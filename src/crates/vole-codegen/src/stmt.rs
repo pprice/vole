@@ -6,7 +6,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeFn;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_frontend::{self, ExprKind, LetInit, Pattern, PatternKind, RaiseStmt, Stmt, Symbol};
+use vole_frontend::{self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, RaiseStmt, ReturnStmt, Stmt, Symbol};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 
@@ -122,212 +122,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a statement. Returns true if terminated (return/break).
     pub fn stmt(&mut self, stmt: &Stmt) -> CodegenResult<bool> {
         match stmt {
-            Stmt::Let(let_stmt) => {
-                // Type aliases don't generate code
-                let init_expr = match &let_stmt.init {
-                    LetInit::Expr(e) => e,
-                    LetInit::TypeAlias(_) => return Ok(false),
-                };
-
-                // Pre-register recursive lambdas so they can capture themselves
-                let preregistered_var = self.preregister_recursive_lambda(let_stmt.name, init_expr);
-
-                // Set self_capture context for recursive lambdas
-                if preregistered_var.is_some() {
-                    self.self_capture = Some(let_stmt.name);
-                }
-
-                let init = self.expr(init_expr)?;
-
-                // Clear self_capture context
-                self.self_capture = None;
-
-                // Struct copy: when binding a struct value, copy to a new stack slot
-                // to maintain value semantics (structs are stack-allocated value types)
-                let mut init = if self.arena().is_struct(init.type_id) {
-                    self.copy_struct_value(init)?
-                } else {
-                    init
-                };
-
-                // Look up the declared type from sema (pre-computed for let statements with type annotations)
-                let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
-
-                // Track whether the value was constructed as a stack-allocated union
-                // (via construct_union_id). Only stack-allocated unions have the
-                // [tag: i8, pad(7), payload: i64] layout that union RC cleanup expects.
-                // Values from function calls are raw i64 values, not pointers to stack slots.
-                let mut is_stack_union = false;
-
-                let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
-                    declared_type_id_opt
-                {
-                    let arena = self.arena();
-                    let is_declared_union = arena.is_union(declared_type_id);
-                    let is_declared_integer = arena.is_integer(declared_type_id);
-                    let is_declared_f32 = declared_type_id == arena.f32();
-                    let is_declared_f64 = declared_type_id == arena.f64();
-                    let is_declared_interface = arena.is_interface(declared_type_id);
-                    let is_declared_unknown = arena.is_unknown(declared_type_id);
-
-                    if is_declared_unknown && !self.arena().is_unknown(init.type_id) {
-                        // Box value to unknown type (TaggedValue)
-                        let boxed = self.box_to_unknown(init)?;
-                        (boxed.value, boxed.type_id)
-                    } else if is_declared_union && !self.arena().is_union(init.type_id) {
-                        let wrapped = self.construct_union_id(init, declared_type_id)?;
-                        is_stack_union = true;
-                        (wrapped.value, wrapped.type_id)
-                    } else if is_declared_integer && init.type_id.is_integer() {
-                        let arena = self.arena();
-                        let declared_cty =
-                            type_id_to_cranelift(declared_type_id, arena, self.ptr_type());
-                        let init_cty = init.ty;
-                        if declared_cty.bits() < init_cty.bits() {
-                            let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
-                            (narrowed, declared_type_id)
-                        } else if declared_cty.bits() > init_cty.bits() {
-                            let widened = self.builder.ins().sextend(declared_cty, init.value);
-                            (widened, declared_type_id)
-                        } else {
-                            (init.value, declared_type_id)
-                        }
-                    } else if is_declared_f32 && init.type_id.is_float() && init.ty == types::F64 {
-                        // f64 -> f32: demote to narrower float
-                        let narrowed = self.builder.ins().fdemote(types::F32, init.value);
-                        (narrowed, declared_type_id)
-                    } else if is_declared_f64 && init.type_id.is_float() && init.ty == types::F32 {
-                        // f32 -> f64: promote to wider float
-                        let widened = self.builder.ins().fpromote(types::F64, init.value);
-                        (widened, declared_type_id)
-                    } else if is_declared_interface {
-                        // For functional interfaces, keep the actual function type from the lambda
-                        // This preserves the is_closure flag for proper calling convention
-                        (init.value, init.type_id)
-                    } else {
-                        (init.value, declared_type_id)
-                    }
-                } else {
-                    (init.value, init.type_id)
-                };
-
-                // Box value if assigning to interface type
-                if let Some(declared_type_id) = declared_type_id_opt {
-                    let arena = self.arena();
-                    let is_declared_interface = arena.is_interface(declared_type_id);
-                    let is_final_interface = arena.is_interface(final_type_id);
-
-                    if is_declared_interface && !is_final_interface {
-                        let arena = self.arena();
-                        let cranelift_ty =
-                            type_id_to_cranelift(final_type_id, arena, self.ptr_type());
-                        let boxed = self.box_interface_value(
-                            CompiledValue::new(final_value, cranelift_ty, final_type_id),
-                            declared_type_id,
-                        )?;
-                        final_value = boxed.value;
-                        final_type_id = boxed.type_id;
-                    }
-                }
-
-                // Use preregistered var for recursive lambdas, otherwise declare new
-                let var = if let Some(var) = preregistered_var {
-                    self.builder.def_var(var, final_value);
-                    // vars already has the entry from preregistration
-                    var
-                } else {
-                    let cranelift_ty = self.cranelift_type(final_type_id);
-                    let var = self.builder.declare_var(cranelift_ty);
-                    self.builder.def_var(var, final_value);
-                    self.vars.insert(let_stmt.name, (var, final_type_id));
-                    var
-                };
-
-                // Register RC locals for drop-flag tracking and emit rc_inc if needed.
-                // Variable copies (let y = x) need rc_inc because we're creating a
-                // new reference to the same heap object. Ownership transfers (let x =
-                // new_string(), let x = "literal") don't need inc — the value is born
-                // with refcount=1 for us.
-                //
-                // Inside a loop body, borrowed let-bindings (array index, field
-                // access, variable copies) must NOT be rc_inc'd because the
-                // source container keeps the value alive for the duration of
-                // the iteration and the let re-executes each iteration. Without
-                // per-iteration dec of the old value, each inc leaks. This
-                // matches for-loop semantics where the loop variable is a raw
-                // borrow. Ownership transfers (calls, literals) inside loops
-                // still get normal RC tracking — they produce a fresh +1 that
-                // the scope-exit dec balances against the last iteration's value.
-                if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup()
-                {
-                    let is_borrow = init.is_borrowed();
-                    if self.cf.in_loop() && is_borrow {
-                        // Borrow inside loop: skip inc and RC registration.
-                        // The container (array, struct, etc.) keeps the value alive.
-                        // If this value is later assigned to an outer variable or
-                        // returned, the assign/return handlers emit their own inc.
-                    } else {
-                        if is_borrow {
-                            self.emit_rc_inc_for_type(final_value, final_type_id)?;
-                        }
-                        let drop_flag = self.register_rc_local(var, final_type_id);
-                        crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
-                    }
-                } else if self.rc_scopes.has_active_scope() {
-                    // Check for composite types (struct, fixed array, tuple) with RC fields.
-                    // These need element-level cleanup on scope exit.
-                    if let Some(offsets) = self.composite_rc_field_offsets(final_type_id) {
-                        // Struct copy (let b = a): the bytewise copy shares the same RC
-                        // pointers as the original.  rc_inc each RC field so both the
-                        // original and the copy own their reference and scope-exit dec
-                        // is balanced.  We detect copies by checking whether the init
-                        // expression is an identifier (variable reference) that is
-                        // already tracked as a composite RC local — meaning its fields
-                        // will also be dec'd on scope exit.
-                        let is_struct_copy = if let ExprKind::Identifier(sym) = &init_expr.kind {
-                            self.vars
-                                .get(sym)
-                                .is_some_and(|&(v, _)| self.rc_scopes.is_composite_rc_local(v))
-                        } else {
-                            false
-                        };
-                        if is_struct_copy {
-                            for &off in &offsets {
-                                let field_ptr = self.builder.ins().load(
-                                    types::I64,
-                                    MemFlags::new(),
-                                    final_value,
-                                    off,
-                                );
-                                self.emit_rc_inc(field_ptr)?;
-                            }
-                        }
-                        let drop_flag = self.register_composite_rc_local(var, offsets);
-                        crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
-                    } else if is_stack_union || self.arena().is_union(final_type_id) {
-                        // Register union RC cleanup for any union-typed value. This
-                        // includes both locally constructed unions (construct_union_id)
-                        // and function return values (call_result copies callee data
-                        // to a local [tag, payload] stack slot).
-                        if let Some(rc_tags) = self.union_rc_variant_tags(final_type_id) {
-                            // If the init value is a borrow (e.g. let g: T? = some_var),
-                            // the RC value is aliased and needs rc_inc so the union
-                            // owns its own reference.
-                            if init.is_borrowed() {
-                                self.emit_union_rc_inc(final_value, &rc_tags)?;
-                            }
-                            let drop_flag = self.register_union_rc_local(var, rc_tags);
-                            crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
-                        }
-                    }
-                }
-
-                // The init value is consumed by the let binding — the binding
-                // now owns it and scope cleanup handles the eventual dec.
-                init.mark_consumed();
-                init.debug_assert_rc_handled("Stmt::Let");
-                Ok(false)
-            }
+            Stmt::Let(let_stmt) => self.let_stmt(let_stmt),
 
             Stmt::LetTuple(let_tuple) => {
                 // Compile the initializer - should be a tuple, fixed array, or class
@@ -375,154 +170,7 @@ impl Cg<'_, '_, '_> {
                 }
             }
 
-            Stmt::Return(ret) => {
-                let return_type_id = self.return_type;
-                if let Some(value) = &ret.value {
-                    let mut compiled = self.expr(value)?;
-
-                    // RC bookkeeping for return values:
-                    // - RC local variable: skip its cleanup (ownership transfers to caller)
-                    // - Composite RC local (struct/array/tuple with RC fields): skip its
-                    //   cleanup too — the caller takes ownership of the whole composite
-                    //   and its scope-exit cleanup will handle the RC fields.
-                    // - Non-RC local / borrow (index, field, loop var): rc_inc for caller
-                    // - Fresh allocation (call, literal): already owned, no action needed
-                    let skip_var = if let ExprKind::Identifier(sym) = &value.kind
-                        && let Some((var, _)) = self.vars.get(sym)
-                        && (self.rc_scopes.is_rc_local(*var)
-                            || self.rc_scopes.is_composite_rc_local(*var)
-                            || self.rc_scopes.is_union_rc_local(*var))
-                    {
-                        Some(*var)
-                    } else {
-                        None
-                    };
-                    if skip_var.is_none() && compiled.is_borrowed() {
-                        if self.rc_state(compiled.type_id).needs_cleanup() {
-                            self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
-                        } else if let Some(rc_tags) = self.union_rc_variant_tags(compiled.type_id) {
-                            // Union with RC variants (e.g. [i64]?): rc_inc the inner
-                            // payload so the caller's copy owns its own reference.
-                            // Without this, the caller's consume_rc_args and the
-                            // return value's scope-exit cleanup both rc_dec the same
-                            // inner value, causing a double-free.
-                            self.emit_union_rc_inc(compiled.value, &rc_tags)?;
-                        }
-                    }
-                    self.emit_rc_cleanup_all_scopes(skip_var)?;
-
-                    // The return value is consumed — ownership transfers to the caller.
-                    compiled.mark_consumed();
-                    compiled.debug_assert_rc_handled("Stmt::Return");
-
-                    // Box concrete types to interface representation if needed
-                    // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
-                    if let Some(ret_type_id) = return_type_id
-                        && self.arena().is_interface(ret_type_id)
-                        && !self.arena().is_interface(compiled.type_id)
-                        && !self.arena().is_runtime_iterator(compiled.type_id)
-                    {
-                        let boxed = self.box_interface_value(compiled, ret_type_id)?;
-                        self.builder.ins().return_(&[boxed.value]);
-                        return Ok(true);
-                    }
-
-                    // Check if the function has a fallible return type using arena methods
-                    if let Some(ret_type_id) = return_type_id
-                        && self.arena().unwrap_fallible(ret_type_id).is_some()
-                    {
-                        // For fallible functions, return (tag, payload) directly in registers
-                        // Both tag and payload are i64 for uniform representation
-                        let tag_val = self.builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
-
-                        if is_wide_fallible(ret_type_id, self.arena()) {
-                            // i128 success: return (tag, low, high) in 3 registers
-                            let (low, high) = split_i128_for_storage(self.builder, compiled.value);
-                            self.builder.ins().return_(&[tag_val, low, high]);
-                        } else {
-                            // Convert payload to i64 for uniform representation
-                            let payload_val = convert_to_i64_for_storage(self.builder, &compiled);
-                            self.builder.ins().return_(&[tag_val, payload_val]);
-                        }
-                    } else if let Some(ret_type_id) = return_type_id
-                        && self.is_small_struct_return(ret_type_id)
-                    {
-                        // Small struct (1-2 flat slots): return values in registers
-                        let flat_count = self
-                            .struct_flat_slot_count(ret_type_id)
-                            .expect("INTERNAL: struct return: missing flat slot count");
-                        let struct_ptr = compiled.value;
-                        let mut return_vals = Vec::with_capacity(2);
-                        for i in 0..flat_count {
-                            let offset = (i as i32) * 8;
-                            let val = self.builder.ins().load(
-                                types::I64,
-                                MemFlags::new(),
-                                struct_ptr,
-                                offset,
-                            );
-                            return_vals.push(val);
-                        }
-                        // Pad to 2 registers for consistent convention
-                        while return_vals.len() < 2 {
-                            return_vals.push(self.builder.ins().iconst(types::I64, 0));
-                        }
-                        self.builder.ins().return_(&return_vals);
-                    } else if let Some(ret_type_id) = return_type_id
-                        && self.is_sret_struct_return(ret_type_id)
-                    {
-                        // Large struct (3+ flat slots): copy all flat slots into sret buffer
-                        let entry_block = self
-                            .builder
-                            .func
-                            .layout
-                            .entry_block()
-                            .expect("INTERNAL: sret return: function has no entry block");
-                        let sret_ptr = self.builder.block_params(entry_block)[0];
-                        let flat_count = self
-                            .struct_flat_slot_count(ret_type_id)
-                            .expect("INTERNAL: sret return: missing flat slot count");
-                        let struct_ptr = compiled.value;
-                        for i in 0..flat_count {
-                            let offset = (i as i32) * 8;
-                            let val = self.builder.ins().load(
-                                types::I64,
-                                MemFlags::new(),
-                                struct_ptr,
-                                offset,
-                            );
-                            self.builder
-                                .ins()
-                                .store(MemFlags::new(), val, sret_ptr, offset);
-                        }
-                        self.builder.ins().return_(&[sret_ptr]);
-                    } else if let Some(ret_type_id) = return_type_id
-                        && self.arena().is_union(ret_type_id)
-                    {
-                        // For union return types, wrap the value in a union
-                        let wrapped = self.construct_union_id(compiled, ret_type_id)?;
-                        self.builder.ins().return_(&[wrapped.value]);
-                    } else {
-                        // Non-fallible function, return value directly
-                        // Convert to return type if needed (e.g., i64 -> i128)
-                        // Access arena via env to avoid borrow conflict with builder
-                        let return_value = if let Some(ret_type_id) = return_type_id {
-                            let arena = self.env.analyzed.type_arena();
-                            let ptr_type = self.ptr_type();
-                            let target_ty = type_id_to_cranelift(ret_type_id, arena, ptr_type);
-                            convert_to_type(self.builder, compiled, target_ty, arena)
-                        } else {
-                            compiled.value
-                        };
-                        self.builder.ins().return_(&[return_value]);
-                    }
-                } else {
-                    // Void return — cleanup all RC locals
-                    self.emit_rc_cleanup_all_scopes(None)?;
-                    self.builder.ins().return_(&[]);
-                }
-                Ok(true)
-            }
+            Stmt::Return(ret) => self.return_stmt(ret),
 
             Stmt::While(while_stmt) => {
                 let header_block = self.builder.create_block();
@@ -665,6 +313,364 @@ impl Cg<'_, '_, '_> {
 
             Stmt::Raise(raise_stmt) => self.raise_stmt(raise_stmt),
         }
+    }
+
+    /// Compile a let statement binding.
+    fn let_stmt(&mut self, let_stmt: &LetStmt) -> CodegenResult<bool> {
+        // Type aliases don't generate code
+        let init_expr = match &let_stmt.init {
+            LetInit::Expr(e) => e,
+            LetInit::TypeAlias(_) => return Ok(false),
+        };
+
+        // Pre-register recursive lambdas so they can capture themselves
+        let preregistered_var = self.preregister_recursive_lambda(let_stmt.name, init_expr);
+
+        // Set self_capture context for recursive lambdas
+        if preregistered_var.is_some() {
+            self.self_capture = Some(let_stmt.name);
+        }
+
+        let init = self.expr(init_expr)?;
+
+        // Clear self_capture context
+        self.self_capture = None;
+
+        // Struct copy: when binding a struct value, copy to a new stack slot
+        // to maintain value semantics (structs are stack-allocated value types)
+        let mut init = if self.arena().is_struct(init.type_id) {
+            self.copy_struct_value(init)?
+        } else {
+            init
+        };
+
+        // Look up the declared type from sema (pre-computed for let statements with type annotations)
+        let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
+
+        // Track whether the value was constructed as a stack-allocated union
+        // (via construct_union_id). Only stack-allocated unions have the
+        // [tag: i8, pad(7), payload: i64] layout that union RC cleanup expects.
+        // Values from function calls are raw i64 values, not pointers to stack slots.
+        let mut is_stack_union = false;
+
+        let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
+            declared_type_id_opt
+        {
+            let arena = self.arena();
+            let is_declared_union = arena.is_union(declared_type_id);
+            let is_declared_integer = arena.is_integer(declared_type_id);
+            let is_declared_f32 = declared_type_id == arena.f32();
+            let is_declared_f64 = declared_type_id == arena.f64();
+            let is_declared_interface = arena.is_interface(declared_type_id);
+            let is_declared_unknown = arena.is_unknown(declared_type_id);
+
+            if is_declared_unknown && !self.arena().is_unknown(init.type_id) {
+                // Box value to unknown type (TaggedValue)
+                let boxed = self.box_to_unknown(init)?;
+                (boxed.value, boxed.type_id)
+            } else if is_declared_union && !self.arena().is_union(init.type_id) {
+                let wrapped = self.construct_union_id(init, declared_type_id)?;
+                is_stack_union = true;
+                (wrapped.value, wrapped.type_id)
+            } else if is_declared_integer && init.type_id.is_integer() {
+                let arena = self.arena();
+                let declared_cty =
+                    type_id_to_cranelift(declared_type_id, arena, self.ptr_type());
+                let init_cty = init.ty;
+                if declared_cty.bits() < init_cty.bits() {
+                    let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
+                    (narrowed, declared_type_id)
+                } else if declared_cty.bits() > init_cty.bits() {
+                    let widened = self.builder.ins().sextend(declared_cty, init.value);
+                    (widened, declared_type_id)
+                } else {
+                    (init.value, declared_type_id)
+                }
+            } else if is_declared_f32 && init.type_id.is_float() && init.ty == types::F64 {
+                // f64 -> f32: demote to narrower float
+                let narrowed = self.builder.ins().fdemote(types::F32, init.value);
+                (narrowed, declared_type_id)
+            } else if is_declared_f64 && init.type_id.is_float() && init.ty == types::F32 {
+                // f32 -> f64: promote to wider float
+                let widened = self.builder.ins().fpromote(types::F64, init.value);
+                (widened, declared_type_id)
+            } else if is_declared_interface {
+                // For functional interfaces, keep the actual function type from the lambda
+                // This preserves the is_closure flag for proper calling convention
+                (init.value, init.type_id)
+            } else {
+                (init.value, declared_type_id)
+            }
+        } else {
+            (init.value, init.type_id)
+        };
+
+        // Box value if assigning to interface type
+        if let Some(declared_type_id) = declared_type_id_opt {
+            let arena = self.arena();
+            let is_declared_interface = arena.is_interface(declared_type_id);
+            let is_final_interface = arena.is_interface(final_type_id);
+
+            if is_declared_interface && !is_final_interface {
+                let arena = self.arena();
+                let cranelift_ty =
+                    type_id_to_cranelift(final_type_id, arena, self.ptr_type());
+                let boxed = self.box_interface_value(
+                    CompiledValue::new(final_value, cranelift_ty, final_type_id),
+                    declared_type_id,
+                )?;
+                final_value = boxed.value;
+                final_type_id = boxed.type_id;
+            }
+        }
+
+        // Use preregistered var for recursive lambdas, otherwise declare new
+        let var = if let Some(var) = preregistered_var {
+            self.builder.def_var(var, final_value);
+            // vars already has the entry from preregistration
+            var
+        } else {
+            let cranelift_ty = self.cranelift_type(final_type_id);
+            let var = self.builder.declare_var(cranelift_ty);
+            self.builder.def_var(var, final_value);
+            self.vars.insert(let_stmt.name, (var, final_type_id));
+            var
+        };
+
+        // Register RC locals for drop-flag tracking and emit rc_inc if needed.
+        // Variable copies (let y = x) need rc_inc because we're creating a
+        // new reference to the same heap object. Ownership transfers (let x =
+        // new_string(), let x = "literal") don't need inc — the value is born
+        // with refcount=1 for us.
+        //
+        // Inside a loop body, borrowed let-bindings (array index, field
+        // access, variable copies) must NOT be rc_inc'd because the
+        // source container keeps the value alive for the duration of
+        // the iteration and the let re-executes each iteration. Without
+        // per-iteration dec of the old value, each inc leaks. This
+        // matches for-loop semantics where the loop variable is a raw
+        // borrow. Ownership transfers (calls, literals) inside loops
+        // still get normal RC tracking — they produce a fresh +1 that
+        // the scope-exit dec balances against the last iteration's value.
+        if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup()
+        {
+            let is_borrow = init.is_borrowed();
+            if self.cf.in_loop() && is_borrow {
+                // Borrow inside loop: skip inc and RC registration.
+                // The container (array, struct, etc.) keeps the value alive.
+                // If this value is later assigned to an outer variable or
+                // returned, the assign/return handlers emit their own inc.
+            } else {
+                if is_borrow {
+                    self.emit_rc_inc_for_type(final_value, final_type_id)?;
+                }
+                let drop_flag = self.register_rc_local(var, final_type_id);
+                crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+            }
+        } else if self.rc_scopes.has_active_scope() {
+            // Check for composite types (struct, fixed array, tuple) with RC fields.
+            // These need element-level cleanup on scope exit.
+            if let Some(offsets) = self.composite_rc_field_offsets(final_type_id) {
+                // Struct copy (let b = a): the bytewise copy shares the same RC
+                // pointers as the original.  rc_inc each RC field so both the
+                // original and the copy own their reference and scope-exit dec
+                // is balanced.  We detect copies by checking whether the init
+                // expression is an identifier (variable reference) that is
+                // already tracked as a composite RC local — meaning its fields
+                // will also be dec'd on scope exit.
+                let is_struct_copy = if let ExprKind::Identifier(sym) = &init_expr.kind {
+                    self.vars
+                        .get(sym)
+                        .is_some_and(|&(v, _)| self.rc_scopes.is_composite_rc_local(v))
+                } else {
+                    false
+                };
+                if is_struct_copy {
+                    for &off in &offsets {
+                        let field_ptr = self.builder.ins().load(
+                            types::I64,
+                            MemFlags::new(),
+                            final_value,
+                            off,
+                        );
+                        self.emit_rc_inc(field_ptr)?;
+                    }
+                }
+                let drop_flag = self.register_composite_rc_local(var, offsets);
+                crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+            } else if is_stack_union || self.arena().is_union(final_type_id) {
+                // Register union RC cleanup for any union-typed value. This
+                // includes both locally constructed unions (construct_union_id)
+                // and function return values (call_result copies callee data
+                // to a local [tag, payload] stack slot).
+                if let Some(rc_tags) = self.union_rc_variant_tags(final_type_id) {
+                    // If the init value is a borrow (e.g. let g: T? = some_var),
+                    // the RC value is aliased and needs rc_inc so the union
+                    // owns its own reference.
+                    if init.is_borrowed() {
+                        self.emit_union_rc_inc(final_value, &rc_tags)?;
+                    }
+                    let drop_flag = self.register_union_rc_local(var, rc_tags);
+                    crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                }
+            }
+        }
+
+        // The init value is consumed by the let binding — the binding
+        // now owns it and scope cleanup handles the eventual dec.
+        init.mark_consumed();
+        init.debug_assert_rc_handled("Stmt::Let");
+        Ok(false)
+    }
+
+    /// Compile a return statement.
+    fn return_stmt(&mut self, ret: &ReturnStmt) -> CodegenResult<bool> {
+        let return_type_id = self.return_type;
+        if let Some(value) = &ret.value {
+            let mut compiled = self.expr(value)?;
+
+            // RC bookkeeping for return values:
+            // - RC local variable: skip its cleanup (ownership transfers to caller)
+            // - Composite RC local (struct/array/tuple with RC fields): skip its
+            //   cleanup too — the caller takes ownership of the whole composite
+            //   and its scope-exit cleanup will handle the RC fields.
+            // - Non-RC local / borrow (index, field, loop var): rc_inc for caller
+            // - Fresh allocation (call, literal): already owned, no action needed
+            let skip_var = if let ExprKind::Identifier(sym) = &value.kind
+                && let Some((var, _)) = self.vars.get(sym)
+                && (self.rc_scopes.is_rc_local(*var)
+                    || self.rc_scopes.is_composite_rc_local(*var)
+                    || self.rc_scopes.is_union_rc_local(*var))
+            {
+                Some(*var)
+            } else {
+                None
+            };
+            if skip_var.is_none() && compiled.is_borrowed() {
+                if self.rc_state(compiled.type_id).needs_cleanup() {
+                    self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
+                } else if let Some(rc_tags) = self.union_rc_variant_tags(compiled.type_id) {
+                    // Union with RC variants (e.g. [i64]?): rc_inc the inner
+                    // payload so the caller's copy owns its own reference.
+                    // Without this, the caller's consume_rc_args and the
+                    // return value's scope-exit cleanup both rc_dec the same
+                    // inner value, causing a double-free.
+                    self.emit_union_rc_inc(compiled.value, &rc_tags)?;
+                }
+            }
+            self.emit_rc_cleanup_all_scopes(skip_var)?;
+
+            // The return value is consumed — ownership transfers to the caller.
+            compiled.mark_consumed();
+            compiled.debug_assert_rc_handled("Stmt::Return");
+
+            // Box concrete types to interface representation if needed
+            // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
+            if let Some(ret_type_id) = return_type_id
+                && self.arena().is_interface(ret_type_id)
+                && !self.arena().is_interface(compiled.type_id)
+                && !self.arena().is_runtime_iterator(compiled.type_id)
+            {
+                let boxed = self.box_interface_value(compiled, ret_type_id)?;
+                self.builder.ins().return_(&[boxed.value]);
+                return Ok(true);
+            }
+
+            // Check if the function has a fallible return type using arena methods
+            if let Some(ret_type_id) = return_type_id
+                && self.arena().unwrap_fallible(ret_type_id).is_some()
+            {
+                // For fallible functions, return (tag, payload) directly in registers
+                // Both tag and payload are i64 for uniform representation
+                let tag_val = self.builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
+
+                if is_wide_fallible(ret_type_id, self.arena()) {
+                    // i128 success: return (tag, low, high) in 3 registers
+                    let (low, high) = split_i128_for_storage(self.builder, compiled.value);
+                    self.builder.ins().return_(&[tag_val, low, high]);
+                } else {
+                    // Convert payload to i64 for uniform representation
+                    let payload_val = convert_to_i64_for_storage(self.builder, &compiled);
+                    self.builder.ins().return_(&[tag_val, payload_val]);
+                }
+            } else if let Some(ret_type_id) = return_type_id
+                && self.is_small_struct_return(ret_type_id)
+            {
+                // Small struct (1-2 flat slots): return values in registers
+                let flat_count = self
+                    .struct_flat_slot_count(ret_type_id)
+                    .expect("INTERNAL: struct return: missing flat slot count");
+                let struct_ptr = compiled.value;
+                let mut return_vals = Vec::with_capacity(2);
+                for i in 0..flat_count {
+                    let offset = (i as i32) * 8;
+                    let val = self.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        struct_ptr,
+                        offset,
+                    );
+                    return_vals.push(val);
+                }
+                // Pad to 2 registers for consistent convention
+                while return_vals.len() < 2 {
+                    return_vals.push(self.builder.ins().iconst(types::I64, 0));
+                }
+                self.builder.ins().return_(&return_vals);
+            } else if let Some(ret_type_id) = return_type_id
+                && self.is_sret_struct_return(ret_type_id)
+            {
+                // Large struct (3+ flat slots): copy all flat slots into sret buffer
+                let entry_block = self
+                    .builder
+                    .func
+                    .layout
+                    .entry_block()
+                    .expect("INTERNAL: sret return: function has no entry block");
+                let sret_ptr = self.builder.block_params(entry_block)[0];
+                let flat_count = self
+                    .struct_flat_slot_count(ret_type_id)
+                    .expect("INTERNAL: sret return: missing flat slot count");
+                let struct_ptr = compiled.value;
+                for i in 0..flat_count {
+                    let offset = (i as i32) * 8;
+                    let val = self.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        struct_ptr,
+                        offset,
+                    );
+                    self.builder
+                        .ins()
+                        .store(MemFlags::new(), val, sret_ptr, offset);
+                }
+                self.builder.ins().return_(&[sret_ptr]);
+            } else if let Some(ret_type_id) = return_type_id
+                && self.arena().is_union(ret_type_id)
+            {
+                // For union return types, wrap the value in a union
+                let wrapped = self.construct_union_id(compiled, ret_type_id)?;
+                self.builder.ins().return_(&[wrapped.value]);
+            } else {
+                // Non-fallible function, return value directly
+                // Convert to return type if needed (e.g., i64 -> i128)
+                // Access arena via env to avoid borrow conflict with builder
+                let return_value = if let Some(ret_type_id) = return_type_id {
+                    let arena = self.env.analyzed.type_arena();
+                    let ptr_type = self.ptr_type();
+                    let target_ty = type_id_to_cranelift(ret_type_id, arena, ptr_type);
+                    convert_to_type(self.builder, compiled, target_ty, arena)
+                } else {
+                    compiled.value
+                };
+                self.builder.ins().return_(&[return_value]);
+            }
+        } else {
+            // Void return — cleanup all RC locals
+            self.emit_rc_cleanup_all_scopes(None)?;
+            self.builder.ins().return_(&[]);
+        }
+        Ok(true)
     }
 
     /// Compile a for loop over a range.
