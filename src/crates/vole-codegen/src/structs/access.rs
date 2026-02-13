@@ -2,7 +2,6 @@
 
 use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg, reconstruct_i128};
 use crate::RuntimeFn;
-use crate::union_layout;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle, module_name_id};
@@ -221,14 +220,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             crate::types::type_id_to_cranelift(inner_type_id, arena, self.ptr_type())
         };
-        let union_size = self.type_size(obj.type_id);
-        let inner_obj = if union_size > union_layout::TAG_ONLY_SIZE {
-            self.builder
-                .ins()
-                .load(inner_cranelift_type, MemFlags::new(), obj.value, union_layout::PAYLOAD_OFFSET)
-        } else {
-            self.builder.ins().iconst(inner_cranelift_type, 0)
-        };
+        let inner_obj = self.load_union_payload(obj.value, obj.type_id, inner_cranelift_type);
 
         // Construct a CompiledValue for the inner object with lifecycle
         // inherited from the original optional. When the optional is

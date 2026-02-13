@@ -1621,6 +1621,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.compiled(ptr, union_type_id)
     }
 
+    /// Load the payload from a union pointer, returning zero if the union is tag-only.
+    ///
+    /// Sentinel-only unions have `union_size == TAG_ONLY_SIZE` (8 bytes, tag only)
+    /// and carry no payload data, so this returns an `iconst 0` for those.
+    pub fn load_union_payload(
+        &mut self,
+        union_ptr: Value,
+        union_type_id: TypeId,
+        payload_type: Type,
+    ) -> Value {
+        let union_size = self.type_size(union_type_id);
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            self.builder
+                .ins()
+                .load(payload_type, MemFlags::new(), union_ptr, union_layout::PAYLOAD_OFFSET)
+        } else {
+            self.builder.ins().iconst(payload_type, 0)
+        }
+    }
+
     // ========== CompiledValue constructors ==========
 
     /// Wrap a Cranelift value as a Bool CompiledValue

@@ -304,16 +304,7 @@ pub fn compile_function_body_with_cg(
                 };
                 cg.builder.ins().return_(&[tag, low, high]);
             } else {
-                // Only load payload if union has payload data.
-                // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
-                let union_size = cg.type_size(value.type_id);
-                let payload = if union_size > union_layout::TAG_ONLY_SIZE {
-                    cg.builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), value.value, union_layout::PAYLOAD_OFFSET)
-                } else {
-                    cg.builder.ins().iconst(types::I64, 0)
-                };
+                let payload = cg.load_union_payload(value.value, value.type_id, types::I64);
                 cg.builder.ins().return_(&[tag, payload]);
             }
         } else if let Some(ret_type_id) = cg.return_type

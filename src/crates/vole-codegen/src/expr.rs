@@ -164,14 +164,7 @@ impl Cg<'_, '_, '_> {
                 // Union layout: [tag:1][padding:7][payload]
                 let payload_ty =
                     type_id_to_cranelift(narrowed_type_id, self.arena(), self.ptr_type());
-                // Only load payload if union has payload data.
-                // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
-                let union_size = self.type_size(*type_id);
-                let payload = if union_size > union_layout::TAG_ONLY_SIZE {
-                    self.builder.ins().load(payload_ty, MemFlags::new(), val, union_layout::PAYLOAD_OFFSET)
-                } else {
-                    self.builder.ins().iconst(payload_ty, 0)
-                };
+                let payload = self.load_union_payload(val, *type_id, payload_ty);
                 let mut cv = CompiledValue::new(payload, payload_ty, narrowed_type_id);
                 // The extracted payload is borrowed from the union variable —
                 // callers must rc_inc if they take ownership.

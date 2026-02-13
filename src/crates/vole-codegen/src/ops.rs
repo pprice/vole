@@ -6,7 +6,6 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 
 use crate::RuntimeFn;
-use crate::union_layout;
 use vole_frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr, ExprKind};
 use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
@@ -836,16 +835,7 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or_else(|| arena.i64())
         };
         let payload_cranelift_type = self.cranelift_type(inner_type_id);
-        // Only load payload if union has payload data.
-        // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
-        let union_size = self.type_size(optional.type_id);
-        let payload = if union_size > union_layout::TAG_ONLY_SIZE {
-            self.builder
-                .ins()
-                .load(payload_cranelift_type, MemFlags::new(), optional.value, union_layout::PAYLOAD_OFFSET)
-        } else {
-            self.builder.ins().iconst(payload_cranelift_type, 0)
-        };
+        let payload = self.load_union_payload(optional.value, optional.type_id, payload_cranelift_type);
 
         // Compare payload with value (extend if necessary to match types)
         let values_equal = if value.ty.is_float() {
