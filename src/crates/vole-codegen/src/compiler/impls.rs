@@ -60,6 +60,13 @@ impl<'a> TypeMethodsData<'a> {
     }
 }
 
+/// Module-specific compilation context passed to method compilation helpers.
+struct ModuleCompileInfo<'a> {
+    interner: &'a Interner,
+    module_id: ModuleId,
+    global_inits: &'a FxHashMap<Symbol, Rc<Expr>>,
+}
+
 /// Trait to abstract over class and struct declarations for unified method compilation.
 /// This allows consolidating the parallel compile_module_class_methods/compile_module_struct_methods.
 pub(crate) trait TypeDeclInfo {
@@ -1598,13 +1605,17 @@ impl Compiler<'_> {
             return Ok(());
         };
 
+        let module_info = ModuleCompileInfo {
+            interner: module_interner,
+            module_id,
+            global_inits: module_global_inits,
+        };
+
         // Compile instance methods
         self.compile_module_type_instance_methods(
             type_decl,
             &metadata,
-            module_interner,
-            module_id,
-            module_global_inits,
+            &module_info,
             type_name_str,
         )?;
 
@@ -1613,9 +1624,7 @@ impl Compiler<'_> {
             self.compile_module_type_static_methods(
                 statics,
                 &metadata,
-                module_interner,
-                module_id,
-                module_global_inits,
+                &module_info,
                 type_name_str,
                 type_kind,
             )?;
@@ -1630,19 +1639,17 @@ impl Compiler<'_> {
         &mut self,
         type_decl: &T,
         metadata: &TypeMetadata,
-        module_interner: &Interner,
-        module_id: ModuleId,
-        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+        module_info: &ModuleCompileInfo<'_>,
         type_name_str: &str,
     ) -> CodegenResult<()> {
         let type_kind = type_decl.type_kind();
 
         for method in type_decl.methods() {
-            let method_name_str = module_interner.resolve(method.name);
+            let method_name_str = module_info.interner.resolve(method.name);
 
             // Look up MethodId from sema to get pre-computed signature
             let method_name_id =
-                method_name_id_with_interner(self.analyzed, module_interner, method.name)
+                method_name_id_with_interner(self.analyzed, module_info.interner, method.name)
                     .unwrap_or_else(|| {
                         panic!(
                             "module {} method name not found in name_table: {}::{}",
@@ -1687,7 +1694,7 @@ impl Compiler<'_> {
                 (params.to_vec(), Some(ret))
             };
 
-            let self_sym = module_interner
+            let self_sym = module_info.interner
                 .lookup("self")
                 .expect("INTERNAL: method compilation: 'self' not interned");
             // Skip explicit `self` params — they are handled via the separate self_binding.
@@ -1709,10 +1716,10 @@ impl Compiler<'_> {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = compile_env!(
                     self,
-                    module_interner,
-                    module_global_inits,
+                    module_info.interner,
+                    module_info.global_inits,
                     source_file_ptr,
-                    module_id
+                    module_info.module_id
                 );
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -1728,7 +1735,7 @@ impl Compiler<'_> {
                     &mut codegen_ctx,
                     &env,
                     config,
-                    Some(module_id),
+                    Some(module_info.module_id),
                     None,
                 )?;
             }
@@ -1742,14 +1749,11 @@ impl Compiler<'_> {
 
     /// Compile static methods for a module type.
     /// Helper for compile_module_type_methods to keep functions under ~80 lines.
-    #[allow(clippy::too_many_arguments)]
     fn compile_module_type_static_methods(
         &mut self,
         statics: &StaticsBlock,
         metadata: &TypeMetadata,
-        module_interner: &Interner,
-        module_id: ModuleId,
-        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+        module_info: &ModuleCompileInfo<'_>,
         type_name_str: &str,
         type_kind: &str,
     ) -> CodegenResult<()> {
@@ -1759,11 +1763,11 @@ impl Compiler<'_> {
                 None => continue,
             };
 
-            let method_name_str = module_interner.resolve(method.name);
+            let method_name_str = module_info.interner.resolve(method.name);
 
             // Look up MethodId from sema to get pre-computed signature
             let method_name_id =
-                method_name_id_with_interner(self.analyzed, module_interner, method.name)
+                method_name_id_with_interner(self.analyzed, module_info.interner, method.name)
                     .unwrap_or_else(|| {
                         panic!(
                             "module {} static method name not found in name_table: {}::{}",
@@ -1824,10 +1828,10 @@ impl Compiler<'_> {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = compile_env!(
                     self,
-                    module_interner,
-                    module_global_inits,
+                    module_info.interner,
+                    module_info.global_inits,
                     source_file_ptr,
-                    module_id
+                    module_info.module_id
                 );
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -1838,7 +1842,7 @@ impl Compiler<'_> {
                     &mut codegen_ctx,
                     &env,
                     config,
-                    Some(module_id),
+                    Some(module_info.module_id),
                     None,
                 )?;
             }
