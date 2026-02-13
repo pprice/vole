@@ -124,7 +124,7 @@ impl Cg<'_, '_, '_> {
         let func_id = self
             .jit_module()
             .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
-            .map_err(|e| CodegenError::cranelift(e))?;
+            .map_err(CodegenError::cranelift)?;
 
         self.funcs().set_func_id(func_key, func_id);
         self.funcs().set_return_type(func_key, return_type_id);
@@ -162,7 +162,7 @@ impl Cg<'_, '_, '_> {
 
         self.jit_module()
             .define_function(func_id, &mut lambda_ctx)
-            .map_err(|e| CodegenError::cranelift(e))?;
+            .map_err(CodegenError::cranelift)?;
 
         let func_ref = self
             .codegen_ctx
@@ -231,7 +231,7 @@ impl Cg<'_, '_, '_> {
         let func_id = self
             .jit_module()
             .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
-            .map_err(|e| CodegenError::cranelift(e))?;
+            .map_err(CodegenError::cranelift)?;
 
         self.funcs().set_func_id(func_key, func_id);
         self.funcs().set_return_type(func_key, return_type_id);
@@ -279,7 +279,7 @@ impl Cg<'_, '_, '_> {
 
         self.jit_module()
             .define_function(func_id, &mut lambda_ctx)
-            .map_err(|e| CodegenError::cranelift(e))?;
+            .map_err(CodegenError::cranelift)?;
 
         // Use split borrows to avoid borrow checker issues
         let func_ref = self

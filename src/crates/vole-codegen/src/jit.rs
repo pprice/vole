@@ -1189,7 +1189,7 @@ impl JitContext {
 
         self.module
             .define_function(func_id, &mut self.ctx)
-            .map_err(|e| CodegenError::cranelift(e))?;
+            .map_err(CodegenError::cranelift)?;
 
         // Capture disassembly if enabled
         if self.disasm
