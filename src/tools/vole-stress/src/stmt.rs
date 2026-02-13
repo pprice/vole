@@ -1495,6 +1495,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_for_interpolation_concat(ctx);
         }
 
+        // ~2% chance: boolean chain expression
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_bool_chain_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: comparison chain expression
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_comparison_chain_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8473,6 +8487,128 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let mut {} = \"\"\nfor {} in 0..{} {{\n    {} = {} + \"{}={{{}}} \"\n}}",
             acc_name, iter_name, n, acc_name, acc_name, prefix, iter_name
         )
+    }
+
+    /// Generate a complex boolean chain: `(a > 0) && (b < 10) || !c`
+    fn try_generate_bool_chain_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let bool_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::Bool)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::Bool)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if bool_vars.is_empty() && i64_vars.is_empty() {
+            return None;
+        }
+
+        let name = ctx.new_local_name();
+        let mut parts = Vec::new();
+
+        let num_parts = self.rng.gen_range(2..=4);
+        for _ in 0..num_parts {
+            let part = match self.rng.gen_range(0..4u32) {
+                0 if !bool_vars.is_empty() => {
+                    bool_vars[self.rng.gen_range(0..bool_vars.len())].clone()
+                }
+                1 if !bool_vars.is_empty() => {
+                    format!("!{}", bool_vars[self.rng.gen_range(0..bool_vars.len())])
+                }
+                2 if !i64_vars.is_empty() => {
+                    let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+                    let n = self.rng.gen_range(0..=10);
+                    let op = match self.rng.gen_range(0..3u32) {
+                        0 => ">",
+                        1 => "<",
+                        _ => "==",
+                    };
+                    format!("({} {} {})", var, op, n)
+                }
+                _ => {
+                    if self.rng.gen_bool(0.5) {
+                        "true".to_string()
+                    } else {
+                        "false".to_string()
+                    }
+                }
+            };
+            parts.push(part);
+        }
+
+        // Join with && and ||
+        let mut expr = parts[0].clone();
+        for i in 1..parts.len() {
+            let op = if self.rng.gen_bool(0.6) { "&&" } else { "||" };
+            expr = format!("({} {} {})", expr, op, parts[i]);
+        }
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
+        Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate a comparison chain: `(a > b) == (c > d)`, `(a != 0) && (b != 0)`
+    fn try_generate_comparison_chain_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.len() < 2 {
+            return None;
+        }
+
+        let name = ctx.new_local_name();
+
+        let a = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let b = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+
+        let expr = match self.rng.gen_range(0..4u32) {
+            0 => format!("({} > 0) == ({} > 0)", a, b),
+            1 => format!("({} != 0) && ({} != 0)", a, b),
+            2 => format!("({} >= 0) || ({} >= 0)", a, b),
+            _ => {
+                let n = self.rng.gen_range(1..=10);
+                format!("({} > {}) == ({} > {})", a, n, b, n)
+            }
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
+        Some(format!("let {} = {}", name, expr))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
