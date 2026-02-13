@@ -1469,6 +1469,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: .to_string() on numeric values
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_numeric_to_string_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: .substring() on strings
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_substring_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8296,6 +8310,88 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!(
             "let {} = when {{\n    {} > {} => when {{\n        {} > {} => {}\n        _ => {}\n    }}\n    _ => {}\n}}",
             name, var_a, thresh_a, var_b, thresh_b, strs[0], strs[1], strs[2]
+        ))
+    }
+
+    /// Generate `.to_string()` on numeric variables or literals (simple form).
+    /// E.g.: `let s = 42.to_string()`, `let s = var.to_string()`
+    fn try_generate_numeric_to_string_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let name = ctx.new_local_name();
+
+        let expr = if !i64_vars.is_empty() && self.rng.gen_bool(0.6) {
+            let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+            format!("{}.to_string()", var)
+        } else {
+            // Use a non-negative literal (negative literals can't have methods called on them)
+            let val = self.rng.gen_range(0..=999);
+            format!("{}.to_string()", val)
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate `.substring(start, end)` on strings.
+    /// E.g.: `let s = "hello world".substring(0, 5)`, `let s = var.substring(0, 3)`
+    fn try_generate_substring_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let name = ctx.new_local_name();
+
+        // Use known-length literals to avoid out-of-bounds
+        let (receiver, max_len) = if !string_vars.is_empty() && self.rng.gen_bool(0.4) {
+            // For variables, use conservative indices (0..3)
+            (string_vars[self.rng.gen_range(0..string_vars.len())].clone(), 3)
+        } else {
+            let literals = [
+                ("\"hello world\"", 11),
+                ("\"testing\"", 7),
+                ("\"abcdefghij\"", 10),
+                ("\"vole lang\"", 9),
+            ];
+            let (lit, len) = literals[self.rng.gen_range(0..literals.len())];
+            (lit.to_string(), len)
+        };
+
+        let start = self.rng.gen_range(0..max_len.min(4) as i32);
+        let end = self.rng.gen_range(start..=max_len as i32);
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = {}.substring({}, {})",
+            name, receiver, start, end
         ))
     }
 
