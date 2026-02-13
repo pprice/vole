@@ -1633,6 +1633,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_for_range_when_accum(ctx);
         }
 
+        // ~2% chance: when with to_string in arms
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_tostring_arms(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: match on sorted array length
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_sorted_length(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9552,6 +9566,85 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             threshold,
             " ".repeat(indent * 2),
         )
+    }
+
+    /// Generate when with to_string in arm values.
+    /// E.g.: `when { x > 0 => x.to_string(), _ => "negative" }`
+    fn try_generate_when_tostring_arms(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+        let threshold = self.rng.gen_range(0..=10);
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = when {{ {} > {} => {}.to_string(), _ => \"default\" }}",
+            name, var, threshold, var
+        ))
+    }
+
+    /// Generate match on sorted array length.
+    /// E.g.: `match arr.iter().sorted().collect().length() { 0 => "empty", _ => "has items" }`
+    fn try_generate_match_sorted_length(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Need a numeric array parameter
+        let array_params: Vec<String> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64,
+                    ) => Some(p.name.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let arr = &array_params[self.rng.gen_range(0..array_params.len())];
+        let name = ctx.new_local_name();
+
+        use std::collections::HashSet;
+        let mut used = HashSet::new();
+        let mut arms = Vec::new();
+        let labels = ["\"empty\"", "\"one\"", "\"two\"", "\"few\""];
+        for i in 0..self.rng.gen_range(2..=3) {
+            let v = i as i64;
+            if used.insert(v) {
+                arms.push(format!("{} => {}", v, labels[i.min(labels.len() - 1)]));
+            }
+        }
+        arms.push("_ => \"many\"".to_string());
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = match {}.iter().sorted().collect().length() {{ {} }}",
+            name,
+            arr,
+            arms.join(", ")
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
