@@ -1457,6 +1457,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: string split iteration
+        if self.rng.gen_bool(0.02) {
+            return self.generate_string_split_for(ctx);
+        }
+
+        // ~2% chance: nested when expression with string result
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_nested_when_string_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8209,6 +8221,81 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             strs[1],
             strs[2],
             strs[3],
+        ))
+    }
+
+    /// Generate a for loop over split string:
+    /// `let parts = "a,b,c".split(",").collect(); let mut s = ""; for p in parts.iter() { s = s + p }`
+    fn generate_string_split_for(&mut self, ctx: &mut StmtContext) -> String {
+        let parts_name = ctx.new_local_name();
+        let acc_name = ctx.new_local_name();
+        let iter_name = ctx.new_local_name();
+
+        let strings = [
+            ("\"alpha,beta,gamma\"", "\",\""),
+            ("\"hello world foo\"", "\" \""),
+            ("\"a-b-c-d\"", "\"-\""),
+            ("\"one;two;three\"", "\";\""),
+        ];
+        let (s, delim) = strings[self.rng.gen_range(0..strings.len())];
+
+        // Protect accumulator
+        ctx.protected_vars.push(acc_name.clone());
+
+        ctx.add_local(
+            parts_name.clone(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+            false,
+        );
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            true,
+        );
+
+        format!(
+            "let {} = {}.split({}).collect()\nlet mut {} = \"\"\nfor {} in {}.iter() {{\n    {} = {} + {}\n}}",
+            parts_name, s, delim, acc_name, iter_name, parts_name, acc_name, acc_name, iter_name
+        )
+    }
+
+    /// Generate a nested when expression with string result:
+    /// `when { a > 0 => when { b > 0 => "both", _ => "b_neg" }, _ => "a_neg" }`
+    fn try_generate_nested_when_string_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.len() < 2 {
+            return None;
+        }
+
+        let var_a = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let var_b = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+
+        let thresh_a = self.rng.gen_range(0..=10);
+        let thresh_b = self.rng.gen_range(0..=10);
+
+        let strs = ["\"both_pos\"", "\"b_neg\"", "\"a_neg\""];
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = when {{\n    {} > {} => when {{\n        {} > {} => {}\n        _ => {}\n    }}\n    _ => {}\n}}",
+            name, var_a, thresh_a, var_b, thresh_b, strs[0], strs[1], strs[2]
         ))
     }
 
