@@ -322,7 +322,7 @@ mod tests {
             if is_present {
                 unsafe { cleanup_string(string_ptr) };
             }
-            let layout = Layout::from_size_align(16, 8).unwrap();
+            let layout = Layout::from_size_align(16, 8).expect("valid layout for boxed optional");
             unsafe { dealloc(ptr, layout) };
         }
     }
