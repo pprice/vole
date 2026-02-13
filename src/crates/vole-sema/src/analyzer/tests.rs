@@ -6,7 +6,7 @@ fn check(source: &str) -> Result<(), Vec<TypeError>> {
     let mut parser = Parser::new(source);
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
-    let mut analyzer = Analyzer::new("test.vole", source);
+    let mut analyzer = Analyzer::new("test.vole");
     analyzer.analyze(&program, &interner)
 }
 
@@ -209,7 +209,7 @@ fn parse_and_analyze(source: &str) -> (Program, Interner) {
     let mut parser = Parser::new(source);
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
-    let mut analyzer = Analyzer::new("test.vole", source);
+    let mut analyzer = Analyzer::new("test.vole");
     analyzer.analyze(&program, &interner).unwrap();
     (program, interner)
 }
@@ -526,7 +526,7 @@ fn analyze_and_check_interface(source: &str) -> Analyzer {
     let mut parser = Parser::new(source);
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
-    let mut analyzer = Analyzer::new("test.vole", source);
+    let mut analyzer = Analyzer::new("test.vole");
     let _ = analyzer.analyze(&program, &interner);
     analyzer
 }

@@ -464,7 +464,7 @@ pub struct MethodLookup {
 impl Analyzer {
     /// Create a new Analyzer for the given file.
     /// Auto-detects project root from the file path.
-    pub fn new(file: &str, _source: &str) -> Self {
+    pub fn new(file: &str) -> Self {
         AnalyzerBuilder::new(file).build()
     }
 
@@ -472,7 +472,7 @@ impl Analyzer {
     /// The cache is shared across multiple Analyzer instances to avoid
     /// re-analyzing the same modules (prelude, stdlib, user imports).
     /// The analyzer uses the CompilationDb from the cache to ensure TypeIds remain valid.
-    pub fn with_cache(file: &str, _source: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
+    pub fn with_cache(file: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
         AnalyzerBuilder::new(file).with_cache(cache).build()
     }
 
@@ -480,7 +480,6 @@ impl Analyzer {
     /// If `project_root` is `None`, auto-detects from file path.
     pub fn with_project_root(
         file: &str,
-        _source: &str,
         project_root: Option<&std::path::Path>,
     ) -> Self {
         AnalyzerBuilder::new(file)
@@ -492,7 +491,6 @@ impl Analyzer {
     /// If `project_root` is `None`, auto-detects from file path.
     pub fn with_cache_and_project_root(
         file: &str,
-        _source: &str,
         cache: Rc<RefCell<ModuleCache>>,
         project_root: Option<&std::path::Path>,
     ) -> Self {

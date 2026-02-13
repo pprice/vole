@@ -148,7 +148,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 
     // Semantic analysis phase
     let sema_start = Instant::now();
-    let mut analyzer = Analyzer::new(file_path, source);
+    let mut analyzer = Analyzer::new(file_path);
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
@@ -202,7 +202,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     interner.seed_builtin_symbols();
 
     // Analyze
-    let mut analyzer = Analyzer::new(file_path, source);
+    let mut analyzer = Analyzer::new(file_path);
     analyzer
         .analyze(&program, &interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
