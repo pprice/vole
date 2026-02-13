@@ -71,7 +71,7 @@ impl Compiler<'_> {
 
     /// Register global module bindings from a top-level destructuring import.
     /// This extracts module exports from the pattern and stores them in global_module_bindings.
-    fn register_global_module_bindings(&mut self, let_tuple: &LetTupleStmt, _import_path: &str) {
+    fn register_global_module_bindings(&mut self, let_tuple: &LetTupleStmt) {
         // Get the module type from semantic analysis
         let module_type_id = self.analyzed.expression_data.get_type(let_tuple.init.id);
         let module_type_id = match module_type_id {
@@ -270,8 +270,8 @@ impl Compiler<'_> {
                 Decl::LetTuple(let_tuple) => {
                     // Handle top-level destructuring imports
                     // Populate global_module_bindings for each destructured name
-                    if let ExprKind::Import(import_path) = &let_tuple.init.kind {
-                        self.register_global_module_bindings(let_tuple, import_path);
+                    if matches!(&let_tuple.init.kind, ExprKind::Import(_)) {
+                        self.register_global_module_bindings(let_tuple);
                     }
                 }
                 Decl::Class(class) => {
@@ -302,7 +302,7 @@ impl Compiler<'_> {
         test_count = 0;
 
         // Declare monomorphized function instances before second pass
-        self.declare_all_monomorphized_instances(program)?;
+        self.declare_all_monomorphized_instances()?;
 
         // Second pass: compile function bodies and tests
         // Note: Decl::Let globals are handled by inlining their initializers
@@ -1107,8 +1107,8 @@ impl Compiler<'_> {
                 }
                 Decl::LetTuple(let_tuple) => {
                     // Handle top-level destructuring imports
-                    if let ExprKind::Import(import_path) = &let_tuple.init.kind {
-                        self.register_global_module_bindings(let_tuple, import_path);
+                    if matches!(&let_tuple.init.kind, ExprKind::Import(_)) {
+                        self.register_global_module_bindings(let_tuple);
                     }
                 }
                 _ => {}
@@ -1118,7 +1118,7 @@ impl Compiler<'_> {
         // Declare monomorphized instances (for generic function calls)
         // This is needed before building IR because function calls may reference
         // monomorphized generic functions like println<string>
-        self.declare_all_monomorphized_instances(program)?;
+        self.declare_all_monomorphized_instances()?;
 
         // Second pass: build and emit IR for each function
         for decl in &program.declarations {
@@ -2214,7 +2214,7 @@ impl Compiler<'_> {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// Declare all monomorphized instances (functions, class methods, static methods)
-    fn declare_all_monomorphized_instances(&mut self, _program: &Program) -> CodegenResult<()> {
+    fn declare_all_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Note: Nested generic calls are now discovered during sema analysis,
         // so we don't need to expand instances here.
         self.declare_monomorphized_instances(false)?;

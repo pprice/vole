@@ -764,10 +764,8 @@ impl Cg<'_, '_, '_> {
             && let Some(name_id) = name_id
         {
             let provided_args = total_user_args;
-            let remaining_start = user_param_offset + provided_args;
-            let remaining_expected_types = expected_types[remaining_start..].to_vec();
             let (default_args, rc_owned) =
-                self.compile_default_args(name_id, provided_args, &remaining_expected_types)?;
+                self.compile_default_args(name_id, provided_args)?;
             args.extend(default_args);
             rc_temp_args.extend(rc_owned);
         }
@@ -829,7 +827,6 @@ impl Cg<'_, '_, '_> {
         &mut self,
         name_id: NameId,
         start_index: usize,
-        _expected_types: &[Type],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let func_id = self.registry().function_by_name(name_id);
         let Some(func_id) = func_id else {
