@@ -599,47 +599,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         union_ptr: Value,
         rc_tags: &[(u8, bool)],
     ) -> CodegenResult<()> {
-        use cranelift::prelude::{InstBuilder, IntCC, MemFlags, types};
-
-        let tag = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), union_ptr, 0);
-        let rc_inc_ref = self.runtime_func_ref(RuntimeFn::RcInc)?;
-
-        for &(variant_tag, is_interface) in rc_tags {
-            let is_match = self
-                .builder
-                .ins()
-                .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
-            let inc_block = self.builder.create_block();
-            let next_block = self.builder.create_block();
-
-            self.builder
-                .ins()
-                .brif(is_match, inc_block, &[], next_block, &[]);
-
-            self.builder.switch_to_block(inc_block);
-            self.builder.seal_block(inc_block);
-            let payload = self
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), union_ptr, 8);
-            if is_interface {
-                let data_word = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), payload, 0);
-                self.builder.ins().call(rc_inc_ref, &[data_word]);
-            } else {
-                self.builder.ins().call(rc_inc_ref, &[payload]);
-            }
-            self.builder.ins().jump(next_block, &[]);
-
-            self.builder.switch_to_block(next_block);
-            self.builder.seal_block(next_block);
-        }
-        Ok(())
+        self.emit_union_rc_op(union_ptr, rc_tags, RuntimeFn::RcInc)
     }
 
     /// Emit rc_dec for the RC payload of a union value, based on its current tag.
@@ -650,28 +610,42 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         union_ptr: Value,
         rc_tags: &[(u8, bool)],
     ) -> CodegenResult<()> {
+        self.emit_union_rc_op(union_ptr, rc_tags, RuntimeFn::RcDec)
+    }
+
+    /// Shared implementation for `emit_union_rc_inc` and `emit_union_rc_dec`.
+    ///
+    /// Loads the tag, checks each RC variant, and applies the given `rc_fn`
+    /// to the payload at offset 8 for the matching variant. For interface
+    /// variants, loads the data word at offset 0 of the payload first.
+    fn emit_union_rc_op(
+        &mut self,
+        union_ptr: Value,
+        rc_tags: &[(u8, bool)],
+        rc_fn: RuntimeFn,
+    ) -> CodegenResult<()> {
         use cranelift::prelude::{InstBuilder, IntCC, MemFlags, types};
 
         let tag = self
             .builder
             .ins()
             .load(types::I8, MemFlags::new(), union_ptr, 0);
-        let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+        let rc_fn_ref = self.runtime_func_ref(rc_fn)?;
 
         for &(variant_tag, is_interface) in rc_tags {
             let is_match = self
                 .builder
                 .ins()
                 .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
-            let dec_block = self.builder.create_block();
+            let op_block = self.builder.create_block();
             let next_block = self.builder.create_block();
 
             self.builder
                 .ins()
-                .brif(is_match, dec_block, &[], next_block, &[]);
+                .brif(is_match, op_block, &[], next_block, &[]);
 
-            self.builder.switch_to_block(dec_block);
-            self.builder.seal_block(dec_block);
+            self.builder.switch_to_block(op_block);
+            self.builder.seal_block(op_block);
             let payload = self
                 .builder
                 .ins()
@@ -681,9 +655,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     .builder
                     .ins()
                     .load(types::I64, MemFlags::new(), payload, 0);
-                self.builder.ins().call(rc_dec_ref, &[data_word]);
+                self.builder.ins().call(rc_fn_ref, &[data_word]);
             } else {
-                self.builder.ins().call(rc_dec_ref, &[payload]);
+                self.builder.ins().call(rc_fn_ref, &[payload]);
             }
             self.builder.ins().jump(next_block, &[]);
 
