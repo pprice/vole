@@ -2764,478 +2764,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::UnaryIntOp(op) => {
-                use crate::intrinsics::UnaryIntOp;
                 if args.is_empty() {
                     return Err(CodegenError::arg_count(intrinsic_key, 1, args.len()));
                 }
-                let arg = args[0];
-                let (value, ty, type_id) = match op {
-                    // abs (signed only)
-                    UnaryIntOp::I8Abs => {
-                        let v = self.builder.ins().iabs(arg);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    UnaryIntOp::I16Abs => {
-                        let v = self.builder.ins().iabs(arg);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    UnaryIntOp::I32Abs => {
-                        let v = self.builder.ins().iabs(arg);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    UnaryIntOp::I64Abs => {
-                        let v = self.builder.ins().iabs(arg);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // clz
-                    UnaryIntOp::I8Clz | UnaryIntOp::U8Clz => {
-                        let v = self.builder.ins().clz(arg);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    UnaryIntOp::I16Clz | UnaryIntOp::U16Clz => {
-                        let v = self.builder.ins().clz(arg);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    UnaryIntOp::I32Clz | UnaryIntOp::U32Clz => {
-                        let v = self.builder.ins().clz(arg);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    UnaryIntOp::I64Clz | UnaryIntOp::U64Clz => {
-                        let v = self.builder.ins().clz(arg);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // ctz
-                    UnaryIntOp::I8Ctz | UnaryIntOp::U8Ctz => {
-                        let v = self.builder.ins().ctz(arg);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    UnaryIntOp::I16Ctz | UnaryIntOp::U16Ctz => {
-                        let v = self.builder.ins().ctz(arg);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    UnaryIntOp::I32Ctz | UnaryIntOp::U32Ctz => {
-                        let v = self.builder.ins().ctz(arg);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    UnaryIntOp::I64Ctz | UnaryIntOp::U64Ctz => {
-                        let v = self.builder.ins().ctz(arg);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // popcnt
-                    UnaryIntOp::I8Popcnt | UnaryIntOp::U8Popcnt => {
-                        let v = self.builder.ins().popcnt(arg);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    UnaryIntOp::I16Popcnt | UnaryIntOp::U16Popcnt => {
-                        let v = self.builder.ins().popcnt(arg);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    UnaryIntOp::I32Popcnt | UnaryIntOp::U32Popcnt => {
-                        let v = self.builder.ins().popcnt(arg);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    UnaryIntOp::I64Popcnt | UnaryIntOp::U64Popcnt => {
-                        let v = self.builder.ins().popcnt(arg);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // bitrev - signed variants
-                    UnaryIntOp::I8Bitrev => {
-                        let v = self.builder.ins().bitrev(arg);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    UnaryIntOp::I16Bitrev => {
-                        let v = self.builder.ins().bitrev(arg);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    UnaryIntOp::I32Bitrev => {
-                        let v = self.builder.ins().bitrev(arg);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    UnaryIntOp::I64Bitrev => {
-                        let v = self.builder.ins().bitrev(arg);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // bitrev - unsigned variants
-                    UnaryIntOp::U8Bitrev => {
-                        let v = self.builder.ins().bitrev(arg);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    UnaryIntOp::U16Bitrev => {
-                        let v = self.builder.ins().bitrev(arg);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    UnaryIntOp::U32Bitrev => {
-                        let v = self.builder.ins().bitrev(arg);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    UnaryIntOp::U64Bitrev => {
-                        let v = self.builder.ins().bitrev(arg);
-                        (v, types::I64, TypeId::U64)
-                    }
-                };
+                let (value, ty, type_id) = self.compile_unary_int_op(*op, args[0]);
                 Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::BinaryIntOp(op) => {
-                use crate::intrinsics::BinaryIntOp;
                 if args.len() < 2 {
                     return Err(CodegenError::arg_count(intrinsic_key, 2, args.len()));
                 }
-                let arg1 = args[0];
-                let arg2 = args[1];
-                let (value, ty, type_id) = match op {
-                    // min signed
-                    BinaryIntOp::I8Min => {
-                        let v = self.builder.ins().smin(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16Min => {
-                        let v = self.builder.ins().smin(arg1, arg2);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32Min => {
-                        let v = self.builder.ins().smin(arg1, arg2);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64Min => {
-                        let v = self.builder.ins().smin(arg1, arg2);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // min unsigned
-                    BinaryIntOp::U8Min => {
-                        let v = self.builder.ins().umin(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16Min => {
-                        let v = self.builder.ins().umin(arg1, arg2);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32Min => {
-                        let v = self.builder.ins().umin(arg1, arg2);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64Min => {
-                        let v = self.builder.ins().umin(arg1, arg2);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // max signed
-                    BinaryIntOp::I8Max => {
-                        let v = self.builder.ins().smax(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16Max => {
-                        let v = self.builder.ins().smax(arg1, arg2);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32Max => {
-                        let v = self.builder.ins().smax(arg1, arg2);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64Max => {
-                        let v = self.builder.ins().smax(arg1, arg2);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // max unsigned
-                    BinaryIntOp::U8Max => {
-                        let v = self.builder.ins().umax(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16Max => {
-                        let v = self.builder.ins().umax(arg1, arg2);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32Max => {
-                        let v = self.builder.ins().umax(arg1, arg2);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64Max => {
-                        let v = self.builder.ins().umax(arg1, arg2);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // rotl - signed (arg2 is u8, needs extension to target type)
-                    BinaryIntOp::I8Rotl => {
-                        let v = self.builder.ins().rotl(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16Rotl => {
-                        let amt = self.builder.ins().uextend(types::I16, arg2);
-                        let v = self.builder.ins().rotl(arg1, amt);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32Rotl => {
-                        let amt = self.builder.ins().uextend(types::I32, arg2);
-                        let v = self.builder.ins().rotl(arg1, amt);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64Rotl => {
-                        let amt = self.builder.ins().uextend(types::I64, arg2);
-                        let v = self.builder.ins().rotl(arg1, amt);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // rotl - unsigned
-                    BinaryIntOp::U8Rotl => {
-                        let v = self.builder.ins().rotl(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16Rotl => {
-                        let amt = self.builder.ins().uextend(types::I16, arg2);
-                        let v = self.builder.ins().rotl(arg1, amt);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32Rotl => {
-                        let amt = self.builder.ins().uextend(types::I32, arg2);
-                        let v = self.builder.ins().rotl(arg1, amt);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64Rotl => {
-                        let amt = self.builder.ins().uextend(types::I64, arg2);
-                        let v = self.builder.ins().rotl(arg1, amt);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // rotr - signed (arg2 is u8, needs extension to target type)
-                    BinaryIntOp::I8Rotr => {
-                        let v = self.builder.ins().rotr(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16Rotr => {
-                        let amt = self.builder.ins().uextend(types::I16, arg2);
-                        let v = self.builder.ins().rotr(arg1, amt);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32Rotr => {
-                        let amt = self.builder.ins().uextend(types::I32, arg2);
-                        let v = self.builder.ins().rotr(arg1, amt);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64Rotr => {
-                        let amt = self.builder.ins().uextend(types::I64, arg2);
-                        let v = self.builder.ins().rotr(arg1, amt);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // rotr - unsigned
-                    BinaryIntOp::U8Rotr => {
-                        let v = self.builder.ins().rotr(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16Rotr => {
-                        let amt = self.builder.ins().uextend(types::I16, arg2);
-                        let v = self.builder.ins().rotr(arg1, amt);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32Rotr => {
-                        let amt = self.builder.ins().uextend(types::I32, arg2);
-                        let v = self.builder.ins().rotr(arg1, amt);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64Rotr => {
-                        let amt = self.builder.ins().uextend(types::I64, arg2);
-                        let v = self.builder.ins().rotr(arg1, amt);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // wrapping_add - signed (Cranelift iadd wraps by default)
-                    BinaryIntOp::I8WrappingAdd => {
-                        let v = self.builder.ins().iadd(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16WrappingAdd => {
-                        let v = self.builder.ins().iadd(arg1, arg2);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32WrappingAdd => {
-                        let v = self.builder.ins().iadd(arg1, arg2);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64WrappingAdd => {
-                        let v = self.builder.ins().iadd(arg1, arg2);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // wrapping_add - unsigned
-                    BinaryIntOp::U8WrappingAdd => {
-                        let v = self.builder.ins().iadd(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16WrappingAdd => {
-                        let v = self.builder.ins().iadd(arg1, arg2);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32WrappingAdd => {
-                        let v = self.builder.ins().iadd(arg1, arg2);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64WrappingAdd => {
-                        let v = self.builder.ins().iadd(arg1, arg2);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // wrapping_sub - signed (Cranelift isub wraps by default)
-                    BinaryIntOp::I8WrappingSub => {
-                        let v = self.builder.ins().isub(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16WrappingSub => {
-                        let v = self.builder.ins().isub(arg1, arg2);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32WrappingSub => {
-                        let v = self.builder.ins().isub(arg1, arg2);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64WrappingSub => {
-                        let v = self.builder.ins().isub(arg1, arg2);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // wrapping_sub - unsigned
-                    BinaryIntOp::U8WrappingSub => {
-                        let v = self.builder.ins().isub(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16WrappingSub => {
-                        let v = self.builder.ins().isub(arg1, arg2);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32WrappingSub => {
-                        let v = self.builder.ins().isub(arg1, arg2);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64WrappingSub => {
-                        let v = self.builder.ins().isub(arg1, arg2);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // wrapping_mul - signed (Cranelift imul wraps by default)
-                    BinaryIntOp::I8WrappingMul => {
-                        let v = self.builder.ins().imul(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16WrappingMul => {
-                        let v = self.builder.ins().imul(arg1, arg2);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32WrappingMul => {
-                        let v = self.builder.ins().imul(arg1, arg2);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64WrappingMul => {
-                        let v = self.builder.ins().imul(arg1, arg2);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // wrapping_mul - unsigned
-                    BinaryIntOp::U8WrappingMul => {
-                        let v = self.builder.ins().imul(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16WrappingMul => {
-                        let v = self.builder.ins().imul(arg1, arg2);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32WrappingMul => {
-                        let v = self.builder.ins().imul(arg1, arg2);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64WrappingMul => {
-                        let v = self.builder.ins().imul(arg1, arg2);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // saturating_add - signed (Cranelift sadd_sat doesn't support i8)
-                    BinaryIntOp::I8SaturatingAdd => {
-                        let v = self.i8_sadd_sat(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16SaturatingAdd => {
-                        let v = self.i16_sadd_sat(arg1, arg2);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32SaturatingAdd => {
-                        let v = self.signed_saturating_add(arg1, arg2, types::I32);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64SaturatingAdd => {
-                        let v = self.signed_saturating_add(arg1, arg2, types::I64);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // saturating_add - unsigned (Cranelift uadd_sat doesn't support u8)
-                    BinaryIntOp::U8SaturatingAdd => {
-                        let v = self.u8_uadd_sat(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16SaturatingAdd => {
-                        let v = self.u16_uadd_sat(arg1, arg2);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32SaturatingAdd => {
-                        let v = self.unsigned_saturating_add(arg1, arg2, types::I32);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64SaturatingAdd => {
-                        let v = self.unsigned_saturating_add(arg1, arg2, types::I64);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // saturating_sub - signed (Cranelift ssub_sat doesn't support i8)
-                    BinaryIntOp::I8SaturatingSub => {
-                        let v = self.i8_ssub_sat(arg1, arg2);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16SaturatingSub => {
-                        let v = self.i16_ssub_sat(arg1, arg2);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32SaturatingSub => {
-                        let v = self.signed_saturating_sub(arg1, arg2, types::I32);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64SaturatingSub => {
-                        let v = self.signed_saturating_sub(arg1, arg2, types::I64);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // saturating_sub - unsigned (Cranelift usub_sat doesn't support u8)
-                    BinaryIntOp::U8SaturatingSub => {
-                        let v = self.u8_usub_sat(arg1, arg2);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16SaturatingSub => {
-                        let v = self.u16_usub_sat(arg1, arg2);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32SaturatingSub => {
-                        let v = self.unsigned_saturating_sub(arg1, arg2, types::I32);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64SaturatingSub => {
-                        let v = self.unsigned_saturating_sub(arg1, arg2, types::I64);
-                        (v, types::I64, TypeId::U64)
-                    }
-                    // saturating_mul - signed (use overflow detection + select)
-                    BinaryIntOp::I8SaturatingMul => {
-                        let v = self.signed_saturating_mul(arg1, arg2, types::I8);
-                        (v, types::I8, TypeId::I8)
-                    }
-                    BinaryIntOp::I16SaturatingMul => {
-                        let v = self.signed_saturating_mul(arg1, arg2, types::I16);
-                        (v, types::I16, TypeId::I16)
-                    }
-                    BinaryIntOp::I32SaturatingMul => {
-                        let v = self.signed_saturating_mul(arg1, arg2, types::I32);
-                        (v, types::I32, TypeId::I32)
-                    }
-                    BinaryIntOp::I64SaturatingMul => {
-                        let v = self.signed_saturating_mul(arg1, arg2, types::I64);
-                        (v, types::I64, TypeId::I64)
-                    }
-                    // saturating_mul - unsigned (use overflow detection + select)
-                    BinaryIntOp::U8SaturatingMul => {
-                        let v = self.unsigned_saturating_mul(arg1, arg2, types::I8);
-                        (v, types::I8, TypeId::U8)
-                    }
-                    BinaryIntOp::U16SaturatingMul => {
-                        let v = self.unsigned_saturating_mul(arg1, arg2, types::I16);
-                        (v, types::I16, TypeId::U16)
-                    }
-                    BinaryIntOp::U32SaturatingMul => {
-                        let v = self.unsigned_saturating_mul(arg1, arg2, types::I32);
-                        (v, types::I32, TypeId::U32)
-                    }
-                    BinaryIntOp::U64SaturatingMul => {
-                        let v = self.unsigned_saturating_mul(arg1, arg2, types::I64);
-                        (v, types::I64, TypeId::U64)
-                    }
-                };
+                let (value, ty, type_id) = self.compile_binary_int_op(*op, args[0], args[1]);
                 Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::UnaryIntWrappingOp(op) => {
@@ -3300,6 +2839,328 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.switch_and_seal(unreachable_block);
 
                 Ok(self.void_value())
+            }
+        }
+    }
+
+    /// Dispatch table for unary integer intrinsic operations.
+    fn compile_unary_int_op(
+        &mut self,
+        op: crate::intrinsics::UnaryIntOp,
+        arg: Value,
+    ) -> (Value, Type, TypeId) {
+        use crate::intrinsics::UnaryIntOp;
+        match op {
+            // abs (signed only)
+            UnaryIntOp::I8Abs => (self.builder.ins().iabs(arg), types::I8, TypeId::I8),
+            UnaryIntOp::I16Abs => (self.builder.ins().iabs(arg), types::I16, TypeId::I16),
+            UnaryIntOp::I32Abs => (self.builder.ins().iabs(arg), types::I32, TypeId::I32),
+            UnaryIntOp::I64Abs => (self.builder.ins().iabs(arg), types::I64, TypeId::I64),
+            // clz
+            UnaryIntOp::I8Clz | UnaryIntOp::U8Clz => {
+                (self.builder.ins().clz(arg), types::I8, TypeId::I8)
+            }
+            UnaryIntOp::I16Clz | UnaryIntOp::U16Clz => {
+                (self.builder.ins().clz(arg), types::I16, TypeId::I16)
+            }
+            UnaryIntOp::I32Clz | UnaryIntOp::U32Clz => {
+                (self.builder.ins().clz(arg), types::I32, TypeId::I32)
+            }
+            UnaryIntOp::I64Clz | UnaryIntOp::U64Clz => {
+                (self.builder.ins().clz(arg), types::I64, TypeId::I64)
+            }
+            // ctz
+            UnaryIntOp::I8Ctz | UnaryIntOp::U8Ctz => {
+                (self.builder.ins().ctz(arg), types::I8, TypeId::I8)
+            }
+            UnaryIntOp::I16Ctz | UnaryIntOp::U16Ctz => {
+                (self.builder.ins().ctz(arg), types::I16, TypeId::I16)
+            }
+            UnaryIntOp::I32Ctz | UnaryIntOp::U32Ctz => {
+                (self.builder.ins().ctz(arg), types::I32, TypeId::I32)
+            }
+            UnaryIntOp::I64Ctz | UnaryIntOp::U64Ctz => {
+                (self.builder.ins().ctz(arg), types::I64, TypeId::I64)
+            }
+            // popcnt
+            UnaryIntOp::I8Popcnt | UnaryIntOp::U8Popcnt => {
+                (self.builder.ins().popcnt(arg), types::I8, TypeId::I8)
+            }
+            UnaryIntOp::I16Popcnt | UnaryIntOp::U16Popcnt => {
+                (self.builder.ins().popcnt(arg), types::I16, TypeId::I16)
+            }
+            UnaryIntOp::I32Popcnt | UnaryIntOp::U32Popcnt => {
+                (self.builder.ins().popcnt(arg), types::I32, TypeId::I32)
+            }
+            UnaryIntOp::I64Popcnt | UnaryIntOp::U64Popcnt => {
+                (self.builder.ins().popcnt(arg), types::I64, TypeId::I64)
+            }
+            // bitrev - signed variants
+            UnaryIntOp::I8Bitrev => (self.builder.ins().bitrev(arg), types::I8, TypeId::I8),
+            UnaryIntOp::I16Bitrev => (self.builder.ins().bitrev(arg), types::I16, TypeId::I16),
+            UnaryIntOp::I32Bitrev => (self.builder.ins().bitrev(arg), types::I32, TypeId::I32),
+            UnaryIntOp::I64Bitrev => (self.builder.ins().bitrev(arg), types::I64, TypeId::I64),
+            // bitrev - unsigned variants
+            UnaryIntOp::U8Bitrev => (self.builder.ins().bitrev(arg), types::I8, TypeId::U8),
+            UnaryIntOp::U16Bitrev => (self.builder.ins().bitrev(arg), types::I16, TypeId::U16),
+            UnaryIntOp::U32Bitrev => (self.builder.ins().bitrev(arg), types::I32, TypeId::U32),
+            UnaryIntOp::U64Bitrev => (self.builder.ins().bitrev(arg), types::I64, TypeId::U64),
+        }
+    }
+
+    /// Dispatch table for binary integer intrinsic operations.
+    fn compile_binary_int_op(
+        &mut self,
+        op: crate::intrinsics::BinaryIntOp,
+        arg1: Value,
+        arg2: Value,
+    ) -> (Value, Type, TypeId) {
+        use crate::intrinsics::BinaryIntOp;
+        match op {
+            // min signed
+            BinaryIntOp::I8Min => (self.builder.ins().smin(arg1, arg2), types::I8, TypeId::I8),
+            BinaryIntOp::I16Min => (self.builder.ins().smin(arg1, arg2), types::I16, TypeId::I16),
+            BinaryIntOp::I32Min => (self.builder.ins().smin(arg1, arg2), types::I32, TypeId::I32),
+            BinaryIntOp::I64Min => (self.builder.ins().smin(arg1, arg2), types::I64, TypeId::I64),
+            // min unsigned
+            BinaryIntOp::U8Min => (self.builder.ins().umin(arg1, arg2), types::I8, TypeId::U8),
+            BinaryIntOp::U16Min => (self.builder.ins().umin(arg1, arg2), types::I16, TypeId::U16),
+            BinaryIntOp::U32Min => (self.builder.ins().umin(arg1, arg2), types::I32, TypeId::U32),
+            BinaryIntOp::U64Min => (self.builder.ins().umin(arg1, arg2), types::I64, TypeId::U64),
+            // max signed
+            BinaryIntOp::I8Max => (self.builder.ins().smax(arg1, arg2), types::I8, TypeId::I8),
+            BinaryIntOp::I16Max => (self.builder.ins().smax(arg1, arg2), types::I16, TypeId::I16),
+            BinaryIntOp::I32Max => (self.builder.ins().smax(arg1, arg2), types::I32, TypeId::I32),
+            BinaryIntOp::I64Max => (self.builder.ins().smax(arg1, arg2), types::I64, TypeId::I64),
+            // max unsigned
+            BinaryIntOp::U8Max => (self.builder.ins().umax(arg1, arg2), types::I8, TypeId::U8),
+            BinaryIntOp::U16Max => (self.builder.ins().umax(arg1, arg2), types::I16, TypeId::U16),
+            BinaryIntOp::U32Max => (self.builder.ins().umax(arg1, arg2), types::I32, TypeId::U32),
+            BinaryIntOp::U64Max => (self.builder.ins().umax(arg1, arg2), types::I64, TypeId::U64),
+            // rotl - signed (arg2 is u8, needs extension to target type)
+            BinaryIntOp::I8Rotl => (self.builder.ins().rotl(arg1, arg2), types::I8, TypeId::I8),
+            BinaryIntOp::I16Rotl => {
+                let amt = self.builder.ins().uextend(types::I16, arg2);
+                (self.builder.ins().rotl(arg1, amt), types::I16, TypeId::I16)
+            }
+            BinaryIntOp::I32Rotl => {
+                let amt = self.builder.ins().uextend(types::I32, arg2);
+                (self.builder.ins().rotl(arg1, amt), types::I32, TypeId::I32)
+            }
+            BinaryIntOp::I64Rotl => {
+                let amt = self.builder.ins().uextend(types::I64, arg2);
+                (self.builder.ins().rotl(arg1, amt), types::I64, TypeId::I64)
+            }
+            // rotl - unsigned
+            BinaryIntOp::U8Rotl => (self.builder.ins().rotl(arg1, arg2), types::I8, TypeId::U8),
+            BinaryIntOp::U16Rotl => {
+                let amt = self.builder.ins().uextend(types::I16, arg2);
+                (self.builder.ins().rotl(arg1, amt), types::I16, TypeId::U16)
+            }
+            BinaryIntOp::U32Rotl => {
+                let amt = self.builder.ins().uextend(types::I32, arg2);
+                (self.builder.ins().rotl(arg1, amt), types::I32, TypeId::U32)
+            }
+            BinaryIntOp::U64Rotl => {
+                let amt = self.builder.ins().uextend(types::I64, arg2);
+                (self.builder.ins().rotl(arg1, amt), types::I64, TypeId::U64)
+            }
+            // rotr - signed (arg2 is u8, needs extension to target type)
+            BinaryIntOp::I8Rotr => (self.builder.ins().rotr(arg1, arg2), types::I8, TypeId::I8),
+            BinaryIntOp::I16Rotr => {
+                let amt = self.builder.ins().uextend(types::I16, arg2);
+                (self.builder.ins().rotr(arg1, amt), types::I16, TypeId::I16)
+            }
+            BinaryIntOp::I32Rotr => {
+                let amt = self.builder.ins().uextend(types::I32, arg2);
+                (self.builder.ins().rotr(arg1, amt), types::I32, TypeId::I32)
+            }
+            BinaryIntOp::I64Rotr => {
+                let amt = self.builder.ins().uextend(types::I64, arg2);
+                (self.builder.ins().rotr(arg1, amt), types::I64, TypeId::I64)
+            }
+            // rotr - unsigned
+            BinaryIntOp::U8Rotr => (self.builder.ins().rotr(arg1, arg2), types::I8, TypeId::U8),
+            BinaryIntOp::U16Rotr => {
+                let amt = self.builder.ins().uextend(types::I16, arg2);
+                (self.builder.ins().rotr(arg1, amt), types::I16, TypeId::U16)
+            }
+            BinaryIntOp::U32Rotr => {
+                let amt = self.builder.ins().uextend(types::I32, arg2);
+                (self.builder.ins().rotr(arg1, amt), types::I32, TypeId::U32)
+            }
+            BinaryIntOp::U64Rotr => {
+                let amt = self.builder.ins().uextend(types::I64, arg2);
+                (self.builder.ins().rotr(arg1, amt), types::I64, TypeId::U64)
+            }
+            // wrapping_add (Cranelift iadd wraps by default)
+            BinaryIntOp::I8WrappingAdd => {
+                (self.builder.ins().iadd(arg1, arg2), types::I8, TypeId::I8)
+            }
+            BinaryIntOp::I16WrappingAdd => {
+                (self.builder.ins().iadd(arg1, arg2), types::I16, TypeId::I16)
+            }
+            BinaryIntOp::I32WrappingAdd => {
+                (self.builder.ins().iadd(arg1, arg2), types::I32, TypeId::I32)
+            }
+            BinaryIntOp::I64WrappingAdd => {
+                (self.builder.ins().iadd(arg1, arg2), types::I64, TypeId::I64)
+            }
+            BinaryIntOp::U8WrappingAdd => {
+                (self.builder.ins().iadd(arg1, arg2), types::I8, TypeId::U8)
+            }
+            BinaryIntOp::U16WrappingAdd => {
+                (self.builder.ins().iadd(arg1, arg2), types::I16, TypeId::U16)
+            }
+            BinaryIntOp::U32WrappingAdd => {
+                (self.builder.ins().iadd(arg1, arg2), types::I32, TypeId::U32)
+            }
+            BinaryIntOp::U64WrappingAdd => {
+                (self.builder.ins().iadd(arg1, arg2), types::I64, TypeId::U64)
+            }
+            // wrapping_sub (Cranelift isub wraps by default)
+            BinaryIntOp::I8WrappingSub => {
+                (self.builder.ins().isub(arg1, arg2), types::I8, TypeId::I8)
+            }
+            BinaryIntOp::I16WrappingSub => {
+                (self.builder.ins().isub(arg1, arg2), types::I16, TypeId::I16)
+            }
+            BinaryIntOp::I32WrappingSub => {
+                (self.builder.ins().isub(arg1, arg2), types::I32, TypeId::I32)
+            }
+            BinaryIntOp::I64WrappingSub => {
+                (self.builder.ins().isub(arg1, arg2), types::I64, TypeId::I64)
+            }
+            BinaryIntOp::U8WrappingSub => {
+                (self.builder.ins().isub(arg1, arg2), types::I8, TypeId::U8)
+            }
+            BinaryIntOp::U16WrappingSub => {
+                (self.builder.ins().isub(arg1, arg2), types::I16, TypeId::U16)
+            }
+            BinaryIntOp::U32WrappingSub => {
+                (self.builder.ins().isub(arg1, arg2), types::I32, TypeId::U32)
+            }
+            BinaryIntOp::U64WrappingSub => {
+                (self.builder.ins().isub(arg1, arg2), types::I64, TypeId::U64)
+            }
+            // wrapping_mul (Cranelift imul wraps by default)
+            BinaryIntOp::I8WrappingMul => {
+                (self.builder.ins().imul(arg1, arg2), types::I8, TypeId::I8)
+            }
+            BinaryIntOp::I16WrappingMul => {
+                (self.builder.ins().imul(arg1, arg2), types::I16, TypeId::I16)
+            }
+            BinaryIntOp::I32WrappingMul => {
+                (self.builder.ins().imul(arg1, arg2), types::I32, TypeId::I32)
+            }
+            BinaryIntOp::I64WrappingMul => {
+                (self.builder.ins().imul(arg1, arg2), types::I64, TypeId::I64)
+            }
+            BinaryIntOp::U8WrappingMul => {
+                (self.builder.ins().imul(arg1, arg2), types::I8, TypeId::U8)
+            }
+            BinaryIntOp::U16WrappingMul => {
+                (self.builder.ins().imul(arg1, arg2), types::I16, TypeId::U16)
+            }
+            BinaryIntOp::U32WrappingMul => {
+                (self.builder.ins().imul(arg1, arg2), types::I32, TypeId::U32)
+            }
+            BinaryIntOp::U64WrappingMul => {
+                (self.builder.ins().imul(arg1, arg2), types::I64, TypeId::U64)
+            }
+            // saturating_add - signed
+            BinaryIntOp::I8SaturatingAdd => {
+                (self.i8_sadd_sat(arg1, arg2), types::I8, TypeId::I8)
+            }
+            BinaryIntOp::I16SaturatingAdd => {
+                (self.i16_sadd_sat(arg1, arg2), types::I16, TypeId::I16)
+            }
+            BinaryIntOp::I32SaturatingAdd => {
+                let v = self.signed_saturating_add(arg1, arg2, types::I32);
+                (v, types::I32, TypeId::I32)
+            }
+            BinaryIntOp::I64SaturatingAdd => {
+                let v = self.signed_saturating_add(arg1, arg2, types::I64);
+                (v, types::I64, TypeId::I64)
+            }
+            // saturating_add - unsigned
+            BinaryIntOp::U8SaturatingAdd => {
+                (self.u8_uadd_sat(arg1, arg2), types::I8, TypeId::U8)
+            }
+            BinaryIntOp::U16SaturatingAdd => {
+                (self.u16_uadd_sat(arg1, arg2), types::I16, TypeId::U16)
+            }
+            BinaryIntOp::U32SaturatingAdd => {
+                let v = self.unsigned_saturating_add(arg1, arg2, types::I32);
+                (v, types::I32, TypeId::U32)
+            }
+            BinaryIntOp::U64SaturatingAdd => {
+                let v = self.unsigned_saturating_add(arg1, arg2, types::I64);
+                (v, types::I64, TypeId::U64)
+            }
+            // saturating_sub - signed
+            BinaryIntOp::I8SaturatingSub => {
+                (self.i8_ssub_sat(arg1, arg2), types::I8, TypeId::I8)
+            }
+            BinaryIntOp::I16SaturatingSub => {
+                (self.i16_ssub_sat(arg1, arg2), types::I16, TypeId::I16)
+            }
+            BinaryIntOp::I32SaturatingSub => {
+                let v = self.signed_saturating_sub(arg1, arg2, types::I32);
+                (v, types::I32, TypeId::I32)
+            }
+            BinaryIntOp::I64SaturatingSub => {
+                let v = self.signed_saturating_sub(arg1, arg2, types::I64);
+                (v, types::I64, TypeId::I64)
+            }
+            // saturating_sub - unsigned
+            BinaryIntOp::U8SaturatingSub => {
+                (self.u8_usub_sat(arg1, arg2), types::I8, TypeId::U8)
+            }
+            BinaryIntOp::U16SaturatingSub => {
+                (self.u16_usub_sat(arg1, arg2), types::I16, TypeId::U16)
+            }
+            BinaryIntOp::U32SaturatingSub => {
+                let v = self.unsigned_saturating_sub(arg1, arg2, types::I32);
+                (v, types::I32, TypeId::U32)
+            }
+            BinaryIntOp::U64SaturatingSub => {
+                let v = self.unsigned_saturating_sub(arg1, arg2, types::I64);
+                (v, types::I64, TypeId::U64)
+            }
+            // saturating_mul - signed
+            BinaryIntOp::I8SaturatingMul => {
+                let v = self.signed_saturating_mul(arg1, arg2, types::I8);
+                (v, types::I8, TypeId::I8)
+            }
+            BinaryIntOp::I16SaturatingMul => {
+                let v = self.signed_saturating_mul(arg1, arg2, types::I16);
+                (v, types::I16, TypeId::I16)
+            }
+            BinaryIntOp::I32SaturatingMul => {
+                let v = self.signed_saturating_mul(arg1, arg2, types::I32);
+                (v, types::I32, TypeId::I32)
+            }
+            BinaryIntOp::I64SaturatingMul => {
+                let v = self.signed_saturating_mul(arg1, arg2, types::I64);
+                (v, types::I64, TypeId::I64)
+            }
+            // saturating_mul - unsigned
+            BinaryIntOp::U8SaturatingMul => {
+                let v = self.unsigned_saturating_mul(arg1, arg2, types::I8);
+                (v, types::I8, TypeId::U8)
+            }
+            BinaryIntOp::U16SaturatingMul => {
+                let v = self.unsigned_saturating_mul(arg1, arg2, types::I16);
+                (v, types::I16, TypeId::U16)
+            }
+            BinaryIntOp::U32SaturatingMul => {
+                let v = self.unsigned_saturating_mul(arg1, arg2, types::I32);
+                (v, types::I32, TypeId::U32)
+            }
+            BinaryIntOp::U64SaturatingMul => {
+                let v = self.unsigned_saturating_mul(arg1, arg2, types::I64);
+                (v, types::I64, TypeId::U64)
             }
         }
     }
