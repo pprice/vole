@@ -279,7 +279,7 @@ impl Analyzer {
                 if left_id == ArenaTypeId::STRING {
                     // String is Stringable but check it explicitly since primitives
                     // don't structurally implement interfaces
-                    #[allow(clippy::if_same_then_else)]
+                    #[expect(clippy::if_same_then_else)]
                     if right_id == ArenaTypeId::STRING {
                         return Ok(ArenaTypeId::STRING);
                     } else if self.satisfies_stringable_id(right_id, interner) {

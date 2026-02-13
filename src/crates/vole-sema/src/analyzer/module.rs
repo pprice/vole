@@ -152,7 +152,7 @@ impl Analyzer {
         }
     }
 
-    #[allow(clippy::result_unit_err)] // Error is added to self.errors vector
+    #[expect(clippy::result_unit_err)] // Error is added to self.errors vector
     #[tracing::instrument(skip(self, span, _interner), fields(path = %import_path))]
     pub fn analyze_module(
         &mut self,

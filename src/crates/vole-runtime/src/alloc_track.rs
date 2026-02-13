@@ -13,7 +13,7 @@ const NUM_TYPE_SLOTS: usize = 12;
 
 /// Per-type allocation counters, indexed by TYPE_* constants.
 static TYPE_COUNTERS: [AtomicI64; NUM_TYPE_SLOTS] = {
-    #[allow(clippy::declare_interior_mutable_const)]
+    #[expect(clippy::declare_interior_mutable_const)]
     const ZERO: AtomicI64 = AtomicI64::new(0);
     [ZERO; NUM_TYPE_SLOTS]
 };
