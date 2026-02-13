@@ -153,12 +153,6 @@ impl FunctionRegistry {
         self.names.main_module()
     }
 
-    pub fn builtin_module(&self) -> ModuleId {
-        self.names
-            .builtin_module_id()
-            .unwrap_or_else(|| self.names.main_module())
-    }
-
     pub fn intern_name_id(&mut self, name_id: NameId) -> FunctionKey {
         if let Some(key) = self.qualified_lookup.get(&name_id) {
             return *key;
@@ -231,10 +225,6 @@ impl FunctionRegistry {
         self.runtime_key(runtime)
             .and_then(|key| self.func_id(key))
             .is_some()
-    }
-
-    pub fn name_table_rc(&self) -> &Rc<NameTable> {
-        &self.names
     }
 
     fn insert(&mut self, name: FunctionName) -> FunctionKey {

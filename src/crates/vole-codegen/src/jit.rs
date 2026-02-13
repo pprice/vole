@@ -161,12 +161,6 @@ impl JitContext {
         Self::new_internal(None, options)
     }
 
-    /// Create a new JitContext with pre-compiled module functions available as external symbols.
-    /// This allows reusing compiled module code across multiple JitContexts.
-    pub fn with_modules(modules: &CompiledModules) -> Self {
-        Self::with_modules_and_options(modules, JitOptions::default())
-    }
-
     /// Create a new JitContext with pre-compiled modules and custom options.
     pub fn with_modules_and_options(modules: &CompiledModules, options: JitOptions) -> Self {
         Self::new_internal(Some(&modules.functions), options)
