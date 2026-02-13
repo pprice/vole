@@ -1483,6 +1483,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: match with to_string arm values
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_to_string_arms(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: for loop with string interpolation concat
+        if self.rng.gen_bool(0.02) {
+            return self.generate_for_interpolation_concat(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8393,6 +8405,74 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = {}.substring({}, {})",
             name, receiver, start, end
         ))
+    }
+
+    /// Generate a match where arm values use `.to_string()`:
+    /// `match x { 0 => 0.to_string(), 1 => 1.to_string(), _ => x.to_string() }`
+    fn try_generate_match_to_string_arms(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+
+        let num_arms = self.rng.gen_range(2..=3);
+        let mut arms = Vec::new();
+        for i in 0..num_arms {
+            arms.push(format!("    {} => {}.to_string()", i, i));
+        }
+        arms.push(format!("    _ => {}.to_string()", var));
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = match {} {{\n{}\n}}",
+            name,
+            var,
+            arms.join("\n")
+        ))
+    }
+
+    /// Generate a for loop building a string with interpolation:
+    /// `let mut s = ""; for i in 0..N { s = s + "item {i} " }`
+    fn generate_for_interpolation_concat(&mut self, ctx: &mut StmtContext) -> String {
+        let acc_name = ctx.new_local_name();
+        let iter_name = ctx.new_local_name();
+        let n = self.rng.gen_range(2..=5);
+
+        let prefixes = ["item", "val", "x", "n", "elem"];
+        let prefix = prefixes[self.rng.gen_range(0..prefixes.len())];
+
+        // Protect accumulator
+        ctx.protected_vars.push(acc_name.clone());
+
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            true,
+        );
+
+        format!(
+            "let mut {} = \"\"\nfor {} in 0..{} {{\n    {} = {} + \"{}={{{}}} \"\n}}",
+            acc_name, iter_name, n, acc_name, acc_name, prefix, iter_name
+        )
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
