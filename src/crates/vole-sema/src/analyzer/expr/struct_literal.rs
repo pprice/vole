@@ -210,7 +210,10 @@ impl Analyzer {
                         result_id,
                     )
                 }
-                _ => {
+                TypeDefKind::Interface
+                | TypeDefKind::ErrorType
+                | TypeDefKind::Primitive
+                | TypeDefKind::Alias => {
                     let type_name = Self::format_struct_literal_path(&struct_lit.path, interner);
                     self.add_error(
                         SemanticError::UnknownType {

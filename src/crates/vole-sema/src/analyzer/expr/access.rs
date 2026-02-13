@@ -173,7 +173,8 @@ impl Analyzer {
         let kind_str = match nominal_kind {
             crate::type_arena::NominalKind::Class => "class",
             crate::type_arena::NominalKind::Struct => "struct",
-            _ => "class",
+            crate::type_arena::NominalKind::Interface => "interface",
+            crate::type_arena::NominalKind::Error => "error type",
         };
         let context = format!(
             "field '{}' not found on {} '{}' (available: {})",
