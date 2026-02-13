@@ -81,6 +81,11 @@ func sign(x: i64) -> i64 {
     }
 }
 
+// When expression guarding division by zero
+// The select optimization must NOT eagerly evaluate division arms
+func safe_div(a: i64, b: i64) -> i64 => when { b != 0 => a / b, _ => 0 }
+func safe_mod(a: i64, b: i64) -> i64 => when { b != 0 => a % b, _ => 0 }
+
 tests "when expressions" {
     test "simple when classification" {
         assert(classify_number(-5) == "negative")
@@ -142,5 +147,12 @@ tests "when expressions" {
         assert(sign(10) == 1)
         assert(sign(-10) == -1)
         assert(sign(0) == 0)
+    }
+
+    test "when guards division by zero" {
+        assert(safe_div(10, 2) == 5)
+        assert(safe_div(10, 0) == 0)
+        assert(safe_mod(10, 3) == 1)
+        assert(safe_mod(10, 0) == 0)
     }
 }

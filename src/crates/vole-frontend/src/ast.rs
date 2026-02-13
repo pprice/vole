@@ -503,7 +503,13 @@ impl Expr {
             ExprKind::Grouping(inner) => inner.is_selectable(),
 
             // Binary ops on selectable operands (arithmetic, comparison, etc.)
-            ExprKind::Binary(bin) => bin.left.is_selectable() && bin.right.is_selectable(),
+            // Div and Mod can trap on division by zero, so they are NOT selectable
+            // (select evaluates both arms eagerly, which would trigger the trap)
+            ExprKind::Binary(bin) => {
+                !matches!(bin.op, BinaryOp::Div | BinaryOp::Mod)
+                    && bin.left.is_selectable()
+                    && bin.right.is_selectable()
+            }
 
             // Unary ops on selectable operand
             ExprKind::Unary(un) => un.operand.is_selectable(),
