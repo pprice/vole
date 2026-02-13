@@ -6,7 +6,9 @@ use cranelift::prelude::*;
 
 use crate::RuntimeFn;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_frontend::{self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, RaiseStmt, ReturnStmt, Stmt, Symbol};
+use vole_frontend::{
+    self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, RaiseStmt, ReturnStmt, Stmt, Symbol,
+};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 
@@ -376,8 +378,7 @@ impl Cg<'_, '_, '_> {
                 (wrapped.value, wrapped.type_id)
             } else if is_declared_integer && init.type_id.is_integer() {
                 let arena = self.arena();
-                let declared_cty =
-                    type_id_to_cranelift(declared_type_id, arena, self.ptr_type());
+                let declared_cty = type_id_to_cranelift(declared_type_id, arena, self.ptr_type());
                 let init_cty = init.ty;
                 if declared_cty.bits() < init_cty.bits() {
                     let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
@@ -415,8 +416,7 @@ impl Cg<'_, '_, '_> {
 
             if is_declared_interface && !is_final_interface {
                 let arena = self.arena();
-                let cranelift_ty =
-                    type_id_to_cranelift(final_type_id, arena, self.ptr_type());
+                let cranelift_ty = type_id_to_cranelift(final_type_id, arena, self.ptr_type());
                 let boxed = self.box_interface_value(
                     CompiledValue::new(final_value, cranelift_ty, final_type_id),
                     declared_type_id,
@@ -454,8 +454,7 @@ impl Cg<'_, '_, '_> {
         // borrow. Ownership transfers (calls, literals) inside loops
         // still get normal RC tracking — they produce a fresh +1 that
         // the scope-exit dec balances against the last iteration's value.
-        if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup()
-        {
+        if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup() {
             let is_borrow = init.is_borrowed();
             if self.cf.in_loop() && is_borrow {
                 // Borrow inside loop: skip inc and RC registration.
@@ -489,12 +488,10 @@ impl Cg<'_, '_, '_> {
                 };
                 if is_struct_copy {
                     for &off in &offsets {
-                        let field_ptr = self.builder.ins().load(
-                            types::I64,
-                            MemFlags::new(),
-                            final_value,
-                            off,
-                        );
+                        let field_ptr =
+                            self.builder
+                                .ins()
+                                .load(types::I64, MemFlags::new(), final_value, off);
                         self.emit_rc_inc(field_ptr)?;
                     }
                 }
@@ -606,12 +603,10 @@ impl Cg<'_, '_, '_> {
                 let mut return_vals = Vec::with_capacity(2);
                 for i in 0..flat_count {
                     let offset = (i as i32) * 8;
-                    let val = self.builder.ins().load(
-                        types::I64,
-                        MemFlags::new(),
-                        struct_ptr,
-                        offset,
-                    );
+                    let val =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), struct_ptr, offset);
                     return_vals.push(val);
                 }
                 // Pad to 2 registers for consistent convention
@@ -636,12 +631,10 @@ impl Cg<'_, '_, '_> {
                 let struct_ptr = compiled.value;
                 for i in 0..flat_count {
                     let offset = (i as i32) * 8;
-                    let val = self.builder.ins().load(
-                        types::I64,
-                        MemFlags::new(),
-                        struct_ptr,
-                        offset,
-                    );
+                    let val =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), struct_ptr, offset);
                     self.builder
                         .ins()
                         .store(MemFlags::new(), val, sret_ptr, offset);
@@ -1312,7 +1305,11 @@ impl Cg<'_, '_, '_> {
                         .insert(field_pattern.binding, (var, field_type_id));
                 }
             }
-            _ => {}
+            PatternKind::Literal(_)
+            | PatternKind::Type { .. }
+            | PatternKind::Val { .. }
+            | PatternKind::Success { .. }
+            | PatternKind::Error { .. } => {}
         }
         Ok(())
     }
