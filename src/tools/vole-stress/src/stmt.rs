@@ -1523,6 +1523,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: sorted collect on array
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_sorted_collect_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: reverse collect on array
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_reverse_collect_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8698,6 +8712,70 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!(
             "let {} = match {}.length() {{\n    0 => {}\n    1 => {}\n    2 => {}\n    _ => {}\n}}",
             name, arr, labels[0], labels[1], labels[2], labels[4]
+        ))
+    }
+
+    /// Generate `.iter().sorted().collect()` on a numeric array parameter.
+    fn try_generate_sorted_collect_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let numeric_array_params: Vec<(String, TypeInfo)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(PrimitiveType::I64 | PrimitiveType::I32) => {
+                        Some((p.name.clone(), p.param_type.clone()))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        if numeric_array_params.is_empty() {
+            return None;
+        }
+
+        let (arr_name, arr_type) =
+            &numeric_array_params[self.rng.gen_range(0..numeric_array_params.len())];
+        let name = ctx.new_local_name();
+
+        ctx.add_local(name.clone(), arr_type.clone(), false);
+        Some(format!(
+            "let {} = {}.iter().sorted().collect()",
+            name, arr_name
+        ))
+    }
+
+    /// Generate `.iter().reverse().collect()` on an array parameter.
+    fn try_generate_reverse_collect_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let array_params: Vec<(String, TypeInfo)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(
+                        PrimitiveType::I64
+                        | PrimitiveType::I32
+                        | PrimitiveType::String
+                        | PrimitiveType::F64,
+                    ) => Some((p.name.clone(), p.param_type.clone())),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let (arr_name, arr_type) = &array_params[self.rng.gen_range(0..array_params.len())];
+        let name = ctx.new_local_name();
+
+        ctx.add_local(name.clone(), arr_type.clone(), false);
+        Some(format!(
+            "let {} = {}.iter().reverse().collect()",
+            name, arr_name
         ))
     }
 
