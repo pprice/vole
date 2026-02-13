@@ -19,15 +19,11 @@ use crate::errors::{CodegenError, CodegenResult};
 /// Only handles numeric types; other types will default to I64.
 fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
     match type_id {
-        TypeId::I8 => types::I8,
-        TypeId::I16 => types::I16,
-        TypeId::I32 => types::I32,
-        TypeId::I64 => types::I64,
+        TypeId::I8 | TypeId::U8 => types::I8,
+        TypeId::I16 | TypeId::U16 => types::I16,
+        TypeId::I32 | TypeId::U32 => types::I32,
+        TypeId::I64 | TypeId::U64 => types::I64,
         TypeId::I128 => types::I128,
-        TypeId::U8 => types::I8,
-        TypeId::U16 => types::I16,
-        TypeId::U32 => types::I32,
-        TypeId::U64 => types::I64,
         TypeId::F32 => types::F32,
         TypeId::F64 => types::F64,
         _ => types::I64, // Default for other types
