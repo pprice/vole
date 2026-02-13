@@ -927,7 +927,7 @@ impl Analyzer {
 
         // Load prelude (trait definitions and primitive type implementations)
         // This makes stdlib methods like "hello".length() available without explicit imports
-        self.load_prelude(interner);
+        self.load_prelude();
 
         // Clear monomorph caches from any previous analysis.
         // When using a shared ModuleCache across multiple test files, the entity_registry

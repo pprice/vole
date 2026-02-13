@@ -410,11 +410,4 @@ impl Analyzer {
         }
     }
 
-    /// Check if a type is a union containing struct variants, and emit errors if so.
-    /// Structs cannot participate in unions because they are value types.
-    pub(crate) fn check_struct_in_union(&mut self, _type_id: ArenaTypeId, _span: Span) {
-        // Structs are now allowed in unions via auto-boxing (v-7d4b).
-        // When a struct value enters a union, it gets heap-copied (boxed).
-        // When extracted, field access uses the heap pointer directly.
-    }
 }

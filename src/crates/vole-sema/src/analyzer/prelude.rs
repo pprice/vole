@@ -21,7 +21,7 @@ impl Analyzer {
     ///
     /// traits.vole is loaded first (defines interfaces like Equatable, Comparable, etc.),
     /// then all other prelude files are auto-discovered and loaded.
-    pub(super) fn load_prelude(&mut self, interner: &Interner) {
+    pub(super) fn load_prelude(&mut self) {
         // Don't load prelude if we're already loading it (prevents recursion)
         if self.loading_prelude {
             return;
@@ -40,7 +40,7 @@ impl Analyzer {
         let prelude_files = self.discover_prelude_files(&prelude_dir);
 
         // Load traits first (defines interfaces like Equatable, Comparable, etc.)
-        self.load_prelude_file("std:prelude/traits", interner);
+        self.load_prelude_file("std:prelude/traits");
 
         // Load remaining prelude files (auto-discovered)
         for file_name in prelude_files {
@@ -48,7 +48,7 @@ impl Analyzer {
                 continue; // Already loaded
             }
             let import_path = format!("std:prelude/{}", file_name);
-            self.load_prelude_file(&import_path, interner);
+            self.load_prelude_file(&import_path);
         }
 
         self.loading_prelude = false;
@@ -76,7 +76,7 @@ impl Analyzer {
     }
 
     /// Load a single prelude file as a proper module
-    pub(super) fn load_prelude_file(&mut self, import_path: &str, _interner: &Interner) {
+    pub(super) fn load_prelude_file(&mut self, import_path: &str) {
         // Resolve path first, then canonicalize for consistent cache keys
         let resolved_path = self
             .module_loader

@@ -67,8 +67,6 @@ impl Analyzer {
                 match &let_stmt.init {
                     LetInit::TypeAlias(type_expr) => {
                         let aliased_type_id = self.resolve_type_id(type_expr, interner);
-                        // Check for struct types in union variants
-                        self.check_struct_in_union(aliased_type_id, let_stmt.span);
                         self.register_type_alias_id(
                             let_stmt.name,
                             aliased_type_id,
