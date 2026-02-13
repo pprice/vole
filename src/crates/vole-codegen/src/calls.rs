@@ -486,26 +486,12 @@ impl Cg<'_, '_, '_> {
 
             // Try FFI call for external module functions
             if let Some(native_func) = self.native_funcs().lookup(&module_path, callee_name) {
-                // Get expected Cranelift types from native function signature
-                let expected_types: Vec<Type> = native_func
-                    .signature
-                    .params
-                    .iter()
-                    .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
-                    .collect();
-                // Compile args with defaults for omitted parameters
-                let args = self.compile_external_call_args(callee_sym, call, &expected_types)?;
-                let call_inst = self.call_native_indirect(native_func, &args);
-                if native_func.signature.return_type == NativeType::Nil {
-                    return Ok(self.void_value());
-                }
-                // Sema records return types for all module external calls.
-                // Use substituted version for monomorphized module code (e.g., V -> i64).
-                let type_id = self
-                    .get_expr_type_substituted(&call_expr_id)
-                    .expect("INTERNAL: external call: missing sema return type");
-                let type_id = self.maybe_convert_iterator_return_type(type_id);
-                return Ok(self.native_call_result(call_inst, native_func, type_id));
+                return self.call_native_external(
+                    native_func,
+                    callee_sym,
+                    call,
+                    &call_expr_id,
+                );
             }
 
             // Fall through to try prelude external functions
@@ -554,26 +540,7 @@ impl Cg<'_, '_, '_> {
             Some((module_path.to_string(), native_name.to_string(), func))
         });
         if let Some((_module_path, _native_name, native_func)) = native_lookup {
-            // Get expected Cranelift types from native function signature
-            let expected_types: Vec<Type> = native_func
-                .signature
-                .params
-                .iter()
-                .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
-                .collect();
-            // Compile args with defaults for omitted parameters
-            let args = self.compile_external_call_args(callee_sym, call, &expected_types)?;
-            let call_inst = self.call_native_indirect(native_func, &args);
-            if native_func.signature.return_type == NativeType::Nil {
-                return Ok(self.void_value());
-            }
-            // Sema records return types for all prelude external calls.
-            // Use substituted version for monomorphized module code (e.g., V -> i64).
-            let type_id = self
-                .get_expr_type_substituted(&call_expr_id)
-                .expect("INTERNAL: prelude call: missing sema return type");
-            let type_id = self.maybe_convert_iterator_return_type(type_id);
-            return Ok(self.native_call_result(call_inst, native_func, type_id));
+            return self.call_native_external(native_func, callee_sym, call, &call_expr_id);
         }
 
         // Try prelude Vole functions (e.g., assert from builtins.vole)
@@ -595,6 +562,34 @@ impl Cg<'_, '_, '_> {
         }
 
         Err(CodegenError::not_found("function", callee_name))
+    }
+
+    /// Compile and execute a native (FFI) function call.
+    ///
+    /// Shared logic for module FFI calls, prelude external calls, and module binding calls.
+    fn call_native_external(
+        &mut self,
+        native_func: &NativeFunction,
+        callee_sym: Symbol,
+        call: &CallExpr,
+        call_expr_id: &NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        let expected_types: Vec<Type> = native_func
+            .signature
+            .params
+            .iter()
+            .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
+            .collect();
+        let args = self.compile_external_call_args(callee_sym, call, &expected_types)?;
+        let call_inst = self.call_native_indirect(native_func, &args);
+        if native_func.signature.return_type == NativeType::Nil {
+            return Ok(self.void_value());
+        }
+        let type_id = self
+            .get_expr_type_substituted(call_expr_id)
+            .expect("INTERNAL: native call: missing sema return type");
+        let type_id = self.maybe_convert_iterator_return_type(type_id);
+        Ok(self.native_call_result(call_inst, native_func, type_id))
     }
 
     /// Call a function via destructured module binding.
@@ -622,26 +617,7 @@ impl Cg<'_, '_, '_> {
 
         // Try FFI call for external module functions
         if let Some(native_func) = self.native_funcs().lookup(&module_path, export_name_str) {
-            // Get expected Cranelift types from native function signature
-            let expected_types: Vec<Type> = native_func
-                .signature
-                .params
-                .iter()
-                .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
-                .collect();
-            // Compile args with defaults for omitted parameters
-            let args = self.compile_external_call_args(export_name, call, &expected_types)?;
-            let call_inst = self.call_native_indirect(native_func, &args);
-            if native_func.signature.return_type == NativeType::Nil {
-                return Ok(self.void_value());
-            }
-            // Sema records return types for all module binding FFI calls.
-            // Use substituted version for monomorphized module code (e.g., V -> i64).
-            let type_id = self
-                .get_expr_type_substituted(&call_expr_id)
-                .expect("INTERNAL: module binding call: missing sema return type");
-            let type_id = self.maybe_convert_iterator_return_type(type_id);
-            return Ok(self.native_call_result(call_inst, native_func, type_id));
+            return self.call_native_external(native_func, export_name, call, &call_expr_id);
         }
 
         Err(CodegenError::not_found(
