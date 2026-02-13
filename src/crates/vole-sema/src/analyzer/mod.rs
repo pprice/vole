@@ -575,37 +575,94 @@ impl Analyzer {
 
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
-        let module_expr_types = self.ctx.module_expr_types.borrow().clone();
-        let module_method_resolutions = self.ctx.module_method_resolutions.borrow().clone();
-        let module_is_check_results = self.ctx.module_is_check_results.borrow().clone();
-        let module_generic_calls = self.ctx.module_generic_calls.borrow().clone();
-        let module_class_method_calls = self.ctx.module_class_method_calls.borrow().clone();
-        let module_static_method_calls = self.ctx.module_static_method_calls.borrow().clone();
-        let module_declared_var_types = self.ctx.module_declared_var_types.borrow().clone();
-        let expression_data = ExpressionData::builder()
-            .types(self.expr_types)
-            .methods(self.method_resolutions.into_inner())
-            .generics(self.generic_calls)
-            .class_method_generics(self.class_method_calls)
-            .static_method_generics(self.static_method_calls)
-            .module_types(module_expr_types)
-            .module_methods(module_method_resolutions)
-            .module_is_check_results(module_is_check_results)
-            .module_generics(module_generic_calls)
-            .module_class_method_generics(module_class_method_calls)
-            .module_static_method_generics(module_static_method_calls)
-            .substituted_return_types(self.substituted_return_types)
-            .lambda_defaults(self.lambda_defaults)
-            .tests_virtual_modules(self.tests_virtual_modules)
-            .is_check_results(self.is_check_results)
-            .declared_var_types(self.declared_var_types)
-            .module_declared_var_types(module_declared_var_types)
-            .build();
-        AnalysisOutput {
-            expression_data,
-            module_programs: self.ctx.module_programs.borrow().clone(),
-            db: Rc::clone(&self.ctx.db),
-            module_id: self.current_module,
+        // Extract per-analysis fields before consuming ctx
+        let expr_types = self.expr_types;
+        let method_resolutions = self.method_resolutions.into_inner();
+        let generic_calls = self.generic_calls;
+        let class_method_calls = self.class_method_calls;
+        let static_method_calls = self.static_method_calls;
+        let substituted_return_types = self.substituted_return_types;
+        let lambda_defaults = self.lambda_defaults;
+        let tests_virtual_modules = self.tests_virtual_modules;
+        let is_check_results = self.is_check_results;
+        let declared_var_types = self.declared_var_types;
+        let current_module = self.current_module;
+
+        // Try to take ownership of the shared context to avoid cloning AST trees.
+        // By this point all sub-analyzers should be dropped, so Rc strong count is 1.
+        match Rc::try_unwrap(self.ctx) {
+            Ok(ctx) => {
+                // Sole owner: move data out of RefCells without cloning
+                let module_expr_types = ctx.module_expr_types.into_inner();
+                let module_method_resolutions = ctx.module_method_resolutions.into_inner();
+                let module_is_check_results = ctx.module_is_check_results.into_inner();
+                let module_generic_calls = ctx.module_generic_calls.into_inner();
+                let module_class_method_calls = ctx.module_class_method_calls.into_inner();
+                let module_static_method_calls = ctx.module_static_method_calls.into_inner();
+                let module_declared_var_types = ctx.module_declared_var_types.into_inner();
+                let module_programs = ctx.module_programs.into_inner();
+                let db = ctx.db;
+                let expression_data = ExpressionData::builder()
+                    .types(expr_types)
+                    .methods(method_resolutions)
+                    .generics(generic_calls)
+                    .class_method_generics(class_method_calls)
+                    .static_method_generics(static_method_calls)
+                    .module_types(module_expr_types)
+                    .module_methods(module_method_resolutions)
+                    .module_is_check_results(module_is_check_results)
+                    .module_generics(module_generic_calls)
+                    .module_class_method_generics(module_class_method_calls)
+                    .module_static_method_generics(module_static_method_calls)
+                    .substituted_return_types(substituted_return_types)
+                    .lambda_defaults(lambda_defaults)
+                    .tests_virtual_modules(tests_virtual_modules)
+                    .is_check_results(is_check_results)
+                    .declared_var_types(declared_var_types)
+                    .module_declared_var_types(module_declared_var_types)
+                    .build();
+                AnalysisOutput {
+                    expression_data,
+                    module_programs,
+                    db,
+                    module_id: current_module,
+                }
+            }
+            Err(ctx) => {
+                // Other references exist: fall back to cloning (should not happen in practice)
+                let module_expr_types = ctx.module_expr_types.borrow().clone();
+                let module_method_resolutions = ctx.module_method_resolutions.borrow().clone();
+                let module_is_check_results = ctx.module_is_check_results.borrow().clone();
+                let module_generic_calls = ctx.module_generic_calls.borrow().clone();
+                let module_class_method_calls = ctx.module_class_method_calls.borrow().clone();
+                let module_static_method_calls = ctx.module_static_method_calls.borrow().clone();
+                let module_declared_var_types = ctx.module_declared_var_types.borrow().clone();
+                let expression_data = ExpressionData::builder()
+                    .types(expr_types)
+                    .methods(method_resolutions)
+                    .generics(generic_calls)
+                    .class_method_generics(class_method_calls)
+                    .static_method_generics(static_method_calls)
+                    .module_types(module_expr_types)
+                    .module_methods(module_method_resolutions)
+                    .module_is_check_results(module_is_check_results)
+                    .module_generics(module_generic_calls)
+                    .module_class_method_generics(module_class_method_calls)
+                    .module_static_method_generics(module_static_method_calls)
+                    .substituted_return_types(substituted_return_types)
+                    .lambda_defaults(lambda_defaults)
+                    .tests_virtual_modules(tests_virtual_modules)
+                    .is_check_results(is_check_results)
+                    .declared_var_types(declared_var_types)
+                    .module_declared_var_types(module_declared_var_types)
+                    .build();
+                AnalysisOutput {
+                    expression_data,
+                    module_programs: ctx.module_programs.borrow().clone(),
+                    db: Rc::clone(&ctx.db),
+                    module_id: current_module,
+                }
+            }
         }
     }
 

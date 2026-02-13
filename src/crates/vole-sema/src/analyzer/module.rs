@@ -470,16 +470,6 @@ impl Analyzer {
             }
         }
 
-        // Store the program and interner for compiling pure Vole functions.
-        // IMPORTANT: This must happen AFTER sub_analyzer.analyze() because analysis
-        // populates lambda capture lists (stored in RefCell<Vec<Capture>> on AST nodes).
-        // Cloning the program before analysis would store empty capture lists, causing
-        // "variable not found" errors during codegen for closures in imported modules.
-        self.ctx.module_programs.borrow_mut().insert(
-            module_key.clone(),
-            (program.clone(), module_interner.clone()),
-        );
-
         // Store module-specific expr_types (NodeIds are per-program)
         // Nested module entries are already in the shared ctx from the sub-analyzer.
         self.ctx
@@ -716,6 +706,19 @@ impl Analyzer {
                 exports.insert(name_id, sentinel_type_id);
             }
         }
+
+        // Store the program and interner for compiling pure Vole functions.
+        // IMPORTANT: This must happen AFTER sub_analyzer.analyze() because analysis
+        // populates lambda capture lists (stored in RefCell<Vec<Capture>> on AST nodes).
+        // Cloning the program before analysis would store empty capture lists, causing
+        // "variable not found" errors during codegen for closures in imported modules.
+        //
+        // Placed after deferred type resolution so we can move the program (avoiding
+        // a deep clone of the entire AST) since deferred_functions/externals borrow it.
+        self.ctx
+            .module_programs
+            .borrow_mut()
+            .insert(module_key.clone(), (program, module_interner.clone()));
 
         // Create TypeId from exports and register module metadata
         let exports_vec: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =
