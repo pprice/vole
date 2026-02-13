@@ -1784,8 +1784,12 @@ impl Cg<'_, '_, '_> {
 
         // If there are fewer provided args than expected, compile default expressions
         if args.len() < param_ids.len() {
-            let (default_args, _rc_owned) =
-                self.compile_static_method_default_args(method_id, args.len(), &param_ids)?;
+            let (default_args, _rc_owned) = self.compile_method_default_args(
+                method_id,
+                args.len(),
+                &param_ids[args.len()..],
+                false,
+            )?;
             args.extend(default_args);
         }
 
@@ -1888,36 +1892,7 @@ impl Cg<'_, '_, '_> {
         Ok(result)
     }
 
-    /// Compile default expressions for omitted static method parameters.
-    /// Returns compiled values for parameters starting at `start_index`.
-    ///
-    /// Uses the unified `compile_defaults_from_ptrs` helper.
-    fn compile_static_method_default_args(
-        &mut self,
-        method_id: MethodId,
-        start_index: usize,
-        param_type_ids: &[TypeId],
-    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        // Get raw pointers to default expressions from MethodDef.
-        let default_ptrs: Vec<Option<*const Expr>> = {
-            let method_def = self.registry().get_method(method_id);
-            method_def
-                .param_defaults
-                .iter()
-                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
-                .collect()
-        };
-
-        // Use the unified helper
-        self.compile_defaults_from_ptrs(
-            &default_ptrs,
-            start_index,
-            &param_type_ids[start_index..],
-            false, // Not a generic class call
-        )
-    }
-
-    /// Compile default expressions for omitted instance method parameters.
+    /// Compile default expressions for omitted method parameters.
     /// Returns compiled values for parameters starting at `start_index`.
     ///
     /// Uses the unified `compile_defaults_from_ptrs` helper.
