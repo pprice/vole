@@ -700,7 +700,7 @@ fn compile_external_wrapper<C: VtableCtx>(
         let iter_call = if use_tag {
             let tag_val = builder
                 .ins()
-                .iconst(types::I64, iter_elem_tag.unwrap() as i64);
+                .iconst(types::I64, iter_elem_tag.expect("tagged iterator requires known element type") as i64);
             builder
                 .ins()
                 .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr, tag_val])
