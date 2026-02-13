@@ -704,6 +704,11 @@ impl Analyzer {
     /// This allows codegen to convert Iterator return types to RuntimeIterator without
     /// needing mutable arena access.
     fn ensure_runtime_iterator_for_iterator(&mut self, type_id: ArenaTypeId) {
+        // Primitive/reserved types (id < FIRST_DYNAMIC) are never interfaces,
+        // so skip the arena lookup and RefCell borrow for the common case.
+        if type_id.index() < ArenaTypeId::FIRST_DYNAMIC {
+            return;
+        }
         // Check if this is an Iterator interface type
         let elem_type_id = {
             let arena = self.type_arena();
