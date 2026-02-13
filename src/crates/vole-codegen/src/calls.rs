@@ -339,7 +339,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a module binding (from destructuring import)
-        if let Some(&(module_id, export_name, export_type_id)) =
+        if let Some(&(module_id, export_name, _)) =
             self.module_bindings.get(&callee_sym)
         {
             // Check if this is a generic external function that needs monomorphization
@@ -352,7 +352,6 @@ impl Cg<'_, '_, '_> {
             return self.call_module_binding(
                 module_id,
                 export_name,
-                export_type_id,
                 call,
                 call_expr_id,
             );
@@ -598,7 +597,6 @@ impl Cg<'_, '_, '_> {
         &mut self,
         module_id: ModuleId,
         export_name: Symbol,
-        _export_type_id: TypeId,
         call: &CallExpr,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {

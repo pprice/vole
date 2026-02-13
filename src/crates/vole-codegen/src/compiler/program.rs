@@ -246,7 +246,7 @@ impl Compiler<'_> {
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
                     // Declare scoped declarations within the tests block
-                    self.declare_tests_scoped_decls(tests_decl, program, &mut test_count);
+                    self.declare_tests_scoped_decls(tests_decl, &mut test_count);
 
                     // Declare each test with a generated name and signature () -> i64
                     let i64_type_id = self.arena().primitives.i64;
@@ -952,7 +952,6 @@ impl Compiler<'_> {
     fn declare_tests_scoped_decls(
         &mut self,
         tests_decl: &TestsDecl,
-        _program: &Program,
         test_count: &mut usize,
     ) {
         let interner = &self.analyzed.interner;
@@ -986,7 +985,7 @@ impl Compiler<'_> {
                 }
                 Decl::Tests(nested_tests) => {
                     // Recursively declare nested tests block scoped decls
-                    self.declare_tests_scoped_decls(nested_tests, _program, test_count);
+                    self.declare_tests_scoped_decls(nested_tests, test_count);
 
                     // Declare each nested test with a generated name and signature () -> i64
                     let i64_type_id = self.arena().primitives.i64;
