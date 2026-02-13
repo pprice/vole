@@ -1166,7 +1166,7 @@ iter_next_fn!(
         // we need to rc_dec them after the transform closure consumes them.
         let source_elem_tag = unsafe { (*src.source).elem_tag };
         let source_needs_rc_dec =
-            crate::value::tag_needs_rc(source_elem_tag) && iter_produces_owned(src.source);
+            tag_needs_rc(source_elem_tag) && iter_produces_owned(src.source);
 
         // Get next value from source iterator (could be Array or Map)
         let mut source_value: i64 = 0;
@@ -1264,7 +1264,7 @@ iter_next_fn!(
         // Check if rejected values need rc_dec (source produces owned RC values)
         let elem_tag = unsafe { (*iter).elem_tag };
         let rc_dec_rejects =
-            crate::value::tag_needs_rc(elem_tag) && iter_produces_owned(src.source);
+            tag_needs_rc(elem_tag) && iter_produces_owned(src.source);
 
         // Keep getting values from source until we find one that passes the predicate
         loop {
@@ -1351,7 +1351,7 @@ fn iter_produces_owned_rc(iter: *mut RcIterator) -> bool {
         return false;
     }
     let tag = unsafe { (*iter).elem_tag };
-    crate::value::tag_needs_rc(tag) && iter_produces_owned(iter)
+    tag_needs_rc(tag) && iter_produces_owned(iter)
 }
 
 /// Returns true if the iterator produces borrowed RC values (i.e. values whose
@@ -1363,7 +1363,7 @@ fn iter_produces_borrowed_rc(iter: *mut RcIterator) -> bool {
         return false;
     }
     let tag = unsafe { (*iter).elem_tag };
-    crate::value::tag_needs_rc(tag) && !iter_produces_owned(iter)
+    tag_needs_rc(tag) && !iter_produces_owned(iter)
 }
 
 /// Count the number of elements in any iterator
@@ -2182,12 +2182,8 @@ pub extern "C" fn vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator 
     let inner_tag = if !source.is_null() {
         let kind = unsafe { (*source).iter.kind };
         match kind {
-            IteratorKind::Chunks => {
-                unsafe { (*source).iter.source.chunks.inner_elem_tag }
-            }
-            IteratorKind::Windows => {
-                unsafe { (*source).iter.source.windows.inner_elem_tag }
-            }
+            IteratorKind::Chunks => unsafe { (*source).iter.source.chunks.inner_elem_tag },
+            IteratorKind::Windows => unsafe { (*source).iter.source.windows.inner_elem_tag },
             _ => 0, // For other sources, let codegen set it
         }
     } else {
@@ -2647,7 +2643,8 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
     // The chunks iterator yields sub-arrays, so its elem_tag should be
     // TYPE_ARRAY (not the inner element type). The inner_elem_tag is stored
     // on ChunksSource so sub-arrays can preserve the correct inner type.
-    let iter = RcIterator::new_with_tag(
+
+    RcIterator::new_with_tag(
         IteratorKind::Chunks,
         IteratorSource {
             chunks: ChunksSource {
@@ -2658,8 +2655,7 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
             },
         },
         crate::value::TYPE_ARRAY as u64,
-    );
-    iter
+    )
 }
 
 iter_next_fn!(
@@ -2803,7 +2799,8 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
     // The windows iterator yields sub-arrays, so its elem_tag should be
     // TYPE_ARRAY (not the inner element type). The inner_elem_tag is stored
     // on WindowsSource so sub-arrays can preserve the correct inner type.
-    let iter = RcIterator::new_with_tag(
+
+    RcIterator::new_with_tag(
         IteratorKind::Windows,
         IteratorSource {
             windows: WindowsSource {
@@ -2814,8 +2811,7 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
             },
         },
         crate::value::TYPE_ARRAY as u64,
-    );
-    iter
+    )
 }
 
 iter_next_fn!(

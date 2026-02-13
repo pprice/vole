@@ -976,10 +976,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // Iterator map using method call on class instance
-        if self
-            .rng
-            .gen_bool(self.config.iter_method_map_probability)
-        {
+        if self.rng.gen_bool(self.config.iter_method_map_probability) {
             if let Some(stmt) = self.try_generate_iter_method_map(ctx) {
                 return stmt;
             }
@@ -1000,7 +997,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // Iterator chunks/windows: let c = arr.iter().chunks(2).count()
-        if self.rng.gen_bool(self.config.iter_chunks_windows_probability) {
+        if self
+            .rng
+            .gen_bool(self.config.iter_chunks_windows_probability)
+        {
             if let Some(stmt) = self.try_generate_iter_chunks_windows_let(ctx) {
                 return stmt;
             }
@@ -2247,7 +2247,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                                 for field in &info.fields {
                                     if let TypeInfo::Primitive(p) = &field.field_type {
                                         // Only types the closure body can handle
-                                        if matches!(p, PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64 | PrimitiveType::String | PrimitiveType::Bool) {
+                                        if matches!(
+                                            p,
+                                            PrimitiveType::I64
+                                                | PrimitiveType::I32
+                                                | PrimitiveType::F64
+                                                | PrimitiveType::String
+                                                | PrimitiveType::Bool
+                                        ) {
                                             candidates.push((name.clone(), field.name.clone(), *p));
                                         }
                                     }
@@ -2262,7 +2269,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                             for field in &info.fields {
                                 if let TypeInfo::Primitive(p) = &field.field_type {
                                     // Only types the closure body can handle
-                                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64 | PrimitiveType::String | PrimitiveType::Bool) {
+                                    if matches!(
+                                        p,
+                                        PrimitiveType::I64
+                                            | PrimitiveType::I32
+                                            | PrimitiveType::F64
+                                            | PrimitiveType::String
+                                            | PrimitiveType::Bool
+                                    ) {
                                         candidates.push((name.clone(), field.name.clone(), *p));
                                     }
                                 }
@@ -2329,7 +2343,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             )
         } else {
             // Candidate filtering above ensures only i64/i32/f64/string/bool reach here
-            unreachable!("unexpected field type in field-closure-let: {:?}", field_prim)
+            unreachable!(
+                "unexpected field type in field-closure-let: {:?}",
+                field_prim
+            )
         };
 
         let indent = "    ".repeat(self.indent);
@@ -2861,8 +2878,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
             let mut match_arms = format!(
                 "{}{} => {}\n{}{} => {}",
-                indent, prim_type.as_str(), prim_arm_expr,
-                indent, sentinel_name, sentinel_arm_expr,
+                indent,
+                prim_type.as_str(),
+                prim_arm_expr,
+                indent,
+                sentinel_name,
+                sentinel_arm_expr,
             );
 
             if let Some((ref name2, _)) = second_sentinel {
@@ -2925,10 +2946,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// ```
     ///
     /// Returns `None` if no suitable class or struct is available in the current module.
-    fn try_generate_optional_destructure_match(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_optional_destructure_match(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let module_id = ctx.module_id?;
         let module = ctx.table.get_module(module_id)?;
 
@@ -2996,10 +3014,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             format!("{} {{ {} }}", type_name, field_values)
         };
 
-        let let_stmt = format!(
-            "let {}: {}? = {}",
-            opt_var_name, type_name, init_value
-        );
+        let let_stmt = format!("let {}: {}? = {}", opt_var_name, type_name, init_value);
 
         // Register the optional variable
         ctx.add_local(opt_var_name.clone(), optional_type, false);
@@ -3104,10 +3119,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             format!("{}.length()", string_bindings[0])
         } else if !bool_bindings.is_empty() {
             // Convert bool to i64 using when expression (if is not an expression in vole)
-            format!(
-                "when {{ {} => 1_i64, _ => 0_i64 }}",
-                bool_bindings[0]
-            )
+            format!("when {{ {} => 1_i64, _ => 0_i64 }}", bool_bindings[0])
         } else {
             // Fallback: just return 1
             "1_i64".to_string()
@@ -3136,11 +3148,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         // Register the result local as i64
-        ctx.add_local(
-            result_name,
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(result_name, TypeInfo::Primitive(PrimitiveType::I64), false);
 
         Some(format!("{}\n{}", let_stmt, match_stmt))
     }
@@ -3178,7 +3186,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let n = self.rng.gen_range(-100..=100);
             format!("{}_i64", n)
         };
-        let union_stmt = format!("let {}: i64 | {} = {}", union_var, sentinel_name, init_value);
+        let union_stmt = format!(
+            "let {}: i64 | {} = {}",
+            union_var, sentinel_name, init_value
+        );
         ctx.add_local(
             union_var.clone(),
             TypeInfo::Union(vec![
@@ -3199,11 +3210,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         let result_stmt = format!("let {} = {}", result_var, closure_expr);
-        ctx.add_local(
-            result_var,
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(result_var, TypeInfo::Primitive(PrimitiveType::I64), false);
 
         Some(format!("{}\n{}", union_stmt, result_stmt))
     }
@@ -3297,10 +3304,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let (struct_name, numeric_fields) = candidates[idx].clone();
 
         // Pick 2-3 fields to use inside the closure
-        let num_fields = std::cmp::min(
-            numeric_fields.len(),
-            self.rng.gen_range(2..=3),
-        );
+        let num_fields = std::cmp::min(numeric_fields.len(), self.rng.gen_range(2..=3));
         let mut chosen_fields = numeric_fields;
         // Shuffle and take first num_fields
         for i in (1..chosen_fields.len()).rev() {
@@ -3310,7 +3314,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         chosen_fields.truncate(num_fields);
 
         // Check if any chosen field is i32 - if so we need to widen to i64
-        let has_i32 = chosen_fields.iter().any(|(_, p)| matches!(p, PrimitiveType::I32));
+        let has_i32 = chosen_fields
+            .iter()
+            .any(|(_, p)| matches!(p, PrimitiveType::I32));
 
         // Build the closure body expression: x + struct.field1 + struct.field2 [+ 0_i64]
         let mut body_parts: Vec<String> = vec!["x".to_string()];
@@ -3396,7 +3402,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             {
                 if param_types.len() == 1
                     && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
-                    && matches!(return_type.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+                    && matches!(
+                        return_type.as_ref(),
+                        TypeInfo::Primitive(PrimitiveType::I64)
+                    )
                 {
                     candidates.push(name.clone());
                 }
@@ -3412,7 +3421,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             {
                 if param_types.len() == 1
                     && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
-                    && matches!(return_type.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+                    && matches!(
+                        return_type.as_ref(),
+                        TypeInfo::Primitive(PrimitiveType::I64)
+                    )
                 {
                     candidates.push(p.name.clone());
                 }
@@ -3449,11 +3461,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let result_name = ctx.new_local_name();
         let arg_val = self.rng.gen_range(1..=50);
         let call_stmt = format!("let {} = {}({})", result_name, outer_fn, arg_val);
-        ctx.add_local(
-            result_name,
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(result_name, TypeInfo::Primitive(PrimitiveType::I64), false);
 
         let indent = "    ".repeat(self.indent);
         Some(format!("{}\n{}{}", outer_closure, indent, call_stmt))
@@ -3629,15 +3637,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             )
         } else if choice < 17 {
             // Count → i64
-            ctx.add_local(
-                name.clone(),
-                TypeInfo::Primitive(PrimitiveType::I64),
-                false,
-            );
-            format!(
-                "let {} = \"{}\".split(\"{}\").count()",
-                name, joined, delim
-            )
+            ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+            format!("let {} = \"{}\".split(\"{}\").count()", name, joined, delim)
         } else {
             // First → string? (use ?? to unwrap to string)
             ctx.add_local(
@@ -3715,18 +3716,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// - `.windows(N).count()` → i64
     /// - `.chunks(N).flatten().collect()` → [T] (original element type array)
     /// - `.windows(N).flatten().collect()` → [T]
-    fn try_generate_iter_chunks_windows_let(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_iter_chunks_windows_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find arrays with primitive element types
         let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
             if let TypeInfo::Array(inner) = ty {
                 if let TypeInfo::Primitive(p) = inner.as_ref() {
                     match p {
-                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
-                        | PrimitiveType::Bool | PrimitiveType::String => {
+                        PrimitiveType::I64
+                        | PrimitiveType::I32
+                        | PrimitiveType::F64
+                        | PrimitiveType::Bool
+                        | PrimitiveType::String => {
                             array_vars.push((name.clone(), *p));
                         }
                         _ => {}
@@ -3838,13 +3839,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         // Body: a simple let binding inside the closure
         let body = match elem_prim {
-            PrimitiveType::I64 | PrimitiveType::I32 => {
-                match self.rng.gen_range(0..3) {
-                    0 => "let y = x * 2".to_string(),
-                    1 => "let y = x + 1".to_string(),
-                    _ => "let y = x".to_string(),
-                }
-            }
+            PrimitiveType::I64 | PrimitiveType::I32 => match self.rng.gen_range(0..3) {
+                0 => "let y = x * 2".to_string(),
+                1 => "let y = x + 1".to_string(),
+                _ => "let y = x".to_string(),
+            },
             PrimitiveType::String => "let y = x".to_string(),
             _ => "let y = x".to_string(),
         };
@@ -3871,7 +3870,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             if let TypeInfo::Array(inner) = ty {
                 if let TypeInfo::Primitive(p) = inner.as_ref() {
                     match p {
-                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String
+                        PrimitiveType::I64
+                        | PrimitiveType::I32
+                        | PrimitiveType::String
                         | PrimitiveType::Bool => {
                             array_vars.push((name.clone(), *p));
                         }
@@ -3884,7 +3885,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             if let TypeInfo::Array(inner) = &param.param_type {
                 if let TypeInfo::Primitive(p) = inner.as_ref() {
                     match p {
-                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String
+                        PrimitiveType::I64
+                        | PrimitiveType::I32
+                        | PrimitiveType::String
                         | PrimitiveType::Bool => {
                             array_vars.push((param.name.clone(), *p));
                         }
@@ -4000,7 +4003,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
         for param in ctx.params.iter() {
-            if matches!(&param.param_type, TypeInfo::Primitive(PrimitiveType::String)) {
+            if matches!(
+                &param.param_type,
+                TypeInfo::Primitive(PrimitiveType::String)
+            ) {
                 string_vars.push(param.name.clone());
             }
         }
@@ -4297,8 +4303,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Includes empty string and escape sequences to stress edge cases.
     fn random_short_string<R2: Rng>(rng: &mut R2) -> String {
         let words = [
-            "hello", "world", "test", "foo", "bar", "abc", "xyz", "str",
-            "", "\\n", "\\t", " ", "a",
+            "hello", "world", "test", "foo", "bar", "abc", "xyz", "str", "", "\\n", "\\t", " ", "a",
         ];
         words[rng.gen_range(0..words.len())].to_string()
     }
@@ -4356,10 +4361,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         } else if operand_names.len() == 1 {
             // Use the one var + a literal
             let lit = self.rng.gen_range(1..=50);
-            (
-                operand_names[0].clone(),
-                format!("{}{}", lit, type_suffix),
-            )
+            (operand_names[0].clone(), format!("{}{}", lit, type_suffix))
         } else {
             // Generate two fresh literals
             let a = self.rng.gen_range(-50..=50);
@@ -4382,12 +4384,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             (ops[self.rng.gen_range(0..ops.len())], false)
         } else {
             // Checked (returns T?)
-            let ops = [
-                "checked_add",
-                "checked_sub",
-                "checked_mul",
-                "checked_div",
-            ];
+            let ops = ["checked_add", "checked_sub", "checked_mul", "checked_div"];
             (ops[self.rng.gen_range(0..ops.len())], true)
         };
 
@@ -4436,8 +4433,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     if let SymbolKind::Class(ref info) = sym.kind {
                         if info.type_params.is_empty() {
                             for method in &info.methods {
-                                if matches!(method.return_type, TypeInfo::Primitive(PrimitiveType::I64))
-                                {
+                                if matches!(
+                                    method.return_type,
+                                    TypeInfo::Primitive(PrimitiveType::I64)
+                                ) {
                                     candidates.push((
                                         name.clone(),
                                         method.name.clone(),
@@ -4611,9 +4610,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let args: Vec<String> = params
             .iter()
             .map(|p| {
-                if !x_used
-                    && matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64))
-                {
+                if !x_used && matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)) {
                     x_used = true;
                     "x".to_string()
                 } else {
@@ -4765,8 +4762,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             _ => {
                 if !prim_candidates.is_empty() {
-                    let (name, _) =
-                        &prim_candidates[self.rng.gen_range(0..prim_candidates.len())];
+                    let (name, _) = &prim_candidates[self.rng.gen_range(0..prim_candidates.len())];
                     format!("{} == {}", name, name)
                 } else {
                     "true".to_string()
@@ -4877,11 +4873,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 format!("let {} = {}.iter().count()", result_name, arr_name)
             }
             1 if !matches!(elem_type, PrimitiveType::String) => {
-                ctx.add_local(
-                    result_name.clone(),
-                    TypeInfo::Primitive(elem_type),
-                    false,
-                );
+                ctx.add_local(result_name.clone(), TypeInfo::Primitive(elem_type), false);
                 format!("let {} = {}.iter().sum()", result_name, arr_name)
             }
             _ => {
@@ -4918,10 +4910,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let result_name = ctx.new_local_name();
 
         let (input, delim) = match self.rng.gen_range(0..4u32) {
-            0 => ("\"\"", "\",\""),        // empty string
-            1 => ("\"a\"", "\"a\""),       // delimiter == entire string
-            2 => ("\",,\"", "\",\""),      // consecutive delimiters
-            _ => ("\"a,b,c\"", "\",\""),   // normal case for safety
+            0 => ("\"\"", "\",\""),      // empty string
+            1 => ("\"a\"", "\"a\""),     // delimiter == entire string
+            2 => ("\",,\"", "\",\""),    // consecutive delimiters
+            _ => ("\"a,b,c\"", "\",\""), // normal case for safety
         };
 
         let terminal = match self.rng.gen_range(0..3u32) {
@@ -4942,10 +4934,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
                     false,
                 );
-                format!(
-                    "let {} = {}.split({}).collect()",
-                    result_name, input, delim
-                )
+                format!("let {} = {}.split({}).collect()", result_name, input, delim)
             }
             _ => {
                 ctx.add_local(
@@ -4953,10 +4942,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     TypeInfo::Primitive(PrimitiveType::I64),
                     false,
                 );
-                format!(
-                    "let {} = {}.split({}).count()",
-                    result_name, input, delim
-                )
+                format!("let {} = {}.split({}).count()", result_name, input, delim)
             }
         };
 
@@ -5003,26 +4989,47 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let (iter_expr, uses_counter) = match self.rng.gen_range(0..3u32) {
             0 => {
                 let filter_body = self.generate_filter_closure_body(elem_prim);
-                (format!("{}.iter().filter((x) => {}).count()", arr_name, filter_body), false)
+                (
+                    format!("{}.iter().filter((x) => {}).count()", arr_name, filter_body),
+                    false,
+                )
             }
             1 => {
                 let map_body = self.generate_map_closure_body(elem_prim);
-                (format!("{}.iter().map((x) => {}).sum()", arr_name, map_body), false)
+                (
+                    format!("{}.iter().map((x) => {}).sum()", arr_name, map_body),
+                    false,
+                )
             }
             _ => {
                 // Use counter as threshold — tests that loop variable is correctly
                 // captured in the filter closure across iterations.
-                (format!(
-                    "{}.iter().filter((x) => x > {}).count()",
-                    arr_name, counter_name
-                ), true)
+                (
+                    format!(
+                        "{}.iter().filter((x) => x > {}).count()",
+                        arr_name, counter_name
+                    ),
+                    true,
+                )
             }
         };
         let _ = uses_counter;
 
-        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
-        ctx.add_local(counter_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
-        ctx.add_local(guard_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
+        ctx.add_local(
+            counter_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
+        ctx.add_local(
+            guard_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
 
         ctx.protected_vars.push(counter_name.clone());
         ctx.protected_vars.push(guard_name.clone());
@@ -5043,13 +5050,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
              {}{} = {} + 1\n\
              {}}}",
             acc_name,
-            indent, counter_name,
-            indent, guard_name,
-            indent, counter_name, limit,
-            inner, guard_name, guard_name,
-            inner, guard_name, guard_limit,
-            inner, acc_name, acc_name, iter_expr,
-            inner, counter_name, counter_name,
+            indent,
+            counter_name,
+            indent,
+            guard_name,
+            indent,
+            counter_name,
+            limit,
+            inner,
+            guard_name,
+            guard_name,
+            inner,
+            guard_name,
+            guard_limit,
+            inner,
+            acc_name,
+            acc_name,
+            iter_expr,
+            inner,
+            counter_name,
+            counter_name,
             indent,
         );
 
@@ -5110,7 +5130,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         arms.push(format!("_ => {}", iter_name));
         let arms_str = arms.join(", ");
 
-        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
         ctx.protected_vars.push(arr_name.clone());
         ctx.protected_vars.push(acc_name.clone());
 
@@ -5128,11 +5152,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
              {}{} = {} + {}\n\
              {}}}",
             acc_name,
-            indent, iter_name, arr_name, chain,
-            inner, match_name, iter_name,
-            inner2, arms_str,
+            indent,
+            iter_name,
+            arr_name,
+            chain,
             inner,
-            inner, acc_name, acc_name, match_name,
+            match_name,
+            iter_name,
+            inner2,
+            arms_str,
+            inner,
+            inner,
+            acc_name,
+            acc_name,
+            match_name,
             indent,
         );
 
@@ -5204,7 +5237,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .iter()
             .filter_map(|(name, ty, _)| {
                 if let TypeInfo::Primitive(p) = ty {
-                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64) {
+                    if matches!(
+                        p,
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
+                    ) {
                         return Some((name.clone(), *p));
                     }
                 }
@@ -5212,7 +5248,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             })
             .chain(ctx.params.iter().filter_map(|p| {
                 if let TypeInfo::Primitive(pt) = &p.param_type {
-                    if matches!(pt, PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64) {
+                    if matches!(
+                        pt,
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
+                    ) {
                         return Some((p.name.clone(), *pt));
                     }
                 }
@@ -5301,10 +5340,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate string interpolation using a struct field access.
     /// E.g., `let s = "value: {instance.field_name}"`
-    fn try_generate_struct_field_interpolation(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_struct_field_interpolation(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find struct-typed locals with numeric or string fields
         let mut candidates: Vec<(String, String, PrimitiveType)> = Vec::new();
 
@@ -5322,11 +5358,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                                         | PrimitiveType::String
                                         | PrimitiveType::Bool
                                 ) {
-                                    candidates.push((
-                                        name.clone(),
-                                        f.name.clone(),
-                                        *p,
-                                    ));
+                                    candidates.push((name.clone(), f.name.clone(), *p));
                                 }
                             }
                         }
@@ -5515,10 +5547,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
              {}for {} in {}.iter() {{\n\
              {}{} = {} + {}.length()\n\
              {}}}",
-            parts_name, input,
-            indent, acc_name,
-            indent, iter_name, parts_name,
-            inner, acc_name, acc_name, iter_name,
+            parts_name,
+            input,
+            indent,
+            acc_name,
+            indent,
+            iter_name,
+            parts_name,
+            inner,
+            acc_name,
+            acc_name,
+            iter_name,
             indent,
         );
 
@@ -5596,10 +5635,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
              {}for {} in {}.iter() {{\n\
              {}{}.push({})\n\
              {}}}",
-            result_name,
-            indent, iter_name, source_name,
-            inner, result_name, transform,
-            indent,
+            result_name, indent, iter_name, source_name, inner, result_name, transform, indent,
         );
 
         ctx.protected_vars.pop();
@@ -5866,9 +5902,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             Some(format!(
                 "let {} = when {{\n{indent}    {} {} {} => when {{ {} {} {} => {}, _ => {} }},\n{indent}    _ => {}\n{indent}}}",
                 result_name,
-                cond1_var, cond1_op, cond1_thresh,
-                cond2_var, cond2_op, cond2_thresh,
-                vals[0], vals[1], vals[2],
+                cond1_var,
+                cond1_op,
+                cond1_thresh,
+                cond2_var,
+                cond2_op,
+                cond2_thresh,
+                vals[0],
+                vals[1],
+                vals[2],
                 indent = indent,
             ))
         } else {
@@ -5885,9 +5927,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             Some(format!(
                 "let {} = when {{\n{indent}    {} {} {} => when {{ {} {} {} => {}, _ => {} }},\n{indent}    _ => {}\n{indent}}}",
                 result_name,
-                cond1_var, cond1_op, cond1_thresh,
-                cond2_var, cond2_op, cond2_thresh,
-                s0, s1, s2,
+                cond1_var,
+                cond1_op,
+                cond1_thresh,
+                cond2_var,
+                cond2_op,
+                cond2_thresh,
+                s0,
+                s1,
+                s2,
                 indent = indent,
             ))
         }
@@ -5952,7 +6000,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 );
                 Some(format!(
                     "let {} = match {}.length() {{ {} => {}, _ => {} }}",
-                    result_name, var, arm_len, val0,
+                    result_name,
+                    var,
+                    arm_len,
+                    val0,
                     if self.rng.gen_bool(0.5) {
                         format!("{}", val_default)
                     } else {
@@ -6248,9 +6299,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 let thresh = (rng() % 15).abs();
                 format!("{}.length() > {}", var, thresh)
             },
-            |var: &str, _rng: &mut dyn FnMut() -> i64| {
-                format!("{}.length() == 0", var)
-            },
+            |var: &str, _rng: &mut dyn FnMut() -> i64| format!("{}.length() == 0", var),
             |var: &str, rng: &mut dyn FnMut() -> i64| {
                 let prefixes = ["\"a\"", "\"test\"", "\"h\""];
                 let prefix = prefixes[rng() as usize % prefixes.len()];
@@ -6300,12 +6349,23 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let indent = self.indent_str();
 
         let (elem_type, elem_str, val) = match self.rng.gen_range(0..3u32) {
-            0 => (PrimitiveType::I64, "i64", format!("{}", self.rng.gen_range(-100..=100))),
-            1 => (PrimitiveType::I32, "i32", format!("{}_i32", self.rng.gen_range(-100..=100))),
+            0 => (
+                PrimitiveType::I64,
+                "i64",
+                format!("{}", self.rng.gen_range(-100..=100)),
+            ),
+            1 => (
+                PrimitiveType::I32,
+                "i32",
+                format!("{}_i32", self.rng.gen_range(-100..=100)),
+            ),
             _ => (
                 PrimitiveType::String,
                 "string",
-                format!("\"{}\"", ["hello", "world", "test", "a"][self.rng.gen_range(0..4)]),
+                format!(
+                    "\"{}\"",
+                    ["hello", "world", "test", "a"][self.rng.gen_range(0..4)]
+                ),
             ),
         };
 
@@ -6327,20 +6387,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             1 if !matches!(elem_type, PrimitiveType::String) => {
                 // arr.iter().sum()
-                ctx.add_local(
-                    result_name.clone(),
-                    TypeInfo::Primitive(elem_type),
-                    false,
-                );
+                ctx.add_local(result_name.clone(), TypeInfo::Primitive(elem_type), false);
                 format!("let {} = {}.iter().sum()", result_name, arr_name)
             }
             2 => {
                 // arr[0]
-                ctx.add_local(
-                    result_name.clone(),
-                    TypeInfo::Primitive(elem_type),
-                    false,
-                );
+                ctx.add_local(result_name.clone(), TypeInfo::Primitive(elem_type), false);
                 format!("let {} = {}[0]", result_name, arr_name)
             }
             _ => {
@@ -6395,10 +6447,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let val_false = self.rng.gen_range(-20..=20);
 
         let cond = match self.rng.gen_range(0..4u32) {
-            0 => format!("{} == {}", var, var),           // always true
-            1 => format!("{} >= {}", var, var),           // always true
-            2 => format!("{} <= {}", var, var),           // always true
-            _ => format!("{} * 0 == 0", var),             // always true (wrapping)
+            0 => format!("{} == {}", var, var), // always true
+            1 => format!("{} >= {}", var, var), // always true
+            2 => format!("{} <= {}", var, var), // always true
+            _ => format!("{} * 0 == 0", var),   // always true (wrapping)
         };
 
         ctx.add_local(
@@ -6409,7 +6461,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         Some(format!(
             "let {} = when {{\n{indent}    {} => {},\n{indent}    _ => {}\n{indent}}}",
-            result_name, cond, val_true, val_false,
+            result_name,
+            cond,
+            val_true,
+            val_false,
             indent = indent,
         ))
     }
@@ -6495,7 +6550,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             _ => {
                 // arr[arr.length() - arr.length()] — first element (index 0)
-                format!("{}[{}.length() - {}.length()]", arr_name, arr_name, arr_name)
+                format!(
+                    "{}[{}.length() - {}.length()]",
+                    arr_name, arr_name, arr_name
+                )
             }
         };
 
@@ -6562,7 +6620,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         Some(format!(
             "let mut {} = 0\n{indent}for {} in 0..{}.length() {{\n{indent}    {}\n{indent}}}",
-            acc_name, iter_name, arr_name, body_op,
+            acc_name,
+            iter_name,
+            arr_name,
+            body_op,
             indent = indent,
         ))
     }
@@ -6596,9 +6657,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         format!(
             "let mut {} = {}\n{indent}while {}.length() < {} {{\n{indent}    {} = {} + {}\n{indent}}}",
-            str_name, init,
-            str_name, limit,
-            str_name, str_name, append,
+            str_name,
+            init,
+            str_name,
+            limit,
+            str_name,
+            str_name,
+            append,
             indent = indent,
         )
     }
@@ -6677,7 +6742,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .locals
             .iter()
             .filter(|(_, ty, _)| {
-                matches!(ty, TypeInfo::Array(_) | TypeInfo::Primitive(PrimitiveType::String))
+                matches!(
+                    ty,
+                    TypeInfo::Array(_) | TypeInfo::Primitive(PrimitiveType::String)
+                )
             })
             .map(|(name, _, _)| name.clone())
             .chain(
@@ -6874,11 +6942,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let name = ctx.new_local_name();
 
         let expr = match self.rng.gen_range(0..6u32) {
-            0 => format!("{} + 0", var),      // x + 0 == x
-            1 => format!("{} * 1", var),      // x * 1 == x
-            2 => format!("{} - 0", var),      // x - 0 == x
-            3 => format!("0 + {}", var),      // 0 + x == x
-            4 => format!("1 * {}", var),      // 1 * x == x
+            0 => format!("{} + 0", var), // x + 0 == x
+            1 => format!("{} * 1", var), // x * 1 == x
+            2 => format!("{} - 0", var), // x - 0 == x
+            3 => format!("0 + {}", var), // 0 + x == x
+            4 => format!("1 * {}", var), // 1 * x == x
             _ => {
                 // x - x == 0
                 ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
@@ -6901,9 +6969,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .chain(
                 ctx.params
                     .iter()
-                    .filter(|p| {
-                        matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
-                    })
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
                     .map(|p| p.name.clone()),
             )
             .collect();
@@ -6941,7 +7007,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         };
 
-        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
         Some(format!("let {} = {}", name, expr))
     }
 
@@ -7155,11 +7225,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let t1 = terminals[self.rng.gen_range(0..terminals.len())];
         let t2 = terminals[self.rng.gen_range(0..terminals.len())];
 
-        ctx.add_local(
-            name.clone(),
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
 
         Some(format!(
             "let {} = when {{ {} > {} => {}.iter().{}, _ => {}.iter().{} }}",
@@ -7206,11 +7272,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let default_val = self.rng.gen_range(-10..=10);
         arms.push(format!("{}_ => {}", indent, default_val));
 
-        ctx.add_local(
-            name.clone(),
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
 
         Some(format!(
             "let {} = when {{\n{}\n{}}}",
@@ -7276,11 +7338,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             indent, v_default, default_op, default_operand
         ));
 
-        ctx.add_local(
-            name.clone(),
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
 
         Some(format!(
             "let {} = match {} {{\n{}\n{}}}",
@@ -7302,9 +7360,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .chain(
                 ctx.params
                     .iter()
-                    .filter(|p| {
-                        matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
-                    })
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
                     .map(|p| p.name.clone()),
             )
             .collect();
@@ -7375,22 +7431,23 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let result_b = self.rng.gen_range(-10..=10);
         let result_c = self.rng.gen_range(-10..=10);
 
-        ctx.add_local(
-            name.clone(),
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
 
         Some(format!(
             "let {} = match {} {{\n{}{} => match {} {{\n{}{} => {}\n{}_ => {}\n{}}}\n{}_ => {}\n{}}}",
             name,
             outer_var,
-            indent, outer_val,
-            inner_var,
-            indent2, inner_val, result_a,
-            indent2, result_b,
             indent,
-            indent, result_c,
+            outer_val,
+            inner_var,
+            indent2,
+            inner_val,
+            result_a,
+            indent2,
+            result_b,
+            indent,
+            indent,
+            result_c,
             "    ".repeat(self.indent),
         ))
     }
@@ -7400,7 +7457,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     fn generate_string_length_edge_cases(&mut self, ctx: &mut StmtContext) -> String {
         let name = ctx.new_local_name();
         let expr = match self.rng.gen_range(0..5u32) {
-            0 => "\"\".length()".to_string(),           // 0
+            0 => "\"\".length()".to_string(),            // 0
             1 => "\"a\".length()".to_string(),           // 1
             2 => "\"hello\".length()".to_string(),       // 5
             3 => "\"hello world\".length()".to_string(), // 11
@@ -7409,9 +7466,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 let string_vars: Vec<String> = ctx
                     .locals
                     .iter()
-                    .filter(|(_, ty, _)| {
-                        matches!(ty, TypeInfo::Primitive(PrimitiveType::String))
-                    })
+                    .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
                     .map(|(name, _, _)| name.clone())
                     .chain(
                         ctx.params
@@ -7430,11 +7485,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 }
             }
         };
-        ctx.add_local(
-            name.clone(),
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
         format!("let {} = {}", name, expr)
     }
 
@@ -7542,9 +7593,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .chain(
                 ctx.params
                     .iter()
-                    .filter(|p| {
-                        matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
-                    })
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
                     .map(|p| p.name.clone()),
             )
             .collect();
@@ -7607,9 +7656,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 let i64_vars: Vec<String> = ctx
                     .locals
                     .iter()
-                    .filter(|(_, ty, _)| {
-                        matches!(ty, TypeInfo::Primitive(PrimitiveType::I64))
-                    })
+                    .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
                     .map(|(name, _, _)| name.clone())
                     .chain(
                         ctx.params
@@ -7632,9 +7679,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 let bool_vars: Vec<String> = ctx
                     .locals
                     .iter()
-                    .filter(|(_, ty, _)| {
-                        matches!(ty, TypeInfo::Primitive(PrimitiveType::Bool))
-                    })
+                    .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::Bool)))
                     .map(|(name, _, _)| name.clone())
                     .chain(
                         ctx.params
@@ -7656,9 +7701,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 let i64_vars: Vec<String> = ctx
                     .locals
                     .iter()
-                    .filter(|(_, ty, _)| {
-                        matches!(ty, TypeInfo::Primitive(PrimitiveType::I64))
-                    })
+                    .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
                     .map(|(name, _, _)| name.clone())
                     .chain(
                         ctx.params
@@ -7694,11 +7737,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         match self.rng.gen_range(0..4u32) {
             0 => {
                 // "hello world".split(" ").count() -> i64
-                ctx.add_local(
-                    name.clone(),
-                    TypeInfo::Primitive(PrimitiveType::I64),
-                    false,
-                );
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
                 format!("let {} = \"hello world\".split(\" \").count()", name)
             }
             1 => {
@@ -7712,20 +7751,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             2 => {
                 // "a,b,c".split(",").count() -> i64
-                ctx.add_local(
-                    name.clone(),
-                    TypeInfo::Primitive(PrimitiveType::I64),
-                    false,
-                );
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
                 format!("let {} = \"a,b,c\".split(\",\").count()", name)
             }
             _ => {
                 // "HELLO".to_lower().length() -> i64
-                ctx.add_local(
-                    name.clone(),
-                    TypeInfo::Primitive(PrimitiveType::I64),
-                    false,
-                );
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
                 format!("let {} = \"HELLO\".to_lower().length()", name)
             }
         }
@@ -7768,11 +7799,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     1 => "xyz",
                     _ => "foo",
                 };
-                ctx.add_local(
-                    name.clone(),
-                    TypeInfo::Primitive(PrimitiveType::I64),
-                    false,
-                );
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
                 Some(format!(
                     "let {} = when {{ {} > {} => \"{}\", _ => \"{}\" }}.length()",
                     name, cond_var, thresh, s1, s2
@@ -7809,10 +7836,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate for-loop that builds a string using when in the body.
     /// `for item in arr { s = s + when { item > 0 => "+", _ => "-" } }`
-    fn try_generate_for_iter_when_string_body(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_for_iter_when_string_body(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find i64 array parameters
         let array_params: Vec<String> = ctx
             .params
@@ -7914,11 +7938,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             _ => 16,
         };
 
-        ctx.add_local(
-            name.clone(),
-            TypeInfo::Primitive(PrimitiveType::I64),
-            false,
-        );
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
         Some(format!("let {} = {} / {}", name, var, divisor))
     }
 
@@ -7952,7 +7972,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let expr = if string_vars.is_empty() {
             // Use a string literal as receiver
-            let literals = ["\"hello world\"", "\"testing\"", "\"abcdef\"", "\"vole lang\""];
+            let literals = [
+                "\"hello world\"",
+                "\"testing\"",
+                "\"abcdef\"",
+                "\"vole lang\"",
+            ];
             let lit = literals[self.rng.gen_range(0..literals.len())];
             format!("{}.{}(\"{}\")", lit, method, search)
         } else {
@@ -8102,7 +8127,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let name = ctx.new_local_name();
 
         // Generate match arms on length values
-        let result_strs = ["\"empty\"", "\"one\"", "\"short\"", "\"medium\"", "\"long\""];
+        let result_strs = [
+            "\"empty\"",
+            "\"one\"",
+            "\"short\"",
+            "\"medium\"",
+            "\"long\"",
+        ];
         let num_arms = self.rng.gen_range(2..=3);
 
         let mut arms = Vec::new();
@@ -8166,11 +8197,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             _ => return None,
         };
 
-        ctx.add_local(
-            name.clone(),
-            TypeInfo::Primitive(*elem_prim),
-            false,
-        );
+        ctx.add_local(name.clone(), TypeInfo::Primitive(*elem_prim), false);
         Some(format!(
             "let {} = when {{\n    {}.length() > 0 => {}[0]\n    _ => {}\n}}",
             name, arr_name, arr_name, default_val
@@ -8254,10 +8281,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let name = ctx.new_local_name();
 
         // 60% numeric reduce, 40% string reduce
-        if !numeric_array_params.is_empty() && (string_array_params.is_empty() || self.rng.gen_bool(0.6))
+        if !numeric_array_params.is_empty()
+            && (string_array_params.is_empty() || self.rng.gen_bool(0.6))
         {
-            let (arr_name, prim) = &numeric_array_params
-                [self.rng.gen_range(0..numeric_array_params.len())];
+            let (arr_name, prim) =
+                &numeric_array_params[self.rng.gen_range(0..numeric_array_params.len())];
             let suffix = if matches!(prim, PrimitiveType::I32) {
                 "_i32"
             } else {
@@ -8275,18 +8303,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 _ => (format!("0{}", suffix), "+"),
             };
 
-            ctx.add_local(
-                name.clone(),
-                TypeInfo::Primitive(*prim),
-                false,
-            );
+            ctx.add_local(name.clone(), TypeInfo::Primitive(*prim), false);
             Some(format!(
                 "let {} = {}.iter().reduce({}, (acc: {}, x: {}) -> {} => acc {} x)",
                 name, arr_name, init, type_annot, type_annot, type_annot, op
             ))
         } else {
-            let arr_name =
-                &string_array_params[self.rng.gen_range(0..string_array_params.len())];
+            let arr_name = &string_array_params[self.rng.gen_range(0..string_array_params.len())];
             let seps = [", ", " ", "-", "; "];
             let sep = seps[self.rng.gen_range(0..seps.len())];
 
@@ -8316,11 +8339,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             _ => "(2147483647_i32 % 100_i32)".to_string(),
         };
 
-        ctx.add_local(
-            name.clone(),
-            TypeInfo::Primitive(PrimitiveType::I32),
-            false,
-        );
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I32), false);
         format!("let {} = {}", name, expr)
     }
 
@@ -8330,9 +8349,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let name = ctx.new_local_name();
 
         let (expr, ty) = match self.rng.gen_range(0..6u32) {
-            0 => ("\"\"".to_string() + ".length()", TypeInfo::Primitive(PrimitiveType::I64)),
-            1 => ("\"\"".to_string() + ".to_upper()", TypeInfo::Primitive(PrimitiveType::String)),
-            2 => ("\"\"".to_string() + ".trim()", TypeInfo::Primitive(PrimitiveType::String)),
+            0 => (
+                "\"\"".to_string() + ".length()",
+                TypeInfo::Primitive(PrimitiveType::I64),
+            ),
+            1 => (
+                "\"\"".to_string() + ".to_upper()",
+                TypeInfo::Primitive(PrimitiveType::String),
+            ),
+            2 => (
+                "\"\"".to_string() + ".trim()",
+                TypeInfo::Primitive(PrimitiveType::String),
+            ),
             3 => (
                 "\"\"".to_string() + ".split(\",\").count()",
                 TypeInfo::Primitive(PrimitiveType::I64),
@@ -8391,11 +8419,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Protect the accumulator from compound assignment modifications
         ctx.protected_vars.push(acc_name.clone());
 
-        ctx.add_local(
-            acc_name.clone(),
-            TypeInfo::Primitive(*prim),
-            true,
-        );
+        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(*prim), true);
 
         Some(format!(
             "let mut {} = 0{}\nfor {} in {}.iter() {{\n    {} = {} {} {}\n}}",
@@ -8453,14 +8477,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
         Some(format!(
             "let {} = when {{\n    true => match {} {{\n        {} => {}\n        {} => {}\n        _ => {}\n    }}\n    _ => {}\n}}",
-            name,
-            var,
-            match_val0,
-            strs[0],
-            match_val1,
-            strs[1],
-            strs[2],
-            strs[3],
+            name, var, match_val0, strs[0], match_val1, strs[1], strs[2], strs[3],
         ))
     }
 
@@ -8595,7 +8612,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Use known-length literals to avoid out-of-bounds
         let (receiver, max_len) = if !string_vars.is_empty() && self.rng.gen_bool(0.4) {
             // For variables, use conservative indices (0..3)
-            (string_vars[self.rng.gen_range(0..string_vars.len())].clone(), 3)
+            (
+                string_vars[self.rng.gen_range(0..string_vars.len())].clone(),
+                3,
+            )
         } else {
             let literals = [
                 ("\"hello world\"", 11),
@@ -9011,12 +9031,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         match self.rng.gen_range(0..6) {
             0 => {
                 // "x".to_upper()
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".to_upper()", name, ch)
             }
             1 => {
                 // "x".to_lower()
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".to_lower()", name, ch)
             }
             2 => {
@@ -9026,17 +9054,29 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             3 => {
                 // "x".contains("x")
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                    false,
+                );
                 format!("let {} = \"{}\".contains(\"{}\")", name, ch, ch)
             }
             4 => {
                 // "x".trim()
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".trim()", name, ch)
             }
             _ => {
                 // "x".substring(0, 1)
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".substring(0, 1)", name, ch)
             }
         }
@@ -9046,9 +9086,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Tests floating-point codegen paths with known-safe values.
     fn generate_f64_literal_ops_let(&mut self, ctx: &mut StmtContext) -> String {
         let name = ctx.new_local_name();
-        let literals = [
-            "0.0", "1.0", "0.5", "2.5", "3.14", "100.0", "0.1", "99.9",
-        ];
+        let literals = ["0.0", "1.0", "0.5", "2.5", "3.14", "100.0", "0.1", "99.9"];
         let a = literals[self.rng.gen_range(0..literals.len())];
         let b = literals[self.rng.gen_range(0..literals.len())];
 
@@ -9083,7 +9121,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             3 => {
                 // f64 comparison: a > b
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                    false,
+                );
                 if let Some(var) = f64_vars.first() {
                     format!("let {} = {} > {}", name, var, a)
                 } else {
@@ -9106,10 +9148,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate `.iter().take(N).collect()` or `.iter().skip(N).collect()` on parameter arrays.
     /// Uses parameter arrays with known length to avoid empty-array issues.
-    fn try_generate_iter_take_skip_collect_let(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_iter_take_skip_collect_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Only use parameter arrays (guaranteed non-empty with known min length)
         let array_params: Vec<(String, TypeInfo)> = ctx
             .params
@@ -9148,7 +9187,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Tests floating-point equality semantics: `0.0 == 0.0`, `1.0 != 2.0`, etc.
     fn generate_f64_comparison_edge_let(&mut self, ctx: &mut StmtContext) -> String {
         let name = ctx.new_local_name();
-        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
 
         match self.rng.gen_range(0..5) {
             0 => format!("let {} = 0.0 == 0.0", name),
@@ -9188,23 +9231,39 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             1 => {
                 // "aaa".contains("a")
                 let ch = &s[0..1];
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                    false,
+                );
                 format!("let {} = \"{}\".contains(\"{}\")", name, s, ch)
             }
             2 => {
                 // "aaa".replace("a", "b")
                 let ch = &s[0..1];
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".replace(\"{}\", \"b\")", name, s, ch)
             }
             3 => {
                 // "   ".trim()
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".trim()", name, s)
             }
             _ => {
                 // "aaa".to_upper()
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".to_upper()", name, s)
             }
         }
@@ -9245,11 +9304,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             TypeInfo::Primitive(PrimitiveType::String),
             false,
         );
-        Some(format!(
-            "let {} = when {{ {} }}",
-            name,
-            arms.join(", ")
-        ))
+        Some(format!("let {} = when {{ {} }}", name, arms.join(", ")))
     }
 
     /// Generate a for-range loop that builds a string from index.to_string().
@@ -9357,11 +9412,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let arr_type = TypeInfo::Array(Box::new(TypeInfo::Primitive(*elem_prim)));
         ctx.add_local(sorted_name.clone(), arr_type, false);
         ctx.protected_vars.push(acc_name.clone());
-        ctx.add_local(
-            acc_name.clone(),
-            TypeInfo::Primitive(*elem_prim),
-            true,
-        );
+        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(*elem_prim), true);
 
         Some(format!(
             "let {} = {}.iter().sorted().collect()\n{}let mut {} = {}\n{}for {} in {}.iter() {{\n{}  {} = {} + {}\n{}}}",
@@ -9465,9 +9516,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .chain(
                 ctx.params
                     .iter()
-                    .filter(|p| {
-                        matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
-                    })
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
                     .map(|p| p.name.clone()),
             )
             .collect();
@@ -9510,10 +9559,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             TypeInfo::Primitive(PrimitiveType::String),
             false,
         );
-        format!(
-            "let {} = \"{}\".substring({}, {})",
-            name, s, idx, idx + 1
-        )
+        format!("let {} = \"{}\".substring({}, {})", name, s, idx, idx + 1)
     }
 
     /// Generate range-based iterator with map and collect.
@@ -9542,10 +9588,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate match on interpolated string length.
     /// E.g.: `match "val={x}".length() { 4 => "short", 5 => "medium", _ => "long" }`
-    fn try_generate_match_interpolation_length(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_match_interpolation_length(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Need a variable to interpolate
         let vars: Vec<String> = ctx
             .locals
@@ -9742,19 +9785,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Tests trim and other string methods on strings with leading/trailing/only whitespace.
     fn generate_whitespace_string_ops(&mut self, ctx: &mut StmtContext) -> String {
         let name = ctx.new_local_name();
-        let ws_strings = [
-            "  hello  ",
-            "  ",
-            " x ",
-            "\thello\t",
-            "  spaces  here  ",
-        ];
+        let ws_strings = ["  hello  ", "  ", " x ", "\thello\t", "  spaces  here  "];
         let s = ws_strings[self.rng.gen_range(0..ws_strings.len())];
 
         match self.rng.gen_range(0..4) {
             0 => {
                 // trim
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".trim()", name, s)
             }
             1 => {
@@ -9764,12 +9805,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             2 => {
                 // contains space
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                    false,
+                );
                 format!("let {} = \"{}\".contains(\" \")", name, s)
             }
             _ => {
                 // replace spaces
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
                 format!("let {} = \"{}\".replace(\" \", \"\")", name, s)
             }
         }
@@ -9806,10 +9855,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate .to_string().length() chain on numeric variables.
     /// E.g.: `let n = x.to_string().length()`
-    fn try_generate_tostring_length_let(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_tostring_length_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let i64_vars: Vec<String> = ctx
             .locals
             .iter()
@@ -9830,10 +9876,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate chained boolean literal operations.
     /// E.g.: `let b = true && false || true`
-    fn generate_bool_chain_edge_let(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> String {
+    fn generate_bool_chain_edge_let(&mut self, ctx: &mut StmtContext) -> String {
         let name = ctx.new_local_name();
 
         let variant = self.rng.gen_range(0..5);
@@ -9845,16 +9888,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             _ => "true && !false".to_string(),
         };
 
-        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
         format!("let {} = {}", name, expr)
     }
 
     /// Generate safe first-element access with length guard.
     /// E.g.: `let x = when { arr.length() > 0 => arr[0], _ => default }`
-    fn try_generate_array_length_zero_check(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_array_length_zero_check(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find parameter arrays (guaranteed non-empty by generation)
         let array_params: Vec<(String, PrimitiveType)> = ctx
             .params
@@ -9893,10 +9937,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate when expression with string replace in arms.
     /// E.g.: `let r = when { s.contains("a") => s.replace("a", "b"), _ => s }`
-    fn try_generate_when_replace_result(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_when_replace_result(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let str_vars: Vec<String> = ctx
             .locals
             .iter()
@@ -9921,7 +9962,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let search = search_chars[self.rng.gen_range(0..search_chars.len())];
         let replace = if search == " " { "_" } else { "x" };
 
-        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
         Some(format!(
             "let {} = when {{ {}.contains(\"{}\") => {}.replace(\"{}\", \"{}\"), _ => {} }}",
             name, var, search, var, search, replace, var
@@ -9930,10 +9975,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate match with .to_string() in each arm.
     /// E.g.: `let s = match x { 0 => "zero", 1 => "one", _ => x.to_string() }`
-    fn try_generate_match_tostring_arms(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_match_tostring_arms(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let i64_vars: Vec<String> = ctx
             .locals
             .iter()
@@ -9965,17 +10007,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
         arms.push_str(&format!("_ => {}.to_string()", var));
 
-        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
         Some(format!("let {} = match {} {{ {} }}", name, var, arms))
     }
 
     /// Generate manual min/max via when expression.
     /// E.g.: `let m = when { a > b => a, _ => b }` (max)
     /// or:   `let m = when { a < b => a, _ => b }` (min)
-    fn try_generate_manual_minmax_let(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_manual_minmax_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let i64_vars: Vec<String> = ctx
             .locals
             .iter()
@@ -10011,10 +10054,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate nested .to_string().length().to_string() chain.
     /// E.g.: `let s = x.to_string().length().to_string()`
-    fn try_generate_nested_tostring_let(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_nested_tostring_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let i64_vars: Vec<String> = ctx
             .locals
             .iter()
@@ -10039,19 +10079,36 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         match variant {
             0 => {
                 // x.to_string().length().to_string() -> string
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
-                Some(format!("let {} = {}.to_string().length().to_string()", name, var))
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.to_string().length().to_string()",
+                    name, var
+                ))
             }
             1 => {
                 // x.to_string().contains("0") -> bool
                 let digit = self.rng.gen_range(0..10);
-                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
-                Some(format!("let {} = {}.to_string().contains(\"{}\")", name, var, digit))
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.to_string().contains(\"{}\")",
+                    name, var, digit
+                ))
             }
             _ => {
                 // x.to_string().replace("-", "").length() -> i64
                 ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
-                Some(format!("let {} = {}.to_string().replace(\"-\", \"\").length()", name, var))
+                Some(format!(
+                    "let {} = {}.to_string().replace(\"-\", \"\").length()",
+                    name, var
+                ))
             }
         }
     }
@@ -10836,20 +10893,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.protected_vars.push(arr_name.clone());
         // acc is mutable i64 declared before the loop
-        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
 
         let indent = self.indent_str();
         let inner_indent = format!("{}    ", indent);
         format!(
             "let mut {} = 0\n{}for {} in {}.iter(){}.enumerate() {{\n{}{}\n{}}}",
-            acc_name,
-            indent,
-            pair_name,
-            arr_name,
-            prefix,
-            inner_indent,
-            body_expr,
-            indent
+            acc_name, indent, pair_name, arr_name, prefix, inner_indent, body_expr, indent
         )
     }
 
@@ -10895,20 +10949,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.protected_vars.push(arr_a.clone());
         ctx.protected_vars.push(arr_b.clone());
-        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
 
         let indent = self.indent_str();
         let inner_indent = format!("{}    ", indent);
         format!(
             "let mut {} = 0\n{}for {} in {}.iter().zip({}.iter()) {{\n{}{}\n{}}}",
-            acc_name,
-            indent,
-            pair_name,
-            arr_a,
-            arr_b,
-            inner_indent,
-            body_expr,
-            indent,
+            acc_name, indent, pair_name, arr_a, arr_b, inner_indent, body_expr, indent,
         )
     }
 
@@ -10923,9 +10974,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         if self.rng.gen_bool(0.10) {
             let start = self.rng.gen_range(0..3);
             return match self.rng.gen_range(0..3) {
-                0 => format!("{}..{}", start, start),         // empty exclusive range
-                1 => format!("{}..={}", start, start),        // single-iteration inclusive
-                _ => format!("{}..{}", start, start + 1),     // single-iteration exclusive
+                0 => format!("{}..{}", start, start),  // empty exclusive range
+                1 => format!("{}..={}", start, start), // single-iteration inclusive
+                _ => format!("{}..{}", start, start + 1), // single-iteration exclusive
             };
         }
 
@@ -11749,10 +11800,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                         let threshold = self.rng.gen_range(0..=5);
                         (
                             "0".to_string(),
-                            format!(
-                                "when {{ el > {} => acc + el, _ => acc }}",
-                                threshold
-                            ),
+                            format!("when {{ el > {} => acc + el, _ => acc }}", threshold),
                             TypeInfo::Primitive(PrimitiveType::I64),
                         )
                     }
@@ -12530,17 +12578,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         // Generate outer condition
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let outer_cond = expr_gen.generate_simple(
-            &TypeInfo::Primitive(PrimitiveType::Bool),
-            &expr_ctx,
-        );
+        let outer_cond =
+            expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx);
 
         // Generate inner condition
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let inner_cond = expr_gen.generate_simple(
-            &TypeInfo::Primitive(PrimitiveType::Bool),
-            &expr_ctx,
-        );
+        let inner_cond =
+            expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx);
 
         // Generate three values for the three branches
         let val1 = self.generate_match_arm_value(&result_type, &expr_ctx);
@@ -12563,11 +12607,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
              {}_ => {}\n\
              {}}}",
             result_name,
-            indent, outer_cond,
-            inner_indent, inner_cond, val1,
-            inner_indent, val2,
+            indent,
+            outer_cond,
+            inner_indent,
+            inner_cond,
+            val1,
+            inner_indent,
+            val2,
             inner_close,
-            indent, val3,
+            indent,
+            val3,
             close_indent,
         ))
     }
@@ -12725,9 +12774,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             result_name,
             arr_name,
             terminal,
-            indent, arm_val1,
-            indent, arm_val2,
-            indent, wildcard_val,
+            indent,
+            arm_val1,
+            indent,
+            arm_val2,
+            indent,
+            wildcard_val,
             close_indent,
         ))
     }
@@ -12736,10 +12788,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Produces patterns like:
     /// - `let r = str.to_upper().to_lower().length()`
     /// - `let r = str.trim().to_upper().contains("x")`
-    fn try_generate_chained_string_methods(
-        &mut self,
-        ctx: &mut StmtContext,
-    ) -> Option<String> {
+    fn try_generate_chained_string_methods(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find string variables in scope
         let mut string_vars: Vec<String> = Vec::new();
         for (name, ty, _) in &ctx.locals {
@@ -12748,7 +12797,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
         for param in ctx.params.iter() {
-            if matches!(&param.param_type, TypeInfo::Primitive(PrimitiveType::String)) {
+            if matches!(
+                &param.param_type,
+                TypeInfo::Primitive(PrimitiveType::String)
+            ) {
                 string_vars.push(param.name.clone());
             }
         }
@@ -12778,10 +12830,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 ".contains(\"a\")".to_string(),
                 TypeInfo::Primitive(PrimitiveType::Bool),
             ),
-            _ => (
-                String::new(),
-                TypeInfo::Primitive(PrimitiveType::String),
-            ),
+            _ => (String::new(), TypeInfo::Primitive(PrimitiveType::String)),
         };
 
         ctx.add_local(result_name.clone(), result_type, false);

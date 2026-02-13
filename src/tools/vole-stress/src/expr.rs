@@ -3270,8 +3270,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 };
                 let threshold = self.rng.gen_range(0..=5);
                 let method = if self.rng.gen_bool(0.5) { "any" } else { "all" };
-                options
-                    .push(format!("{}.iter().{}((x) => x > {}{})", name, method, threshold, suffix));
+                options.push(format!(
+                    "{}.iter().{}((x) => x > {}{})",
+                    name, method, threshold, suffix
+                ));
             }
         }
 
@@ -4314,9 +4316,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         };
 
         // ~20% chance: multiline block body (only for non-void, primitive return types)
-        let use_block_body = matches!(return_type, TypeInfo::Primitive(_))
-            && depth < 2
-            && self.rng.gen_bool(0.20);
+        let use_block_body =
+            matches!(return_type, TypeInfo::Primitive(_)) && depth < 2 && self.rng.gen_bool(0.20);
 
         if use_block_body {
             let use_early_return = self.rng.gen_bool(0.4);

@@ -568,65 +568,66 @@ impl<'src> Lexer<'src> {
         let first_char = self.bytes[self.start];
 
         if first_char == b'0'
-            && let Some(prefix) = self.peek_byte() {
-                if prefix == b'x' || prefix == b'X' {
-                    // Hex literal: 0x...
-                    self.current += 1;
-                    self.column += 1;
-                    let mut has_digits = false;
-                    while let Some(&b) = self.bytes.get(self.current) {
-                        if b.is_ascii_hexdigit() {
-                            has_digits = true;
+            && let Some(prefix) = self.peek_byte()
+        {
+            if prefix == b'x' || prefix == b'X' {
+                // Hex literal: 0x...
+                self.current += 1;
+                self.column += 1;
+                let mut has_digits = false;
+                while let Some(&b) = self.bytes.get(self.current) {
+                    if b.is_ascii_hexdigit() {
+                        has_digits = true;
+                        self.current += 1;
+                        self.column += 1;
+                    } else if b == b'_' {
+                        // Check if this underscore starts a type suffix
+                        if self.is_type_suffix_ahead() {
                             self.current += 1;
                             self.column += 1;
-                        } else if b == b'_' {
-                            // Check if this underscore starts a type suffix
-                            if self.is_type_suffix_ahead() {
-                                self.current += 1;
-                                self.column += 1;
-                                self.consume_suffix_name();
-                                break;
-                            }
-                            self.current += 1;
-                            self.column += 1;
-                        } else {
+                            self.consume_suffix_name();
                             break;
                         }
+                        self.current += 1;
+                        self.column += 1;
+                    } else {
+                        break;
                     }
-                    if !has_digits {
-                        return self.error_invalid_number();
-                    }
-                    return self.make_token(TokenType::IntLiteral);
-                } else if prefix == b'b' || prefix == b'B' {
-                    // Binary literal: 0b...
-                    self.current += 1;
-                    self.column += 1;
-                    let mut has_digits = false;
-                    while let Some(&b) = self.bytes.get(self.current) {
-                        if b == b'0' || b == b'1' {
-                            has_digits = true;
-                            self.current += 1;
-                            self.column += 1;
-                        } else if b == b'_' {
-                            // Check if this underscore starts a type suffix
-                            if self.is_type_suffix_ahead() {
-                                self.current += 1;
-                                self.column += 1;
-                                self.consume_suffix_name();
-                                break;
-                            }
-                            self.current += 1;
-                            self.column += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if !has_digits {
-                        return self.error_invalid_number();
-                    }
-                    return self.make_token(TokenType::IntLiteral);
                 }
+                if !has_digits {
+                    return self.error_invalid_number();
+                }
+                return self.make_token(TokenType::IntLiteral);
+            } else if prefix == b'b' || prefix == b'B' {
+                // Binary literal: 0b...
+                self.current += 1;
+                self.column += 1;
+                let mut has_digits = false;
+                while let Some(&b) = self.bytes.get(self.current) {
+                    if b == b'0' || b == b'1' {
+                        has_digits = true;
+                        self.current += 1;
+                        self.column += 1;
+                    } else if b == b'_' {
+                        // Check if this underscore starts a type suffix
+                        if self.is_type_suffix_ahead() {
+                            self.current += 1;
+                            self.column += 1;
+                            self.consume_suffix_name();
+                            break;
+                        }
+                        self.current += 1;
+                        self.column += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if !has_digits {
+                    return self.error_invalid_number();
+                }
+                return self.make_token(TokenType::IntLiteral);
             }
+        }
 
         // Decimal integer part (continue consuming digits and underscores)
         while let Some(&b) = self.bytes.get(self.current) {
@@ -653,76 +654,44 @@ impl<'src> Lexer<'src> {
         // Check for decimal point followed by digit
         if self.peek_byte() == Some(b'.')
             && let Some(next) = self.peek_next()
-                && next.is_ascii_digit() {
-                    // Consume the dot
+            && next.is_ascii_digit()
+        {
+            // Consume the dot
+            self.current += 1;
+            self.column += 1;
+            // Consume the fractional part
+            while let Some(&b) = self.bytes.get(self.current) {
+                if b.is_ascii_digit() {
                     self.current += 1;
                     self.column += 1;
-                    // Consume the fractional part
-                    while let Some(&b) = self.bytes.get(self.current) {
-                        if b.is_ascii_digit() {
-                            self.current += 1;
-                            self.column += 1;
-                        } else if b == b'_' {
-                            // Check if this underscore starts a type suffix
-                            if self.is_type_suffix_ahead() {
-                                self.current += 1;
-                                self.column += 1;
-                                self.consume_suffix_name();
-                                return self.make_token(TokenType::FloatLiteral);
-                            }
-                            self.current += 1;
-                            self.column += 1;
-                        } else {
-                            break;
-                        }
+                } else if b == b'_' {
+                    // Check if this underscore starts a type suffix
+                    if self.is_type_suffix_ahead() {
+                        self.current += 1;
+                        self.column += 1;
+                        self.consume_suffix_name();
+                        return self.make_token(TokenType::FloatLiteral);
                     }
-
-                    // Check for scientific notation exponent on float
-                    if let Some(&e) = self.bytes.get(self.current)
-                        && (e == b'e' || e == b'E') {
-                            self.current += 1;
-                            self.column += 1;
-                            // Optional sign
-                            if let Some(&sign) = self.bytes.get(self.current)
-                                && (sign == b'+' || sign == b'-') {
-                                    self.current += 1;
-                                    self.column += 1;
-                                }
-                            // Consume exponent digits
-                            while let Some(&b) = self.bytes.get(self.current) {
-                                if b.is_ascii_digit() {
-                                    self.current += 1;
-                                    self.column += 1;
-                                } else if b == b'_' {
-                                    // Check if this underscore starts a type suffix
-                                    if self.is_type_suffix_ahead() {
-                                        self.current += 1;
-                                        self.column += 1;
-                                        self.consume_suffix_name();
-                                        return self.make_token(TokenType::FloatLiteral);
-                                    }
-                                    self.current += 1;
-                                    self.column += 1;
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-
-                    return self.make_token(TokenType::FloatLiteral);
+                    self.current += 1;
+                    self.column += 1;
+                } else {
+                    break;
                 }
+            }
 
-        // Check for scientific notation on integer (makes it a float)
-        if let Some(&e) = self.bytes.get(self.current)
-            && (e == b'e' || e == b'E') {
+            // Check for scientific notation exponent on float
+            if let Some(&e) = self.bytes.get(self.current)
+                && (e == b'e' || e == b'E')
+            {
                 self.current += 1;
                 self.column += 1;
                 // Optional sign
                 if let Some(&sign) = self.bytes.get(self.current)
-                    && (sign == b'+' || sign == b'-') {
-                        self.current += 1;
-                        self.column += 1;
-                    }
+                    && (sign == b'+' || sign == b'-')
+                {
+                    self.current += 1;
+                    self.column += 1;
+                }
                 // Consume exponent digits
                 while let Some(&b) = self.bytes.get(self.current) {
                     if b.is_ascii_digit() {
@@ -742,8 +711,45 @@ impl<'src> Lexer<'src> {
                         break;
                     }
                 }
-                return self.make_token(TokenType::FloatLiteral);
             }
+
+            return self.make_token(TokenType::FloatLiteral);
+        }
+
+        // Check for scientific notation on integer (makes it a float)
+        if let Some(&e) = self.bytes.get(self.current)
+            && (e == b'e' || e == b'E')
+        {
+            self.current += 1;
+            self.column += 1;
+            // Optional sign
+            if let Some(&sign) = self.bytes.get(self.current)
+                && (sign == b'+' || sign == b'-')
+            {
+                self.current += 1;
+                self.column += 1;
+            }
+            // Consume exponent digits
+            while let Some(&b) = self.bytes.get(self.current) {
+                if b.is_ascii_digit() {
+                    self.current += 1;
+                    self.column += 1;
+                } else if b == b'_' {
+                    // Check if this underscore starts a type suffix
+                    if self.is_type_suffix_ahead() {
+                        self.current += 1;
+                        self.column += 1;
+                        self.consume_suffix_name();
+                        return self.make_token(TokenType::FloatLiteral);
+                    }
+                    self.current += 1;
+                    self.column += 1;
+                } else {
+                    break;
+                }
+            }
+            return self.make_token(TokenType::FloatLiteral);
+        }
 
         self.make_token(TokenType::IntLiteral)
     }

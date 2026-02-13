@@ -99,11 +99,7 @@ impl EntityRegistry {
         }
         for type_def in &self.type_defs[start..end] {
             if let Some(last_segment) = name_table.last_segment_str(type_def.name_id) {
-                cache
-                    .map
-                    .entry(last_segment)
-                    .or_default()
-                    .push(type_def.id);
+                cache.map.entry(last_segment).or_default().push(type_def.id);
             }
         }
         cache.indexed_count = end;
