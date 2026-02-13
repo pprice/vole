@@ -1597,6 +1597,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: filter-collect then iterate with to_string
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_filter_iter_tostring(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: when comparing lengths of array and string
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_length_compare(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9266,6 +9280,116 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             acc_name,
             iter_var,
             " ".repeat(indent * 2),
+        ))
+    }
+
+    /// Generate filter-collect then iterate converting to string.
+    /// E.g.: `let pos = arr.iter().filter(x => x > 0).collect(); let mut s = ""; for x in pos.iter() { s = s + x.to_string() }`
+    fn try_generate_filter_iter_tostring(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Need a numeric array parameter (i64)
+        let i64_arrays: Vec<String> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner)
+                    if matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) =>
+                {
+                    Some(p.name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
+        if i64_arrays.is_empty() {
+            return None;
+        }
+
+        let arr_name = &i64_arrays[self.rng.gen_range(0..i64_arrays.len())];
+        let filtered_name = ctx.new_local_name();
+        let acc_name = ctx.new_local_name();
+        let iter_var = ctx.new_local_name();
+        let indent = self.indent;
+
+        let threshold = self.rng.gen_range(0..=5);
+
+        ctx.add_local(
+            filtered_name.clone(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            false,
+        );
+        ctx.protected_vars.push(acc_name.clone());
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            true,
+        );
+
+        Some(format!(
+            "let {} = {}.iter().filter((x) => x > {}).collect()\n{}let mut {} = \"\"\n{}for {} in {}.iter() {{\n{}  {} = {} + {}.to_string()\n{}}}",
+            filtered_name,
+            arr_name,
+            threshold,
+            " ".repeat(indent * 2),
+            acc_name,
+            " ".repeat(indent * 2),
+            iter_var,
+            filtered_name,
+            " ".repeat((indent + 1) * 2),
+            acc_name,
+            acc_name,
+            iter_var,
+            " ".repeat(indent * 2),
+        ))
+    }
+
+    /// Generate when expression comparing lengths of array and string.
+    /// E.g.: `when { arr.length() > s.length() => "arr_bigger", _ => "str_bigger" }`
+    fn try_generate_when_length_compare(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Need at least one array and one string variable
+        let array_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Array(_)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Array(_)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| {
+                        matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
+                    })
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if array_vars.is_empty() || string_vars.is_empty() {
+            return None;
+        }
+
+        let arr = &array_vars[self.rng.gen_range(0..array_vars.len())];
+        let s = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let name = ctx.new_local_name();
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = when {{ {}.length() > {}.length() => \"arr_longer\", _ => \"str_longer\" }}",
+            name, arr, s
         ))
     }
 
