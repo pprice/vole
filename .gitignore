@@ -1,4 +1,5 @@
 /target
+/target-asan
 /docs/plans
 .worktrees/
 CLAUDE.local.md
@@ -9,3 +10,9 @@ perf.data*
 .serena/
 .claude/stress-hunt-state.json
 .claude/stress-hunt-repros/
+.claude/stress-hunt-journal.md
+.claude/perf-hunt-state.json
+.claude/perf-hunt-journal.md
+.claude/tidy-hunt-state.json
+.claude/tidy-hunt-journal.md
+.claude/.ralph-loop.local.md

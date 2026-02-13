@@ -80,6 +80,8 @@ when setting K and Z.
     }
   ],
   "round": 1,
+  "consecutive_clean": 0,
+  "base_k": 10,
   "history": [
     { "round": 1, "passed": 3, "failed": 2, "bugs_fixed": 2, "skipped": 0, "dupes": 0 }
   ]
@@ -90,6 +92,19 @@ Seed statuses: `pending` -> `pass` | `fail` -> `reducing` -> `reduced` -> `fixin
                                                                                   `-> skipped`
                                                             `-> dupe` (matched known bug)
 
+## Journal: `.claude/stress-hunt-journal.md`
+
+A persistent log of facts learned across runs — reserved words, syntax
+gotchas, generator pitfalls, process lessons. This file is gitignored and
+survives across sessions.
+
+<IMPORTANT>
+- **Read the journal** at the start of every stress-hunt session (step 1)
+- **Append to the journal** whenever you discover something that would save
+  a future run from wasting time — wrong syntax assumptions, reserved words,
+  codegen quirks, process mistakes. Keep entries terse (one line each).
+</IMPORTANT>
+
 ## Workflow Per Iteration
 
 Read `.claude/stress-hunt-state.json`. Based on seed statuses, perform the
@@ -97,6 +112,7 @@ Read `.claude/stress-hunt-state.json`. Based on seed statuses, perform the
 
 ### 1. Initialize (no state file, or stale state from a previous run)
 
+- **Read `.claude/stress-hunt-journal.md`** to load lessons from previous runs
 - If `.claude/stress-hunt-state.json` exists from a previous session (i.e. we
   did NOT create it this session), delete it and start fresh
 - **Preflight check**: run `just check` to verify the repo compiles. If it
@@ -109,27 +125,76 @@ Read `.claude/stress-hunt-state.json`. Based on seed statuses, perform the
 
 ### 2. Generate + Test (`pending` seeds exist)
 
-For each `pending` seed:
+<IMPORTANT>
+ALWAYS use the `run-round.sh` shell script for generation and testing. NEVER
+run `cargo run -p vole-stress` or `cargo run -- test` individually per seed.
+The script builds once and runs all seeds in a single invocation — it is
+faster, handles timeouts, and produces structured JSONL output.
+</IMPORTANT>
+
+**Step-by-step:**
+
+1. Collect all `pending` seeds from the state file into `seed:profile` pairs
+2. Run them all in one batch via the script:
 
 ```bash
-cargo run -p vole-stress -- --seed <S> --profile <P> --output /tmp/vole-stress
+bash .claude/skills/stress-hunt/run-round.sh [flags] /tmp/vole-stress \
+  <seed1>:<profile1> <seed2>:<profile2> ...
 ```
 
-Capture the output directory name from stdout. Then test:
+For example, if the state has seeds 12345 (profile=full), 67890
+(profile=many-modules), and 11111 (profile=deep-nesting):
 
 ```bash
-timeout 60 cargo run -- test <dir>/
+bash .claude/skills/stress-hunt/run-round.sh /tmp/vole-stress \
+  12345:full 67890:many-modules 11111:deep-nesting
 ```
 
-And if a `main.vole` exists:
+3. Capture stdout (JSONL results) and parse it to update seed statuses
 
-```bash
-timeout 30 cargo run -- run <dir>/main.vole
+**Flags:**
+
+- `--release` — Build and run with the `release-local` cargo profile
+  (optimized with debug symbols). Use when recent rounds have had no failures
+  — it iterates much faster. Omit for debug builds (better error messages,
+  faster compilation).
+- `--diff` — Differential testing: builds both debug and release-local, runs
+  each seed under both, and reports mismatches (different exit codes or stdout
+  output). Catches optimization-related bugs. Output includes a `diff_mismatch`
+  field. Use this periodically (e.g. every 3-5 rounds) to catch bugs that only
+  manifest under optimization.
+- `--asan` — Build vole with AddressSanitizer (nightly toolchain, into
+  `target-asan/`). Catches heap corruption, double-free, and use-after-free
+  in the compiler runtime. Mutually exclusive with `--release` and `--diff`.
+  Use every 5-10 rounds with moderate K (10-20) — ASan adds ~2-3x overhead.
+  ASan errors appear in `error_summary` with `AddressSanitizer:` prefixed
+  messages and should be categorized as codegen errors during triage.
+
+**Scaling K:** When using `--release` and recent rounds have zero failures,
+increase K to 50-100 seeds per round. The expanded name pool (94k unique
+names) supports this without collisions, and release-local builds execute
+significantly faster than debug.
+
+**Script output format:** The script builds once, then for each seed:profile
+pair it generates, tests (60s timeout), and runs main.vole (30s timeout). It
+outputs **JSONL to stdout** — one JSON object per line, one per seed:
+
+```json
+{"seed":12345,"profile":"full","dir_name":"soaring-swift-penguin","dir":"/tmp/vole-stress/soaring-swift-penguin","test_status":"pass","run_status":"pass","error_summary":""}
 ```
 
-- If both pass: mark `pass`
-- If either fails or times out: mark `fail`, record error in `error_summary`
-  (**truncate to first 20 lines** — keep the key error, not full backtraces)
+In `--diff` mode, an additional `diff_mismatch` field is included (empty string
+if both builds agree, otherwise describes the difference).
+
+Status values: `pass`, `fail`, `timeout`, `skip`. Progress goes to stderr.
+
+**Parsing the JSONL output:** For each line, update the corresponding seed in
+the state file:
+- `test_status` and `run_status` both `pass` → mark seed `pass`
+- Any `fail` or `timeout` → mark seed `fail`, record `error_summary`
+- `diff_mismatch` non-empty → mark seed `fail` even if both builds "pass"
+  (the mismatch itself is the bug)
+- Update the seed's `dir` and `dir_name` fields from the JSONL output
 
 Process all pending seeds in one iteration before moving on.
 
@@ -141,7 +206,9 @@ For each `fail` seed:
 
 Extract a fingerprint from the error: the panic location (e.g.
 `panicked at frontend.rs:509`), the error code + message (e.g.
-`[E2023]: unknown method 'foo'`), or the signal (e.g. `signal 11`).
+`[E2023]: unknown method 'foo'`), the signal (e.g. `signal 11`), or the
+ASan error type and location (e.g.
+`AddressSanitizer: heap-use-after-free on address 0x... at pc 0x...`).
 Store in `error_fingerprint`.
 
 #### 3b. Check for duplicates
@@ -164,7 +231,12 @@ primary.
 - `[E0xxx]` lexer errors, `[E1xxx]` parser errors
 - `[E2xxx]` sema errors where generated code is clearly structurally wrong
   (impossible types, undefined names that should have been declared)
+- Runtime panics caused by invalid generated code (e.g. array index OOB
+  on empty arrays from `filter().collect()`)
 - Set `error_category: "generator"`
+- **Generator bugs MUST be fixed** — do not dismiss them as "pre-existing"
+  or move on. If the same generator bug keeps appearing, fix the root cause
+  in `src/tools/vole-stress/` before proceeding to the next round.
 
 **Sema error** (type checker bug):
 - `[E2xxx]` errors where generated code looks valid but type checker rejects it
@@ -173,6 +245,9 @@ primary.
 
 **Codegen error** (code generation / runtime bug):
 - No E-code errors, timeouts, signal 11 (segfault), panics, wrong results
+- AddressSanitizer errors (heap-use-after-free, double-free, heap-buffer-overflow,
+  stack-buffer-overflow) — these are always codegen bugs indicating memory
+  safety issues in the compiler runtime or generated code
 - Set `error_category: "codegen"`
 
 ### 4. Reduce (`fail` seeds with `error_category` set)
@@ -187,6 +262,7 @@ error type:
 | Segfault | `--signal 11` |
 | Timeout | `--timeout 60` |
 | Assertion failure | `--stderr "assertion failed" --exit-code 1` |
+| ASan error | `--stderr "AddressSanitizer" --exit-code 1` |
 | Generic crash | `--exit-code 1 --stderr "<specific error text>"` |
 
 Always use `--command` with `--manifest-path` since vole-reduce runs from the
@@ -197,6 +273,15 @@ cargo run -p vole-reduce -- <dir>/ \
   --command 'timeout 90 cargo run --manifest-path /home/phil/code/personal/vole/Cargo.toml -- test {file}' \
   --timeout 60 \
   <oracle-flags>
+```
+
+For ASan-detected bugs, use the ASan binary in the oracle command instead:
+
+```bash
+cargo run -p vole-reduce -- <dir>/ \
+  --command 'timeout 90 env ASAN_OPTIONS=detect_leaks=0 /home/phil/code/personal/vole/target-asan/x86_64-unknown-linux-gnu/debug/vole test {file}' \
+  --timeout 60 \
+  --stderr "AddressSanitizer" --exit-code 1
 ```
 
 After reduction completes:
@@ -223,6 +308,14 @@ Fix ONE seed per iteration to keep changes focused and reviewable.
 Generator bugs are straightforward vole-stress fixes and do NOT get tickets.
 Read the reduced test case, fix the generator code in `src/tools/vole-stress/`,
 run `just pre-commit`, commit, and mark `fixing`.
+
+<IMPORTANT>
+Generator bugs MUST be fixed immediately — there is no such thing as a
+"pre-existing" generator bug. If the generator produces code that panics at
+runtime (e.g. array index OOB on empty arrays), that is a bug in the generator
+that must be root-caused and fixed, not noted and skipped. Fix the generator
+so it never produces that invalid pattern again.
+</IMPORTANT>
 
 #### Sema/codegen bugs — dispatch a sub-agent
 
@@ -287,6 +380,10 @@ If new failure: mark `fail` again with new error, clear `error_category`.
 
 ### 7. Round Complete (all seeds `pass`, `verified`, `skipped`, or `dupe`)
 
+**A round is NOT complete if any generator bugs were observed but not fixed.**
+Generator bugs must be fixed before moving to the next round. Only sema/codegen
+bugs that hit the 15-minute time limit may be `skipped`.
+
 When all K seeds in the current round are terminal (`pass`, `verified`,
 `skipped`, or `dupe`):
 
@@ -298,9 +395,14 @@ When all K seeds in the current round are terminal (`pass`, `verified`,
    seeds in this round
 3. Print a summary: `Round N complete: X/K passed, Y bugs fixed, S skipped, D dupes`
 4. If `round >= max_rounds`: output `<promise>STRESS_HUNT_DONE</promise>` and stop
-5. **If zero non-dupe failures**: run Generator Evolution (see below) before
-   continuing
-6. Pick K fresh random seeds, distribute across profiles round-robin,
+5. **If any non-dupe failures occurred**: reset `consecutive_clean` to 0
+6. **If zero non-dupe failures** (clean round):
+   - Increment `consecutive_clean`
+   - If `consecutive_clean == 1`: double K for next round (capped at 100),
+     do NOT evolve the generator — just run more seeds at current complexity
+   - If `consecutive_clean >= 2`: run Generator Evolution (see below),
+     then reset K back to `base_k` for the next round
+7. Pick K fresh random seeds, distribute across profiles round-robin,
    replace `seeds` array, increment `round`
 
 ## Timeout Handling
@@ -368,29 +470,39 @@ item with enough context for someone to pick up where you left off.
 
 ## Generator Evolution (clean rounds)
 
-When a round completes with **zero non-dupe failures**, add a small feature to
-`vole-stress` that increases language coverage. The goal is to generate
-increasingly exotic but **valid** Vole code.
+When a round completes with **zero non-dupe failures**, decide whether to
+evolve or just run more seeds:
+
+- **First clean round in a row**: double K for the next round (up to 100),
+  do NOT evolve. More seeds at current complexity is cheaper than evolving.
+- **Second+ consecutive clean round**: evolve the generator, then reset K
+  back to the original value for the next round.
+
+The goal is to generate increasingly exotic but **valid** Vole code — with
+a bias toward *feature interactions* and *edge cases* over breadth.
 
 This runs **before** the next round starts, not in parallel.
 
 ### Process
 
-1. Pick ONE small enhancement from the priority areas below
-2. **Verify syntax first**: before writing any generator code, write a small
+1. **Re-read `.claude/stress-hunt-journal.md`** before picking a feature —
+   check for reserved words, syntax gotchas, and known pitfalls
+2. Pick ONE small enhancement from the priority areas below
+3. **Verify syntax first**: before writing any generator code, write a small
    hand-crafted `.vole` file in `/tmp/` that uses the feature you plan to
    generate. Run it with `cargo run -- test /tmp/test_feature.vole` (or
    `cargo run -- run /tmp/test_feature.vole`). This catches wrong assumptions
    about syntax early (e.g. tuple indexing is `tuple[0]` not `tuple.0`).
    If the syntax doesn't work as expected, adjust your plan or pick a
-   different feature.
-3. Launch a sub-agent to implement it. The sub-agent MUST:
+   different feature. **If you learn something new (reserved words, syntax
+   quirks), append it to the journal.**
+4. Launch a sub-agent to implement it. The sub-agent MUST:
    - Read existing `test/**/*.vole` files to understand valid syntax/structure
    - Make the change to `src/tools/vole-stress/`
    - Run `just pre-commit` to verify the change compiles
    - If pre-commit fails, fix or revert
-4. **Wait for the sub-agent to complete** before continuing
-5. **Validate** with multiple seeds across profiles:
+5. **Wait for the sub-agent to complete** before continuing
+6. **Validate** with multiple seeds across profiles:
    ```bash
    for seed in 999999 888888 777777 666666 555555; do
      cargo run -p vole-stress -- --seed $seed --profile full --output /tmp/vole-stress-validate
@@ -399,11 +511,11 @@ This runs **before** the next round starts, not in parallel.
    done
    ```
    Also validate any new profile specifically with 3+ seeds.
-6. **Classify validation failures** (see below)
-7. If validation passes: **commit** the change, then proceed to the next round
-8. **If a new profile was added**: append its name to the `profiles` array in
+7. **Classify validation failures** (see below)
+8. If validation passes: **commit** the change, then proceed to the next round
+9. **If a new profile was added**: append its name to the `profiles` array in
    the state file so it gets used in round-robin seed distribution going forward.
-9. The next round's stress tests will exercise the new feature across K seeds
+10. The next round's stress tests will exercise the new feature across K seeds
 
 ### Classifying validation failures
 
@@ -449,57 +561,90 @@ generator change causes widespread failures:
 
 Only proceed to the next round after Part 2 is complete.
 
-### Priority Areas
+### Choosing What to Evolve
 
-Pick enhancements in rough priority order. Reference `test/**/*.vole` files
-for valid syntax patterns before implementing.
+Roll a dice (`shuf -i 1-10 -n 1`) to select the evolution category:
 
-**a) Language coverage gaps** — features the generator doesn't use yet:
-- `match` with guards (`_ if condition => ...`)
-- Nested `when`/`match` in more positions (arguments, field values)
-- String interpolation with expressions (`"result: {x + y}"`)
-- Tuple indexing (`tuple.0`, `tuple.1`)
+| Roll | Category | Why |
+|------|----------|-----|
+| 1-4  | **Feature interactions** | Cross-cutting combos are where real bugs hide |
+| 5-7  | **Edge cases & boundaries** | Boundary conditions stress codegen/RC/sema |
+| 8-9  | **Language features** | New syntax coverage, structural patterns |
+| 10   | **Breadth** | Stdlib methods, API surface |
+
+Record the roll and chosen category in the commit message (e.g.
+`vole-stress: [roll=3/interactions] generate closures capturing union fields`).
+
+### Category Details
+
+Reference `test/**/*.vole` files for valid syntax patterns before implementing.
+
+**Feature interactions** (rolls 1-4) — combine 2+ features that stress
+different compiler subsystems together. These find the most bugs because
+they exercise codegen paths that individual features don't reach alone.
+
+Pick combinations, not individual features. Examples:
+- Generics + interface dispatch (generic fn calling interface method)
+- Closures + RC types (closure capturing a class instance or string)
+- Unions + pattern matching + RC (match on union variant containing RC type)
+- Generics + closures (generic fn taking closure parameter)
+- Interface upcasting + method calls in generic context
+- Optional chaining on results of generic function calls
+- Fallible functions + closures (`try` block inside closure)
+- Iterators + closures capturing outer mutable state
+- Cross-module generics (generic type defined in one module, used in another)
+- Nested containers (array of optional of class implementing interface)
+- Match/when inside closures that capture variables
+- String interpolation with method calls on generic types
+- Destructuring + union types + optional fields
+- Multiple interface implementations + generic constraints
+- Recursive functions with generic parameters and interface bounds
+
+**Edge cases & boundaries** (rolls 5-7) — boundary conditions, unusual but
+valid inputs, and patterns that stress reference counting, memory layout,
+or type resolution.
+
+Examples:
+- Empty arrays/strings passed to iterator chains
+- Deeply nested optional unwrapping (`x??.field??.method()`)
+- Zero-variant and single-variant unions
+- Functions with many parameters (8+, 16+) — stresses calling conventions
+- Large tuple types (5+, 8+ elements)
+- Deeply nested function calls (f(g(h(x)))) with type coercions at each level
+- Match/when with many arms (20+, 50+)
+- Strings containing special characters, empty strings, very long strings
+- Numeric boundary values (i32::MAX, i64::MIN, etc.) in expressions
+- Classes with many fields (10+, 20+), some optional, some RC
+- Arrays with mixed operations (push then pop then iterate then map)
+- Chained method calls (5+ deep) on iterators or strings
+- Diamond interface inheritance with method name conflicts
+- Default parameter values that are complex expressions
+- Break/continue in nested loops with closures in between
+
+**Language features** (rolls 8-9) — new syntax or structural patterns
+the generator doesn't use yet. Focus on features that are likely to interact
+with existing generation in complex ways.
+
+Examples:
+- Type aliases (especially aliasing generic types)
+- Nested generic types (`Array<Optional<MyClass<T>>>`)
 - Multi-line string literals
 - `unreachable` keyword in exhaustive branches
-- Range expressions in more contexts (`for i in 0..n`)
-- Chained comparisons and boolean logic patterns
-- Type aliases
-- Nested generic types
-
-**b) Exotic but valid patterns:**
-- Deeply nested type expressions (optional of array of tuple)
-- Union types with 3+ variants
-- Functions returning functions (closures)
-- Closures capturing outer variables
-- Diamond interface implementations
-- Method calls in string interpolation
-- Chained optional unwrap (`value ?? default ?? fallback`)
-- Nested destructuring
-- Passing class instances as interface-typed parameters
-- Recursive data patterns (where valid)
-
-**c) Standard library usage (excluding IO):**
-- String methods: `.contains()`, `.length()`, `.split()`, `.trim()`,
-  `.starts_with()`, `.ends_with()`, `.to_upper()`, `.to_lower()`
-- Array methods: `.length()`, `.map()`, `.filter()`, `.push()`, `.pop()`
-- Math operations: bitwise, shifts, overflow behavior
-- Type conversions between numeric types
-- Optional chaining and coalescing patterns
-
-**d) Structural patterns:**
-- Multiple implement blocks for the same class
-- Fallible functions with `try`/`raise`
-- Generic functions with interface constraints
 - Modules re-exporting imported symbols
+- Multiple implement blocks for the same class
 - Test blocks that exercise error paths
-- Complex control flow (break/continue in nested loops)
-- Large switch/match with many arms
+- Complex control flow (break/continue in nested loops with early returns)
+- Recursive data patterns (where valid)
+- Functions returning functions (closures)
 
-**e) New profiles** (add to `profile.rs` alongside existing ones):
-- Profiles that focus generation on specific feature combinations
-- E.g. `closures-heavy`, `unions-heavy`, `fallible-heavy`, `stdlib-heavy`
-- Each profile should tune the config knobs to emphasize its focus area
-- When adding a new profile, update the state file's `profiles` array
+**Breadth** (roll 10) — adding individual stdlib methods, API surface
+coverage. Still useful but unlikely to find new bug categories.
+
+Examples:
+- String methods not yet generated
+- Array/iterator methods not yet generated
+- Math operations: bitwise, shifts
+- Type conversions between numeric types
 
 ### Rules for generator changes
 
@@ -525,6 +670,11 @@ When fixing **sema** or **codegen** bugs, always add a regression test to
 - NEVER simplify tests — you are hiding bugs
 - NEVER assume "pre-existing failures" — you likely broke it
 - NEVER skip work or decide it's "too complex"
+- **ALL generator bugs must be fixed immediately** — do not label them
+  "pre-existing" and move on. If a generator pattern produces invalid code
+  (e.g. indexing empty arrays from `filter().collect()`), find and fix the
+  root cause in `src/tools/vole-stress/`. A recurring generator bug that is
+  never fixed is wasted signal in every future round.
 - Always `just pre-commit` before any commit
 - Track shortcuts in tickets with `tk` if any are taken
 - Fix ONE bug per iteration to keep commits focused
