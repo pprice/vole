@@ -381,19 +381,10 @@ impl Compiler<'_> {
 
     /// Compile pure Vole functions from imported modules.
     /// These are functions defined in module files (not external FFI functions).
-    fn compile_module_functions(&mut self) -> CodegenResult<()> {
-        // Collect module paths first to avoid borrow issues
-        let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
-        tracing::debug!(
-            ?module_paths,
-            "compile_module_functions: processing module paths"
-        );
-
-        // ============================================
-        // PASS 1: Declare ALL functions across ALL modules
-        // This ensures cross-module calls can be resolved
-        // ============================================
-        for module_path in &module_paths {
+    /// Declare all module functions, finalize types, and register implement blocks.
+    /// Must run before compiling function bodies so cross-module calls can be resolved.
+    fn declare_module_types_and_functions(&mut self, module_paths: &[String]) {
+        for module_path in module_paths {
             tracing::debug!(module_path, "compile_module_functions: declaring functions");
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
 
@@ -423,7 +414,6 @@ impl Compiler<'_> {
                 }
             }
 
-            // Get module ID for type resolution
             let module_id = self.query().module_id_or_main(module_path);
 
             // Finalize module classes (register type metadata, declare methods)
@@ -460,21 +450,24 @@ impl Compiler<'_> {
                 }
             }
         }
+    }
 
-        // ============================================
-        // PASS 1.5: Declare and compile monomorphized generic function instances
-        // Module functions may call generic functions defined in the same module
-        // (e.g., `identity<T>` called from `use_identity`). These monomorphized
-        // instances must be declared and compiled before PASS 2 compiles the
-        // non-generic function bodies that reference them.
-        // ============================================
+    fn compile_module_functions(&mut self) -> CodegenResult<()> {
+        // Collect module paths first to avoid borrow issues
+        let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
+        tracing::debug!(
+            ?module_paths,
+            "compile_module_functions: processing module paths"
+        );
+
+        // Pass 1: Declare all functions and finalize types across all modules
+        self.declare_module_types_and_functions(&module_paths);
+
+        // Pass 1.5: Declare and compile monomorphized generic function instances
         self.declare_monomorphized_instances(true)?;
         self.compile_module_monomorphized_instances()?;
 
-        // ============================================
-        // PASS 2: Compile ALL function bodies across ALL modules
-        // Now all functions are declared, so cross-module calls work
-        // ============================================
+        // Pass 2: Compile all function bodies (cross-module calls now resolved)
         for module_path in &module_paths {
             tracing::debug!(module_path, "compile_module_functions: compiling bodies");
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
