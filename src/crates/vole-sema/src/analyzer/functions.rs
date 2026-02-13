@@ -74,6 +74,22 @@ impl Analyzer {
         }
     }
 
+    /// Create a new scope and define function/method/lambda parameters in it.
+    pub(super) fn enter_param_scope(&mut self, params: &[Param], type_ids: &[ArenaTypeId]) {
+        let parent = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent);
+        for (param, &ty_id) in params.iter().zip(type_ids.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                    declaration_span: param.span,
+                },
+            );
+        }
+    }
+
     /// Infer the return type from collected return_types in ReturnInfo.
     ///
     /// This enables multi-branch return type inference:
@@ -144,19 +160,7 @@ impl Analyzer {
         };
 
         // Create new scope with parameters
-        let parent_scope = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(parent_scope);
-
-        for (param, &ty_id) in func.params.iter().zip(func_type.params_id.iter()) {
-            self.scope.define(
-                param.name,
-                Variable {
-                    ty: ty_id,
-                    mutable: false,
-                    declaration_span: param.span,
-                },
-            );
-        }
+        self.enter_param_scope(&func.params, &func_type.params_id);
 
         // Type-check parameter default expressions
         self.check_param_defaults(&func.params, &func_type.params_id, interner)?;
@@ -255,19 +259,7 @@ impl Analyzer {
         let saved_ctx = self.enter_function_context(concrete_return_id);
 
         // Create new scope with parameters (using concrete types)
-        let parent_scope = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(parent_scope);
-
-        for (param, &ty_id) in func.params.iter().zip(concrete_param_ids.iter()) {
-            self.scope.define(
-                param.name,
-                Variable {
-                    ty: ty_id,
-                    mutable: false,
-                    declaration_span: param.span,
-                },
-            );
-        }
+        self.enter_param_scope(&func.params, &concrete_param_ids);
 
         // Set up type parameter scope with the substitutions
         // This maps type param names to their concrete types
@@ -667,21 +659,8 @@ impl Analyzer {
             self.type_param_stack.push_merged(method_type_params);
         }
 
-        // Create scope WITHOUT 'self'
-        let parent_scope = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(parent_scope);
-
-        // Add parameters (no 'self' for static methods)
-        for (param, &ty_id) in method.params.iter().zip(params_id.iter()) {
-            self.scope.define(
-                param.name,
-                Variable {
-                    ty: ty_id,
-                    mutable: false,
-                    declaration_span: param.span,
-                },
-            );
-        }
+        // Create scope WITHOUT 'self', define parameters
+        self.enter_param_scope(&method.params, &params_id);
 
         // Check body
         let body_info = self.check_func_body(body, interner)?;
