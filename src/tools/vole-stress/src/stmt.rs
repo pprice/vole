@@ -1621,6 +1621,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_range_iter_map_collect(ctx);
         }
 
+        // ~2% chance: match on interpolated string length
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_interpolation_length(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: range for-loop with when body accumulation
+        if self.rng.gen_bool(0.02) {
+            return self.generate_for_range_when_accum(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9449,6 +9461,96 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         format!(
             "let {} = (0..{}).iter().map((x) => {}).collect()",
             name, n, map_op
+        )
+    }
+
+    /// Generate match on interpolated string length.
+    /// E.g.: `match "val={x}".length() { 4 => "short", 5 => "medium", _ => "long" }`
+    fn try_generate_match_interpolation_length(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        // Need a variable to interpolate
+        let vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| {
+                matches!(
+                    ty,
+                    TypeInfo::Primitive(
+                        PrimitiveType::I64
+                            | PrimitiveType::I32
+                            | PrimitiveType::String
+                            | PrimitiveType::Bool
+                    )
+                )
+            })
+            .map(|(name, _, _)| name.clone())
+            .collect();
+
+        if vars.is_empty() {
+            return None;
+        }
+
+        let var = &vars[self.rng.gen_range(0..vars.len())];
+        let name = ctx.new_local_name();
+        let prefix = ["val", "x", "result", "out"];
+        let pfx = prefix[self.rng.gen_range(0..prefix.len())];
+
+        use std::collections::HashSet;
+        let mut used_vals = HashSet::new();
+        let mut arms = Vec::new();
+        for _ in 0..self.rng.gen_range(2..=3) {
+            let v = self.rng.gen_range(1..=20) as i64;
+            if used_vals.insert(v) {
+                let labels = ["\"short\"", "\"medium\"", "\"exact\""];
+                let label = labels[arms.len().min(labels.len() - 1)];
+                arms.push(format!("{} => {}", v, label));
+            }
+        }
+        arms.push("_ => \"other\"".to_string());
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = match \"{}={{{}}}\".length() {{ {} }}",
+            name,
+            pfx,
+            var,
+            arms.join(", ")
+        ))
+    }
+
+    /// Generate range for-loop with when body accumulating strings.
+    /// E.g.: `let mut s = ""; for i in 0..5 { s = s + when { i > 2 => "big", _ => "small" } }`
+    fn generate_for_range_when_accum(&mut self, ctx: &mut StmtContext) -> String {
+        let acc_name = ctx.new_local_name();
+        let iter_var = ctx.new_local_name();
+        let n = self.rng.gen_range(3..=6);
+        let threshold = self.rng.gen_range(1..n);
+        let indent = self.indent;
+
+        ctx.protected_vars.push(acc_name.clone());
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            true,
+        );
+        format!(
+            "let mut {} = \"\"\n{}for {} in 0..{} {{\n{}  {} = {} + when {{ {} > {} => \"hi\", _ => \"lo\" }}\n{}}}",
+            acc_name,
+            " ".repeat(indent * 2),
+            iter_var,
+            n,
+            " ".repeat((indent + 1) * 2),
+            acc_name,
+            acc_name,
+            iter_var,
+            threshold,
+            " ".repeat(indent * 2),
         )
     }
 
