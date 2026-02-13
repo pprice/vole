@@ -735,13 +735,8 @@ fn compile_external_wrapper<C: VtableCtx>(
     }
 
     // Get string names from NameId
-    let name_table = ctx.analyzed().name_table();
-    let module_path = name_table
-        .last_segment_str(external_info.module_path)
-        .ok_or_else(|| "module_path NameId has no segment".to_string())?;
-    let native_name = name_table
-        .last_segment_str(external_info.native_name)
-        .ok_or_else(|| "native_name NameId has no segment".to_string())?;
+    let (module_path, native_name) =
+        crate::context::resolve_external_names(ctx.analyzed().name_table(), external_info)?;
 
     // Extract just the pointer value to end the borrow before jit_module() call
     let native_func_ptr = ctx

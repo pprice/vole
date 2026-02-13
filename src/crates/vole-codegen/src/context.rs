@@ -2532,16 +2532,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         return_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Get string names from NameId
-        let (module_path, native_name) = {
-            let name_table = self.name_table();
-            let mp = name_table
-                .last_segment_str(external_info.module_path)
-                .ok_or_else(|| "module_path NameId has no segment".to_string())?;
-            let nn = name_table
-                .last_segment_str(external_info.native_name)
-                .ok_or_else(|| "native_name NameId has no segment".to_string())?;
-            (mp, nn)
-        };
+        let (module_path, native_name) =
+            resolve_external_names(self.name_table(), external_info)?;
 
         // Check if this is a compiler intrinsic
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
@@ -3600,4 +3592,18 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
     fn method_func_keys(&self) -> &FxHashMap<(NameId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
     }
+}
+
+/// Resolve the module path and native function name strings from an ExternalMethodInfo.
+pub(crate) fn resolve_external_names(
+    name_table: &vole_identity::NameTable,
+    external_info: &ExternalMethodInfo,
+) -> CodegenResult<(String, String)> {
+    let module_path = name_table
+        .last_segment_str(external_info.module_path)
+        .ok_or_else(|| "module_path NameId has no segment".to_string())?;
+    let native_name = name_table
+        .last_segment_str(external_info.native_name)
+        .ok_or_else(|| "native_name NameId has no segment".to_string())?;
+    Ok((module_path, native_name))
 }
