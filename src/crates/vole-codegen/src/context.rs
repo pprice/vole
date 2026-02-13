@@ -2687,10 +2687,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             IntrinsicHandler::UnaryFloatOp(op) => {
                 if args.is_empty() {
-                    return Err(CodegenError::internal_with_context(
-                        "wrong argument count",
-                        format!("{} expects 1 argument, got {}", intrinsic_key, args.len()),
-                    ));
+                    return Err(CodegenError::arg_count(intrinsic_key, 1, args.len()));
                 }
                 let arg = args[0];
                 let (value, ty, type_id) = match op {
@@ -2748,10 +2745,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::BinaryFloatOp(op) => {
                 use crate::intrinsics::BinaryFloatOp;
                 if args.len() < 2 {
-                    return Err(CodegenError::internal_with_context(
-                        "wrong argument count",
-                        format!("{} expects 2 arguments, got {}", intrinsic_key, args.len()),
-                    ));
+                    return Err(CodegenError::arg_count(intrinsic_key, 2, args.len()));
                 }
                 let arg1 = args[0];
                 let arg2 = args[1];
@@ -2778,10 +2772,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::UnaryIntOp(op) => {
                 use crate::intrinsics::UnaryIntOp;
                 if args.is_empty() {
-                    return Err(CodegenError::internal_with_context(
-                        "wrong argument count",
-                        format!("{} expects 1 argument, got {}", intrinsic_key, args.len()),
-                    ));
+                    return Err(CodegenError::arg_count(intrinsic_key, 1, args.len()));
                 }
                 let arg = args[0];
                 let (value, ty, type_id) = match op {
@@ -2893,10 +2884,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::BinaryIntOp(op) => {
                 use crate::intrinsics::BinaryIntOp;
                 if args.len() < 2 {
-                    return Err(CodegenError::internal_with_context(
-                        "wrong argument count",
-                        format!("{} expects 2 arguments, got {}", intrinsic_key, args.len()),
-                    ));
+                    return Err(CodegenError::arg_count(intrinsic_key, 2, args.len()));
                 }
                 let arg1 = args[0];
                 let arg2 = args[1];
@@ -3259,10 +3247,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::UnaryIntWrappingOp(op) => {
                 use crate::intrinsics::UnaryIntWrappingOp;
                 if args.is_empty() {
-                    return Err(CodegenError::internal_with_context(
-                        "wrong argument count",
-                        format!("{} expects 1 argument, got {}", intrinsic_key, args.len()),
-                    ));
+                    return Err(CodegenError::arg_count(intrinsic_key, 1, args.len()));
                 }
                 let arg = args[0];
                 let (value, ty, type_id) = match op {
@@ -3288,10 +3273,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             IntrinsicHandler::CheckedIntOp(op) => {
                 if args.len() < 2 {
-                    return Err(CodegenError::internal_with_context(
-                        "wrong argument count",
-                        format!("{} expects 2 arguments, got {}", intrinsic_key, args.len()),
-                    ));
+                    return Err(CodegenError::arg_count(intrinsic_key, 2, args.len()));
                 }
                 let arg1 = args[0];
                 let arg2 = args[1];

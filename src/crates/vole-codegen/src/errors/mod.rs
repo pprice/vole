@@ -18,7 +18,7 @@ pub enum CodegenError {
 
     /// Wrong number of arguments to a builtin or intrinsic
     ArgumentCount {
-        function: &'static str,
+        function: String,
         expected: usize,
         found: usize,
     },
@@ -64,9 +64,9 @@ impl CodegenError {
     }
 
     /// Create an argument count error
-    pub fn arg_count(function: &'static str, expected: usize, found: usize) -> Self {
+    pub fn arg_count(function: impl Into<String>, expected: usize, found: usize) -> Self {
         CodegenError::ArgumentCount {
-            function,
+            function: function.into(),
             expected,
             found,
         }
