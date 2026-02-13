@@ -17,7 +17,7 @@ use crate::types::{
     value_to_word, word_to_value_type_id,
 };
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
-use vole_identity::NamerLookup;
+use vole_identity::{ModuleId, NamerLookup};
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::generic::{ClassMethodMonomorphKey, StaticMethodMonomorphKey};
 use vole_sema::resolution::ResolvedMethod;
@@ -104,140 +104,15 @@ impl Cg<'_, '_, '_> {
         let method_name_str = self.interner().resolve(mc.method);
 
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
-        // These go to either external native functions or pure Vole module functions
-        // Extract module_id before the if-let to avoid holding arena borrow
         let module_id_opt = self.arena().unwrap_module(obj.type_id).map(|m| m.module_id);
         if let Some(module_id) = module_id_opt {
-            let module_path = self
-                .analyzed()
-                .name_table()
-                .module_path(module_id)
-                .to_string();
-            let name_id = module_name_id(self.analyzed(), module_id, method_name_str);
-            // Get the method resolution (reuse current_module_path from above)
-            let resolution = self
-                .analyzed()
-                .query()
-                .method_at_in_module(expr_id, current_module_path.as_deref());
-            let Some(ResolvedMethod::Implemented {
-                external_info,
-                func_type_id,
-                ..
-            }) = resolution
-            else {
-                return Err(CodegenError::not_found(
-                    "module method",
-                    format!("{}::{}", module_path, method_name_str),
-                ));
-            };
-
-            // Get return type from arena
-            let return_type_id = {
-                let arena = self.arena();
-                let (_, ret, _) = arena
-                    .unwrap_function(*func_type_id)
-                    .expect("INTERNAL: module method: missing function type");
-                ret
-            };
-
-            // Compile arguments, tracking owned RC temps for cleanup
-            let (args, mut rc_temps) = self.compile_call_args_tracking_rc(&mc.args)?;
-
-            if let Some(ext_info) = external_info {
-                // External FFI function
-                let result = self.call_external_id(ext_info, &args, return_type_id)?;
-                self.consume_rc_args(&mut rc_temps)?;
-                return Ok(result);
-            }
-
-            // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
-            if let Some(monomorph_key) = self.query().monomorph_for(expr_id) {
-                let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
-                    (
-                        inst.original_name,
-                        inst.func_type.return_type_id,
-                        inst.substitutions.clone(),
-                    )
-                });
-
-                if let Some((original_name, mono_return_type_id, substitutions)) = instance_data
-                    && let Some(callee_name) = self.name_table().last_segment_str(original_name)
-                    && let Some(generic_ext_info) = self
-                        .analyzed()
-                        .implement_registry()
-                        .get_generic_external(&callee_name)
-                    && let Some(key) = self.find_intrinsic_key_for_monomorph(
-                        &generic_ext_info.type_mappings,
-                        &substitutions,
-                    )
-                {
-                    let ext_module_path = self
-                        .name_table()
-                        .last_segment_str(generic_ext_info.module_path)
-                        .unwrap_or_default();
-
-                    let return_type_id = self.substitute_type(mono_return_type_id);
-
-                    // Clean up rc_temps from initial arg compilation
-                    // (generic intrinsic recompiles args internally)
-                    self.consume_rc_args(&mut rc_temps)?;
-                    return self.call_generic_external_intrinsic_args(
-                        &ext_module_path,
-                        &key,
-                        &mc.args,
-                        return_type_id,
-                    );
-                }
-            }
-
-            // Pure Vole function - call by mangled name
-            let name_id = name_id.ok_or_else(|| {
-                format!(
-                    "Module method {}::{} not interned",
-                    module_path, method_name_str
-                )
-            })?;
-            let func_key = self.funcs().intern_name_id(name_id);
-            let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
-                format!(
-                    "Module function {}::{} not found",
-                    module_path, method_name_str
-                )
-            })?;
-            let func_ref = self
-                .codegen_ctx
-                .jit_module()
-                .declare_func_in_func(func_id, self.builder.func);
-
-            // Handle sret convention for large struct returns (3+ flat slots).
-            // The function signature has a hidden first parameter for the return
-            // buffer pointer that must be prepended to the call arguments.
-            let is_sret = self.is_sret_struct_return(return_type_id);
-            let mut call_args = args;
-            if is_sret {
-                let ptr_type = self.ptr_type();
-                let flat_count = self
-                    .struct_flat_slot_count(return_type_id)
-                    .expect("INTERNAL: sret module call: missing flat slot count");
-                let total_size = (flat_count as u32) * 8;
-                let slot = self.alloc_stack(total_size);
-                let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-                call_args.insert(0, sret_ptr);
-            }
-
-            let coerced = self.coerce_call_args(func_ref, &call_args);
-            let call_inst = self.builder.ins().call(func_ref, &coerced);
-            self.field_cache.clear(); // Callee may mutate instance fields
-
-            // For sret, result[0] is the sret pointer we passed in
-            let result = if is_sret {
-                let results = self.builder.inst_results(call_inst);
-                CompiledValue::new(results[0], self.ptr_type(), return_type_id)
-            } else {
-                self.call_result(call_inst, return_type_id)
-            };
-            self.consume_rc_args(&mut rc_temps)?;
-            return Ok(result);
+            return self.module_method_call(
+                module_id,
+                mc,
+                expr_id,
+                method_name_str,
+                current_module_path.as_deref(),
+            );
         }
 
         // Handle built-in methods (passing concrete_return_hint for iter methods)
@@ -900,6 +775,145 @@ impl Cg<'_, '_, '_> {
                 .expect("INTERNAL: range iterator: RuntimeIterator<i64> type not pre-created")
         });
         Ok(CompiledValue::owned(result, self.ptr_type(), iter_type_id))
+    }
+
+    /// Handle method calls on module objects (e.g., math.sqrt(16.0), math.lerp(...)).
+    /// Dispatches to external native functions, generic intrinsics, or pure Vole module functions.
+    fn module_method_call(
+        &mut self,
+        module_id: ModuleId,
+        mc: &MethodCallExpr,
+        expr_id: NodeId,
+        method_name_str: &str,
+        current_module_path: Option<&str>,
+    ) -> CodegenResult<CompiledValue> {
+        let module_path = self
+            .analyzed()
+            .name_table()
+            .module_path(module_id)
+            .to_string();
+        let name_id = module_name_id(self.analyzed(), module_id, method_name_str);
+        let resolution = self
+            .analyzed()
+            .query()
+            .method_at_in_module(expr_id, current_module_path);
+        let Some(ResolvedMethod::Implemented {
+            external_info,
+            func_type_id,
+            ..
+        }) = resolution
+        else {
+            return Err(CodegenError::not_found(
+                "module method",
+                format!("{}::{}", module_path, method_name_str),
+            ));
+        };
+
+        // Get return type from arena
+        let return_type_id = {
+            let arena = self.arena();
+            let (_, ret, _) = arena
+                .unwrap_function(*func_type_id)
+                .expect("INTERNAL: module method: missing function type");
+            ret
+        };
+
+        // Compile arguments, tracking owned RC temps for cleanup
+        let (args, mut rc_temps) = self.compile_call_args_tracking_rc(&mc.args)?;
+
+        if let Some(ext_info) = external_info {
+            // External FFI function
+            let result = self.call_external_id(ext_info, &args, return_type_id)?;
+            self.consume_rc_args(&mut rc_temps)?;
+            return Ok(result);
+        }
+
+        // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
+        if let Some(monomorph_key) = self.query().monomorph_for(expr_id) {
+            let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+                (
+                    inst.original_name,
+                    inst.func_type.return_type_id,
+                    inst.substitutions.clone(),
+                )
+            });
+
+            if let Some((original_name, mono_return_type_id, substitutions)) = instance_data
+                && let Some(callee_name) = self.name_table().last_segment_str(original_name)
+                && let Some(generic_ext_info) = self
+                    .analyzed()
+                    .implement_registry()
+                    .get_generic_external(&callee_name)
+                && let Some(key) = self.find_intrinsic_key_for_monomorph(
+                    &generic_ext_info.type_mappings,
+                    &substitutions,
+                )
+            {
+                let ext_module_path = self
+                    .name_table()
+                    .last_segment_str(generic_ext_info.module_path)
+                    .unwrap_or_default();
+
+                let return_type_id = self.substitute_type(mono_return_type_id);
+
+                // Clean up rc_temps from initial arg compilation
+                // (generic intrinsic recompiles args internally)
+                self.consume_rc_args(&mut rc_temps)?;
+                return self.call_generic_external_intrinsic_args(
+                    &ext_module_path,
+                    &key,
+                    &mc.args,
+                    return_type_id,
+                );
+            }
+        }
+
+        // Pure Vole function - call by mangled name
+        let name_id = name_id.ok_or_else(|| {
+            format!(
+                "Module method {}::{} not interned",
+                module_path, method_name_str
+            )
+        })?;
+        let func_key = self.funcs().intern_name_id(name_id);
+        let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
+            format!(
+                "Module function {}::{} not found",
+                module_path, method_name_str
+            )
+        })?;
+        let func_ref = self
+            .codegen_ctx
+            .jit_module()
+            .declare_func_in_func(func_id, self.builder.func);
+
+        // Handle sret convention for large struct returns (3+ flat slots).
+        let is_sret = self.is_sret_struct_return(return_type_id);
+        let mut call_args = args;
+        if is_sret {
+            let ptr_type = self.ptr_type();
+            let flat_count = self
+                .struct_flat_slot_count(return_type_id)
+                .expect("INTERNAL: sret module call: missing flat slot count");
+            let total_size = (flat_count as u32) * 8;
+            let slot = self.alloc_stack(total_size);
+            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            call_args.insert(0, sret_ptr);
+        }
+
+        let coerced = self.coerce_call_args(func_ref, &call_args);
+        let call_inst = self.builder.ins().call(func_ref, &coerced);
+        self.field_cache.clear(); // Callee may mutate instance fields
+
+        // For sret, result[0] is the sret pointer we passed in
+        let result = if is_sret {
+            let results = self.builder.inst_results(call_inst);
+            CompiledValue::new(results[0], self.ptr_type(), return_type_id)
+        } else {
+            self.call_result(call_inst, return_type_id)
+        };
+        self.consume_rc_args(&mut rc_temps)?;
+        Ok(result)
     }
 
     /// Handle built-in methods on arrays, strings, and ranges.
