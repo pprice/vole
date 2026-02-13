@@ -1370,7 +1370,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         runtime: RuntimeFn,
     ) -> CodegenResult<cranelift::codegen::ir::FuncRef> {
         let key = self.funcs().runtime_key(runtime).ok_or_else(|| {
-            CodegenError::not_found("runtime function", runtime.name()).to_string()
+            CodegenError::not_found("runtime function", runtime.name())
         })?;
         self.func_ref(key)
     }

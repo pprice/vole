@@ -49,14 +49,14 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         .unwrap_class(resolved_type_id)
         .or_else(|| arena.unwrap_struct(resolved_type_id))
         .ok_or_else(|| {
-            CodegenError::type_mismatch("field access", "class or struct", "other type").to_string()
+            CodegenError::type_mismatch("field access", "class or struct", "other type")
         })?;
 
     let type_def = type_ctx.query.get_type(type_def_id);
     let generic_info = type_def
         .generic_info
         .as_ref()
-        .ok_or_else(|| CodegenError::not_found("generic_info", "type").to_string())?;
+        .ok_or_else(|| CodegenError::not_found("generic_info", "type"))?;
 
     // Build combined substitution map: type params -> type args, plus monomorphization context
     // This allows a single pass through the type tree instead of two.

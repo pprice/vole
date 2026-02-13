@@ -436,7 +436,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let arena = self.arena();
         let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
+            CodegenError::type_mismatch("union construction", "union type", "non-union")
         })?;
         let variants = variants.clone();
 
