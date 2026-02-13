@@ -1575,7 +1575,7 @@ impl Cg<'_, '_, '_> {
                     // This handles suffixed literals like `191_i64` matched against
                     // an i32 scrutinee (sema reports an error but codegen continues).
                     let coerced_lit =
-                        self.convert_for_select(lit_val.value, lit_val.ty, scrutinee.ty);
+                        self.convert_for_select(lit_val.value, scrutinee.ty);
 
                     // Use Vole type (not Cranelift type) to determine comparison method
                     let cmp = self.compile_equality_check(
@@ -1826,7 +1826,7 @@ impl Cg<'_, '_, '_> {
                 }
 
                 let converted =
-                    self.convert_for_select(body_val.value, body_val.ty, result_cranelift_type);
+                    self.convert_for_select(body_val.value, result_cranelift_type);
                 self.builder.ins().jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
@@ -1931,7 +1931,7 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
                 let converted =
-                    self.convert_for_select(body_val.value, body_val.ty, result_cranelift_type);
+                    self.convert_for_select(body_val.value, result_cranelift_type);
                 self.builder.ins().jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
@@ -2282,9 +2282,9 @@ impl Cg<'_, '_, '_> {
 
         // Ensure both values have the same type (may need conversion)
         let then_val =
-            self.convert_for_select(then_result.value, then_result.ty, result_cranelift_type);
+            self.convert_for_select(then_result.value, result_cranelift_type);
         let else_val =
-            self.convert_for_select(else_result.value, else_result.ty, result_cranelift_type);
+            self.convert_for_select(else_result.value, result_cranelift_type);
 
         // Extend condition to i8 if needed (select expects i8/i16/i32/i64 condition)
         let cond_val = if condition.ty == types::I8 {
@@ -2304,7 +2304,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Convert a value for use in select (ensure matching types).
-    fn convert_for_select(&mut self, value: Value, _from_ty: Type, to_ty: Type) -> Value {
+    fn convert_for_select(&mut self, value: Value, to_ty: Type) -> Value {
         // Use the actual Cranelift value type rather than the reported type,
         // since CompiledValue.ty can be stale when values flow through deeply
         // nested when/match block parameters.
@@ -2386,7 +2386,7 @@ impl Cg<'_, '_, '_> {
                 self.emit_rc_inc_for_type(then_result.value, result_type_id)?;
             }
             let converted =
-                self.convert_for_select(then_result.value, then_result.ty, result_cranelift_type);
+                self.convert_for_select(then_result.value, result_cranelift_type);
             self.builder.ins().jump(merge_block, &[converted.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
@@ -2409,7 +2409,7 @@ impl Cg<'_, '_, '_> {
                 self.emit_rc_inc_for_type(else_result.value, result_type_id)?;
             }
             let converted =
-                self.convert_for_select(else_result.value, else_result.ty, result_cranelift_type);
+                self.convert_for_select(else_result.value, result_cranelift_type);
             self.builder.ins().jump(merge_block, &[converted.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
@@ -2511,9 +2511,9 @@ impl Cg<'_, '_, '_> {
 
         // Ensure both values have the same type (may need conversion)
         let then_val =
-            self.convert_for_select(then_result.value, then_result.ty, result_cranelift_type);
+            self.convert_for_select(then_result.value, result_cranelift_type);
         let else_val =
-            self.convert_for_select(else_result.value, else_result.ty, result_cranelift_type);
+            self.convert_for_select(else_result.value, result_cranelift_type);
 
         // Extend condition to i8 if needed
         let cond_val = if condition.ty == types::I8 {
@@ -2640,11 +2640,7 @@ impl Cg<'_, '_, '_> {
                 if result_needs_rc && body_result.is_borrowed() {
                     self.emit_rc_inc_for_type(body_result.value, result_type_id)?;
                 }
-                let converted = self.convert_for_select(
-                    body_result.value,
-                    body_result.ty,
-                    result_cranelift_type,
-                );
+                let converted = self.convert_for_select(body_result.value, result_cranelift_type);
                 self.builder.ins().jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
