@@ -1647,6 +1647,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: single-element range operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_single_elem_range_let(ctx);
+        }
+
+        // ~2% chance: whitespace-heavy string operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_whitespace_string_ops(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9645,6 +9655,72 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             arr,
             arms.join(", ")
         ))
+    }
+
+    /// Generate single-element range operations.
+    /// E.g.: `(5..6).iter().collect()` — range with exactly one element.
+    fn generate_single_elem_range_let(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let start = self.rng.gen_range(0..=10);
+
+        match self.rng.gen_range(0..3) {
+            0 => {
+                // Collect single-element range
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                    false,
+                );
+                format!("let {} = ({}..{}).iter().collect()", name, start, start + 1)
+            }
+            1 => {
+                // Sum of single-element range
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                format!("let {} = ({}..{}).iter().sum()", name, start, start + 1)
+            }
+            _ => {
+                // Count of single-element range
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                format!("let {} = ({}..{}).iter().count()", name, start, start + 1)
+            }
+        }
+    }
+
+    /// Generate operations on whitespace-heavy strings.
+    /// Tests trim and other string methods on strings with leading/trailing/only whitespace.
+    fn generate_whitespace_string_ops(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let ws_strings = [
+            "  hello  ",
+            "  ",
+            " x ",
+            "\thello\t",
+            "  spaces  here  ",
+        ];
+        let s = ws_strings[self.rng.gen_range(0..ws_strings.len())];
+
+        match self.rng.gen_range(0..4) {
+            0 => {
+                // trim
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".trim()", name, s)
+            }
+            1 => {
+                // length
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                format!("let {} = \"{}\".trim().length()", name, s)
+            }
+            2 => {
+                // contains space
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                format!("let {} = \"{}\".contains(\" \")", name, s)
+            }
+            _ => {
+                // replace spaces
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".replace(\" \", \"\")", name, s)
+            }
+        }
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
