@@ -25,10 +25,6 @@ pub struct Lexer<'src> {
 
 impl<'src> Lexer<'src> {
     pub fn new(source: &'src str) -> Self {
-        Self::new_with_file(source, "<input>")
-    }
-
-    pub fn new_with_file(source: &'src str, _filename: &str) -> Self {
         let mut lexer = Self {
             source,
             bytes: source.as_bytes(),
@@ -1140,8 +1136,8 @@ mod tests {
     }
 
     #[test]
-    fn lexer_new_with_file_creates_errors() {
-        let mut lexer = Lexer::new_with_file("@", "test.vole");
+    fn lexer_new_creates_errors() {
+        let mut lexer = Lexer::new("@");
         lexer.next_token();
 
         let errors = lexer.take_errors();

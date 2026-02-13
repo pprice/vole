@@ -61,7 +61,7 @@ pub fn inspect_files(
         match inspect_type {
             InspectType::Ast => {
                 // Parse
-                let mut parser = Parser::with_file(&source, &file_path);
+                let mut parser = Parser::new(&source);
                 let program = match parser.parse_program() {
                     Ok(p) => p,
                     Err(e) => {

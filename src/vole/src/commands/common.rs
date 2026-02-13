@@ -127,7 +127,7 @@ pub fn compile_source(
     // Parse phase
     let (mut program, mut interner) = {
         let _span = tracing::info_span!("parse", file = %file_path).entered();
-        let mut parser = Parser::with_file(source, file_path);
+        let mut parser = Parser::new(source);
         parser.set_skip_tests(skip_tests);
         let program = match parser.parse_program() {
             Ok(prog) => prog,
@@ -494,7 +494,7 @@ pub fn inspect_ast_captured<W: Write>(
     mut stderr: W,
 ) -> Result<(), PipelineError> {
     // Parse
-    let mut parser = Parser::with_file(source, file_path);
+    let mut parser = Parser::new(source);
     let program = match parser.parse_program() {
         Ok(prog) => prog,
         Err(e) => {

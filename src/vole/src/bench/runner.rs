@@ -109,7 +109,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 
     // Lexing phase - we time how long it takes to tokenize everything
     let lex_start = Instant::now();
-    let mut lexer = Lexer::new_with_file(source, file_path);
+    let mut lexer = Lexer::new(source);
     // Consume all tokens to measure lexing
     let mut token_count = 0usize;
     loop {
@@ -131,7 +131,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 
     // Parse phase
     let parse_start = Instant::now();
-    let mut parser = Parser::with_file(source, file_path);
+    let mut parser = Parser::new(source);
     let program = parser
         .parse_program()
         .map_err(|e| format!("parse error: {:?}", e.error))?;
@@ -188,7 +188,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 /// Compile source code and return the JIT context ready for execution
 fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     // Parse
-    let mut parser = Parser::with_file(source, file_path);
+    let mut parser = Parser::new(source);
     let program = parser
         .parse_program()
         .map_err(|e| format!("parse error: {:?}", e.error))?;

@@ -49,23 +49,6 @@ impl<'src> Parser<'src> {
         }
     }
 
-    /// Create a parser with a custom file name for diagnostics
-    pub fn with_file(source: &'src str, file: &str) -> Self {
-        let mut lexer = Lexer::new_with_file(source, file);
-        let current = lexer.next_token();
-        let mut interner = Interner::new();
-        // Pre-intern "self" so it's always available for method bodies
-        interner.intern("self");
-        Self {
-            lexer,
-            current,
-            previous: Token::new(TokenType::Eof, "", Span::default()),
-            interner,
-            next_node_id: 0,
-            pending_gt: false,
-            skip_tests: false,
-        }
-    }
 
     /// Set whether to skip parsing tests block bodies.
     /// When enabled, tests blocks are brace-matched but their contents are not parsed.
