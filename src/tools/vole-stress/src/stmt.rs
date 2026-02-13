@@ -1407,6 +1407,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: match on string length
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_string_length(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: array length guard (safe indexing)
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_array_length_guard(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -7775,6 +7789,104 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             false,
         );
         Some(format!("let {} = {}", name, interp_str))
+    }
+
+    /// Generate a match on string length: `match s.length() { 0 => "empty", 1 => "one", _ => "many" }`
+    fn try_generate_match_string_length(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if string_vars.is_empty() {
+            return None;
+        }
+
+        let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let name = ctx.new_local_name();
+
+        // Generate match arms on length values
+        let result_strs = ["\"empty\"", "\"one\"", "\"short\"", "\"medium\"", "\"long\""];
+        let num_arms = self.rng.gen_range(2..=3);
+
+        let mut arms = Vec::new();
+        let mut used_values = std::collections::HashSet::new();
+        for i in 0..num_arms {
+            let val = i as i64;
+            used_values.insert(val);
+            arms.push(format!(
+                "    {} => {}",
+                val,
+                result_strs[i % result_strs.len()]
+            ));
+        }
+        // Default arm
+        let default = result_strs[num_arms % result_strs.len()];
+        arms.push(format!("    _ => {}", default));
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = match {}.length() {{\n{}\n}}",
+            name,
+            var,
+            arms.join("\n")
+        ))
+    }
+
+    /// Generate a safe array access with length guard:
+    /// `when { arr.length() > 0 => arr[0], _ => default_val }`
+    fn try_generate_array_length_guard(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find array parameters (safe to index — params are always non-empty from test harness)
+        let array_params: Vec<(String, PrimitiveType)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(prim) => Some((p.name.clone(), *prim)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let (arr_name, elem_prim) = &array_params[self.rng.gen_range(0..array_params.len())];
+        let name = ctx.new_local_name();
+
+        let default_val = match elem_prim {
+            PrimitiveType::I64 => "0".to_string(),
+            PrimitiveType::I32 => "0_i32".to_string(),
+            PrimitiveType::F64 => "0.0_f64".to_string(),
+            PrimitiveType::Bool => "false".to_string(),
+            PrimitiveType::String => "\"\"".to_string(),
+            PrimitiveType::I8 => "0_i8".to_string(),
+            _ => return None,
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(*elem_prim),
+            false,
+        );
+        Some(format!(
+            "let {} = when {{\n    {}.length() > 0 => {}[0]\n    _ => {}\n}}",
+            name, arr_name, arr_name, default_val
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
