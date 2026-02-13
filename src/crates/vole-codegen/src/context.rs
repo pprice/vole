@@ -1592,7 +1592,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let payload = results[1];
 
             // Allocate stack slot to store (tag, payload) for callers that expect a pointer
-            let slot_size = 16u32; // 8 bytes tag + 8 bytes payload
+            let slot_size = union_layout::STANDARD_SIZE;
             let slot = self.alloc_stack(slot_size);
 
             // Store tag at offset 0
@@ -2454,7 +2454,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let value_tag = if nil_tag == 0 { 1 } else { 0 };
 
         // Allocate stack slot for optional: [tag: i8] + padding(7) + [value: T(8)]
-        let slot = self.alloc_stack(16);
+        let slot = self.alloc_stack(union_layout::STANDARD_SIZE);
 
         // Determine tag based on overflow flag:
         // if overflow => nil_tag, else => value_tag
@@ -3277,8 +3277,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Get the runtime tag for this type
         let tag = unknown_type_tag(value.type_id, self.arena());
 
-        // Create a 16-byte stack slot for TaggedValue
-        let slot = self.alloc_stack(16);
+        // Create a stack slot for TaggedValue
+        let slot = self.alloc_stack(union_layout::STANDARD_SIZE);
 
         // Store the tag at offset 0
         let tag_val = self.builder.ins().iconst(types::I64, tag as i64);

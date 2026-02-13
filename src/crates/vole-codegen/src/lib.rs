@@ -63,6 +63,10 @@ pub(crate) mod union_layout {
     /// Byte offset of the payload within a union or optional value.
     /// After the 1-byte tag and 7 bytes of padding.
     pub const PAYLOAD_OFFSET: i32 = 8;
+
+    /// Standard union allocation size: tag (8 bytes) + single i64 payload (8 bytes).
+    /// Used for stack/heap allocations of standard-layout unions and optionals.
+    pub const STANDARD_SIZE: u32 = 16;
 }
 
 /// Named trap codes for Cranelift traps used across the compiler.

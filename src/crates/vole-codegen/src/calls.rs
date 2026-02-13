@@ -1237,7 +1237,7 @@ impl Cg<'_, '_, '_> {
             let tag = results[0];
             let payload = results[1];
 
-            let slot_size = 16u32; // 8 bytes tag + 8 bytes payload
+            let slot_size = union_layout::STANDARD_SIZE;
             let slot = self.alloc_stack(slot_size);
 
             self.builder.ins().stack_store(tag, slot, 0);
