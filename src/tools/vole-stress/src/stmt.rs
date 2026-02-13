@@ -1393,6 +1393,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: string predicate (contains/starts_with/ends_with)
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_string_predicate_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: string interpolation with complex expressions
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_interpolation_expr_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -7604,6 +7618,163 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             false,
         );
         Some(format!("let {} = {} / {}", name, var, divisor))
+    }
+
+    /// Generate a string predicate call: `s.contains("sub")`, `s.starts_with("hel")`, `s.ends_with("rld")`
+    /// Returns a bool-typed let binding.
+    fn try_generate_string_predicate_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let name = ctx.new_local_name();
+
+        // Pick method and argument
+        let method = match self.rng.gen_range(0..3u32) {
+            0 => "contains",
+            1 => "starts_with",
+            _ => "ends_with",
+        };
+
+        let search_strs = ["hello", "world", "a", "str", "test", "", "xyz", "lo"];
+        let search = search_strs[self.rng.gen_range(0..search_strs.len())];
+
+        let expr = if string_vars.is_empty() {
+            // Use a string literal as receiver
+            let literals = ["\"hello world\"", "\"testing\"", "\"abcdef\"", "\"vole lang\""];
+            let lit = literals[self.rng.gen_range(0..literals.len())];
+            format!("{}.{}(\"{}\")", lit, method, search)
+        } else {
+            let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+            format!("{}.{}(\"{}\")", var, method, search)
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
+        Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate a string interpolation with complex embedded expressions.
+    /// E.g.: `"sum={a + b}"`, `"len={arr.length()}"`, `"upper={s.to_upper()}"`
+    fn try_generate_interpolation_expr_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Collect typed variables for interpolation expressions
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let array_vars: Vec<String> = ctx
+            .params
+            .iter()
+            .filter(|p| matches!(p.param_type, TypeInfo::Array(_)))
+            .map(|p| p.name.clone())
+            .collect();
+
+        // Need at least some variables to make interesting interpolations
+        if i64_vars.is_empty() && string_vars.is_empty() && array_vars.is_empty() {
+            return None;
+        }
+
+        let name = ctx.new_local_name();
+        let mut parts: Vec<String> = Vec::new();
+
+        // Generate 2-3 interpolation segments
+        let num_segments = self.rng.gen_range(2..=3);
+        for _ in 0..num_segments {
+            let choice = self.rng.gen_range(0..5u32);
+            match choice {
+                0 if !i64_vars.is_empty() => {
+                    // Arithmetic: {a + b} or {a * 2}
+                    let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+                    let n = self.rng.gen_range(1..=10);
+                    let op = match self.rng.gen_range(0..3u32) {
+                        0 => "+",
+                        1 => "-",
+                        _ => "*",
+                    };
+                    parts.push(format!("{{{} {} {}}}", var, op, n));
+                }
+                1 if !string_vars.is_empty() => {
+                    // String method: {s.to_upper()} or {s.length()} or {s.trim()}
+                    let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+                    let method = match self.rng.gen_range(0..3u32) {
+                        0 => ".to_upper()",
+                        1 => ".length()",
+                        _ => ".trim()",
+                    };
+                    parts.push(format!("{{{}{}}}", var, method));
+                }
+                2 if !array_vars.is_empty() => {
+                    // Array method: {arr.length()}
+                    let var = &array_vars[self.rng.gen_range(0..array_vars.len())];
+                    parts.push(format!("{{{}.length()}}", var));
+                }
+                3 if !i64_vars.is_empty() => {
+                    // Simple variable
+                    let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+                    parts.push(format!("{{{}}}", var));
+                }
+                _ if !string_vars.is_empty() => {
+                    // Simple string variable
+                    let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+                    parts.push(format!("{{{}}}", var));
+                }
+                _ => {
+                    // Literal text fallback
+                    parts.push("ok".to_string());
+                }
+            }
+        }
+
+        let labels = ["val", "result", "out", "x", "data"];
+        let label = labels[self.rng.gen_range(0..labels.len())];
+        let sep = match self.rng.gen_range(0..3u32) {
+            0 => ", ",
+            1 => " | ",
+            _ => " ",
+        };
+
+        let interp_str = format!("\"{}={}\"", label, parts.join(sep));
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!("let {} = {}", name, interp_str))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
