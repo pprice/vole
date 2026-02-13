@@ -292,10 +292,7 @@ impl Cg<'_, '_, '_> {
 
         for (field_name, default_expr_ptr) in field_default_ptrs {
             let slot = *field_slots.get(&field_name).ok_or_else(|| {
-                format!(
-                    "Unknown field: {} in type {} (default)",
-                    field_name, path_str
-                )
+                CodegenError::not_found("field", format!("{} in {}", field_name, path_str))
             })?;
 
             // SAFETY: The pointer points to an Expr in the original AST (either main Program
@@ -672,10 +669,7 @@ impl Cg<'_, '_, '_> {
 
         for (field_name, default_expr_ptr) in field_default_ptrs {
             let field_slot = *field_slots.get(&field_name).ok_or_else(|| {
-                format!(
-                    "Unknown field: {} in type {} (default)",
-                    field_name, path_str
-                )
+                CodegenError::not_found("field", format!("{} in {}", field_name, path_str))
             })?;
 
             let offset = {

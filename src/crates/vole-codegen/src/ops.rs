@@ -402,10 +402,7 @@ impl Cg<'_, '_, '_> {
             .implement_registry()
             .get_method(&impl_type_id, method_id)
             .ok_or_else(|| {
-                format!(
-                    "to_string method not implemented for type_id {:?}",
-                    val.type_id
-                )
+                CodegenError::not_found("to_string method", format!("{:?}", val.type_id))
             })?;
 
         // Check if it's an external (native) method

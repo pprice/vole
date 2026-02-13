@@ -1343,10 +1343,7 @@ impl Cg<'_, '_, '_> {
             self.registry(),
         )
         .ok_or_else(|| {
-            format!(
-                "Error type {} not found in fallible type",
-                self.interner().resolve(raise_stmt.error_name)
-            )
+            CodegenError::not_found("error type", self.interner().resolve(raise_stmt.error_name))
         })?;
 
         // Get the error type_def_id to look up field order from EntityRegistry
@@ -1376,10 +1373,7 @@ impl Cg<'_, '_, '_> {
             None
         }
         .ok_or_else(|| {
-            format!(
-                "Could not find error type info for {}",
-                self.interner().resolve(raise_stmt.error_name)
-            )
+            CodegenError::not_found("error type info", self.interner().resolve(raise_stmt.error_name))
         })?;
 
         // Get fields from EntityRegistry

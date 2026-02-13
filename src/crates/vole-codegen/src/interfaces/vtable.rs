@@ -682,10 +682,7 @@ fn compile_external_wrapper<C: VtableCtx>(
             .native_registry()
             .lookup("vole:std:runtime", native_name)
             .ok_or_else(|| {
-                format!(
-                    "native function vole:std:runtime::{} not found",
-                    native_name
-                )
+                CodegenError::not_found("native function", format!("vole:std:runtime::{}", native_name))
             })?
             .ptr;
         let mut iter_sig = ctx.jit_module().make_signature();
@@ -1029,10 +1026,7 @@ fn resolve_vtable_target<C: VtableCtx>(
 
     let impl_type_id = ImplTypeId::from_type_id(concrete_type_id, ctx.arena(), ctx.registry())
         .ok_or_else(|| {
-            format!(
-                "cannot resolve interface method {} on type {:?}",
-                method_name_str, concrete_type_id
-            )
+            CodegenError::not_found("interface method", format!("{} on {:?}", method_name_str, concrete_type_id))
         })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented

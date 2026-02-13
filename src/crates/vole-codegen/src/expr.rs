@@ -532,7 +532,7 @@ impl Cg<'_, '_, '_> {
                 }
 
                 let (var, var_type_id) = self.vars.get(sym).ok_or_else(|| {
-                    format!("undefined variable: {}", self.interner().resolve(*sym))
+                    CodegenError::not_found("variable", self.interner().resolve(*sym))
                 })?;
                 let var = *var;
                 let var_type_id = *var_type_id;

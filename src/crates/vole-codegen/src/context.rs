@@ -2547,10 +2547,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .native_registry()
             .lookup(&module_path, &native_name)
             .ok_or_else(|| {
-                format!(
-                    "Native function {}::{} not found in registry",
-                    module_path, native_name
-                )
+                CodegenError::not_found("native function", format!("{}::{}", module_path, native_name))
             })?;
 
         // Build the Cranelift signature from NativeSignature
