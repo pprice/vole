@@ -12,7 +12,9 @@
 
 use cranelift_codegen::dominator_tree::DominatorTree;
 use cranelift_codegen::flowgraph::ControlFlowGraph;
-use cranelift_codegen::ir::{Block, Function, Inst, Opcode, Value};
+#[cfg(test)]
+use cranelift_codegen::ir::Opcode;
+use cranelift_codegen::ir::{Block, Function, Inst, Value};
 use cranelift_codegen::loop_analysis::{Loop, LoopAnalysis as CraneliftLoopAnalysis};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -83,12 +85,40 @@ impl FunctionLoopInfo {
 
     /// Analyze the loops in a function.
     ///
-    /// This computes:
+    /// This computes the lightweight analysis needed for optimization:
+    /// 1. Basic loop structure (headers, blocks, nesting)
+    /// 2. Block parameter classification (modified vs invariant)
+    ///
+    /// The expensive invariant_values and induction_vars fields are left empty.
+    /// Use `analyze_full` if those are needed.
+    pub fn analyze(&mut self, func: &Function) {
+        // First, compute control flow graph and dominator tree
+        self.cfg.compute(func);
+        self.domtree.compute(func, &self.cfg);
+
+        // Then compute Cranelift's loop analysis
+        self.cranelift_analysis
+            .compute(func, &self.cfg, &self.domtree);
+
+        // Build info for each loop (lightweight: skip invariant_values and induction_vars)
+        self.loops.clear();
+        for lp in self.cranelift_analysis.loops() {
+            let info = self.analyze_single_loop_lightweight(func, lp);
+            self.loops.insert(lp, info);
+        }
+
+        self.valid = true;
+    }
+
+    /// Analyze the loops in a function with full detail.
+    ///
+    /// This computes everything including:
     /// 1. Basic loop structure (headers, blocks, nesting)
     /// 2. Loop-invariant values
     /// 3. Induction variables
     /// 4. Block parameter classification
-    pub fn analyze(&mut self, func: &Function) {
+    #[cfg(test)]
+    pub fn analyze_full(&mut self, func: &Function) {
         // First, compute control flow graph and dominator tree
         self.cfg.compute(func);
         self.domtree.compute(func, &self.cfg);
@@ -100,15 +130,43 @@ impl FunctionLoopInfo {
         // Build detailed info for each loop
         self.loops.clear();
         for lp in self.cranelift_analysis.loops() {
-            let info = self.analyze_single_loop(func, lp);
+            let info = self.analyze_single_loop_full(func, lp);
             self.loops.insert(lp, info);
         }
 
         self.valid = true;
     }
 
-    /// Analyze a single loop and return its LoopInfo.
-    fn analyze_single_loop(&self, func: &Function, lp: Loop) -> LoopInfo {
+    /// Lightweight analysis: only computes blocks and block parameter classification.
+    /// Skips the expensive invariant_values and induction_vars computation.
+    fn analyze_single_loop_lightweight(&self, func: &Function, lp: Loop) -> LoopInfo {
+        let header = self.cranelift_analysis.loop_header(lp);
+
+        // Collect all blocks in this loop
+        let blocks = self.collect_loop_blocks(func, lp);
+
+        // Analyze block parameters
+        let header_params: FxHashSet<Value> =
+            func.dfg.block_params(header).iter().copied().collect();
+
+        // Find which header params are actually modified in the loop
+        let (modified_params, invariant_params) =
+            self.classify_block_params(func, header, &blocks, &header_params);
+
+        LoopInfo {
+            loop_id: lp,
+            header,
+            blocks,
+            invariant_values: FxHashSet::default(),
+            induction_vars: FxHashMap::default(),
+            modified_params,
+            invariant_params,
+        }
+    }
+
+    /// Full analysis of a single loop including invariant values and induction vars.
+    #[cfg(test)]
+    fn analyze_single_loop_full(&self, func: &Function, lp: Loop) -> LoopInfo {
         let header = self.cranelift_analysis.loop_header(lp);
 
         // Collect all blocks in this loop
@@ -156,6 +214,7 @@ impl FunctionLoopInfo {
     }
 
     /// Find all values defined in a set of blocks.
+    #[cfg(test)]
     fn values_defined_in_blocks(
         &self,
         func: &Function,
@@ -181,6 +240,7 @@ impl FunctionLoopInfo {
     }
 
     /// Find all values used in a set of blocks.
+    #[cfg(test)]
     fn values_used_in_blocks(
         &self,
         func: &Function,
@@ -297,6 +357,7 @@ impl FunctionLoopInfo {
     ///
     /// An induction variable is a value that changes by a constant amount each iteration.
     /// For example: `i = i + 1` or `x = x + 0.01`
+    #[cfg(test)]
     fn find_induction_vars(
         &self,
         func: &Function,
@@ -324,6 +385,7 @@ impl FunctionLoopInfo {
     }
 
     /// Detect if a modified parameter follows an induction pattern.
+    #[cfg(test)]
     fn detect_induction_pattern(
         &self,
         func: &Function,
@@ -356,6 +418,7 @@ impl FunctionLoopInfo {
     }
 
     /// Check if `result` is computed as `base + constant` or `base - constant`.
+    #[cfg(test)]
     fn is_additive_update(
         &self,
         func: &Function,
@@ -427,6 +490,7 @@ impl FunctionLoopInfo {
     }
 
     /// Get the constant integer value if `v` is defined by iconst.
+    #[cfg(test)]
     fn get_const_int(&self, func: &Function, v: Value) -> Option<i64> {
         let inst = func.dfg.value_def(v).inst()?;
         if func.dfg.insts[inst].opcode() == Opcode::Iconst {
@@ -441,6 +505,7 @@ impl FunctionLoopInfo {
     }
 
     /// Get the immediate value from an iadd_imm instruction.
+    #[cfg(test)]
     fn get_iadd_imm(&self, func: &Function, inst: Inst) -> Option<i64> {
         if let cranelift_codegen::ir::InstructionData::BinaryImm64 { imm, .. } =
             func.dfg.insts[inst]
@@ -451,6 +516,7 @@ impl FunctionLoopInfo {
     }
 
     /// Get the constant float value if `v` is defined by f32const or f64const.
+    #[cfg(test)]
     fn get_const_float(&self, func: &Function, v: Value) -> Option<f64> {
         let inst = func.dfg.value_def(v).inst()?;
         let opcode = func.dfg.insts[inst].opcode();
@@ -546,6 +612,13 @@ mod tests {
     use cranelift::codegen::ir::BlockArg;
     use cranelift::prelude::*;
 
+    /// Full analysis for tests that check invariant_values and induction_vars.
+    fn analyze_loops_full(func: &Function) -> FunctionLoopInfo {
+        let mut info = FunctionLoopInfo::new();
+        info.analyze_full(func);
+        info
+    }
+
     fn create_test_function() -> Function {
         let mut func = Function::new();
         func.signature.returns.push(AbiParam::new(types::I64));
@@ -619,7 +692,8 @@ mod tests {
 
         builder.finalize();
 
-        let info = analyze_loops(&func);
+        // Use full analysis to test invariant_values and induction_vars
+        let info = analyze_loops_full(&func);
         assert!(info.is_valid());
         assert_eq!(info.num_loops(), 1);
 
@@ -698,7 +772,8 @@ mod tests {
         builder.seal_block(exit);
         builder.finalize();
 
-        let info = analyze_loops(&func);
+        // Use full analysis to test modified/invariant params
+        let info = analyze_loops_full(&func);
         let loop_info = info.innermost_loop(header).unwrap();
 
         // Counter should be modified, limit should be invariant
