@@ -3351,19 +3351,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// # Safety
     /// The raw pointers must point to data in EntityRegistry which outlives compilation.
-    /// Compile default expressions for omitted parameters.
-    ///
-    /// This is a unified helper used by function calls, method calls, and static method calls.
-    /// It takes pre-extracted raw pointers to default expressions to avoid borrow checker issues.
-    ///
-    /// # Arguments
-    /// - `default_ptrs`: Raw pointers to default expressions (indexed by parameter position)
-    /// - `start_index`: Index of the first omitted parameter
-    /// - `expected_type_ids`: Expected TypeIds for the omitted parameters (slice starting at start_index)
-    /// - `is_generic_class`: Whether this is a generic class call (needs value_to_word conversion)
-    ///
-    /// # Safety
-    /// The raw pointers must point to data in EntityRegistry which outlives compilation.
     pub fn compile_defaults_from_ptrs(
         &mut self,
         default_ptrs: &[Option<*const Expr>],
