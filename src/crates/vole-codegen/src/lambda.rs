@@ -162,7 +162,7 @@ impl Cg<'_, '_, '_> {
 
         self.jit_module()
             .define_function(func_id, &mut lambda_ctx)
-            .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         let func_ref = self
             .codegen_ctx
@@ -279,7 +279,7 @@ impl Cg<'_, '_, '_> {
 
         self.jit_module()
             .define_function(func_id, &mut lambda_ctx)
-            .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         // Use split borrows to avoid borrow checker issues
         let func_ref = self

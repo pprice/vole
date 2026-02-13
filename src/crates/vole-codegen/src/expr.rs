@@ -404,7 +404,7 @@ impl Cg<'_, '_, '_> {
 
         self.jit_module()
             .define_function(wrapper_func_id, &mut wrapper_ctx)
-            .map_err(|e| format!("Failed to define function wrapper: {:?}", e))?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         // Get the wrapper function address
         let wrapper_func_ref = self
