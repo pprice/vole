@@ -7,8 +7,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cranelift::prelude::{
-    AbiParam, FunctionBuilder, InstBuilder, IntCC, MemFlags, StackSlotData, StackSlotKind,
-    TrapCode, Type, Value, Variable, types,
+    AbiParam, FunctionBuilder, InstBuilder, IntCC, MemFlags, StackSlotData, StackSlotKind, Type,
+    Value, Variable, types,
 };
 use cranelift_codegen::ir::StackSlot;
 use cranelift_module::{FuncId, Module};
@@ -2881,7 +2881,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 )?;
 
                 // Panic never returns - emit trap and unreachable block
-                self.builder.ins().trap(TrapCode::unwrap_user(3));
+                self.builder.ins().trap(crate::trap_codes::PANIC);
                 let unreachable_block = self.builder.create_block();
                 self.switch_and_seal(unreachable_block);
 

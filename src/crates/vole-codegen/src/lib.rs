@@ -47,3 +47,15 @@ pub mod loop_analysis {
 pub mod loop_param_opt {
     pub use super::control_flow::loop_param_opt::*;
 }
+
+/// Named trap codes for Cranelift traps used across the compiler.
+pub(crate) mod trap_codes {
+    use cranelift::prelude::TrapCode;
+
+    /// Unreachable code (divergent match/if arms, exhaustion, panic handlers)
+    pub const UNREACHABLE: TrapCode = TrapCode::unwrap_user(1);
+    /// Array/slice bounds check failure
+    pub const BOUNDS_CHECK: TrapCode = TrapCode::unwrap_user(2);
+    /// Explicit panic() call
+    pub const PANIC: TrapCode = TrapCode::unwrap_user(3);
+}

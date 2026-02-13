@@ -161,7 +161,7 @@ impl Cg<'_, '_, '_> {
                     // emit_panic_static creates an unreachable continuation block
                     // that needs a terminator so Cranelift doesn't complain about
                     // an unfilled block.
-                    self.builder.ins().trap(TrapCode::unwrap_user(1));
+                    self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
                     Ok(true)
                 } else {
                     // Consume RC value if the expression result is unused

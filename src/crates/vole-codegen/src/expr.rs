@@ -859,7 +859,7 @@ impl Cg<'_, '_, '_> {
                 // Trap if out of bounds
                 self.builder
                     .ins()
-                    .trapz(in_bounds, TrapCode::unwrap_user(2));
+                    .trapz(in_bounds, crate::trap_codes::BOUNDS_CHECK);
 
                 let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
                 self.builder.ins().imul(idx.value, elem_size_val)
@@ -945,7 +945,7 @@ impl Cg<'_, '_, '_> {
                 // Trap if out of bounds
                 self.builder
                     .ins()
-                    .trapz(in_bounds, TrapCode::unwrap_user(2));
+                    .trapz(in_bounds, crate::trap_codes::BOUNDS_CHECK);
 
                 let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
                 self.builder.ins().imul(idx.value, elem_size_val)
@@ -1813,7 +1813,7 @@ impl Cg<'_, '_, '_> {
 
             if body_val.type_id == TypeId::NEVER {
                 // Divergent arm (unreachable/panic) — terminate with trap
-                self.builder.ins().trap(TrapCode::unwrap_user(1));
+                self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
             } else if !is_void {
                 body_val = self.coerce_to_type(body_val, result_type_id)?;
                 // If the arm body produces a borrowed RC value, emit rc_inc so
@@ -1836,7 +1836,7 @@ impl Cg<'_, '_, '_> {
 
         // Fill in trap block (should be unreachable if match is exhaustive)
         self.switch_and_seal(trap_block);
-        self.builder.ins().trap(TrapCode::unwrap_user(1));
+        self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
 
         self.switch_and_seal(merge_block);
         self.invalidate_value_caches();
@@ -1908,7 +1908,7 @@ impl Cg<'_, '_, '_> {
         // If there's no wildcard, the default block is a trap
         if analysis.wildcard_idx.is_none() {
             self.switch_and_seal(default_block);
-            self.builder.ins().trap(TrapCode::unwrap_user(1));
+            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         }
 
         // Whether the result type needs RC cleanup
@@ -1924,7 +1924,7 @@ impl Cg<'_, '_, '_> {
 
             if body_val.type_id == TypeId::NEVER {
                 // Divergent arm (unreachable/panic) — terminate with trap
-                self.builder.ins().trap(TrapCode::unwrap_user(1));
+                self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
             } else if !is_void {
                 body_val = self.coerce_to_type(body_val, result_type_id)?;
                 if result_needs_rc && body_val.is_borrowed() {
@@ -2380,7 +2380,7 @@ impl Cg<'_, '_, '_> {
         let then_result = self.expr(&if_expr.then_branch)?;
         if then_result.type_id == TypeId::NEVER {
             // Divergent branch (unreachable/panic) — terminate with trap
-            self.builder.ins().trap(TrapCode::unwrap_user(1));
+            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         } else if !is_void {
             if result_needs_rc && then_result.is_borrowed() {
                 self.emit_rc_inc_for_type(then_result.value, result_type_id)?;
@@ -2403,7 +2403,7 @@ impl Cg<'_, '_, '_> {
         };
         if else_result.type_id == TypeId::NEVER {
             // Divergent branch (unreachable/panic) — terminate with trap
-            self.builder.ins().trap(TrapCode::unwrap_user(1));
+            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         } else if !is_void {
             if result_needs_rc && else_result.is_borrowed() {
                 self.emit_rc_inc_for_type(else_result.value, result_type_id)?;
@@ -2631,7 +2631,7 @@ impl Cg<'_, '_, '_> {
             // The current block is an unreachable continuation — terminate
             // it with a trap instead of a jump with a mistyped dummy value.
             if body_result.type_id == TypeId::NEVER {
-                self.builder.ins().trap(TrapCode::unwrap_user(1));
+                self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
                 continue;
             }
 

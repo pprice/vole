@@ -1039,7 +1039,7 @@ impl Cg<'_, '_, '_> {
         )?;
 
         // Since panic never returns, emit trap and create unreachable block
-        self.builder.ins().trap(TrapCode::unwrap_user(3));
+        self.builder.ins().trap(crate::trap_codes::PANIC);
 
         // Create an unreachable block for code that follows the panic call
         let unreachable_block = self.builder.create_block();
