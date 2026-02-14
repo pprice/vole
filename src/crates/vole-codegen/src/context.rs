@@ -618,10 +618,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             self.builder.switch_to_block(op_block);
             self.builder.seal_block(op_block);
-            let payload = self
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), union_ptr, union_layout::PAYLOAD_OFFSET);
+            let payload = self.builder.ins().load(
+                types::I64,
+                MemFlags::new(),
+                union_ptr,
+                union_layout::PAYLOAD_OFFSET,
+            );
             if is_interface {
                 let data_word = self
                     .builder
@@ -1088,7 +1090,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect()
     }
 
-
     /// Convert an i64 value back to its proper type (reverse of convert_to_i64_for_storage)
     pub fn convert_from_i64_storage(&mut self, word: Value, type_id: TypeId) -> Value {
         use super::types::word_to_value_type_id;
@@ -1199,7 +1200,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn func_id(&self, key: FunctionKey) -> CodegenResult<FuncId> {
         self.funcs_ref()
             .func_id(key)
-            .ok_or(CodegenError::not_found("function id", ""))
+            .ok_or_else(|| CodegenError::not_found("function id", ""))
     }
 
     /// Get a function reference for calling
@@ -1215,9 +1216,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         runtime: RuntimeFn,
     ) -> CodegenResult<cranelift::codegen::ir::FuncRef> {
-        let key = self.funcs().runtime_key(runtime).ok_or_else(|| {
-            CodegenError::not_found("runtime function", runtime.name())
-        })?;
+        let key = self
+            .funcs()
+            .runtime_key(runtime)
+            .ok_or_else(|| CodegenError::not_found("runtime function", runtime.name()))?;
         self.func_ref(key)
     }
 
@@ -1457,7 +1459,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.builder.ins().stack_store(tag, slot, 0);
             // Reconstruct i128 from low/high and store at offset 8
             let i128_val = super::structs::reconstruct_i128(self.builder, low, high);
-            super::structs::helpers::store_i128_to_stack(self.builder, i128_val, slot, union_layout::PAYLOAD_OFFSET);
+            super::structs::helpers::store_i128_to_stack(
+                self.builder,
+                i128_val,
+                slot,
+                union_layout::PAYLOAD_OFFSET,
+            );
 
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
@@ -1477,7 +1484,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // Store tag at offset 0
             self.builder.ins().stack_store(tag, slot, 0);
             // Store payload at offset 8
-            self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+            self.builder
+                .ins()
+                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
 
             // Get pointer to stack slot
             let ptr_type = self.ptr_type();
@@ -1526,10 +1535,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.ins().stack_store(tag, slot, 0);
 
         if union_size > union_layout::TAG_ONLY_SIZE {
-            let payload = self
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
+            let payload = self.builder.ins().load(
+                types::I64,
+                MemFlags::new(),
+                src_ptr,
+                union_layout::PAYLOAD_OFFSET,
+            );
             self.builder
                 .ins()
                 .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
@@ -1552,9 +1563,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Value {
         let union_size = self.type_size(union_type_id);
         if union_size > union_layout::TAG_ONLY_SIZE {
-            self.builder
-                .ins()
-                .load(payload_type, MemFlags::new(), union_ptr, union_layout::PAYLOAD_OFFSET)
+            self.builder.ins().load(
+                payload_type,
+                MemFlags::new(),
+                union_ptr,
+                union_layout::PAYLOAD_OFFSET,
+            )
         } else {
             self.builder.ins().iconst(payload_type, 0)
         }
@@ -1819,11 +1833,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .ins()
             .load(types::I8, MemFlags::new(), heap_ptr, 0);
         self.builder.ins().stack_store(tag, slot, 0);
-        let payload = self
-            .builder
+        let payload = self.builder.ins().load(
+            types::I64,
+            MemFlags::new(),
+            heap_ptr,
+            union_layout::PAYLOAD_OFFSET,
+        );
+        self.builder
             .ins()
-            .load(types::I64, MemFlags::new(), heap_ptr, union_layout::PAYLOAD_OFFSET);
-        self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+            .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
         let mut cv = CompiledValue::new(ptr, ptr_type, union_type_id);
@@ -1851,7 +1869,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.struct_flat_slot_count(type_id)
             .is_some_and(|count| count > crate::MAX_SMALL_STRUCT_FIELDS)
     }
-
 
     /// If the return type uses sret convention (large struct), allocate a stack
     /// buffer for the return value and return a pointer to it. The caller should
@@ -1943,9 +1960,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Copy a struct value to a new stack slot (value semantics).
     /// Copies all flat slots (8 bytes each), accounting for nested structs.
     pub fn copy_struct_value(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
-        let flat_count = self
-            .struct_flat_slot_count(src.type_id)
-            .ok_or_else(|| CodegenError::type_mismatch("copy_struct_value", "struct type", "non-struct"))?;
+        let flat_count = self.struct_flat_slot_count(src.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("copy_struct_value", "struct type", "non-struct")
+        })?;
 
         let total_size = (flat_count as u32) * 8;
         let dst_slot = self.alloc_stack(total_size);
@@ -1969,9 +1986,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Copy a struct value to a heap allocation.
     /// Used when storing structs into arrays so the data survives the current stack frame.
     pub fn copy_struct_to_heap(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
-        let flat_count = self
-            .struct_flat_slot_count(src.type_id)
-            .ok_or_else(|| CodegenError::type_mismatch("copy_struct_to_heap", "struct type", "non-struct"))?;
+        let flat_count = self.struct_flat_slot_count(src.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("copy_struct_to_heap", "struct type", "non-struct")
+        })?;
 
         let total_size = (flat_count as u32) * 8;
         let ptr_type = self.ptr_type();
@@ -2373,7 +2390,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CodegenResult<CompiledValue> {
         // Find the nil and value variant positions in the union
         let nil_tag = self.find_nil_variant(return_type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("checked arithmetic intrinsic", "optional type", "non-optional")
+            CodegenError::type_mismatch(
+                "checked arithmetic intrinsic",
+                "optional type",
+                "non-optional",
+            )
         })?;
 
         // The value tag is the other position (0 or 1 in a 2-variant union)
@@ -2405,7 +2426,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             result
         };
-        self.builder.ins().stack_store(value_to_store, slot, union_layout::PAYLOAD_OFFSET);
+        self.builder
+            .ins()
+            .stack_store(value_to_store, slot, union_layout::PAYLOAD_OFFSET);
 
         // Return pointer to the stack slot
         let ptr_type = self.ptr_type();
@@ -2500,8 +2523,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         return_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Get string names from NameId
-        let (module_path, native_name) =
-            resolve_external_names(self.name_table(), external_info)?;
+        let (module_path, native_name) = resolve_external_names(self.name_table(), external_info)?;
 
         // Check if this is a compiler intrinsic
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
@@ -2513,7 +2535,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .native_registry()
             .lookup(&module_path, &native_name)
             .ok_or_else(|| {
-                CodegenError::not_found("native function", format!("{}::{}", module_path, native_name))
+                CodegenError::not_found(
+                    "native function",
+                    format!("{}::{}", module_path, native_name),
+                )
             })?;
 
         // Build the Cranelift signature from NativeSignature
@@ -3040,9 +3065,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 (self.builder.ins().imul(arg1, arg2), types::I64, TypeId::U64)
             }
             // saturating_add - signed
-            BinaryIntOp::I8SaturatingAdd => {
-                (self.i8_sadd_sat(arg1, arg2), types::I8, TypeId::I8)
-            }
+            BinaryIntOp::I8SaturatingAdd => (self.i8_sadd_sat(arg1, arg2), types::I8, TypeId::I8),
             BinaryIntOp::I16SaturatingAdd => {
                 (self.i16_sadd_sat(arg1, arg2), types::I16, TypeId::I16)
             }
@@ -3055,9 +3078,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 (v, types::I64, TypeId::I64)
             }
             // saturating_add - unsigned
-            BinaryIntOp::U8SaturatingAdd => {
-                (self.u8_uadd_sat(arg1, arg2), types::I8, TypeId::U8)
-            }
+            BinaryIntOp::U8SaturatingAdd => (self.u8_uadd_sat(arg1, arg2), types::I8, TypeId::U8),
             BinaryIntOp::U16SaturatingAdd => {
                 (self.u16_uadd_sat(arg1, arg2), types::I16, TypeId::U16)
             }
@@ -3070,9 +3091,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 (v, types::I64, TypeId::U64)
             }
             // saturating_sub - signed
-            BinaryIntOp::I8SaturatingSub => {
-                (self.i8_ssub_sat(arg1, arg2), types::I8, TypeId::I8)
-            }
+            BinaryIntOp::I8SaturatingSub => (self.i8_ssub_sat(arg1, arg2), types::I8, TypeId::I8),
             BinaryIntOp::I16SaturatingSub => {
                 (self.i16_ssub_sat(arg1, arg2), types::I16, TypeId::I16)
             }
@@ -3085,9 +3104,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 (v, types::I64, TypeId::I64)
             }
             // saturating_sub - unsigned
-            BinaryIntOp::U8SaturatingSub => {
-                (self.u8_usub_sat(arg1, arg2), types::I8, TypeId::U8)
-            }
+            BinaryIntOp::U8SaturatingSub => (self.u8_usub_sat(arg1, arg2), types::I8, TypeId::U8),
             BinaryIntOp::U16SaturatingSub => {
                 (self.u16_usub_sat(arg1, arg2), types::I16, TypeId::U16)
             }
@@ -3234,7 +3251,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             value.value
         };
 
-        self.builder.ins().stack_store(value_as_i64, slot, union_layout::PAYLOAD_OFFSET);
+        self.builder
+            .ins()
+            .stack_store(value_as_i64, slot, union_layout::PAYLOAD_OFFSET);
 
         // Return pointer to the TaggedValue
         let ptr_type = self.ptr_type();

@@ -233,10 +233,7 @@ impl Cg<'_, '_, '_> {
 
     /// Try to optimize integer multiply/divide/mod by power of 2 to shifts/masks
     /// Returns Some(result) if optimization was applied, None otherwise
-    fn try_emit_power_of_two(
-        &mut self,
-        bin: &BinaryExpr,
-    ) -> CodegenResult<Option<CompiledValue>> {
+    fn try_emit_power_of_two(&mut self, bin: &BinaryExpr) -> CodegenResult<Option<CompiledValue>> {
         // Only handle Mul, Div, Mod for power-of-2 optimization
         if !matches!(bin.op, BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) {
             return Ok(None);
@@ -391,7 +388,9 @@ impl Cg<'_, '_, '_> {
     fn call_to_string(&mut self, val: &CompiledValue) -> CodegenResult<Value> {
         let arena = self.arena();
         let impl_type_id = ImplTypeId::from_type_id(val.type_id, arena, self.registry())
-            .ok_or_else(|| CodegenError::not_found("ImplTypeId for type_id", format!("{:?}", val.type_id)))?;
+            .ok_or_else(|| {
+                CodegenError::not_found("ImplTypeId for type_id", format!("{:?}", val.type_id))
+            })?;
 
         // Look up to_string method via query
         let method_id = self.query().method_name_id_by_str("to_string");
@@ -418,7 +417,9 @@ impl Cg<'_, '_, '_> {
         let func_key = *self
             .method_func_keys()
             .get(&(type_name_id, method_id))
-            .ok_or_else(|| CodegenError::not_found("method info", "to_string in method_func_keys"))?;
+            .ok_or_else(|| {
+                CodegenError::not_found("method info", "to_string in method_func_keys")
+            })?;
 
         let func_ref = self.func_ref(func_key)?;
 
@@ -427,9 +428,10 @@ impl Cg<'_, '_, '_> {
         let call = self.builder.ins().call(func_ref, &coerced);
         let results = self.builder.inst_results(call);
 
-        results.first().copied().ok_or(CodegenError::internal(
-            "to_string method did not return a value",
-        ))
+        results
+            .first()
+            .copied()
+            .ok_or_else(|| CodegenError::internal("to_string method did not return a value"))
     }
 
     /// Short-circuit AND evaluation
@@ -750,9 +752,9 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
-        let flat_count = self
-            .struct_flat_slot_count(left.type_id)
-            .ok_or_else(|| CodegenError::type_mismatch("struct_equality", "struct type", "non-struct"))?;
+        let flat_count = self.struct_flat_slot_count(left.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("struct_equality", "struct type", "non-struct")
+        })?;
 
         // Start with true (1) - all fields equal so far
         let mut result = self.builder.ins().iconst(types::I8, 1);
@@ -788,13 +790,9 @@ impl Cg<'_, '_, '_> {
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
         // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag =
-            self.find_nil_variant(optional.type_id)
-                .ok_or(CodegenError::type_mismatch(
-                    "optional_nil_compare",
-                    "optional type",
-                    "non-optional",
-                ))?;
+        let nil_tag = self.find_nil_variant(optional.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("optional_nil_compare", "optional type", "non-optional")
+        })?;
 
         // Compare tag with nil_tag
         let result = match op {
@@ -815,13 +813,9 @@ impl Cg<'_, '_, '_> {
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
         // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag =
-            self.find_nil_variant(optional.type_id)
-                .ok_or(CodegenError::type_mismatch(
-                    "optional_value_compare",
-                    "optional type",
-                    "non-optional",
-                ))?;
+        let nil_tag = self.find_nil_variant(optional.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("optional_value_compare", "optional type", "non-optional")
+        })?;
 
         // Check if not nil (tag != nil_tag)
         let is_not_nil = self.tag_ne(optional.value, nil_tag as i64);
@@ -835,7 +829,8 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or_else(|| arena.i64())
         };
         let payload_cranelift_type = self.cranelift_type(inner_type_id);
-        let payload = self.load_union_payload(optional.value, optional.type_id, payload_cranelift_type);
+        let payload =
+            self.load_union_payload(optional.value, optional.type_id, payload_cranelift_type);
 
         // Compare payload with value (extend if necessary to match types)
         let values_equal = if value.ty.is_float() {

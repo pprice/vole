@@ -143,8 +143,7 @@ impl Cg<'_, '_, '_> {
                     let cr_type = self.cranelift_type(init.type_id);
                     let temp_var = self.builder.declare_var(cr_type);
                     self.builder.def_var(temp_var, init.value);
-                    let drop_flag =
-                        self.register_composite_rc_local(temp_var, offsets.to_vec());
+                    let drop_flag = self.register_composite_rc_local(temp_var, offsets.to_vec());
                     crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                 }
 
@@ -261,9 +260,7 @@ impl Cg<'_, '_, '_> {
                 // If both branches terminated, the merge block is unreachable.
                 // Cranelift still requires it to be filled, so emit a trap.
                 if then_terminated && else_terminated {
-                    self.builder
-                        .ins()
-                        .trap(crate::trap_codes::UNREACHABLE);
+                    self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
                 }
 
                 self.builder.seal_block(then_block);
@@ -437,7 +434,7 @@ impl Cg<'_, '_, '_> {
                     // the RC value is aliased and needs rc_inc so the union
                     // owns its own reference.
                     if init.is_borrowed() {
-                        self.emit_union_rc_inc(final_value, &rc_tags)?;
+                        self.emit_union_rc_inc(final_value, rc_tags)?;
                     }
                     let drop_flag = self.register_union_rc_local(var, rc_tags.to_vec());
                     crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
@@ -568,7 +565,7 @@ impl Cg<'_, '_, '_> {
                     // Without this, the caller's consume_rc_args and the
                     // return value's scope-exit cleanup both rc_dec the same
                     // inner value, causing a double-free.
-                    self.emit_union_rc_inc(compiled.value, &rc_tags)?;
+                    self.emit_union_rc_inc(compiled.value, rc_tags)?;
                 }
             }
             self.emit_rc_cleanup_all_scopes(skip_var)?;
@@ -1165,11 +1162,15 @@ impl Cg<'_, '_, '_> {
         // decide whether to rc_inc the payload when promoting to the heap.
         let is_rc = self.rc_state(actual_type_id).needs_cleanup();
         let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
-        self.builder.ins().stack_store(is_rc_val, slot, union_layout::IS_RC_OFFSET);
+        self.builder
+            .ins()
+            .stack_store(is_rc_val, slot, union_layout::IS_RC_OFFSET);
 
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
         if !self.arena().is_sentinel(actual_type_id) {
-            self.builder.ins().stack_store(actual_value, slot, union_layout::PAYLOAD_OFFSET);
+            self.builder
+                .ins()
+                .stack_store(actual_value, slot, union_layout::PAYLOAD_OFFSET);
         }
 
         let ptr_type = self.ptr_type();
@@ -1317,9 +1318,11 @@ impl Cg<'_, '_, '_> {
     /// Then returns from the function with (tag, payload).
     fn raise_stmt(&mut self, raise_stmt: &RaiseStmt) -> CodegenResult<bool> {
         // Get the current function's return type - must be Fallible
-        let return_type_id = self.return_type.ok_or(CodegenError::internal(
-            "raise statement used outside of a function with declared return type",
-        ))?;
+        let return_type_id = self.return_type.ok_or_else(|| {
+            CodegenError::internal(
+                "raise statement used outside of a function with declared return type",
+            )
+        })?;
 
         // Extract the error type from the fallible return type
         let (_success_type_id, error_type_id) = self
@@ -1435,8 +1438,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.builder.ins().iconst(types::I64, 0));
         }
 
-        if error_fields.len() == 1
-            && !crate::types::is_wide_type(error_fields[0].ty, self.arena())
+        if error_fields.len() == 1 && !crate::types::is_wide_type(error_fields[0].ty, self.arena())
         {
             // Single non-wide field - store inline as payload value
             let field_def = &error_fields[0];
@@ -1489,8 +1491,7 @@ impl Cg<'_, '_, '_> {
             // The field value is consumed into the error payload.
             field_value.mark_consumed();
             field_value.debug_assert_rc_handled("Stmt::Raise (multi field)");
-            let bytes_stored =
-                store_value_to_stack(self.builder, &field_value, slot, field_offset);
+            let bytes_stored = store_value_to_stack(self.builder, &field_value, slot, field_offset);
             field_offset += bytes_stored;
         }
 
