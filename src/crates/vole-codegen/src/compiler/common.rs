@@ -95,38 +95,29 @@ impl<'a> FunctionCompileConfig<'a> {
         }
     }
 
-    /// Create a config for a pure lambda (no captures, skips closure ptr param)
-    pub fn pure_lambda(
+    /// Create a config for a lambda (pure or capturing, skips closure ptr param)
+    ///
+    /// If `capture_bindings` is Some, the lambda captures variables from its
+    /// environment and the closure pointer is used to access them. If None,
+    /// the closure pointer parameter is still present (for calling convention
+    /// consistency) but ignored.
+    pub fn lambda(
         body: &'a FuncBody,
         params: Vec<(Symbol, TypeId, Type)>,
         return_type_id: TypeId,
-    ) -> Self {
-        Self {
-            body,
-            params,
-            self_binding: None,
-            capture_bindings: None,
-            closure_ptr_type: None,
-            return_type_id: Some(return_type_id),
-            skip_block_params: 1, // Skip the closure pointer
-            default_return: DefaultReturn::Zero,
-        }
-    }
-
-    /// Create a config for a capturing lambda (has captures, skips closure ptr param)
-    pub fn capturing_lambda(
-        body: &'a FuncBody,
-        params: Vec<(Symbol, TypeId, Type)>,
-        capture_bindings: &'a FxHashMap<Symbol, CaptureBinding>,
+        capture_bindings: Option<&'a FxHashMap<Symbol, CaptureBinding>>,
         closure_ptr_type: Type,
-        return_type_id: TypeId,
     ) -> Self {
         Self {
             body,
             params,
             self_binding: None,
-            capture_bindings: Some(capture_bindings),
-            closure_ptr_type: Some(closure_ptr_type),
+            capture_bindings,
+            closure_ptr_type: if capture_bindings.is_some() {
+                Some(closure_ptr_type)
+            } else {
+                None
+            },
             return_type_id: Some(return_type_id),
             skip_block_params: 1, // Skip the closure pointer
             default_return: DefaultReturn::Zero,
