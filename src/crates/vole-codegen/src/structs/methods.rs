@@ -23,6 +23,7 @@ use vole_identity::{ModuleId, NamerLookup};
 use vole_sema::generic::{
     ClassMethodMonomorphKey, StaticMethodMonomorphInstance, StaticMethodMonomorphKey,
 };
+use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 
@@ -1078,15 +1079,13 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
-    /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
-    fn runtime_iterator_method(
-        &mut self,
-        obj: &CompiledValue,
-        mc: &MethodCallExpr,
+    /// Resolve an Iterator interface method: find the external binding and
+    /// compute the substituted return type (converting Iterator<T> to RuntimeIterator(T)).
+    fn resolve_iterator_method(
+        &self,
         method_name: &str,
-        elem_type_id: TypeId,
         expr_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
+    ) -> CodegenResult<(ExternalMethodInfo, TypeId)> {
         // Look up the Iterator interface
         let iter_type_id = self
             .resolve_type_str_or_interface("Iterator")
@@ -1121,6 +1120,20 @@ impl Cg<'_, '_, '_> {
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values
         let return_type_id = self.convert_iterator_return_type(return_type_id, iter_type_id);
+
+        Ok((external_info, return_type_id))
+    }
+
+    /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
+    fn runtime_iterator_method(
+        &mut self,
+        obj: &CompiledValue,
+        mc: &MethodCallExpr,
+        method_name: &str,
+        elem_type_id: TypeId,
+        expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        let (external_info, return_type_id) = self.resolve_iterator_method(method_name, expr_id)?;
 
         // When the iterator comes from a variable (borrowed), rc_inc it before
         // pipeline and terminal method calls. Both categories assume ownership
