@@ -1056,6 +1056,84 @@ impl Cg<'_, '_, '_> {
         Ok(false)
     }
 
+    /// Find the union variant tag for a value's type, with integer widening/narrowing fallback.
+    /// Returns (tag_index, possibly_coerced_value, actual_type_id).
+    fn find_union_variant_tag(
+        &mut self,
+        value: &CompiledValue,
+        union_type_id: TypeId,
+        variants: &[TypeId],
+    ) -> CodegenResult<(usize, Value, TypeId)> {
+        // Direct type match
+        if let Some(pos) = variants.iter().position(|&v| v == value.type_id) {
+            return Ok((pos, value.value, value.type_id));
+        }
+
+        // Try to find a compatible integer type for widening/narrowing
+        let arena = self.arena();
+        let value_is_integer = arena.is_integer(value.type_id);
+
+        let compatible = if value_is_integer {
+            variants
+                .iter()
+                .enumerate()
+                .find(|(_, v)| arena.is_integer(**v))
+                .map(|(pos, v)| (pos, *v))
+        } else {
+            None
+        };
+
+        match compatible {
+            Some((pos, variant_type_id)) => {
+                let target_ty = self.cranelift_type(variant_type_id);
+                let actual = if target_ty.bytes() < value.ty.bytes() {
+                    self.builder.ins().ireduce(target_ty, value.value)
+                } else if target_ty.bytes() > value.ty.bytes() {
+                    self.builder.ins().sextend(target_ty, value.value)
+                } else {
+                    value.value
+                };
+                Ok((pos, actual, variant_type_id))
+            }
+            None => {
+                let expected = variants
+                    .iter()
+                    .map(|&variant| self.arena().display_basic(variant))
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                let found = if let Some(name_id) = self.arena().unwrap_type_param(value.type_id) {
+                    format!("{} ({:?})", self.name_table().display(name_id), name_id)
+                } else {
+                    self.arena().display_basic(value.type_id)
+                };
+                let subs = self
+                    .substitutions
+                    .map(|m| {
+                        m.iter()
+                            .map(|(k, v)| {
+                                format!(
+                                    "{} ({:?}) -> {}",
+                                    self.name_table().display(*k),
+                                    k,
+                                    self.arena().display_basic(*v)
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "<none>".to_string());
+                Err(CodegenError::type_mismatch(
+                    "union variant",
+                    format!("compatible type ({expected})"),
+                    format!(
+                        "{found} (union={}, substitutions={subs})",
+                        self.arena().display_basic(union_type_id)
+                    ),
+                ))
+            }
+        }
+    }
+
     /// Wrap a value in a union representation.
     pub fn construct_union_id(
         &mut self,
@@ -1082,74 +1160,7 @@ impl Cg<'_, '_, '_> {
 
         // Find the position of value's type in variants
         let (tag, actual_value, actual_type_id) =
-            if let Some(pos) = variants.iter().position(|&v| v == value.type_id) {
-                (pos, value.value, value.type_id)
-            } else {
-                // Try to find a compatible integer type for widening/narrowing
-                let arena = self.arena();
-                let value_is_integer = arena.is_integer(value.type_id);
-
-                let compatible = if value_is_integer {
-                    variants
-                        .iter()
-                        .enumerate()
-                        .find(|(_, v)| arena.is_integer(**v))
-                        .map(|(pos, v)| (pos, *v))
-                } else {
-                    None
-                };
-
-                match compatible {
-                    Some((pos, variant_type_id)) => {
-                        let target_ty = self.cranelift_type(variant_type_id);
-                        let actual = if target_ty.bytes() < value.ty.bytes() {
-                            self.builder.ins().ireduce(target_ty, value.value)
-                        } else if target_ty.bytes() > value.ty.bytes() {
-                            self.builder.ins().sextend(target_ty, value.value)
-                        } else {
-                            value.value
-                        };
-                        (pos, actual, variant_type_id)
-                    }
-                    None => {
-                        let expected = variants
-                            .iter()
-                            .map(|&variant| self.arena().display_basic(variant))
-                            .collect::<Vec<_>>()
-                            .join(" | ");
-                        let found =
-                            if let Some(name_id) = self.arena().unwrap_type_param(value.type_id) {
-                                format!("{} ({:?})", self.name_table().display(name_id), name_id)
-                            } else {
-                                self.arena().display_basic(value.type_id)
-                            };
-                        let subs = self
-                            .substitutions
-                            .map(|m| {
-                                m.iter()
-                                    .map(|(k, v)| {
-                                        format!(
-                                            "{} ({:?}) -> {}",
-                                            self.name_table().display(*k),
-                                            k,
-                                            self.arena().display_basic(*v)
-                                        )
-                                    })
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            })
-                            .unwrap_or_else(|| "<none>".to_string());
-                        return Err(CodegenError::type_mismatch(
-                            "union variant",
-                            format!("compatible type ({expected})"),
-                            format!(
-                                "{found} (union={}, substitutions={subs})",
-                                self.arena().display_basic(union_type_id)
-                            ),
-                        ));
-                    }
-                }
-            };
+            self.find_union_variant_tag(&value, union_type_id, &variants)?;
 
         let union_size = self.type_size(union_type_id);
         let slot = self.alloc_stack(union_size);
