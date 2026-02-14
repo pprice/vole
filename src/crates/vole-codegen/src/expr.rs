@@ -1841,16 +1841,7 @@ impl Cg<'_, '_, '_> {
         // rc_dec balances the original reference from the callee.
         self.cleanup_fallible_scrutinee(&scrutinee, scrutinee_type_id)?;
 
-        if !is_void {
-            let result = self.builder.block_params(merge_block)[0];
-            let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
-            if self.rc_state(result_type_id).needs_cleanup() {
-                cv.rc_lifecycle = RcLifecycle::Owned;
-            }
-            Ok(cv)
-        } else {
-            Ok(self.void_value())
-        }
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }
 
     /// Emit a match expression using Cranelift's Switch for O(1) dispatch.
@@ -1935,16 +1926,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
         self.invalidate_value_caches();
 
-        if !is_void {
-            let result = self.builder.block_params(merge_block)[0];
-            let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
-            if result_needs_rc {
-                cv.rc_lifecycle = RcLifecycle::Owned;
-            }
-            Ok(cv)
-        } else {
-            Ok(self.void_value())
-        }
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }
 
     /// Emit rc_dec for the payload inside a fallible scrutinee after a match.
@@ -2345,6 +2327,29 @@ impl Cg<'_, '_, '_> {
         Ok(())
     }
 
+    /// Retrieve the merged result from a multi-arm block (match/if/when).
+    ///
+    /// For non-void expressions, reads the block parameter from the merge block,
+    /// wraps it as a CompiledValue, and marks it as Owned if the type needs RC
+    /// cleanup. For void expressions, emits a zero-valued void placeholder.
+    fn merge_block_result(
+        &mut self,
+        merge_block: Block,
+        cranelift_type: Type,
+        type_id: TypeId,
+        is_void: bool,
+    ) -> CodegenResult<CompiledValue> {
+        if is_void {
+            return Ok(self.void_value());
+        }
+        let result = self.builder.block_params(merge_block)[0];
+        let mut cv = CompiledValue::new(result, cranelift_type, type_id);
+        if self.rc_state(type_id).needs_cleanup() {
+            cv.rc_lifecycle = RcLifecycle::Owned;
+        }
+        Ok(cv)
+    }
+
     /// Compile if expression using blocks (standard path).
     fn if_expr_blocks(
         &mut self,
@@ -2422,16 +2427,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
         self.invalidate_value_caches();
 
-        if !is_void {
-            let result = self.builder.block_params(merge_block)[0];
-            let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
-            if result_needs_rc {
-                cv.rc_lifecycle = RcLifecycle::Owned;
-            }
-            Ok(cv)
-        } else {
-            Ok(self.void_value())
-        }
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }
 
     /// Compile a when expression (subject-less conditional chain)
@@ -2654,18 +2650,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
         self.invalidate_value_caches();
 
-        if !is_void {
-            let result = self.builder.block_params(merge_block)[0];
-            let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
-            // For RC types, each arm ensured a +1 ref, so the merge result is
-            // effectively Owned. Mark it so the consumer doesn't add another inc.
-            if result_needs_rc {
-                cv.rc_lifecycle = RcLifecycle::Owned;
-            }
-            Ok(cv)
-        } else {
-            Ok(self.void_value())
-        }
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }
 
     // =========================================================================
