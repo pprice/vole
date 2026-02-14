@@ -1164,7 +1164,7 @@ impl Cg<'_, '_, '_> {
         // decide whether to rc_inc the payload when promoting to the heap.
         let is_rc = self.rc_state(actual_type_id).needs_cleanup();
         let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
-        self.builder.ins().stack_store(is_rc_val, slot, 1);
+        self.builder.ins().stack_store(is_rc_val, slot, union_layout::IS_RC_OFFSET);
 
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
         if !self.arena().is_sentinel(actual_type_id) {

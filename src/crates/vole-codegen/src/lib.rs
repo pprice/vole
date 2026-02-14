@@ -67,6 +67,11 @@ pub(crate) mod union_layout {
     /// Standard union allocation size: tag (8 bytes) + single i64 payload (8 bytes).
     /// Used for stack/heap allocations of standard-layout unions and optionals.
     pub const STANDARD_SIZE: u32 = 16;
+
+    /// Byte offset of the is_rc flag within a union value.
+    /// Layout: `[tag:i8, is_rc:i8, pad(6), payload:i64]`.
+    /// Used by heap promotion to decide whether to rc_inc the payload.
+    pub const IS_RC_OFFSET: i32 = 1;
 }
 
 /// Named trap codes for Cranelift traps used across the compiler.

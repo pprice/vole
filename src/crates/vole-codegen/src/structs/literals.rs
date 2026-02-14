@@ -476,7 +476,7 @@ impl Cg<'_, '_, '_> {
         let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
         self.builder
             .ins()
-            .store(MemFlags::new(), is_rc_val, heap_ptr, 1);
+            .store(MemFlags::new(), is_rc_val, heap_ptr, union_layout::IS_RC_OFFSET);
 
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
         if !self.arena().is_sentinel(value.type_id) {
@@ -527,7 +527,7 @@ impl Cg<'_, '_, '_> {
         let is_rc = self
             .builder
             .ins()
-            .load(types::I8, MemFlags::new(), value.value, 1);
+            .load(types::I8, MemFlags::new(), value.value, union_layout::IS_RC_OFFSET);
         let is_rc_nonzero = self.builder.ins().icmp_imm(IntCC::NotEqual, is_rc, 0);
         let payload_nonzero = self.builder.ins().icmp_imm(IntCC::NotEqual, payload, 0);
         let needs_inc = self.builder.ins().band(is_rc_nonzero, payload_nonzero);
