@@ -18,7 +18,7 @@ use expr::{print_expr, print_pattern, print_string_literal};
 pub(super) const INDENT: isize = 4;
 
 /// Pretty-print a program to a Doc.
-pub fn print_program<'a>(
+pub(crate) fn print_program<'a>(
     arena: &'a Arena<'a>,
     program: &Program,
     interner: &Interner,
