@@ -1187,8 +1187,7 @@ impl Cg<'_, '_, '_> {
                 let tested_type_id = self
                     .resolve_simple_type_expr(&is_expr.type_expr)
                     .ok_or_else(|| {
-                        "is expression in monomorphized generic: cannot resolve tested type"
-                            .to_string()
+                        CodegenError::internal("is expression in monomorphized generic: cannot resolve tested type")
                     })?;
                 self.compute_is_check_result(value.type_id, tested_type_id)
             }

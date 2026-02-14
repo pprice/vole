@@ -195,18 +195,6 @@ impl From<CodegenError> for String {
     }
 }
 
-// Convenience conversion from String to CodegenError (for legacy error strings)
-// This wraps arbitrary strings as internal errors during migration.
-impl From<String> for CodegenError {
-    fn from(msg: String) -> Self {
-        // Parse common patterns into appropriate variants, otherwise InternalError
-        CodegenError::InternalError {
-            message: "legacy error",
-            context: Some(msg),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

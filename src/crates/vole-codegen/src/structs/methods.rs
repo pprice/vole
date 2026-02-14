@@ -1325,7 +1325,7 @@ impl Cg<'_, '_, '_> {
         let (param_ids, return_type_id) = {
             let arena = self.arena();
             let (params, ret, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
-                "Expected function type for functional interface call".to_string()
+                CodegenError::type_mismatch("functional interface call", "function type", "other")
             })?;
             (params.clone(), ret)
         };
@@ -1746,9 +1746,12 @@ impl Cg<'_, '_, '_> {
                         format!("{:?} -> {}", k, mangled)
                     })
                     .collect();
-                format!(
-                    "Static method not found: {}::{} (type_name_id={:?}, method_name_id={:?}). Registered: {:?}. Static candidates: {:?}",
-                    type_name, method_name, type_name_id, method_name_id, registered_keys, static_candidates
+                CodegenError::internal_with_context(
+                    "static method not found",
+                    format!(
+                        "{}::{} (type_name_id={:?}, method_name_id={:?}). Registered: {:?}. Static candidates: {:?}",
+                        type_name, method_name, type_name_id, method_name_id, registered_keys, static_candidates
+                    ),
                 )
             })?;
 

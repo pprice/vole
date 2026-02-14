@@ -155,7 +155,6 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let variants = arena.unwrap_union(obj.type_id).ok_or_else(|| {
                 CodegenError::type_mismatch("optional chain", "optional type", "non-optional")
-                    .to_string()
             })?;
             let nil_id = arena.nil();
             let nil_tag = variants
@@ -168,7 +167,6 @@ impl Cg<'_, '_, '_> {
                     "optional type",
                     "union without inner type",
                 )
-                .to_string()
             })?;
             (variants.clone(), nil_tag, inner_type_id)
         };

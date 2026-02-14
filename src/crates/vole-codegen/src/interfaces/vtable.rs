@@ -120,9 +120,9 @@ impl InterfaceVtableRegistry {
                 let impl_type_id =
                     ImplTypeId::from_type_id(concrete_type_id, arena, ctx.registry()).ok_or_else(
                         || {
-                            format!(
-                                "cannot build vtable for unsupported type {:?}",
-                                concrete_type_id
+                            CodegenError::internal_with_context(
+                                "cannot build vtable for unsupported type",
+                                format!("{:?}", concrete_type_id),
                             )
                         },
                     )?;
@@ -242,9 +242,9 @@ impl InterfaceVtableRegistry {
                 let impl_type_id =
                     ImplTypeId::from_type_id(concrete_type_id, arena, ctx.registry()).ok_or_else(
                         || {
-                            format!(
-                                "cannot build vtable for unsupported type {:?}",
-                                concrete_type_id
+                            CodegenError::internal_with_context(
+                                "cannot build vtable for unsupported type",
+                                format!("{:?}", concrete_type_id),
                             )
                         },
                     )?;
