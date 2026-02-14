@@ -1198,6 +1198,12 @@ impl TypeArena {
         }
     }
 
+    /// Unwrap an error or struct type, returning just the TypeDefId.
+    pub fn unwrap_error_or_struct_def(&self, id: TypeId) -> Option<TypeDefId> {
+        self.unwrap_error(id)
+            .or_else(|| self.unwrap_struct(id).map(|(def_id, _)| def_id))
+    }
+
     /// Unwrap a union type, returning the variants
     pub fn unwrap_union(&self, id: TypeId) -> Option<&TypeIdVec> {
         match self.get(id) {

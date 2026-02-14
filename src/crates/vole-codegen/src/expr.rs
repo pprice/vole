@@ -2070,11 +2070,7 @@ impl Cg<'_, '_, '_> {
     /// Check if an error variant is safe for unconditional rc_dec.
     /// True for: 0 fields (null payload) or 1 RC field.
     fn error_variant_safe_for_rc_dec(&self, type_id: TypeId) -> bool {
-        let arena = self.arena();
-        let type_def_id = arena
-            .unwrap_error(type_id)
-            .or_else(|| arena.unwrap_struct(type_id).map(|(id, _)| id));
-        let Some(type_def_id) = type_def_id else {
+        let Some(type_def_id) = self.arena().unwrap_error_or_struct_def(type_id) else {
             return false;
         };
         let fields: Vec<_> = self.query().fields_on_type(type_def_id).collect();
@@ -2090,11 +2086,7 @@ impl Cg<'_, '_, '_> {
 
     /// Check if an error/struct type has exactly one field and that field is RC.
     fn error_type_single_field_is_rc(&self, type_id: TypeId) -> bool {
-        let arena = self.arena();
-        let type_def_id = arena
-            .unwrap_error(type_id)
-            .or_else(|| arena.unwrap_struct(type_id).map(|(id, _)| id));
-        let Some(type_def_id) = type_def_id else {
+        let Some(type_def_id) = self.arena().unwrap_error_or_struct_def(type_id) else {
             return false;
         };
         let fields: Vec<_> = self.query().fields_on_type(type_def_id).collect();
