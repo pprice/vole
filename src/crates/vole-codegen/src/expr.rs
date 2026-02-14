@@ -4,7 +4,7 @@
 
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
-use cranelift_module::Module;
+use cranelift_module::{FuncId, Module};
 
 use crate::RuntimeFn;
 use crate::errors::{CodegenError, CodegenResult};
@@ -301,43 +301,21 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Compile a reference to a named function, wrapping it in a closure struct.
-    /// Creates a wrapper function that adapts the function to the closure calling convention.
-    fn function_reference(
+    /// Create a closure wrapper function that adapts a regular function to closure
+    /// calling convention. The wrapper takes (closure_ptr, params...) and calls
+    /// the original function with just (params...).
+    fn create_closure_wrapper(
         &mut self,
-        sym: Symbol,
-        func_type_id: TypeId,
-    ) -> CodegenResult<CompiledValue> {
+        orig_func_id: FuncId,
+        param_ids: &[TypeId],
+        return_type_id: TypeId,
+    ) -> CodegenResult<FuncId> {
         use cranelift::prelude::FunctionBuilderContext;
 
-        // Look up the original function's FuncId using the name table
-        let query = self.query();
-        let module_id = self
-            .current_module_id()
-            .unwrap_or(self.env.analyzed.module_id);
-        let name_id = query.function_name_id(module_id, sym);
-
-        let orig_func_key = self.funcs().intern_name_id(name_id);
-        let orig_func_id = self.funcs().func_id(orig_func_key).ok_or_else(|| {
-            CodegenError::not_found("function id for", self.interner().resolve(sym))
-        })?;
-
-        // Unwrap function type to get params and return type
-        let (param_ids, return_type_id) = {
-            let arena = self.arena();
-            let (params, ret, _is_closure) =
-                arena.unwrap_function(func_type_id).ok_or_else(|| {
-                    CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
-                })?;
-            (params.clone(), ret)
-        };
-
-        // Create a wrapper function that adapts the original function to closure calling convention.
-        // The wrapper takes (closure_ptr, params...) and calls the original function with just (params...).
         let wrapper_index = self.next_lambda_id();
 
         // Build wrapper signature: (closure_ptr, params...) -> return_type
-        let param_types = self.cranelift_types(&param_ids);
+        let param_types = self.cranelift_types(param_ids);
         let return_cr_type = self.cranelift_type(return_type_id);
         let is_void_return = self.arena().is_void(return_type_id);
 
@@ -405,6 +383,41 @@ impl Cg<'_, '_, '_> {
         self.jit_module()
             .define_function(wrapper_func_id, &mut wrapper_ctx)
             .map_err(CodegenError::cranelift)?;
+
+        Ok(wrapper_func_id)
+    }
+
+    /// Compile a reference to a named function, wrapping it in a closure struct.
+    /// Creates a wrapper function that adapts the function to the closure calling convention.
+    fn function_reference(
+        &mut self,
+        sym: Symbol,
+        func_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        // Look up the original function's FuncId using the name table
+        let query = self.query();
+        let module_id = self
+            .current_module_id()
+            .unwrap_or(self.env.analyzed.module_id);
+        let name_id = query.function_name_id(module_id, sym);
+
+        let orig_func_key = self.funcs().intern_name_id(name_id);
+        let orig_func_id = self.funcs().func_id(orig_func_key).ok_or_else(|| {
+            CodegenError::not_found("function id for", self.interner().resolve(sym))
+        })?;
+
+        // Unwrap function type to get params and return type
+        let (param_ids, return_type_id) = {
+            let arena = self.arena();
+            let (params, ret, _is_closure) =
+                arena.unwrap_function(func_type_id).ok_or_else(|| {
+                    CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
+                })?;
+            (params.clone(), ret)
+        };
+
+        let wrapper_func_id =
+            self.create_closure_wrapper(orig_func_id, &param_ids, return_type_id)?;
 
         // Get the wrapper function address
         let wrapper_func_ref = self
