@@ -177,6 +177,12 @@ impl Analyzer {
         id == ArenaTypeId::BOOL
     }
 
+    /// Check if TypeId can be used in boolean context (bool or numeric)
+    #[inline]
+    pub(crate) fn is_bool_compatible_id(&self, id: ArenaTypeId) -> bool {
+        self.is_bool_id(id) || self.is_numeric_id(id)
+    }
+
     /// Check if TypeId is metatype (no arena access)
     #[inline]
     pub(crate) fn is_metatype_id(&self, id: ArenaTypeId) -> bool {
@@ -409,5 +415,4 @@ impl Analyzer {
             NumericSuffix::F64 => "f64 range".to_string(),
         }
     }
-
 }

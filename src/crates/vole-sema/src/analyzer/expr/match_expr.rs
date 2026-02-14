@@ -135,7 +135,7 @@ impl Analyzer {
             // Check guard if present (must be bool) using TypeId
             if let Some(guard) = &arm.guard {
                 let guard_type_id = self.check_expr(guard, interner)?;
-                if !self.is_bool_id(guard_type_id) && !self.is_numeric_id(guard_type_id) {
+                if !self.is_bool_compatible_id(guard_type_id) {
                     let found = self.type_display_id(guard_type_id);
                     self.add_error(
                         SemanticError::MatchGuardNotBool {

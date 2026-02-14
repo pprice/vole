@@ -302,7 +302,7 @@ impl Analyzer {
             }
             Stmt::While(while_stmt) => {
                 let cond_type_id = self.check_expr(&while_stmt.condition, interner)?;
-                if !self.is_bool_id(cond_type_id) && !self.is_numeric_id(cond_type_id) {
+                if !self.is_bool_compatible_id(cond_type_id) {
                     let found = self.type_display_id(cond_type_id);
                     self.add_error(
                         SemanticError::ConditionNotBool {
@@ -322,7 +322,7 @@ impl Analyzer {
             }
             Stmt::If(if_stmt) => {
                 let cond_type_id = self.check_expr(&if_stmt.condition, interner)?;
-                if !self.is_bool_id(cond_type_id) && !self.is_numeric_id(cond_type_id) {
+                if !self.is_bool_compatible_id(cond_type_id) {
                     let found = self.type_display_id(cond_type_id);
                     self.add_error(
                         SemanticError::ConditionNotBool {
