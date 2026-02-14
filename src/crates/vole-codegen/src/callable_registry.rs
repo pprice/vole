@@ -138,7 +138,9 @@ fn strategy_for_intrinsic(intrinsic: &IntrinsicKey) -> CallableStrategy {
     match intrinsic.as_str() {
         // Guardrail: only explicitly-vetted callables are dual-backend; NaN/overflow-sensitive
         // numeric intrinsics stay inline-only until behavior conformance exists.
-        "panic" | "array_len" | "string_len" => CallableStrategy::PreferInlineFallbackRuntime,
+        "panic" | "array_len" | "string_len" | "string_eq" => {
+            CallableStrategy::PreferInlineFallbackRuntime
+        }
         _ => CallableStrategy::InlineOnly,
     }
 }
@@ -148,6 +150,7 @@ fn runtime_peer_for_intrinsic(key: &IntrinsicKey) -> Option<RuntimeFn> {
         "panic" => Some(RuntimeFn::Panic),
         "array_len" => Some(RuntimeFn::ArrayLen),
         "string_len" => Some(RuntimeFn::StringLen),
+        "string_eq" => Some(RuntimeFn::StringEq),
         _ => None,
     }
 }
@@ -165,6 +168,10 @@ fn intrinsic_signature(key: &IntrinsicKey) -> Option<CallableSig> {
         "string_len" => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: Some(AbiTy::I64),
+        }),
+        "string_eq" => Some(CallableSig {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::I8),
         }),
         _ => None,
     }
@@ -184,6 +191,10 @@ fn runtime_adapter_signature(key: &IntrinsicKey, runtime: RuntimeFn) -> Option<C
         ("string_len", RuntimeFn::StringLen) => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: Some(AbiTy::I64),
+        }),
+        ("string_eq", RuntimeFn::StringEq) => Some(CallableSig {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::I8),
         }),
         _ => None,
     }
@@ -270,7 +281,7 @@ mod tests {
 
     #[test]
     fn len_intrinsics_can_toggle_to_runtime_backend() {
-        for key in ["array_len", "string_len"] {
+        for key in ["array_len", "string_len", "string_eq"] {
             let resolved = resolve_callable_with_preference(
                 CallableKey::Intrinsic(IntrinsicKey::from(key)),
                 CallableBackendPreference::PreferRuntime,
@@ -278,7 +289,9 @@ mod tests {
             .expect("len callable resolution");
             assert!(matches!(
                 resolved,
-                ResolvedCallable::Runtime(RuntimeFn::ArrayLen | RuntimeFn::StringLen)
+                ResolvedCallable::Runtime(
+                    RuntimeFn::ArrayLen | RuntimeFn::StringLen | RuntimeFn::StringEq
+                )
             ));
         }
     }

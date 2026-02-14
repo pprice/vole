@@ -1622,12 +1622,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create an integer constant with a specific Vole type
     pub fn int_const(&mut self, n: i64, type_id: TypeId) -> CompiledValue {
         let ty = self.cranelift_type(type_id);
+        let arena = self.arena();
         // If bidirectional inference produced a float type for an integer literal
         // (can happen in generic contexts where the type parameter resolves to f64
         // during sema but codegen uses i64 for the type param), fall back to i64.
         // Float conversion for `let x: f64 = 5` is handled by sema recording the
         // literal as a FloatLiteral, not through int_const.
-        let (ty, type_id) = if ty == types::F64 || ty == types::F32 {
+        //
+        // Likewise, if sema contextual typing labels an int literal as a union
+        // element, keep the literal concrete here and let explicit union boxing
+        // happen at coercion/assignment boundaries.
+        let (ty, type_id) = if ty == types::F64 || ty == types::F32 || arena.is_union(type_id) {
             (types::I64, TypeId::I64)
         } else {
             (ty, type_id)
@@ -1646,6 +1651,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
         let arena = self.arena();
+        if arena.is_union(type_id) {
+            let v = self.builder.ins().f64const(n);
+            return CompiledValue::new(v, types::F64, TypeId::F64);
+        }
         let (ty, value) = match arena.get(type_id) {
             ArenaType::Primitive(PrimitiveType::F32) => {
                 let v = self.builder.ins().f32const(n as f32);
@@ -2864,6 +2873,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let len_val = self.emit_inline_string_len(args[0]);
                 Ok(self.i64_value(len_val))
             }
+            IntrinsicHandler::BuiltinStringEq => {
+                if args.len() < 2 {
+                    return Err(CodegenError::arg_count("string_eq", 2, args.len()));
+                }
+                let eq_val = self.emit_inline_string_eq(args[0], args[1]);
+                Ok(self.bool_value(eq_val))
+            }
         }
     }
 
@@ -3005,6 +3021,153 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.switch_to_block(exit_block);
         let result = self.builder.block_params(exit_block)[0];
         self.builder.ins().jump(merge_block, &[result.into()]);
+
+        self.builder.switch_to_block(merge_block);
+        self.builder.block_params(merge_block)[0]
+    }
+
+    fn emit_inline_string_eq(&mut self, left_ptr: Value, right_ptr: Value) -> Value {
+        let ptr_type = self.ptr_type();
+        let zero_i8 = self.builder.ins().iconst(types::I8, 0);
+        let one_i8 = self.builder.ins().iconst(types::I8, 1);
+        let zero_i64 = self.builder.ins().iconst(types::I64, 0);
+        let one_i64 = self.builder.ins().iconst(types::I64, 1);
+        let null_ptr = self.builder.ins().iconst(ptr_type, 0);
+
+        let left_is_null = self.builder.ins().icmp(IntCC::Equal, left_ptr, null_ptr);
+        let right_is_null = self.builder.ins().icmp(IntCC::Equal, right_ptr, null_ptr);
+
+        let left_null_block = self.builder.create_block();
+        let left_nonnull_block = self.builder.create_block();
+        let right_null_from_left_block = self.builder.create_block();
+        let both_nonnull_block = self.builder.create_block();
+        let len_equal_block = self.builder.create_block();
+        let hash_equal_block = self.builder.create_block();
+        let loop_header_block = self.builder.create_block();
+        let loop_body_block = self.builder.create_block();
+        let byte_equal_block = self.builder.create_block();
+        let exit_true_block = self.builder.create_block();
+        let exit_false_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder.append_block_param(merge_block, types::I8);
+        self.builder
+            .append_block_param(loop_header_block, types::I64);
+
+        self.builder
+            .ins()
+            .brif(left_is_null, left_null_block, &[], left_nonnull_block, &[]);
+
+        self.builder.switch_to_block(left_null_block);
+        self.builder.ins().brif(
+            right_is_null,
+            right_null_from_left_block,
+            &[],
+            exit_false_block,
+            &[],
+        );
+
+        self.builder.switch_to_block(right_null_from_left_block);
+        self.builder.ins().jump(merge_block, &[one_i8.into()]);
+
+        self.builder.switch_to_block(left_nonnull_block);
+        self.builder.ins().brif(
+            right_is_null,
+            exit_false_block,
+            &[],
+            both_nonnull_block,
+            &[],
+        );
+
+        self.builder.switch_to_block(both_nonnull_block);
+        let same_ptr = self.builder.ins().icmp(IntCC::Equal, left_ptr, right_ptr);
+        self.builder
+            .ins()
+            .brif(same_ptr, exit_true_block, &[], len_equal_block, &[]);
+
+        self.builder.switch_to_block(len_equal_block);
+        let len_offset = std::mem::offset_of!(vole_runtime::string::RcString, len) as i32;
+        let left_len = self
+            .builder
+            .ins()
+            .load(ptr_type, MemFlags::new(), left_ptr, len_offset);
+        let right_len = self
+            .builder
+            .ins()
+            .load(ptr_type, MemFlags::new(), right_ptr, len_offset);
+        let len_same = self.builder.ins().icmp(IntCC::Equal, left_len, right_len);
+        self.builder
+            .ins()
+            .brif(len_same, hash_equal_block, &[], exit_false_block, &[]);
+
+        self.builder.switch_to_block(hash_equal_block);
+        let hash_offset = std::mem::offset_of!(vole_runtime::string::RcString, hash) as i32;
+        let left_hash = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), left_ptr, hash_offset);
+        let right_hash =
+            self.builder
+                .ins()
+                .load(types::I64, MemFlags::new(), right_ptr, hash_offset);
+        let hash_same = self.builder.ins().icmp(IntCC::Equal, left_hash, right_hash);
+        self.builder.ins().brif(
+            hash_same,
+            loop_header_block,
+            &[zero_i64.into()],
+            exit_false_block,
+            &[],
+        );
+
+        self.builder.switch_to_block(loop_header_block);
+        let idx = self.builder.block_params(loop_header_block)[0];
+        let left_len_i64 = if ptr_type == types::I64 {
+            left_len
+        } else {
+            self.builder.ins().uextend(types::I64, left_len)
+        };
+        let done = self
+            .builder
+            .ins()
+            .icmp(IntCC::UnsignedGreaterThanOrEqual, idx, left_len_i64);
+        self.builder
+            .ins()
+            .brif(done, exit_true_block, &[], loop_body_block, &[]);
+
+        self.builder.switch_to_block(loop_body_block);
+        let data_offset = size_of::<vole_runtime::string::RcString>() as i64;
+        let left_data = self.builder.ins().iadd_imm(left_ptr, data_offset);
+        let right_data = self.builder.ins().iadd_imm(right_ptr, data_offset);
+        let idx_ptr = if ptr_type == types::I64 {
+            idx
+        } else {
+            self.builder.ins().ireduce(ptr_type, idx)
+        };
+        let left_byte_ptr = self.builder.ins().iadd(left_data, idx_ptr);
+        let right_byte_ptr = self.builder.ins().iadd(right_data, idx_ptr);
+        let left_byte = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), left_byte_ptr, 0);
+        let right_byte = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), right_byte_ptr, 0);
+        let bytes_same = self.builder.ins().icmp(IntCC::Equal, left_byte, right_byte);
+        self.builder
+            .ins()
+            .brif(bytes_same, byte_equal_block, &[], exit_false_block, &[]);
+
+        self.builder.switch_to_block(byte_equal_block);
+        let next_idx = self.builder.ins().iadd(idx, one_i64);
+        self.builder
+            .ins()
+            .jump(loop_header_block, &[next_idx.into()]);
+
+        self.builder.switch_to_block(exit_true_block);
+        self.builder.ins().jump(merge_block, &[one_i8.into()]);
+
+        self.builder.switch_to_block(exit_false_block);
+        self.builder.ins().jump(merge_block, &[zero_i8.into()]);
 
         self.builder.switch_to_block(merge_block);
         self.builder.block_params(merge_block)[0]

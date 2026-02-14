@@ -2,6 +2,8 @@
 //
 // Statement and block compilation - impl Cg methods.
 
+use std::mem::size_of;
+
 use cranelift::prelude::*;
 
 use crate::RuntimeFn;
@@ -334,7 +336,18 @@ impl Cg<'_, '_, '_> {
             self.self_capture = Some(let_stmt.name);
         }
 
-        let init = self.expr(init_expr)?;
+        // Look up the declared type from sema (pre-computed for let statements with type annotations)
+        let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
+        let forced_union_elem = declared_type_id_opt
+            .and_then(|type_id| self.arena().unwrap_array(type_id))
+            .filter(|&elem_type_id| self.arena().is_union(elem_type_id));
+        let init = if let ExprKind::ArrayLiteral(elements) = &init_expr.kind {
+            let compiled =
+                self.array_literal_with_union_hint(elements, init_expr, forced_union_elem)?;
+            self.mark_rc_owned(compiled)
+        } else {
+            self.expr(init_expr)?
+        };
 
         // Clear self_capture context
         self.self_capture = None;
@@ -346,9 +359,6 @@ impl Cg<'_, '_, '_> {
         } else {
             init
         };
-
-        // Look up the declared type from sema (pre-computed for let statements with type annotations)
-        let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
 
         let (final_value, final_type_id, is_stack_union) =
             self.coerce_let_init(&init, declared_type_id_opt)?;
@@ -845,9 +855,32 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(body_block);
 
         let current_idx = self.builder.use_var(idx_var);
-        let elem_val = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, current_idx])?;
-        // Narrow the i64 runtime value to the element's actual Cranelift type
-        let elem_val = if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+        let ptr_type = self.ptr_type();
+        let data_offset = std::mem::offset_of!(vole_runtime::array::RcArray, data) as i32;
+        let tagged_value_size = size_of::<vole_runtime::value::TaggedValue>() as i64;
+        let value_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, value) as i32;
+        let data_ptr = self
+            .builder
+            .ins()
+            .load(ptr_type, MemFlags::new(), arr.value, data_offset);
+        let idx_ptr = if ptr_type == types::I64 {
+            current_idx
+        } else {
+            self.builder.ins().ireduce(ptr_type, current_idx)
+        };
+        let stride = self.builder.ins().iconst(ptr_type, tagged_value_size);
+        let elem_offset = self.builder.ins().imul(idx_ptr, stride);
+        let elem_ptr = self.builder.ins().iadd(data_ptr, elem_offset);
+        let elem_val = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), elem_ptr, value_offset);
+        let elem_val = if self.arena().is_union(elem_type_id) {
+            // Union array slots hold heap buffers; copy to stack to avoid
+            // aliasing/use-after-free hazards across iterations and mutations.
+            self.copy_union_heap_to_stack(elem_val, elem_type_id).value
+        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            // Narrow the i64 runtime value to the element's actual Cranelift type.
             self.builder.ins().ireduce(elem_cr_type, elem_val)
         } else if elem_cr_type == types::F64 {
             self.builder

@@ -615,6 +615,15 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an array or tuple literal
     fn array_literal(&mut self, elements: &[Expr], expr: &Expr) -> CodegenResult<CompiledValue> {
+        self.array_literal_with_union_hint(elements, expr, None)
+    }
+
+    pub(crate) fn array_literal_with_union_hint(
+        &mut self,
+        elements: &[Expr],
+        expr: &Expr,
+        forced_union_elem: Option<TypeId>,
+    ) -> CodegenResult<CompiledValue> {
         // Check the inferred type from semantic analysis (module-aware)
         let inferred_type_id = self.get_expr_type(&expr.id);
 
@@ -629,6 +638,9 @@ impl Cg<'_, '_, '_> {
         // Otherwise, create a dynamic array
         let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
         let array_push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
+        let union_elem_type = forced_union_elem.or(inferred_type_id
+            .and_then(|array_type_id| self.arena().unwrap_array(array_type_id))
+            .filter(|&elem_type_id| self.arena().is_union(elem_type_id)));
 
         for elem in elements {
             let compiled = self.expr(elem)?;
@@ -637,6 +649,18 @@ impl Cg<'_, '_, '_> {
             // if the array escapes the current stack frame (e.g. returned from a function).
             let mut compiled = if self.arena().is_struct(compiled.type_id) {
                 self.copy_struct_to_heap(compiled)?
+            } else {
+                compiled
+            };
+            // Coerce dynamic array literal elements into the declared union type.
+            // Without this, tags/payloads can be stored as plain scalar entries,
+            // while union reads expect boxed union-heap representation.
+            compiled = if let Some(union_type_id) = union_elem_type {
+                if self.arena().is_union(compiled.type_id) {
+                    compiled
+                } else {
+                    self.construct_union_heap_id(compiled, union_type_id)?
+                }
             } else {
                 compiled
             };
@@ -1294,11 +1318,13 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Value> {
         let arena = self.arena();
         Ok(if arena.is_string(type_id) {
-            if self.funcs().has_runtime(RuntimeFn::StringEq) {
-                self.call_runtime(RuntimeFn::StringEq, &[left, right])?
-            } else {
-                self.builder.ins().icmp(IntCC::Equal, left, right)
-            }
+            self.call_compiler_intrinsic_key_with_line(
+                crate::IntrinsicKey::from("string_eq"),
+                &[left, right],
+                TypeId::BOOL,
+                0,
+            )?
+            .value
         } else if arena.is_float(type_id) {
             self.builder.ins().fcmp(FloatCC::Equal, left, right)
         } else if type_id.is_integer() || type_id.is_bool() {

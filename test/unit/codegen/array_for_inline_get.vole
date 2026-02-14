@@ -1,0 +1,76 @@
+class Score {
+    value: i64
+}
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+tests "for-array inline get coverage" {
+    test "primitive array elements in for loop" {
+        let arr = [1_i32, 2_i32, 3_i32, 4_i32]
+        let mut sum: i64 = 0
+        for item in arr {
+            sum = sum + item
+        }
+        assert(sum == 10)
+    }
+
+    test "union array elements in for loop" {
+        let arr: [i64 | string] = [1, "two", 3, "four"]
+        let mut nums: i64 = 0
+        let mut words = ""
+        for item in arr {
+            if item is i64 {
+                nums = nums + item
+            } else {
+                words = words + item + ","
+            }
+        }
+        assert(nums == 4)
+        assert(words == "two,four,")
+    }
+
+    test "optional array elements in for loop" {
+        let arr: [i64?] = [1, nil, 3, nil]
+        let mut sum: i64 = 0
+        let mut nils = 0
+        for item in arr {
+            if item == nil {
+                nils = nils + 1
+            } else {
+                sum = sum + (item ?? 0)
+            }
+        }
+        assert(sum == 4)
+        assert(nils == 2)
+    }
+
+    test "class array elements in for loop" {
+        let arr = [Score { value: 5 }, Score { value: 7 }, Score { value: 9 }]
+        let mut sum = 0
+        for item in arr {
+            sum = sum + item.value
+        }
+        assert(sum == 21)
+    }
+
+    test "struct array elements in for loop" {
+        let arr = [Point { x: 1, y: 10 }, Point { x: 2, y: 20 }]
+        let mut sum = 0
+        for item in arr {
+            sum = sum + item.x + item.y
+        }
+        assert(sum == 33)
+    }
+
+    test "tuple array elements in for loop" {
+        let arr: [[i64, i64]] = [[1, 10], [2, 20], [3, 30]]
+        let mut sum = 0
+        for item in arr {
+            sum = sum + item[0] + item[1]
+        }
+        assert(sum == 66)
+    }
+}

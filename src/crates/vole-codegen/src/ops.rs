@@ -737,11 +737,14 @@ impl Cg<'_, '_, '_> {
 
     /// String equality comparison
     fn string_eq(&mut self, left: Value, right: Value) -> CodegenResult<Value> {
-        if self.funcs().has_runtime(RuntimeFn::StringEq) {
-            self.call_runtime(RuntimeFn::StringEq, &[left, right])
-        } else {
-            Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
-        }
+        Ok(self
+            .call_compiler_intrinsic_key_with_line(
+                crate::IntrinsicKey::from("string_eq"),
+                &[left, right],
+                TypeId::BOOL,
+                0,
+            )?
+            .value)
     }
 
     /// Struct equality: compare all flat slots field-by-field.
