@@ -71,45 +71,47 @@ fn print_type_constraint<'a>(
             arena.intersperse(parts, arena.text(" | "))
         }
         TypeConstraint::Structural { fields, methods } => {
-            let mut parts: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
-            for field in fields {
-                parts.push(
-                    arena
-                        .text(interner.resolve(field.name).to_string())
-                        .append(arena.text(": "))
-                        .append(print_type_expr(arena, &field.ty, interner)),
-                );
-            }
-            for method in methods {
-                // Structural method params are just types, not named params
-                let param_types: Vec<_> = method
-                    .params
-                    .iter()
-                    .map(|ty| print_type_expr(arena, ty, interner))
-                    .collect();
-                let params = arena
-                    .text("(")
-                    .append(arena.intersperse(param_types, arena.text(", ")))
-                    .append(arena.text(")"));
-                let return_type = arena.text(" -> ").append(print_type_expr(
-                    arena,
-                    &method.return_type,
-                    interner,
-                ));
-                parts.push(
-                    arena
-                        .text("func ")
-                        .append(arena.text(interner.resolve(method.name).to_string()))
-                        .append(params)
-                        .append(return_type),
-                );
-            }
-            arena
-                .text("{ ")
-                .append(arena.intersperse(parts, arena.text(", ")))
-                .append(arena.text(" }"))
+            print_structural_members(arena, fields, methods, interner)
         }
     }
+}
+
+/// Print structural type members (fields and methods) in `{ field: Type, func name(Params) -> Ret }` format.
+fn print_structural_members<'a>(
+    arena: &'a Arena<'a>,
+    fields: &[StructuralField],
+    methods: &[StructuralMethod],
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let mut parts: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
+    for field in fields {
+        parts.push(
+            arena
+                .text(interner.resolve(field.name).to_string())
+                .append(arena.text(": "))
+                .append(print_type_expr(arena, &field.ty, interner)),
+        );
+    }
+    for method in methods {
+        let params: Vec<_> = method
+            .params
+            .iter()
+            .map(|p| print_type_expr(arena, p, interner))
+            .collect();
+        parts.push(
+            arena
+                .text("func ")
+                .append(arena.text(interner.resolve(method.name).to_string()))
+                .append(arena.text("("))
+                .append(arena.intersperse(params, arena.text(", ")))
+                .append(arena.text(") -> "))
+                .append(print_type_expr(arena, &method.return_type, interner)),
+        );
+    }
+    arena
+        .text("{ ")
+        .append(arena.intersperse(parts, arena.text(", ")))
+        .append(arena.text(" }"))
 }
 
 /// Print a type expression.
@@ -190,35 +192,7 @@ pub(crate) fn print_type_expr<'a>(
             .append(arena.text(size.to_string()))
             .append(arena.text("]")),
         TypeExpr::Structural { fields, methods } => {
-            let mut parts = Vec::new();
-            for field in fields {
-                parts.push(
-                    arena
-                        .text(interner.resolve(field.name).to_string())
-                        .append(arena.text(": "))
-                        .append(print_type_expr(arena, &field.ty, interner)),
-                );
-            }
-            for method in methods {
-                let params: Vec<_> = method
-                    .params
-                    .iter()
-                    .map(|p| print_type_expr(arena, p, interner))
-                    .collect();
-                parts.push(
-                    arena
-                        .text("func ")
-                        .append(arena.text(interner.resolve(method.name).to_string()))
-                        .append(arena.text("("))
-                        .append(arena.intersperse(params, arena.text(", ")))
-                        .append(arena.text(") -> "))
-                        .append(print_type_expr(arena, &method.return_type, interner)),
-                );
-            }
-            arena
-                .text("{ ")
-                .append(arena.intersperse(parts, arena.text(", ")))
-                .append(arena.text(" }"))
+            print_structural_members(arena, fields, methods, interner)
         }
         TypeExpr::Combination(parts) => {
             let type_docs: Vec<_> = parts
