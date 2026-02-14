@@ -11,10 +11,10 @@ use vole_frontend::{ExprKind, FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use crate::context::{Captures, Cg};
-use crate::union_layout;
 use crate::errors::CodegenResult;
 use crate::lambda::CaptureBinding;
-use crate::types::{CodegenCtx, CompileEnv};
+use crate::types::{CodegenCtx, CompileEnv, CompiledValue};
+use crate::union_layout;
 
 /// What to return from a non-terminated block
 #[derive(Clone, Copy)]
@@ -189,84 +189,18 @@ pub(crate) fn setup_function_entry<'a>(
     (variables, captures)
 }
 
-/// Compile function body using Cg context.
+/// Emit the implicit return for a function body.
 ///
-/// This is the new Cg-based compilation path. The caller is responsible for:
-/// - Setting up the function entry (call `setup_function_entry`)
-/// - Creating the Cg context
-/// - Calling seal_all_blocks and finalize after this returns
-///
-/// # Arguments
-/// * `cg` - The Cg context with builder, variables, captures, etc.
-/// * `body` - The function body to compile
-/// * `default_return` - What to return if body doesn't terminate explicitly
-///
-/// # Returns
-/// Ok(()) on success, Err with message on failure
-pub fn compile_function_body_with_cg(
+/// For expression bodies, emit the appropriate return instruction based on
+/// the return type (fallible, struct, union, or normal). For block bodies
+/// that didn't terminate, emit a default return (empty or zero).
+fn emit_implicit_return(
     cg: &mut Cg,
-    body: &FuncBody,
+    expr_value: Option<CompiledValue>,
+    terminated: bool,
     default_return: DefaultReturn,
 ) -> CodegenResult<()> {
-    // Push function-level RC scope for tracking RC locals
-    cg.push_rc_scope();
-
-    // Compile function body
-    let (terminated, expr_value) = match body {
-        FuncBody::Block(block) => {
-            let terminated = cg.block(block)?;
-            (terminated, None)
-        }
-        FuncBody::Expr(expr) => {
-            let mut value = cg.expr(expr)?;
-
-            // RC bookkeeping for expression-bodied returns (mirrors Stmt::Return logic):
-            // If the return expression is a borrow (variable read, index, field access),
-            // we must rc_inc before scope cleanup so the caller receives an owned +1 ref.
-            let skip_var = if let ExprKind::Identifier(sym) = &expr.kind
-                && let Some((var, _)) = cg.vars.get(sym)
-                && (cg.rc_scopes.is_rc_local(*var)
-                    || cg.rc_scopes.is_composite_rc_local(*var)
-                    || cg.rc_scopes.is_union_rc_local(*var))
-            {
-                Some(*var)
-            } else {
-                None
-            };
-            if skip_var.is_none() && value.is_borrowed() {
-                if cg.rc_state(value.type_id).needs_cleanup() {
-                    cg.emit_rc_inc_for_type(value.value, value.type_id)?;
-                } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
-                    // Union with RC variants (e.g. [string]?): rc_inc the inner
-                    // payload so the caller's copy owns its own reference.
-                    // Without this, the caller's consume_rc_args and the
-                    // return value's scope-exit cleanup both rc_dec the same
-                    // inner value, causing a double-free / heap corruption.
-                    cg.emit_union_rc_inc(value.value, &rc_tags)?;
-                }
-            }
-
-            // The return value is consumed — ownership transfers to the caller.
-            value.mark_consumed();
-            value.debug_assert_rc_handled("implicit return");
-            (true, Some((value, skip_var)))
-        }
-    };
-
-    // Emit RC cleanup for function-level scope before implicit returns.
-    // Explicit returns are handled in stmt.rs (Stmt::Return).
-    // If the function terminated (via explicit return/break), cleanup was already
-    // emitted at that point, so we only clean up for non-terminated paths.
-    if !terminated || expr_value.is_some() {
-        let skip_var = expr_value.as_ref().and_then(|(_, sv)| *sv);
-        cg.pop_rc_scope_with_cleanup(skip_var)?;
-    } else {
-        // Just pop the scope marker (cleanup was emitted by the return/break)
-        cg.rc_scopes.pop_scope();
-    }
-
-    // Add implicit return if no explicit return
-    if let Some((value, _skip_var)) = expr_value {
+    if let Some(value) = expr_value {
         // Check if the return type is fallible - need multi-value return
         let is_fallible_return = cg
             .return_type
@@ -289,10 +223,12 @@ pub fn compile_function_body_with_cg(
                 // Wide fallible (i128 success): load low/high from offset 8/16
                 let union_size = cg.type_size(value.type_id);
                 let (low, high) = if union_size > union_layout::TAG_ONLY_SIZE {
-                    let low = cg
-                        .builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), value.value, union_layout::PAYLOAD_OFFSET);
+                    let low = cg.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        value.value,
+                        union_layout::PAYLOAD_OFFSET,
+                    );
                     let high = cg
                         .builder
                         .ins()
@@ -354,6 +290,89 @@ pub fn compile_function_body_with_cg(
             }
         }
     }
+
+    Ok(())
+}
+
+/// Compile function body using Cg context.
+///
+/// This is the new Cg-based compilation path. The caller is responsible for:
+/// - Setting up the function entry (call `setup_function_entry`)
+/// - Creating the Cg context
+/// - Calling seal_all_blocks and finalize after this returns
+///
+/// # Arguments
+/// * `cg` - The Cg context with builder, variables, captures, etc.
+/// * `body` - The function body to compile
+/// * `default_return` - What to return if body doesn't terminate explicitly
+///
+/// # Returns
+/// Ok(()) on success, Err with message on failure
+pub fn compile_function_body_with_cg(
+    cg: &mut Cg,
+    body: &FuncBody,
+    default_return: DefaultReturn,
+) -> CodegenResult<()> {
+    // Push function-level RC scope for tracking RC locals
+    cg.push_rc_scope();
+
+    // Compile function body
+    let (terminated, expr_value) = match body {
+        FuncBody::Block(block) => {
+            let terminated = cg.block(block)?;
+            (terminated, None)
+        }
+        FuncBody::Expr(expr) => {
+            let mut value = cg.expr(expr)?;
+
+            // RC bookkeeping for expression-bodied returns (mirrors Stmt::Return logic):
+            // If the return expression is a borrow (variable read, index, field access),
+            // we must rc_inc before scope cleanup so the caller receives an owned +1 ref.
+            let skip_var = if let ExprKind::Identifier(sym) = &expr.kind
+                && let Some((var, _)) = cg.vars.get(sym)
+                && (cg.rc_scopes.is_rc_local(*var)
+                    || cg.rc_scopes.is_composite_rc_local(*var)
+                    || cg.rc_scopes.is_union_rc_local(*var))
+            {
+                Some(*var)
+            } else {
+                None
+            };
+            if skip_var.is_none() && value.is_borrowed() {
+                if cg.rc_state(value.type_id).needs_cleanup() {
+                    cg.emit_rc_inc_for_type(value.value, value.type_id)?;
+                } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
+                    // Union with RC variants (e.g. [string]?): rc_inc the inner
+                    // payload so the caller's copy owns its own reference.
+                    // Without this, the caller's consume_rc_args and the
+                    // return value's scope-exit cleanup both rc_dec the same
+                    // inner value, causing a double-free / heap corruption.
+                    cg.emit_union_rc_inc(value.value, rc_tags)?;
+                }
+            }
+
+            // The return value is consumed — ownership transfers to the caller.
+            value.mark_consumed();
+            value.debug_assert_rc_handled("implicit return");
+            (true, Some((value, skip_var)))
+        }
+    };
+
+    // Emit RC cleanup for function-level scope before implicit returns.
+    // Explicit returns are handled in stmt.rs (Stmt::Return).
+    // If the function terminated (via explicit return/break), cleanup was already
+    // emitted at that point, so we only clean up for non-terminated paths.
+    if !terminated || expr_value.is_some() {
+        let skip_var = expr_value.as_ref().and_then(|(_, sv)| *sv);
+        cg.pop_rc_scope_with_cleanup(skip_var)?;
+    } else {
+        // Just pop the scope marker (cleanup was emitted by the return/break)
+        cg.rc_scopes.pop_scope();
+    }
+
+    // Emit implicit return
+    let return_value = expr_value.map(|(value, _skip_var)| value);
+    emit_implicit_return(cg, return_value, terminated, default_return)?;
 
     Ok(())
 }
@@ -442,7 +461,7 @@ pub fn compile_function_inner_with_params<'ctx>(
 /// * `default_return` - What to return when not terminated (Empty or Zero)
 pub fn finalize_function_body(
     mut builder: FunctionBuilder,
-    expr_value: Option<&crate::types::CompiledValue>,
+    expr_value: Option<&CompiledValue>,
     terminated: bool,
     default_return: DefaultReturn,
 ) {
