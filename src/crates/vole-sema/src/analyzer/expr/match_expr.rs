@@ -12,7 +12,14 @@ impl Analyzer {
                     .resolve_type(*name, &self.entity_registry())
                     .is_some()
             }
-            _ => false,
+            PatternKind::Wildcard
+            | PatternKind::Literal(_)
+            | PatternKind::Type { .. }
+            | PatternKind::Val { .. }
+            | PatternKind::Success { .. }
+            | PatternKind::Error { .. }
+            | PatternKind::Tuple { .. }
+            | PatternKind::Record { .. } => false,
         }
     }
 
