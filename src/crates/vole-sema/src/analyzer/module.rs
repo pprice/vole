@@ -4,6 +4,77 @@
 use super::*;
 use crate::entity_defs::MethodBinding;
 
+/// RAII guard that removes a canonical path from the modules_in_progress set on drop.
+/// Replaces the `bail_module!` macro so extracted helper functions don't need the macro.
+struct ModuleInProgressGuard {
+    ctx: Rc<AnalyzerContext>,
+    canonical_path: String,
+}
+
+impl ModuleInProgressGuard {
+    fn new(ctx: &Rc<AnalyzerContext>, canonical_path: String) -> Self {
+        ctx.modules_in_progress
+            .borrow_mut()
+            .insert(canonical_path.clone());
+        Self {
+            ctx: Rc::clone(ctx),
+            canonical_path,
+        }
+    }
+
+    /// Consume the guard without removing from in-progress (used on success path
+    /// where we explicitly remove it ourselves after caching).
+    fn defuse(self) {
+        std::mem::forget(self);
+    }
+}
+
+impl Drop for ModuleInProgressGuard {
+    fn drop(&mut self) {
+        self.ctx
+            .modules_in_progress
+            .borrow_mut()
+            .remove(&self.canonical_path);
+    }
+}
+
+/// Collected declarations from a module, ready for type resolution after sub-analysis.
+struct ModuleDeclarations<'a> {
+    exports: FxHashMap<NameId, ArenaTypeId>,
+    constants: FxHashMap<NameId, ConstantValue>,
+    external_funcs: FxHashSet<NameId>,
+    type_names: ModuleTypeNames,
+    deferred_functions: Vec<(NameId, &'a FuncDecl)>,
+    deferred_externals: Vec<(NameId, &'a ExternalFunc)>,
+    deferred_generic_externals: Vec<(NameId, &'a ExternalFunc)>,
+}
+
+/// Named type declarations collected from a module for post-analysis export resolution.
+#[derive(Default)]
+struct ModuleTypeNames {
+    interfaces: Vec<(NameId, Symbol)>,
+    structs: Vec<(NameId, Symbol)>,
+    classes: Vec<(NameId, Symbol)>,
+    errors: Vec<(NameId, Symbol)>,
+    sentinels: Vec<(NameId, Symbol)>,
+}
+
+/// Parsed and transformed module, ready for analysis.
+struct ParsedModule {
+    program: Program,
+    interner: Interner,
+    file_path: PathBuf,
+}
+
+/// Data needed to finalize a module: create the module type and store in context.
+struct ModuleFinalization {
+    program: Program,
+    interner: Interner,
+    exports: FxHashMap<NameId, ArenaTypeId>,
+    constants: FxHashMap<NameId, ConstantValue>,
+    external_funcs: FxHashSet<NameId>,
+}
+
 impl Analyzer {
     /// Process module imports early so they're available for qualified implement syntax.
     /// This runs before signature collection to allow `implement mod.Interface for Type`.
@@ -160,30 +231,8 @@ impl Analyzer {
         span: Span,
         _interner: &Interner,
     ) -> Result<ArenaTypeId, ()> {
-        // Resolve path first (cheap - no file content read) to get canonical path for cache lookup
-        let canonical_path = match self
-            .module_loader
-            .resolve_path(import_path, self.current_file_path.as_deref())
-        {
-            Ok(path) => {
-                // Canonicalize to ensure consistent cache keys (resolves `..` components)
-                path.canonicalize()
-                    .unwrap_or(path)
-                    .to_string_lossy()
-                    .to_string()
-            }
-            Err(e) => {
-                self.add_error(
-                    SemanticError::ModuleNotFound {
-                        path: import_path.to_string(),
-                        message: e.to_string(),
-                        span: span.into(),
-                    },
-                    span,
-                );
-                return Err(());
-            }
-        };
+        // Phase 1: Resolve path and check cache
+        let canonical_path = self.resolve_module_path(import_path, span)?;
 
         // Check cache with canonical path
         let cached_type_id = self
@@ -198,8 +247,7 @@ impl Analyzer {
         }
         tracing::debug!(import_path, %canonical_path, "analyze_module: cache MISS");
 
-        // Check for circular import: if this module is already being analyzed
-        // somewhere in the call stack, we have a cycle.
+        // Phase 2: Circular import detection + RAII guard for in-progress tracking
         if self
             .ctx
             .modules_in_progress
@@ -215,47 +263,153 @@ impl Analyzer {
             );
             return Err(());
         }
+        let guard = ModuleInProgressGuard::new(&self.ctx, canonical_path.clone());
 
-        // Mark this module as in-progress before loading/analyzing
+        // Phase 3: Load, parse, and transform the module
+        let parsed = self.load_and_parse_module(import_path, span)?;
+
+        // Compute module key for storing analysis results
+        let module_key = if import_path.starts_with("std:") {
+            import_path.to_string()
+        } else {
+            canonical_path.clone()
+        };
+        tracing::debug!(import_path, %module_key, "analyze_module: creating module_id");
+        let module_id = self.name_table_mut().module_id(&module_key);
+
+        // Destructure ParsedModule so file_path can be moved independently
+        let ParsedModule {
+            program: module_program,
+            interner: module_interner,
+            file_path: module_file_path,
+        } = parsed;
+
+        // Phase 4: Collect declarations from the parsed module
+        let decls = self.collect_module_declarations(&module_program, &module_interner, module_id);
+
+        // Phase 5a: Run sub-analysis
+        let mut sub_analyzer = self.fork_for_module(module_id, Some(module_file_path));
+        let analyze_result = sub_analyzer.analyze(&module_program, &module_interner);
+        if let Err(ref errors) = analyze_result {
+            tracing::warn!(import_path, ?errors, "module analysis errors");
+            for err in errors {
+                if matches!(err.error, SemanticError::CircularImport { .. }) {
+                    self.errors.push(err.clone());
+                }
+            }
+        }
+        self.store_sub_analyzer_results(&module_key, sub_analyzer);
+
+        // Destructure decls: deferred items borrow the program and must be consumed
+        // before we can move module_program into finalize_module.
+        let ModuleDeclarations {
+            mut exports,
+            constants,
+            mut external_funcs,
+            type_names,
+            deferred_functions,
+            deferred_externals,
+            deferred_generic_externals,
+        } = decls;
+
+        // Phases 5b-5d: Resolve deferred function/external types (consumes program borrows)
+        for (name_id, f) in deferred_functions {
+            let type_id = self.resolve_func_type(
+                &f.params,
+                f.return_type.as_ref(),
+                &module_interner,
+                module_id,
+            );
+            exports.insert(name_id, type_id);
+        }
+        for (name_id, func) in deferred_externals {
+            let type_id = self.resolve_func_type(
+                &func.params,
+                func.return_type.as_ref(),
+                &module_interner,
+                module_id,
+            );
+            exports.insert(name_id, type_id);
+            external_funcs.insert(name_id);
+        }
+        for (name_id, func) in deferred_generic_externals {
+            self.resolve_generic_external(name_id, func, &mut exports, &module_interner, module_id);
+        }
+
+        // Phase 5e: Populate type exports after sub-analysis
+        self.populate_type_exports(&mut exports, &type_names, &module_interner, module_id);
+
+        // Phases 5f-5h: Store program, create module type, cache
+        let finalization = ModuleFinalization {
+            program: module_program,
+            interner: module_interner,
+            exports,
+            constants,
+            external_funcs,
+        };
+        let type_id = self.finalize_module(finalization, &module_key, module_id, import_path);
+
+        // Success: remove from in-progress explicitly, then cache
+        guard.defuse();
         self.ctx
             .modules_in_progress
             .borrow_mut()
-            .insert(canonical_path.clone());
+            .remove(&canonical_path);
+        self.ctx
+            .module_type_ids
+            .borrow_mut()
+            .insert(canonical_path, type_id);
 
-        // Helper macro to clean up modules_in_progress on early return
-        macro_rules! bail_module {
-            ($self:expr, $canonical_path:expr) => {
-                $self
-                    .ctx
-                    .modules_in_progress
-                    .borrow_mut()
-                    .remove($canonical_path);
-            };
+        Ok(type_id)
+    }
+
+    /// Phase 1: Resolve the import path and canonicalize it for use as a cache key.
+    fn resolve_module_path(&mut self, import_path: &str, span: Span) -> Result<String, ()> {
+        match self
+            .module_loader
+            .resolve_path(import_path, self.current_file_path.as_deref())
+        {
+            Ok(path) => {
+                // Canonicalize to ensure consistent cache keys (resolves `..` components)
+                Ok(path
+                    .canonicalize()
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string())
+            }
+            Err(e) => {
+                self.add_error(
+                    SemanticError::ModuleNotFound {
+                        path: import_path.to_string(),
+                        message: e.to_string(),
+                        span: span.into(),
+                    },
+                    span,
+                );
+                Err(())
+            }
         }
+    }
 
-        // Cache miss - now load the file content
+    /// Phase 3: Load the module file, parse it, and run generator transforms.
+    fn load_and_parse_module(&mut self, import_path: &str, span: Span) -> Result<ParsedModule, ()> {
         let is_relative = import_path.starts_with("./") || import_path.starts_with("../");
         let module_info = if is_relative {
             match &self.current_file_path {
-                Some(current_path) => {
-                    match self.module_loader.load_relative(import_path, current_path) {
-                        Ok(info) => info,
-                        Err(e) => {
-                            bail_module!(self, &canonical_path);
-                            self.add_error(
-                                SemanticError::ModuleNotFound {
-                                    path: import_path.to_string(),
-                                    message: e.to_string(),
-                                    span: span.into(),
-                                },
-                                span,
-                            );
-                            return Err(());
-                        }
-                    }
-                }
+                Some(current_path) => self
+                    .module_loader
+                    .load_relative(import_path, current_path)
+                    .map_err(|e| {
+                        self.add_error(
+                            SemanticError::ModuleNotFound {
+                                path: import_path.to_string(),
+                                message: e.to_string(),
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    })?,
                 None => {
-                    bail_module!(self, &canonical_path);
                     self.add_error(
                         SemanticError::ModuleNotFound {
                             path: import_path.to_string(),
@@ -268,24 +422,18 @@ impl Analyzer {
                 }
             }
         } else {
-            match self.module_loader.load(import_path) {
-                Ok(info) => info,
-                Err(e) => {
-                    bail_module!(self, &canonical_path);
-                    self.add_error(
-                        SemanticError::ModuleNotFound {
-                            path: import_path.to_string(),
-                            message: e.to_string(),
-                            span: span.into(),
-                        },
-                        span,
-                    );
-                    return Err(());
-                }
-            }
+            self.module_loader.load(import_path).map_err(|e| {
+                self.add_error(
+                    SemanticError::ModuleNotFound {
+                        path: import_path.to_string(),
+                        message: e.to_string(),
+                        span: span.into(),
+                    },
+                    span,
+                );
+            })?
         };
 
-        // Save the module's file path for sub-analyzer (for nested relative imports)
         let module_file_path = module_info.path.clone();
 
         // Parse the module
@@ -293,7 +441,6 @@ impl Analyzer {
         let mut program = match parser.parse_program() {
             Ok(p) => p,
             Err(e) => {
-                bail_module!(self, &canonical_path);
                 self.add_error(
                     SemanticError::ModuleParseError {
                         path: import_path.to_string(),
@@ -307,16 +454,11 @@ impl Analyzer {
         };
 
         // Transform generators in the imported module (yield -> state machine)
-        // This must happen before semantic analysis so codegen sees the desugared AST.
-        let mut module_interner_mut = parser.into_interner();
-        // Seed the module interner with builtin symbols (Iterator, Iterable, etc.)
-        // so that method resolution can look up interface names via interner.lookup().
-        module_interner_mut.seed_builtin_symbols();
+        let mut module_interner = parser.into_interner();
+        module_interner.seed_builtin_symbols();
         let (_, transform_errors) =
-            crate::transforms::transform_generators(&mut program, &mut module_interner_mut);
+            crate::transforms::transform_generators(&mut program, &mut module_interner);
         if !transform_errors.is_empty() {
-            bail_module!(self, &canonical_path);
-            // Report the first transform error as a module error
             self.add_error(
                 SemanticError::ModuleParseError {
                     path: import_path.to_string(),
@@ -327,55 +469,48 @@ impl Analyzer {
             );
             return Err(());
         }
-        let module_interner = module_interner_mut;
 
-        // Collect exports, constants, and track external functions
-        let mut exports = FxHashMap::default();
-        let mut constants = FxHashMap::default();
-        let mut external_funcs = FxHashSet::default();
-        // Interfaces are collected separately for post-analysis lookup
-        let mut interface_names: Vec<(NameId, Symbol)> = Vec::new();
-        let mut struct_names: Vec<(NameId, Symbol)> = Vec::new();
-        let mut class_names: Vec<(NameId, Symbol)> = Vec::new();
-        let mut error_names: Vec<(NameId, Symbol)> = Vec::new();
-        let mut sentinel_names: Vec<(NameId, Symbol)> = Vec::new();
-        // Functions and external functions are collected for post-analysis type resolution
-        // (needed for types that reference class/error types defined in the same module,
-        // e.g. fallible return types that reference module-local error types)
-        let mut deferred_functions: Vec<(NameId, &FuncDecl)> = Vec::new();
-        let mut deferred_externals: Vec<(NameId, &ExternalFunc)> = Vec::new();
-        let mut deferred_generic_externals: Vec<(NameId, &ExternalFunc)> = Vec::new();
+        Ok(ParsedModule {
+            program,
+            interner: module_interner,
+            file_path: module_file_path,
+        })
+    }
 
-        // For stdlib modules, use symbolic paths like "std:math" for native registry lookups.
-        // For user modules, use canonical file path for consistent deduplication.
-        let module_key = if import_path.starts_with("std:") {
-            import_path.to_string()
-        } else {
-            canonical_path.clone()
+    /// Phase 4: Iterate module declarations to collect exports, constants,
+    /// deferred function types, and type names for post-analysis resolution.
+    fn collect_module_declarations<'a>(
+        &mut self,
+        program: &'a Program,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) -> ModuleDeclarations<'a> {
+        let mut decls = ModuleDeclarations {
+            exports: FxHashMap::default(),
+            constants: FxHashMap::default(),
+            external_funcs: FxHashSet::default(),
+            type_names: ModuleTypeNames::default(),
+            deferred_functions: Vec::new(),
+            deferred_externals: Vec::new(),
+            deferred_generic_externals: Vec::new(),
         };
-        tracing::debug!(import_path, %module_key, "analyze_module: creating module_id");
-        let module_id = self.name_table_mut().module_id(&module_key);
 
         for decl in &program.declarations {
             match decl {
                 Decl::Function(f) => {
-                    // Defer function type resolution until after sub_analyzer.analyze() runs.
-                    // This allows functions to reference class types defined in the same module.
                     let name_id =
                         self.name_table_mut()
-                            .intern(module_id, &[f.name], &module_interner);
-                    deferred_functions.push((name_id, f));
+                            .intern(module_id, &[f.name], module_interner);
+                    decls.deferred_functions.push((name_id, f));
                 }
                 Decl::Let(l) if !l.mutable => {
-                    // Only export immutable let bindings (skip type aliases for now)
                     let init_expr = match &l.init {
                         LetInit::Expr(e) => e,
-                        LetInit::TypeAlias(_) => continue, // Type aliases handled separately
+                        LetInit::TypeAlias(_) => continue,
                     };
-                    // Infer type from literal for constants and store the value
                     let name_id =
                         self.name_table_mut()
-                            .intern(module_id, &[l.name], &module_interner);
+                            .intern(module_id, &[l.name], module_interner);
                     let arena = self.type_arena();
                     let (ty_id, const_val) = match &init_expr.kind {
                         ExprKind::FloatLiteral(v, _) => (arena.f64(), Some(ConstantValue::F64(*v))),
@@ -384,261 +519,221 @@ impl Analyzer {
                         ExprKind::StringLiteral(v) => {
                             (arena.string(), Some(ConstantValue::String(v.clone())))
                         }
-                        _ => (arena.invalid(), None), // Complex expressions need full analysis
+                        _ => (arena.invalid(), None),
                     };
                     drop(arena);
-                    exports.insert(name_id, ty_id);
+                    decls.exports.insert(name_id, ty_id);
                     if let Some(cv) = const_val {
-                        constants.insert(name_id, cv);
+                        decls.constants.insert(name_id, cv);
                     }
                 }
                 Decl::External(ext) => {
-                    // Defer external function type resolution until after sub_analyzer.analyze()
-                    // runs. This allows fallible return types to reference error types defined
-                    // in the same module (e.g. `fallible(string, NotFound | PermissionDenied)`).
                     for func in &ext.functions {
                         let name_id = self.name_table_mut().intern(
                             module_id,
                             &[func.vole_name],
-                            &module_interner,
+                            module_interner,
                         );
                         if !func.type_params.is_empty() {
-                            deferred_generic_externals.push((name_id, func));
+                            decls.deferred_generic_externals.push((name_id, func));
                         } else {
-                            deferred_externals.push((name_id, func));
+                            decls.deferred_externals.push((name_id, func));
                         }
                     }
                 }
                 Decl::Interface(iface) => {
-                    // Export interfaces to allow qualified implement syntax
-                    // We'll populate the actual TypeId after sub-analysis registers them
                     let name_id =
                         self.name_table_mut()
-                            .intern(module_id, &[iface.name], &module_interner);
-                    // Store interface name for post-analysis lookup
-                    interface_names.push((name_id, iface.name));
+                            .intern(module_id, &[iface.name], module_interner);
+                    decls.type_names.interfaces.push((name_id, iface.name));
                 }
                 Decl::Struct(struct_decl) => {
-                    // Export structs so they can be used as types from the module
                     let name_id = self.name_table_mut().intern(
                         module_id,
                         &[struct_decl.name],
-                        &module_interner,
+                        module_interner,
                     );
-                    struct_names.push((name_id, struct_decl.name));
+                    decls.type_names.structs.push((name_id, struct_decl.name));
                 }
                 Decl::Class(class) => {
-                    // Export classes so they can be used as types from the module
                     let name_id =
                         self.name_table_mut()
-                            .intern(module_id, &[class.name], &module_interner);
-                    class_names.push((name_id, class.name));
+                            .intern(module_id, &[class.name], module_interner);
+                    decls.type_names.classes.push((name_id, class.name));
                 }
                 Decl::Error(err) => {
-                    // Export error types so they can be used in match patterns
                     let name_id =
                         self.name_table_mut()
-                            .intern(module_id, &[err.name], &module_interner);
-                    error_names.push((name_id, err.name));
+                            .intern(module_id, &[err.name], module_interner);
+                    decls.type_names.errors.push((name_id, err.name));
                 }
                 Decl::Sentinel(sentinel_decl) => {
-                    // Export sentinel types so they can be used as union variants
                     let name_id = self.name_table_mut().intern(
                         module_id,
                         &[sentinel_decl.name],
-                        &module_interner,
+                        module_interner,
                     );
-                    sentinel_names.push((name_id, sentinel_decl.name));
+                    decls
+                        .type_names
+                        .sentinels
+                        .push((name_id, sentinel_decl.name));
                 }
-                _ => {} // Skip other declarations (implement blocks, etc.)
+                _ => {}
             }
         }
 
-        // Run semantic analysis on the module to populate expr_types for function bodies.
-        // This is needed for codegen to resolve return types of calls to external functions
-        // inside the module (e.g., min(max(x, lo), hi) in math.clamp).
-        let mut sub_analyzer = self.fork_for_module(module_id, Some(module_file_path));
-        let analyze_result = sub_analyzer.analyze(&program, &module_interner);
-        if let Err(ref errors) = analyze_result {
-            tracing::warn!(import_path, ?errors, "module analysis errors");
-            // Propagate circular import errors to the parent so they're reported to the user.
-            // Without this, a self-importing file checked individually would silently succeed.
-            for err in errors {
-                if matches!(err.error, SemanticError::CircularImport { .. }) {
-                    self.errors.push(err.clone());
-                }
-            }
-        }
+        decls
+    }
 
-        // Store module-specific expr_types (NodeIds are per-program)
-        // Nested module entries are already in the shared ctx from the sub-analyzer.
+    /// Phase 5a (partial): Store sub-analyzer results into the shared context.
+    fn store_sub_analyzer_results(&mut self, module_key: &str, sub_analyzer: Analyzer) {
         self.ctx
             .module_expr_types
             .borrow_mut()
-            .insert(module_key.clone(), sub_analyzer.expr_types.clone());
-        // Store module-specific method_resolutions (NodeIds are per-program)
+            .insert(module_key.to_string(), sub_analyzer.expr_types.clone());
         self.ctx.module_method_resolutions.borrow_mut().insert(
-            module_key.clone(),
+            module_key.to_string(),
             sub_analyzer.method_resolutions.into_inner(),
         );
-        // Store module-specific is_check_results (NodeIds are per-program)
-        self.ctx
-            .module_is_check_results
-            .borrow_mut()
-            .insert(module_key.clone(), sub_analyzer.is_check_results.clone());
-        // Store module-specific generic function/class/static method keys (NodeIds are per-program)
+        self.ctx.module_is_check_results.borrow_mut().insert(
+            module_key.to_string(),
+            sub_analyzer.is_check_results.clone(),
+        );
         self.ctx
             .module_generic_calls
             .borrow_mut()
-            .insert(module_key.clone(), sub_analyzer.generic_calls.clone());
-        self.ctx
-            .module_class_method_calls
-            .borrow_mut()
-            .insert(module_key.clone(), sub_analyzer.class_method_calls.clone());
-        self.ctx
-            .module_static_method_calls
-            .borrow_mut()
-            .insert(module_key.clone(), sub_analyzer.static_method_calls.clone());
-        // Store module-specific declared_var_types (NodeIds are per-program)
+            .insert(module_key.to_string(), sub_analyzer.generic_calls.clone());
+        self.ctx.module_class_method_calls.borrow_mut().insert(
+            module_key.to_string(),
+            sub_analyzer.class_method_calls.clone(),
+        );
+        self.ctx.module_static_method_calls.borrow_mut().insert(
+            module_key.to_string(),
+            sub_analyzer.static_method_calls.clone(),
+        );
         self.ctx
             .module_declared_var_types
             .borrow_mut()
-            .insert(module_key.clone(), sub_analyzer.declared_var_types.clone());
+            .insert(module_key.to_string(), sub_analyzer.declared_var_types);
+    }
 
-        // Now resolve deferred function types after sub-analysis has registered class types
-        for (name_id, f) in deferred_functions {
-            let func_type_id = {
-                let mut ctx = TypeResolutionContext {
-                    db: &self.ctx.db,
-                    interner: &module_interner,
-                    module_id,
-                    type_params: None,
-                    self_type: None,
-                    imports: &[],
-                    priority_module: None,
-                };
-                let param_ids: crate::type_arena::TypeIdVec = f
-                    .params
-                    .iter()
-                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                    .collect();
-                let return_id = f
-                    .return_type
-                    .as_ref()
-                    .map(|rt| resolve_type_to_id(rt, &mut ctx))
-                    .unwrap_or_else(|| self.type_arena().void());
-                self.type_arena_mut().function(param_ids, return_id, false)
+    /// Resolve parameter and return types into a function ArenaTypeId.
+    /// Used for deferred resolution of function and external function declarations.
+    fn resolve_func_type(
+        &mut self,
+        params: &[Param],
+        return_type: Option<&TypeExpr>,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) -> ArenaTypeId {
+        let mut ctx = TypeResolutionContext {
+            db: &self.ctx.db,
+            interner: module_interner,
+            module_id,
+            type_params: None,
+            self_type: None,
+            imports: &[],
+            priority_module: None,
+        };
+        let param_ids: crate::type_arena::TypeIdVec = params
+            .iter()
+            .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
+            .collect();
+        let return_id = return_type
+            .map(|rt| resolve_type_to_id(rt, &mut ctx))
+            .unwrap_or_else(|| self.type_arena().void());
+        self.type_arena_mut().function(param_ids, return_id, false)
+    }
+
+    /// Resolve a single generic external function type and register its generic info.
+    fn resolve_generic_external(
+        &mut self,
+        name_id: NameId,
+        func: &ExternalFunc,
+        exports: &mut FxHashMap<NameId, ArenaTypeId>,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) {
+        let builtin_mod = self.name_table_mut().builtin_module();
+        let mut type_param_scope = TypeParamScope::new();
+        let mut type_params: Vec<TypeParamInfo> = Vec::new();
+        for tp in &func.type_params {
+            let tp_name_str = module_interner.resolve(tp.name);
+            let tp_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[tp_name_str]);
+            let tp_info = TypeParamInfo {
+                name: tp.name,
+                name_id: tp_name_id,
+                constraint: None,
+                type_param_id: None,
+                variance: TypeParamVariance::default(),
             };
-            exports.insert(name_id, func_type_id);
+            type_param_scope.add(tp_info.clone());
+            type_params.push(tp_info);
         }
 
-        // Now resolve deferred non-generic external function types
-        // Error types (e.g. NotFound, PermissionDenied) are now registered by sub-analysis
-        for (name_id, func) in deferred_externals {
-            let func_type_id = {
-                let mut ctx = TypeResolutionContext {
-                    db: &self.ctx.db,
-                    interner: &module_interner,
-                    module_id,
-                    type_params: None,
-                    self_type: None,
-                    imports: &[],
-                    priority_module: None,
-                };
-                let param_ids: crate::type_arena::TypeIdVec = func
-                    .params
-                    .iter()
-                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                    .collect();
-                let return_id = func
-                    .return_type
-                    .as_ref()
-                    .map(|rt| resolve_type_to_id(rt, &mut ctx))
-                    .unwrap_or_else(|| self.type_arena().void());
-                self.type_arena_mut().function(param_ids, return_id, false)
-            };
-            exports.insert(name_id, func_type_id);
-            external_funcs.insert(name_id);
-        }
-
-        // Now resolve deferred generic external function types
-        for (name_id, func) in deferred_generic_externals {
-            let builtin_mod = self.name_table_mut().builtin_module();
-            let mut type_param_scope = TypeParamScope::new();
-            let mut type_params: Vec<TypeParamInfo> = Vec::new();
-            for tp in &func.type_params {
-                let tp_name_str = module_interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                let tp_info = TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint: None,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                };
-                type_param_scope.add(tp_info.clone());
-                type_params.push(tp_info);
-            }
-
-            let (func_type_id, param_type_ids, return_type_id) = {
-                let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.ctx.db,
-                    &module_interner,
-                    module_id,
-                    &type_param_scope,
-                );
-                let param_ids: Vec<ArenaTypeId> = func
-                    .params
-                    .iter()
-                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                    .collect();
-                let return_id = func
-                    .return_type
-                    .as_ref()
-                    .map(|rt| resolve_type_to_id(rt, &mut ctx))
-                    .unwrap_or_else(|| self.type_arena().void());
-                let func_id = self
-                    .type_arena_mut()
-                    .function(param_ids.clone(), return_id, false);
-                (func_id, param_ids, return_id)
-            };
-
-            exports.insert(name_id, func_type_id);
-
-            // Register in EntityRegistry so module destructuring can find generic info
-            let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
-            let func_id = self.entity_registry_mut().register_function_full(
-                name_id,
-                name_id,
+        let (func_type_id, param_type_ids, return_type_id) = {
+            let mut ctx = TypeResolutionContext::with_type_params(
+                &self.ctx.db,
+                module_interner,
                 module_id,
-                signature,
-                func.params.len(),
-                vec![],
+                &type_param_scope,
             );
-            self.entity_registry_mut().set_function_generic_info(
-                func_id,
-                GenericFuncInfo {
-                    type_params,
-                    param_types: param_type_ids,
-                    return_type: return_type_id,
-                },
-            );
-        }
+            let param_ids: Vec<ArenaTypeId> = func
+                .params
+                .iter()
+                .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
+                .collect();
+            let return_id = func
+                .return_type
+                .as_ref()
+                .map(|rt| resolve_type_to_id(rt, &mut ctx))
+                .unwrap_or_else(|| self.type_arena().void());
+            let func_id = self
+                .type_arena_mut()
+                .function(param_ids.clone(), return_id, false);
+            (func_id, param_ids, return_id)
+        };
 
-        // Now populate interface exports after sub-analysis has registered them
-        for (name_id, iface_sym) in interface_names {
-            // Look up interface type from entity registry
-            // Use block to ensure resolver guard is dropped before type_arena_mut
-            // Use resolver_for_module with the module's ID, not self.current_module
+        exports.insert(name_id, func_type_id);
+
+        // Register in EntityRegistry so module destructuring can find generic info
+        let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
+        let func_id = self.entity_registry_mut().register_function_full(
+            name_id,
+            name_id,
+            module_id,
+            signature,
+            func.params.len(),
+            vec![],
+        );
+        self.entity_registry_mut().set_function_generic_info(
+            func_id,
+            GenericFuncInfo {
+                type_params,
+                param_types: param_type_ids,
+                return_type: return_type_id,
+            },
+        );
+    }
+
+    /// Phase 5e: Populate type exports (interfaces, structs, classes, errors, sentinels)
+    /// after sub-analysis has registered them in the entity registry.
+    fn populate_type_exports(
+        &mut self,
+        exports: &mut FxHashMap<NameId, ArenaTypeId>,
+        type_names: &ModuleTypeNames,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) {
+        for &(name_id, iface_sym) in &type_names.interfaces {
             let type_def_id = {
                 let iface_str = module_interner.resolve(iface_sym);
-                self.resolver_for_module(&module_interner, module_id)
+                self.resolver_for_module(module_interner, module_id)
                     .resolve_type_str_or_interface(iface_str, &self.entity_registry())
             };
             if let Some(type_def_id) = type_def_id {
-                // Create interface type and add to exports
                 let iface_type_id = self
                     .type_arena_mut()
                     .interface(type_def_id, smallvec::smallvec![]);
@@ -646,11 +741,10 @@ impl Analyzer {
             }
         }
 
-        // Now populate struct exports after sub-analysis has registered them
-        for (name_id, struct_sym) in struct_names {
+        for &(name_id, struct_sym) in &type_names.structs {
             let type_def_id = {
                 let struct_str = module_interner.resolve(struct_sym);
-                self.resolver_for_module(&module_interner, module_id)
+                self.resolver_for_module(module_interner, module_id)
                     .resolve_type_str_or_interface(struct_str, &self.entity_registry())
             };
             if let Some(type_def_id) = type_def_id {
@@ -661,13 +755,10 @@ impl Analyzer {
             }
         }
 
-        // Now populate class exports after sub-analysis has registered them
-        for (name_id, class_sym) in class_names {
+        for &(name_id, class_sym) in &type_names.classes {
             let type_def_id = {
                 let class_str = module_interner.resolve(class_sym);
-                // Use resolve_type_str_or_interface which has fallback to class_by_short_name
-                // Use resolver_for_module with the module's ID, not self.current_module
-                self.resolver_for_module(&module_interner, module_id)
+                self.resolver_for_module(module_interner, module_id)
                     .resolve_type_str_or_interface(class_str, &self.entity_registry())
             };
             if let Some(type_def_id) = type_def_id {
@@ -678,11 +769,10 @@ impl Analyzer {
             }
         }
 
-        // Now populate error type exports after sub-analysis has registered them
-        for (name_id, error_sym) in error_names {
+        for &(name_id, error_sym) in &type_names.errors {
             let type_def_id = {
                 let error_str = module_interner.resolve(error_sym);
-                self.resolver_for_module(&module_interner, module_id)
+                self.resolver_for_module(module_interner, module_id)
                     .resolve_type_str_or_interface(error_str, &self.entity_registry())
             };
             if let Some(type_def_id) = type_def_id {
@@ -691,11 +781,10 @@ impl Analyzer {
             }
         }
 
-        // Now populate sentinel exports after sub-analysis has registered them
-        for (name_id, sentinel_sym) in sentinel_names {
+        for &(name_id, sentinel_sym) in &type_names.sentinels {
             let type_def_id = {
                 let sentinel_str = module_interner.resolve(sentinel_sym);
-                self.resolver_for_module(&module_interner, module_id)
+                self.resolver_for_module(module_interner, module_id)
                     .resolve_type_str_or_interface(sentinel_str, &self.entity_registry())
             };
             if let Some(type_def_id) = type_def_id {
@@ -706,36 +795,39 @@ impl Analyzer {
                 exports.insert(name_id, sentinel_type_id);
             }
         }
+    }
 
-        // Store the program and interner for compiling pure Vole functions.
+    /// Phases 5f-5h: Store program/interner, create module type, and log.
+    fn finalize_module(
+        &mut self,
+        data: ModuleFinalization,
+        module_key: &str,
+        module_id: ModuleId,
+        import_path: &str,
+    ) -> ArenaTypeId {
+        // Phase 5f: Store the program and interner for compiling pure Vole functions.
         // IMPORTANT: This must happen AFTER sub_analyzer.analyze() because analysis
         // populates lambda capture lists (stored in RefCell<Vec<Capture>> on AST nodes).
-        // Cloning the program before analysis would store empty capture lists, causing
-        // "variable not found" errors during codegen for closures in imported modules.
-        //
-        // Placed after deferred type resolution so we can move the program (avoiding
-        // a deep clone of the entire AST) since deferred_functions/externals borrow it.
         self.ctx
             .module_programs
             .borrow_mut()
-            .insert(module_key.clone(), (program, module_interner.clone()));
+            .insert(module_key.to_string(), (data.program, data.interner));
 
-        // Create TypeId from exports and register module metadata
+        // Phase 5g: Create TypeId from exports and register module metadata
         let exports_vec: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =
-            exports.into_iter().collect();
+            data.exports.into_iter().collect();
         let mut arena = self.type_arena_mut();
-        // Register module metadata (constants, external_funcs) for method resolution
         arena.register_module_metadata(
             module_id,
             crate::type_arena::ModuleMetadata {
-                constants,
-                external_funcs,
+                constants: data.constants,
+                external_funcs: data.external_funcs,
             },
         );
         let type_id = arena.module(module_id, exports_vec);
         drop(arena);
 
-        // Debug: trace what module_id and module_path are being used
+        // Phase 5h: Debug trace
         let module_path_check = self.name_table().module_path(module_id).to_string();
         tracing::debug!(
             import_path,
@@ -745,19 +837,7 @@ impl Analyzer {
             "analyze_module: created module type"
         );
 
-        // Module analysis complete - remove from in-progress set
-        self.ctx
-            .modules_in_progress
-            .borrow_mut()
-            .remove(&canonical_path);
-
-        // Cache the TypeId with canonical path for consistent lookups
-        self.ctx
-            .module_type_ids
-            .borrow_mut()
-            .insert(canonical_path, type_id);
-
-        Ok(type_id)
+        type_id
     }
 
     /// Fork for analyzing an imported module.
