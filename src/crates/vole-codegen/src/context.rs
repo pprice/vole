@@ -207,6 +207,17 @@ macro_rules! impl_sat_widen_narrow {
     };
 }
 
+/// Get signed integer min/max bounds for a given bit width.
+fn signed_min_max(bits: u32) -> (i64, i64) {
+    match bits {
+        8 => (i8::MIN as i64, i8::MAX as i64),
+        16 => (i16::MIN as i64, i16::MAX as i64),
+        32 => (i32::MIN as i64, i32::MAX as i64),
+        64 => (i64::MIN, i64::MAX),
+        _ => panic!("Unsupported bit width: {}", bits),
+    }
+}
+
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a new codegen context.
     ///
@@ -2023,13 +2034,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn signed_saturating_mul(&mut self, a: Value, b: Value, ty: Type) -> Value {
         // Compute min and max for this type
         let bits = ty.bits();
-        let (min_val, max_val) = match bits {
-            8 => (i8::MIN as i64, i8::MAX as i64),
-            16 => (i16::MIN as i64, i16::MAX as i64),
-            32 => (i32::MIN as i64, i32::MAX as i64),
-            64 => (i64::MIN, i64::MAX),
-            _ => panic!("Unsupported bit width: {}", bits),
-        };
+        let (min_val, max_val) = signed_min_max(bits);
         let max = self.builder.ins().iconst(ty, max_val);
         let min = self.builder.ins().iconst(ty, min_val);
         let zero = self.builder.ins().iconst(ty, 0);
@@ -2076,13 +2081,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn signed_saturating_add(&mut self, a: Value, b: Value, ty: Type) -> Value {
         // Compute min and max for this type
         let bits = ty.bits();
-        let (min_val, max_val) = match bits {
-            8 => (i8::MIN as i64, i8::MAX as i64),
-            16 => (i16::MIN as i64, i16::MAX as i64),
-            32 => (i32::MIN as i64, i32::MAX as i64),
-            64 => (i64::MIN, i64::MAX),
-            _ => panic!("Unsupported bit width: {}", bits),
-        };
+        let (min_val, max_val) = signed_min_max(bits);
         let max = self.builder.ins().iconst(ty, max_val);
         let min = self.builder.ins().iconst(ty, min_val);
         let zero = self.builder.ins().iconst(ty, 0);
@@ -2125,13 +2124,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn signed_saturating_sub(&mut self, a: Value, b: Value, ty: Type) -> Value {
         // Compute min and max for this type
         let bits = ty.bits();
-        let (min_val, max_val) = match bits {
-            8 => (i8::MIN as i64, i8::MAX as i64),
-            16 => (i16::MIN as i64, i16::MAX as i64),
-            32 => (i32::MIN as i64, i32::MAX as i64),
-            64 => (i64::MIN, i64::MAX),
-            _ => panic!("Unsupported bit width: {}", bits),
-        };
+        let (min_val, max_val) = signed_min_max(bits);
         let max = self.builder.ins().iconst(ty, max_val);
         let min = self.builder.ins().iconst(ty, min_val);
         let zero = self.builder.ins().iconst(ty, 0);
@@ -2446,13 +2439,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         return_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let bits = ty.bits();
-        let min_val = match bits {
-            8 => i8::MIN as i64,
-            16 => i16::MIN as i64,
-            32 => i32::MIN as i64,
-            64 => i64::MIN,
-            _ => panic!("Unsupported bit width: {}", bits),
-        };
+        let (min_val, _) = signed_min_max(bits);
 
         let zero = self.builder.ins().iconst(ty, 0);
         let one = self.builder.ins().iconst(ty, 1);
