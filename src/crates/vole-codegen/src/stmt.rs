@@ -262,7 +262,7 @@ impl Cg<'_, '_, '_> {
                 if then_terminated && else_terminated {
                     self.builder
                         .ins()
-                        .trap(TrapCode::user(1).expect("INTERNAL: trap code 1 is invalid"));
+                        .trap(crate::trap_codes::UNREACHABLE);
                 }
 
                 self.builder.seal_block(then_block);
