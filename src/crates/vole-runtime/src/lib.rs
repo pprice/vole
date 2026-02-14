@@ -19,7 +19,6 @@ pub mod closure;
 pub mod instance;
 pub mod iterator;
 pub(crate) mod iterator_abi;
-pub(crate) mod iterator_backend;
 pub(crate) mod iterator_core;
 #[cfg(test)]
 mod iterator_parity;

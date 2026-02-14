@@ -18,7 +18,6 @@ use crate::iterator::{
     vole_zip_iter,
 };
 use crate::iterator_abi::TaggedNextWord;
-use crate::iterator_backend::{IteratorBackend as RuntimeBackend, with_backend};
 use crate::iterator_core::CoreIter;
 use crate::value::TaggedValue;
 
@@ -289,211 +288,113 @@ fn parity_find_any_all() {
 }
 
 #[test]
-fn adapter_dispatch_matches_legacy_for_array_paths() {
-    let legacy = with_backend(RuntimeBackend::Legacy, || {
-        let collected = collect_i64_values(vole_iter_collect_tagged(
-            mk_legacy_array_iter(&[5, 6, 7]),
-            crate::value::TYPE_I64 as u64,
-        ));
-        let first = decode_optional_i64(vole_iter_first(mk_legacy_array_iter(&[5, 6, 7])));
-        let last = decode_optional_i64(vole_iter_last(mk_legacy_array_iter(&[5, 6, 7])));
-        let nth = decode_optional_i64(vole_iter_nth(mk_legacy_array_iter(&[5, 6, 7]), 1));
-        (collected, first, last, nth)
-    });
-
-    let new_core = with_backend(RuntimeBackend::NewCore, || {
-        let collected = collect_i64_values(vole_iter_collect_tagged(
-            mk_legacy_array_iter(&[5, 6, 7]),
-            crate::value::TYPE_I64 as u64,
-        ));
-        let first = decode_optional_i64(vole_iter_first(mk_legacy_array_iter(&[5, 6, 7])));
-        let last = decode_optional_i64(vole_iter_last(mk_legacy_array_iter(&[5, 6, 7])));
-        let nth = decode_optional_i64(vole_iter_nth(mk_legacy_array_iter(&[5, 6, 7]), 1));
-        (collected, first, last, nth)
-    });
-
-    assert_eq!(new_core, legacy, "adapter dispatch diverged from legacy");
+fn adapter_dispatch_array_paths() {
+    let collected = collect_i64_values(vole_iter_collect_tagged(
+        mk_legacy_array_iter(&[5, 6, 7]),
+        crate::value::TYPE_I64 as u64,
+    ));
+    let first = decode_optional_i64(vole_iter_first(mk_legacy_array_iter(&[5, 6, 7])));
+    let last = decode_optional_i64(vole_iter_last(mk_legacy_array_iter(&[5, 6, 7])));
+    let nth = decode_optional_i64(vole_iter_nth(mk_legacy_array_iter(&[5, 6, 7]), 1));
+    assert_eq!(collected, vec![5, 6, 7]);
+    assert_eq!(first, Some(5));
+    assert_eq!(last, Some(7));
+    assert_eq!(nth, Some(6));
 }
 
 #[test]
-fn adapter_dispatch_matches_legacy_for_slice_a_leaf_iterators() {
-    let legacy = with_backend(RuntimeBackend::Legacy, || {
-        let range_first = decode_optional_i64(vole_iter_first(vole_range_iter(2, 6)));
-        let range_last = decode_optional_i64(vole_iter_last(vole_range_iter(2, 6)));
-        let once_first = decode_optional_i64(vole_iter_first(vole_once_iter(99)));
-        let empty_first = decode_optional_i64(vole_iter_first(vole_empty_iter()));
-        let repeat_nth = decode_optional_i64(vole_iter_nth(vole_repeat_iter(7), 3));
-        (range_first, range_last, once_first, empty_first, repeat_nth)
-    });
-
-    let new_core = with_backend(RuntimeBackend::NewCore, || {
-        let range_first = decode_optional_i64(vole_iter_first(vole_range_iter(2, 6)));
-        let range_last = decode_optional_i64(vole_iter_last(vole_range_iter(2, 6)));
-        let once_first = decode_optional_i64(vole_iter_first(vole_once_iter(99)));
-        let empty_first = decode_optional_i64(vole_iter_first(vole_empty_iter()));
-        let repeat_nth = decode_optional_i64(vole_iter_nth(vole_repeat_iter(7), 3));
-        (range_first, range_last, once_first, empty_first, repeat_nth)
-    });
-
-    assert_eq!(new_core, legacy, "slice A adapter dispatch diverged");
+fn adapter_dispatch_slice_a_leaf_iterators() {
+    let range_first = decode_optional_i64(vole_iter_first(vole_range_iter(2, 6)));
+    let range_last = decode_optional_i64(vole_iter_last(vole_range_iter(2, 6)));
+    let once_first = decode_optional_i64(vole_iter_first(vole_once_iter(99)));
+    let empty_first = decode_optional_i64(vole_iter_first(vole_empty_iter()));
+    let repeat_nth = decode_optional_i64(vole_iter_nth(vole_repeat_iter(7), 3));
+    assert_eq!(range_first, Some(2));
+    assert_eq!(range_last, Some(5));
+    assert_eq!(once_first, Some(99));
+    assert_eq!(empty_first, None);
+    assert_eq!(repeat_nth, Some(7));
 }
 
 #[test]
-fn adapter_dispatch_matches_legacy_for_slice_b_iterators() {
-    let legacy = with_backend(RuntimeBackend::Legacy, || {
-        let map_fn = alloc_closure_for_unary_i64_i64(map_times_two_legacy);
-        let mapped = collect_i64_values(vole_iter_collect_tagged(
-            vole_map_iter(mk_legacy_array_iter(&[1, 2, 3]), map_fn),
-            crate::value::TYPE_I64 as u64,
-        ));
+fn adapter_dispatch_slice_b_iterators() {
+    let map_fn = alloc_closure_for_unary_i64_i64(map_times_two_legacy);
+    let mapped = collect_i64_values(vole_iter_collect_tagged(
+        vole_map_iter(mk_legacy_array_iter(&[1, 2, 3]), map_fn),
+        crate::value::TYPE_I64 as u64,
+    ));
 
-        let pred = alloc_closure_for_unary_i64_bool(predicate_even_legacy);
-        let filtered = collect_i64_values(vole_iter_collect_tagged(
-            vole_filter_iter(mk_legacy_array_iter(&[1, 2, 3, 4, 5]), pred),
-            crate::value::TYPE_I64 as u64,
-        ));
+    let pred = alloc_closure_for_unary_i64_bool(predicate_even_legacy);
+    let filtered = collect_i64_values(vole_iter_collect_tagged(
+        vole_filter_iter(mk_legacy_array_iter(&[1, 2, 3, 4, 5]), pred),
+        crate::value::TYPE_I64 as u64,
+    ));
 
-        let taken = collect_i64_values(vole_iter_collect_tagged(
-            vole_take_iter(mk_legacy_array_iter(&[10, 11, 12, 13]), 2),
-            crate::value::TYPE_I64 as u64,
-        ));
+    let taken = collect_i64_values(vole_iter_collect_tagged(
+        vole_take_iter(mk_legacy_array_iter(&[10, 11, 12, 13]), 2),
+        crate::value::TYPE_I64 as u64,
+    ));
 
-        let skipped = collect_i64_values(vole_iter_collect_tagged(
-            vole_skip_iter(mk_legacy_array_iter(&[10, 11, 12, 13]), 2),
-            crate::value::TYPE_I64 as u64,
-        ));
+    let skipped = collect_i64_values(vole_iter_collect_tagged(
+        vole_skip_iter(mk_legacy_array_iter(&[10, 11, 12, 13]), 2),
+        crate::value::TYPE_I64 as u64,
+    ));
 
-        let chained = collect_i64_values(vole_iter_collect_tagged(
-            vole_chain_iter(mk_legacy_array_iter(&[1, 2]), mk_legacy_array_iter(&[3, 4])),
-            crate::value::TYPE_I64 as u64,
-        ));
+    let chained = collect_i64_values(vole_iter_collect_tagged(
+        vole_chain_iter(mk_legacy_array_iter(&[1, 2]), mk_legacy_array_iter(&[3, 4])),
+        crate::value::TYPE_I64 as u64,
+    ));
 
-        let unique = collect_i64_values(vole_iter_collect_tagged(
-            vole_unique_iter(mk_legacy_array_iter(&[1, 1, 2, 2, 2, 3, 1, 1])),
-            crate::value::TYPE_I64 as u64,
-        ));
+    let unique = collect_i64_values(vole_iter_collect_tagged(
+        vole_unique_iter(mk_legacy_array_iter(&[1, 1, 2, 2, 2, 3, 1, 1])),
+        crate::value::TYPE_I64 as u64,
+    ));
 
-        (mapped, filtered, taken, skipped, chained, unique)
-    });
-
-    let new_core = with_backend(RuntimeBackend::NewCore, || {
-        let map_fn = alloc_closure_for_unary_i64_i64(map_times_two_legacy);
-        let mapped = collect_i64_values(vole_iter_collect_tagged(
-            vole_map_iter(mk_legacy_array_iter(&[1, 2, 3]), map_fn),
-            crate::value::TYPE_I64 as u64,
-        ));
-
-        let pred = alloc_closure_for_unary_i64_bool(predicate_even_legacy);
-        let filtered = collect_i64_values(vole_iter_collect_tagged(
-            vole_filter_iter(mk_legacy_array_iter(&[1, 2, 3, 4, 5]), pred),
-            crate::value::TYPE_I64 as u64,
-        ));
-
-        let taken = collect_i64_values(vole_iter_collect_tagged(
-            vole_take_iter(mk_legacy_array_iter(&[10, 11, 12, 13]), 2),
-            crate::value::TYPE_I64 as u64,
-        ));
-
-        let skipped = collect_i64_values(vole_iter_collect_tagged(
-            vole_skip_iter(mk_legacy_array_iter(&[10, 11, 12, 13]), 2),
-            crate::value::TYPE_I64 as u64,
-        ));
-
-        let chained = collect_i64_values(vole_iter_collect_tagged(
-            vole_chain_iter(mk_legacy_array_iter(&[1, 2]), mk_legacy_array_iter(&[3, 4])),
-            crate::value::TYPE_I64 as u64,
-        ));
-
-        let unique = collect_i64_values(vole_iter_collect_tagged(
-            vole_unique_iter(mk_legacy_array_iter(&[1, 1, 2, 2, 2, 3, 1, 1])),
-            crate::value::TYPE_I64 as u64,
-        ));
-
-        (mapped, filtered, taken, skipped, chained, unique)
-    });
-
-    assert_eq!(new_core, legacy, "slice B adapter dispatch diverged");
+    assert_eq!(mapped, vec![2, 4, 6]);
+    assert_eq!(filtered, vec![2, 4]);
+    assert_eq!(taken, vec![10, 11]);
+    assert_eq!(skipped, vec![12, 13]);
+    assert_eq!(chained, vec![1, 2, 3, 4]);
+    assert_eq!(unique, vec![1, 2, 3, 1]);
 }
 
 #[test]
-fn adapter_dispatch_matches_legacy_for_slice_c_composites() {
-    let legacy = with_backend(RuntimeBackend::Legacy, || {
-        let flattened_chunks = collect_i64_values(vole_iter_collect_tagged(
-            vole_flatten_iter(vole_chunks_iter(mk_legacy_array_iter(&[1, 2, 3, 4, 5]), 2)),
-            crate::value::TYPE_I64 as u64,
-        ));
-        let flattened_windows = collect_i64_values(vole_iter_collect_tagged(
-            vole_flatten_iter(vole_windows_iter(mk_legacy_array_iter(&[1, 2, 3, 4]), 3)),
-            crate::value::TYPE_I64 as u64,
-        ));
-        let flat_mapped = collect_i64_values(vole_iter_collect_tagged(
-            vole_flat_map_iter(
-                mk_legacy_array_iter(&[2, 3]),
-                alloc_closure_for_unary_i64_i64(flat_map_pair_legacy),
-            ),
-            crate::value::TYPE_I64 as u64,
-        ));
+fn adapter_dispatch_slice_c_composites() {
+    let flattened_chunks = collect_i64_values(vole_iter_collect_tagged(
+        vole_flatten_iter(vole_chunks_iter(mk_legacy_array_iter(&[1, 2, 3, 4, 5]), 2)),
+        crate::value::TYPE_I64 as u64,
+    ));
+    let flattened_windows = collect_i64_values(vole_iter_collect_tagged(
+        vole_flatten_iter(vole_windows_iter(mk_legacy_array_iter(&[1, 2, 3, 4]), 3)),
+        crate::value::TYPE_I64 as u64,
+    ));
+    let flat_mapped = collect_i64_values(vole_iter_collect_tagged(
+        vole_flat_map_iter(
+            mk_legacy_array_iter(&[2, 3]),
+            alloc_closure_for_unary_i64_i64(flat_map_pair_legacy),
+        ),
+        crate::value::TYPE_I64 as u64,
+    ));
 
-        (flattened_chunks, flattened_windows, flat_mapped)
-    });
-
-    let new_core = with_backend(RuntimeBackend::NewCore, || {
-        let flattened_chunks = collect_i64_values(vole_iter_collect_tagged(
-            vole_flatten_iter(vole_chunks_iter(mk_legacy_array_iter(&[1, 2, 3, 4, 5]), 2)),
-            crate::value::TYPE_I64 as u64,
-        ));
-        let flattened_windows = collect_i64_values(vole_iter_collect_tagged(
-            vole_flatten_iter(vole_windows_iter(mk_legacy_array_iter(&[1, 2, 3, 4]), 3)),
-            crate::value::TYPE_I64 as u64,
-        ));
-        let flat_mapped = collect_i64_values(vole_iter_collect_tagged(
-            vole_flat_map_iter(
-                mk_legacy_array_iter(&[2, 3]),
-                alloc_closure_for_unary_i64_i64(flat_map_pair_legacy),
-            ),
-            crate::value::TYPE_I64 as u64,
-        ));
-
-        (flattened_chunks, flattened_windows, flat_mapped)
-    });
-
-    assert_eq!(
-        new_core, legacy,
-        "slice C composite iterator dispatch diverged"
-    );
+    assert_eq!(flattened_chunks, vec![1, 2, 3, 4, 5]);
+    assert_eq!(flattened_windows, vec![1, 2, 3, 2, 3, 4]);
+    assert_eq!(flat_mapped, vec![2, 20, 3, 30]);
 }
 
 #[test]
-fn adapter_dispatch_matches_legacy_for_slice_c_tuple_iterators() {
-    let legacy = with_backend(RuntimeBackend::Legacy, || {
-        let enumerated = collect_tuple_values_and_free(vole_iter_collect_tagged(
-            vole_enumerate_iter(mk_legacy_array_iter(&[7, 8, 9])),
-            crate::value::TYPE_I64 as u64,
-        ));
-        let zipped = collect_tuple_values_and_free(vole_iter_collect_tagged(
-            vole_zip_iter(
-                mk_legacy_array_iter(&[1, 2, 3]),
-                mk_legacy_array_iter(&[10, 20]),
-            ),
-            crate::value::TYPE_I64 as u64,
-        ));
-        (enumerated, zipped)
-    });
+fn adapter_dispatch_slice_c_tuple_iterators() {
+    let enumerated = collect_tuple_values_and_free(vole_iter_collect_tagged(
+        vole_enumerate_iter(mk_legacy_array_iter(&[7, 8, 9])),
+        crate::value::TYPE_I64 as u64,
+    ));
+    let zipped = collect_tuple_values_and_free(vole_iter_collect_tagged(
+        vole_zip_iter(
+            mk_legacy_array_iter(&[1, 2, 3]),
+            mk_legacy_array_iter(&[10, 20]),
+        ),
+        crate::value::TYPE_I64 as u64,
+    ));
 
-    let new_core = with_backend(RuntimeBackend::NewCore, || {
-        let enumerated = collect_tuple_values_and_free(vole_iter_collect_tagged(
-            vole_enumerate_iter(mk_legacy_array_iter(&[7, 8, 9])),
-            crate::value::TYPE_I64 as u64,
-        ));
-        let zipped = collect_tuple_values_and_free(vole_iter_collect_tagged(
-            vole_zip_iter(
-                mk_legacy_array_iter(&[1, 2, 3]),
-                mk_legacy_array_iter(&[10, 20]),
-            ),
-            crate::value::TYPE_I64 as u64,
-        ));
-        (enumerated, zipped)
-    });
-
-    assert_eq!(new_core, legacy, "slice C tuple iterator dispatch diverged");
+    assert_eq!(enumerated, vec![(0, 7), (1, 8), (2, 9)]);
+    assert_eq!(zipped, vec![(1, 10), (2, 20)]);
 }

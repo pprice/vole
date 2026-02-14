@@ -20,7 +20,6 @@ use crate::alloc_track;
 use crate::array::RcArray;
 use crate::closure::Closure;
 use crate::iterator_abi::{NextTag, TaggedNextWord};
-use crate::iterator_backend::{IteratorBackend, active_backend};
 use crate::iterator_core::CoreIter;
 use crate::string::RcString;
 use crate::value::{RcHeader, TYPE_I64, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc, tag_needs_rc};
@@ -1066,6 +1065,18 @@ fn extract_supported_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> O
     }
 
     let kind = unsafe { (*iter).iter.kind };
+    if !matches!(
+        kind,
+        IteratorKind::Flatten
+            | IteratorKind::FlatMap
+            | IteratorKind::Chunks
+            | IteratorKind::Windows
+            | IteratorKind::Enumerate
+            | IteratorKind::Zip
+    ) && unsafe { (*iter).elem_tag } != TYPE_I64 as u64
+    {
+        return None;
+    }
     let mut out = Vec::new();
 
     match kind {
@@ -1320,9 +1331,7 @@ pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
 pub extern "C" fn vole_iter_collect_tagged(iter: *mut RcIterator, elem_tag: u64) -> *mut RcArray {
     use crate::value::{TaggedValue, tag_needs_rc};
 
-    if active_backend() == IteratorBackend::NewCore
-        && let Some(result) = try_new_core_collect_tagged(iter, elem_tag)
-    {
+    if let Some(result) = try_new_core_collect_tagged(iter, elem_tag) {
         return result;
     }
 
@@ -1869,9 +1878,7 @@ pub extern "C" fn vole_iter_reduce(
 /// Frees the iterator after getting the first element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
-    if active_backend() == IteratorBackend::NewCore
-        && let Some(ptr) = try_new_core_first(iter)
-    {
+    if let Some(ptr) = try_new_core_first(iter) {
         return ptr;
     }
 
@@ -1921,9 +1928,7 @@ pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
 /// Frees the iterator after getting the last element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
-    if active_backend() == IteratorBackend::NewCore
-        && let Some(ptr) = try_new_core_last(iter)
-    {
+    if let Some(ptr) = try_new_core_last(iter) {
         return ptr;
     }
 
@@ -1989,9 +1994,7 @@ pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
 /// Frees the iterator after getting the nth element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 {
-    if active_backend() == IteratorBackend::NewCore
-        && let Some(ptr) = try_new_core_nth(iter, n)
-    {
+    if let Some(ptr) = try_new_core_nth(iter, n) {
         return ptr;
     }
 
