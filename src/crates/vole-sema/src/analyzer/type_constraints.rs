@@ -119,11 +119,18 @@ fn constraint_satisfied(
             found_struct == required_struct
         }
         // Different constraint kinds don't satisfy each other
-        (TypeConstraint::Interface(_), TypeConstraint::UnionId(_) | TypeConstraint::Structural(_))
-        | (TypeConstraint::UnionId(_), TypeConstraint::Interface(_) | TypeConstraint::Structural(_))
-        | (TypeConstraint::Structural(_), TypeConstraint::Interface(_) | TypeConstraint::UnionId(_)) => {
-            false
-        }
+        (
+            TypeConstraint::Interface(_),
+            TypeConstraint::UnionId(_) | TypeConstraint::Structural(_),
+        )
+        | (
+            TypeConstraint::UnionId(_),
+            TypeConstraint::Interface(_) | TypeConstraint::Structural(_),
+        )
+        | (
+            TypeConstraint::Structural(_),
+            TypeConstraint::Interface(_) | TypeConstraint::UnionId(_),
+        ) => false,
     }
 }
 

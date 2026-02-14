@@ -812,7 +812,9 @@ impl Analyzer {
             | PatternKind::Success { .. }
             | PatternKind::Error { .. }
             | PatternKind::Tuple { .. }
-            | PatternKind::Record { type_name: None, .. } => None,
+            | PatternKind::Record {
+                type_name: None, ..
+            } => None,
         }
     }
 }

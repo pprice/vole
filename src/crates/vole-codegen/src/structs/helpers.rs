@@ -44,11 +44,12 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         "field access: resolved type"
     );
 
-    let (type_def_id, type_args, _) = arena
-        .unwrap_class_or_struct(resolved_type_id)
-        .ok_or_else(|| {
-            CodegenError::type_mismatch("field access", "class or struct", "other type")
-        })?;
+    let (type_def_id, type_args, _) =
+        arena
+            .unwrap_class_or_struct(resolved_type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch("field access", "class or struct", "other type")
+            })?;
 
     let type_def = type_ctx.query.get_type(type_def_id);
     let generic_info = type_def

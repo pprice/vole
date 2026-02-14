@@ -49,7 +49,6 @@ impl<'src> Parser<'src> {
         }
     }
 
-
     /// Set whether to skip parsing tests block bodies.
     /// When enabled, tests blocks are brace-matched but their contents are not parsed.
     pub fn set_skip_tests(&mut self, skip: bool) {

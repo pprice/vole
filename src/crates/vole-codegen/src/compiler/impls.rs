@@ -176,7 +176,11 @@ impl Compiler<'_> {
             .ok_or_else(|| {
                 CodegenError::not_found(
                     "type",
-                    format!("{} {}", data.type_kind, self.query().resolve_symbol(data.name)),
+                    format!(
+                        "{} {}",
+                        data.type_kind,
+                        self.query().resolve_symbol(data.name)
+                    ),
                 )
             })?;
 
@@ -188,7 +192,11 @@ impl Compiler<'_> {
             .ok_or_else(|| {
                 CodegenError::not_found(
                     "type_metadata",
-                    format!("{} {}", data.type_kind, self.query().resolve_symbol(data.name)),
+                    format!(
+                        "{} {}",
+                        data.type_kind,
+                        self.query().resolve_symbol(data.name)
+                    ),
                 )
             })?;
 
@@ -942,7 +950,7 @@ impl Compiler<'_> {
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            CodegenError::not_found("method", self.func_registry.display(func_key).to_string())
+            CodegenError::not_found("method", self.func_registry.display(func_key))
         })?;
 
         let sig =
@@ -1161,7 +1169,7 @@ impl Compiler<'_> {
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            CodegenError::not_found("method", self.func_registry.display(func_key).to_string())
+            CodegenError::not_found("method", self.func_registry.display(func_key))
         })?;
 
         let sig =
@@ -1270,7 +1278,7 @@ impl Compiler<'_> {
             });
 
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            CodegenError::not_found("method", self.func_registry.display(func_key).to_string())
+            CodegenError::not_found("method", self.func_registry.display(func_key))
         })?;
 
         // Create method signature using pre-resolved MethodId
@@ -1374,7 +1382,7 @@ impl Compiler<'_> {
             });
 
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            CodegenError::not_found("default method", self.func_registry.display(func_key).to_string())
+            CodegenError::not_found("default method", self.func_registry.display(func_key))
         })?;
 
         // Create method signature using pre-resolved MethodId
@@ -1666,10 +1674,7 @@ impl Compiler<'_> {
                 .get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                CodegenError::not_found(
-                    "method",
-                    format!("{}::{}", type_name_str, method_name_str),
-                )
+                CodegenError::not_found("method", format!("{}::{}", type_name_str, method_name_str))
             })?;
 
             // Create method signature using pre-resolved MethodId

@@ -272,9 +272,10 @@ fn lookup_replacement(
     // Slow path: val might be an alias to a param being removed
     let resolved = dfg.resolve_aliases(val);
     if resolved != val
-        && let Some(&r) = replacements.get(&resolved) {
-            return Some(r);
-        }
+        && let Some(&r) = replacements.get(&resolved)
+    {
+        return Some(r);
+    }
     None
 }
 

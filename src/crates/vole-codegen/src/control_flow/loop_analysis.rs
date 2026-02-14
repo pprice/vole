@@ -146,8 +146,7 @@ impl FunctionLoopInfo {
         let blocks = self.collect_loop_blocks(func, lp);
 
         // Find which header params are actually modified in the loop
-        let (modified_params, invariant_params) =
-            self.classify_block_params(func, header, &blocks);
+        let (modified_params, invariant_params) = self.classify_block_params(func, header, &blocks);
 
         LoopInfo {
             loop_id: lp,
@@ -177,8 +176,7 @@ impl FunctionLoopInfo {
             used_in_loop.difference(&defined_in_loop).copied().collect();
 
         // Find which header params are actually modified in the loop
-        let (modified_params, invariant_params) =
-            self.classify_block_params(func, header, &blocks);
+        let (modified_params, invariant_params) = self.classify_block_params(func, header, &blocks);
 
         // Find induction variables
         let induction_vars = self.find_induction_vars(func, header, &blocks, &modified_params);

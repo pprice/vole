@@ -1128,10 +1128,8 @@ impl Compiler<'_> {
                 Decl::Tests(tests_decl) if include_tests => {
                     for test in &tests_decl.tests {
                         self.build_test_ir(test)?;
-                        writeln!(writer, "// test \"{}\"", test.name)
-                            .map_err(CodegenError::io)?;
-                        writeln!(writer, "{}", self.jit.ctx.func)
-                            .map_err(CodegenError::io)?;
+                        writeln!(writer, "// test \"{}\"", test.name).map_err(CodegenError::io)?;
+                        writeln!(writer, "{}", self.jit.ctx.func).map_err(CodegenError::io)?;
                         self.jit.clear();
                     }
                 }

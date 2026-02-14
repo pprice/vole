@@ -349,7 +349,12 @@ pub(crate) fn emit_union_rc_cleanup(
 
             builder.switch_to_block(dec_block);
             builder.seal_block(dec_block);
-            let payload = builder.ins().load(types::I64, MemFlags::new(), base_ptr, crate::union_layout::PAYLOAD_OFFSET);
+            let payload = builder.ins().load(
+                types::I64,
+                MemFlags::new(),
+                base_ptr,
+                crate::union_layout::PAYLOAD_OFFSET,
+            );
             if is_interface {
                 let data_word = builder.ins().load(types::I64, MemFlags::new(), payload, 0);
                 builder.ins().call(rc_dec_ref, &[data_word]);
