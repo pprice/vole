@@ -83,12 +83,12 @@ impl ResolvedMethod {
     /// Use arena.unwrap_function(id) to get (params, ret, is_closure)
     pub fn func_type_id(&self) -> TypeId {
         match self {
-            ResolvedMethod::Direct { func_type_id, .. } => *func_type_id,
-            ResolvedMethod::Implemented { func_type_id, .. } => *func_type_id,
-            ResolvedMethod::FunctionalInterface { func_type_id, .. } => *func_type_id,
-            ResolvedMethod::DefaultMethod { func_type_id, .. } => *func_type_id,
-            ResolvedMethod::InterfaceMethod { func_type_id, .. } => *func_type_id,
-            ResolvedMethod::Static { func_type_id, .. } => *func_type_id,
+            ResolvedMethod::Direct { func_type_id, .. }
+            | ResolvedMethod::Implemented { func_type_id, .. }
+            | ResolvedMethod::FunctionalInterface { func_type_id, .. }
+            | ResolvedMethod::DefaultMethod { func_type_id, .. }
+            | ResolvedMethod::InterfaceMethod { func_type_id, .. }
+            | ResolvedMethod::Static { func_type_id, .. } => *func_type_id,
         }
     }
 
@@ -96,12 +96,12 @@ impl ResolvedMethod {
     /// This eliminates the need for arena.unwrap_function() in codegen.
     pub fn return_type_id(&self) -> TypeId {
         match self {
-            ResolvedMethod::Direct { return_type_id, .. } => *return_type_id,
-            ResolvedMethod::Implemented { return_type_id, .. } => *return_type_id,
-            ResolvedMethod::FunctionalInterface { return_type_id, .. } => *return_type_id,
-            ResolvedMethod::DefaultMethod { return_type_id, .. } => *return_type_id,
-            ResolvedMethod::InterfaceMethod { return_type_id, .. } => *return_type_id,
-            ResolvedMethod::Static { return_type_id, .. } => *return_type_id,
+            ResolvedMethod::Direct { return_type_id, .. }
+            | ResolvedMethod::Implemented { return_type_id, .. }
+            | ResolvedMethod::FunctionalInterface { return_type_id, .. }
+            | ResolvedMethod::DefaultMethod { return_type_id, .. }
+            | ResolvedMethod::InterfaceMethod { return_type_id, .. }
+            | ResolvedMethod::Static { return_type_id, .. } => *return_type_id,
         }
     }
 
@@ -158,12 +158,12 @@ impl ResolvedMethod {
     /// Get the method_name_id (available for all variants)
     pub fn method_name_id(&self) -> NameId {
         match self {
-            ResolvedMethod::Direct { method_name_id, .. } => *method_name_id,
-            ResolvedMethod::Implemented { method_name_id, .. } => *method_name_id,
-            ResolvedMethod::FunctionalInterface { method_name_id, .. } => *method_name_id,
-            ResolvedMethod::DefaultMethod { method_name_id, .. } => *method_name_id,
-            ResolvedMethod::InterfaceMethod { method_name_id, .. } => *method_name_id,
-            ResolvedMethod::Static { method_name_id, .. } => *method_name_id,
+            ResolvedMethod::Direct { method_name_id, .. }
+            | ResolvedMethod::Implemented { method_name_id, .. }
+            | ResolvedMethod::FunctionalInterface { method_name_id, .. }
+            | ResolvedMethod::DefaultMethod { method_name_id, .. }
+            | ResolvedMethod::InterfaceMethod { method_name_id, .. }
+            | ResolvedMethod::Static { method_name_id, .. } => *method_name_id,
         }
     }
 
