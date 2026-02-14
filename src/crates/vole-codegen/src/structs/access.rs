@@ -11,6 +11,12 @@ use vole_sema::type_arena::TypeId;
 use vole_sema::types::ConstantValue;
 
 impl Cg<'_, '_, '_> {
+    /// Convenience wrapper: compute struct field byte offset, panicking on invalid types.
+    pub(super) fn struct_field_byte_offset(&self, type_id: TypeId, slot: usize) -> i32 {
+        super::helpers::struct_field_byte_offset(type_id, slot, self.arena(), self.registry())
+            .expect("INTERNAL: struct field offset must be computable for valid struct type")
+    }
+
     #[tracing::instrument(skip(self, fa), fields(field = %self.interner().resolve(fa.field)))]
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> CodegenResult<CompiledValue> {
         let obj = self.expr(&fa.object)?;
@@ -277,13 +283,7 @@ impl Cg<'_, '_, '_> {
         // Struct types: store directly to pointer + offset
         let is_struct = self.arena().is_struct(obj.type_id);
         if is_struct {
-            let offset = {
-                let arena = self.arena();
-                let entities = self.registry();
-                super::helpers::struct_field_byte_offset(obj.type_id, slot, arena, entities).expect(
-                    "INTERNAL: struct field offset must be computable for valid struct type",
-                )
-            };
+            let offset = self.struct_field_byte_offset(obj.type_id, slot);
 
             // If assigning a nested struct, copy all flat slots inline
             let nested_flat = {
@@ -406,12 +406,7 @@ impl Cg<'_, '_, '_> {
         parent_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Compute byte offset accounting for nested struct sizes
-        let offset = {
-            let arena = self.arena();
-            let entities = self.registry();
-            super::helpers::struct_field_byte_offset(parent_type_id, slot, arena, entities)
-                .expect("INTERNAL: struct field offset must be computable for valid struct type")
-        };
+        let offset = self.struct_field_byte_offset(parent_type_id, slot);
 
         // If the field is itself a struct, return a pointer into the parent data
         let is_nested_struct = self.arena().is_struct(field_type_id);

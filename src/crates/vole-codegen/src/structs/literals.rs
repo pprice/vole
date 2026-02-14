@@ -7,14 +7,14 @@ use rustc_hash::FxHashMap;
 use super::helpers::{convert_to_i64_for_storage, split_i128_for_storage, store_field_value};
 use crate::RuntimeFn;
 use crate::context::Cg;
-use crate::union_layout;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
+use crate::union_layout;
 use cranelift::prelude::*;
 use cranelift_codegen::ir::StackSlot;
 use vole_frontend::{Decl, Expr, FieldDef, Program, StructLiteralExpr, Symbol};
-use vole_sema::entity_defs::TypeDefKind;
 use vole_runtime::value::TYPE_INSTANCE;
+use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::TypeId;
 
 /// Find the field definitions for a type by looking up the class declaration in the program.
@@ -199,9 +199,9 @@ impl Cg<'_, '_, '_> {
         // Compile explicitly provided fields
         for init in &sl.fields {
             let init_name = self.interner().resolve(init.name);
-            let slot = *field_slots
-                .get(init_name)
-                .ok_or_else(|| CodegenError::not_found("field", format!("{} in type {}", init_name, path_str)))?;
+            let slot = *field_slots.get(init_name).ok_or_else(|| {
+                CodegenError::not_found("field", format!("{} in type {}", init_name, path_str))
+            })?;
 
             let mut value = self.expr(&init.value)?;
 
@@ -305,12 +305,10 @@ impl Cg<'_, '_, '_> {
                         let type_def = query.registry().get_type(def_id);
                         if type_def.kind == TypeDefKind::Alias
                             && let Some(aliased_type_id) = type_def.aliased_type
-                        {
-                            if let Some((underlying_id, _, _)) =
+                            && let Some((underlying_id, _, _)) =
                                 self.arena().unwrap_class_or_struct(aliased_type_id)
-                            {
-                                resolved_id = Some(underlying_id);
-                            }
+                        {
+                            resolved_id = Some(underlying_id);
                         }
                     }
                     resolved_id
@@ -475,15 +473,21 @@ impl Cg<'_, '_, '_> {
         // This flag is used by union_heap_cleanup to know whether to rc_dec the payload.
         let is_rc = self.rc_state(value.type_id).needs_cleanup();
         let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
-        self.builder
-            .ins()
-            .store(MemFlags::new(), is_rc_val, heap_ptr, union_layout::IS_RC_OFFSET);
+        self.builder.ins().store(
+            MemFlags::new(),
+            is_rc_val,
+            heap_ptr,
+            union_layout::IS_RC_OFFSET,
+        );
 
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
         if !self.arena().is_sentinel(value.type_id) {
-            self.builder
-                .ins()
-                .store(MemFlags::new(), value.value, heap_ptr, union_layout::PAYLOAD_OFFSET);
+            self.builder.ins().store(
+                MemFlags::new(),
+                value.value,
+                heap_ptr,
+                union_layout::PAYLOAD_OFFSET,
+            );
         }
 
         Ok(CompiledValue::new(heap_ptr, self.ptr_type(), union_type_id))
@@ -515,20 +519,27 @@ impl Cg<'_, '_, '_> {
             .store(MemFlags::new(), tag_and_rc, heap_ptr, 0);
 
         // Copy payload (offset 8)
-        let payload = self
-            .builder
-            .ins()
-            .load(types::I64, MemFlags::new(), value.value, union_layout::PAYLOAD_OFFSET);
-        self.builder
-            .ins()
-            .store(MemFlags::new(), payload, heap_ptr, union_layout::PAYLOAD_OFFSET);
+        let payload = self.builder.ins().load(
+            types::I64,
+            MemFlags::new(),
+            value.value,
+            union_layout::PAYLOAD_OFFSET,
+        );
+        self.builder.ins().store(
+            MemFlags::new(),
+            payload,
+            heap_ptr,
+            union_layout::PAYLOAD_OFFSET,
+        );
 
         // If the payload is RC-managed, increment its refcount since both the
         // original and the copy will need independent cleanup
-        let is_rc = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), value.value, union_layout::IS_RC_OFFSET);
+        let is_rc = self.builder.ins().load(
+            types::I8,
+            MemFlags::new(),
+            value.value,
+            union_layout::IS_RC_OFFSET,
+        );
         let is_rc_nonzero = self.builder.ins().icmp_imm(IntCC::NotEqual, is_rc, 0);
         let payload_nonzero = self.builder.ins().icmp_imm(IntCC::NotEqual, payload, 0);
         let needs_inc = self.builder.ins().band(is_rc_nonzero, payload_nonzero);
@@ -623,21 +634,11 @@ impl Cg<'_, '_, '_> {
         // Compile and store each explicitly provided field
         for init in &sl.fields {
             let init_name = self.interner().resolve(init.name);
-            let field_slot = *field_slots
-                .get(init_name)
-                .ok_or_else(|| CodegenError::not_found("field", format!("{} in type {}", init_name, path_str)))?;
+            let field_slot = *field_slots.get(init_name).ok_or_else(|| {
+                CodegenError::not_found("field", format!("{} in type {}", init_name, path_str))
+            })?;
 
-            let offset = {
-                let arena = self.arena();
-                let entities = self.registry();
-                super::helpers::struct_field_byte_offset(
-                    result_type_id,
-                    field_slot,
-                    arena,
-                    entities,
-                )
-                .expect("INTERNAL: struct field offset must be computable for valid struct type")
-            };
+            let offset = self.struct_field_byte_offset(result_type_id, field_slot);
 
             let mut value = self.expr(&init.value)?;
             // RC: inc borrowed field values (e.g., reading from another struct's field)
@@ -673,17 +674,7 @@ impl Cg<'_, '_, '_> {
                 CodegenError::not_found("field", format!("{} in {}", field_name, path_str))
             })?;
 
-            let offset = {
-                let arena = self.arena();
-                let entities = self.registry();
-                super::helpers::struct_field_byte_offset(
-                    result_type_id,
-                    field_slot,
-                    arena,
-                    entities,
-                )
-                .expect("INTERNAL: struct field offset must be computable for valid struct type")
-            };
+            let offset = self.struct_field_byte_offset(result_type_id, field_slot);
 
             // SAFETY: See collect_field_default_ptrs documentation
             let default_expr: &Expr = unsafe { &*default_expr_ptr };
