@@ -1,6 +1,7 @@
 //! Vole code generation: Cranelift JIT compilation.
 
 mod analyzed;
+mod callable_registry;
 mod calls;
 pub mod compiler;
 mod context;
@@ -23,6 +24,7 @@ mod types;
 mod control_flow;
 mod interfaces;
 
+pub use callable_registry::{CallableKey, ResolvedCallable, resolve_callable};
 pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
 pub use intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, IntrinsicsRegistry};
