@@ -84,8 +84,7 @@ impl Analyzer {
         }
 
         // Push new scope for lambda body
-        let outer_scope = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(outer_scope);
+        self.push_scope();
 
         // Define parameters in scope and track as locals
         for (param, &ty_id) in lambda.params.iter().zip(param_type_ids.iter()) {
@@ -160,9 +159,7 @@ impl Analyzer {
         };
 
         // Restore outer scope
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
-        }
+        self.pop_scope();
 
         // Pop type params if we pushed any
         if !type_params.is_empty() {

@@ -474,6 +474,18 @@ impl Analyzer {
         self.skip_tests = skip;
     }
 
+    /// Push a new child scope onto the scope stack.
+    pub(crate) fn push_scope(&mut self) {
+        self.scope = Scope::with_parent(std::mem::take(&mut self.scope));
+    }
+
+    /// Pop the current scope, restoring the parent.
+    pub(crate) fn pop_scope(&mut self) {
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+    }
+
     // Builtin registration: builtins.rs
     // Prelude loading: prelude.rs
     // Error/display helpers: errors.rs

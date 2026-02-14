@@ -441,17 +441,14 @@ impl Analyzer {
 
         // Check each test case (each gets its own child scope)
         for test_case in &tests_decl.tests {
-            let tests_block_scope = std::mem::take(&mut sub.scope);
-            sub.scope = Scope::with_parent(tests_block_scope);
+            sub.push_scope();
 
             let void_id = sub.type_arena().void();
             let saved_ctx = sub.enter_function_context(void_id);
 
             let _body_info = sub.check_func_body(&test_case.body, interner);
 
-            if let Some(parent) = std::mem::take(&mut sub.scope).into_parent() {
-                sub.scope = parent;
-            }
+            sub.pop_scope();
             sub.exit_function_context(saved_ctx);
         }
 

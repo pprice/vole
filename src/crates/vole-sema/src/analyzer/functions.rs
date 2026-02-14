@@ -76,8 +76,7 @@ impl Analyzer {
 
     /// Create a new scope and define function/method/lambda parameters in it.
     pub(super) fn enter_param_scope(&mut self, params: &[Param], type_ids: &[ArenaTypeId]) {
-        let parent = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(parent);
+        self.push_scope();
         for (param, &ty_id) in params.iter().zip(type_ids.iter()) {
             self.scope.define(
                 param.name,
@@ -212,9 +211,7 @@ impl Analyzer {
         }
 
         // Restore scope
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
-        }
+        self.pop_scope();
         self.exit_function_context(saved_ctx);
 
         Ok(())
@@ -282,9 +279,7 @@ impl Analyzer {
         self.type_param_stack.pop();
 
         // Restore scope
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
-        }
+        self.pop_scope();
         self.exit_function_context(saved_ctx);
     }
 
@@ -401,8 +396,7 @@ impl Analyzer {
         };
 
         // Create scope with 'self' and parameters
-        let parent_scope = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(parent_scope);
+        self.push_scope();
 
         // Add 'self' to scope
         // Note: "self" should already be interned by the parser when it parses method bodies
@@ -518,9 +512,7 @@ impl Analyzer {
         }
 
         // Restore scope
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
-        }
+        self.pop_scope();
         self.exit_function_context(saved_ctx);
 
         Ok(())
@@ -688,9 +680,7 @@ impl Analyzer {
         }
 
         // Restore scope and context
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
-        }
+        self.pop_scope();
         self.exit_function_context(saved_ctx);
 
         Ok(())
@@ -740,8 +730,7 @@ impl Analyzer {
         };
 
         // Create scope with 'self' and parameters
-        let parent_scope = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(parent_scope);
+        self.push_scope();
 
         // Add 'self' to scope
         let self_sym = interner
@@ -788,9 +777,7 @@ impl Analyzer {
         // This could be enhanced later if needed.
 
         // Restore scope and context
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
-        }
+        self.pop_scope();
         self.exit_function_context(saved_ctx);
 
         Ok(())

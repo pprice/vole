@@ -308,15 +308,12 @@ impl Analyzer {
                     );
                 }
 
-                let parent = std::mem::take(&mut self.scope);
-                self.scope = Scope::with_parent(parent);
+                self.push_scope();
                 // While loop body may never execute, so we collect return_types
                 // but don't propagate definitely_returns
                 let body_info = self.check_block(&while_stmt.body, interner)?;
                 let _ = body_info; // Return info from loops handled in v-2602
-                if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-                    self.scope = parent;
-                }
+                self.pop_scope();
             }
             Stmt::If(if_stmt) => {
                 let cond_type_id = self.check_expr(&if_stmt.condition, interner)?;
@@ -338,15 +335,12 @@ impl Analyzer {
                 let saved_overrides = self.type_overrides.clone();
 
                 // Then branch (with narrowing if applicable)
-                let parent = std::mem::take(&mut self.scope);
-                self.scope = Scope::with_parent(parent);
+                self.push_scope();
                 if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
                     self.type_overrides.insert(*sym, *narrowed_type_id);
                 }
                 let then_info = self.check_block(&if_stmt.then_branch, interner)?;
-                if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-                    self.scope = parent;
-                }
+                self.pop_scope();
 
                 // Restore overrides for else branch
                 self.type_overrides = saved_overrides.clone();
@@ -418,8 +412,7 @@ impl Analyzer {
                     }
                 };
 
-                let parent = std::mem::take(&mut self.scope);
-                self.scope = Scope::with_parent(parent);
+                self.push_scope();
                 self.scope.define(
                     for_stmt.var_name,
                     Variable {
@@ -434,9 +427,7 @@ impl Analyzer {
                 let body_info = self.check_block(&for_stmt.body, interner)?;
                 let _ = body_info; // Return info from loops handled in v-2602
 
-                if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-                    self.scope = parent;
-                }
+                self.pop_scope();
             }
             Stmt::Break(_) => {
                 // Could check we're in a loop, but skipping for Phase 1

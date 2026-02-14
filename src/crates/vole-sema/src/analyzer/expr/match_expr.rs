@@ -82,7 +82,7 @@ impl Analyzer {
 
         for arm in &match_expr.arms {
             // Enter new scope for arm (bindings live here)
-            self.scope = Scope::with_parent(std::mem::take(&mut self.scope));
+            self.push_scope();
 
             // Save current type overrides
             let saved_overrides = self.type_overrides.clone();
@@ -184,9 +184,7 @@ impl Analyzer {
             }
 
             // Exit arm scope
-            if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-                self.scope = parent;
-            }
+            self.pop_scope();
         }
 
         Ok(result_type_id.unwrap_or(ArenaTypeId::VOID))
