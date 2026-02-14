@@ -701,52 +701,7 @@ impl Analyzer {
             })
             .collect();
 
-        // Check for missing fields (fields in error type but not provided in raise)
-        let provided_fields: HashSet<String> = stmt
-            .fields
-            .iter()
-            .map(|f| interner.resolve(f.name).to_string())
-            .collect();
-        for (field_name, _) in &error_fields {
-            if !provided_fields.contains(field_name) {
-                self.add_error(
-                    SemanticError::MissingField {
-                        ty: error_type_name.clone(),
-                        field: field_name.clone(),
-                        span: stmt.span.into(),
-                    },
-                    stmt.span,
-                );
-            }
-        }
-
-        // Type check field initializers and check for unknown fields
-        for field_init in &stmt.fields {
-            let value_type_id = match self.check_expr(&field_init.value, interner) {
-                Ok(ty_id) => ty_id,
-                Err(_) => ArenaTypeId::INVALID,
-            };
-            let field_init_name = interner.resolve(field_init.name);
-            if let Some((_, field_ty_id)) = error_fields
-                .iter()
-                .find(|(name, _)| name == field_init_name)
-            {
-                // Known field - check type compatibility using TypeId
-                if !self.types_compatible_id(value_type_id, *field_ty_id, interner) {
-                    self.add_type_mismatch_id(*field_ty_id, value_type_id, field_init.span);
-                }
-            } else {
-                // Unknown field
-                self.add_error(
-                    SemanticError::UnknownField {
-                        ty: error_type_name.clone(),
-                        field: interner.resolve(field_init.name).to_string(),
-                        span: field_init.span.into(),
-                    },
-                    field_init.span,
-                );
-            }
-        }
+        self.check_raise_field_initializers(stmt, &error_fields, &error_type_name, interner);
 
         // Verify that raised error type is compatible with declared error type
         let stmt_error_name = interner.resolve(stmt.error_name);
@@ -792,6 +747,63 @@ impl Analyzer {
         }
 
         self.ty_void_id() // raise doesn't produce a value - it transfers control
+    }
+
+    /// Validate raise statement field initializers: check for missing fields,
+    /// unknown fields, and type compatibility.
+    fn check_raise_field_initializers(
+        &mut self,
+        stmt: &RaiseStmt,
+        error_fields: &[(String, ArenaTypeId)],
+        error_type_name: &str,
+        interner: &Interner,
+    ) {
+        // Check for missing fields (fields in error type but not provided in raise)
+        let provided_fields: HashSet<String> = stmt
+            .fields
+            .iter()
+            .map(|f| interner.resolve(f.name).to_string())
+            .collect();
+        for (field_name, _) in error_fields {
+            if !provided_fields.contains(field_name) {
+                self.add_error(
+                    SemanticError::MissingField {
+                        ty: error_type_name.to_string(),
+                        field: field_name.clone(),
+                        span: stmt.span.into(),
+                    },
+                    stmt.span,
+                );
+            }
+        }
+
+        // Type check field initializers and check for unknown fields
+        for field_init in &stmt.fields {
+            let value_type_id = match self.check_expr(&field_init.value, interner) {
+                Ok(ty_id) => ty_id,
+                Err(_) => ArenaTypeId::INVALID,
+            };
+            let field_init_name = interner.resolve(field_init.name);
+            if let Some((_, field_ty_id)) = error_fields
+                .iter()
+                .find(|(name, _)| name == field_init_name)
+            {
+                // Known field - check type compatibility using TypeId
+                if !self.types_compatible_id(value_type_id, *field_ty_id, interner) {
+                    self.add_type_mismatch_id(*field_ty_id, value_type_id, field_init.span);
+                }
+            } else {
+                // Unknown field
+                self.add_error(
+                    SemanticError::UnknownField {
+                        ty: error_type_name.to_string(),
+                        field: interner.resolve(field_init.name).to_string(),
+                        span: field_init.span.into(),
+                    },
+                    field_init.span,
+                );
+            }
+        }
     }
 
     /// Analyze a try expression (propagation)
