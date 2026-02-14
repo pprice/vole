@@ -389,9 +389,7 @@ impl Analyzer {
                 // Validate type annotation first to emit errors for unknown types
                 self.validate_type_annotation(&p.ty, p.span, interner, None);
                 let type_id = self.resolve_type_id(&p.ty, interner);
-                self.check_never_not_allowed(type_id, p.span);
-                self.check_union_simplification(&p.ty, p.span);
-                self.check_combination_not_allowed(&p.ty, p.span);
+                self.check_type_annotation_constraints(type_id, &p.ty, p.span);
                 type_id
             })
             .collect()
@@ -466,9 +464,7 @@ impl Analyzer {
         for (param, &type_id) in func.params.iter().zip(param_type_ids) {
             // Validate type annotation to emit errors for unknown types
             self.validate_type_annotation(&param.ty, param.span, interner, type_param_scope);
-            self.check_never_not_allowed(type_id, param.span);
-            self.check_union_simplification(&param.ty, param.span);
-            self.check_combination_not_allowed(&param.ty, param.span);
+            self.check_type_annotation_constraints(type_id, &param.ty, param.span);
         }
         if let Some(rt) = &func.return_type {
             // Validate return type annotation to emit errors for unknown types
@@ -690,9 +686,7 @@ impl Analyzer {
 
         // Check that never is not used in method parameters
         for (param, &type_id) in params.iter().zip(&params_id) {
-            self.check_never_not_allowed(type_id, param.span);
-            self.check_union_simplification(&param.ty, param.span);
-            self.check_combination_not_allowed(&param.ty, param.span);
+            self.check_type_annotation_constraints(type_id, &param.ty, param.span);
         }
 
         let return_type_id = return_type
@@ -1260,9 +1254,7 @@ impl Analyzer {
 
         // Check that never is not used in class fields
         for (field, &type_id) in fields.iter().zip(&field_type_ids) {
-            self.check_never_not_allowed(type_id, field.span);
-            self.check_union_simplification(&field.ty, field.span);
-            self.check_combination_not_allowed(&field.ty, field.span);
+            self.check_type_annotation_constraints(type_id, &field.ty, field.span);
         }
 
         (field_names, field_type_ids)
@@ -2142,7 +2134,10 @@ impl Analyzer {
 
         // Validate trait exists if specified
         if impl_block.trait_type.is_some() && resolved_interface.is_none() {
-            let trait_type = impl_block.trait_type.as_ref().expect("trait_type checked is_some above");
+            let trait_type = impl_block
+                .trait_type
+                .as_ref()
+                .expect("trait_type checked is_some above");
 
             // Provide more specific error for qualified paths
             if is_qualified_path(trait_type) {

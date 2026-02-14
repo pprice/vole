@@ -182,6 +182,19 @@ impl Analyzer {
         }
     }
 
+    /// Run all standard type-position annotation checks: never, union simplification,
+    /// and combination (intersection) not allowed.
+    pub(crate) fn check_type_annotation_constraints(
+        &mut self,
+        type_id: ArenaTypeId,
+        ty: &TypeExpr,
+        span: Span,
+    ) {
+        self.check_never_not_allowed(type_id, span);
+        self.check_union_simplification(ty, span);
+        self.check_combination_not_allowed(ty, span);
+    }
+
     /// Check if a type expression is or contains a `Combination` (intersection type `A + B`)
     /// and emit E2103. Intersection types are only valid in type constraints, not type positions.
     pub(crate) fn check_combination_not_allowed(&mut self, ty: &TypeExpr, span: Span) {
