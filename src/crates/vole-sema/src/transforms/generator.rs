@@ -44,6 +44,7 @@
 //! }
 //! ```
 
+use super::expr_walker::{any_child_expr, any_child_expr_in_block, for_each_child_expr};
 use crate::analyzer::TypeError;
 use crate::errors::SemanticError;
 use vole_frontend::ast::*;
@@ -102,7 +103,7 @@ impl<'a> GeneratorTransformer<'a> {
 
         for (i, decl) in program.declarations.iter().enumerate() {
             if let Decl::Function(func) = decl
-                && self.contains_yield(&func.body)
+                && Self::contains_yield(&func.body)
             {
                 generators_info.push((i, func.clone()));
             }
@@ -140,133 +141,20 @@ impl<'a> GeneratorTransformer<'a> {
         (count, std::mem::take(&mut self.errors))
     }
 
-    /// Check if a function body contains any yield expressions
-    fn contains_yield(&self, body: &FuncBody) -> bool {
+    /// Check if a function body contains any yield expressions.
+    fn contains_yield(body: &FuncBody) -> bool {
         match body {
-            FuncBody::Block(block) => self.block_contains_yield(block),
-            FuncBody::Expr(expr) => self.expr_contains_yield(expr),
+            FuncBody::Block(block) => {
+                any_child_expr_in_block(block, &mut Self::expr_contains_yield)
+            }
+            FuncBody::Expr(expr) => Self::expr_contains_yield(expr),
         }
     }
 
-    fn block_contains_yield(&self, block: &Block) -> bool {
-        for stmt in &block.stmts {
-            if self.stmt_contains_yield(stmt) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn stmt_contains_yield(&self, stmt: &Stmt) -> bool {
-        match stmt {
-            Stmt::Expr(expr_stmt) => self.expr_contains_yield(&expr_stmt.expr),
-            Stmt::Let(let_stmt) => match &let_stmt.init {
-                LetInit::Expr(e) => self.expr_contains_yield(e),
-                LetInit::TypeAlias(_) => false,
-            },
-            Stmt::While(while_stmt) => {
-                self.expr_contains_yield(&while_stmt.condition)
-                    || self.block_contains_yield(&while_stmt.body)
-            }
-            Stmt::For(for_stmt) => {
-                self.expr_contains_yield(&for_stmt.iterable)
-                    || self.block_contains_yield(&for_stmt.body)
-            }
-            Stmt::If(if_stmt) => {
-                self.expr_contains_yield(&if_stmt.condition)
-                    || self.block_contains_yield(&if_stmt.then_branch)
-                    || if_stmt
-                        .else_branch
-                        .as_ref()
-                        .is_some_and(|b| self.block_contains_yield(b))
-            }
-            Stmt::Return(ret_stmt) => ret_stmt
-                .value
-                .as_ref()
-                .is_some_and(|e| self.expr_contains_yield(e)),
-            Stmt::LetTuple(lt) => self.expr_contains_yield(&lt.init),
-            Stmt::Raise(_) | Stmt::Break(_) | Stmt::Continue(_) => false,
-        }
-    }
-
-    fn expr_contains_yield(&self, expr: &Expr) -> bool {
+    fn expr_contains_yield(expr: &Expr) -> bool {
         match &expr.kind {
             ExprKind::Yield(_) => true,
-            ExprKind::Binary(bin) => {
-                self.expr_contains_yield(&bin.left) || self.expr_contains_yield(&bin.right)
-            }
-            ExprKind::Unary(un) => self.expr_contains_yield(&un.operand),
-            ExprKind::Call(call) => {
-                self.expr_contains_yield(&call.callee)
-                    || call.args.iter().any(|a| self.expr_contains_yield(a))
-            }
-            ExprKind::Grouping(inner) => self.expr_contains_yield(inner),
-            ExprKind::ArrayLiteral(elems) => elems.iter().any(|e| self.expr_contains_yield(e)),
-            ExprKind::RepeatLiteral { element, .. } => self.expr_contains_yield(element),
-            ExprKind::Index(idx) => {
-                self.expr_contains_yield(&idx.object) || self.expr_contains_yield(&idx.index)
-            }
-            ExprKind::Match(m) => {
-                self.expr_contains_yield(&m.scrutinee)
-                    || m.arms.iter().any(|arm| self.expr_contains_yield(&arm.body))
-            }
-            ExprKind::NullCoalesce(nc) => {
-                self.expr_contains_yield(&nc.value) || self.expr_contains_yield(&nc.default)
-            }
-            ExprKind::Is(is_expr) => self.expr_contains_yield(&is_expr.value),
-            ExprKind::FieldAccess(fa) => self.expr_contains_yield(&fa.object),
-            ExprKind::OptionalChain(oc) => self.expr_contains_yield(&oc.object),
-            ExprKind::MethodCall(mc) => {
-                self.expr_contains_yield(&mc.object)
-                    || mc.args.iter().any(|a| self.expr_contains_yield(a))
-            }
-            ExprKind::StructLiteral(sl) => {
-                sl.fields.iter().any(|f| self.expr_contains_yield(&f.value))
-            }
-            ExprKind::Assign(assign) => self.expr_contains_yield(&assign.value),
-            ExprKind::CompoundAssign(ca) => self.expr_contains_yield(&ca.value),
-            ExprKind::Range(range) => {
-                self.expr_contains_yield(&range.start) || self.expr_contains_yield(&range.end)
-            }
-            ExprKind::Lambda(lambda) => match &lambda.body {
-                FuncBody::Expr(e) => self.expr_contains_yield(e),
-                FuncBody::Block(b) => self.block_contains_yield(b),
-            },
-            ExprKind::Try(inner) => self.expr_contains_yield(inner),
-            ExprKind::InterpolatedString(parts) => parts.iter().any(|p| match p {
-                StringPart::Literal(_) => false,
-                StringPart::Expr(e) => self.expr_contains_yield(e),
-            }),
-            ExprKind::Block(block) => {
-                block.stmts.iter().any(|s| self.stmt_contains_yield(s))
-                    || block
-                        .trailing_expr
-                        .as_ref()
-                        .is_some_and(|e| self.expr_contains_yield(e))
-            }
-            ExprKind::If(if_expr) => {
-                self.expr_contains_yield(&if_expr.condition)
-                    || self.expr_contains_yield(&if_expr.then_branch)
-                    || if_expr
-                        .else_branch
-                        .as_ref()
-                        .is_some_and(|e| self.expr_contains_yield(e))
-            }
-            ExprKind::When(when_expr) => when_expr.arms.iter().any(|arm| {
-                arm.condition
-                    .as_ref()
-                    .is_some_and(|c| self.expr_contains_yield(c))
-                    || self.expr_contains_yield(&arm.body)
-            }),
-            // Leaf expressions that can't contain yield
-            ExprKind::IntLiteral(..)
-            | ExprKind::FloatLiteral(..)
-            | ExprKind::BoolLiteral(_)
-            | ExprKind::StringLiteral(_)
-            | ExprKind::Identifier(_)
-            | ExprKind::Unreachable
-            | ExprKind::TypeLiteral(_)
-            | ExprKind::Import(_) => false,
+            _ => any_child_expr(expr, &mut Self::expr_contains_yield),
         }
     }
 
@@ -291,7 +179,7 @@ impl<'a> GeneratorTransformer<'a> {
         self.generator_count += 1;
 
         // Collect yields to determine states
-        let yields = self.collect_yields(&func.body);
+        let yields = Self::collect_yields(&func.body);
         if yields.is_empty() {
             return None; // No yields, not actually a generator
         }
@@ -382,176 +270,30 @@ impl<'a> GeneratorTransformer<'a> {
     }
 
     /// Collect all yield expressions from a function body (in order).
-    fn collect_yields(&self, body: &FuncBody) -> Vec<Expr> {
+    fn collect_yields(body: &FuncBody) -> Vec<Expr> {
         let mut yields = Vec::new();
         match body {
-            FuncBody::Block(block) => self.collect_yields_from_block(block, &mut yields),
-            FuncBody::Expr(expr) => self.collect_yields_from_expr(expr, &mut yields),
+            FuncBody::Block(block) => {
+                any_child_expr_in_block(block, &mut |e| {
+                    Self::collect_yields_from_expr(e, &mut yields);
+                    false
+                });
+            }
+            FuncBody::Expr(expr) => Self::collect_yields_from_expr(expr, &mut yields),
         }
         yields
     }
 
-    fn collect_yields_from_block(&self, block: &Block, yields: &mut Vec<Expr>) {
-        for stmt in &block.stmts {
-            self.collect_yields_from_stmt(stmt, yields);
-        }
-    }
-
-    fn collect_yields_from_stmt(&self, stmt: &Stmt, yields: &mut Vec<Expr>) {
-        match stmt {
-            Stmt::Expr(expr_stmt) => self.collect_yields_from_expr(&expr_stmt.expr, yields),
-            Stmt::Let(let_stmt) => {
-                if let LetInit::Expr(e) = &let_stmt.init {
-                    self.collect_yields_from_expr(e, yields);
-                }
-            }
-            Stmt::While(while_stmt) => {
-                self.collect_yields_from_expr(&while_stmt.condition, yields);
-                self.collect_yields_from_block(&while_stmt.body, yields);
-            }
-            Stmt::For(for_stmt) => {
-                self.collect_yields_from_expr(&for_stmt.iterable, yields);
-                self.collect_yields_from_block(&for_stmt.body, yields);
-            }
-            Stmt::If(if_stmt) => {
-                self.collect_yields_from_expr(&if_stmt.condition, yields);
-                self.collect_yields_from_block(&if_stmt.then_branch, yields);
-                if let Some(else_branch) = &if_stmt.else_branch {
-                    self.collect_yields_from_block(else_branch, yields);
-                }
-            }
-            Stmt::Return(ret_stmt) => {
-                if let Some(value) = &ret_stmt.value {
-                    self.collect_yields_from_expr(value, yields);
-                }
-            }
-            Stmt::LetTuple(lt) => {
-                self.collect_yields_from_expr(&lt.init, yields);
-            }
-            Stmt::Raise(_) | Stmt::Break(_) | Stmt::Continue(_) => {}
-        }
-    }
-
-    fn collect_yields_from_expr(&self, expr: &Expr, yields: &mut Vec<Expr>) {
+    fn collect_yields_from_expr(expr: &Expr, yields: &mut Vec<Expr>) {
         match &expr.kind {
             ExprKind::Yield(yield_expr) => {
-                // Clone the yielded value expression
                 yields.push(yield_expr.value.clone());
             }
-            ExprKind::Binary(bin) => {
-                self.collect_yields_from_expr(&bin.left, yields);
-                self.collect_yields_from_expr(&bin.right, yields);
+            _ => {
+                for_each_child_expr(expr, &mut |e| {
+                    Self::collect_yields_from_expr(e, yields);
+                });
             }
-            ExprKind::Unary(un) => {
-                self.collect_yields_from_expr(&un.operand, yields);
-            }
-            ExprKind::Call(call) => {
-                self.collect_yields_from_expr(&call.callee, yields);
-                for arg in &call.args {
-                    self.collect_yields_from_expr(arg, yields);
-                }
-            }
-            ExprKind::Grouping(inner) => {
-                self.collect_yields_from_expr(inner, yields);
-            }
-            ExprKind::ArrayLiteral(elems) => {
-                for elem in elems {
-                    self.collect_yields_from_expr(elem, yields);
-                }
-            }
-            ExprKind::RepeatLiteral { element, .. } => {
-                self.collect_yields_from_expr(element, yields);
-            }
-            ExprKind::Index(idx) => {
-                self.collect_yields_from_expr(&idx.object, yields);
-                self.collect_yields_from_expr(&idx.index, yields);
-            }
-            ExprKind::Match(m) => {
-                self.collect_yields_from_expr(&m.scrutinee, yields);
-                for arm in &m.arms {
-                    self.collect_yields_from_expr(&arm.body, yields);
-                }
-            }
-            ExprKind::NullCoalesce(nc) => {
-                self.collect_yields_from_expr(&nc.value, yields);
-                self.collect_yields_from_expr(&nc.default, yields);
-            }
-            ExprKind::Is(is_expr) => {
-                self.collect_yields_from_expr(&is_expr.value, yields);
-            }
-            ExprKind::FieldAccess(fa) => {
-                self.collect_yields_from_expr(&fa.object, yields);
-            }
-            ExprKind::OptionalChain(oc) => {
-                self.collect_yields_from_expr(&oc.object, yields);
-            }
-            ExprKind::MethodCall(mc) => {
-                self.collect_yields_from_expr(&mc.object, yields);
-                for arg in &mc.args {
-                    self.collect_yields_from_expr(arg, yields);
-                }
-            }
-            ExprKind::StructLiteral(sl) => {
-                for field in &sl.fields {
-                    self.collect_yields_from_expr(&field.value, yields);
-                }
-            }
-            ExprKind::Assign(assign) => {
-                self.collect_yields_from_expr(&assign.value, yields);
-            }
-            ExprKind::CompoundAssign(ca) => {
-                self.collect_yields_from_expr(&ca.value, yields);
-            }
-            ExprKind::Range(range) => {
-                self.collect_yields_from_expr(&range.start, yields);
-                self.collect_yields_from_expr(&range.end, yields);
-            }
-            ExprKind::Lambda(lambda) => match &lambda.body {
-                FuncBody::Expr(e) => self.collect_yields_from_expr(e, yields),
-                FuncBody::Block(b) => self.collect_yields_from_block(b, yields),
-            },
-            ExprKind::Try(inner) => {
-                self.collect_yields_from_expr(inner, yields);
-            }
-            ExprKind::InterpolatedString(parts) => {
-                for part in parts {
-                    if let StringPart::Expr(e) = part {
-                        self.collect_yields_from_expr(e, yields);
-                    }
-                }
-            }
-            ExprKind::Block(block) => {
-                for stmt in &block.stmts {
-                    self.collect_yields_from_stmt(stmt, yields);
-                }
-                if let Some(trailing) = &block.trailing_expr {
-                    self.collect_yields_from_expr(trailing, yields);
-                }
-            }
-            ExprKind::If(if_expr) => {
-                self.collect_yields_from_expr(&if_expr.condition, yields);
-                self.collect_yields_from_expr(&if_expr.then_branch, yields);
-                if let Some(else_branch) = &if_expr.else_branch {
-                    self.collect_yields_from_expr(else_branch, yields);
-                }
-            }
-            ExprKind::When(when_expr) => {
-                for arm in &when_expr.arms {
-                    if let Some(ref cond) = arm.condition {
-                        self.collect_yields_from_expr(cond, yields);
-                    }
-                    self.collect_yields_from_expr(&arm.body, yields);
-                }
-            }
-            // Leaf expressions
-            ExprKind::IntLiteral(..)
-            | ExprKind::FloatLiteral(..)
-            | ExprKind::BoolLiteral(_)
-            | ExprKind::StringLiteral(_)
-            | ExprKind::Identifier(_)
-            | ExprKind::Unreachable
-            | ExprKind::TypeLiteral(_)
-            | ExprKind::Import(_) => {}
         }
     }
 
@@ -1079,12 +821,9 @@ mod tests {
         "#;
         let mut parser = Parser::new(source);
         let program = parser.parse_program().expect("parse failed");
-        let interner = parser.into_interner();
 
         if let Decl::Function(func) = &program.declarations[0] {
-            let mut interner = interner;
-            let transformer = GeneratorTransformer::new(&mut interner);
-            assert!(transformer.contains_yield(&func.body));
+            assert!(GeneratorTransformer::contains_yield(&func.body));
         }
     }
 
@@ -1097,12 +836,9 @@ mod tests {
         "#;
         let mut parser = Parser::new(source);
         let program = parser.parse_program().expect("parse failed");
-        let interner = parser.into_interner();
 
         if let Decl::Function(func) = &program.declarations[0] {
-            let mut interner = interner;
-            let transformer = GeneratorTransformer::new(&mut interner);
-            assert!(!transformer.contains_yield(&func.body));
+            assert!(!GeneratorTransformer::contains_yield(&func.body));
         }
     }
 

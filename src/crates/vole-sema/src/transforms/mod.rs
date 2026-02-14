@@ -4,6 +4,7 @@
 //! allowing high-level language features to be desugared into
 //! simpler constructs.
 
+mod expr_walker;
 pub mod generator;
 mod rewrite_refs;
 
