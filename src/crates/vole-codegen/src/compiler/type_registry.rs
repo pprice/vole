@@ -2,6 +2,7 @@ use rustc_hash::FxHashMap;
 
 use super::impls::TypeDeclInfo;
 use super::{Compiler, SelfParam};
+use crate::FunctionKey;
 use crate::types::{MethodInfo, TypeMetadata, method_name_id_with_interner};
 use vole_frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, SentinelDecl, StaticsBlock, StructDecl,
@@ -41,6 +42,19 @@ fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) ->
 }
 
 impl Compiler<'_> {
+    /// Register a method's func_key in the unified lookup map, keyed by type name + method name.
+    fn register_method_func_key(
+        &mut self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+        func_key: FunctionKey,
+    ) {
+        let type_name_id = self.query().get_type(type_def_id).name_id;
+        self.state
+            .method_func_keys
+            .insert((type_name_id, method_name_id), func_key);
+    }
+
     /// Find an interface declaration by name in the program
     pub(super) fn find_interface_decl<'b>(
         &self,
@@ -276,11 +290,7 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
             method_infos.insert(method_name_id, MethodInfo { func_key });
-            // Also populate unified method_func_keys map
-            let type_name_id = self.query().get_type(type_def_id).name_id;
-            self.state
-                .method_func_keys
-                .insert((type_name_id, method_name_id), func_key);
+            self.register_method_func_key(type_def_id, method_name_id, func_key);
         }
 
         method_infos
@@ -348,11 +358,7 @@ impl Compiler<'_> {
                         let jit_func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, jit_func_id);
                         method_infos.insert(method_name_id, MethodInfo { func_key });
-                        // Also populate unified method_func_keys map
-                        let type_name_id = self.query().get_type(type_def_id).name_id;
-                        self.state
-                            .method_func_keys
-                            .insert((type_name_id, method_name_id), func_key);
+                        self.register_method_func_key(type_def_id, method_name_id, func_key);
                     }
                 }
             }
@@ -509,11 +515,7 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
 
-            // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
-            let type_name_id = self.query().get_type(type_def_id).name_id;
-            self.state
-                .method_func_keys
-                .insert((type_name_id, method_name_id), func_key);
+            self.register_method_func_key(type_def_id, method_name_id, func_key);
         }
     }
 
@@ -691,11 +693,7 @@ impl Compiler<'_> {
                 "Registered instance method"
             );
             method_infos.insert(method_name_id, MethodInfo { func_key });
-            // Also populate unified method_func_keys map
-            let type_name_id = self.query().get_type(type_def_id).name_id;
-            self.state
-                .method_func_keys
-                .insert((type_name_id, method_name_id), func_key);
+            self.register_method_func_key(type_def_id, method_name_id, func_key);
         }
 
         tracing::debug!(
@@ -758,10 +756,7 @@ impl Compiler<'_> {
                 "Registering static method"
             );
 
-            let type_name_id = self.query().get_type(type_def_id).name_id;
-            self.state
-                .method_func_keys
-                .insert((type_name_id, method_name_id), func_key);
+            self.register_method_func_key(type_def_id, method_name_id, func_key);
         }
     }
 }
