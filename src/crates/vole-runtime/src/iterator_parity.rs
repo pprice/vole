@@ -1,9 +1,8 @@
 //! Iterator backend conformance harness.
 //!
 //! This harness runs the same scenario against multiple iterator backends and
-//! compares semantic outputs. During early migration both backends may route to
-//! legacy implementations; this still provides a stable test contract for future
-//! backend switching.
+//! compares semantic outputs. During migration, `new_core` runs the FFI-agnostic
+//! `iterator_core` engine while `legacy` runs current runtime entry points.
 
 use std::alloc::{Layout, dealloc};
 use std::env;
@@ -15,6 +14,7 @@ use crate::iterator::{
     vole_iter_find, vole_iter_first, vole_iter_last, vole_iter_nth, vole_iter_reduce,
 };
 use crate::iterator_abi::TaggedNextWord;
+use crate::iterator_core::CoreIter;
 use crate::value::TaggedValue;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,38 +103,46 @@ fn decode_optional_i64(ptr: *mut u8) -> Option<i64> {
         let payload = *(ptr.add(TaggedNextWord::PAYLOAD_OFFSET) as *const i64);
         if tag == 0 { Some(payload) } else { None }
     };
-    let layout = Layout::from_size_align(TaggedNextWord::SIZE, TaggedNextWord::ALIGN)
-        .expect("valid optional layout");
+    let layout =
+        Layout::from_size_align(TaggedNextWord::SIZE, TaggedNextWord::ALIGN).expect("layout");
     unsafe {
         dealloc(ptr, layout);
     }
     result
 }
 
-fn mk_array_iter(backend: IteratorBackend, values: &[i64]) -> *mut RcIterator {
+fn mk_legacy_array_iter(values: &[i64]) -> *mut RcIterator {
     let array = make_i64_array(values);
-    let iter = match backend {
-        IteratorBackend::Legacy => vole_array_iter(array),
-        // Placeholder routing until the new core backend exists.
-        IteratorBackend::NewCore => vole_array_iter(array),
-    };
-    // Transfer ownership to iterator chain.
+    let iter = vole_array_iter(array);
     unsafe {
+        // Transfer ownership to iterator chain.
         RcArray::dec_ref(array);
     }
     iter
 }
 
-extern "C" fn reducer_sum(_closure: *const Closure, acc: i64, value: i64) -> i64 {
+extern "C" fn reducer_sum_legacy(_closure: *const Closure, acc: i64, value: i64) -> i64 {
     acc + value
 }
 
-extern "C" fn predicate_even(_closure: *const Closure, value: i64) -> i8 {
+fn reducer_sum_core(acc: i64, value: i64) -> i64 {
+    acc + value
+}
+
+extern "C" fn predicate_even_legacy(_closure: *const Closure, value: i64) -> i8 {
     (value % 2 == 0) as i8
 }
 
-extern "C" fn predicate_gt_ten(_closure: *const Closure, value: i64) -> i8 {
+extern "C" fn predicate_gt_ten_legacy(_closure: *const Closure, value: i64) -> i8 {
     (value > 10) as i8
+}
+
+fn predicate_even_core(value: i64) -> bool {
+    value % 2 == 0
+}
+
+fn predicate_gt_ten_core(value: i64) -> bool {
+    value > 10
 }
 
 fn alloc_closure_for_binary_i64(
@@ -151,50 +159,87 @@ fn alloc_closure_for_unary_i64_bool(
 
 #[test]
 fn parity_collect_tagged() {
-    run_conformance_case("collect_tagged", |backend| {
-        let iter = mk_array_iter(backend, &[1, 2, 3, 4]);
-        let collected = vole_iter_collect_tagged(iter, crate::value::TYPE_I64 as u64);
-        collect_i64_values(collected)
+    run_conformance_case("collect_tagged", |backend| match backend {
+        IteratorBackend::Legacy => {
+            let iter = mk_legacy_array_iter(&[1, 2, 3, 4]);
+            let collected = vole_iter_collect_tagged(iter, crate::value::TYPE_I64 as u64);
+            collect_i64_values(collected)
+        }
+        IteratorBackend::NewCore => CoreIter::from_i64_slice(&[1, 2, 3, 4])
+            .collect_i64()
+            .expect("core collect should succeed"),
     });
 }
 
 #[test]
 fn parity_first_last_nth() {
-    run_conformance_case("first_last_nth", |backend| {
-        let first = decode_optional_i64(vole_iter_first(mk_array_iter(backend, &[3, 7, 11, 15])));
-        let last = decode_optional_i64(vole_iter_last(mk_array_iter(backend, &[3, 7, 11, 15])));
-        let nth = decode_optional_i64(vole_iter_nth(mk_array_iter(backend, &[3, 7, 11, 15]), 2));
-        (first, last, nth)
+    run_conformance_case("first_last_nth", |backend| match backend {
+        IteratorBackend::Legacy => {
+            let first = decode_optional_i64(vole_iter_first(mk_legacy_array_iter(&[3, 7, 11, 15])));
+            let last = decode_optional_i64(vole_iter_last(mk_legacy_array_iter(&[3, 7, 11, 15])));
+            let nth = decode_optional_i64(vole_iter_nth(mk_legacy_array_iter(&[3, 7, 11, 15]), 2));
+            (first, last, nth)
+        }
+        IteratorBackend::NewCore => (
+            CoreIter::from_i64_slice(&[3, 7, 11, 15])
+                .first_i64()
+                .expect("core first should succeed"),
+            CoreIter::from_i64_slice(&[3, 7, 11, 15])
+                .last_i64()
+                .expect("core last should succeed"),
+            CoreIter::from_i64_slice(&[3, 7, 11, 15])
+                .nth_i64(2)
+                .expect("core nth should succeed"),
+        ),
     });
 }
 
 #[test]
 fn parity_reduce() {
-    run_conformance_case("reduce", |backend| {
-        let iter = mk_array_iter(backend, &[1, 2, 3, 4, 5]);
-        let reducer = alloc_closure_for_binary_i64(reducer_sum);
-        vole_iter_reduce(iter, 0, reducer)
+    run_conformance_case("reduce", |backend| match backend {
+        IteratorBackend::Legacy => {
+            let iter = mk_legacy_array_iter(&[1, 2, 3, 4, 5]);
+            let reducer = alloc_closure_for_binary_i64(reducer_sum_legacy);
+            vole_iter_reduce(iter, 0, reducer)
+        }
+        IteratorBackend::NewCore => CoreIter::from_i64_slice(&[1, 2, 3, 4, 5])
+            .reduce_i64(0, reducer_sum_core)
+            .expect("core reduce should succeed"),
     });
 }
 
 #[test]
 fn parity_find_any_all() {
-    run_conformance_case("find_any_all", |backend| {
-        let find_predicate = alloc_closure_for_unary_i64_bool(predicate_even);
-        let found = decode_optional_i64(vole_iter_find(
-            mk_array_iter(backend, &[1, 3, 6, 9]),
-            find_predicate,
-        ));
-        unsafe { Closure::free(find_predicate) };
+    run_conformance_case("find_any_all", |backend| match backend {
+        IteratorBackend::Legacy => {
+            let find_predicate = alloc_closure_for_unary_i64_bool(predicate_even_legacy);
+            let found = decode_optional_i64(vole_iter_find(
+                mk_legacy_array_iter(&[1, 3, 6, 9]),
+                find_predicate,
+            ));
+            unsafe { Closure::free(find_predicate) };
 
-        let any_predicate = alloc_closure_for_unary_i64_bool(predicate_gt_ten);
-        let any = vole_iter_any(mk_array_iter(backend, &[1, 3, 6, 9]), any_predicate);
-        unsafe { Closure::free(any_predicate) };
+            let any_predicate = alloc_closure_for_unary_i64_bool(predicate_gt_ten_legacy);
+            let any = vole_iter_any(mk_legacy_array_iter(&[1, 3, 6, 9]), any_predicate);
+            unsafe { Closure::free(any_predicate) };
 
-        let all_predicate = alloc_closure_for_unary_i64_bool(predicate_even);
-        let all = vole_iter_all(mk_array_iter(backend, &[2, 4, 6, 8]), all_predicate);
-        unsafe { Closure::free(all_predicate) };
+            let all_predicate = alloc_closure_for_unary_i64_bool(predicate_even_legacy);
+            let all = vole_iter_all(mk_legacy_array_iter(&[2, 4, 6, 8]), all_predicate);
+            unsafe { Closure::free(all_predicate) };
 
-        (found, any, all)
+            (found, any, all)
+        }
+        IteratorBackend::NewCore => {
+            let found = CoreIter::from_i64_slice(&[1, 3, 6, 9])
+                .find_i64(predicate_even_core)
+                .expect("core find should succeed");
+            let any = CoreIter::from_i64_slice(&[1, 3, 6, 9])
+                .any_i64(predicate_gt_ten_core)
+                .expect("core any should succeed");
+            let all = CoreIter::from_i64_slice(&[2, 4, 6, 8])
+                .all_i64(predicate_even_core)
+                .expect("core all should succeed");
+            (found, any as i8, all as i8)
+        }
     });
 }
