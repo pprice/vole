@@ -562,7 +562,6 @@ fn compile_function_wrapper<C: VtableCtx>(
         ));
     }
 
-    let void_id = ctx.arena().void();
     let (func_ptr, call_args, sig) = if is_closure {
         let closure_get_key = ctx
             .funcs()
@@ -592,7 +591,7 @@ fn compile_function_wrapper<C: VtableCtx>(
                 ctx.ptr_type(),
             )));
         }
-        if ret_type_id != void_id {
+        if !ctx.arena().is_void(ret_type_id) {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret_type_id,
                 arena,
@@ -614,7 +613,7 @@ fn compile_function_wrapper<C: VtableCtx>(
                 ctx.ptr_type(),
             )));
         }
-        if ret_type_id != void_id {
+        if !ctx.arena().is_void(ret_type_id) {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret_type_id,
                 arena,
@@ -784,8 +783,7 @@ fn compile_external_wrapper<C: VtableCtx>(
         )));
     }
     // Add return type if not void
-    let void_id = arena.void();
-    if return_type_id != void_id {
+    if !arena.is_void(return_type_id) {
         native_sig.returns.push(AbiParam::new(type_id_to_cranelift(
             return_type_id,
             arena,

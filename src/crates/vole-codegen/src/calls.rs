@@ -1095,7 +1095,7 @@ impl Cg<'_, '_, '_> {
                 .push(AbiParam::new(self.cranelift_type(param_type_id)));
         }
         let arena = self.arena();
-        if ret != arena.void() {
+        if !arena.is_void(ret) {
             // For fallible returns, use multi-value return (tag: i64, payload: i64)
             // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
             if is_wide_fallible(ret, arena) {
