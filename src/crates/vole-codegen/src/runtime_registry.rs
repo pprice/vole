@@ -83,6 +83,93 @@ pub enum RuntimeKey {
     RcDec,
 }
 
+impl RuntimeKey {
+    pub const ALL: &'static [RuntimeKey] = &[
+        RuntimeKey::StringNew,
+        RuntimeKey::StringConcat,
+        RuntimeKey::StringEq,
+        RuntimeKey::StringLen,
+        RuntimeKey::PrintlnString,
+        RuntimeKey::PrintlnI64,
+        RuntimeKey::PrintlnF64,
+        RuntimeKey::PrintlnBool,
+        RuntimeKey::PrintString,
+        RuntimeKey::PrintI64,
+        RuntimeKey::PrintF64,
+        RuntimeKey::PrintBool,
+        RuntimeKey::PrintChar,
+        RuntimeKey::I64ToString,
+        RuntimeKey::I128ToString,
+        RuntimeKey::I128Sdiv,
+        RuntimeKey::I128Srem,
+        RuntimeKey::F64ToString,
+        RuntimeKey::F32ToString,
+        RuntimeKey::BoolToString,
+        RuntimeKey::NilToString,
+        RuntimeKey::ArrayI64ToString,
+        RuntimeKey::Flush,
+        RuntimeKey::AssertFail,
+        RuntimeKey::Panic,
+        RuntimeKey::ArrayNew,
+        RuntimeKey::ArrayPush,
+        RuntimeKey::ArrayGetValue,
+        RuntimeKey::ArrayLen,
+        RuntimeKey::ArrayIter,
+        RuntimeKey::ArrayIterNext,
+        RuntimeKey::ArrayIterCollect,
+        RuntimeKey::ArraySet,
+        RuntimeKey::ArrayFilled,
+        RuntimeKey::MapIter,
+        RuntimeKey::MapIterNext,
+        RuntimeKey::MapIterCollect,
+        RuntimeKey::FilterIter,
+        RuntimeKey::FilterIterNext,
+        RuntimeKey::FilterIterCollect,
+        RuntimeKey::TakeIter,
+        RuntimeKey::TakeIterNext,
+        RuntimeKey::TakeIterCollect,
+        RuntimeKey::SkipIter,
+        RuntimeKey::SkipIterNext,
+        RuntimeKey::SkipIterCollect,
+        RuntimeKey::IterCount,
+        RuntimeKey::IterSum,
+        RuntimeKey::IterForEach,
+        RuntimeKey::IterReduce,
+        RuntimeKey::IterReduceTagged,
+        RuntimeKey::IterSetElemTag,
+        RuntimeKey::IterSetProducesOwned,
+        RuntimeKey::IterFirst,
+        RuntimeKey::IterLast,
+        RuntimeKey::IterNth,
+        RuntimeKey::RangeIter,
+        RuntimeKey::StringCharsIter,
+        RuntimeKey::ClosureAlloc,
+        RuntimeKey::ClosureSetCapture,
+        RuntimeKey::ClosureSetCaptureKind,
+        RuntimeKey::ClosureGetCapture,
+        RuntimeKey::ClosureGetFunc,
+        RuntimeKey::HeapAlloc,
+        RuntimeKey::InstanceNew,
+        RuntimeKey::InstanceGetField,
+        RuntimeKey::InstanceSetField,
+        RuntimeKey::SbNew,
+        RuntimeKey::SbPushString,
+        RuntimeKey::SbFinish,
+        RuntimeKey::InterfaceIter,
+        RuntimeKey::RcInc,
+        RuntimeKey::RcDec,
+    ];
+
+    pub fn name(self) -> &'static str {
+        for symbol in RUNTIME_SYMBOLS {
+            if symbol.key == self {
+                return symbol.c_name;
+            }
+        }
+        panic!("missing runtime symbol name for key: {self:?}");
+    }
+}
+
 /// Metadata for a runtime callable.
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeSymbol {

@@ -8,109 +8,11 @@ use rustc_hash::FxHashMap;
 
 use cranelift_module::FuncId;
 
+pub use crate::runtime_registry::RuntimeKey as RuntimeFn;
 use vole_identity::{ModuleId, NameId, NameTable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionKey(u32);
-
-/// Macro for defining runtime functions with a single source of truth.
-/// Each entry defines the enum variant and its corresponding C function name.
-macro_rules! runtime_fns {
-    ($($variant:ident => $name:literal),* $(,)?) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub enum RuntimeFn {
-            $($variant),*
-        }
-
-        impl RuntimeFn {
-            pub const ALL: &'static [RuntimeFn] = &[
-                $(RuntimeFn::$variant),*
-            ];
-
-            pub fn name(self) -> &'static str {
-                match self {
-                    $(RuntimeFn::$variant => $name),*
-                }
-            }
-        }
-    };
-}
-
-runtime_fns! {
-    StringNew => "vole_string_new",
-    StringConcat => "vole_string_concat",
-    StringEq => "vole_string_eq",
-    StringLen => "vole_string_len",
-    PrintlnString => "vole_println_string",
-    PrintlnI64 => "vole_println_i64",
-    PrintlnF64 => "vole_println_f64",
-    PrintlnBool => "vole_println_bool",
-    PrintString => "vole_print_string",
-    PrintI64 => "vole_print_i64",
-    PrintF64 => "vole_print_f64",
-    PrintBool => "vole_print_bool",
-    PrintChar => "vole_print_char",
-    I64ToString => "vole_i64_to_string",
-    I128ToString => "vole_i128_to_string",
-    I128Sdiv => "vole_i128_sdiv",
-    I128Srem => "vole_i128_srem",
-    F64ToString => "vole_f64_to_string",
-    F32ToString => "vole_f32_to_string",
-    BoolToString => "vole_bool_to_string",
-    NilToString => "vole_nil_to_string",
-    ArrayI64ToString => "vole_array_i64_to_string",
-    Flush => "vole_flush",
-    AssertFail => "vole_assert_fail",
-    Panic => "vole_panic",
-    ArrayNew => "vole_array_new",
-    ArrayPush => "vole_array_push",
-    ArrayGetValue => "vole_array_get_value",
-    ArrayLen => "vole_array_len",
-    ArrayIter => "vole_array_iter",
-    ArrayIterNext => "vole_array_iter_next",
-    ArrayIterCollect => "vole_array_iter_collect",
-    ArraySet => "vole_array_set",
-    ArrayFilled => "vole_array_filled",
-    MapIter => "vole_map_iter",
-    MapIterNext => "vole_map_iter_next",
-    MapIterCollect => "vole_map_iter_collect",
-    FilterIter => "vole_filter_iter",
-    FilterIterNext => "vole_filter_iter_next",
-    FilterIterCollect => "vole_filter_iter_collect",
-    TakeIter => "vole_take_iter",
-    TakeIterNext => "vole_take_iter_next",
-    TakeIterCollect => "vole_take_iter_collect",
-    SkipIter => "vole_skip_iter",
-    SkipIterNext => "vole_skip_iter_next",
-    SkipIterCollect => "vole_skip_iter_collect",
-    IterCount => "vole_iter_count",
-    IterSum => "vole_iter_sum",
-    IterForEach => "vole_iter_for_each",
-    IterReduce => "vole_iter_reduce",
-    IterReduceTagged => "vole_iter_reduce_tagged",
-    IterSetElemTag => "vole_iter_set_elem_tag",
-    IterSetProducesOwned => "vole_iter_set_produces_owned",
-    IterFirst => "vole_iter_first",
-    IterLast => "vole_iter_last",
-    IterNth => "vole_iter_nth",
-    RangeIter => "vole_range_iter",
-    StringCharsIter => "vole_string_chars_iter",
-    ClosureAlloc => "vole_closure_alloc",
-    ClosureSetCapture => "vole_closure_set_capture",
-    ClosureSetCaptureKind => "vole_closure_set_capture_kind",
-    ClosureGetCapture => "vole_closure_get_capture",
-    ClosureGetFunc => "vole_closure_get_func",
-    HeapAlloc => "vole_heap_alloc",
-    InstanceNew => "vole_instance_new",
-    InstanceGetField => "vole_instance_get_field",
-    InstanceSetField => "vole_instance_set_field",
-    SbNew => "vole_sb_new",
-    SbPushString => "vole_sb_push_string",
-    SbFinish => "vole_sb_finish",
-    InterfaceIter => "vole_interface_iter",
-    RcInc => "rc_inc",
-    RcDec => "rc_dec",
-}
 
 #[derive(Debug, Clone)]
 enum FunctionName {
