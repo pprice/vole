@@ -774,6 +774,89 @@ fn run_source_tests_with_progress(
     Ok(results)
 }
 
+/// Print or display a single test's result in either verbose or progress mode.
+fn report_test_result(
+    test_name: &str,
+    status: &TestStatus,
+    duration_str: &str,
+    captured_output: &Option<String>,
+    config: &TestRunConfig,
+    progress: &mut Option<&mut ProgressLine>,
+) {
+    if config.verbose {
+        match status {
+            TestStatus::Passed => {
+                println!(
+                    "  {}\u{2022}{} {} {}({}){}",
+                    config.colors.green(),
+                    config.colors.reset(),
+                    test_name,
+                    config.colors.dim(),
+                    duration_str,
+                    config.colors.reset()
+                );
+                let _ = io::stdout().flush();
+            }
+            TestStatus::Failed(failure) => {
+                print!(
+                    "  {}\u{2718}{} {} {}({}){}",
+                    config.colors.red(),
+                    config.colors.reset(),
+                    test_name,
+                    config.colors.dim(),
+                    duration_str,
+                    config.colors.reset()
+                );
+                if let Some(info) = failure {
+                    println!(" - assertion failed at {}:{}", info.file, info.line);
+                } else {
+                    println!();
+                }
+                if let Some(output) = captured_output {
+                    println!(
+                        "    {}--- captured output ---{}",
+                        config.colors.dim(),
+                        config.colors.reset()
+                    );
+                    for line in output.lines() {
+                        println!("    {}", line);
+                    }
+                }
+                let _ = io::stdout().flush();
+            }
+            TestStatus::Panicked(msg) => {
+                println!(
+                    "  {}\u{2620}{} {} {}({}){}",
+                    config.colors.red(),
+                    config.colors.reset(),
+                    test_name,
+                    config.colors.dim(),
+                    duration_str,
+                    config.colors.reset()
+                );
+                eprintln!("    PANIC: {}", msg);
+                if let Some(output) = captured_output {
+                    println!(
+                        "    {}--- captured output ---{}",
+                        config.colors.dim(),
+                        config.colors.reset()
+                    );
+                    for line in output.lines() {
+                        println!("    {}", line);
+                    }
+                }
+                let _ = io::stdout().flush();
+                let _ = io::stderr().flush();
+            }
+        }
+    } else if let Some(p) = progress {
+        match status {
+            TestStatus::Passed => p.print_pass(),
+            TestStatus::Failed(_) | TestStatus::Panicked(_) => p.print_fail(),
+        }
+    }
+}
+
 /// Execute compiled tests with incremental progress output
 fn execute_tests_with_progress(
     tests: Vec<TestInfo>,
@@ -882,82 +965,14 @@ fn execute_tests_with_progress(
         let duration = test_start.elapsed();
         let duration_str = format_duration(duration);
 
-        // Print result immediately after test completes in verbose mode
-        if config.verbose {
-            match &status {
-                TestStatus::Passed => {
-                    println!(
-                        "  {}\u{2022}{} {} {}({}){}",
-                        config.colors.green(),
-                        config.colors.reset(),
-                        test.name,
-                        config.colors.dim(),
-                        duration_str,
-                        config.colors.reset()
-                    );
-                    let _ = io::stdout().flush();
-                }
-                TestStatus::Failed(failure) => {
-                    print!(
-                        "  {}\u{2718}{} {} {}({}){}",
-                        config.colors.red(),
-                        config.colors.reset(),
-                        test.name,
-                        config.colors.dim(),
-                        duration_str,
-                        config.colors.reset()
-                    );
-                    if let Some(info) = failure {
-                        println!(" - assertion failed at {}:{}", info.file, info.line);
-                    } else {
-                        println!();
-                    }
-                    // Print captured output on failure
-                    if let Some(output) = &captured_output {
-                        println!(
-                            "    {}--- captured output ---{}",
-                            config.colors.dim(),
-                            config.colors.reset()
-                        );
-                        for line in output.lines() {
-                            println!("    {}", line);
-                        }
-                    }
-                    let _ = io::stdout().flush();
-                }
-                TestStatus::Panicked(msg) => {
-                    println!(
-                        "  {}\u{2620}{} {} {}({}){}",
-                        config.colors.red(),
-                        config.colors.reset(),
-                        test.name,
-                        config.colors.dim(),
-                        duration_str,
-                        config.colors.reset()
-                    );
-                    eprintln!("    PANIC: {}", msg);
-                    // Print captured output on panic
-                    if let Some(output) = &captured_output {
-                        println!(
-                            "    {}--- captured output ---{}",
-                            config.colors.dim(),
-                            config.colors.reset()
-                        );
-                        for line in output.lines() {
-                            println!("    {}", line);
-                        }
-                    }
-                    let _ = io::stdout().flush();
-                    let _ = io::stderr().flush();
-                }
-            }
-        } else if let Some(ref mut p) = progress {
-            // Print progress dot in non-verbose mode
-            match &status {
-                TestStatus::Passed => p.print_pass(),
-                TestStatus::Failed(_) | TestStatus::Panicked(_) => p.print_fail(),
-            }
-        }
+        report_test_result(
+            &test.name,
+            &status,
+            &duration_str,
+            &captured_output,
+            config,
+            &mut progress,
+        );
 
         results.add(TestResult {
             info: test.clone(),
