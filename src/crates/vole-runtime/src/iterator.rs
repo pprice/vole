@@ -1036,7 +1036,7 @@ fn pack_optional_i64(value: Option<i64>) -> *mut u8 {
     ptr
 }
 
-fn try_extract_simple_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> Option<Vec<i64>> {
+fn extract_supported_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> Option<Vec<i64>> {
     if iter.is_null() {
         return Some(Vec::new());
     }
@@ -1048,7 +1048,6 @@ fn try_extract_simple_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> 
         IteratorKind::Array => {
             let source = unsafe { (*iter).iter.source.array };
             if source.array.is_null() {
-                RcIterator::dec_ref(iter);
                 return Some(out);
             }
             let len = unsafe { (*source.array).len };
@@ -1062,6 +1061,7 @@ fn try_extract_simple_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> 
                 out.push(unsafe { RcArray::get(source.array, idx).as_i64() });
                 idx += 1;
             }
+            Some(out)
         }
         IteratorKind::Range => {
             let source = unsafe { (*iter).iter.source.range };
@@ -1075,23 +1075,123 @@ fn try_extract_simple_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> 
                 out.push(current);
                 current += 1;
             }
+            Some(out)
         }
         IteratorKind::Once => {
             let source = unsafe { (*iter).iter.source.once };
             if source.exhausted == 0 {
                 out.push(source.value);
             }
+            if let Some(max) = limit {
+                out.truncate(max);
+            }
+            Some(out)
         }
-        IteratorKind::Empty => {}
+        IteratorKind::Empty => Some(out),
         IteratorKind::Repeat => {
             let source = unsafe { (*iter).iter.source.repeat };
             let max = limit?;
             out.resize(max, source.value);
+            Some(out)
         }
-        _ => return None,
+        IteratorKind::Map => {
+            let source = unsafe { (*iter).iter.source.map };
+            let mut words = extract_supported_i64_words(source.source, limit)?;
+            let map_fn: extern "C" fn(*const Closure, i64) -> i64 =
+                unsafe { std::mem::transmute(Closure::get_func(source.transform)) };
+            for word in &mut words {
+                *word = map_fn(source.transform, *word);
+            }
+            Some(words)
+        }
+        IteratorKind::Filter => {
+            let source = unsafe { (*iter).iter.source.filter };
+            let mut words = extract_supported_i64_words(source.source, None)?;
+            let pred_fn: extern "C" fn(*const Closure, i64) -> i8 =
+                unsafe { std::mem::transmute(Closure::get_func(source.predicate)) };
+            words.retain(|&v| pred_fn(source.predicate, v) != 0);
+            if let Some(max) = limit {
+                words.truncate(max);
+            }
+            Some(words)
+        }
+        IteratorKind::Take => {
+            let source = unsafe { (*iter).iter.source.take };
+            let remaining = source.remaining.max(0) as usize;
+            let mut words = extract_supported_i64_words(source.source, Some(remaining))?;
+            words.truncate(remaining);
+            if let Some(max) = limit {
+                words.truncate(max);
+            }
+            Some(words)
+        }
+        IteratorKind::Skip => {
+            let source = unsafe { (*iter).iter.source.skip };
+            let skip_count = if source.skipped != 0 {
+                0
+            } else {
+                source.skip_count.max(0) as usize
+            };
+            let needed = limit.map(|max| max.saturating_add(skip_count));
+            let mut words = extract_supported_i64_words(source.source, needed)?;
+            let drop_count = skip_count.min(words.len());
+            words.drain(0..drop_count);
+            if let Some(max) = limit {
+                words.truncate(max);
+            }
+            Some(words)
+        }
+        IteratorKind::Chain => {
+            let source = unsafe { (*iter).iter.source.chain };
+            let mut words = Vec::new();
+            if source.on_second == 0 {
+                let mut first_words = extract_supported_i64_words(source.first, limit)?;
+                words.append(&mut first_words);
+            }
+            if let Some(max) = limit {
+                if words.len() < max {
+                    let mut second_words =
+                        extract_supported_i64_words(source.second, Some(max - words.len()))?;
+                    words.append(&mut second_words);
+                } else {
+                    words.truncate(max);
+                }
+            } else {
+                let mut second_words = extract_supported_i64_words(source.second, None)?;
+                words.append(&mut second_words);
+            }
+            Some(words)
+        }
+        IteratorKind::Unique => {
+            let source = unsafe { (*iter).iter.source.unique };
+            let words = extract_supported_i64_words(source.source, None)?;
+            let mut out = Vec::new();
+            let mut prev = source.prev;
+            let mut has_prev = source.has_prev != 0;
+            for value in words {
+                if !has_prev || value != prev {
+                    out.push(value);
+                    prev = value;
+                    has_prev = true;
+                }
+            }
+            if let Some(max) = limit {
+                out.truncate(max);
+            }
+            Some(out)
+        }
+        _ => None,
     }
+}
 
-    RcIterator::dec_ref(iter);
+fn try_extract_supported_i64_words(
+    iter: *mut RcIterator,
+    limit: Option<usize>,
+) -> Option<Vec<i64>> {
+    let out = extract_supported_i64_words(iter, limit)?;
+    if !iter.is_null() {
+        RcIterator::dec_ref(iter);
+    }
     Some(out)
 }
 
@@ -1111,7 +1211,7 @@ fn try_new_core_collect_tagged(iter: *mut RcIterator, elem_tag: u64) -> Option<*
     if elem_tag != TYPE_I64 as u64 {
         return None;
     }
-    let words = try_extract_simple_i64_words(iter, None)?;
+    let words = try_extract_supported_i64_words(iter, None)?;
     let collected = CoreIter::from_i64_slice(&words).collect_i64().ok()?;
     Some(words_to_i64_array(&collected))
 }
@@ -1123,7 +1223,7 @@ fn try_new_core_first(iter: *mut RcIterator) -> Option<*mut u8> {
             return None;
         }
     }
-    let words = try_extract_simple_i64_words(iter, Some(1))?;
+    let words = try_extract_supported_i64_words(iter, Some(1))?;
     let value = CoreIter::from_i64_slice(&words).first_i64().ok()?;
     Some(pack_optional_i64(value))
 }
@@ -1135,7 +1235,7 @@ fn try_new_core_last(iter: *mut RcIterator) -> Option<*mut u8> {
             return None;
         }
     }
-    let words = try_extract_simple_i64_words(iter, None)?;
+    let words = try_extract_supported_i64_words(iter, None)?;
     let value = CoreIter::from_i64_slice(&words).last_i64().ok()?;
     Some(pack_optional_i64(value))
 }
@@ -1150,7 +1250,7 @@ fn try_new_core_nth(iter: *mut RcIterator, n: i64) -> Option<*mut u8> {
             return None;
         }
     }
-    let words = try_extract_simple_i64_words(iter, Some((n as usize).saturating_add(1)))?;
+    let words = try_extract_supported_i64_words(iter, Some((n as usize).saturating_add(1)))?;
     let value = CoreIter::from_i64_slice(&words).nth_i64(n as usize).ok()?;
     Some(pack_optional_i64(value))
 }
