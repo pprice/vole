@@ -236,7 +236,7 @@ pub fn compile_function_body_with_cg(
             if skip_var.is_none() && value.is_borrowed() {
                 if cg.rc_state(value.type_id).needs_cleanup() {
                     cg.emit_rc_inc_for_type(value.value, value.type_id)?;
-                } else if let Some(rc_tags) = cg.union_rc_variant_tags(value.type_id) {
+                } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
                     // Union with RC variants (e.g. [string]?): rc_inc the inner
                     // payload so the caller's copy owns its own reference.
                     // Without this, the caller's consume_rc_args and the

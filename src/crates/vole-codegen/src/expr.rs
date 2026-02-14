@@ -191,7 +191,7 @@ impl Cg<'_, '_, '_> {
             // optional_chain knows the inner payload will be dec'd at scope
             // exit and does not emit a redundant rc_dec.
             if cv.rc_lifecycle == RcLifecycle::Untracked
-                && self.union_rc_variant_tags(*type_id).is_some()
+                && self.rc_state(*type_id).union_variants().is_some()
             {
                 cv.mark_borrowed();
             }
@@ -570,12 +570,14 @@ impl Cg<'_, '_, '_> {
         };
 
         let composite_rc_old = self
-            .deep_rc_field_offsets(type_id)
-            .map(|offsets| (self.builder.use_var(var), offsets));
+            .rc_state(type_id)
+            .deep_offsets()
+            .map(|offsets| (self.builder.use_var(var), offsets.to_vec()));
 
         let union_rc_old = self
-            .union_rc_variant_tags(type_id)
-            .map(|rc_tags| (self.builder.use_var(var), rc_tags));
+            .rc_state(type_id)
+            .union_variants()
+            .map(|rc_tags| (self.builder.use_var(var), rc_tags.to_vec()));
 
         (rc_old, composite_rc_old, union_rc_old)
     }

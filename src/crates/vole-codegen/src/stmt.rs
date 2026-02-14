@@ -138,12 +138,13 @@ impl Cg<'_, '_, '_> {
                 // its source already has composite cleanup registered.
                 if self.rc_scopes.has_active_scope()
                     && !is_borrow
-                    && let Some(offsets) = self.composite_rc_field_offsets(init.type_id)
+                    && let Some(offsets) = self.rc_state(init.type_id).shallow_offsets()
                 {
                     let cr_type = self.cranelift_type(init.type_id);
                     let temp_var = self.builder.declare_var(cr_type);
                     self.builder.def_var(temp_var, init.value);
-                    let drop_flag = self.register_composite_rc_local(temp_var, offsets);
+                    let drop_flag =
+                        self.register_composite_rc_local(temp_var, offsets.to_vec());
                     crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                 }
 
@@ -400,7 +401,7 @@ impl Cg<'_, '_, '_> {
         } else if self.rc_scopes.has_active_scope() {
             // Check for composite types (struct, fixed array, tuple) with RC fields.
             // These need element-level cleanup on scope exit.
-            if let Some(offsets) = self.composite_rc_field_offsets(final_type_id) {
+            if let Some(offsets) = self.rc_state(final_type_id).shallow_offsets() {
                 // Struct copy (let b = a): the bytewise copy shares the same RC
                 // pointers as the original.  rc_inc each RC field so both the
                 // original and the copy own their reference and scope-exit dec
@@ -416,7 +417,7 @@ impl Cg<'_, '_, '_> {
                     false
                 };
                 if is_struct_copy {
-                    for &off in &offsets {
+                    for &off in offsets {
                         let field_ptr =
                             self.builder
                                 .ins()
@@ -424,21 +425,21 @@ impl Cg<'_, '_, '_> {
                         self.emit_rc_inc(field_ptr)?;
                     }
                 }
-                let drop_flag = self.register_composite_rc_local(var, offsets);
+                let drop_flag = self.register_composite_rc_local(var, offsets.to_vec());
                 crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
             } else if is_stack_union || self.arena().is_union(final_type_id) {
                 // Register union RC cleanup for any union-typed value. This
                 // includes both locally constructed unions (construct_union_id)
                 // and function return values (call_result copies callee data
                 // to a local [tag, payload] stack slot).
-                if let Some(rc_tags) = self.union_rc_variant_tags(final_type_id) {
+                if let Some(rc_tags) = self.rc_state(final_type_id).union_variants() {
                     // If the init value is a borrow (e.g. let g: T? = some_var),
                     // the RC value is aliased and needs rc_inc so the union
                     // owns its own reference.
                     if init.is_borrowed() {
                         self.emit_union_rc_inc(final_value, &rc_tags)?;
                     }
-                    let drop_flag = self.register_union_rc_local(var, rc_tags);
+                    let drop_flag = self.register_union_rc_local(var, rc_tags.to_vec());
                     crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                 }
             }
@@ -561,7 +562,7 @@ impl Cg<'_, '_, '_> {
             if skip_var.is_none() && compiled.is_borrowed() {
                 if self.rc_state(compiled.type_id).needs_cleanup() {
                     self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
-                } else if let Some(rc_tags) = self.union_rc_variant_tags(compiled.type_id) {
+                } else if let Some(rc_tags) = self.rc_state(compiled.type_id).union_variants() {
                     // Union with RC variants (e.g. [i64]?): rc_inc the inner
                     // payload so the caller's copy owns its own reference.
                     // Without this, the caller's consume_rc_args and the

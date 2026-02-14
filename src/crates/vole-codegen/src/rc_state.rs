@@ -6,17 +6,13 @@
 // ways a type can be reference-counted, along with a compute function that
 // analyzes a type once and returns the appropriate state.
 //
-// The goal is to replace the scattered RC query methods with one cached
-// computation per TypeId:
-// - needs_rc_cleanup(type_id) -> bool
-// - is_capture_rc(type_id) -> bool
-// - composite_rc_field_offsets(type_id) -> Option<Vec<i32>>
-// - deep_rc_field_offsets(type_id) -> Option<Vec<i32>>
-// - union_rc_variant_tags(type_id) -> Option<Vec<(u8, bool)>>
-
-// This module is purely additive - callers will be migrated in subsequent tickets.
-// The allow(dead_code) will be removed once callers are migrated.
-#![allow(dead_code)]
+// All RC queries go through `CodegenContext::rc_state(type_id)` which caches
+// the result per TypeId. Accessors on RcState:
+// - needs_cleanup() -> bool
+// - is_capture() -> bool
+// - shallow_offsets() -> Option<&[i32]>
+// - deep_offsets() -> Option<&[i32]>
+// - union_variants() -> Option<&[(u8, bool)]>
 
 use vole_sema::entity_registry::EntityRegistry;
 use vole_sema::type_arena::{SemaType, TypeArena, TypeId};

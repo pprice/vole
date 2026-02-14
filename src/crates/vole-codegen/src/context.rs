@@ -708,96 +708,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         drop_flag
     }
 
-    /// Compute the byte offsets of RC fields within a composite type.
-    /// Returns None if the type has no RC fields needing cleanup, or Some(offsets).
-    pub fn composite_rc_field_offsets(&self, type_id: TypeId) -> Option<Vec<i32>> {
-        let arena = self.arena();
-
-        // Struct: iterate fields, collect offsets of RC-typed fields
-        if let Some((type_def_id, _)) = arena.unwrap_struct(type_id) {
-            let entities = self.registry();
-            let type_def = entities.get_type(type_def_id);
-            let generic_info = type_def.generic_info.as_ref()?;
-            let field_types = &generic_info.field_types;
-            let mut offsets = Vec::new();
-            let mut byte_offset = 0i32;
-            for field_type in field_types {
-                let slots = super::structs::field_flat_slots(*field_type, arena, entities);
-                if self.rc_state(*field_type).needs_cleanup() {
-                    offsets.push(byte_offset);
-                }
-                byte_offset += (slots as i32) * 8;
-            }
-            if offsets.is_empty() {
-                return None;
-            }
-            return Some(offsets);
-        }
-
-        // Fixed array: if element type is RC, all elements need cleanup
-        if let Some((elem_type_id, size)) = arena.unwrap_fixed_array(type_id) {
-            if self.rc_state(elem_type_id).needs_cleanup() {
-                let offsets: Vec<i32> = (0..size).map(|i| (i as i32) * 8).collect();
-                return Some(offsets);
-            }
-            return None;
-        }
-
-        // Tuple: use tuple_layout_id to get correct offsets, then filter RC elements
-        if let Some(elem_types) = arena.unwrap_tuple(type_id).cloned() {
-            let entities = self.registry();
-            let ptr_type = self.ptr_type();
-            let (_total, all_offsets) =
-                super::types::tuple_layout_id(&elem_types, ptr_type, entities, arena);
-            let mut rc_offsets = Vec::new();
-            for (i, elem_type) in elem_types.iter().enumerate() {
-                if self.rc_state(*elem_type).needs_cleanup() {
-                    rc_offsets.push(all_offsets[i]);
-                }
-            }
-            if rc_offsets.is_empty() {
-                return None;
-            }
-            return Some(rc_offsets);
-        }
-
-        None
-    }
-
-    /// Like `composite_rc_field_offsets`, but recursively includes RC fields
-    /// within nested struct fields. Used for variable reassignment where the
-    /// old value's entire RC tree needs to be decremented — there is no
-    /// separate local binding that would take responsibility for the nested
-    /// struct's RC fields.
-    pub fn deep_rc_field_offsets(&self, type_id: TypeId) -> Option<Vec<i32>> {
-        let arena = self.arena();
-        if let Some((type_def_id, _)) = arena.unwrap_struct(type_id) {
-            let entities = self.registry();
-            let type_def = entities.get_type(type_def_id);
-            let generic_info = type_def.generic_info.as_ref()?;
-            let field_types = &generic_info.field_types;
-            let mut offsets = Vec::new();
-            let mut byte_offset = 0i32;
-            for field_type in field_types {
-                let slots = super::structs::field_flat_slots(*field_type, arena, entities);
-                if self.rc_state(*field_type).needs_cleanup() {
-                    offsets.push(byte_offset);
-                } else if let Some(nested) = self.deep_rc_field_offsets(*field_type) {
-                    for off in nested {
-                        offsets.push(byte_offset + off);
-                    }
-                }
-                byte_offset += (slots as i32) * 8;
-            }
-            if offsets.is_empty() {
-                return None;
-            }
-            return Some(offsets);
-        }
-        // Non-struct types: delegate to the shallow version
-        self.composite_rc_field_offsets(type_id)
-    }
-
     /// Register a composite RC local (struct/fixed-array/tuple with RC fields)
     /// in the current scope. Returns the drop flag Variable.
     pub fn register_composite_rc_local(
@@ -809,25 +719,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.rc_scopes
             .register_composite(variable, drop_flag, rc_field_offsets);
         drop_flag
-    }
-
-    /// For a union type, compute which variant tags correspond to RC types.
-    /// Returns None if no variants need RC cleanup.
-    pub fn union_rc_variant_tags(&self, type_id: TypeId) -> Option<Vec<(u8, bool)>> {
-        let arena = self.arena();
-        let variants = arena.unwrap_union(type_id)?;
-        let mut rc_tags = Vec::new();
-        for (i, &variant_type_id) in variants.iter().enumerate() {
-            if self.rc_state(variant_type_id).needs_cleanup() {
-                let is_interface = arena.is_interface(variant_type_id);
-                rc_tags.push((i as u8, is_interface));
-            }
-        }
-        if rc_tags.is_empty() {
-            None
-        } else {
-            Some(rc_tags)
-        }
     }
 
     /// Register a union RC local in the current scope. Returns the drop flag Variable.
@@ -1777,7 +1668,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn mark_borrowed_if_rc(&self, cv: &mut CompiledValue) {
         if self.rc_state(cv.type_id).needs_cleanup()
             || self.rc_state(cv.type_id).union_variants().is_some()
-            || self.composite_rc_field_offsets(cv.type_id).is_some()
+            || self.rc_state(cv.type_id).shallow_offsets().is_some()
         {
             cv.mark_borrowed();
         }
