@@ -81,6 +81,7 @@ Only touch compiler crates:
 - `src/crates/vole-runtime/`
 - `src/crates/vole-frontend/`
 - `src/crates/vole-identity/`
+- `src/crates/vole-fmt/`
 - `src/vole/` (CLI)
 
 Do NOT touch:
@@ -137,7 +138,7 @@ Persistent across sessions. Sections:
 
 ## Categories
 
-Roll a dice (`shuf -i 1-10 -n 1`) to select the category:
+Roll a dice (`shuf -i 1-16 -n 1`) to select the category:
 
 | Roll | Category | What to scan for |
 |------|----------|-----------------|
@@ -148,6 +149,11 @@ Roll a dice (`shuf -i 1-10 -n 1`) to select the category:
 | 8    | **Unwrap hardening** | Bare `.unwrap()` → `.expect("context")` or proper error handling |
 | 9    | **Magic numbers** | Bare numeric constants that should be named constants |
 | 10   | **Large function splitting** | Functions >150 lines that do multiple distinct things |
+| 11-12| **Visibility tightening** | `pub` items that should be `pub(crate)` or `pub(super)` |
+| 13   | **Let-else modernization** | `if let` with early return/continue/break → `let else` |
+| 14   | **Module organization** | Files >600 lines that should be split into submodules |
+| 15   | **Clone/allocation reduction** | Unnecessary `.clone()`, `String` params → `&str`, `Vec<T>` → `&[T]` |
+| 16   | **Iterator modernization** | Manual loops → iterator combinators, for+push → map+collect |
 
 Record the roll and category in the commit message (e.g.
 `tidy(exhaustive-match): replace _ catch-all in type_id_to_cranelift_type`).
@@ -254,22 +260,33 @@ patterns. If one is clearly better (more correct, more complete), that's the fix
 
 These override any judgment:
 
-1. **Max 3 files changed.** If the fix would touch more than 3 files, DEFER.
-   No exceptions. Multi-file refactors are too risky for an automated loop.
+1. **Max 10 files changed** — unless the change is a **pure mechanical replacement**
+   (e.g., replacing a magic number literal with a named constant, or renaming a
+   symbol). Mechanical replacements verified by SSR or simple search-and-replace
+   may touch unlimited files, because each site is independently correct.
+   For mechanical replacements >5 files: define the constant/name first, run
+   `just check` to confirm it compiles, then do the replacement pass, then
+   `just check` again. If any site turns out to mean something different
+   (e.g., `8` meaning "array length" not "pointer size"), revert that site.
 
 2. **Must be obviously correct.** If you cannot be 95% confident the refactoring
    preserves behavior just by reading the code, DEFER. Do not reason about
    "this should be equivalent because..." — if it's not obviously equivalent,
    it needs human eyes.
 
-3. **No signature changes to public functions.** If the fix requires changing
-   a function's parameter types, return type, or number of arguments, DEFER.
-   Callers may exist that you haven't found.
+3. **No signature changes to `pub` functions.** If the fix requires changing
+   a `pub` function's parameter types, return type, or number of arguments,
+   DEFER. However, `pub(crate)`, `pub(super)`, and private function signatures
+   MAY be changed if all callers are updated in the same commit.
 
 4. **No moving code between crates.** Even if logic "belongs" in a different
    crate, cross-crate moves are architectural decisions. DEFER.
 
-5. **When in doubt, DEFER.** The ticket costs 30 seconds to create. A broken
+5. **New files are allowed** for module splits and helper extraction, but only
+   within the same crate. The new file must be registered in the parent `mod.rs`
+   or `lib.rs`. Prefer extracting into existing files when possible.
+
+6. **When in doubt, DEFER.** The ticket costs 30 seconds to create. A broken
    refactoring costs an hour to debug. Always DEFER over guessing.
 
 When deferring, the ticket description MUST include:
@@ -440,7 +457,11 @@ Pick ONE instance.
   → SKIP (this is a dispatch table, not a magic number)
 - Number is used exactly once and has a comment already → SKIP
 
-**Max 1 file per round.**
+**Multi-file magic number hoists are allowed.** Define the constant in the most
+central location (e.g., a `constants.rs` or the type's module), then replace
+all sites across the codebase. This is a mechanical replacement — the file limit
+exception in Hard Rule 1 applies. Verify each replacement site actually means
+the same thing (e.g., `8` as "word size" vs `8` as "array capacity").
 
 #### Large function splitting (roll 10)
 
@@ -457,17 +478,168 @@ Read the longest function in the highest-churn file.
 
 **Decision rule:**
 - Function is <100 lines → SKIP (not large enough to split)
-- Function is 100-200 lines with 2-3 clear phases (setup, main work, cleanup)
+- Function is 100-400 lines with 2-3 clear phases (setup, main work, cleanup)
   → FIX: extract each phase into a helper. The original function becomes a
   3-5 line outline that calls the helpers.
-- Function is >200 lines → DEFER to ticket (too large for the loop)
+- Function is >400 lines → DEFER to ticket (too large for the loop)
 - Function is a single large match/when dispatch → SKIP (these are inherently
   large, splitting doesn't help)
 - Function is already well-structured with clear comments separating sections
   → SKIP (structure exists, extraction is cosmetic)
 
-**Only extract helpers within the same file.** Do not create new files or move
-code between modules.
+Extract helpers within the same file when possible. Creating a new sibling
+file in the same module is allowed if the extracted code is >80 lines and
+forms a coherent unit (e.g., a phase of compilation). Register the new file
+in the parent `mod.rs`.
+
+#### Visibility tightening (rolls 11-12)
+
+**Scan:**
+```bash
+# Find pub items (functions, structs, enums, traits) in src/crates/
+rg '^\s*pub fn ' src/crates/ --type rust -n | grep -v 'pub(crate)\|pub(super)' | head -30
+rg '^\s*pub struct |^\s*pub enum |^\s*pub trait ' src/crates/ --type rust -n | grep -v 'pub(crate)\|pub(super)' | head -30
+```
+
+Pick ONE `pub` item. Check if it's used outside its crate.
+
+```bash
+# For a function named `foo` in crate vole-codegen:
+rg 'foo' src/crates/ --type rust -l | grep -v vole-codegen
+```
+
+**Decision rule:**
+- `pub fn` with zero cross-crate callers → FIX: change to `pub(crate) fn`
+- `pub fn` used only within its module → FIX: change to `pub(super) fn` or
+  remove `pub` entirely
+- `pub struct/enum` with zero cross-crate usage → FIX: change to `pub(crate)`
+- `pub` item re-exported in `lib.rs` or used in tests → SKIP
+- `pub` item on a trait method → SKIP (trait methods inherit visibility)
+- Item is part of a `pub` trait impl → SKIP
+
+**Max 1 item per round.** Check all callers before changing. Run `just check`
+immediately after each change — if anything breaks, the item IS used externally.
+
+**Max 5 files changed** (the definition + up to 4 files with `use` statements
+that need updating).
+
+#### Let-else modernization (roll 13)
+
+**Scan:**
+```bash
+# Find if-let with early return/continue/break in else
+rg 'if let (Some|Ok)\(' src/crates/ --type rust -n -A5 | head -80
+# Find nested if-let chains
+rg 'if let.*\{' src/crates/ --type rust -n -A1 | head -50
+```
+
+Pick ONE file with the most `if let` + early-exit patterns.
+
+**Decision rule:**
+- `if let Some(x) = expr { body } else { return ... }` → FIX: convert to
+  `let Some(x) = expr else { return ... };` followed by body at same indent level
+- `if let Ok(x) = expr { body } else { return Err(...) }` → FIX: same pattern
+  with `let Ok(x) = expr else { ... };`
+- `if let Some(x) = expr { body }` with no else → SKIP (let-else doesn't help)
+- Nested `if let Some` inside another `if let Some` → FIX: convert the OUTER
+  one to let-else to reduce nesting. Only the outer one per round.
+- `if let` inside a loop with `continue` in else → FIX: convert to let-else
+- `if let` where the body is 1-2 lines → SKIP (marginal improvement)
+
+**Max 1 file per round. Max 5 conversions per file.**
+
+#### Module organization (roll 14)
+
+**Scan:**
+```bash
+# Find large files (>600 lines)
+wc -l src/crates/*/src/**/*.rs | sort -rn | head -20
+# Also check for files with many distinct impl blocks
+rg '^impl ' src/crates/ --type rust -c | sort -t: -k2 -rn | head -10
+```
+
+Pick ONE file that is >600 lines.
+
+**Decision rule:**
+- File has 2+ clearly separable concerns (e.g., type definitions + display impls,
+  or different phases of analysis) → FIX: extract one concern into a new sibling
+  file. Add `mod new_file;` to parent. Re-export as needed with `pub use`.
+- File is large because of one big impl block → SKIP (splitting the impl is
+  possible with `mod` but usually not worth it)
+- File is large because of many small related functions → SKIP (they belong
+  together)
+- File has distinct groups of `impl` blocks for different types → FIX: extract
+  one type + its impls to a new file
+
+**New file must compile on its own** (after adding `use` imports). Run `just check`
+after creating the file and updating `mod.rs`.
+
+**Max 2 files created per round.** The source file + 1 new file (+ mod.rs update).
+
+#### Clone/allocation reduction (roll 15)
+
+**Scan:**
+```bash
+# Find .clone() calls in non-test code
+rg '\.clone\(\)' src/crates/vole-codegen/src/ --type rust -n | head -30
+rg '\.clone\(\)' src/crates/vole-sema/src/ --type rust -n | head -30
+# Find String params that could be &str
+rg 'fn \w+\(.*String[,)]' src/crates/ --type rust -n | head -20
+# Find Vec params that could be slices
+rg 'fn \w+\(.*Vec<' src/crates/ --type rust -n | head -20
+# Find .to_string() / .to_owned() that might be avoidable
+rg '\.to_string\(\)|\.to_owned\(\)' src/crates/ --type rust -n | head -30
+```
+
+Pick ONE instance.
+
+**Decision rule for .clone():**
+- `.clone()` on a `Copy` type (TypeId, NodeId, Span, etc.) → FIX: remove clone
+  (Copy types don't need it). Use `rust-analyzer search '$e.clone()'` to find
+  candidates, then check if the type is Copy.
+- `.clone()` to satisfy borrow checker where a reference would work → FIX:
+  refactor to use reference. Only if the change is contained to 1-2 functions.
+- `.clone()` on a large struct just to read one field → FIX: access field
+  directly or take reference
+- `.clone()` needed for ownership transfer → SKIP (legitimate use)
+
+**Decision rule for owned params:**
+- `fn foo(s: String)` where `s` is only read (not stored or returned) → FIX:
+  change to `fn foo(s: &str)`. Update callers to pass `&s` or `s.as_str()`.
+  Only if callers are in <=3 files.
+- `fn foo(v: Vec<T>)` where `v` is only iterated → FIX: change to `fn foo(v: &[T])`.
+  Only if callers are in <=3 files.
+- Function stores the owned value in a struct field → SKIP (ownership needed)
+
+**Max 1 file per round for clone removal. Max 3 files for param changes.**
+
+#### Iterator modernization (roll 16)
+
+**Scan:**
+```bash
+# Find manual collect patterns: empty vec + for + push
+rg 'let mut \w+ = Vec::new\(\);' src/crates/ --type rust -n -A5 | head -60
+# Find manual any/all patterns: for + if + return true/false
+rg 'for .* in .* \{' src/crates/ --type rust -n -A3 | head -60
+# Find manual find patterns: for + if + return Some
+rg 'return Some\(' src/crates/ --type rust -n -B5 | head -60
+```
+
+Pick ONE instance.
+
+**Decision rule:**
+- `let mut v = Vec::new(); for x in iter { v.push(f(x)); }` → FIX: convert to
+  `let v: Vec<_> = iter.map(|x| f(x)).collect();`
+- `for x in iter { if cond(x) { return true; } } return false;` → FIX: convert
+  to `iter.any(|x| cond(x))`
+- `for x in iter { if cond(x) { return Some(x); } } return None;` → FIX:
+  convert to `iter.find(|x| cond(x))`
+- Loop body has side effects beyond the collection → SKIP
+- Loop body has early returns/breaks for error handling → SKIP
+- Loop uses index variable for something other than the item → SKIP
+- Iterator chain would be >3 combinators deep → SKIP (readability)
+
+**Max 1 file per round. Max 3 conversions per file.**
 
 ## Workflow Per Iteration
 
@@ -489,7 +661,7 @@ step**, then update state and finish.
 
 ### Step 2 — Pick and Scan
 
-1. Roll for category: `shuf -i 1-10 -n 1`
+1. Roll for category: `shuf -i 1-16 -n 1`
 2. Run the scan commands for that category
 3. Rank findings by impact:
    - Files with most recent git churn (most likely to have accumulated debt)
