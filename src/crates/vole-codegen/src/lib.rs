@@ -14,6 +14,7 @@ mod method_resolution;
 mod ops;
 mod rc_cleanup;
 mod rc_state;
+mod runtime_registry;
 mod stmt;
 mod structs;
 mod types;
@@ -26,6 +27,7 @@ pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
 pub use intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, IntrinsicsRegistry};
 pub use jit::{CompiledModules, JitContext, JitOptions};
+pub use runtime_registry::{RuntimeKey, all_symbols as all_runtime_symbols};
 pub use types::CompiledValue;
 
 // Error types
