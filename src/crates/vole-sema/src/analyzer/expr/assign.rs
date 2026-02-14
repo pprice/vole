@@ -38,76 +38,12 @@ impl Analyzer {
                 field_span,
             } => {
                 let obj_ty_id = self.check_expr(object, interner)?;
-                let field_name = interner.resolve(*field);
-
-                let struct_info = {
-                    let arena = self.type_arena();
-                    arena
-                        .unwrap_class_or_struct(obj_ty_id)
-                        .map(|(id, args, _kind)| (id, args.clone()))
-                };
-
-                if let Some((type_def_id, type_args_id)) = struct_info {
-                    let name_id = self.entity_registry().name_id(type_def_id);
-                    let generic_info = self.entity_registry().type_generic_info(type_def_id);
-                    let type_name = self
-                        .name_table()
-                        .last_segment_str(name_id)
-                        .unwrap_or_else(|| "class".to_string());
-
-                    if let Some(ref generic_info) = generic_info {
-                        let field_idx = generic_info.field_index_by_name(field_name, &self.name_table());
-                        if let Some(idx) = field_idx {
-                            // Substitute type args via arena if any
-                            let field_type_id = generic_info.field_types[idx];
-                            let resolved_type_id = if type_args_id.is_empty() {
-                                field_type_id
-                            } else {
-                                // Use type_args_id directly (already TypeIds)
-                                let subs_id: FxHashMap<_, _> = generic_info
-                                    .type_params
-                                    .iter()
-                                    .zip(type_args_id.iter())
-                                    .map(|(tp, &type_id)| (tp.name_id, type_id))
-                                    .collect();
-                                self.type_arena_mut().substitute(field_type_id, &subs_id)
-                            };
-                            (resolved_type_id, true, None, true)
-                        } else {
-                            self.add_error(
-                                SemanticError::UnknownField {
-                                    ty: type_name,
-                                    field: field_name.to_string(),
-                                    span: (*field_span).into(),
-                                },
-                                *field_span,
-                            );
-                            (ArenaTypeId::INVALID, false, None, false)
-                        }
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownField {
-                                ty: type_name,
-                                field: field_name.to_string(),
-                                span: (*field_span).into(),
-                            },
-                            *field_span,
-                        );
-                        (ArenaTypeId::INVALID, false, None, false)
-                    }
-                } else {
-                    if !obj_ty_id.is_invalid() {
-                        let ty = self.type_display_id(obj_ty_id);
-                        self.add_error(
-                            SemanticError::UnknownField {
-                                ty,
-                                field: field_name.to_string(),
-                                span: (*field_span).into(),
-                            },
-                            *field_span,
-                        );
-                    }
+                let field_ty =
+                    self.resolve_assign_field_type(obj_ty_id, *field, *field_span, interner);
+                if field_ty.is_invalid() {
                     (ArenaTypeId::INVALID, false, None, false)
+                } else {
+                    (field_ty, true, None, true)
                 }
             }
             AssignTarget::Index { object, index } => {
@@ -172,6 +108,85 @@ impl Analyzer {
         }
 
         Ok(target_ty_id)
+    }
+
+    /// Resolve the type of a struct/class field for assignment.
+    /// Reports errors and returns INVALID if the field doesn't exist.
+    fn resolve_assign_field_type(
+        &mut self,
+        obj_ty_id: ArenaTypeId,
+        field: Symbol,
+        field_span: Span,
+        interner: &Interner,
+    ) -> ArenaTypeId {
+        let field_name = interner.resolve(field);
+
+        let struct_info = {
+            let arena = self.type_arena();
+            arena
+                .unwrap_class_or_struct(obj_ty_id)
+                .map(|(id, args, _kind)| (id, args.clone()))
+        };
+
+        if let Some((type_def_id, type_args_id)) = struct_info {
+            let name_id = self.entity_registry().name_id(type_def_id);
+            let generic_info = self.entity_registry().type_generic_info(type_def_id);
+            let type_name = self
+                .name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_else(|| "class".to_string());
+
+            if let Some(ref generic_info) = generic_info {
+                let field_idx = generic_info.field_index_by_name(field_name, &self.name_table());
+                if let Some(idx) = field_idx {
+                    let field_type_id = generic_info.field_types[idx];
+                    if type_args_id.is_empty() {
+                        field_type_id
+                    } else {
+                        let subs_id: FxHashMap<_, _> = generic_info
+                            .type_params
+                            .iter()
+                            .zip(type_args_id.iter())
+                            .map(|(tp, &type_id)| (tp.name_id, type_id))
+                            .collect();
+                        self.type_arena_mut().substitute(field_type_id, &subs_id)
+                    }
+                } else {
+                    self.add_error(
+                        SemanticError::UnknownField {
+                            ty: type_name,
+                            field: field_name.to_string(),
+                            span: field_span.into(),
+                        },
+                        field_span,
+                    );
+                    ArenaTypeId::INVALID
+                }
+            } else {
+                self.add_error(
+                    SemanticError::UnknownField {
+                        ty: type_name,
+                        field: field_name.to_string(),
+                        span: field_span.into(),
+                    },
+                    field_span,
+                );
+                ArenaTypeId::INVALID
+            }
+        } else {
+            if !obj_ty_id.is_invalid() {
+                let ty = self.type_display_id(obj_ty_id);
+                self.add_error(
+                    SemanticError::UnknownField {
+                        ty,
+                        field: field_name.to_string(),
+                        span: field_span.into(),
+                    },
+                    field_span,
+                );
+            }
+            ArenaTypeId::INVALID
+        }
     }
 
     pub(super) fn check_compound_assign_expr(
@@ -255,76 +270,7 @@ impl Analyzer {
                 field_span,
             } => {
                 let obj_ty_id = self.check_expr(object, interner)?;
-                let field_name = interner.resolve(*field);
-
-                let struct_info = {
-                    let arena = self.type_arena();
-                    arena
-                        .unwrap_class_or_struct(obj_ty_id)
-                        .map(|(id, args, _kind)| (id, args.clone()))
-                };
-
-                if let Some((type_def_id, type_args_id)) = struct_info {
-                    let name_id = self.entity_registry().name_id(type_def_id);
-                    let generic_info = self.entity_registry().type_generic_info(type_def_id);
-                    let type_name = self
-                        .name_table()
-                        .last_segment_str(name_id)
-                        .unwrap_or_else(|| "class".to_string());
-
-                    if let Some(ref generic_info) = generic_info {
-                        let field_idx = generic_info.field_index_by_name(field_name, &self.name_table());
-                        if let Some(idx) = field_idx {
-                            // Substitute type args via arena if any
-                            let field_type_id = generic_info.field_types[idx];
-                            if type_args_id.is_empty() {
-                                field_type_id
-                            } else {
-                                // Use type_args_id directly (already TypeIds)
-                                let subs_id: FxHashMap<_, _> = generic_info
-                                    .type_params
-                                    .iter()
-                                    .zip(type_args_id.iter())
-                                    .map(|(tp, &type_id)| (tp.name_id, type_id))
-                                    .collect();
-                                self.type_arena_mut().substitute(field_type_id, &subs_id)
-                            }
-                        } else {
-                            self.add_error(
-                                SemanticError::UnknownField {
-                                    ty: type_name,
-                                    field: field_name.to_string(),
-                                    span: (*field_span).into(),
-                                },
-                                *field_span,
-                            );
-                            ArenaTypeId::INVALID
-                        }
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownField {
-                                ty: type_name,
-                                field: field_name.to_string(),
-                                span: (*field_span).into(),
-                            },
-                            *field_span,
-                        );
-                        ArenaTypeId::INVALID
-                    }
-                } else {
-                    if !obj_ty_id.is_invalid() {
-                        let ty = self.type_display_id(obj_ty_id);
-                        self.add_error(
-                            SemanticError::UnknownField {
-                                ty,
-                                field: interner.resolve(*field).to_string(),
-                                span: (*field_span).into(),
-                            },
-                            *field_span,
-                        );
-                    }
-                    ArenaTypeId::INVALID
-                }
+                self.resolve_assign_field_type(obj_ty_id, *field, *field_span, interner)
             }
         };
 
