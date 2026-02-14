@@ -290,7 +290,7 @@ impl<'src> Lexer<'src> {
         } else {
             // Non-ASCII: decode UTF-8 from the source str
             let remaining = &self.source[self.current..];
-            let c = remaining.chars().next().unwrap();
+            let c = remaining.chars().next().expect("non-empty source slice");
             self.current += c.len_utf8();
             self.column += 1;
             Some(c)
@@ -436,7 +436,7 @@ impl<'src> Lexer<'src> {
             } else if b >= UTF8_MULTIBYTE {
                 // Non-ASCII: decode and check Unicode XID
                 let remaining = &self.source[self.current..];
-                let c = remaining.chars().next().unwrap();
+                let c = remaining.chars().next().expect("non-empty source slice");
                 if unicode_ident::is_xid_continue(c) && !Self::is_banned_unicode(c) {
                     self.current += c.len_utf8();
                     self.column += 1;
