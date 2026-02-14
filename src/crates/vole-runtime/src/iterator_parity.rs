@@ -10,8 +10,9 @@ use std::env;
 use crate::array::RcArray;
 use crate::closure::Closure;
 use crate::iterator::{
-    RcIterator, vole_array_iter, vole_iter_all, vole_iter_any, vole_iter_collect_tagged,
-    vole_iter_find, vole_iter_first, vole_iter_last, vole_iter_nth, vole_iter_reduce,
+    RcIterator, vole_array_iter, vole_empty_iter, vole_iter_all, vole_iter_any,
+    vole_iter_collect_tagged, vole_iter_find, vole_iter_first, vole_iter_last, vole_iter_nth,
+    vole_iter_reduce, vole_once_iter, vole_range_iter, vole_repeat_iter,
 };
 use crate::iterator_abi::TaggedNextWord;
 use crate::iterator_backend::{IteratorBackend as RuntimeBackend, with_backend};
@@ -270,4 +271,27 @@ fn adapter_dispatch_matches_legacy_for_array_paths() {
     });
 
     assert_eq!(new_core, legacy, "adapter dispatch diverged from legacy");
+}
+
+#[test]
+fn adapter_dispatch_matches_legacy_for_slice_a_leaf_iterators() {
+    let legacy = with_backend(RuntimeBackend::Legacy, || {
+        let range_first = decode_optional_i64(vole_iter_first(vole_range_iter(2, 6)));
+        let range_last = decode_optional_i64(vole_iter_last(vole_range_iter(2, 6)));
+        let once_first = decode_optional_i64(vole_iter_first(vole_once_iter(99)));
+        let empty_first = decode_optional_i64(vole_iter_first(vole_empty_iter()));
+        let repeat_nth = decode_optional_i64(vole_iter_nth(vole_repeat_iter(7), 3));
+        (range_first, range_last, once_first, empty_first, repeat_nth)
+    });
+
+    let new_core = with_backend(RuntimeBackend::NewCore, || {
+        let range_first = decode_optional_i64(vole_iter_first(vole_range_iter(2, 6)));
+        let range_last = decode_optional_i64(vole_iter_last(vole_range_iter(2, 6)));
+        let once_first = decode_optional_i64(vole_iter_first(vole_once_iter(99)));
+        let empty_first = decode_optional_i64(vole_iter_first(vole_empty_iter()));
+        let repeat_nth = decode_optional_i64(vole_iter_nth(vole_repeat_iter(7), 3));
+        (range_first, range_last, once_first, empty_first, repeat_nth)
+    });
+
+    assert_eq!(new_core, legacy, "slice A adapter dispatch diverged");
 }

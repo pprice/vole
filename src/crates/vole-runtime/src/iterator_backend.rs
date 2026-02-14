@@ -25,8 +25,8 @@ fn default_backend() -> IteratorBackend {
             .ok()
             .as_deref()
         {
-            Some("new_core") => IteratorBackend::NewCore,
-            _ => IteratorBackend::Legacy,
+            Some("legacy") => IteratorBackend::Legacy,
+            _ => IteratorBackend::NewCore,
         }
     }
     #[cfg(not(test))]
