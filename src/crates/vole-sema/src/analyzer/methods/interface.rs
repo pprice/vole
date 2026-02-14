@@ -150,9 +150,7 @@ impl Analyzer {
         // Get type_def_id from TypeId using arena queries (class only)
         let type_def_id = {
             let arena = self.type_arena();
-            arena
-                .unwrap_class_or_struct(ty_id)
-                .map(|(id, _, _)| id)
+            arena.unwrap_class_or_struct(ty_id).map(|(id, _, _)| id)
         };
 
         // For primitives/arrays, check implement registry (using TypeId)
@@ -332,9 +330,7 @@ impl Analyzer {
         // Get the type def id for the concrete type to look up implementations
         let type_def_id = {
             let arena = self.type_arena();
-            arena
-                .unwrap_class_or_struct(ty_id)
-                .map(|(id, _, _)| id)
+            arena.unwrap_class_or_struct(ty_id).map(|(id, _, _)| id)
         };
 
         let Some(type_def_id) = type_def_id else {
@@ -472,6 +468,57 @@ impl Analyzer {
         true
     }
 
+    /// Collect interface method info with type parameter substitutions applied.
+    /// Returns (method_name, has_default, substituted_signature) for each valid method.
+    fn collect_substituted_method_infos(
+        &mut self,
+        method_ids: &[MethodId],
+        substitutions: &FxHashMap<NameId, ArenaTypeId>,
+    ) -> Vec<(String, bool, FunctionType)> {
+        method_ids
+            .iter()
+            .filter_map(|&method_id| {
+                let (has_default, name_id, signature_id) =
+                    self.entity_registry().method_default_name_sig(method_id);
+                let name = self
+                    .name_table()
+                    .last_segment_str(name_id)
+                    .unwrap_or_default();
+
+                // Get original signature from arena - skip if invalid
+                let (param_ids, return_id, is_closure) = {
+                    let arena = self.type_arena();
+                    let (params, ret, is_closure) = arena.unwrap_function(signature_id)?;
+                    (params.to_vec(), ret, is_closure)
+                };
+
+                // Apply type parameter substitution using TypeId-based arena substitution
+                let subst_sig = if substitutions.is_empty() {
+                    FunctionType {
+                        is_closure,
+                        params_id: param_ids.into(),
+                        return_type_id: return_id,
+                    }
+                } else {
+                    // Substitute using arena
+                    let (subst_params, subst_ret) = {
+                        let mut arena = self.type_arena_mut();
+                        let params: Vec<ArenaTypeId> = param_ids
+                            .iter()
+                            .map(|&p| arena.substitute(p, substitutions))
+                            .collect();
+                        let ret = arena.substitute(return_id, substitutions);
+                        (params, ret)
+                    };
+
+                    // Build FunctionType from substituted TypeIds
+                    FunctionType::from_ids(&subst_params, subst_ret, is_closure)
+                };
+                Some((name, has_default, subst_sig))
+            })
+            .collect()
+    }
+
     /// Validate that a type satisfies an interface by having all required methods with correct signatures
     pub(crate) fn validate_interface_satisfaction(
         &mut self,
@@ -537,50 +584,7 @@ impl Analyzer {
                     FxHashMap::default()
                 };
 
-            // Collect method info upfront (name_str, has_default, signature with substitutions applied)
-            // Use filter_map to skip methods with invalid signatures (unknown types)
-            let method_infos: Vec<(String, bool, FunctionType)> = method_ids
-                .iter()
-                .filter_map(|&method_id| {
-                    let (has_default, name_id, signature_id) =
-                        self.entity_registry().method_default_name_sig(method_id);
-                    let name = self
-                        .name_table()
-                        .last_segment_str(name_id)
-                        .unwrap_or_default();
-
-                    // Get original signature from arena - skip if invalid
-                    let (param_ids, return_id, is_closure) = {
-                        let arena = self.type_arena();
-                        let (params, ret, is_closure) = arena.unwrap_function(signature_id)?;
-                        (params.to_vec(), ret, is_closure)
-                    };
-
-                    // Apply type parameter substitution using TypeId-based arena substitution
-                    let subst_sig = if substitutions.is_empty() {
-                        FunctionType {
-                            is_closure,
-                            params_id: param_ids.into(),
-                            return_type_id: return_id,
-                        }
-                    } else {
-                        // Substitute using arena
-                        let (subst_params, subst_ret) = {
-                            let mut arena = self.type_arena_mut();
-                            let params: Vec<ArenaTypeId> = param_ids
-                                .iter()
-                                .map(|&p| arena.substitute(p, &substitutions))
-                                .collect();
-                            let ret = arena.substitute(return_id, &substitutions);
-                            (params, ret)
-                        };
-
-                        // Build FunctionType from substituted TypeIds
-                        FunctionType::from_ids(&subst_params, subst_ret, is_closure)
-                    };
-                    Some((name, has_default, subst_sig))
-                })
-                .collect();
+            let method_infos = self.collect_substituted_method_infos(&method_ids, &substitutions);
 
             // Collect parent names upfront
             let parent_names: Vec<Option<String>> = extends
