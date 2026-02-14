@@ -617,29 +617,14 @@ pub(crate) fn value_to_word(
                 .bitcast(types::I32, MemFlags::new(), value.value);
             builder.ins().uextend(word_type, i32_val)
         }
-        ArenaType::Primitive(PrimitiveType::Bool) => {
+        ArenaType::Primitive(PrimitiveType::Bool)
+        | ArenaType::Primitive(PrimitiveType::I8)
+        | ArenaType::Primitive(PrimitiveType::U8)
+        | ArenaType::Primitive(PrimitiveType::I16)
+        | ArenaType::Primitive(PrimitiveType::U16)
+        | ArenaType::Primitive(PrimitiveType::I32)
+        | ArenaType::Primitive(PrimitiveType::U32) => {
             // Only extend if the Cranelift value isn't already word-sized
-            if value.ty == word_type {
-                value.value
-            } else {
-                builder.ins().uextend(word_type, value.value)
-            }
-        }
-        ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
-            if value.ty == word_type {
-                value.value
-            } else {
-                builder.ins().uextend(word_type, value.value)
-            }
-        }
-        ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => {
-            if value.ty == word_type {
-                value.value
-            } else {
-                builder.ins().uextend(word_type, value.value)
-            }
-        }
-        ArenaType::Primitive(PrimitiveType::I32) | ArenaType::Primitive(PrimitiveType::U32) => {
             if value.ty == word_type {
                 value.value
             } else {
@@ -696,10 +681,9 @@ pub(crate) fn word_to_value_type_id(
             let i32_val = builder.ins().ireduce(types::I32, word);
             builder.ins().bitcast(types::F32, MemFlags::new(), i32_val)
         }
-        ArenaType::Primitive(PrimitiveType::Bool) => builder.ins().ireduce(types::I8, word),
-        ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
-            builder.ins().ireduce(types::I8, word)
-        }
+        ArenaType::Primitive(PrimitiveType::Bool)
+        | ArenaType::Primitive(PrimitiveType::I8)
+        | ArenaType::Primitive(PrimitiveType::U8) => builder.ins().ireduce(types::I8, word),
         ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => {
             builder.ins().ireduce(types::I16, word)
         }
