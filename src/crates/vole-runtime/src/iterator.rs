@@ -19,6 +19,7 @@
 use crate::alloc_track;
 use crate::array::RcArray;
 use crate::closure::Closure;
+use crate::iterator_abi::{NextTag, TaggedNextWord};
 use crate::string::RcString;
 use crate::value::{RcHeader, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc, tag_needs_rc};
 use std::alloc::{Layout, alloc, dealloc};
@@ -986,14 +987,19 @@ pub extern "C" fn vole_iter_next(iter: *mut RcIterator) -> *mut u8 {
         vole_array_iter_next(iter, &mut value)
     };
 
-    let layout = Layout::from_size_align(16, 8).expect("valid union layout");
+    let layout = Layout::from_size_align(TaggedNextWord::SIZE, TaggedNextWord::ALIGN)
+        .expect("valid union layout");
     let ptr = unsafe { alloc(layout) };
     if ptr.is_null() {
         std::alloc::handle_alloc_error(layout);
     }
 
     // Tag 0 = value, Tag 1 = Done (descending sort order)
-    let tag = if has_value == 0 { 1u8 } else { 0u8 };
+    let tag = if has_value == 0 {
+        NextTag::Done as u8
+    } else {
+        NextTag::Value as u8
+    };
     unsafe {
         ptr::write(ptr, tag);
         let payload_ptr = ptr.add(8) as *mut i64;

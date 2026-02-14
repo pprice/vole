@@ -18,6 +18,7 @@ pub mod builtins;
 pub mod closure;
 pub mod instance;
 pub mod iterator;
+pub(crate) mod iterator_abi;
 pub mod native_registry;
 pub mod signal;
 pub mod stdlib;
