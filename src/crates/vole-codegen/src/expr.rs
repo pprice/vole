@@ -156,20 +156,57 @@ impl Cg<'_, '_, '_> {
             let val = self.builder.use_var(*var);
             let ty = self.builder.func.dfg.value_type(val);
 
-            // Check for narrowed type from semantic analysis
-            if let Some(narrowed_type_id) = self.get_expr_type(&expr.id)
-                && self.arena().is_union(*type_id)
-                && !self.arena().is_union(narrowed_type_id)
-            {
-                // Union layout: [tag:1][padding:7][payload]
-                let payload_ty =
-                    type_id_to_cranelift(narrowed_type_id, self.arena(), self.ptr_type());
-                let payload = self.load_union_payload(val, *type_id, payload_ty);
-                let mut cv = CompiledValue::new(payload, payload_ty, narrowed_type_id);
-                // The extracted payload is borrowed from the union variable —
-                // callers must rc_inc if they take ownership.
-                self.mark_borrowed_if_rc(&mut cv);
-                return Ok(cv);
+            // Check for narrowed type from semantic analysis.
+            // In monomorphized generic bodies, sema-provided expr types can be stale.
+            // Only narrow when the requested type is actually compatible with one of
+            // this union's concrete variants after substitution.
+            if let Some(raw_narrowed_type_id) = self.get_expr_type(&expr.id) {
+                let resolved_union_type_id = self.try_substitute_type(*type_id);
+                let narrowed_type_id = self.try_substitute_type(raw_narrowed_type_id);
+                if self.arena().is_union(resolved_union_type_id)
+                    && !self.arena().is_union(narrowed_type_id)
+                    && narrowed_type_id != resolved_union_type_id
+                {
+                    let narrowed_variant = self
+                        .arena()
+                        .unwrap_union(resolved_union_type_id)
+                        .and_then(|variants| {
+                            variants
+                                .iter()
+                                .copied()
+                                .find(|&variant| variant == narrowed_type_id)
+                                .or_else(|| {
+                                    if self.arena().is_integer(narrowed_type_id) {
+                                        variants
+                                            .iter()
+                                            .copied()
+                                            .find(|&variant| self.arena().is_integer(variant))
+                                    } else {
+                                        None
+                                    }
+                                })
+                        });
+                    if let Some(narrowed_variant) = narrowed_variant {
+                        // In monomorphized generic bodies sema can report stale primitive
+                        // narrowings (commonly i64). Keep narrowing for nominal variants,
+                        // but skip primitive extraction and return the full union value.
+                        if self.substitutions.is_none() || !narrowed_variant.is_primitive() {
+                            // Union layout: [tag:1][padding:7][payload]
+                            let payload_ty = type_id_to_cranelift(
+                                narrowed_variant,
+                                self.arena(),
+                                self.ptr_type(),
+                            );
+                            let payload =
+                                self.load_union_payload(val, resolved_union_type_id, payload_ty);
+                            let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
+                            // The extracted payload is borrowed from the union variable —
+                            // callers must rc_inc if they take ownership.
+                            self.mark_borrowed_if_rc(&mut cv);
+                            return Ok(cv);
+                        }
+                    }
+                }
             }
 
             // Check for narrowed type from unknown
@@ -924,22 +961,21 @@ impl Cg<'_, '_, '_> {
 
         // Try dynamic array
         if let Some(element_id) = arena.unwrap_array(obj.type_id) {
-            // Dynamic array indexing with CSE caching
+            // Dynamic array indexing
             let idx = self.expr(index)?;
-
-            let raw_value =
-                self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
-            if self.arena().is_union(element_id) {
-                let cv = if self.union_array_prefers_inline_storage(element_id) {
+            let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
+            let resolved_element_id = self.try_substitute_type(element_id);
+            if self.arena().is_union(resolved_element_id) {
+                let cv = if self.union_array_prefers_inline_storage(resolved_element_id) {
                     let raw_tag =
-                        self.call_runtime_cached(RuntimeFn::ArrayGetTag, &[obj.value, idx.value])?;
-                    self.decode_dynamic_array_union_element(raw_tag, raw_value, element_id)
+                        self.call_runtime(RuntimeFn::ArrayGetTag, &[obj.value, idx.value])?;
+                    self.decode_dynamic_array_union_element(raw_tag, raw_value, resolved_element_id)
                 } else {
-                    self.copy_union_heap_to_stack(raw_value, element_id)
+                    self.copy_union_heap_to_stack(raw_value, resolved_element_id)
                 };
                 return Ok(cv);
             }
-            let mut cv = self.convert_field_value(raw_value, element_id);
+            let mut cv = self.convert_field_value(raw_value, resolved_element_id);
             self.mark_borrowed_if_rc(&mut cv);
             return Ok(cv);
         }
@@ -1061,6 +1097,10 @@ impl Cg<'_, '_, '_> {
                 let value_bits = convert_to_i64_for_storage(self.builder, &val);
                 (tag_val, value_bits, val)
             };
+
+            // Container store: borrowed RC values need an extra ref so the array
+            // owns its element independently of the source binding.
+            self.rc_inc_borrowed_for_container(&val)?;
 
             // i128 cannot fit in a TaggedValue (u64 payload)
             if val.ty == types::I128 {
@@ -1254,7 +1294,6 @@ impl Cg<'_, '_, '_> {
                 self.compute_is_check_result(value.type_id, tested_type_id)
             }
         };
-
         match is_check_result {
             IsCheckResult::AlwaysTrue => Ok(self.bool_const(true)),
             IsCheckResult::AlwaysFalse => Ok(self.bool_const(false)),
@@ -1325,11 +1364,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Value> {
         let arena = self.arena();
         Ok(if arena.is_string(type_id) {
-            if self.funcs().has_runtime(RuntimeFn::StringEq) {
-                self.call_runtime(RuntimeFn::StringEq, &[left, right])?
-            } else {
-                self.builder.ins().icmp(IntCC::Equal, left, right)
-            }
+            self.call_runtime(RuntimeFn::StringEq, &[left, right])?
         } else if arena.is_float(type_id) {
             self.builder.ins().fcmp(FloatCC::Equal, left, right)
         } else if type_id.is_integer() || type_id.is_bool() {
@@ -1344,11 +1379,6 @@ impl Cg<'_, '_, '_> {
         &mut self,
         nc: &vole_frontend::NullCoalesceExpr,
     ) -> CodegenResult<CompiledValue> {
-        // Check if the source is a variable (needs rc_inc because union cleanup
-        // will also dec the payload) vs a temporary (ownership transfers directly).
-        let source_is_variable =
-            matches!(&nc.value.kind, ExprKind::Identifier(sym) if self.vars.contains_key(sym));
-
         let value = self.expr(&nc.value)?;
         let nil_tag = self.find_nil_variant(value.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
@@ -1411,11 +1441,10 @@ impl Cg<'_, '_, '_> {
                 value.value,
                 union_layout::PAYLOAD_OFFSET,
             );
-            // RC: if the source is a variable, its union cleanup will dec the
-            // payload at scope exit, so we need rc_inc to keep the extracted
-            // value alive. If the source is a temporary (function call, etc.),
-            // ownership transfers directly — no inc needed.
-            if result_needs_rc && source_is_variable {
+            // RC: if the source optional is borrowed (identifier, array/index read,
+            // field access, etc.), the owner will eventually dec the payload, so
+            // the coalesce result needs its own ref.
+            if result_needs_rc && value.is_borrowed() {
                 self.emit_rc_inc_for_type(loaded, inner_type_id)?;
             }
             loaded

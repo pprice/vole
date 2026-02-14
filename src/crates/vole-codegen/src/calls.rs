@@ -408,7 +408,7 @@ impl Cg<'_, '_, '_> {
         if let Some(name_id) = direct_name_id {
             let func_key = self.funcs().intern_name_id(name_id);
             if let Some(func_id) = self.funcs_ref().func_id(func_key) {
-                return self.call_func_id(func_key, func_id, call, callee_sym);
+                return self.call_func_id(func_key, func_id, call, callee_sym, call_expr_id);
             }
         }
 
@@ -420,7 +420,7 @@ impl Cg<'_, '_, '_> {
                 let func_key = self.funcs().intern_name_id(name_id);
                 if let Some(func_id) = self.funcs().func_id(func_key) {
                     // Found module function with qualified name
-                    return self.call_func_id(func_key, func_id, call, callee_sym);
+                    return self.call_func_id(func_key, func_id, call, callee_sym, call_expr_id);
                 }
             }
 
@@ -491,7 +491,13 @@ impl Cg<'_, '_, '_> {
             if let Some(name_id) = name_id {
                 let func_key = self.funcs().intern_name_id(name_id);
                 if let Some(func_id) = self.funcs_ref().func_id(func_key) {
-                    return self.call_func_id_by_name_id(func_key, func_id, call, name_id);
+                    return self.call_func_id_by_name_id(
+                        func_key,
+                        func_id,
+                        call,
+                        name_id,
+                        call_expr_id,
+                    );
                 }
             }
         }
@@ -624,7 +630,7 @@ impl Cg<'_, '_, '_> {
             let func_key = self.funcs().intern_name_id(name_id);
             if let Some(func_id) = self.funcs_ref().func_id(func_key) {
                 // Found compiled module function
-                return self.call_func_id(func_key, func_id, call, export_name);
+                return self.call_func_id(func_key, func_id, call, export_name, call_expr_id);
             }
         }
 
@@ -646,6 +652,7 @@ impl Cg<'_, '_, '_> {
         func_id: FuncId,
         call: &CallExpr,
         callee_sym: Symbol,
+        call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         // Look up the function's NameId for param types and default args.
         // Use self.interner() (not self.query()) because callee_sym comes from the
@@ -656,7 +663,8 @@ impl Cg<'_, '_, '_> {
         let name_id = self
             .name_table()
             .name_id(module_id, &[callee_sym], self.interner());
-        self.call_func_id_impl(func_key, func_id, call, name_id)
+        let return_type_override = self.get_expr_type_substituted(&call_expr_id);
+        self.call_func_id_impl(func_key, func_id, call, name_id, None, return_type_override)
     }
 
     /// Call a function by FuncId using NameId for default parameter lookup.
@@ -667,8 +675,17 @@ impl Cg<'_, '_, '_> {
         func_id: FuncId,
         call: &CallExpr,
         name_id: NameId,
+        call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
-        self.call_func_id_impl(func_key, func_id, call, Some(name_id))
+        let return_type_override = self.get_expr_type_substituted(&call_expr_id);
+        self.call_func_id_impl(
+            func_key,
+            func_id,
+            call,
+            Some(name_id),
+            None,
+            return_type_override,
+        )
     }
 
     /// Core implementation for calling a function by FuncId.
@@ -679,6 +696,8 @@ impl Cg<'_, '_, '_> {
         func_id: FuncId,
         call: &CallExpr,
         name_id: Option<NameId>,
+        param_type_ids_override: Option<Vec<TypeId>>,
+        return_type_id_override: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
         let func_ref = self
             .codegen_ctx
@@ -687,13 +706,14 @@ impl Cg<'_, '_, '_> {
 
         // Get return type early to check for sret convention.
         // Return type is always set when the function is declared/compiled.
-        let return_type_id = self
+        let callee_return_type_id = self
             .codegen_ctx
             .funcs()
             .return_type(func_key)
             .expect("INTERNAL: function call: missing return type in registry");
+        let return_type_id = return_type_id_override.unwrap_or(callee_return_type_id);
 
-        let is_sret = self.is_sret_struct_return(return_type_id);
+        let is_sret = self.is_sret_struct_return(callee_return_type_id);
 
         // Get expected parameter types from the function's signature
         let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
@@ -705,7 +725,7 @@ impl Cg<'_, '_, '_> {
         let mut args = Vec::new();
         let sret_slot = if is_sret {
             let flat_count = self
-                .struct_flat_slot_count(return_type_id)
+                .struct_flat_slot_count(callee_return_type_id)
                 .expect("INTERNAL: sret call: missing flat slot count");
             let total_size = (flat_count as u32) * 8;
             let slot = self.alloc_stack(total_size);
@@ -720,7 +740,7 @@ impl Cg<'_, '_, '_> {
         let user_param_offset = if is_sret { 1 } else { 0 };
 
         // Get parameter TypeIds from the function definition for union coercion
-        let param_type_ids: Vec<TypeId> = {
+        let param_type_ids: Vec<TypeId> = param_type_ids_override.unwrap_or_else(|| {
             let func_id_sema = name_id.and_then(|id| self.registry().function_by_name(id));
             if let Some(fid) = func_id_sema {
                 let func_def = self.registry().get_function(fid);
@@ -728,7 +748,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 Vec::new()
             }
-        };
+        });
 
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
@@ -781,7 +801,8 @@ impl Cg<'_, '_, '_> {
             && let Some(name_id) = name_id
         {
             let provided_args = total_user_args;
-            let (default_args, rc_owned) = self.compile_default_args(name_id, provided_args)?;
+            let (default_args, rc_owned) =
+                self.compile_default_args_with_types(name_id, provided_args, &param_type_ids)?;
             args.extend(default_args);
             rc_temp_args.extend(rc_owned);
         }
@@ -790,13 +811,12 @@ impl Cg<'_, '_, '_> {
         let call_inst = self.builder.ins().call(func_ref, &args);
         self.field_cache.clear(); // Callee may mutate instance fields
 
-        // If the return type is a union, copy the data from the callee's stack to our own
-        // BEFORE consuming RC args. The rc_dec calls in consume_rc_args can clobber the
-        // callee's stack frame, invalidating the returned pointer.
-        let union_copy = if sret_slot.is_none() && self.arena().is_union(return_type_id) {
+        // For union returns, copy the value out of the callee's stack frame
+        // before RC temp cleanup. rc_dec may clobber the callee return slot.
+        let union_copy = if sret_slot.is_none() && self.arena().is_union(callee_return_type_id) {
             let results = self.builder.inst_results(call_inst);
             let src_ptr = results[0];
-            Some(self.copy_union_ptr_to_local(src_ptr, return_type_id))
+            Some(self.copy_union_ptr_to_local(src_ptr, callee_return_type_id))
         } else {
             None
         };
@@ -804,26 +824,36 @@ impl Cg<'_, '_, '_> {
         // Dec RC temp args after the call has consumed them
         self.consume_rc_args(&mut rc_temp_args)?;
 
-        // If we already copied the union data, return that
         if let Some(result) = union_copy {
+            let mut result = result;
+            if return_type_id != callee_return_type_id {
+                result = self.coerce_to_type(result, return_type_id)?;
+            }
             return Ok(result);
         }
 
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);
-            return Ok(CompiledValue::new(results[0], ptr_type, return_type_id));
+            let mut result = CompiledValue::new(results[0], ptr_type, callee_return_type_id);
+            if return_type_id != callee_return_type_id {
+                result = self.coerce_to_type(result, return_type_id)?;
+            }
+            return Ok(result);
         }
 
-        Ok(self.call_result(call_inst, return_type_id))
+        let mut result = self.call_result(call_inst, callee_return_type_id);
+        if return_type_id != callee_return_type_id {
+            result = self.coerce_to_type(result, return_type_id)?;
+        }
+        Ok(result)
     }
 
-    /// Compile default expressions for omitted function parameters.
-    /// Returns compiled values for parameters starting at `start_index`.
-    fn compile_default_args(
+    fn compile_default_args_with_types(
         &mut self,
         name_id: NameId,
         start_index: usize,
+        param_type_ids_override: &[TypeId],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let func_id = self.registry().function_by_name(name_id);
         let Some(func_id) = func_id else {
@@ -839,6 +869,12 @@ impl Cg<'_, '_, '_> {
                 .collect();
             let type_ids = func_def.signature.params_id.iter().copied().collect();
             (ptrs, type_ids)
+        };
+
+        let param_type_ids = if param_type_ids_override.is_empty() {
+            param_type_ids
+        } else {
+            param_type_ids_override.to_vec()
         };
 
         self.compile_defaults_from_ptrs(
@@ -1603,7 +1639,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         call_expr_id: NodeId,
         call: &CallExpr,
-        callee_sym: Symbol,
+        _callee_sym: Symbol,
         callee_name: &str,
     ) -> CodegenResult<Option<CompiledValue>> {
         let current_module_path = self
@@ -1627,15 +1663,31 @@ impl Cg<'_, '_, '_> {
             (
                 inst.original_name,
                 inst.mangled_name,
+                inst.func_type.params_id.to_vec(),
                 inst.func_type.return_type_id,
                 inst.substitutions.clone(),
             )
         });
 
-        let Some((original_name, mangled_name, return_type_id, substitutions)) = instance_data
+        let Some((original_name, mangled_name, param_types_raw, return_type_id, substitutions)) =
+            instance_data
         else {
             return Ok(None);
         };
+
+        let param_type_display: Vec<String> = param_types_raw
+            .iter()
+            .map(|&ty| self.arena().display_basic(ty))
+            .collect();
+        tracing::debug!(
+            call_expr_id = ?call_expr_id,
+            callee = callee_name,
+            mangled = ?mangled_name,
+            ?param_types_raw,
+            ?param_type_display,
+            ?substitutions,
+            "monomorph call instance"
+        );
 
         tracing::trace!(
             instance_name = ?original_name,
@@ -1645,9 +1697,21 @@ impl Cg<'_, '_, '_> {
 
         let func_key = self.funcs().intern_name_id(mangled_name);
         if let Some(func_id) = self.funcs().func_id(func_key) {
+            let arena = self.arena();
+            let param_type_ids: Vec<TypeId> = param_types_raw
+                .iter()
+                .map(|&ty| arena.expect_substitute(ty, &substitutions, "monomorph call args"))
+                .collect();
             tracing::trace!("found func_id, using regular path");
             return self
-                .call_func_id(func_key, func_id, call, callee_sym)
+                .call_func_id_impl(
+                    func_key,
+                    func_id,
+                    call,
+                    Some(original_name),
+                    Some(param_type_ids),
+                    self.get_expr_type_substituted(&call_expr_id),
+                )
                 .map(Some);
         }
 

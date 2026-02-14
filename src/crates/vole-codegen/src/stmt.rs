@@ -2,8 +2,6 @@
 //
 // Statement and block compilation - impl Cg methods.
 
-use std::mem::size_of;
-
 use cranelift::prelude::*;
 
 use crate::RuntimeFn;
@@ -542,6 +540,7 @@ impl Cg<'_, '_, '_> {
         let return_type_id = self.return_type;
         if let Some(value) = &ret.value {
             let mut compiled = self.expr(value)?;
+            compiled.type_id = self.try_substitute_type(compiled.type_id);
 
             // RC bookkeeping for return values:
             // - RC local variable: skip its cleanup (ownership transfers to caller)
@@ -849,22 +848,8 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(body_block);
 
         let current_idx = self.builder.use_var(idx_var);
-        let ptr_type = self.ptr_type();
-        let data_offset = std::mem::offset_of!(vole_runtime::array::RcArray, data) as i32;
-        let tagged_value_size = size_of::<vole_runtime::value::TaggedValue>() as i64;
+        let elem_ptr = self.dynamic_array_elem_ptr_unchecked(arr.value, current_idx);
         let value_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, value) as i32;
-        let data_ptr = self
-            .builder
-            .ins()
-            .load(ptr_type, MemFlags::new(), arr.value, data_offset);
-        let idx_ptr = if ptr_type == types::I64 {
-            current_idx
-        } else {
-            self.builder.ins().ireduce(ptr_type, current_idx)
-        };
-        let stride = self.builder.ins().iconst(ptr_type, tagged_value_size);
-        let elem_offset = self.builder.ins().imul(idx_ptr, stride);
-        let elem_ptr = self.builder.ins().iadd(data_ptr, elem_offset);
         let elem_val = self
             .builder
             .ins()
@@ -1106,14 +1091,16 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
         variants: &[TypeId],
     ) -> CodegenResult<(usize, Value, TypeId)> {
+        let resolved_value_type_id = self.try_substitute_type(value.type_id);
+
         // Direct type match
-        if let Some(pos) = variants.iter().position(|&v| v == value.type_id) {
-            return Ok((pos, value.value, value.type_id));
+        if let Some(pos) = variants.iter().position(|&v| v == resolved_value_type_id) {
+            return Ok((pos, value.value, resolved_value_type_id));
         }
 
         // Try to find a compatible integer type for widening/narrowing
         let arena = self.arena();
-        let value_is_integer = arena.is_integer(value.type_id);
+        let value_is_integer = arena.is_integer(resolved_value_type_id);
 
         let compatible = if value_is_integer {
             variants
@@ -1146,7 +1133,7 @@ impl Cg<'_, '_, '_> {
                 let found = if let Some(name_id) = self.arena().unwrap_type_param(value.type_id) {
                     format!("{} ({:?})", self.name_table().display(name_id), name_id)
                 } else {
-                    self.arena().display_basic(value.type_id)
+                    self.arena().display_basic(resolved_value_type_id)
                 };
                 let subs = self
                     .substitutions
@@ -1219,11 +1206,18 @@ impl Cg<'_, '_, '_> {
             .ins()
             .stack_store(is_rc_val, slot, union_layout::IS_RC_OFFSET);
 
-        // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
-        if !self.arena().is_sentinel(actual_type_id) {
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            // Initialize payload bytes for payload-carrying unions. Sentinel variants
+            // don't carry data, but zeroing avoids undefined behavior when generic
+            // cleanup/copy paths read the payload word.
+            let payload = if self.arena().is_sentinel(actual_type_id) {
+                self.builder.ins().iconst(types::I64, 0)
+            } else {
+                actual_value
+            };
             self.builder
                 .ins()
-                .stack_store(actual_value, slot, union_layout::PAYLOAD_OFFSET);
+                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
         }
 
         let ptr_type = self.ptr_type();
