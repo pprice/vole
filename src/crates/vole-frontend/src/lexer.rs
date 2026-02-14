@@ -551,105 +551,10 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Scan a number literal (integer or float)
-    ///
-    /// Supports:
-    /// - Decimal: `42`, `1_000_000`
-    /// - Hex: `0xFF`, `0xFF_FF`
-    /// - Binary: `0b1010`, `0b1111_0000`
-    /// - Float: `3.14`, `1_000.5`
-    /// - Scientific: `1e10`, `1.5e-3`, `2E+6`
-    /// - Underscores as separators in all formats
-    /// - Type suffixes: `100_u8`, `3.14_f32`, `0xFF_i32`
-    fn number(&mut self) -> Token<'src> {
-        // The first digit has already been consumed by next_token().
-        // Check if it was '0' to detect hex/binary prefix.
-        let first_char = self.bytes[self.start];
-
-        if first_char == b'0'
-            && let Some(prefix) = self.peek_byte()
-        {
-            if prefix == b'x' || prefix == b'X' {
-                // Hex literal: 0x...
-                self.current += 1;
-                self.column += 1;
-                let mut has_digits = false;
-                while let Some(&b) = self.bytes.get(self.current) {
-                    if b.is_ascii_hexdigit() {
-                        has_digits = true;
-                        self.current += 1;
-                        self.column += 1;
-                    } else if b == b'_' {
-                        // Check if this underscore starts a type suffix
-                        if self.is_type_suffix_ahead() {
-                            self.current += 1;
-                            self.column += 1;
-                            self.consume_suffix_name();
-                            break;
-                        }
-                        self.current += 1;
-                        self.column += 1;
-                    } else {
-                        break;
-                    }
-                }
-                if !has_digits {
-                    return self.error_invalid_number();
-                }
-                return self.make_token(TokenType::IntLiteral);
-            } else if prefix == b'b' || prefix == b'B' {
-                // Binary literal: 0b...
-                self.current += 1;
-                self.column += 1;
-                let mut has_digits = false;
-                while let Some(&b) = self.bytes.get(self.current) {
-                    if b == b'0' || b == b'1' {
-                        has_digits = true;
-                        self.current += 1;
-                        self.column += 1;
-                    } else if b == b'_' {
-                        // Check if this underscore starts a type suffix
-                        if self.is_type_suffix_ahead() {
-                            self.current += 1;
-                            self.column += 1;
-                            self.consume_suffix_name();
-                            break;
-                        }
-                        self.current += 1;
-                        self.column += 1;
-                    } else {
-                        break;
-                    }
-                }
-                if !has_digits {
-                    return self.error_invalid_number();
-                }
-                return self.make_token(TokenType::IntLiteral);
-            }
-        }
-
-        // Decimal integer part (continue consuming digits and underscores)
-        while let Some(&b) = self.bytes.get(self.current) {
-            if b.is_ascii_digit() {
-                self.current += 1;
-                self.column += 1;
-            } else if b == b'_' {
-                // Check if this underscore starts a type suffix
-                if self.is_type_suffix_ahead() {
-                    self.current += 1;
-                    self.column += 1;
-                    self.consume_suffix_name();
-                    // After consuming suffix, check if this is a float suffix on a decimal
-                    // (we haven't seen a dot yet, so we're still in integer parsing)
-                    return self.make_token(TokenType::IntLiteral);
-                }
-                self.current += 1;
-                self.column += 1;
-            } else {
-                break;
-            }
-        }
-
+    /// After consuming the integer part of a decimal number, check if it extends
+    /// to a float literal via a decimal point or scientific notation.
+    /// Returns a FloatLiteral token if extended, IntLiteral otherwise.
+    fn try_extend_to_float(&mut self) -> Token<'src> {
         // Check for decimal point followed by digit
         if self.peek_byte() == Some(b'.')
             && let Some(next) = self.peek_next()
@@ -751,6 +656,108 @@ impl<'src> Lexer<'src> {
         }
 
         self.make_token(TokenType::IntLiteral)
+    }
+
+    /// Scan a number literal (integer or float)
+    ///
+    /// Supports:
+    /// - Decimal: `42`, `1_000_000`
+    /// - Hex: `0xFF`, `0xFF_FF`
+    /// - Binary: `0b1010`, `0b1111_0000`
+    /// - Float: `3.14`, `1_000.5`
+    /// - Scientific: `1e10`, `1.5e-3`, `2E+6`
+    /// - Underscores as separators in all formats
+    /// - Type suffixes: `100_u8`, `3.14_f32`, `0xFF_i32`
+    fn number(&mut self) -> Token<'src> {
+        // The first digit has already been consumed by next_token().
+        // Check if it was '0' to detect hex/binary prefix.
+        let first_char = self.bytes[self.start];
+
+        if first_char == b'0'
+            && let Some(prefix) = self.peek_byte()
+        {
+            if prefix == b'x' || prefix == b'X' {
+                // Hex literal: 0x...
+                self.current += 1;
+                self.column += 1;
+                let mut has_digits = false;
+                while let Some(&b) = self.bytes.get(self.current) {
+                    if b.is_ascii_hexdigit() {
+                        has_digits = true;
+                        self.current += 1;
+                        self.column += 1;
+                    } else if b == b'_' {
+                        // Check if this underscore starts a type suffix
+                        if self.is_type_suffix_ahead() {
+                            self.current += 1;
+                            self.column += 1;
+                            self.consume_suffix_name();
+                            break;
+                        }
+                        self.current += 1;
+                        self.column += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if !has_digits {
+                    return self.error_invalid_number();
+                }
+                return self.make_token(TokenType::IntLiteral);
+            } else if prefix == b'b' || prefix == b'B' {
+                // Binary literal: 0b...
+                self.current += 1;
+                self.column += 1;
+                let mut has_digits = false;
+                while let Some(&b) = self.bytes.get(self.current) {
+                    if b == b'0' || b == b'1' {
+                        has_digits = true;
+                        self.current += 1;
+                        self.column += 1;
+                    } else if b == b'_' {
+                        // Check if this underscore starts a type suffix
+                        if self.is_type_suffix_ahead() {
+                            self.current += 1;
+                            self.column += 1;
+                            self.consume_suffix_name();
+                            break;
+                        }
+                        self.current += 1;
+                        self.column += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if !has_digits {
+                    return self.error_invalid_number();
+                }
+                return self.make_token(TokenType::IntLiteral);
+            }
+        }
+
+        // Decimal integer part (continue consuming digits and underscores)
+        while let Some(&b) = self.bytes.get(self.current) {
+            if b.is_ascii_digit() {
+                self.current += 1;
+                self.column += 1;
+            } else if b == b'_' {
+                // Check if this underscore starts a type suffix
+                if self.is_type_suffix_ahead() {
+                    self.current += 1;
+                    self.column += 1;
+                    self.consume_suffix_name();
+                    // After consuming suffix, check if this is a float suffix on a decimal
+                    // (we haven't seen a dot yet, so we're still in integer parsing)
+                    return self.make_token(TokenType::IntLiteral);
+                }
+                self.current += 1;
+                self.column += 1;
+            } else {
+                break;
+            }
+        }
+
+        self.try_extend_to_float()
     }
 
     /// Check if the characters after the current `_` position form a known type suffix.
