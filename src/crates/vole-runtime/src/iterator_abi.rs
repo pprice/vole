@@ -137,14 +137,12 @@ impl TaggedNextWord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::mem::{align_of, size_of};
 
     #[test]
     fn tagged_next_word_layout_is_stable() {
-        assert_eq!(std::mem::size_of::<TaggedNextWord>(), TaggedNextWord::SIZE);
-        assert_eq!(
-            std::mem::align_of::<TaggedNextWord>(),
-            TaggedNextWord::ALIGN
-        );
+        assert_eq!(size_of::<TaggedNextWord>(), TaggedNextWord::SIZE);
+        assert_eq!(align_of::<TaggedNextWord>(), TaggedNextWord::ALIGN);
         assert_eq!(TaggedNextWord::PAYLOAD_OFFSET, 8);
     }
 

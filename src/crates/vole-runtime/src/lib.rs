@@ -19,6 +19,8 @@ pub mod closure;
 pub mod instance;
 pub mod iterator;
 pub(crate) mod iterator_abi;
+#[cfg(test)]
+mod iterator_parity;
 pub mod native_registry;
 pub mod signal;
 pub mod stdlib;
