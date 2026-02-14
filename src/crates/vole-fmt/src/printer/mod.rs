@@ -14,7 +14,7 @@ use decl::{
     print_interface_decl, print_sentinel_decl, print_struct_decl,
 };
 use expr::{print_expr, print_pattern, print_string_literal};
-pub(super) use types::{print_type_expr, print_type_params};
+pub(super) use types::{print_return_type, print_type_expr, print_type_params};
 
 /// Indent width for formatting (4 spaces)
 pub(super) const INDENT: isize = 4;

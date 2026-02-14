@@ -250,6 +250,21 @@ pub(crate) fn print_type_expr<'a>(
     }
 }
 
+/// Print an optional return type annotation (` -> Type` or nothing).
+pub(crate) fn print_return_type<'a>(
+    arena: &'a Arena<'a>,
+    return_type: &Option<TypeExpr>,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if let Some(ty) = return_type {
+        arena
+            .text(" -> ")
+            .append(print_type_expr(arena, ty, interner))
+    } else {
+        arena.nil()
+    }
+}
+
 /// Get the string representation of a primitive type.
 fn primitive_type_str(prim: PrimitiveType) -> &'static str {
     match prim {

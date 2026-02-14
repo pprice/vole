@@ -6,7 +6,7 @@ use vole_frontend::Interner;
 use vole_frontend::PatternKind;
 use vole_frontend::ast::*;
 
-use super::{INDENT, print_block, print_stmt, print_type_expr};
+use super::{INDENT, print_block, print_return_type, print_stmt, print_type_expr};
 
 /// Print an expression.
 pub(super) fn print_expr<'a>(
@@ -558,13 +558,7 @@ fn print_lambda_expr<'a>(
     let params = print_lambda_params(arena, &lambda.params, interner);
 
     // Print return type if present
-    let return_type = if let Some(ty) = &lambda.return_type {
-        arena
-            .text(" -> ")
-            .append(print_type_expr(arena, ty, interner))
-    } else {
-        arena.nil()
-    };
+    let return_type = print_return_type(arena, &lambda.return_type, interner);
 
     // Print body
     let body = match &lambda.body {

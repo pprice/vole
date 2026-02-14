@@ -6,7 +6,7 @@ use vole_frontend::Interner;
 use vole_frontend::ast::*;
 
 use super::expr::print_string_literal;
-use super::{INDENT, print_func_body, print_type_expr, print_type_params};
+use super::{INDENT, print_func_body, print_return_type, print_type_expr, print_type_params};
 
 /// Groups arguments for printing a class-like body (class, struct).
 struct ClassLikeBody<'a, 'b> {
@@ -35,13 +35,7 @@ pub(super) fn print_func_decl<'a>(
     let params = print_params(arena, &func.params, interner);
 
     // Return type
-    let return_type = if let Some(ty) = &func.return_type {
-        arena
-            .text(" -> ")
-            .append(print_type_expr(arena, ty, interner))
-    } else {
-        arena.nil()
-    };
+    let return_type = print_return_type(arena, &func.return_type, interner);
 
     arena
         .text("func ")
@@ -136,13 +130,7 @@ fn print_external_func<'a>(
 
     let params = print_params(arena, &func.params, interner);
 
-    let return_type = if let Some(ty) = &func.return_type {
-        arena
-            .text(" -> ")
-            .append(print_type_expr(arena, ty, interner))
-    } else {
-        arena.nil()
-    };
+    let return_type = print_return_type(arena, &func.return_type, interner);
 
     name_part.append(params).append(return_type)
 }
@@ -434,13 +422,7 @@ fn print_interface_method<'a>(
     let name = interner.resolve(method.name).to_string();
     let params = print_params(arena, &method.params, interner);
 
-    let return_type = if let Some(ty) = &method.return_type {
-        arena
-            .text(" -> ")
-            .append(print_type_expr(arena, ty, interner))
-    } else {
-        arena.nil()
-    };
+    let return_type = print_return_type(arena, &method.return_type, interner);
 
     let signature = arena
         .text("func ")
