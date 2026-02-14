@@ -1814,12 +1814,13 @@ impl Cg<'_, '_, '_> {
                 // Without this, borrowed payloads extracted from unions would be
                 // freed by both the union cleanup and the result variable cleanup.
                 let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
-                if result_needs_rc && body_val.is_borrowed() {
-                    self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
-                }
-
-                let converted = self.convert_for_select(body_val.value, result_cranelift_type);
-                self.builder.ins().jump(merge_block, &[converted.into()]);
+                self.jump_with_owned_result(
+                    body_val,
+                    result_type_id,
+                    result_cranelift_type,
+                    result_needs_rc,
+                    merge_block,
+                )?;
             } else {
                 self.builder.ins().jump(merge_block, &[]);
             }
@@ -1919,11 +1920,13 @@ impl Cg<'_, '_, '_> {
                 self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
             } else if !is_void {
                 body_val = self.coerce_to_type(body_val, result_type_id)?;
-                if result_needs_rc && body_val.is_borrowed() {
-                    self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
-                }
-                let converted = self.convert_for_select(body_val.value, result_cranelift_type);
-                self.builder.ins().jump(merge_block, &[converted.into()]);
+                self.jump_with_owned_result(
+                    body_val,
+                    result_type_id,
+                    result_cranelift_type,
+                    result_needs_rc,
+                    merge_block,
+                )?;
             } else {
                 self.builder.ins().jump(merge_block, &[]);
             }
@@ -2325,6 +2328,23 @@ impl Cg<'_, '_, '_> {
         value
     }
 
+    /// Jump to a merge block with a non-void result, ensuring RC ownership for borrowed values.
+    fn jump_with_owned_result(
+        &mut self,
+        val: CompiledValue,
+        type_id: TypeId,
+        cranelift_type: Type,
+        needs_rc: bool,
+        merge_block: Block,
+    ) -> Result<(), CodegenError> {
+        if needs_rc && val.is_borrowed() {
+            self.emit_rc_inc_for_type(val.value, type_id)?;
+        }
+        let converted = self.convert_for_select(val.value, cranelift_type);
+        self.builder.ins().jump(merge_block, &[converted.into()]);
+        Ok(())
+    }
+
     /// Compile if expression using blocks (standard path).
     fn if_expr_blocks(
         &mut self,
@@ -2363,11 +2383,13 @@ impl Cg<'_, '_, '_> {
             // Divergent branch (unreachable/panic) — terminate with trap
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         } else if !is_void {
-            if result_needs_rc && then_result.is_borrowed() {
-                self.emit_rc_inc_for_type(then_result.value, result_type_id)?;
-            }
-            let converted = self.convert_for_select(then_result.value, result_cranelift_type);
-            self.builder.ins().jump(merge_block, &[converted.into()]);
+            self.jump_with_owned_result(
+                then_result,
+                result_type_id,
+                result_cranelift_type,
+                result_needs_rc,
+                merge_block,
+            )?;
         } else {
             self.builder.ins().jump(merge_block, &[]);
         }
@@ -2385,11 +2407,13 @@ impl Cg<'_, '_, '_> {
             // Divergent branch (unreachable/panic) — terminate with trap
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         } else if !is_void {
-            if result_needs_rc && else_result.is_borrowed() {
-                self.emit_rc_inc_for_type(else_result.value, result_type_id)?;
-            }
-            let converted = self.convert_for_select(else_result.value, result_cranelift_type);
-            self.builder.ins().jump(merge_block, &[converted.into()]);
+            self.jump_with_owned_result(
+                else_result,
+                result_type_id,
+                result_cranelift_type,
+                result_needs_rc,
+                merge_block,
+            )?;
         } else {
             self.builder.ins().jump(merge_block, &[]);
         }
@@ -2614,11 +2638,13 @@ impl Cg<'_, '_, '_> {
 
             if !is_void {
                 // For RC types, ensure each arm contributes an owned +1 ref.
-                if result_needs_rc && body_result.is_borrowed() {
-                    self.emit_rc_inc_for_type(body_result.value, result_type_id)?;
-                }
-                let converted = self.convert_for_select(body_result.value, result_cranelift_type);
-                self.builder.ins().jump(merge_block, &[converted.into()]);
+                self.jump_with_owned_result(
+                    body_result,
+                    result_type_id,
+                    result_cranelift_type,
+                    result_needs_rc,
+                    merge_block,
+                )?;
             } else {
                 self.builder.ins().jump(merge_block, &[]);
             }
