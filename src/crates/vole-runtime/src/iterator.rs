@@ -20,8 +20,10 @@ use crate::alloc_track;
 use crate::array::RcArray;
 use crate::closure::Closure;
 use crate::iterator_abi::{NextTag, TaggedNextWord};
+use crate::iterator_backend::{IteratorBackend, active_backend};
+use crate::iterator_core::CoreIter;
 use crate::string::RcString;
-use crate::value::{RcHeader, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc, tag_needs_rc};
+use crate::value::{RcHeader, TYPE_I64, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc, tag_needs_rc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -1012,6 +1014,105 @@ pub extern "C" fn vole_iter_next(iter: *mut RcIterator) -> *mut u8 {
 // Generate iter_produces_owned from the central definition
 for_all_iterator_kinds!(generate_produces_owned);
 
+fn pack_optional_i64(value: Option<i64>) -> *mut u8 {
+    let layout = Layout::from_size_align(TaggedNextWord::SIZE, TaggedNextWord::ALIGN)
+        .expect("valid optional layout");
+    let ptr = unsafe { alloc(layout) };
+    if ptr.is_null() {
+        std::alloc::handle_alloc_error(layout);
+    }
+    unsafe {
+        match value {
+            Some(v) => {
+                ptr::write(ptr, 0u8);
+                ptr::write(ptr.add(TaggedNextWord::PAYLOAD_OFFSET) as *mut i64, v);
+            }
+            None => {
+                ptr::write(ptr, 1u8);
+                ptr::write(ptr.add(TaggedNextWord::PAYLOAD_OFFSET) as *mut i64, 0);
+            }
+        }
+    }
+    ptr
+}
+
+fn drain_iter_to_i64_words(iter: *mut RcIterator) -> Vec<i64> {
+    let mut out = Vec::new();
+    if iter.is_null() {
+        return out;
+    }
+    loop {
+        let mut value = 0i64;
+        let has_value = vole_array_iter_next(iter, &mut value);
+        if has_value == 0 {
+            break;
+        }
+        out.push(value);
+    }
+    RcIterator::dec_ref(iter);
+    out
+}
+
+fn words_to_i64_array(words: &[i64]) -> *mut RcArray {
+    use crate::value::TaggedValue;
+
+    let result = RcArray::new();
+    unsafe {
+        for &value in words {
+            RcArray::push(result, TaggedValue::from_i64(value));
+        }
+    }
+    result
+}
+
+fn try_new_core_collect_tagged(iter: *mut RcIterator, elem_tag: u64) -> Option<*mut RcArray> {
+    if elem_tag != TYPE_I64 as u64 {
+        return None;
+    }
+    let words = drain_iter_to_i64_words(iter);
+    let collected = CoreIter::from_i64_slice(&words).collect_i64().ok()?;
+    Some(words_to_i64_array(&collected))
+}
+
+fn try_new_core_first(iter: *mut RcIterator) -> Option<*mut u8> {
+    if !iter.is_null() {
+        let elem_tag = unsafe { (*iter).elem_tag };
+        if tag_needs_rc(elem_tag) {
+            return None;
+        }
+    }
+    let words = drain_iter_to_i64_words(iter);
+    let value = CoreIter::from_i64_slice(&words).first_i64().ok()?;
+    Some(pack_optional_i64(value))
+}
+
+fn try_new_core_last(iter: *mut RcIterator) -> Option<*mut u8> {
+    if !iter.is_null() {
+        let elem_tag = unsafe { (*iter).elem_tag };
+        if tag_needs_rc(elem_tag) {
+            return None;
+        }
+    }
+    let words = drain_iter_to_i64_words(iter);
+    let value = CoreIter::from_i64_slice(&words).last_i64().ok()?;
+    Some(pack_optional_i64(value))
+}
+
+fn try_new_core_nth(iter: *mut RcIterator, n: i64) -> Option<*mut u8> {
+    if n < 0 {
+        return None;
+    }
+    if !iter.is_null() {
+        let elem_tag = unsafe { (*iter).elem_tag };
+        if tag_needs_rc(elem_tag) {
+            return None;
+        }
+    }
+    let words = drain_iter_to_i64_words(iter);
+    let value = CoreIter::from_i64_slice(&words).nth_i64(n as usize).ok()?;
+    Some(pack_optional_i64(value))
+}
+
 /// Collect all remaining iterator values into a new array with proper element type tags.
 /// Reads `elem_tag` from the iterator's stored tag (set by codegen or
 /// `interface_iter_tagged`). Used by vtable dispatch where the extra tag
@@ -1046,6 +1147,12 @@ pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_collect_tagged(iter: *mut RcIterator, elem_tag: u64) -> *mut RcArray {
     use crate::value::{TaggedValue, tag_needs_rc};
+
+    if active_backend() == IteratorBackend::NewCore
+        && let Some(result) = try_new_core_collect_tagged(iter, elem_tag)
+    {
+        return result;
+    }
 
     let result = RcArray::new();
 
@@ -1590,6 +1697,12 @@ pub extern "C" fn vole_iter_reduce(
 /// Frees the iterator after getting the first element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
+    if active_backend() == IteratorBackend::NewCore
+        && let Some(ptr) = try_new_core_first(iter)
+    {
+        return ptr;
+    }
+
     let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
     let ptr = unsafe { alloc(layout) };
     if ptr.is_null() {
@@ -1636,6 +1749,12 @@ pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
 /// Frees the iterator after getting the last element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
+    if active_backend() == IteratorBackend::NewCore
+        && let Some(ptr) = try_new_core_last(iter)
+    {
+        return ptr;
+    }
+
     let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
     let ptr = unsafe { alloc(layout) };
     if ptr.is_null() {
@@ -1698,6 +1817,12 @@ pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
 /// Frees the iterator after getting the nth element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 {
+    if active_backend() == IteratorBackend::NewCore
+        && let Some(ptr) = try_new_core_nth(iter, n)
+    {
+        return ptr;
+    }
+
     let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
     let ptr = unsafe { alloc(layout) };
     if ptr.is_null() {

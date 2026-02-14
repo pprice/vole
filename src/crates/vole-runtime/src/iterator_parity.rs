@@ -14,6 +14,7 @@ use crate::iterator::{
     vole_iter_find, vole_iter_first, vole_iter_last, vole_iter_nth, vole_iter_reduce,
 };
 use crate::iterator_abi::TaggedNextWord;
+use crate::iterator_backend::{IteratorBackend as RuntimeBackend, with_backend};
 use crate::iterator_core::CoreIter;
 use crate::value::TaggedValue;
 
@@ -242,4 +243,31 @@ fn parity_find_any_all() {
             (found, any as i8, all as i8)
         }
     });
+}
+
+#[test]
+fn adapter_dispatch_matches_legacy_for_array_paths() {
+    let legacy = with_backend(RuntimeBackend::Legacy, || {
+        let collected = collect_i64_values(vole_iter_collect_tagged(
+            mk_legacy_array_iter(&[5, 6, 7]),
+            crate::value::TYPE_I64 as u64,
+        ));
+        let first = decode_optional_i64(vole_iter_first(mk_legacy_array_iter(&[5, 6, 7])));
+        let last = decode_optional_i64(vole_iter_last(mk_legacy_array_iter(&[5, 6, 7])));
+        let nth = decode_optional_i64(vole_iter_nth(mk_legacy_array_iter(&[5, 6, 7]), 1));
+        (collected, first, last, nth)
+    });
+
+    let new_core = with_backend(RuntimeBackend::NewCore, || {
+        let collected = collect_i64_values(vole_iter_collect_tagged(
+            mk_legacy_array_iter(&[5, 6, 7]),
+            crate::value::TYPE_I64 as u64,
+        ));
+        let first = decode_optional_i64(vole_iter_first(mk_legacy_array_iter(&[5, 6, 7])));
+        let last = decode_optional_i64(vole_iter_last(mk_legacy_array_iter(&[5, 6, 7])));
+        let nth = decode_optional_i64(vole_iter_nth(mk_legacy_array_iter(&[5, 6, 7]), 1));
+        (collected, first, last, nth)
+    });
+
+    assert_eq!(new_core, legacy, "adapter dispatch diverged from legacy");
 }
