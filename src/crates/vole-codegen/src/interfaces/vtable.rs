@@ -7,13 +7,13 @@ use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use super::vtable_ctx::{VtableCtx, VtableCtxView};
 use crate::RuntimeFn;
-use crate::union_layout;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use crate::types::{
     CompiledValue, MethodInfo, method_name_id_by_str, type_id_size, type_id_to_cranelift,
     type_metadata_by_name_id, value_to_word, word_to_value_type_id,
 };
+use crate::union_layout;
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::EntityRegistry;
@@ -458,8 +458,15 @@ impl InterfaceVtableRegistry {
 
                     builder.ins().stack_store(remapped_tag, slot, 0);
                     if union_size > union_layout::TAG_ONLY_SIZE {
-                        let payload = builder.ins().load(types::I64, MemFlags::new(), result, union_layout::PAYLOAD_OFFSET);
-                        builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+                        let payload = builder.ins().load(
+                            types::I64,
+                            MemFlags::new(),
+                            result,
+                            union_layout::PAYLOAD_OFFSET,
+                        );
+                        builder
+                            .ins()
+                            .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
                     }
 
                     // Heap-allocate and copy from local stack to heap.
@@ -471,10 +478,17 @@ impl InterfaceVtableRegistry {
                     let local_tag = builder.ins().stack_load(types::I8, slot, 0);
                     builder.ins().store(MemFlags::new(), local_tag, heap_ptr, 0);
                     if union_size > union_layout::TAG_ONLY_SIZE {
-                        let local_payload = builder.ins().stack_load(types::I64, slot, union_layout::PAYLOAD_OFFSET);
-                        builder
-                            .ins()
-                            .store(MemFlags::new(), local_payload, heap_ptr, union_layout::PAYLOAD_OFFSET);
+                        let local_payload = builder.ins().stack_load(
+                            types::I64,
+                            slot,
+                            union_layout::PAYLOAD_OFFSET,
+                        );
+                        builder.ins().store(
+                            MemFlags::new(),
+                            local_payload,
+                            heap_ptr,
+                            union_layout::PAYLOAD_OFFSET,
+                        );
                     }
 
                     builder.ins().return_(&[heap_ptr]);
@@ -655,7 +669,7 @@ fn compile_method_wrapper<C: VtableCtx>(
 }
 
 /// Compile wrapper body for External target (native/external function calls)
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn compile_external_wrapper<C: VtableCtx>(
     builder: &mut FunctionBuilder,
     ctx: &mut C,
@@ -682,7 +696,10 @@ fn compile_external_wrapper<C: VtableCtx>(
             .native_registry()
             .lookup("vole:std:runtime", native_name)
             .ok_or_else(|| {
-                CodegenError::not_found("native function", format!("vole:std:runtime::{}", native_name))
+                CodegenError::not_found(
+                    "native function",
+                    format!("vole:std:runtime::{}", native_name),
+                )
             })?
             .ptr;
         let mut iter_sig = ctx.jit_module().make_signature();
@@ -696,9 +713,10 @@ fn compile_external_wrapper<C: VtableCtx>(
             .ins()
             .iconst(ctx.ptr_type(), interface_iter_ptr as i64);
         let iter_call = if use_tag {
-            let tag_val = builder
-                .ins()
-                .iconst(types::I64, iter_elem_tag.expect("tagged iterator requires known element type") as i64);
+            let tag_val = builder.ins().iconst(
+                types::I64,
+                iter_elem_tag.expect("tagged iterator requires known element type") as i64,
+            );
             builder
                 .ins()
                 .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr, tag_val])
@@ -740,7 +758,12 @@ fn compile_external_wrapper<C: VtableCtx>(
     let native_func_ptr = ctx
         .native_registry()
         .lookup(&module_path, &native_name)
-        .ok_or_else(|| CodegenError::not_found("native function", format!("{}::{}", module_path, native_name)))?
+        .ok_or_else(|| {
+            CodegenError::not_found(
+                "native function",
+                format!("{}::{}", module_path, native_name),
+            )
+        })?
         .ptr;
 
     let mut native_sig = ctx.jit_module().make_signature();
@@ -903,7 +926,9 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
         .analyzed
         .name_table()
         .last_segment_str(interface_def.name_id)
-        .ok_or_else(|| CodegenError::not_found("interface name string", format!("{:?}", type_def_id)))?;
+        .ok_or_else(|| {
+            CodegenError::not_found("interface name string", format!("{:?}", type_def_id))
+        })?;
     let interface_name = env.interner.lookup(&interface_name_str).ok_or_else(|| {
         CodegenError::not_found("interface name in interner", &interface_name_str)
     })?;
@@ -1026,7 +1051,10 @@ fn resolve_vtable_target<C: VtableCtx>(
 
     let impl_type_id = ImplTypeId::from_type_id(concrete_type_id, ctx.arena(), ctx.registry())
         .ok_or_else(|| {
-            CodegenError::not_found("interface method", format!("{} on {:?}", method_name_str, concrete_type_id))
+            CodegenError::not_found(
+                "interface method",
+                format!("{} on {:?}", method_name_str, concrete_type_id),
+            )
         })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented

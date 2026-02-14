@@ -179,7 +179,12 @@ impl Cg<'_, '_, '_> {
             {
                 // TaggedValue layout: [tag:8][value:8]
                 // Extract the value from offset 8 and convert to proper type
-                let raw_value = self.builder.ins().load(types::I64, MemFlags::new(), val, union_layout::PAYLOAD_OFFSET);
+                let raw_value = self.builder.ins().load(
+                    types::I64,
+                    MemFlags::new(),
+                    val,
+                    union_layout::PAYLOAD_OFFSET,
+                );
                 let extracted = self.extract_unknown_value(raw_value, narrowed_type_id);
                 return Ok(extracted);
             }
@@ -320,9 +325,10 @@ impl Cg<'_, '_, '_> {
         // Unwrap function type to get params and return type
         let (param_ids, return_type_id) = {
             let arena = self.arena();
-            let (params, ret, _is_closure) = arena
-                .unwrap_function(func_type_id)
-                .ok_or_else(|| CodegenError::type_mismatch("closure wrapper", "function type", "non-function"))?;
+            let (params, ret, _is_closure) =
+                arena.unwrap_function(func_type_id).ok_or_else(|| {
+                    CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
+                })?;
             (params.clone(), ret)
         };
 
@@ -479,15 +485,10 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile assignment to a variable, handling RC snapshots and cleanup.
-    fn assign_variable(
-        &mut self,
-        sym: Symbol,
-        value_expr: &Expr,
-    ) -> CodegenResult<CompiledValue> {
+    fn assign_variable(&mut self, sym: Symbol, value_expr: &Expr) -> CodegenResult<CompiledValue> {
         // Read the old value BEFORE evaluating the new expression,
         // so we can rc_dec it after the assignment.
-        let (rc_old, composite_rc_old, union_rc_old) =
-            self.snapshot_rc_for_reassignment(&sym);
+        let (rc_old, composite_rc_old, union_rc_old) = self.snapshot_rc_for_reassignment(&sym);
 
         let mut value = self.expr(value_expr)?;
 
@@ -496,9 +497,10 @@ impl Cg<'_, '_, '_> {
             return self.store_capture(&binding, value);
         }
 
-        let (var, var_type_id) = self.vars.get(&sym).ok_or_else(|| {
-            CodegenError::not_found("variable", self.interner().resolve(sym))
-        })?;
+        let (var, var_type_id) = self
+            .vars
+            .get(&sym)
+            .ok_or_else(|| CodegenError::not_found("variable", self.interner().resolve(sym)))?;
         let var = *var;
         let var_type_id = *var_type_id;
 
@@ -520,10 +522,10 @@ impl Cg<'_, '_, '_> {
         // The new struct's fields are already alive (fresh from the literal).
         if let Some((old_ptr, offsets)) = composite_rc_old {
             for off in &offsets {
-                let field_ptr =
-                    self.builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), old_ptr, *off);
+                let field_ptr = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), old_ptr, *off);
                 self.emit_rc_dec(field_ptr)?;
             }
             // Update the composite RC local's offsets so scope-exit cleanup
@@ -548,6 +550,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// Returns (rc_old, composite_rc_old, union_rc_old) — each `Some` if the
     /// variable's old value needs RC cleanup after the new value is stored.
+    #[expect(clippy::type_complexity)]
     fn snapshot_rc_for_reassignment(
         &mut self,
         sym: &Symbol,
@@ -1189,7 +1192,9 @@ impl Cg<'_, '_, '_> {
                 let tested_type_id = self
                     .resolve_simple_type_expr(&is_expr.type_expr)
                     .ok_or_else(|| {
-                        CodegenError::internal("is expression in monomorphized generic: cannot resolve tested type")
+                        CodegenError::internal(
+                            "is expression in monomorphized generic: cannot resolve tested type",
+                        )
                     })?;
                 self.compute_is_check_result(value.type_id, tested_type_id)
             }
@@ -1345,10 +1350,12 @@ impl Cg<'_, '_, '_> {
         // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
         let union_size = self.type_size(value.type_id);
         let payload = if union_size > union_layout::TAG_ONLY_SIZE {
-            let loaded = self
-                .builder
-                .ins()
-                .load(cranelift_type, MemFlags::new(), value.value, union_layout::PAYLOAD_OFFSET);
+            let loaded = self.builder.ins().load(
+                cranelift_type,
+                MemFlags::new(),
+                value.value,
+                union_layout::PAYLOAD_OFFSET,
+            );
             // RC: if the source is a variable, its union cleanup will dec the
             // payload at scope exit, so we need rc_inc to keep the extracted
             // value alive. If the source is a temporary (function call, etc.),
@@ -1375,9 +1382,9 @@ impl Cg<'_, '_, '_> {
         &mut self,
         binding: &super::lambda::CaptureBinding,
     ) -> CodegenResult<CompiledValue> {
-        let closure_var = self
-            .closure_var()
-            .ok_or_else(|| CodegenError::internal("closure variable not available for capture access"))?;
+        let closure_var = self.closure_var().ok_or_else(|| {
+            CodegenError::internal("closure variable not available for capture access")
+        })?;
         let closure_ptr = self.builder.use_var(closure_var);
 
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
@@ -1413,9 +1420,9 @@ impl Cg<'_, '_, '_> {
         binding: &super::lambda::CaptureBinding,
         mut value: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
-        let closure_var = self
-            .closure_var()
-            .ok_or_else(|| CodegenError::internal("closure variable not available for capture access"))?;
+        let closure_var = self.closure_var().ok_or_else(|| {
+            CodegenError::internal("closure variable not available for capture access")
+        })?;
         let closure_ptr = self.builder.use_var(closure_var);
 
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
@@ -1498,11 +1505,8 @@ impl Cg<'_, '_, '_> {
                 // Coerce literal value to match scrutinee's Cranelift type.
                 let coerced_lit = self.convert_for_select(lit_val.value, scrutinee.ty);
 
-                let cmp = self.compile_equality_check(
-                    scrutinee_type_id,
-                    scrutinee.value,
-                    coerced_lit,
-                )?;
+                let cmp =
+                    self.compile_equality_check(scrutinee_type_id, scrutinee.value, coerced_lit)?;
                 Ok(Some(cmp))
             }
             PatternKind::Val { name } => {
@@ -1581,21 +1585,20 @@ impl Cg<'_, '_, '_> {
                 }
                 Ok(None)
             }
-            PatternKind::Record { type_name, fields } => {
-                self.compile_record_pattern(
-                    scrutinee,
-                    pattern,
-                    type_name.as_ref(),
-                    fields,
-                    arm_variables,
-                    arm_block,
-                    next_block,
-                    effective_arm_block,
-                )
-            }
+            PatternKind::Record { type_name, fields } => self.compile_record_pattern(
+                scrutinee,
+                pattern,
+                type_name.as_ref(),
+                fields,
+                arm_variables,
+                arm_block,
+                next_block,
+                effective_arm_block,
+            ),
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn compile_record_pattern(
         &mut self,
         scrutinee: &CompiledValue,
@@ -1610,13 +1613,9 @@ impl Cg<'_, '_, '_> {
         let scrutinee_type_id = scrutinee.type_id;
 
         let (pattern_check, pattern_type_id) = if let Some(type_expr) = type_name {
-            let pattern_check =
-                self.compile_type_pattern_check(scrutinee, pattern.id)?;
-            let pattern_type_id = self.pattern_type_id_for_record_arm(
-                scrutinee_type_id,
-                pattern.id,
-                type_expr,
-            );
+            let pattern_check = self.compile_type_pattern_check(scrutinee, pattern.id)?;
+            let pattern_type_id =
+                self.pattern_type_id_for_record_arm(scrutinee_type_id, pattern.id, type_expr);
             (pattern_check, pattern_type_id)
         } else {
             (None, None)
@@ -1628,8 +1627,8 @@ impl Cg<'_, '_, '_> {
         if is_conditional_extract {
             let extract_block = self.builder.create_block();
 
-            let cond = pattern_check
-                .expect("INTERNAL: match pattern: missing pattern_check condition");
+            let cond =
+                pattern_check.expect("INTERNAL: match pattern: missing pattern_check condition");
             let cond_i32 = self.cond_to_i32(cond);
             self.builder
                 .ins()
@@ -1639,51 +1638,35 @@ impl Cg<'_, '_, '_> {
 
             self.builder.switch_to_block(extract_block);
 
-            let (field_source, field_source_type_id) =
-                if let Some(pt_id) = pattern_type_id {
-                    let payload = self.builder.ins().load(
-                        types::I64,
-                        MemFlags::new(),
-                        scrutinee.value,
-                        8,
-                    );
-                    (payload, pt_id)
-                } else {
-                    (scrutinee.value, scrutinee_type_id)
-                };
+            let (field_source, field_source_type_id) = if let Some(pt_id) = pattern_type_id {
+                let payload =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), scrutinee.value, 8);
+                (payload, pt_id)
+            } else {
+                (scrutinee.value, scrutinee_type_id)
+            };
 
-            self.extract_record_fields(
-                fields,
-                field_source,
-                field_source_type_id,
-                arm_variables,
-            )?;
+            self.extract_record_fields(fields, field_source, field_source_type_id, arm_variables)?;
 
             Ok(None)
         } else {
-            let (field_source, field_source_type_id) =
-                if self.arena().is_union(scrutinee_type_id) {
-                    if let Some(pt_id) = pattern_type_id {
-                        let payload = self.builder.ins().load(
-                            types::I64,
-                            MemFlags::new(),
-                            scrutinee.value,
-                            8,
-                        );
-                        (payload, pt_id)
-                    } else {
-                        (scrutinee.value, scrutinee_type_id)
-                    }
+            let (field_source, field_source_type_id) = if self.arena().is_union(scrutinee_type_id) {
+                if let Some(pt_id) = pattern_type_id {
+                    let payload =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), scrutinee.value, 8);
+                    (payload, pt_id)
                 } else {
                     (scrutinee.value, scrutinee_type_id)
-                };
+                }
+            } else {
+                (scrutinee.value, scrutinee_type_id)
+            };
 
-            self.extract_record_fields(
-                fields,
-                field_source,
-                field_source_type_id,
-                arm_variables,
-            )?;
+            self.extract_record_fields(fields, field_source, field_source_type_id, arm_variables)?;
 
             Ok(pattern_check)
         }
@@ -1835,8 +1818,7 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
 
-                let converted =
-                    self.convert_for_select(body_val.value, result_cranelift_type);
+                let converted = self.convert_for_select(body_val.value, result_cranelift_type);
                 self.builder.ins().jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
@@ -1940,8 +1922,7 @@ impl Cg<'_, '_, '_> {
                 if result_needs_rc && body_val.is_borrowed() {
                     self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
-                let converted =
-                    self.convert_for_select(body_val.value, result_cranelift_type);
+                let converted = self.convert_for_select(body_val.value, result_cranelift_type);
                 self.builder.ins().jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
@@ -2283,10 +2264,8 @@ impl Cg<'_, '_, '_> {
             type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
 
         // Ensure both values have the same type (may need conversion)
-        let then_val =
-            self.convert_for_select(then_result.value, result_cranelift_type);
-        let else_val =
-            self.convert_for_select(else_result.value, result_cranelift_type);
+        let then_val = self.convert_for_select(then_result.value, result_cranelift_type);
+        let else_val = self.convert_for_select(else_result.value, result_cranelift_type);
 
         // Extend condition to i8 if needed (select expects i8/i16/i32/i64 condition)
         let cond_val = if condition.ty == types::I8 {
@@ -2335,10 +2314,10 @@ impl Cg<'_, '_, '_> {
             if actual_ty.bits() == to_ty.bits() {
                 return self.builder.ins().bitcast(to_ty, MemFlags::new(), value);
             } else if actual_ty.bits() > to_ty.bits() {
-                let narrowed = self
-                    .builder
-                    .ins()
-                    .ireduce(Type::int(to_ty.bits() as u16).expect("valid integer type for narrowing"), value);
+                let narrowed = self.builder.ins().ireduce(
+                    Type::int(to_ty.bits() as u16).expect("valid integer type for narrowing"),
+                    value,
+                );
                 return self.builder.ins().bitcast(to_ty, MemFlags::new(), narrowed);
             }
         }
@@ -2387,8 +2366,7 @@ impl Cg<'_, '_, '_> {
             if result_needs_rc && then_result.is_borrowed() {
                 self.emit_rc_inc_for_type(then_result.value, result_type_id)?;
             }
-            let converted =
-                self.convert_for_select(then_result.value, result_cranelift_type);
+            let converted = self.convert_for_select(then_result.value, result_cranelift_type);
             self.builder.ins().jump(merge_block, &[converted.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
@@ -2410,8 +2388,7 @@ impl Cg<'_, '_, '_> {
             if result_needs_rc && else_result.is_borrowed() {
                 self.emit_rc_inc_for_type(else_result.value, result_type_id)?;
             }
-            let converted =
-                self.convert_for_select(else_result.value, result_cranelift_type);
+            let converted = self.convert_for_select(else_result.value, result_cranelift_type);
             self.builder.ins().jump(merge_block, &[converted.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
@@ -2512,10 +2489,8 @@ impl Cg<'_, '_, '_> {
             type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
 
         // Ensure both values have the same type (may need conversion)
-        let then_val =
-            self.convert_for_select(then_result.value, result_cranelift_type);
-        let else_val =
-            self.convert_for_select(else_result.value, result_cranelift_type);
+        let then_val = self.convert_for_select(then_result.value, result_cranelift_type);
+        let else_val = self.convert_for_select(else_result.value, result_cranelift_type);
 
         // Extend condition to i8 if needed
         let cond_val = if condition.ty == types::I8 {

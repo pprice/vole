@@ -234,7 +234,7 @@ define_int_op_enum! {
 
 define_int_op_enum! {
     /// Unary integer wrapping operations.
-    #[allow(clippy::enum_variant_names)] // All variants are WrappingNeg by design for consistency
+    #[expect(clippy::enum_variant_names)] // All variants are WrappingNeg by design for consistency
     pub enum UnaryIntWrappingOp {
         signed: [WrappingNeg],
     }
