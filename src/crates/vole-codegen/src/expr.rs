@@ -915,7 +915,84 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
-    /// Compile an index assignment
+    /// Assign a value to a fixed array element at the given index.
+    /// Handles compile-time and runtime bounds checking, RC bookkeeping
+    /// for element overwrite, and direct store at computed offset.
+    fn index_assign_fixed_array(
+        &mut self,
+        arr_value: Value,
+        index: &Expr,
+        val: CompiledValue,
+        elem_type_id: TypeId,
+        size: usize,
+    ) -> CodegenResult<CompiledValue> {
+        let elem_size = 8i32; // All elements aligned to 8 bytes
+
+        // Calculate offset
+        let offset = if let ExprKind::IntLiteral(i, _) = &index.kind {
+            let i = *i as usize;
+            if i >= size {
+                return Err(CodegenError::internal_with_context(
+                    "array index out of bounds",
+                    format!("index {} for array of size {}", i, size),
+                ));
+            }
+            self.builder.ins().iconst(types::I64, (i as i64) * 8)
+        } else {
+            // Runtime index - add bounds check
+            let idx = self.expr(index)?;
+            let size_val = self.builder.ins().iconst(types::I64, size as i64);
+
+            // Check if index < 0 or index >= size
+            let in_bounds = self
+                .builder
+                .ins()
+                .icmp(IntCC::UnsignedLessThan, idx.value, size_val);
+
+            // Trap if out of bounds
+            self.builder
+                .ins()
+                .trapz(in_bounds, crate::trap_codes::BOUNDS_CHECK);
+
+            let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
+            self.builder.ins().imul(idx.value, elem_size_val)
+        };
+
+        let elem_ptr = self.builder.ins().iadd(arr_value, offset);
+
+        // RC bookkeeping for fixed array element overwrite:
+        // 1. Load old element value
+        // 2. rc_inc new if it's a borrow
+        // 3. Store new value
+        // 4. rc_dec old (after store, in case old == new)
+        let rc_old =
+            if self.rc_scopes.has_active_scope() && self.rc_state(elem_type_id).needs_cleanup() {
+                Some(
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), elem_ptr, 0),
+                )
+            } else {
+                None
+            };
+        if rc_old.is_some() && val.is_borrowed() {
+            self.emit_rc_inc_for_type(val.value, elem_type_id)?;
+        }
+        self.builder
+            .ins()
+            .store(MemFlags::new(), val.value, elem_ptr, 0);
+        if let Some(old_val) = rc_old {
+            self.emit_rc_dec_for_type(old_val, elem_type_id)?;
+        }
+
+        // The assignment consumed the temp — ownership transfers
+        // to the array element; the container's cleanup handles the dec.
+        let mut val = val;
+        val.mark_consumed();
+        val.debug_assert_rc_handled("fixed array index assign");
+        Ok(val)
+    }
+
     fn index_assign(
         &mut self,
         object: &Expr,
@@ -930,73 +1007,7 @@ impl Cg<'_, '_, '_> {
         let is_dynamic_array = arena.is_array(arr.type_id);
 
         if let Some((elem_type_id, size)) = fixed_array_info {
-            // Fixed array assignment - store directly at offset
-            let elem_size = 8i32; // All elements aligned to 8 bytes
-
-            // Calculate offset
-            let offset = if let ExprKind::IntLiteral(i, _) = &index.kind {
-                let i = *i as usize;
-                if i >= size {
-                    return Err(CodegenError::internal_with_context(
-                        "array index out of bounds",
-                        format!("index {} for array of size {}", i, size),
-                    ));
-                }
-                self.builder.ins().iconst(types::I64, (i as i64) * 8)
-            } else {
-                // Runtime index - add bounds check
-                let idx = self.expr(index)?;
-                let size_val = self.builder.ins().iconst(types::I64, size as i64);
-
-                // Check if index < 0 or index >= size
-                let in_bounds =
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::UnsignedLessThan, idx.value, size_val);
-
-                // Trap if out of bounds
-                self.builder
-                    .ins()
-                    .trapz(in_bounds, crate::trap_codes::BOUNDS_CHECK);
-
-                let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
-                self.builder.ins().imul(idx.value, elem_size_val)
-            };
-
-            let elem_ptr = self.builder.ins().iadd(arr.value, offset);
-
-            // RC bookkeeping for fixed array element overwrite:
-            // 1. Load old element value
-            // 2. rc_inc new if it's a borrow
-            // 3. Store new value
-            // 4. rc_dec old (after store, in case old == new)
-            let rc_old = if self.rc_scopes.has_active_scope()
-                && self.rc_state(elem_type_id).needs_cleanup()
-            {
-                Some(
-                    self.builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), elem_ptr, 0),
-                )
-            } else {
-                None
-            };
-            if rc_old.is_some() && val.is_borrowed() {
-                self.emit_rc_inc_for_type(val.value, elem_type_id)?;
-            }
-            self.builder
-                .ins()
-                .store(MemFlags::new(), val.value, elem_ptr, 0);
-            if let Some(old_val) = rc_old {
-                self.emit_rc_dec_for_type(old_val, elem_type_id)?;
-            }
-
-            // The assignment consumed the temp — ownership transfers
-            // to the array element; the container's cleanup handles the dec.
-            let mut val = val;
-            val.mark_consumed();
-            val.debug_assert_rc_handled("fixed array index assign");
-            Ok(val)
+            self.index_assign_fixed_array(arr.value, index, val, elem_type_id, size)
         } else if is_dynamic_array {
             // Dynamic array assignment
             let idx = self.expr(index)?;
