@@ -3,6 +3,7 @@
 // Call-related codegen - impl Cg methods and standalone helpers.
 
 use cranelift::prelude::*;
+use cranelift_codegen::ir::SigRef;
 use cranelift_jit::JITModule;
 use cranelift_module::{DataDescription, FuncId, Linkage, Module};
 use smallvec::{SmallVec, smallvec};
@@ -243,9 +244,12 @@ impl Cg<'_, '_, '_> {
         // Sentinel-only unions have no payload bytes allocated at offset 8.
         let inner_size = self.type_size(inner_type_id);
         let inner_val = if inner_size > 0 {
-            self.builder
-                .ins()
-                .load(inner_cr_type, MemFlags::new(), ptr, union_layout::PAYLOAD_OFFSET)
+            self.builder.ins().load(
+                inner_cr_type,
+                MemFlags::new(),
+                ptr,
+                union_layout::PAYLOAD_OFFSET,
+            )
         } else {
             self.builder.ins().iconst(inner_cr_type, 0)
         };
@@ -299,9 +303,12 @@ impl Cg<'_, '_, '_> {
             let inner_size = self.type_size(variant_type_id);
 
             let inner_val = if inner_size > 0 {
-                self.builder
-                    .ins()
-                    .load(inner_cr_type, MemFlags::new(), ptr, union_layout::PAYLOAD_OFFSET)
+                self.builder.ins().load(
+                    inner_cr_type,
+                    MemFlags::new(),
+                    ptr,
+                    union_layout::PAYLOAD_OFFSET,
+                )
             } else {
                 self.builder.ins().iconst(inner_cr_type, 0)
             };
@@ -340,9 +347,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a module binding (from destructuring import)
-        if let Some(&(module_id, export_name, _)) =
-            self.module_bindings.get(&callee_sym)
-        {
+        if let Some(&(module_id, export_name, _)) = self.module_bindings.get(&callee_sym) {
             // Check if this is a generic external function that needs monomorphization
             if let Some(result) =
                 self.try_call_generic_external_intrinsic_from_monomorph(call_expr_id, call)?
@@ -350,12 +355,7 @@ impl Cg<'_, '_, '_> {
                 return Ok(result);
             }
 
-            return self.call_module_binding(
-                module_id,
-                export_name,
-                call,
-                call_expr_id,
-            );
+            return self.call_module_binding(module_id, export_name, call, call_expr_id);
         }
 
         // Check if it's a closure variable
@@ -426,12 +426,7 @@ impl Cg<'_, '_, '_> {
 
             // Try FFI call for external module functions
             if let Some(native_func) = self.native_registry().lookup(&module_path, callee_name) {
-                return self.call_native_external(
-                    native_func,
-                    callee_sym,
-                    call,
-                    &call_expr_id,
-                );
+                return self.call_native_external(native_func, callee_sym, call, &call_expr_id);
             }
 
             // Fall through to try prelude external functions
@@ -782,8 +777,7 @@ impl Cg<'_, '_, '_> {
             && let Some(name_id) = name_id
         {
             let provided_args = total_user_args;
-            let (default_args, rc_owned) =
-                self.compile_default_args(name_id, provided_args)?;
+            let (default_args, rc_owned) = self.compile_default_args(name_id, provided_args)?;
             args.extend(default_args);
             rc_temp_args.extend(rc_owned);
         }
@@ -1187,22 +1181,7 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        // Coerce args to match signature types. Boolean values flowing through
-        // block parameters (when/match) can be i64 while the signature expects i8.
-        let sig_params: Vec<_> = sig.params.iter().map(|p| p.value_type).collect();
-        let sig_ref = self.builder.import_signature(sig);
-        for (i, &expected_ty) in sig_params.iter().enumerate() {
-            if i < args.len() {
-                let actual_ty = self.builder.func.dfg.value_type(args[i]);
-                if actual_ty != expected_ty && actual_ty.is_int() && expected_ty.is_int() {
-                    args[i] = if expected_ty.bits() < actual_ty.bits() {
-                        self.builder.ins().ireduce(expected_ty, args[i])
-                    } else {
-                        self.builder.ins().sextend(expected_ty, args[i])
-                    };
-                }
-            }
-        }
+        let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
 
         let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
         self.field_cache.clear(); // Callee may mutate instance fields
@@ -1222,7 +1201,9 @@ impl Cg<'_, '_, '_> {
             let slot = self.alloc_stack(slot_size);
 
             self.builder.ins().stack_store(tag, slot, 0);
-            self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+            self.builder
+                .ins()
+                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
 
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
@@ -1239,6 +1220,31 @@ impl Cg<'_, '_, '_> {
                 Ok(self.compiled(results[0], ret))
             }
         }
+    }
+
+    /// Import a signature and coerce argument values to match the expected parameter types.
+    /// Handles bool values from when/match block params that may be i64 when the
+    /// signature expects i8.
+    pub(crate) fn import_sig_and_coerce_args(
+        &mut self,
+        sig: Signature,
+        args: &mut [Value],
+    ) -> SigRef {
+        let sig_param_types: Vec<_> = sig.params.iter().map(|p| p.value_type).collect();
+        let sig_ref = self.builder.import_signature(sig);
+        for (i, &expected_ty) in sig_param_types.iter().enumerate() {
+            if i < args.len() {
+                let actual_ty = self.builder.func.dfg.value_type(args[i]);
+                if actual_ty != expected_ty && actual_ty.is_int() && expected_ty.is_int() {
+                    args[i] = if expected_ty.bits() < actual_ty.bits() {
+                        self.builder.ins().ireduce(expected_ty, args[i])
+                    } else {
+                        self.builder.ins().sextend(expected_ty, args[i])
+                    };
+                }
+            }
+        }
+        sig_ref
     }
 
     /// Emit an indirect call to a native function.

@@ -1363,22 +1363,7 @@ impl Cg<'_, '_, '_> {
                 args.push(compiled.value);
             }
 
-            // Coerce args to match signature types (bool values from when/match
-            // block params can be i64 while the signature expects i8).
-            let sig_param_types: Vec<_> = sig.params.iter().map(|p| p.value_type).collect();
-            let sig_ref = self.builder.import_signature(sig);
-            for (i, &expected_ty) in sig_param_types.iter().enumerate() {
-                if i < args.len() {
-                    let actual_ty = self.builder.func.dfg.value_type(args[i]);
-                    if actual_ty != expected_ty && actual_ty.is_int() && expected_ty.is_int() {
-                        args[i] = if expected_ty.bits() < actual_ty.bits() {
-                            self.builder.ins().ireduce(expected_ty, args[i])
-                        } else {
-                            self.builder.ins().sextend(expected_ty, args[i])
-                        };
-                    }
-                }
-            }
+            let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
 
             // Perform the indirect call
             let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
@@ -1403,21 +1388,7 @@ impl Cg<'_, '_, '_> {
             }
 
             let mut args = self.compile_call_args(&mc.args)?;
-            // Coerce args to match signature types
-            let sig_param_types: Vec<_> = sig.params.iter().map(|p| p.value_type).collect();
-            let sig_ref = self.builder.import_signature(sig);
-            for (i, &expected_ty) in sig_param_types.iter().enumerate() {
-                if i < args.len() {
-                    let actual_ty = self.builder.func.dfg.value_type(args[i]);
-                    if actual_ty != expected_ty && actual_ty.is_int() && expected_ty.is_int() {
-                        args[i] = if expected_ty.bits() < actual_ty.bits() {
-                            self.builder.ins().ireduce(expected_ty, args[i])
-                        } else {
-                            self.builder.ins().sextend(expected_ty, args[i])
-                        };
-                    }
-                }
-            }
+            let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
             let call_inst = self
                 .builder
                 .ins()
