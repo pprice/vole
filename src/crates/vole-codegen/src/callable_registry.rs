@@ -43,48 +43,41 @@ struct CallableSig {
 /// Resolve a typed callable key to its backend implementation.
 ///
 /// Current behavior is a 1:1 mapping with existing call paths.
-pub fn resolve_callable(key: CallableKey) -> ResolvedCallable {
-    resolve_callable_with_preference(key, default_backend_preference())
-}
-
 pub fn resolve_callable_with_preference(
     key: CallableKey,
     preference: CallableBackendPreference,
-) -> ResolvedCallable {
+) -> Result<ResolvedCallable, CallableResolutionError> {
     match key {
         CallableKey::Runtime(runtime) => {
-            debug_assert_eq!(
+            if !matches!(
                 strategy_for_callable(&CallableKey::Runtime(runtime)),
                 CallableStrategy::RuntimeOnly
-            );
-            ResolvedCallable::Runtime(runtime)
+            ) {
+                return Err(CallableResolutionError::InvalidRuntimeStrategy { runtime });
+            }
+            Ok(ResolvedCallable::Runtime(runtime))
         }
         CallableKey::Intrinsic(intrinsic) => match strategy_for_intrinsic(&intrinsic) {
-            CallableStrategy::InlineOnly => ResolvedCallable::InlineIntrinsic(intrinsic),
+            CallableStrategy::InlineOnly => Ok(ResolvedCallable::InlineIntrinsic(intrinsic)),
             CallableStrategy::RuntimeOnly => {
-                let runtime = runtime_peer_for_intrinsic(&intrinsic)
-                    .expect("INTERNAL: runtime-only intrinsic must define runtime peer");
-                ResolvedCallable::Runtime(runtime)
+                let runtime = runtime_peer_for_intrinsic(&intrinsic).ok_or_else(|| {
+                    CallableResolutionError::MissingRuntimePeer {
+                        intrinsic: intrinsic.as_str().to_string(),
+                    }
+                })?;
+                Ok(ResolvedCallable::Runtime(runtime))
             }
             CallableStrategy::PreferInlineFallbackRuntime => {
                 if matches!(preference, CallableBackendPreference::PreferRuntime)
                     && let Some(runtime) = runtime_peer_for_intrinsic(&intrinsic)
                 {
-                    validate_runtime_swap_contract(&intrinsic, runtime)
-                        .expect("INTERNAL: invalid intrinsic/runtime swap contract");
-                    return ResolvedCallable::Runtime(runtime);
+                    validate_runtime_swap_contract(&intrinsic, runtime)?;
+                    return Ok(ResolvedCallable::Runtime(runtime));
                 }
-                ResolvedCallable::InlineIntrinsic(intrinsic)
+                Ok(ResolvedCallable::InlineIntrinsic(intrinsic))
             }
         },
     }
-}
-
-fn default_backend_preference() -> CallableBackendPreference {
-    if std::env::var("VOLE_CALLABLE_BACKEND").is_ok_and(|value| value == "runtime") {
-        return CallableBackendPreference::PreferRuntime;
-    }
-    CallableBackendPreference::PreferInline
 }
 
 pub fn strategy_for_callable(key: &CallableKey) -> CallableStrategy {
@@ -93,6 +86,53 @@ pub fn strategy_for_callable(key: &CallableKey) -> CallableStrategy {
         CallableKey::Intrinsic(intrinsic) => strategy_for_intrinsic(intrinsic),
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallableResolutionError {
+    InvalidRuntimeStrategy {
+        runtime: RuntimeFn,
+    },
+    MissingRuntimePeer {
+        intrinsic: String,
+    },
+    MissingIntrinsicSignature {
+        intrinsic: String,
+    },
+    MissingRuntimeAdapterSignature {
+        intrinsic: String,
+        runtime: RuntimeFn,
+    },
+    SignatureMismatch {
+        intrinsic: String,
+    },
+}
+
+impl std::fmt::Display for CallableResolutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidRuntimeStrategy { runtime } => {
+                write!(f, "invalid runtime strategy for `{runtime:?}`")
+            }
+            Self::MissingRuntimePeer { intrinsic } => {
+                write!(f, "missing runtime peer for intrinsic `{intrinsic}`")
+            }
+            Self::MissingIntrinsicSignature { intrinsic } => {
+                write!(f, "missing intrinsic signature contract for `{intrinsic}`")
+            }
+            Self::MissingRuntimeAdapterSignature { intrinsic, runtime } => {
+                write!(
+                    f,
+                    "missing runtime adapter signature contract for `{intrinsic}` -> `{runtime:?}`"
+                )
+            }
+            Self::SignatureMismatch { intrinsic } => {
+                write!(f, "signature mismatch for `{intrinsic}` runtime swap")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CallableResolutionError {}
 
 fn strategy_for_intrinsic(intrinsic: &IntrinsicKey) -> CallableStrategy {
     if intrinsic.as_str() == "panic" {
@@ -131,21 +171,25 @@ fn runtime_adapter_signature(key: &IntrinsicKey, runtime: RuntimeFn) -> Option<C
     }
 }
 
-fn validate_runtime_swap_contract(key: &IntrinsicKey, runtime: RuntimeFn) -> Result<(), String> {
-    let intrinsic = intrinsic_signature(key)
-        .ok_or_else(|| format!("missing intrinsic signature contract for {}", key.as_str()))?;
+fn validate_runtime_swap_contract(
+    key: &IntrinsicKey,
+    runtime: RuntimeFn,
+) -> Result<(), CallableResolutionError> {
+    let intrinsic = intrinsic_signature(key).ok_or_else(|| {
+        CallableResolutionError::MissingIntrinsicSignature {
+            intrinsic: key.as_str().to_string(),
+        }
+    })?;
     let runtime_adapter = runtime_adapter_signature(key, runtime).ok_or_else(|| {
-        format!(
-            "missing runtime adapter signature contract for {} -> {:?}",
-            key.as_str(),
-            runtime
-        )
+        CallableResolutionError::MissingRuntimeAdapterSignature {
+            intrinsic: key.as_str().to_string(),
+            runtime,
+        }
     })?;
     if intrinsic != runtime_adapter {
-        return Err(format!(
-            "signature mismatch for {} runtime swap",
-            key.as_str()
-        ));
+        return Err(CallableResolutionError::SignatureMismatch {
+            intrinsic: key.as_str().to_string(),
+        });
     }
     Ok(())
 }
@@ -156,7 +200,11 @@ mod tests {
 
     #[test]
     fn runtime_key_resolves_to_runtime_backend() {
-        let resolved = resolve_callable(CallableKey::Runtime(RuntimeFn::StringNew));
+        let resolved = resolve_callable_with_preference(
+            CallableKey::Runtime(RuntimeFn::StringNew),
+            CallableBackendPreference::PreferInline,
+        )
+        .expect("runtime callable resolution");
         assert!(matches!(
             resolved,
             ResolvedCallable::Runtime(RuntimeFn::StringNew)
@@ -165,7 +213,11 @@ mod tests {
 
     #[test]
     fn intrinsic_key_resolves_to_inline_backend() {
-        let resolved = resolve_callable(CallableKey::Intrinsic(IntrinsicKey::from("f64_nan")));
+        let resolved = resolve_callable_with_preference(
+            CallableKey::Intrinsic(IntrinsicKey::from("f64_nan")),
+            CallableBackendPreference::PreferInline,
+        )
+        .expect("intrinsic callable resolution");
         assert!(matches!(
             resolved,
             ResolvedCallable::InlineIntrinsic(key) if key.as_str() == "f64_nan"
@@ -176,14 +228,16 @@ mod tests {
     fn panic_intrinsic_can_toggle_to_runtime_backend() {
         let key = CallableKey::Intrinsic(IntrinsicKey::from("panic"));
         let inline =
-            resolve_callable_with_preference(key.clone(), CallableBackendPreference::PreferInline);
+            resolve_callable_with_preference(key.clone(), CallableBackendPreference::PreferInline)
+                .expect("inline panic callable resolution");
         assert!(matches!(
             inline,
             ResolvedCallable::InlineIntrinsic(k) if k.as_str() == "panic"
         ));
 
         let runtime =
-            resolve_callable_with_preference(key, CallableBackendPreference::PreferRuntime);
+            resolve_callable_with_preference(key, CallableBackendPreference::PreferRuntime)
+                .expect("runtime panic callable resolution");
         assert!(matches!(
             runtime,
             ResolvedCallable::Runtime(RuntimeFn::Panic)

@@ -1487,8 +1487,119 @@ mod tests {
     }
 
     fn contains_runtime_symbol_literal(src: &str) -> bool {
-        src.lines().any(|line| {
-            line.contains("\"vole_") || line.contains("\"rc_inc\"") || line.contains("\"rc_dec\"")
-        })
+        let runtime_literals: FxHashSet<&'static str> = all_symbols()
+            .iter()
+            .map(|symbol| symbol.c_name)
+            .chain(all_linkable_symbols().iter().map(|symbol| symbol.c_name))
+            .collect();
+
+        for literal in string_literals(src) {
+            if runtime_literals.contains(literal.as_str()) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn string_literals(src: &str) -> Vec<String> {
+        let bytes = src.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0usize;
+
+        while i < bytes.len() {
+            // Skip line comments.
+            if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                i += 2;
+                while i < bytes.len() && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+
+            // Skip block comments (supports nesting).
+            if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                i += 2;
+                let mut depth = 1usize;
+                while i + 1 < bytes.len() && depth > 0 {
+                    if bytes[i] == b'/' && bytes[i + 1] == b'*' {
+                        depth += 1;
+                        i += 2;
+                    } else if bytes[i] == b'*' && bytes[i + 1] == b'/' {
+                        depth -= 1;
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                continue;
+            }
+
+            // Parse normal string literal.
+            if bytes[i] == b'"' {
+                i += 1;
+                let mut lit = String::new();
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        if i + 1 < bytes.len() {
+                            lit.push(bytes[i + 1] as char);
+                            i += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    if bytes[i] == b'"' {
+                        i += 1;
+                        break;
+                    }
+                    lit.push(bytes[i] as char);
+                    i += 1;
+                }
+                out.push(lit);
+                continue;
+            }
+
+            // Parse raw string literal r#"..."# (and multi-# forms).
+            if bytes[i] == b'r'
+                && i + 1 < bytes.len()
+                && (bytes[i + 1] == b'"' || bytes[i + 1] == b'#')
+            {
+                let mut j = i + 1;
+                let mut hashes = 0usize;
+                while j < bytes.len() && bytes[j] == b'#' {
+                    hashes += 1;
+                    j += 1;
+                }
+                if j < bytes.len() && bytes[j] == b'"' {
+                    j += 1;
+                    let content_start = j;
+                    let mut content_end = None;
+                    while j < bytes.len() {
+                        if bytes[j] == b'"' {
+                            let mut k = j + 1;
+                            let mut seen_hashes = 0usize;
+                            while k < bytes.len() && seen_hashes < hashes && bytes[k] == b'#' {
+                                seen_hashes += 1;
+                                k += 1;
+                            }
+                            if seen_hashes == hashes {
+                                content_end = Some(j);
+                                i = k;
+                                break;
+                            }
+                        }
+                        j += 1;
+                    }
+                    if let Some(end) = content_end {
+                        let lit = String::from_utf8_lossy(&bytes[content_start..end]).to_string();
+                        out.push(lit);
+                        continue;
+                    }
+                }
+            }
+
+            i += 1;
+        }
+
+        out
     }
 }

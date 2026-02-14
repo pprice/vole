@@ -24,7 +24,10 @@ mod types;
 mod control_flow;
 mod interfaces;
 
-pub use callable_registry::{CallableKey, ResolvedCallable, resolve_callable};
+pub use callable_registry::{
+    CallableBackendPreference, CallableKey, CallableResolutionError, ResolvedCallable,
+    resolve_callable_with_preference,
+};
 pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
 pub use intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, IntrinsicsRegistry};

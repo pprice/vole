@@ -893,7 +893,10 @@ impl Compiler<'_> {
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
                 // Compile scoped let declarations and test body
-                let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env);
+                let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env)
+                    .with_callable_backend_preference(
+                        crate::CallableBackendPreference::PreferInline,
+                    );
 
                 // Push function-level RC scope for test body
                 cg.push_rc_scope();
@@ -1250,8 +1253,9 @@ impl Compiler<'_> {
                 global_module_bindings: &self.global_module_bindings,
             };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-            let (terminated, _) =
-                Cg::new(&mut builder, &mut codegen_ctx, &env).compile_body(&test.body)?;
+            let (terminated, _) = Cg::new(&mut builder, &mut codegen_ctx, &env)
+                .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
+                .compile_body(&test.body)?;
 
             finalize_function_body(builder, None, terminated, DefaultReturn::Zero);
         }

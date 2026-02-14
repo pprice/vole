@@ -418,6 +418,7 @@ pub fn compile_function_inner_with_params<'ctx>(
 
     // Create Cg with split contexts
     let mut cg = Cg::new(&mut builder, codegen_ctx, env)
+        .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
         .with_vars(variables)
         .with_return_type(config.return_type_id)
         .with_captures(captures)

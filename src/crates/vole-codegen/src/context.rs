@@ -14,7 +14,9 @@ use cranelift_codegen::ir::StackSlot;
 use cranelift_module::{FuncId, Module};
 use rustc_hash::FxHashMap;
 
-use crate::callable_registry::{CallableKey, ResolvedCallable, resolve_callable};
+use crate::callable_registry::{
+    CallableBackendPreference, CallableKey, ResolvedCallable, resolve_callable_with_preference,
+};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeFn};
@@ -139,6 +141,8 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub current_module: Option<ModuleId>,
     /// Type parameter substitutions for monomorphized generics
     pub substitutions: Option<&'a FxHashMap<NameId, TypeId>>,
+    /// Backend selection policy for dual runtime/intrinsic callables.
+    callable_backend_preference: CallableBackendPreference,
     /// Cache for substituted types
     substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
     /// Cache for RC state computations
@@ -243,6 +247,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return_type: None,
             current_module: None,
             substitutions: None,
+            callable_backend_preference: CallableBackendPreference::PreferInline,
             substitution_cache: RefCell::new(FxHashMap::default()),
             rc_state_cache: RefCell::new(FxHashMap::default()),
             // Initialize with global module bindings from top-level destructuring imports
@@ -274,6 +279,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Set type parameter substitutions for monomorphized generics.
     pub fn with_substitutions(mut self, subs: Option<&'a FxHashMap<NameId, TypeId>>) -> Self {
         self.substitutions = subs;
+        self
+    }
+
+    /// Set backend preference for dual runtime/intrinsic callables.
+    pub fn with_callable_backend_preference(
+        mut self,
+        preference: CallableBackendPreference,
+    ) -> Self {
+        self.callable_backend_preference = preference;
         self
     }
 
@@ -1318,16 +1332,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a runtime function and return the first result (or error if no results)
     pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<Value> {
-        let runtime = match resolve_callable(CallableKey::Runtime(runtime)) {
-            ResolvedCallable::Runtime(runtime) => runtime,
-            ResolvedCallable::InlineIntrinsic(_) => {
-                return Err(CodegenError::internal_with_context(
-                    "runtime callable resolved to intrinsic backend",
-                    runtime.name(),
-                ));
-            }
-        };
-
         let func_ref = self.runtime_func_ref(runtime)?;
         let coerced = self.coerce_call_args(func_ref, args);
         let call = self.builder.ins().call(func_ref, &coerced);
@@ -1410,16 +1414,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a runtime function that returns void
     pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<()> {
-        let runtime = match resolve_callable(CallableKey::Runtime(runtime)) {
-            ResolvedCallable::Runtime(runtime) => runtime,
-            ResolvedCallable::InlineIntrinsic(_) => {
-                return Err(CodegenError::internal_with_context(
-                    "runtime callable resolved to intrinsic backend",
-                    runtime.name(),
-                ));
-            }
-        };
-
         let func_ref = self.runtime_func_ref(runtime)?;
         let coerced = self.coerce_call_args(func_ref, args);
         self.builder.ins().call(func_ref, &coerced);
@@ -2535,7 +2529,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Check if this is a compiler intrinsic
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
-            return self.call_compiler_intrinsic(&native_name, args, return_type_id);
+            return self.call_compiler_intrinsic_key_with_line(
+                crate::IntrinsicKey::from(native_name.as_str()),
+                args,
+                return_type_id,
+                0,
+            );
         }
 
         // Look up native function for FFI call
@@ -2611,35 +2610,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Call a compiler intrinsic by key (e.g., "f64_nan", "f32_infinity").
-    ///
-    /// Compiler intrinsics are declared with `external("vole:compiler_intrinsic")` and
-    /// emit inline IR instead of FFI calls. The intrinsic key format is `{type}_{method}`.
-    pub fn call_compiler_intrinsic(
-        &mut self,
-        intrinsic_key: &str,
-        args: &[Value],
-        return_type_id: TypeId,
-    ) -> CodegenResult<CompiledValue> {
-        self.call_compiler_intrinsic_with_line(intrinsic_key, args, return_type_id, 0)
-    }
-
-    /// Call a compiler intrinsic with an optional source line number.
-    pub fn call_compiler_intrinsic_with_line(
-        &mut self,
-        intrinsic_key: &str,
-        args: &[Value],
-        return_type_id: TypeId,
-        call_line: u32,
-    ) -> CodegenResult<CompiledValue> {
-        self.call_compiler_intrinsic_key_with_line(
-            crate::IntrinsicKey::from(intrinsic_key),
-            args,
-            return_type_id,
-            call_line,
-        )
-    }
-
     /// Call a compiler intrinsic using a typed key.
     pub fn call_compiler_intrinsic_key_with_line(
         &mut self,
@@ -2648,7 +2618,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         return_type_id: TypeId,
         call_line: u32,
     ) -> CodegenResult<CompiledValue> {
-        match resolve_callable(CallableKey::Intrinsic(intrinsic_key)) {
+        let resolved = resolve_callable_with_preference(
+            CallableKey::Intrinsic(intrinsic_key),
+            self.callable_backend_preference,
+        )
+        .map_err(|err| {
+            CodegenError::internal_with_context("callable resolution failed", err.to_string())
+        })?;
+
+        match resolved {
             ResolvedCallable::InlineIntrinsic(intrinsic_key) => {
                 self.compile_inline_intrinsic(&intrinsic_key, args, return_type_id, call_line)
             }

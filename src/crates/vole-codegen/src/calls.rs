@@ -459,8 +459,8 @@ impl Cg<'_, '_, '_> {
                 let return_type_id = self
                     .get_expr_type(&call_expr_id)
                     .expect("INTERNAL: compiler intrinsic call: missing sema return type");
-                return self.call_compiler_intrinsic_with_line(
-                    &native_name_str,
+                return self.call_compiler_intrinsic_key_with_line(
+                    crate::IntrinsicKey::from(native_name_str.as_str()),
                     &args,
                     return_type_id,
                     call_line,
@@ -1494,7 +1494,12 @@ impl Cg<'_, '_, '_> {
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
             // Compile arguments (for intrinsics that take args)
             let args = self.compile_call_args(args_exprs)?;
-            return self.call_compiler_intrinsic(intrinsic_key, &args, return_type_id);
+            return self.call_compiler_intrinsic_key_with_line(
+                crate::IntrinsicKey::from(intrinsic_key),
+                &args,
+                return_type_id,
+                0,
+            );
         }
 
         // Otherwise, look up in native registry (not supported for args-only version)
