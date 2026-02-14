@@ -22,7 +22,7 @@ use crate::closure::Closure;
 use crate::iterator_abi::{NextTag, TaggedNextWord};
 use crate::iterator_core::CoreIter;
 use crate::string::RcString;
-use crate::value::{RcHeader, TYPE_I64, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc, tag_needs_rc};
+use crate::value::{RcHeader, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc, tag_needs_rc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -1035,15 +1035,11 @@ fn pack_optional_i64(value: Option<i64>) -> *mut u8 {
     ptr
 }
 
-fn extract_i64_words_via_next(iter: *mut RcIterator, limit: Option<usize>) -> Option<Vec<i64>> {
-    if iter.is_null() {
-        return Some(Vec::new());
-    }
-    if unsafe { (*iter).elem_tag } != TYPE_I64 as u64 {
-        return None;
-    }
-
+fn consume_values_via_next(iter: *mut RcIterator, limit: Option<usize>) -> Vec<i64> {
     let mut out = Vec::new();
+    if iter.is_null() {
+        return out;
+    }
     loop {
         if let Some(max) = limit
             && out.len() >= max
@@ -1056,243 +1052,134 @@ fn extract_i64_words_via_next(iter: *mut RcIterator, limit: Option<usize>) -> Op
         }
         out.push(value);
     }
-    Some(out)
+    RcIterator::dec_ref(iter);
+    out
 }
 
-fn extract_supported_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> Option<Vec<i64>> {
-    if iter.is_null() {
-        return Some(Vec::new());
+fn cleanup_owned_rc_except(words: &[i64], keep_index: Option<usize>, owned_rc: bool) {
+    if !owned_rc {
+        return;
     }
-
-    let kind = unsafe { (*iter).iter.kind };
-    if !matches!(
-        kind,
-        IteratorKind::Flatten
-            | IteratorKind::FlatMap
-            | IteratorKind::Chunks
-            | IteratorKind::Windows
-            | IteratorKind::Enumerate
-            | IteratorKind::Zip
-    ) && unsafe { (*iter).elem_tag } != TYPE_I64 as u64
-    {
-        return None;
-    }
-    let mut out = Vec::new();
-
-    match kind {
-        IteratorKind::Array => {
-            let source = unsafe { (*iter).iter.source.array };
-            if source.array.is_null() {
-                return Some(out);
-            }
-            let len = unsafe { (*source.array).len };
-            let mut idx = source.index.max(0) as usize;
-            while idx < len {
-                if let Some(max) = limit
-                    && out.len() >= max
-                {
-                    break;
-                }
-                out.push(unsafe { RcArray::get(source.array, idx).as_i64() });
-                idx += 1;
-            }
-            Some(out)
-        }
-        IteratorKind::Range => {
-            let source = unsafe { (*iter).iter.source.range };
-            let mut current = source.current;
-            while current < source.end {
-                if let Some(max) = limit
-                    && out.len() >= max
-                {
-                    break;
-                }
-                out.push(current);
-                current += 1;
-            }
-            Some(out)
-        }
-        IteratorKind::Once => {
-            let source = unsafe { (*iter).iter.source.once };
-            if source.exhausted == 0 {
-                out.push(source.value);
-            }
-            if let Some(max) = limit {
-                out.truncate(max);
-            }
-            Some(out)
-        }
-        IteratorKind::Empty => Some(out),
-        IteratorKind::Repeat => {
-            let source = unsafe { (*iter).iter.source.repeat };
-            let max = limit?;
-            out.resize(max, source.value);
-            Some(out)
-        }
-        IteratorKind::Map => {
-            let source = unsafe { (*iter).iter.source.map };
-            let mut words = extract_supported_i64_words(source.source, limit)?;
-            let map_fn: extern "C" fn(*const Closure, i64) -> i64 =
-                unsafe { std::mem::transmute(Closure::get_func(source.transform)) };
-            for word in &mut words {
-                *word = map_fn(source.transform, *word);
-            }
-            Some(words)
-        }
-        IteratorKind::Filter => {
-            let source = unsafe { (*iter).iter.source.filter };
-            let mut words = extract_supported_i64_words(source.source, None)?;
-            let pred_fn: extern "C" fn(*const Closure, i64) -> i8 =
-                unsafe { std::mem::transmute(Closure::get_func(source.predicate)) };
-            words.retain(|&v| pred_fn(source.predicate, v) != 0);
-            if let Some(max) = limit {
-                words.truncate(max);
-            }
-            Some(words)
-        }
-        IteratorKind::Take => {
-            let source = unsafe { (*iter).iter.source.take };
-            let remaining = source.remaining.max(0) as usize;
-            let mut words = extract_supported_i64_words(source.source, Some(remaining))?;
-            words.truncate(remaining);
-            if let Some(max) = limit {
-                words.truncate(max);
-            }
-            Some(words)
-        }
-        IteratorKind::Skip => {
-            let source = unsafe { (*iter).iter.source.skip };
-            let skip_count = if source.skipped != 0 {
-                0
-            } else {
-                source.skip_count.max(0) as usize
-            };
-            let needed = limit.map(|max| max.saturating_add(skip_count));
-            let mut words = extract_supported_i64_words(source.source, needed)?;
-            let drop_count = skip_count.min(words.len());
-            words.drain(0..drop_count);
-            if let Some(max) = limit {
-                words.truncate(max);
-            }
-            Some(words)
-        }
-        IteratorKind::Chain => {
-            let source = unsafe { (*iter).iter.source.chain };
-            let mut words = Vec::new();
-            if source.on_second == 0 {
-                let mut first_words = extract_supported_i64_words(source.first, limit)?;
-                words.append(&mut first_words);
-            }
-            if let Some(max) = limit {
-                if words.len() < max {
-                    let mut second_words =
-                        extract_supported_i64_words(source.second, Some(max - words.len()))?;
-                    words.append(&mut second_words);
-                } else {
-                    words.truncate(max);
-                }
-            } else {
-                let mut second_words = extract_supported_i64_words(source.second, None)?;
-                words.append(&mut second_words);
-            }
-            Some(words)
-        }
-        IteratorKind::Unique => {
-            let source = unsafe { (*iter).iter.source.unique };
-            let words = extract_supported_i64_words(source.source, None)?;
-            let mut out = Vec::new();
-            let mut prev = source.prev;
-            let mut has_prev = source.has_prev != 0;
-            for value in words {
-                if !has_prev || value != prev {
-                    out.push(value);
-                    prev = value;
-                    has_prev = true;
-                }
-            }
-            if let Some(max) = limit {
-                out.truncate(max);
-            }
-            Some(out)
-        }
-        IteratorKind::Flatten
-        | IteratorKind::FlatMap
-        | IteratorKind::Chunks
-        | IteratorKind::Windows
-        | IteratorKind::Enumerate
-        | IteratorKind::Zip => extract_i64_words_via_next(iter, limit),
-        _ => None,
-    }
-}
-
-fn try_extract_supported_i64_words(
-    iter: *mut RcIterator,
-    limit: Option<usize>,
-) -> Option<Vec<i64>> {
-    let out = extract_supported_i64_words(iter, limit)?;
-    if !iter.is_null() {
-        RcIterator::dec_ref(iter);
-    }
-    Some(out)
-}
-
-fn words_to_i64_array(words: &[i64]) -> *mut RcArray {
-    use crate::value::TaggedValue;
-
-    let result = RcArray::new();
-    unsafe {
-        for &value in words {
-            RcArray::push(result, TaggedValue::from_i64(value));
+    for (idx, &value) in words.iter().enumerate() {
+        if Some(idx) != keep_index && value != 0 {
+            rc_dec(value as *mut u8);
         }
     }
-    result
 }
 
 fn try_new_core_collect_tagged(iter: *mut RcIterator, elem_tag: u64) -> Option<*mut RcArray> {
-    if elem_tag != TYPE_I64 as u64 {
-        return None;
+    use crate::value::{TaggedValue, tag_needs_rc};
+
+    if iter.is_null() {
+        return Some(RcArray::new());
     }
-    let words = try_extract_supported_i64_words(iter, None)?;
+
+    let values_owned = iter_produces_owned(iter);
+    let needs_rc = tag_needs_rc(elem_tag);
+    let words = consume_values_via_next(iter, None);
     let collected = CoreIter::from_i64_slice(&words).collect_i64().ok()?;
-    Some(words_to_i64_array(&collected))
+    let result = RcArray::new();
+
+    for value in collected {
+        let actual_tag = if needs_rc && !(value as usize).is_multiple_of(8) {
+            0u64
+        } else {
+            elem_tag
+        };
+        let actual_needs_rc = tag_needs_rc(actual_tag);
+        if actual_needs_rc && !values_owned && value != 0 {
+            rc_inc(value as *mut u8);
+        }
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: actual_tag,
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    Some(result)
 }
 
 fn try_new_core_first(iter: *mut RcIterator) -> Option<*mut u8> {
-    if !iter.is_null() {
-        let elem_tag = unsafe { (*iter).elem_tag };
-        if elem_tag != TYPE_I64 as u64 {
-            return None;
-        }
-    }
-    let words = try_extract_supported_i64_words(iter, Some(1))?;
+    let borrowed_rc = if iter.is_null() {
+        false
+    } else {
+        iter_produces_borrowed_rc(iter)
+    };
+    let words = consume_values_via_next(iter, Some(1));
     let value = CoreIter::from_i64_slice(&words).first_i64().ok()?;
+    if let Some(v) = value
+        && borrowed_rc
+        && v != 0
+    {
+        rc_inc(v as *mut u8);
+    }
     Some(pack_optional_i64(value))
 }
 
 fn try_new_core_last(iter: *mut RcIterator) -> Option<*mut u8> {
-    if !iter.is_null() {
-        let elem_tag = unsafe { (*iter).elem_tag };
-        if elem_tag != TYPE_I64 as u64 {
-            return None;
-        }
-    }
-    let words = try_extract_supported_i64_words(iter, None)?;
+    let owned_rc = if iter.is_null() {
+        false
+    } else {
+        iter_produces_owned_rc(iter)
+    };
+    let borrowed_rc = if iter.is_null() {
+        false
+    } else {
+        iter_produces_borrowed_rc(iter)
+    };
+    let words = consume_values_via_next(iter, None);
     let value = CoreIter::from_i64_slice(&words).last_i64().ok()?;
+    let keep_index = if value.is_some() && !words.is_empty() {
+        Some(words.len() - 1)
+    } else {
+        None
+    };
+    cleanup_owned_rc_except(&words, keep_index, owned_rc);
+    if let Some(v) = value
+        && borrowed_rc
+        && v != 0
+    {
+        rc_inc(v as *mut u8);
+    }
     Some(pack_optional_i64(value))
 }
 
 fn try_new_core_nth(iter: *mut RcIterator, n: i64) -> Option<*mut u8> {
     if n < 0 {
-        return None;
-    }
-    if !iter.is_null() {
-        let elem_tag = unsafe { (*iter).elem_tag };
-        if elem_tag != TYPE_I64 as u64 {
-            return None;
+        if !iter.is_null() {
+            RcIterator::dec_ref(iter);
         }
+        return Some(pack_optional_i64(None));
     }
-    let words = try_extract_supported_i64_words(iter, Some((n as usize).saturating_add(1)))?;
+    let owned_rc = if iter.is_null() {
+        false
+    } else {
+        iter_produces_owned_rc(iter)
+    };
+    let borrowed_rc = if iter.is_null() {
+        false
+    } else {
+        iter_produces_borrowed_rc(iter)
+    };
+    let words = consume_values_via_next(iter, Some((n as usize).saturating_add(1)));
     let value = CoreIter::from_i64_slice(&words).nth_i64(n as usize).ok()?;
+    let keep_index = if value.is_some() {
+        Some(n as usize)
+    } else {
+        None
+    };
+    cleanup_owned_rc_except(&words, keep_index, owned_rc);
+    if let Some(v) = value
+        && borrowed_rc
+        && v != 0
+    {
+        rc_inc(v as *mut u8);
+    }
     Some(pack_optional_i64(value))
 }
 
@@ -1329,65 +1216,7 @@ pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_collect_tagged(iter: *mut RcIterator, elem_tag: u64) -> *mut RcArray {
-    use crate::value::{TaggedValue, tag_needs_rc};
-
-    if let Some(result) = try_new_core_collect_tagged(iter, elem_tag) {
-        return result;
-    }
-
-    let result = RcArray::new();
-
-    if iter.is_null() {
-        return result;
-    }
-
-    let needs_rc = tag_needs_rc(elem_tag);
-    let values_owned = iter_produces_owned(iter);
-
-    loop {
-        let mut value: i64 = 0;
-        let has_value = vole_array_iter_next(iter, &mut value);
-
-        if has_value == 0 {
-            break;
-        }
-
-        // Determine the actual tag for this value.
-        // The codegen-provided elem_tag may be wrong for type-transforming iterators
-        // like Flatten (which reduces Array<T> to T). Use a pointer alignment check
-        // to validate: all RC heap objects are 8-byte aligned, so if the value isn't
-        // aligned, it can't be an RC pointer regardless of what the tag says.
-        let actual_tag = if needs_rc && !(value as usize).is_multiple_of(8) {
-            // Value is not a valid heap pointer - use tag 0 (non-RC)
-            0u64
-        } else {
-            elem_tag
-        };
-        let actual_needs_rc = tag_needs_rc(actual_tag);
-
-        // For borrowed RC values (from array source), rc_inc so the collected
-        // array gets its own reference. For owned values (from map), the value
-        // is already at refcount 1 from creation - just transfer ownership.
-        if actual_needs_rc && !values_owned && value != 0 {
-            rc_inc(value as *mut u8);
-        }
-
-        // Push to result array with correct element type tag.
-        unsafe {
-            RcArray::push(
-                result,
-                TaggedValue {
-                    tag: actual_tag,
-                    value: value as u64,
-                },
-            );
-        }
-    }
-
-    // Free the iterator chain
-    RcIterator::dec_ref(iter);
-
-    result
+    try_new_core_collect_tagged(iter, elem_tag).expect("collect path should always produce a value")
 }
 
 /// Collect all remaining iterator values into a new array
@@ -1878,48 +1707,7 @@ pub extern "C" fn vole_iter_reduce(
 /// Frees the iterator after getting the first element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
-    if let Some(ptr) = try_new_core_first(iter) {
-        return ptr;
-    }
-
-    let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
-    let ptr = unsafe { alloc(layout) };
-    if ptr.is_null() {
-        std::alloc::handle_alloc_error(layout);
-    }
-
-    if iter.is_null() {
-        // Return nil
-        unsafe {
-            ptr::write(ptr, 1u8); // tag 1 = nil
-            ptr::write(ptr.add(8) as *mut i64, 0);
-        }
-        return ptr;
-    }
-
-    let mut value: i64 = 0;
-    let has_value = vole_array_iter_next(iter, &mut value);
-
-    // rc_inc borrowed RC values before freeing the iterator chain so the
-    // returned optional owns its payload.
-    if has_value != 0 && iter_produces_borrowed_rc(iter) {
-        rc_inc(value as *mut u8);
-    }
-
-    // Free the iterator chain
-    RcIterator::dec_ref(iter);
-
-    unsafe {
-        if has_value != 0 {
-            ptr::write(ptr, 0u8); // tag 0 = value present
-            ptr::write(ptr.add(8) as *mut i64, value);
-        } else {
-            ptr::write(ptr, 1u8); // tag 1 = nil
-            ptr::write(ptr.add(8) as *mut i64, 0);
-        }
-    }
-
-    ptr
+    try_new_core_first(iter).expect("first path should always produce a value")
 }
 
 /// Get the last element from any iterator, returns T? (optional)
@@ -1928,65 +1716,7 @@ pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
 /// Frees the iterator after getting the last element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
-    if let Some(ptr) = try_new_core_last(iter) {
-        return ptr;
-    }
-
-    let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
-    let ptr = unsafe { alloc(layout) };
-    if ptr.is_null() {
-        std::alloc::handle_alloc_error(layout);
-    }
-
-    if iter.is_null() {
-        // Return nil
-        unsafe {
-            ptr::write(ptr, 1u8); // tag 1 = nil
-            ptr::write(ptr.add(8) as *mut i64, 0);
-        }
-        return ptr;
-    }
-
-    let owned_rc = iter_produces_owned_rc(iter);
-    let borrowed_rc = iter_produces_borrowed_rc(iter);
-    let mut last_value: i64 = 0;
-    let mut found_any = false;
-
-    loop {
-        let mut value: i64 = 0;
-        let has_value = vole_array_iter_next(iter, &mut value);
-
-        if has_value == 0 {
-            break;
-        }
-        // Free the previous "last" value if it was an owned RC value
-        if owned_rc && found_any && last_value != 0 {
-            rc_dec(last_value as *mut u8);
-        }
-        last_value = value;
-        found_any = true;
-    }
-
-    // rc_inc borrowed RC values before freeing the iterator chain so the
-    // returned optional owns its payload.
-    if found_any && borrowed_rc && last_value != 0 {
-        rc_inc(last_value as *mut u8);
-    }
-
-    // Free the iterator chain
-    RcIterator::dec_ref(iter);
-
-    unsafe {
-        if found_any {
-            ptr::write(ptr, 0u8); // tag 0 = value present
-            ptr::write(ptr.add(8) as *mut i64, last_value);
-        } else {
-            ptr::write(ptr, 1u8); // tag 1 = nil
-            ptr::write(ptr.add(8) as *mut i64, 0);
-        }
-    }
-
-    ptr
+    try_new_core_last(iter).expect("last path should always produce a value")
 }
 
 /// Get the nth element from any iterator (0-indexed), returns T? (optional)
@@ -1994,74 +1724,7 @@ pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
 /// Frees the iterator after getting the nth element.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 {
-    if let Some(ptr) = try_new_core_nth(iter, n) {
-        return ptr;
-    }
-
-    let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
-    let ptr = unsafe { alloc(layout) };
-    if ptr.is_null() {
-        std::alloc::handle_alloc_error(layout);
-    }
-
-    if iter.is_null() || n < 0 {
-        // Return nil for null iterator or negative index
-        unsafe {
-            ptr::write(ptr, 1u8); // tag 1 = nil
-            ptr::write(ptr.add(8) as *mut i64, 0);
-        }
-        if !iter.is_null() {
-            RcIterator::dec_ref(iter);
-        }
-        return ptr;
-    }
-
-    let owned_rc = iter_produces_owned_rc(iter);
-    let borrowed_rc = iter_produces_borrowed_rc(iter);
-
-    // Skip n elements
-    for _ in 0..n {
-        let mut dummy: i64 = 0;
-        let has_value = vole_array_iter_next(iter, &mut dummy);
-        if has_value == 0 {
-            // Iterator exhausted before reaching nth element
-            RcIterator::dec_ref(iter);
-            unsafe {
-                ptr::write(ptr, 1u8); // tag 1 = nil
-                ptr::write(ptr.add(8) as *mut i64, 0);
-            }
-            return ptr;
-        }
-        // Free skipped owned RC values
-        if owned_rc && dummy != 0 {
-            rc_dec(dummy as *mut u8);
-        }
-    }
-
-    // Get the nth element
-    let mut value: i64 = 0;
-    let has_value = vole_array_iter_next(iter, &mut value);
-
-    // rc_inc borrowed RC values before freeing the iterator chain so the
-    // returned optional owns its payload.
-    if has_value != 0 && borrowed_rc && value != 0 {
-        rc_inc(value as *mut u8);
-    }
-
-    // Free the iterator chain
-    RcIterator::dec_ref(iter);
-
-    unsafe {
-        if has_value != 0 {
-            ptr::write(ptr, 0u8); // tag 0 = value present
-            ptr::write(ptr.add(8) as *mut i64, value);
-        } else {
-            ptr::write(ptr, 1u8); // tag 1 = nil
-            ptr::write(ptr.add(8) as *mut i64, 0);
-        }
-    }
-
-    ptr
+    try_new_core_nth(iter, n).expect("nth path should always produce a value")
 }
 
 // =============================================================================
