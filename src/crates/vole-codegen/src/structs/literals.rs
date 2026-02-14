@@ -14,6 +14,7 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::StackSlot;
 use vole_frontend::{Decl, Expr, FieldDef, Program, StructLiteralExpr, Symbol};
 use vole_sema::entity_defs::TypeDefKind;
+use vole_runtime::value::TYPE_INSTANCE;
 use vole_sema::type_arena::TypeId;
 
 /// Find the field definitions for a type by looking up the class declaration in the program.
@@ -198,7 +199,7 @@ impl Cg<'_, '_, '_> {
 
         let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);
         let field_count_val = self.builder.ins().iconst(types::I32, field_count as i64);
-        let runtime_type = self.builder.ins().iconst(types::I32, 7); // TYPE_INSTANCE
+        let runtime_type = self.builder.ins().iconst(types::I32, TYPE_INSTANCE as i64);
 
         let instance_ptr = self.call_runtime(
             RuntimeFn::InstanceNew,
