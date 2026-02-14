@@ -138,12 +138,9 @@ fn print_float_literal<'a>(arena: &'a Arena<'a>, f: f64) -> DocBuilder<'a, Arena
     }
 }
 
-/// Print a string literal with proper escaping.
-pub(super) fn print_string_literal<'a>(arena: &'a Arena<'a>, s: &str) -> DocBuilder<'a, Arena<'a>> {
-    // Check if it's a raw string (contains unescaped backslashes that would need escaping)
-    // For now, just use regular string literals
-    let mut result = String::with_capacity(s.len() + 2);
-    result.push('"');
+/// Escape special characters in a string for output.
+fn escape_string_chars(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
             '"' => result.push_str("\\\""),
@@ -154,6 +151,14 @@ pub(super) fn print_string_literal<'a>(arena: &'a Arena<'a>, s: &str) -> DocBuil
             c => result.push(c),
         }
     }
+    result
+}
+
+/// Print a string literal with proper escaping.
+pub(super) fn print_string_literal<'a>(arena: &'a Arena<'a>, s: &str) -> DocBuilder<'a, Arena<'a>> {
+    let mut result = String::with_capacity(s.len() + 2);
+    result.push('"');
+    result.push_str(&escape_string_chars(s));
     result.push('"');
     arena.text(result)
 }
@@ -167,21 +172,7 @@ fn print_interpolated_string<'a>(
     let mut result = arena.text("\"");
     for part in parts {
         result = match part {
-            StringPart::Literal(s) => {
-                // Escape the literal part (but don't double-escape { and })
-                let mut escaped = String::new();
-                for c in s.chars() {
-                    match c {
-                        '"' => escaped.push_str("\\\""),
-                        '\\' => escaped.push_str("\\\\"),
-                        '\n' => escaped.push_str("\\n"),
-                        '\r' => escaped.push_str("\\r"),
-                        '\t' => escaped.push_str("\\t"),
-                        c => escaped.push(c),
-                    }
-                }
-                result.append(arena.text(escaped))
-            }
+            StringPart::Literal(s) => result.append(arena.text(escape_string_chars(s))),
             StringPart::Expr(expr) => {
                 // Render the expression inside {expr}
                 result
