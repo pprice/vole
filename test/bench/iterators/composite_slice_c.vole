@@ -1,0 +1,38 @@
+// Iterator benchmark: slice C composites (chunks/windows/flat_map).
+
+func main() {
+    let base = [
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+        13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+    ]
+
+    let mut checksum = 0
+    let mut round = 0
+    while round < 350 {
+        let mut chunks_sum = 0
+        for chunk in base.iter().chunks(4) {
+            for value in chunk.iter() {
+                chunks_sum = chunks_sum + value
+            }
+        }
+
+        let mut windows_div3 = 0
+        for window in base.iter().windows(5) {
+            for value in window.iter() {
+                if value % 3 == 0 {
+                    windows_div3 = windows_div3 + 1
+                }
+            }
+        }
+
+        let mut flat_mapped_sum = 0
+        for value in base.iter().take(18).flat_map((x) => [x, x + 1, x + 2]) {
+            flat_mapped_sum = flat_mapped_sum + value
+        }
+
+        checksum = checksum + chunks_sum + windows_div3 + flat_mapped_sum
+        round = round + 1
+    }
+
+    println("composite_slice_c checksum: {checksum}")
+}

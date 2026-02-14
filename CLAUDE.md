@@ -78,6 +78,8 @@ just dev-backtrace-test file.vole  # Debug segfaults
 just trace file.vole             # Tracing with VOLE_LOG
 just dev iterator-stress         # Repeated leak/stress corpus for iterators
 just dev iterator-asan           # ASAN run for iterator parity tests (nightly)
+just dev iterator-bench-baseline # Record iterator benchmark baseline JSON
+just dev iterator-bench-compare  # Compare current iterator runtimes vs baseline
 ```
 
 For release-only issues, use `cargo build --profile release-local` which keeps symbols for debugging while maintaining release optimizations.

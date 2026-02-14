@@ -1,0 +1,26 @@
+// Iterator benchmark: tuple-producing composites (enumerate/zip).
+
+func main() {
+    let left = [
+        3, 5, 8, 13, 21, 34, 55, 89,
+        144, 233, 377, 610, 987, 1597, 2584, 4181,
+    ]
+    let right = [
+        2, 4, 6, 8, 10, 12, 14, 16,
+        18, 20, 22, 24, 26, 28, 30, 32,
+    ]
+
+    let mut checksum = 0
+    let mut round = 0
+    while round < 600 {
+        for pair in left.iter().enumerate() {
+            checksum = checksum + pair[0] + pair[1]
+        }
+        for pair in left.iter().zip(right.iter()) {
+            checksum = checksum + (pair[0] * pair[1])
+        }
+        round = round + 1
+    }
+
+    println("tuples_slice_c checksum: {checksum}")
+}

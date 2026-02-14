@@ -173,6 +173,26 @@ iterator-asan:
     RUSTFLAGS="-Zsanitizer=address" \
     cargo +nightly test -p vole-runtime --target x86_64-unknown-linux-gnu iterator_parity -- --test-threads=1
 
+# Record baseline runtime metrics for iterator migration benchmarks.
+# Policy: <=2% expected noise, >2% investigate, >5% regression.
+iterator-bench-baseline output="artifacts/bench/iterator-baseline.json" iterations="12" warmup="3":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$(dirname "{{output}}")"
+    cargo run --release --bin vole -- bench run test/bench/iterators/*.vole -n "{{iterations}}" -w "{{warmup}}" -o "{{output}}"
+
+# Compare current runtime metrics against a recorded iterator baseline.
+iterator-bench-compare baseline="artifacts/bench/iterator-baseline.json" output="artifacts/bench/iterator-current.json":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p "$(dirname "{{output}}")"
+    cargo run --release --bin vole -- bench compare "{{baseline}}" -o "{{output}}"
+    echo
+    echo "Regression envelope:"
+    echo "  - <= 2%: expected variance"
+    echo "  - > 2%: investigate"
+    echo "  - > 5%: regression, open a tk bug and block backend default switch"
+
 # Run valgrind on a small RC test suite
 valgrind file="test/unit/mem/basics/cleanup.vole":
     #!/usr/bin/env bash
