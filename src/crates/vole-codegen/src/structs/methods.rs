@@ -18,9 +18,11 @@ use crate::types::{
     value_to_word, word_to_value_type_id,
 };
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
-use vole_identity::{ModuleId, NamerLookup};
 use vole_identity::{MethodId, NameId, TypeDefId};
-use vole_sema::generic::{ClassMethodMonomorphKey, StaticMethodMonomorphKey};
+use vole_identity::{ModuleId, NamerLookup};
+use vole_sema::generic::{
+    ClassMethodMonomorphKey, StaticMethodMonomorphInstance, StaticMethodMonomorphKey,
+};
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 
@@ -289,9 +291,9 @@ impl Cg<'_, '_, '_> {
         {
             // Use ResolvedMethod's type_def_id and method_name_id for method_func_keys lookup
             // Uses type's NameId for stable lookup across different analyzer instances
-            let type_def_id = resolved.type_def_id().ok_or_else(|| {
-                CodegenError::not_found("type_def_id", &*method_name_str)
-            })?;
+            let type_def_id = resolved
+                .type_def_id()
+                .ok_or_else(|| CodegenError::not_found("type_def_id", method_name_str))?;
             let type_name_id = self.query().get_type(type_def_id).name_id;
             let resolved_method_name_id = resolved.method_name_id();
             let func_key = self
@@ -351,9 +353,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let type_def_id =
                 get_type_def_id_from_type_id(resolved_obj_type_id, arena, self.analyzed())
-                    .ok_or_else(|| {
-                        CodegenError::not_found("TypeDefId", &*method_name_str)
-                    })?;
+                    .ok_or_else(|| CodegenError::not_found("TypeDefId", method_name_str))?;
 
             // Check for external method binding first (interface methods on primitives)
             if let Some(binding) = self
@@ -703,11 +703,17 @@ impl Cg<'_, '_, '_> {
                 // Copy payload (8 bytes at offset 8) only if union has payload data.
                 // Sentinel-only unions have union_size == 8 (tag only), no payload.
                 if union_size > union_layout::TAG_ONLY_SIZE {
-                    let payload =
-                        self.builder
-                            .ins()
-                            .load(types::I64, MemFlags::new(), result_value, union_layout::PAYLOAD_OFFSET);
-                    self.builder.ins().stack_store(payload, local_slot, union_layout::PAYLOAD_OFFSET);
+                    let payload = self.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        result_value,
+                        union_layout::PAYLOAD_OFFSET,
+                    );
+                    self.builder.ins().stack_store(
+                        payload,
+                        local_slot,
+                        union_layout::PAYLOAD_OFFSET,
+                    );
                 }
 
                 let ptr_type = self.ptr_type();
@@ -846,11 +852,17 @@ impl Cg<'_, '_, '_> {
 
         // Pure Vole function - call by mangled name
         let name_id = name_id.ok_or_else(|| {
-            CodegenError::not_found("module method", format!("{}::{}", module_path, method_name_str))
+            CodegenError::not_found(
+                "module method",
+                format!("{}::{}", module_path, method_name_str),
+            )
         })?;
         let func_key = self.funcs().intern_name_id(name_id);
         let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
-            CodegenError::not_found("module function", format!("{}::{}", module_path, method_name_str))
+            CodegenError::not_found(
+                "module function",
+                format!("{}::{}", module_path, method_name_str),
+            )
         })?;
         let func_ref = self
             .codegen_ctx
@@ -1456,9 +1468,14 @@ impl Cg<'_, '_, '_> {
         // Unwrap function type to get params and return type
         let (param_count, param_type_ids, return_type_id, is_void_return) = {
             let arena = self.arena();
-            let (params, ret_id, _is_closure) = arena
-                .unwrap_function(func_type_id)
-                .ok_or_else(|| CodegenError::type_mismatch("interface dispatch", "function type", "non-function"))?;
+            let (params, ret_id, _is_closure) =
+                arena.unwrap_function(func_type_id).ok_or_else(|| {
+                    CodegenError::type_mismatch(
+                        "interface dispatch",
+                        "function type",
+                        "non-function",
+                    )
+                })?;
             (params.len(), params.to_vec(), ret_id, arena.is_void(ret_id))
         };
 
@@ -1581,129 +1598,11 @@ impl Cg<'_, '_, '_> {
         let method_def = self.query().get_method(method_id);
         let method_name_id = method_def.name_id;
 
-        // Check for monomorphized static method (for generic classes).
-        // Use module-aware lookup because NodeIds are file-local.
-        let current_module_path = self
-            .current_module()
-            .map(|module_id| self.name_table().module_path(module_id).to_string());
-        if let Some(mono_key) = self
-            .query()
-            .static_method_generic_at_in_module(expr_id, current_module_path.as_deref())
+        // Check for monomorphized static method (generic classes)
+        if let Some(instance) =
+            self.find_static_monomorph_instance(method_name_id, type_def_id, expr_id)
         {
-            // Static method call sites inside generic class methods are often recorded
-            // with abstract TypeParam keys. Rewrite those keys through the current
-            // substitution map before looking in the monomorph cache.
-            let effective_key = if let Some(subs) = self.substitutions {
-                let arena = self.arena();
-                let needs_substitution = mono_key
-                    .class_type_keys
-                    .iter()
-                    .chain(mono_key.method_type_keys.iter())
-                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some());
-                if needs_substitution {
-                    let map_keys = |keys: &[TypeId]| {
-                        keys.iter()
-                            .map(|&type_id| {
-                                if let Some(name_id) = arena.unwrap_type_param(type_id) {
-                                    subs.get(&name_id).copied().unwrap_or(type_id)
-                                } else {
-                                    type_id
-                                }
-                            })
-                            .collect::<Vec<TypeId>>()
-                    };
-                    StaticMethodMonomorphKey::new(
-                        mono_key.class_name,
-                        mono_key.method_name,
-                        map_keys(&mono_key.class_type_keys),
-                        map_keys(&mono_key.method_type_keys),
-                    )
-                } else {
-                    mono_key.clone()
-                }
-            } else {
-                mono_key.clone()
-            };
-
-            // Look up the monomorphized instance
-            if let Some(instance) = self
-                .registry()
-                .static_method_monomorph_cache
-                .get(&effective_key)
-            {
-                return self.call_static_monomorph_instance(instance, mc);
-            }
-        }
-
-        // Fallback: choose a compatible cached static monomorph instance by class/method.
-        // This handles class-independent static helpers where sema records an abstract key
-        // (or no concrete key in module-local NodeId space), while still preferring a
-        // concrete instance that matches the current substitution map when available.
-        let type_name_id = self.query().get_type(type_def_id).name_id;
-        let fallback_instance = {
-            let subs = self.substitutions;
-            let module_prefix = current_module_path.as_deref();
-            let arena = self.arena();
-            self.registry()
-                .static_method_monomorph_cache
-                .instances()
-                .filter_map(|(key, instance)| {
-                    if key.class_name != type_name_id || key.method_name != method_name_id {
-                        return None;
-                    }
-
-                    let substitution_matches = if let Some(subs) = subs {
-                        let mut matches = 0usize;
-                        let mut incompatible = false;
-                        for (name_id, inst_ty) in &instance.substitutions {
-                            if let Some(ctx_ty) = subs.get(name_id).copied() {
-                                if ctx_ty == *inst_ty {
-                                    matches += 1;
-                                } else if arena.unwrap_type_param(*inst_ty).is_none() {
-                                    // Concrete mismatch: this candidate does not match
-                                    // the current monomorphized call context.
-                                    incompatible = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if incompatible {
-                            return None;
-                        }
-                        matches
-                    } else {
-                        0
-                    };
-                    let module_match = module_prefix.is_some_and(|prefix| {
-                        self.query()
-                            .display_name(instance.mangled_name)
-                            .starts_with(prefix)
-                    });
-                    let concrete_key = key
-                        .class_type_keys
-                        .iter()
-                        .all(|&type_id| arena.unwrap_type_param(type_id).is_none())
-                        && key
-                            .method_type_keys
-                            .iter()
-                            .all(|&type_id| arena.unwrap_type_param(type_id).is_none());
-
-                    // Prefer substitution-compatible concrete instances first.
-                    // Module prefix is only a tie-breaker.
-                    let score = (
-                        substitution_matches,
-                        concrete_key as usize,
-                        module_match as usize,
-                        instance.substitutions.len(),
-                    );
-
-                    Some((score, instance))
-                })
-                .max_by_key(|(score, _)| *score)
-                .map(|(_, instance)| instance)
-        };
-        if let Some(instance) = fallback_instance {
-            return self.call_static_monomorph_instance(instance, mc);
+            return self.call_static_monomorph_instance(&instance, mc);
         }
 
         // Look up the static method info via unified method_func_keys map
@@ -1745,9 +1644,9 @@ impl Cg<'_, '_, '_> {
         // Get param types and return type from arena
         let (param_ids, return_type_id) = {
             let arena = self.arena();
-            let (params, ret, _) = arena
-                .unwrap_function(func_type_id)
-                .ok_or_else(|| CodegenError::type_mismatch("static method call", "function type", "non-function"))?;
+            let (params, ret, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
+                CodegenError::type_mismatch("static method call", "function type", "non-function")
+            })?;
             (params.clone(), ret)
         };
 
@@ -1808,9 +1707,141 @@ impl Cg<'_, '_, '_> {
         Ok(result)
     }
 
+    /// Resolve a monomorphized static method instance for a generic class static call.
+    ///
+    /// Tries direct lookup (with type param substitution key rewriting), then falls
+    /// back to scoring-based candidate selection. Returns a cloned instance to avoid
+    /// borrow conflicts with the mutable caller.
+    fn find_static_monomorph_instance(
+        &self,
+        method_name_id: NameId,
+        type_def_id: TypeDefId,
+        expr_id: NodeId,
+    ) -> Option<StaticMethodMonomorphInstance> {
+        let current_module_path = self
+            .current_module()
+            .map(|module_id| self.name_table().module_path(module_id).to_string());
+
+        // Try direct monomorph lookup with key rewriting
+        if let Some(mono_key) = self
+            .query()
+            .static_method_generic_at_in_module(expr_id, current_module_path.as_deref())
+        {
+            // Static method call sites inside generic class methods are often recorded
+            // with abstract TypeParam keys. Rewrite those keys through the current
+            // substitution map before looking in the monomorph cache.
+            let effective_key = if let Some(subs) = self.substitutions {
+                let arena = self.arena();
+                let needs_substitution = mono_key
+                    .class_type_keys
+                    .iter()
+                    .chain(mono_key.method_type_keys.iter())
+                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some());
+                if needs_substitution {
+                    let map_keys = |keys: &[TypeId]| {
+                        keys.iter()
+                            .map(|&type_id| {
+                                if let Some(name_id) = arena.unwrap_type_param(type_id) {
+                                    subs.get(&name_id).copied().unwrap_or(type_id)
+                                } else {
+                                    type_id
+                                }
+                            })
+                            .collect::<Vec<TypeId>>()
+                    };
+                    StaticMethodMonomorphKey::new(
+                        mono_key.class_name,
+                        mono_key.method_name,
+                        map_keys(&mono_key.class_type_keys),
+                        map_keys(&mono_key.method_type_keys),
+                    )
+                } else {
+                    mono_key.clone()
+                }
+            } else {
+                mono_key.clone()
+            };
+
+            // Look up the monomorphized instance
+            if let Some(instance) = self
+                .registry()
+                .static_method_monomorph_cache
+                .get(&effective_key)
+            {
+                return Some(instance.clone());
+            }
+        }
+
+        // Fallback: choose a compatible cached static monomorph instance by class/method.
+        // This handles class-independent static helpers where sema records an abstract key
+        // (or no concrete key in module-local NodeId space), while still preferring a
+        // concrete instance that matches the current substitution map when available.
+        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let subs = self.substitutions;
+        let module_prefix = current_module_path.as_deref();
+        let arena = self.arena();
+        self.registry()
+            .static_method_monomorph_cache
+            .instances()
+            .filter_map(|(key, instance)| {
+                if key.class_name != type_name_id || key.method_name != method_name_id {
+                    return None;
+                }
+
+                let substitution_matches = if let Some(subs) = subs {
+                    let mut matches = 0usize;
+                    let mut incompatible = false;
+                    for (name_id, inst_ty) in &instance.substitutions {
+                        if let Some(ctx_ty) = subs.get(name_id).copied() {
+                            if ctx_ty == *inst_ty {
+                                matches += 1;
+                            } else if arena.unwrap_type_param(*inst_ty).is_none() {
+                                // Concrete mismatch: this candidate does not match
+                                // the current monomorphized call context.
+                                incompatible = true;
+                                break;
+                            }
+                        }
+                    }
+                    if incompatible {
+                        return None;
+                    }
+                    matches
+                } else {
+                    0
+                };
+                let module_match = module_prefix.is_some_and(|prefix| {
+                    self.query()
+                        .display_name(instance.mangled_name)
+                        .starts_with(prefix)
+                });
+                let concrete_key = key
+                    .class_type_keys
+                    .iter()
+                    .all(|&type_id| arena.unwrap_type_param(type_id).is_none())
+                    && key
+                        .method_type_keys
+                        .iter()
+                        .all(|&type_id| arena.unwrap_type_param(type_id).is_none());
+
+                // Prefer substitution-compatible concrete instances first.
+                // Module prefix is only a tie-breaker.
+                let score = (
+                    substitution_matches,
+                    concrete_key as usize,
+                    module_match as usize,
+                    instance.substitutions.len(),
+                );
+
+                Some((score, instance))
+            })
+            .max_by_key(|(score, _)| *score)
+            .map(|(_, instance)| instance.clone())
+    }
+
     fn call_static_monomorph_instance(
         &mut self,
-        instance: &vole_sema::generic::StaticMethodMonomorphInstance,
+        instance: &StaticMethodMonomorphInstance,
         mc: &MethodCallExpr,
     ) -> CodegenResult<CompiledValue> {
         // Compile arguments with substituted param types (TypeId-based)
@@ -1984,10 +2015,9 @@ impl Cg<'_, '_, '_> {
         let return_type_id = self
             .get_expr_type_substituted(&expr_id)
             .ok_or_else(|| CodegenError::missing_resource("Array.filled return type from sema"))?;
-        let elem_type_id = self
-            .arena()
-            .unwrap_array(return_type_id)
-            .ok_or_else(|| CodegenError::type_mismatch("Array.filled", "array type", "non-array"))?;
+        let elem_type_id = self.arena().unwrap_array(return_type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("Array.filled", "array type", "non-array")
+        })?;
 
         // Compile count argument
         let count = self.expr(&mc.args[0])?;
