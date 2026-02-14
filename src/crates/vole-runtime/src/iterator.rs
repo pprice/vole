@@ -1036,6 +1036,30 @@ fn pack_optional_i64(value: Option<i64>) -> *mut u8 {
     ptr
 }
 
+fn extract_i64_words_via_next(iter: *mut RcIterator, limit: Option<usize>) -> Option<Vec<i64>> {
+    if iter.is_null() {
+        return Some(Vec::new());
+    }
+    if unsafe { (*iter).elem_tag } != TYPE_I64 as u64 {
+        return None;
+    }
+
+    let mut out = Vec::new();
+    loop {
+        if let Some(max) = limit
+            && out.len() >= max
+        {
+            break;
+        }
+        let mut value = 0i64;
+        if vole_array_iter_next(iter, &mut value) == 0 {
+            break;
+        }
+        out.push(value);
+    }
+    Some(out)
+}
+
 fn extract_supported_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> Option<Vec<i64>> {
     if iter.is_null() {
         return Some(Vec::new());
@@ -1180,6 +1204,12 @@ fn extract_supported_i64_words(iter: *mut RcIterator, limit: Option<usize>) -> O
             }
             Some(out)
         }
+        IteratorKind::Flatten
+        | IteratorKind::FlatMap
+        | IteratorKind::Chunks
+        | IteratorKind::Windows
+        | IteratorKind::Enumerate
+        | IteratorKind::Zip => extract_i64_words_via_next(iter, limit),
         _ => None,
     }
 }
