@@ -98,12 +98,9 @@ impl Analyzer {
         // Get type_def_id and type_args from TypeId using arena queries (class only)
         let (type_def_id, type_args_id) = {
             let arena = self.type_arena();
-            let Some((id, args, kind)) = arena.unwrap_nominal(ty_id) else {
+            let Some((id, args, _)) = arena.unwrap_class_or_struct(ty_id) else {
                 return false;
             };
-            if !kind.is_class_or_struct() {
-                return false;
-            }
             (id, args.clone())
         };
 
@@ -154,8 +151,7 @@ impl Analyzer {
         let type_def_id = {
             let arena = self.type_arena();
             arena
-                .unwrap_nominal(ty_id)
-                .filter(|(_, _, kind)| kind.is_class_or_struct())
+                .unwrap_class_or_struct(ty_id)
                 .map(|(id, _, _)| id)
         };
 
@@ -337,8 +333,7 @@ impl Analyzer {
         let type_def_id = {
             let arena = self.type_arena();
             arena
-                .unwrap_nominal(ty_id)
-                .filter(|(_, _, kind)| kind.is_class_or_struct())
+                .unwrap_class_or_struct(ty_id)
                 .map(|(id, _, _)| id)
         };
 

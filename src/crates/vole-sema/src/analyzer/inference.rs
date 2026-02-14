@@ -54,8 +54,7 @@ impl Analyzer {
             let type_def_id = {
                 let arena = self.type_arena();
                 arena
-                    .unwrap_nominal(concrete_type_id)
-                    .filter(|(_, _, kind)| kind.is_class_or_struct())
+                    .unwrap_class_or_struct(concrete_type_id)
                     .map(|(id, _, _)| id)
             };
             let Some(type_def_id) = type_def_id else {

@@ -1181,6 +1181,15 @@ impl TypeArena {
         }
     }
 
+    /// Unwrap a nominal type that is a class or struct (not interface).
+    ///
+    /// This is a convenience wrapper around `unwrap_nominal` that filters out
+    /// interfaces, since many call sites only care about field-bearing types.
+    pub fn unwrap_class_or_struct(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec, NominalKind)> {
+        self.unwrap_nominal(id)
+            .filter(|(_, _, kind)| kind.is_class_or_struct())
+    }
+
     /// Unwrap an error type, returning type_def_id
     pub fn unwrap_error(&self, id: TypeId) -> Option<TypeDefId> {
         match self.get(id) {

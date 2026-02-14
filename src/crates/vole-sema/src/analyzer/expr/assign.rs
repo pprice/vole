@@ -43,8 +43,7 @@ impl Analyzer {
                 let struct_info = {
                     let arena = self.type_arena();
                     arena
-                        .unwrap_nominal(obj_ty_id)
-                        .filter(|(_, _, kind)| kind.is_class_or_struct())
+                        .unwrap_class_or_struct(obj_ty_id)
                         .map(|(id, args, _kind)| (id, args.clone()))
                 };
 
@@ -261,8 +260,7 @@ impl Analyzer {
                 let struct_info = {
                     let arena = self.type_arena();
                     arena
-                        .unwrap_nominal(obj_ty_id)
-                        .filter(|(_, _, kind)| kind.is_class_or_struct())
+                        .unwrap_class_or_struct(obj_ty_id)
                         .map(|(id, args, _kind)| (id, args.clone()))
                 };
 

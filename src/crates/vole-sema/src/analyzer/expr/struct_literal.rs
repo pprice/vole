@@ -87,8 +87,7 @@ impl Analyzer {
                     // The export_type_id is an ArenaTypeId, we need to extract the TypeDefId
                     let arena = self.type_arena();
                     arena
-                        .unwrap_nominal(export_type_id)
-                        .filter(|(_, _, kind)| kind.is_class_or_struct())
+                        .unwrap_class_or_struct(export_type_id)
                         .map(|(type_def_id, _, _)| type_def_id)
                 })
         }
@@ -154,8 +153,7 @@ impl Analyzer {
                         let arena = self.type_arena();
                         // Get the underlying TypeDefId from the aliased type (class or struct)
                         let underlying = arena
-                            .unwrap_nominal(aliased_type_id)
-                            .filter(|(_, _, kind)| kind.is_class_or_struct())
+                            .unwrap_class_or_struct(aliased_type_id)
                             .map(|(def_id, _, kind)| (def_id, kind.to_type_def_kind()));
 
                         if let Some((underlying_def_id, underlying_kind)) = underlying {

@@ -118,8 +118,7 @@ impl Analyzer {
         let struct_info = {
             let arena = self.type_arena();
             arena
-                .unwrap_nominal(object_type_id)
-                .filter(|(_, _, kind)| kind.is_class_or_struct())
+                .unwrap_class_or_struct(object_type_id)
                 .map(|(id, args, kind)| (id, args.clone(), kind))
         };
         let Some((type_def_id, type_args_id, nominal_kind)) = struct_info else {
@@ -213,8 +212,7 @@ impl Analyzer {
         let struct_info = {
             let arena = self.type_arena();
             arena
-                .unwrap_nominal(inner_type_id)
-                .filter(|(_, _, kind)| kind.is_class_or_struct())
+                .unwrap_class_or_struct(inner_type_id)
                 .map(|(id, args, _)| (id, args.clone()))
         };
         let Some((type_def_id, type_args_id)) = struct_info else {
@@ -284,9 +282,7 @@ impl Analyzer {
             && let Some(var_type_id) = self.get_variable_type_id(*sym)
         {
             let arena = self.type_arena();
-            if let Some((type_def_id, _, kind)) = arena.unwrap_nominal(var_type_id)
-                && kind.is_class_or_struct()
-            {
+            if let Some((type_def_id, _, _)) = arena.unwrap_class_or_struct(var_type_id) {
                 drop(arena);
                 let method_name_id = self.method_name_id(method_call.method, interner);
                 let has_static = self
@@ -628,8 +624,7 @@ impl Analyzer {
                 let type_args_and_def = {
                     let arena = self.type_arena();
                     arena
-                        .unwrap_nominal(object_type_id)
-                        .filter(|(_, _, kind)| kind.is_class_or_struct())
+                        .unwrap_class_or_struct(object_type_id)
                         .map(|(id, args, _)| (id, args.clone()))
                 };
                 if let Some((type_def_id, type_args)) = type_args_and_def
@@ -742,8 +737,7 @@ impl Analyzer {
                 // Extract TypeDefId from the export type (class only)
                 let arena = self.type_arena();
                 let type_def_id = arena
-                    .unwrap_nominal(export_type_id)
-                    .filter(|(_, _, kind)| kind.is_class_or_struct())
+                    .unwrap_class_or_struct(export_type_id)
                     .map(|(id, _, _)| id)?;
 
                 tracing::trace!(
@@ -990,8 +984,8 @@ impl Analyzer {
         let generic_info = {
             let arena = self.type_arena();
             arena
-                .unwrap_nominal(object_type_id)
-                .filter(|(_, args, kind)| kind.is_class_or_struct() && !args.is_empty())
+                .unwrap_class_or_struct(object_type_id)
+                .filter(|(_, args, _)| !args.is_empty())
                 .map(|(id, args, _)| (id, args.clone()))
         };
         let Some((class_type_def_id, type_args_id)) = generic_info else {
