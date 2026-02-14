@@ -2929,11 +2929,7 @@ impl Cg<'_, '_, '_> {
                 .iter()
                 .map(|f| {
                     let current = offset;
-                    offset += if crate::types::is_wide_type(f.ty, arena) {
-                        16
-                    } else {
-                        8
-                    };
+                    offset += crate::types::field_byte_size(f.ty, arena) as i32;
                     current
                 })
                 .collect()

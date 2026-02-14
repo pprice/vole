@@ -340,11 +340,7 @@ pub(crate) fn field_flat_slots(
         return count;
     }
     // i128 needs 2 x 8-byte slots
-    if crate::types::is_wide_type(type_id, arena) {
-        2
-    } else {
-        1
-    }
+    crate::types::field_slot_count(type_id, arena)
 }
 
 /// Compute the byte offset of field `slot` within a struct, accounting

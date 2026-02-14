@@ -1477,13 +1477,7 @@ impl Cg<'_, '_, '_> {
         // i128 fields use 16 bytes (2 slots), all others use 8 bytes (1 slot).
         let error_payload_size: u32 = error_fields
             .iter()
-            .map(|f| {
-                if crate::types::is_wide_type(f.ty, self.arena()) {
-                    16u32
-                } else {
-                    8u32
-                }
-            })
+            .map(|f| crate::types::field_byte_size(f.ty, self.arena()))
             .sum();
         let slot = self.alloc_stack(error_payload_size);
 

@@ -238,11 +238,7 @@ impl Compiler<'_> {
                     field_type_tags.push(FieldTypeTag::Value);
                 }
             }
-            physical_slot += if crate::types::is_wide_type(field_def.ty, arena) {
-                2
-            } else {
-                1
-            };
+            physical_slot += crate::types::field_slot_count(field_def.ty, arena);
         }
 
         (field_slots, physical_slot, field_type_tags)

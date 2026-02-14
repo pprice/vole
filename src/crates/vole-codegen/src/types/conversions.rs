@@ -288,6 +288,16 @@ pub(crate) fn is_wide_type(ty: TypeId, arena: &TypeArena) -> bool {
     matches!(arena.get(ty), SemaType::Primitive(PrimitiveType::I128))
 }
 
+/// Get the byte size of a field: 16 for i128 (wide) types, 8 for all others.
+pub(crate) fn field_byte_size(ty: TypeId, arena: &TypeArena) -> u32 {
+    if is_wide_type(ty, arena) { 16 } else { 8 }
+}
+
+/// Get the slot count of a field: 2 for i128 (wide) types, 1 for all others.
+pub(crate) fn field_slot_count(ty: TypeId, arena: &TypeArena) -> usize {
+    if is_wide_type(ty, arena) { 2 } else { 1 }
+}
+
 /// Check if a fallible type has a wide (i128) success type.
 /// Returns true if the type is `fallible(i128, ...)`.
 /// When true, the fallible return convention uses 3 i64 registers instead of 2
