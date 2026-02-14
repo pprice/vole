@@ -283,11 +283,7 @@ pub extern "C" fn str_compare(a: *const RcString, b: *const RcString) -> i32 {
     } else {
         unsafe { (*b).as_str() }
     };
-    match a_str.cmp(b_str) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    super::intrinsics::ordering_to_i32(a_str.cmp(b_str))
 }
 
 /// Compute FNV-1a hash of a string

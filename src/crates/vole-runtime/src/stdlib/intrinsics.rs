@@ -9,6 +9,27 @@ use crate::builtins::{
     bool_to_string, f64_to_string, i32_to_string, i64_to_string, i128_to_string,
 };
 
+/// Convert a total ordering to the standard comparison result: -1, 0, or 1.
+#[inline]
+pub(super) fn ordering_to_i32(ord: std::cmp::Ordering) -> i32 {
+    match ord {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Convert a partial ordering to the standard comparison result: -1, 0, or 1.
+/// Returns 0 for unordered (NaN) comparisons.
+#[inline]
+pub(super) fn partial_ordering_to_i32(ord: Option<std::cmp::Ordering>) -> i32 {
+    match ord {
+        Some(std::cmp::Ordering::Less) => -1,
+        Some(std::cmp::Ordering::Equal) | None => 0,
+        Some(std::cmp::Ordering::Greater) => 1,
+    }
+}
+
 /// Create the vole:std:runtime native module
 pub fn module() -> NativeModule {
     let mut m = NativeModule::new();
@@ -675,11 +696,7 @@ pub extern "C" fn i64_equals(a: i64, b: i64) -> i8 {
 /// Compare two i64 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn i64_compare(a: i64, b: i64) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 // i64_to_string is imported from builtins
@@ -697,11 +714,7 @@ pub extern "C" fn i32_equals(a: i32, b: i32) -> i8 {
 /// Compare two i32 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn i32_compare(a: i32, b: i32) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 // i32_to_string is imported from builtins
@@ -744,12 +757,7 @@ pub extern "C" fn f64_equals(a: f64, b: f64) -> i8 {
 /// Compare two f64 values, returns -1, 0, or 1 (NaN returns 0)
 #[unsafe(no_mangle)]
 pub extern "C" fn f64_compare(a: f64, b: f64) -> i32 {
-    match a.partial_cmp(&b) {
-        Some(std::cmp::Ordering::Less) => -1,
-        Some(std::cmp::Ordering::Equal) => 0,
-        Some(std::cmp::Ordering::Greater) => 1,
-        None => 0, // NaN comparison returns 0
-    }
+    partial_ordering_to_i32(a.partial_cmp(&b))
 }
 
 // f64_to_string is imported from builtins
@@ -779,11 +787,7 @@ pub extern "C" fn i8_equals(a: i8, b: i8) -> i8 {
 /// Compare two i8 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn i8_compare(a: i8, b: i8) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 /// Hash an i8 value
@@ -805,11 +809,7 @@ pub extern "C" fn i16_equals(a: i16, b: i16) -> i8 {
 /// Compare two i16 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn i16_compare(a: i16, b: i16) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 /// Hash an i16 value
@@ -831,11 +831,7 @@ pub extern "C" fn u8_equals(a: u8, b: u8) -> i8 {
 /// Compare two u8 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn u8_compare(a: u8, b: u8) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 /// Hash a u8 value
@@ -857,11 +853,7 @@ pub extern "C" fn u16_equals(a: u16, b: u16) -> i8 {
 /// Compare two u16 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn u16_compare(a: u16, b: u16) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 /// Hash a u16 value
@@ -883,11 +875,7 @@ pub extern "C" fn u32_equals(a: u32, b: u32) -> i8 {
 /// Compare two u32 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn u32_compare(a: u32, b: u32) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 /// Hash a u32 value
@@ -909,11 +897,7 @@ pub extern "C" fn u64_equals(a: u64, b: u64) -> i8 {
 /// Compare two u64 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn u64_compare(a: u64, b: u64) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 /// Hash a u64 value
@@ -935,11 +919,7 @@ pub extern "C" fn i128_equals(a: i128, b: i128) -> i8 {
 /// Compare two i128 values, returns -1, 0, or 1
 #[unsafe(no_mangle)]
 pub extern "C" fn i128_compare(a: i128, b: i128) -> i32 {
-    match a.cmp(&b) {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
+    ordering_to_i32(a.cmp(&b))
 }
 
 // i128_to_string is imported from builtins
@@ -968,12 +948,7 @@ pub extern "C" fn f32_equals(a: f32, b: f32) -> i8 {
 /// Compare two f32 values, returns -1, 0, or 1 (NaN returns 0)
 #[unsafe(no_mangle)]
 pub extern "C" fn f32_compare(a: f32, b: f32) -> i32 {
-    match a.partial_cmp(&b) {
-        Some(std::cmp::Ordering::Less) => -1,
-        Some(std::cmp::Ordering::Equal) => 0,
-        Some(std::cmp::Ordering::Greater) => 1,
-        None => 0, // NaN comparison returns 0
-    }
+    partial_ordering_to_i32(a.partial_cmp(&b))
 }
 
 #[cfg(test)]
