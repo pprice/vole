@@ -1304,10 +1304,53 @@ pub fn all_linkable_symbols() -> &'static [LinkableRuntimeSymbol] {
     LINKABLE_RUNTIME_SYMBOLS
 }
 
+/// Linkable runtime symbols intentionally not exposed through `RuntimeKey` imports.
+///
+/// These are currently invoked via NativeRegistry external dispatch or runtime-internal
+/// pathways rather than `RuntimeFn`-typed call sites.
+#[cfg(test)]
+const NON_CODEGEN_LINKABLE_SYMBOLS: &[&str] = &[
+    "vole_string_inc",
+    "vole_string_dec",
+    "vole_string_data",
+    "vole_chain_iter",
+    "vole_chain_iter_next",
+    "vole_chain_iter_collect",
+    "vole_flatten_iter",
+    "vole_flatten_iter_next",
+    "vole_flatten_iter_collect",
+    "vole_flat_map_iter",
+    "vole_flat_map_iter_next",
+    "vole_flat_map_iter_collect",
+    "vole_reverse_iter",
+    "vole_sorted_iter",
+    "vole_unique_iter",
+    "vole_unique_iter_next",
+    "vole_chunks_iter",
+    "vole_chunks_iter_next",
+    "vole_chunks_iter_collect",
+    "vole_windows_iter",
+    "vole_windows_iter_next",
+    "vole_windows_iter_collect",
+    "vole_repeat_iter",
+    "vole_repeat_iter_next",
+    "vole_once_iter",
+    "vole_once_iter_next",
+    "vole_empty_iter",
+    "vole_from_fn_iter",
+    "vole_from_fn_iter_next",
+    "vole_range_iter_next",
+    "vole_string_chars_iter_next",
+    "vole_instance_inc",
+    "vole_instance_dec",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rustc_hash::FxHashSet;
+    use std::fs;
+    use std::path::Path;
 
     #[test]
     fn runtime_symbol_names_are_unique() {
@@ -1343,5 +1386,109 @@ mod tests {
                 symbol.c_name
             );
         }
+    }
+
+    #[test]
+    fn runtime_key_all_matches_codegen_symbols() {
+        let expected: FxHashSet<_> = RuntimeKey::ALL.iter().copied().collect();
+        let actual: FxHashSet<_> = codegen_symbols().map(|symbol| symbol.key).collect();
+
+        assert_eq!(
+            expected, actual,
+            "RuntimeKey::ALL and codegen symbol exposure diverged"
+        );
+    }
+
+    #[test]
+    fn every_codegen_symbol_has_linkable_pointer() {
+        let linkable_names: FxHashSet<_> = all_linkable_symbols()
+            .iter()
+            .map(|symbol| symbol.c_name)
+            .collect();
+
+        for symbol in codegen_symbols() {
+            assert!(
+                linkable_names.contains(symbol.c_name),
+                "codegen symbol missing linkable pointer: {}",
+                symbol.c_name
+            );
+        }
+    }
+
+    #[test]
+    fn linkables_are_either_codegen_or_explicit_non_codegen() {
+        let codegen_names: FxHashSet<_> = codegen_symbols().map(|symbol| symbol.c_name).collect();
+        let allowed_non_codegen: FxHashSet<_> =
+            NON_CODEGEN_LINKABLE_SYMBOLS.iter().copied().collect();
+
+        for symbol in all_linkable_symbols() {
+            assert!(
+                codegen_names.contains(symbol.c_name)
+                    || allowed_non_codegen.contains(symbol.c_name),
+                "unclassified non-codegen linkable symbol: {}",
+                symbol.c_name
+            );
+        }
+
+        for &name in NON_CODEGEN_LINKABLE_SYMBOLS {
+            assert!(
+                all_linkable_symbols()
+                    .iter()
+                    .any(|symbol| symbol.c_name == name),
+                "stale non-codegen linkable symbol entry: {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn signatures_exist_for_all_runtime_keys() {
+        for key in RuntimeKey::ALL {
+            let _ = signature_for(*key);
+        }
+    }
+
+    #[test]
+    fn runtime_symbol_string_literals_only_live_in_registry() {
+        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut rs_files = Vec::new();
+        collect_rs_files(&crate_root, &mut rs_files);
+
+        for file in rs_files {
+            let rel = file
+                .strip_prefix(&crate_root)
+                .expect("INTERNAL: file must live under codegen/src");
+            if rel == Path::new("runtime_registry.rs") {
+                continue;
+            }
+
+            let content =
+                fs::read_to_string(&file).expect("INTERNAL: failed to read codegen source file");
+            assert!(
+                !contains_runtime_symbol_literal(&content),
+                "runtime symbol string literal found outside registry: {}",
+                rel.display()
+            );
+        }
+    }
+
+    fn collect_rs_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        let entries = fs::read_dir(dir).expect("INTERNAL: failed to read directory");
+        for entry in entries {
+            let entry = entry.expect("INTERNAL: failed to read directory entry");
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+                continue;
+            }
+            if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    fn contains_runtime_symbol_literal(src: &str) -> bool {
+        src.lines().any(|line| {
+            line.contains("\"vole_") || line.contains("\"rc_inc\"") || line.contains("\"rc_dec\"")
+        })
     }
 }
