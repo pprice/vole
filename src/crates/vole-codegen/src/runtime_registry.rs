@@ -178,7 +178,7 @@ pub struct RuntimeSymbol {
     pub exposed_to_codegen: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AbiTy {
     Ptr,
     I8,

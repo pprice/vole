@@ -2653,6 +2653,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.compile_inline_intrinsic(&intrinsic_key, args, return_type_id, call_line)
             }
             ResolvedCallable::Runtime(runtime) => {
+                if matches!(runtime, RuntimeFn::Panic) {
+                    self.emit_runtime_panic(args, call_line)?;
+                    return Ok(self.void_value());
+                }
+
                 if return_type_id.is_void() {
                     self.call_runtime_void(runtime, args)?;
                     Ok(self.void_value())
@@ -2863,31 +2868,35 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.checked_int_op_impl(*op, arg1, arg2, return_type_id)
             }
             IntrinsicHandler::BuiltinPanic => {
-                if args.is_empty() {
-                    return Err(CodegenError::arg_count("panic", 1, 0));
-                }
-
-                // vole_panic(msg, file_ptr, file_len, line)
-                let msg = args[0];
-                let (file_ptr, file_len) = self.source_file();
-                let ptr_type = self.ptr_type();
-                let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
-                let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
-                let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
-
-                self.call_runtime_void(
-                    RuntimeFn::Panic,
-                    &[msg, file_ptr_val, file_len_val, line_val],
-                )?;
-
-                // Panic never returns - emit trap and unreachable block
-                self.builder.ins().trap(crate::trap_codes::PANIC);
-                let unreachable_block = self.builder.create_block();
-                self.switch_and_seal(unreachable_block);
-
+                self.emit_runtime_panic(args, call_line)?;
                 Ok(self.void_value())
             }
         }
+    }
+
+    fn emit_runtime_panic(&mut self, args: &[Value], call_line: u32) -> CodegenResult<()> {
+        if args.is_empty() {
+            return Err(CodegenError::arg_count("panic", 1, 0));
+        }
+
+        // vole_panic(msg, file_ptr, file_len, line)
+        let msg = args[0];
+        let (file_ptr, file_len) = self.source_file();
+        let ptr_type = self.ptr_type();
+        let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
+        let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
+        let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
+
+        self.call_runtime_void(
+            RuntimeFn::Panic,
+            &[msg, file_ptr_val, file_len_val, line_val],
+        )?;
+
+        // Panic never returns - emit trap and unreachable block
+        self.builder.ins().trap(crate::trap_codes::PANIC);
+        let unreachable_block = self.builder.create_block();
+        self.switch_and_seal(unreachable_block);
+        Ok(())
     }
 
     /// Dispatch table for unary integer intrinsic operations.
