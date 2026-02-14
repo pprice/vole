@@ -11,8 +11,8 @@ use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
-use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
-use super::types::{CompiledValue, array_element_tag_id, convert_to_type};
+use super::structs::get_field_slot_and_type_id_cg;
+use super::types::{CompiledValue, convert_to_type};
 use crate::errors::{CodegenError, CodegenResult};
 
 /// Convert a numeric TypeId to its corresponding Cranelift type.
@@ -737,14 +737,11 @@ impl Cg<'_, '_, '_> {
 
     /// String equality comparison
     fn string_eq(&mut self, left: Value, right: Value) -> CodegenResult<Value> {
-        Ok(self
-            .call_compiler_intrinsic_key_with_line(
-                crate::IntrinsicKey::from("string_eq"),
-                &[left, right],
-                TypeId::BOOL,
-                0,
-            )?
-            .value)
+        if self.funcs().has_runtime(RuntimeFn::StringEq) {
+            self.call_runtime(RuntimeFn::StringEq, &[left, right])
+        } else {
+            Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
+        }
     }
 
     /// Struct equality: compare all flat slots field-by-field.
@@ -958,7 +955,16 @@ impl Cg<'_, '_, '_> {
 
         // Load current element
         let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
-        let current = self.convert_field_value(raw_value, elem_type_id);
+        let current = if self.arena().is_union(elem_type_id) {
+            if self.union_array_prefers_inline_storage(elem_type_id) {
+                let raw_tag = self.call_runtime(RuntimeFn::ArrayGetTag, &[arr.value, idx.value])?;
+                self.decode_dynamic_array_union_element(raw_tag, raw_value, elem_type_id)
+            } else {
+                self.copy_union_heap_to_stack(raw_value, elem_type_id)
+            }
+        } else {
+            self.convert_field_value(raw_value, elem_type_id)
+        };
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
@@ -973,14 +979,9 @@ impl Cg<'_, '_, '_> {
                 "i128 (128-bit values cannot be stored in arrays)",
             ));
         }
+        let (tag_val, store_value, _stored) =
+            self.prepare_dynamic_array_store(result, elem_type_id)?;
         let array_set_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
-        let store_value = convert_to_i64_for_storage(self.builder, &result);
-        // Compute tag before using builder to avoid borrow conflict
-        let tag = {
-            let arena = self.arena();
-            array_element_tag_id(elem_type_id, arena)
-        };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
 
         let set_args =
             self.coerce_call_args(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);

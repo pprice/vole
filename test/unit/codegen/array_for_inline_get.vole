@@ -2,9 +2,37 @@ class Score {
     value: i64
 }
 
+class UnionBox {
+    vals: [i64 | string]
+}
+
+class GenericHolder<T> {
+    vals: [T]
+}
+
+class Nested {
+    vals: [[i64 | string]]
+}
+
 struct Point {
     x: i64,
     y: i64,
+}
+
+sentinel Missing
+
+func sum_numbers(arr: [i64 | string]) -> i64 {
+    let mut sum: i64 = 0
+    for item in arr {
+        if item is i64 {
+            sum = sum + item
+        }
+    }
+    return sum
+}
+
+func make_holder<T>(vals: [T]) -> GenericHolder<T> {
+    return GenericHolder { vals: vals }
 }
 
 tests "for-array inline get coverage" {
@@ -72,5 +100,75 @@ tests "for-array inline get coverage" {
             sum = sum + item[0] + item[1]
         }
         assert(sum == 66)
+    }
+
+    test "union array literal in class field is safe for for-loop inline get" {
+        let b = UnionBox { vals: [1, "x", 2, "y"] }
+        let mut sum: i64 = 0
+        for item in b.vals {
+            if item is i64 {
+                sum = sum + item
+            }
+        }
+        assert(sum == 3)
+    }
+
+    test "union array literal passed to typed function arg is safe" {
+        let vals: [i64 | string] = [1, "two", 3]
+        assert(sum_numbers(vals) == 4)
+    }
+
+    test "nested union arrays in class field are safe" {
+        let n = Nested { vals: [[1, "a"], [2, "b"]] }
+        let mut sum: i64 = 0
+        for inner in n.vals {
+            for item in inner {
+                if item is i64 {
+                    sum = sum + item
+                }
+            }
+        }
+        assert(sum == 3)
+    }
+
+    test "generic T union array in class field is safe" {
+        let vals: [i64 | string] = [1, "x", 2, "y"]
+        let h = make_holder(vals)
+        let mut sum: i64 = 0
+        for item in h.vals {
+            if item is i64 {
+                sum = sum + item
+            }
+        }
+        assert(sum == 3)
+    }
+
+    test "generic container of T (array of union arrays) is safe" {
+        let vals: [[i64 | string]] = [[1, "x"], [2, "y"]]
+        let h = make_holder(vals)
+        let mut sum: i64 = 0
+        for inner in h.vals {
+            for item in inner {
+                if item is i64 {
+                    sum = sum + item
+                }
+            }
+        }
+        assert(sum == 3)
+    }
+
+    test "sentinel union arrays use boxed fallback and stay correct" {
+        let arr: [i64 | Missing] = [1, Missing, 2]
+        let mut sum: i64 = 0
+        let mut missing = 0
+        for item in arr {
+            if item is i64 {
+                sum = sum + item
+            } else {
+                missing = missing + 1
+            }
+        }
+        assert(sum == 3)
+        assert(missing == 1)
     }
 }

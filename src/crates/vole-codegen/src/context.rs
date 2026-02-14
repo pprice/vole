@@ -1134,6 +1134,232 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         )
     }
 
+    /// Returns true when a union array can be stored inline as (runtime_tag, payload)
+    /// without losing variant identity.
+    ///
+    /// If two variants map to the same runtime tag (e.g. `i64 | nil` -> TYPE_I64),
+    /// inline storage cannot recover the original union variant on read, so we must
+    /// fall back to heap-boxed union buffers.
+    pub fn union_array_prefers_inline_storage(&self, union_type_id: TypeId) -> bool {
+        use crate::types::unknown_type_tag;
+        use rustc_hash::FxHashSet;
+        use vole_runtime::value::TYPE_I64;
+
+        let resolved_union_id = self.try_substitute_type(union_type_id);
+        let Some(variants) = self.arena().unwrap_union(resolved_union_id) else {
+            return false;
+        };
+
+        let arena = self.arena();
+        let mut seen_tags: FxHashSet<u64> = FxHashSet::default();
+        for &variant in variants {
+            if !self.supports_inline_union_array_variant(variant) {
+                return false;
+            }
+
+            let tag = unknown_type_tag(variant, arena);
+            if tag == TYPE_I64 as u64 && !arena.is_integer(variant) && !arena.is_sentinel(variant) {
+                return false;
+            }
+            if !seen_tags.insert(tag) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn supports_inline_union_array_variant(&self, variant: TypeId) -> bool {
+        let arena = self.arena();
+        // Codegen/runtime layout policy: inline union array slots store only
+        // (runtime_tag, payload_bits), so variants that need richer tagging or
+        // heap-backed payload wrappers must use boxed union storage.
+        !(arena.is_union(variant)
+            || arena.is_interface(variant)
+            || arena.is_class(variant)
+            || arena.is_struct(variant)
+            || arena.is_unknown(variant)
+            || arena.unwrap_tuple(variant).is_some()
+            || arena.unwrap_fallible(variant).is_some()
+            || arena.unwrap_type_param(variant).is_some())
+    }
+
+    fn union_variant_index_to_array_tag(
+        &mut self,
+        variant_idx: Value,
+        variants: &[TypeId],
+    ) -> Value {
+        let variant_tags: Vec<i64> = {
+            let arena = self.arena();
+            variants
+                .iter()
+                .map(|&variant| crate::types::array_element_tag_id(variant, arena))
+                .collect()
+        };
+        let default_tag = variant_tags[0];
+        let mut runtime_tag = self.builder.ins().iconst(types::I64, default_tag);
+
+        for (idx, &tag) in variant_tags.iter().enumerate().skip(1) {
+            let idx_val = self.builder.ins().iconst(types::I8, idx as i64);
+            let is_match = self.builder.ins().icmp(IntCC::Equal, variant_idx, idx_val);
+            let tag_val = self.builder.ins().iconst(types::I64, tag);
+            runtime_tag = self.builder.ins().select(is_match, tag_val, runtime_tag);
+        }
+
+        runtime_tag
+    }
+
+    fn array_tag_to_union_variant_index(&mut self, array_tag: Value, variants: &[TypeId]) -> Value {
+        let variant_tags: Vec<i64> = {
+            let arena = self.arena();
+            variants
+                .iter()
+                .map(|&variant| crate::types::array_element_tag_id(variant, arena))
+                .collect()
+        };
+        let mut variant_idx = self.builder.ins().iconst(types::I8, 0);
+        let first_match = self
+            .builder
+            .ins()
+            .icmp_imm(IntCC::Equal, array_tag, variant_tags[0]);
+        let mut matched_any = first_match;
+
+        for (idx, &runtime_tag) in variant_tags.iter().enumerate().skip(1) {
+            let is_match = self
+                .builder
+                .ins()
+                .icmp_imm(IntCC::Equal, array_tag, runtime_tag);
+            let idx_val = self.builder.ins().iconst(types::I8, idx as i64);
+            variant_idx = self.builder.ins().select(is_match, idx_val, variant_idx);
+            matched_any = self.builder.ins().bor(matched_any, is_match);
+        }
+
+        // Strict contract: unknown tags are a hard runtime fault.
+        self.builder
+            .ins()
+            .trapz(matched_any, crate::trap_codes::PANIC);
+
+        variant_idx
+    }
+
+    /// Convert a value to dynamic array storage representation for a known element type.
+    ///
+    /// Returns `(tag, payload_bits, stored_value_for_lifecycle)`.
+    pub fn prepare_dynamic_array_store(
+        &mut self,
+        value: CompiledValue,
+        elem_type_id: TypeId,
+    ) -> CodegenResult<(Value, Value, CompiledValue)> {
+        let mut value = if self.arena().is_struct(value.type_id) {
+            self.copy_struct_to_heap(value)?
+        } else {
+            value
+        };
+
+        let resolved_elem_type = self.try_substitute_type(elem_type_id);
+        if !self.arena().is_union(resolved_elem_type) {
+            value = self.coerce_to_type(value, resolved_elem_type)?;
+            let tag = {
+                let arena = self.arena();
+                crate::types::array_element_tag_id(value.type_id, arena)
+            };
+            let tag_val = self.builder.ins().iconst(types::I64, tag);
+            let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
+            return Ok((tag_val, payload_bits, value));
+        }
+
+        // Union array element type: choose storage strategy by tag uniqueness.
+        if self.union_array_prefers_inline_storage(resolved_elem_type) {
+            value = self.coerce_to_type(value, resolved_elem_type)?;
+            if !self.arena().is_union(value.type_id) {
+                return Err(CodegenError::type_mismatch(
+                    "array union inline coercion",
+                    self.arena().display_basic(resolved_elem_type),
+                    self.arena().display_basic(value.type_id),
+                ));
+            }
+            let variants = self
+                .arena()
+                .unwrap_union(resolved_elem_type)
+                .expect("INTERNAL: expected union element type")
+                .clone();
+
+            let variant_idx = self
+                .builder
+                .ins()
+                .load(types::I8, MemFlags::new(), value.value, 0);
+            let runtime_tag = self.union_variant_index_to_array_tag(variant_idx, &variants);
+            let payload_bits = if self.type_size(resolved_elem_type) > union_layout::TAG_ONLY_SIZE {
+                self.builder.ins().load(
+                    types::I64,
+                    MemFlags::new(),
+                    value.value,
+                    union_layout::PAYLOAD_OFFSET,
+                )
+            } else {
+                self.builder.ins().iconst(types::I64, 0)
+            };
+            return Ok((runtime_tag, payload_bits, value));
+        }
+
+        // Boxed union storage for ambiguous runtime tags.
+        if self.arena().is_union(value.type_id) {
+            value = self.coerce_to_type(value, resolved_elem_type)?;
+            if !self.arena().is_union(value.type_id) {
+                return Err(CodegenError::type_mismatch(
+                    "array union boxed coercion",
+                    self.arena().display_basic(resolved_elem_type),
+                    self.arena().display_basic(value.type_id),
+                ));
+            }
+            value = self.copy_union_to_heap(value)?;
+        } else {
+            value.type_id = self.try_substitute_type(value.type_id);
+            value = self.construct_union_heap_id(value, resolved_elem_type)?;
+        }
+
+        let tag = {
+            let arena = self.arena();
+            crate::types::array_element_tag_id(value.type_id, arena)
+        };
+        let tag_val = self.builder.ins().iconst(types::I64, tag);
+        let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
+        Ok((tag_val, payload_bits, value))
+    }
+
+    /// Decode a dynamic array union element from `(tag, payload)` storage.
+    pub fn decode_dynamic_array_union_element(
+        &mut self,
+        raw_tag: Value,
+        raw_value: Value,
+        union_type_id: TypeId,
+    ) -> CompiledValue {
+        let resolved_union_id = self.try_substitute_type(union_type_id);
+        if !self.union_array_prefers_inline_storage(resolved_union_id) {
+            return self.copy_union_heap_to_stack(raw_value, resolved_union_id);
+        }
+
+        let variants = self
+            .arena()
+            .unwrap_union(resolved_union_id)
+            .expect("INTERNAL: expected union type for array decode")
+            .clone();
+
+        let union_size = self.type_size(resolved_union_id);
+        let slot = self.alloc_stack(union_size);
+        let variant_idx = self.array_tag_to_union_variant_index(raw_tag, &variants);
+        self.builder.ins().stack_store(variant_idx, slot, 0);
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            self.builder
+                .ins()
+                .stack_store(raw_value, slot, union_layout::PAYLOAD_OFFSET);
+        }
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        let mut cv = CompiledValue::new(ptr, ptr_type, resolved_union_id);
+        cv.mark_borrowed();
+        cv
+    }
+
     /// Get the size (in bits) of a TypeId
     pub fn type_size(&self, ty: TypeId) -> u32 {
         type_id_size(ty, self.ptr_type(), self.registry(), self.arena())
@@ -2873,13 +3099,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let len_val = self.emit_inline_string_len(args[0]);
                 Ok(self.i64_value(len_val))
             }
-            IntrinsicHandler::BuiltinStringEq => {
-                if args.len() < 2 {
-                    return Err(CodegenError::arg_count("string_eq", 2, args.len()));
-                }
-                let eq_val = self.emit_inline_string_eq(args[0], args[1]);
-                Ok(self.bool_value(eq_val))
-            }
         }
     }
 
@@ -3021,153 +3240,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.switch_to_block(exit_block);
         let result = self.builder.block_params(exit_block)[0];
         self.builder.ins().jump(merge_block, &[result.into()]);
-
-        self.builder.switch_to_block(merge_block);
-        self.builder.block_params(merge_block)[0]
-    }
-
-    fn emit_inline_string_eq(&mut self, left_ptr: Value, right_ptr: Value) -> Value {
-        let ptr_type = self.ptr_type();
-        let zero_i8 = self.builder.ins().iconst(types::I8, 0);
-        let one_i8 = self.builder.ins().iconst(types::I8, 1);
-        let zero_i64 = self.builder.ins().iconst(types::I64, 0);
-        let one_i64 = self.builder.ins().iconst(types::I64, 1);
-        let null_ptr = self.builder.ins().iconst(ptr_type, 0);
-
-        let left_is_null = self.builder.ins().icmp(IntCC::Equal, left_ptr, null_ptr);
-        let right_is_null = self.builder.ins().icmp(IntCC::Equal, right_ptr, null_ptr);
-
-        let left_null_block = self.builder.create_block();
-        let left_nonnull_block = self.builder.create_block();
-        let right_null_from_left_block = self.builder.create_block();
-        let both_nonnull_block = self.builder.create_block();
-        let len_equal_block = self.builder.create_block();
-        let hash_equal_block = self.builder.create_block();
-        let loop_header_block = self.builder.create_block();
-        let loop_body_block = self.builder.create_block();
-        let byte_equal_block = self.builder.create_block();
-        let exit_true_block = self.builder.create_block();
-        let exit_false_block = self.builder.create_block();
-        let merge_block = self.builder.create_block();
-        self.builder.append_block_param(merge_block, types::I8);
-        self.builder
-            .append_block_param(loop_header_block, types::I64);
-
-        self.builder
-            .ins()
-            .brif(left_is_null, left_null_block, &[], left_nonnull_block, &[]);
-
-        self.builder.switch_to_block(left_null_block);
-        self.builder.ins().brif(
-            right_is_null,
-            right_null_from_left_block,
-            &[],
-            exit_false_block,
-            &[],
-        );
-
-        self.builder.switch_to_block(right_null_from_left_block);
-        self.builder.ins().jump(merge_block, &[one_i8.into()]);
-
-        self.builder.switch_to_block(left_nonnull_block);
-        self.builder.ins().brif(
-            right_is_null,
-            exit_false_block,
-            &[],
-            both_nonnull_block,
-            &[],
-        );
-
-        self.builder.switch_to_block(both_nonnull_block);
-        let same_ptr = self.builder.ins().icmp(IntCC::Equal, left_ptr, right_ptr);
-        self.builder
-            .ins()
-            .brif(same_ptr, exit_true_block, &[], len_equal_block, &[]);
-
-        self.builder.switch_to_block(len_equal_block);
-        let len_offset = std::mem::offset_of!(vole_runtime::string::RcString, len) as i32;
-        let left_len = self
-            .builder
-            .ins()
-            .load(ptr_type, MemFlags::new(), left_ptr, len_offset);
-        let right_len = self
-            .builder
-            .ins()
-            .load(ptr_type, MemFlags::new(), right_ptr, len_offset);
-        let len_same = self.builder.ins().icmp(IntCC::Equal, left_len, right_len);
-        self.builder
-            .ins()
-            .brif(len_same, hash_equal_block, &[], exit_false_block, &[]);
-
-        self.builder.switch_to_block(hash_equal_block);
-        let hash_offset = std::mem::offset_of!(vole_runtime::string::RcString, hash) as i32;
-        let left_hash = self
-            .builder
-            .ins()
-            .load(types::I64, MemFlags::new(), left_ptr, hash_offset);
-        let right_hash =
-            self.builder
-                .ins()
-                .load(types::I64, MemFlags::new(), right_ptr, hash_offset);
-        let hash_same = self.builder.ins().icmp(IntCC::Equal, left_hash, right_hash);
-        self.builder.ins().brif(
-            hash_same,
-            loop_header_block,
-            &[zero_i64.into()],
-            exit_false_block,
-            &[],
-        );
-
-        self.builder.switch_to_block(loop_header_block);
-        let idx = self.builder.block_params(loop_header_block)[0];
-        let left_len_i64 = if ptr_type == types::I64 {
-            left_len
-        } else {
-            self.builder.ins().uextend(types::I64, left_len)
-        };
-        let done = self
-            .builder
-            .ins()
-            .icmp(IntCC::UnsignedGreaterThanOrEqual, idx, left_len_i64);
-        self.builder
-            .ins()
-            .brif(done, exit_true_block, &[], loop_body_block, &[]);
-
-        self.builder.switch_to_block(loop_body_block);
-        let data_offset = size_of::<vole_runtime::string::RcString>() as i64;
-        let left_data = self.builder.ins().iadd_imm(left_ptr, data_offset);
-        let right_data = self.builder.ins().iadd_imm(right_ptr, data_offset);
-        let idx_ptr = if ptr_type == types::I64 {
-            idx
-        } else {
-            self.builder.ins().ireduce(ptr_type, idx)
-        };
-        let left_byte_ptr = self.builder.ins().iadd(left_data, idx_ptr);
-        let right_byte_ptr = self.builder.ins().iadd(right_data, idx_ptr);
-        let left_byte = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), left_byte_ptr, 0);
-        let right_byte = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), right_byte_ptr, 0);
-        let bytes_same = self.builder.ins().icmp(IntCC::Equal, left_byte, right_byte);
-        self.builder
-            .ins()
-            .brif(bytes_same, byte_equal_block, &[], exit_false_block, &[]);
-
-        self.builder.switch_to_block(byte_equal_block);
-        let next_idx = self.builder.ins().iadd(idx, one_i64);
-        self.builder
-            .ins()
-            .jump(loop_header_block, &[next_idx.into()]);
-
-        self.builder.switch_to_block(exit_true_block);
-        self.builder.ins().jump(merge_block, &[one_i8.into()]);
-
-        self.builder.switch_to_block(exit_false_block);
-        self.builder.ins().jump(merge_block, &[zero_i8.into()]);
 
         self.builder.switch_to_block(merge_block);
         self.builder.block_params(merge_block)[0]
@@ -3646,7 +3718,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
                 // The data is not moved or modified, so the pointer remains valid.
                 let default_expr: &Expr = unsafe { &**default_ptr };
-                let compiled = self.expr(default_expr)?;
+                let compiled = self.expr_with_expected_type(default_expr, param_type_id)?;
 
                 // Track owned RC values for cleanup after the call
                 if compiled.is_owned() {

@@ -733,7 +733,11 @@ impl Cg<'_, '_, '_> {
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
-            let compiled = self.expr(arg)?;
+            let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
+                self.expr_with_expected_type(arg, param_type_id)?
+            } else {
+                self.expr(arg)?
+            };
             if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
@@ -1141,7 +1145,7 @@ impl Cg<'_, '_, '_> {
         // Compile provided arguments, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
-            let compiled = self.expr(arg)?;
+            let compiled = self.expr_with_expected_type(arg, param_type_id)?;
             if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
@@ -1183,7 +1187,7 @@ impl Cg<'_, '_, '_> {
                 // SAFETY: The pointer points to data in Program AST which is owned by
                 // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
                 let default_expr = unsafe { &**default_ptr };
-                let compiled = self.expr(default_expr)?;
+                let compiled = self.expr_with_expected_type(default_expr, param_type_id)?;
                 if compiled.is_owned() {
                     rc_temp_args.push(compiled);
                 }

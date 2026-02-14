@@ -35,6 +35,7 @@ pub enum RuntimeKey {
     Panic,
     ArrayNew,
     ArrayPush,
+    ArrayGetTag,
     ArrayGetValue,
     ArrayLen,
     ArrayIter,
@@ -112,6 +113,7 @@ impl RuntimeKey {
         RuntimeKey::Panic,
         RuntimeKey::ArrayNew,
         RuntimeKey::ArrayPush,
+        RuntimeKey::ArrayGetTag,
         RuntimeKey::ArrayGetValue,
         RuntimeKey::ArrayLen,
         RuntimeKey::ArrayIter,
@@ -329,6 +331,11 @@ const RUNTIME_SYMBOLS: &[RuntimeSymbol] = &[
     RuntimeSymbol {
         key: RuntimeKey::ArrayPush,
         c_name: "vole_array_push",
+        exposed_to_codegen: true,
+    },
+    RuntimeSymbol {
+        key: RuntimeKey::ArrayGetTag,
+        c_name: "vole_array_get_tag",
         exposed_to_codegen: true,
     },
     RuntimeSymbol {
@@ -683,6 +690,10 @@ pub fn signature_for(key: RuntimeKey) -> SigSpec {
             params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
             ret: None,
         },
+        RuntimeKey::ArrayGetTag => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64],
+            ret: Some(AbiTy::I64),
+        },
         RuntimeKey::ArrayGetValue => SigSpec {
             params: &[AbiTy::Ptr, AbiTy::I64],
             ret: Some(AbiTy::I64),
@@ -1001,6 +1012,10 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_array_push",
         ptr: vole_runtime::builtins::vole_array_push as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_array_get_tag",
+        ptr: vole_runtime::builtins::vole_array_get_tag as *const u8,
     },
     LinkableRuntimeSymbol {
         c_name: "vole_array_get_value",

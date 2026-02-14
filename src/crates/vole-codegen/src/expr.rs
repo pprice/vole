@@ -618,6 +618,23 @@ impl Cg<'_, '_, '_> {
         self.array_literal_with_union_hint(elements, expr, None)
     }
 
+    pub(crate) fn expr_with_expected_type(
+        &mut self,
+        expr: &Expr,
+        expected_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let forced_union_elem = self
+            .arena()
+            .unwrap_array(expected_type_id)
+            .filter(|&elem_type_id| self.arena().is_union(elem_type_id));
+        if let ExprKind::ArrayLiteral(elements) = &expr.kind {
+            let compiled = self.array_literal_with_union_hint(elements, expr, forced_union_elem)?;
+            Ok(self.mark_rc_owned(compiled))
+        } else {
+            self.expr(expr)
+        }
+    }
+
     pub(crate) fn array_literal_with_union_hint(
         &mut self,
         elements: &[Expr],
@@ -638,31 +655,32 @@ impl Cg<'_, '_, '_> {
         // Otherwise, create a dynamic array
         let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
         let array_push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
-        let union_elem_type = forced_union_elem.or(inferred_type_id
-            .and_then(|array_type_id| self.arena().unwrap_array(array_type_id))
-            .filter(|&elem_type_id| self.arena().is_union(elem_type_id)));
+        let inferred_elem_type =
+            inferred_type_id.and_then(|array_type_id| self.arena().unwrap_array(array_type_id));
+        let expected_elem_type = forced_union_elem.or(inferred_elem_type);
 
         for elem in elements {
-            let compiled = self.expr(elem)?;
-
-            // Structs are stack-allocated; copy to heap so the data survives
-            // if the array escapes the current stack frame (e.g. returned from a function).
-            let mut compiled = if self.arena().is_struct(compiled.type_id) {
-                self.copy_struct_to_heap(compiled)?
+            let compiled = if let Some(elem_type_id) = expected_elem_type {
+                self.expr_with_expected_type(elem, elem_type_id)?
             } else {
-                compiled
+                self.expr(elem)?
             };
-            // Coerce dynamic array literal elements into the declared union type.
-            // Without this, tags/payloads can be stored as plain scalar entries,
-            // while union reads expect boxed union-heap representation.
-            compiled = if let Some(union_type_id) = union_elem_type {
-                if self.arena().is_union(compiled.type_id) {
-                    compiled
-                } else {
-                    self.construct_union_heap_id(compiled, union_type_id)?
-                }
+            let (tag_val, value_bits, mut compiled) = if let Some(elem_type_id) = expected_elem_type
+            {
+                self.prepare_dynamic_array_store(compiled, elem_type_id)?
             } else {
-                compiled
+                let compiled = if self.arena().is_struct(compiled.type_id) {
+                    self.copy_struct_to_heap(compiled)?
+                } else {
+                    compiled
+                };
+                let tag = {
+                    let arena = self.arena();
+                    array_element_tag_id(compiled.type_id, arena)
+                };
+                let tag_val = self.builder.ins().iconst(types::I64, tag);
+                let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
+                (tag_val, value_bits, compiled)
             };
 
             // RC: inc borrowed RC elements so the array gets its own reference.
@@ -676,14 +694,6 @@ impl Cg<'_, '_, '_> {
                     "i128 (128-bit values cannot be stored in arrays)",
                 ));
             }
-
-            // Compute tag before using builder to avoid borrow conflict
-            let tag = {
-                let arena = self.arena();
-                array_element_tag_id(compiled.type_id, arena)
-            };
-            let tag_val = self.builder.ins().iconst(types::I64, tag);
-            let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
 
             let push_args = self.coerce_call_args(array_push_ref, &[arr_ptr, tag_val, value_bits]);
             self.builder.ins().call(array_push_ref, &push_args);
@@ -919,11 +929,14 @@ impl Cg<'_, '_, '_> {
 
             let raw_value =
                 self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
-            // Union elements in dynamic arrays are stored as heap buffers
-            // (16 bytes: [tag, is_rc, pad(6), payload]). Copy to a stack
-            // slot to prevent use-after-free when the array is mutated.
             if self.arena().is_union(element_id) {
-                let cv = self.copy_union_heap_to_stack(raw_value, element_id);
+                let cv = if self.union_array_prefers_inline_storage(element_id) {
+                    let raw_tag =
+                        self.call_runtime_cached(RuntimeFn::ArrayGetTag, &[obj.value, idx.value])?;
+                    self.decode_dynamic_array_union_element(raw_tag, raw_value, element_id)
+                } else {
+                    self.copy_union_heap_to_stack(raw_value, element_id)
+                };
                 return Ok(cv);
             }
             let mut cv = self.convert_field_value(raw_value, element_id);
@@ -1036,16 +1049,17 @@ impl Cg<'_, '_, '_> {
             // Dynamic array assignment
             let idx = self.expr(index)?;
 
-            // If the array element type is a union, box the value into a union pointer.
             let elem_type = self.arena().unwrap_array(arr.type_id);
-            let val = if let Some(elem_id) = elem_type {
-                if self.arena().is_union(elem_id) && !self.arena().is_union(val.type_id) {
-                    self.construct_union_heap_id(val, elem_id)?
-                } else {
-                    val
-                }
+            let (tag_val, value_bits, val) = if let Some(elem_id) = elem_type {
+                self.prepare_dynamic_array_store(val, elem_id)?
             } else {
-                val
+                let tag = {
+                    let arena = self.arena();
+                    array_element_tag_id(val.type_id, arena)
+                };
+                let tag_val = self.builder.ins().iconst(types::I64, tag);
+                let value_bits = convert_to_i64_for_storage(self.builder, &val);
+                (tag_val, value_bits, val)
             };
 
             // i128 cannot fit in a TaggedValue (u64 payload)
@@ -1058,13 +1072,6 @@ impl Cg<'_, '_, '_> {
             }
 
             let set_value_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
-            // Compute tag before using builder to avoid borrow conflict
-            let tag = {
-                let arena = self.arena();
-                array_element_tag_id(val.type_id, arena)
-            };
-            let tag_val = self.builder.ins().iconst(types::I64, tag);
-            let value_bits = convert_to_i64_for_storage(self.builder, &val);
 
             let set_args =
                 self.coerce_call_args(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
@@ -1318,13 +1325,11 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Value> {
         let arena = self.arena();
         Ok(if arena.is_string(type_id) {
-            self.call_compiler_intrinsic_key_with_line(
-                crate::IntrinsicKey::from("string_eq"),
-                &[left, right],
-                TypeId::BOOL,
-                0,
-            )?
-            .value
+            if self.funcs().has_runtime(RuntimeFn::StringEq) {
+                self.call_runtime(RuntimeFn::StringEq, &[left, right])?
+            } else {
+                self.builder.ins().icmp(IntCC::Equal, left, right)
+            }
         } else if arena.is_float(type_id) {
             self.builder.ins().fcmp(FloatCC::Equal, left, right)
         } else if type_id.is_integer() || type_id.is_bool() {

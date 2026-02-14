@@ -243,7 +243,7 @@ impl Cg<'_, '_, '_> {
                 let mut rc_temps: Vec<CompiledValue> = Vec::new();
                 if let Some(param_type_ids) = &param_type_ids {
                     for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-                        let compiled = self.expr(arg)?;
+                        let compiled = self.expr_with_expected_type(arg, param_type_id)?;
                         if compiled.is_owned() {
                             rc_temps.push(compiled);
                         }
@@ -368,7 +368,7 @@ impl Cg<'_, '_, '_> {
                 let mut args: ArgVec = smallvec![obj.value];
                 let mut rc_temps: Vec<CompiledValue> = Vec::new();
                 for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-                    let compiled = self.expr(arg)?;
+                    let compiled = self.expr_with_expected_type(arg, param_type_id)?;
                     if compiled.is_owned() {
                         rc_temps.push(compiled);
                     }
@@ -532,7 +532,7 @@ impl Cg<'_, '_, '_> {
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         if let Some(param_type_ids) = &param_type_ids {
             for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-                let compiled = self.expr(arg)?;
+                let compiled = self.expr_with_expected_type(arg, param_type_id)?;
                 if compiled.is_owned() {
                     rc_temps.push(compiled);
                 }
@@ -1033,37 +1033,26 @@ impl Cg<'_, '_, '_> {
         // Compile the argument
         let value = self.expr(&mc.args[0])?;
 
-        // Structs are stack-allocated; copy to heap so the data survives
-        // if the array escapes the current stack frame.
-        let value = if self.arena().is_struct(value.type_id) {
-            self.copy_struct_to_heap(value)?
-        } else {
-            value
-        };
-
-        // If the array element type is a union, box the value into a union pointer.
-        // Union-element arrays store boxed union pointers so that get returns a
-        // properly typed union value without needing to re-box on read.
         let elem_type = self.arena().unwrap_array(arr_obj.type_id);
-        let value = if let Some(elem_id) = elem_type {
-            if self.arena().is_union(elem_id) && !self.arena().is_union(value.type_id) {
-                self.construct_union_heap_id(value, elem_id)?
+        let (tag_val, value_bits, value) = if let Some(elem_id) = elem_type {
+            self.prepare_dynamic_array_store(value, elem_id)?
+        } else {
+            let value = if self.arena().is_struct(value.type_id) {
+                self.copy_struct_to_heap(value)?
             } else {
                 value
-            }
-        } else {
-            value
+            };
+            let tag = {
+                let arena = self.arena();
+                array_element_tag_id(value.type_id, arena)
+            };
+            let tag_val = self.builder.ins().iconst(types::I64, tag);
+            let value_bits = convert_to_i64_for_storage(self.builder, &value);
+            (tag_val, value_bits, value)
         };
 
         // Get the runtime function reference
         let push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
-
-        // Compute tag for the element type
-        let tag = {
-            let arena = self.arena();
-            array_element_tag_id(value.type_id, arena)
-        };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
 
         // i128 cannot fit in a TaggedValue (u64 payload)
         if value.ty == types::I128 {
@@ -1073,9 +1062,6 @@ impl Cg<'_, '_, '_> {
                 "i128 (128-bit values cannot be stored in arrays)",
             ));
         }
-        // Convert value to i64 for storage
-        let value_bits = convert_to_i64_for_storage(self.builder, &value);
-
         // Call vole_array_push(arr_ptr, tag, value)
         let push_args = self.coerce_call_args(push_ref, &[arr_obj.value, tag_val, value_bits]);
         self.builder.ins().call(push_ref, &push_args);
@@ -1509,7 +1495,11 @@ impl Cg<'_, '_, '_> {
         // RcIterator adapters via vole_interface_iter.
         let mut call_args: ArgVec = smallvec![obj.value];
         for (i, arg) in args.iter().enumerate() {
-            let compiled = self.expr(arg)?;
+            let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {
+                self.expr_with_expected_type(arg, expected_type_id)?
+            } else {
+                self.expr(arg)?
+            };
             // Coerce arguments to their expected parameter types before converting
             // to word representation. Without this, union-typed parameters would be
             // passed as their concrete variant (e.g. i16) rather than as a tagged
@@ -1648,7 +1638,7 @@ impl Cg<'_, '_, '_> {
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
-            let compiled = self.expr(arg)?;
+            let compiled = self.expr_with_expected_type(arg, *param_id)?;
             if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
@@ -1843,7 +1833,7 @@ impl Cg<'_, '_, '_> {
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-            let compiled = self.expr(arg)?;
+            let compiled = self.expr_with_expected_type(arg, param_type_id)?;
             if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
@@ -2019,32 +2009,8 @@ impl Cg<'_, '_, '_> {
         // Compile value argument
         let value = self.expr(&mc.args[1])?;
 
-        // Union-element arrays store boxed union pointers so get() returns a
-        // properly typed union value. Box the value once; the runtime rc_inc's
-        // the box pointer for each slot, keeping the shared box alive.
-        let value = if self.arena().is_union(elem_type_id) && !self.arena().is_union(value.type_id)
-        {
-            self.construct_union_heap_id(value, elem_type_id)?
-        } else {
-            value
-        };
-
-        // Copy structs to heap so data survives if the array escapes the stack frame
-        let value = if self.arena().is_struct(value.type_id) {
-            self.copy_struct_to_heap(value)?
-        } else {
-            value
-        };
-
-        // Compute tag for the element type
-        let tag = {
-            let arena = self.arena();
-            array_element_tag_id(value.type_id, arena)
-        };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
-
-        // Convert value to i64 for storage
-        let value_bits = convert_to_i64_for_storage(self.builder, &value);
+        let (tag_val, value_bits, _stored_value) =
+            self.prepare_dynamic_array_store(value, elem_type_id)?;
 
         // Call vole_array_filled(count, tag, value) -> *mut RcArray
         let filled_ref = self.runtime_func_ref(RuntimeFn::ArrayFilled)?;

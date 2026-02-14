@@ -160,34 +160,19 @@ impl Cg<'_, '_, '_> {
 
         let set_func_ref = self.runtime_func_ref(RuntimeFn::InstanceSetField)?;
 
-        // Get field types for wrapping optional values using arena methods
-        let field_types: HashMap<String, TypeId> = {
-            let arena = self.arena();
-            let type_def_id = arena.unwrap_class(result_type_id).map(|(id, _)| id);
-
-            if let Some(type_def_id) = type_def_id {
-                let type_def = self.query().get_type(type_def_id);
-                if let Some(generic_info) = &type_def.generic_info {
-                    generic_info
-                        .field_names
-                        .iter()
-                        .zip(generic_info.field_types.iter())
-                        .map(|(name_id, ty_id)| {
-                            (
-                                self.name_table()
-                                    .last_segment_str(*name_id)
-                                    .unwrap_or_default(),
-                                *ty_id,
-                            )
-                        })
-                        .collect()
-                } else {
-                    HashMap::new()
-                }
-            } else {
-                HashMap::new()
-            }
-        };
+        let field_types: HashMap<String, TypeId> = self
+            .registry()
+            .fields_on_type(type_def_id)
+            .map(|field_id| {
+                let field = self.registry().get_field(field_id);
+                (
+                    self.name_table()
+                        .last_segment_str(field.name_id)
+                        .unwrap_or_default(),
+                    self.try_substitute_type(field.ty),
+                )
+            })
+            .collect();
 
         // Collect names of fields that were explicitly provided in the struct literal
         let provided_fields: HashSet<String> = sl
@@ -202,8 +187,12 @@ impl Cg<'_, '_, '_> {
             let slot = *field_slots.get(init_name).ok_or_else(|| {
                 CodegenError::not_found("field", format!("{} in type {}", init_name, path_str))
             })?;
-
-            let mut value = self.expr(&init.value)?;
+            let field_type_id = field_types.get(init_name).copied();
+            let mut value = if let Some(field_type_id) = field_type_id {
+                self.expr_with_expected_type(&init.value, field_type_id)?
+            } else {
+                self.expr(&init.value)?
+            };
 
             // RC: inc borrowed field values (e.g., reading from a variable) so the
             // instance gets its own reference. instance_drop will rc_dec these fields
@@ -222,7 +211,7 @@ impl Cg<'_, '_, '_> {
             value.mark_consumed();
 
             // Coerce value to match the field's type (union wrapping, interface boxing)
-            let final_value = if let Some(&field_type_id) = field_types.get(init_name) {
+            let final_value = if let Some(field_type_id) = field_type_id {
                 self.coerce_field_value(value, field_type_id)?
             } else {
                 value
@@ -252,12 +241,17 @@ impl Cg<'_, '_, '_> {
             // or a module Program), both owned by AnalyzedProgram. Since AnalyzedProgram
             // outlives this entire compilation, the pointer remains valid.
             let default_expr: &Expr = unsafe { &*default_expr_ptr };
+            let field_type_id = field_types.get(&field_name).copied();
 
             // Compile the default expression
-            let value = self.expr(default_expr)?;
+            let value = if let Some(field_type_id) = field_type_id {
+                self.expr_with_expected_type(default_expr, field_type_id)?
+            } else {
+                self.expr(default_expr)?
+            };
 
             // Coerce value to match the field's type (union wrapping, interface boxing)
-            let final_value = if let Some(&field_type_id) = field_types.get(&field_name) {
+            let final_value = if let Some(field_type_id) = field_type_id {
                 self.coerce_field_value(value, field_type_id)?
             } else {
                 value
@@ -435,23 +429,8 @@ impl Cg<'_, '_, '_> {
             return Ok(value);
         }
 
-        // Find the tag for the value type
-        let tag = variants
-            .iter()
-            .position(|&v| v == value.type_id)
-            .ok_or_else(|| {
-                let expected = variants
-                    .iter()
-                    .map(|&variant| self.arena().display_basic(variant))
-                    .collect::<Vec<_>>()
-                    .join(" | ");
-                let found = self.arena().display_basic(value.type_id);
-                CodegenError::type_mismatch(
-                    "union variant",
-                    format!("compatible type ({expected})"),
-                    found,
-                )
-            })?;
+        let (tag, actual_value, actual_type_id) =
+            self.find_union_variant_tag(&value, union_type_id, &variants)?;
 
         // Get heap_alloc function ref
         let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
@@ -471,7 +450,7 @@ impl Cg<'_, '_, '_> {
 
         // Store is_rc flag at offset 1: 1 if the variant is RC-managed, 0 otherwise.
         // This flag is used by union_heap_cleanup to know whether to rc_dec the payload.
-        let is_rc = self.rc_state(value.type_id).needs_cleanup();
+        let is_rc = self.rc_state(actual_type_id).needs_cleanup();
         let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
         self.builder.ins().store(
             MemFlags::new(),
@@ -481,10 +460,10 @@ impl Cg<'_, '_, '_> {
         );
 
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
-        if !self.arena().is_sentinel(value.type_id) {
+        if !self.arena().is_sentinel(actual_type_id) {
             self.builder.ins().store(
                 MemFlags::new(),
-                value.value,
+                actual_value,
                 heap_ptr,
                 union_layout::PAYLOAD_OFFSET,
             );
@@ -632,6 +611,19 @@ impl Cg<'_, '_, '_> {
         let slot = self.alloc_stack(total_size);
 
         // Compile and store each explicitly provided field
+        let field_types: HashMap<String, TypeId> = self
+            .registry()
+            .fields_on_type(type_def_id)
+            .map(|field_id| {
+                let field = self.registry().get_field(field_id);
+                (
+                    self.name_table()
+                        .last_segment_str(field.name_id)
+                        .unwrap_or_default(),
+                    self.try_substitute_type(field.ty),
+                )
+            })
+            .collect();
         for init in &sl.fields {
             let init_name = self.interner().resolve(init.name);
             let field_slot = *field_slots.get(init_name).ok_or_else(|| {
@@ -640,7 +632,11 @@ impl Cg<'_, '_, '_> {
 
             let offset = self.struct_field_byte_offset(result_type_id, field_slot);
 
-            let mut value = self.expr(&init.value)?;
+            let mut value = if let Some(&field_type_id) = field_types.get(init_name) {
+                self.expr_with_expected_type(&init.value, field_type_id)?
+            } else {
+                self.expr(&init.value)?
+            };
             // RC: inc borrowed field values (e.g., reading from another struct's field)
             // so the new struct gets its own reference.
             if self.rc_scopes.has_active_scope()
@@ -678,7 +674,11 @@ impl Cg<'_, '_, '_> {
 
             // SAFETY: See collect_field_default_ptrs documentation
             let default_expr: &Expr = unsafe { &*default_expr_ptr };
-            let value = self.expr(default_expr)?;
+            let value = if let Some(&field_type_id) = field_types.get(&field_name) {
+                self.expr_with_expected_type(default_expr, field_type_id)?
+            } else {
+                self.expr(default_expr)?
+            };
             self.store_struct_field(value, slot, offset)?;
         }
 

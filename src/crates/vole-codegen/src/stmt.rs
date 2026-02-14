@@ -336,15 +336,9 @@ impl Cg<'_, '_, '_> {
             self.self_capture = Some(let_stmt.name);
         }
 
-        // Look up the declared type from sema (pre-computed for let statements with type annotations)
         let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
-        let forced_union_elem = declared_type_id_opt
-            .and_then(|type_id| self.arena().unwrap_array(type_id))
-            .filter(|&elem_type_id| self.arena().is_union(elem_type_id));
-        let init = if let ExprKind::ArrayLiteral(elements) = &init_expr.kind {
-            let compiled =
-                self.array_literal_with_union_hint(elements, init_expr, forced_union_elem)?;
-            self.mark_rc_owned(compiled)
+        let init = if let Some(declared_type_id) = declared_type_id_opt {
+            self.expr_with_expected_type(init_expr, declared_type_id)?
         } else {
             self.expr(init_expr)?
         };
@@ -876,9 +870,17 @@ impl Cg<'_, '_, '_> {
             .ins()
             .load(types::I64, MemFlags::new(), elem_ptr, value_offset);
         let elem_val = if self.arena().is_union(elem_type_id) {
-            // Union array slots hold heap buffers; copy to stack to avoid
-            // aliasing/use-after-free hazards across iterations and mutations.
-            self.copy_union_heap_to_stack(elem_val, elem_type_id).value
+            if self.union_array_prefers_inline_storage(elem_type_id) {
+                let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
+                let elem_tag =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
+                self.decode_dynamic_array_union_element(elem_tag, elem_val, elem_type_id)
+                    .value
+            } else {
+                self.copy_union_heap_to_stack(elem_val, elem_type_id).value
+            }
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
             // Narrow the i64 runtime value to the element's actual Cranelift type.
             self.builder.ins().ireduce(elem_cr_type, elem_val)
@@ -1098,7 +1100,7 @@ impl Cg<'_, '_, '_> {
 
     /// Find the union variant tag for a value's type, with integer widening/narrowing fallback.
     /// Returns (tag_index, possibly_coerced_value, actual_type_id).
-    fn find_union_variant_tag(
+    pub(crate) fn find_union_variant_tag(
         &mut self,
         value: &CompiledValue,
         union_type_id: TypeId,
