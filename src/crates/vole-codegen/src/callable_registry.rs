@@ -135,17 +135,19 @@ impl std::fmt::Display for CallableResolutionError {
 impl std::error::Error for CallableResolutionError {}
 
 fn strategy_for_intrinsic(intrinsic: &IntrinsicKey) -> CallableStrategy {
-    if intrinsic.as_str() == "panic" {
-        // Guardrail: only panic is dual-backend today; NaN/overflow-sensitive
+    match intrinsic.as_str() {
+        // Guardrail: only explicitly-vetted callables are dual-backend; NaN/overflow-sensitive
         // numeric intrinsics stay inline-only until behavior conformance exists.
-        return CallableStrategy::PreferInlineFallbackRuntime;
+        "panic" | "array_len" | "string_len" => CallableStrategy::PreferInlineFallbackRuntime,
+        _ => CallableStrategy::InlineOnly,
     }
-    CallableStrategy::InlineOnly
 }
 
 fn runtime_peer_for_intrinsic(key: &IntrinsicKey) -> Option<RuntimeFn> {
     match key.as_str() {
         "panic" => Some(RuntimeFn::Panic),
+        "array_len" => Some(RuntimeFn::ArrayLen),
+        "string_len" => Some(RuntimeFn::StringLen),
         _ => None,
     }
 }
@@ -155,6 +157,14 @@ fn intrinsic_signature(key: &IntrinsicKey) -> Option<CallableSig> {
         "panic" => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: None,
+        }),
+        "array_len" => Some(CallableSig {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        }),
+        "string_len" => Some(CallableSig {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
         }),
         _ => None,
     }
@@ -166,6 +176,14 @@ fn runtime_adapter_signature(key: &IntrinsicKey, runtime: RuntimeFn) -> Option<C
         ("panic", RuntimeFn::Panic) => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: None,
+        }),
+        ("array_len", RuntimeFn::ArrayLen) => Some(CallableSig {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        }),
+        ("string_len", RuntimeFn::StringLen) => Some(CallableSig {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
         }),
         _ => None,
     }
@@ -248,5 +266,20 @@ mod tests {
     fn panic_runtime_swap_contract_is_valid() {
         validate_runtime_swap_contract(&IntrinsicKey::from("panic"), RuntimeFn::Panic)
             .expect("panic swap contract must remain valid");
+    }
+
+    #[test]
+    fn len_intrinsics_can_toggle_to_runtime_backend() {
+        for key in ["array_len", "string_len"] {
+            let resolved = resolve_callable_with_preference(
+                CallableKey::Intrinsic(IntrinsicKey::from(key)),
+                CallableBackendPreference::PreferRuntime,
+            )
+            .expect("len callable resolution");
+            assert!(matches!(
+                resolved,
+                ResolvedCallable::Runtime(RuntimeFn::ArrayLen | RuntimeFn::StringLen)
+            ));
+        }
     }
 }

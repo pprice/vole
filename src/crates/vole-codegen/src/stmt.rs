@@ -794,7 +794,14 @@ impl Cg<'_, '_, '_> {
             .unwrap_array(arr.type_id)
             .unwrap_or_else(|| self.arena().i64());
 
-        let len_val = self.call_runtime(RuntimeFn::ArrayLen, &[arr.value])?;
+        let len_val = self
+            .call_compiler_intrinsic_key_with_line(
+                crate::IntrinsicKey::from("array_len"),
+                &[arr.value],
+                TypeId::I64,
+                0,
+            )?
+            .value;
 
         let idx_var = self.builder.declare_var(types::I64);
         let zero = self.builder.ins().iconst(types::I64, 0);

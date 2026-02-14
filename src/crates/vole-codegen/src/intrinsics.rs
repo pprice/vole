@@ -172,6 +172,10 @@ pub enum IntrinsicHandler {
     CheckedIntOp(CheckedIntOp),
     /// Built-in panic: terminates execution with a message.
     BuiltinPanic,
+    /// Inline array length read with runtime-compatible null semantics.
+    BuiltinArrayLen,
+    /// Inline UTF-8 string character count with runtime-compatible null semantics.
+    BuiltinStringLen,
 }
 
 /// Unary float operations that take one argument and return a float.
@@ -491,6 +495,14 @@ impl IntrinsicsRegistry {
     /// Register built-in intrinsics (panic, etc.).
     fn register_builtin_intrinsics(&mut self) {
         self.register(IntrinsicKey::from("panic"), IntrinsicHandler::BuiltinPanic);
+        self.register(
+            IntrinsicKey::from("array_len"),
+            IntrinsicHandler::BuiltinArrayLen,
+        );
+        self.register(
+            IntrinsicKey::from("string_len"),
+            IntrinsicHandler::BuiltinStringLen,
+        );
     }
 }
 
@@ -553,8 +565,8 @@ mod tests {
         // 4 unary int wrapping ops (wrapping_neg for signed types)
         // 24 saturating int ops (8 saturating_add + 8 saturating_sub + 8 saturating_mul)
         // 32 checked int ops (8 checked_add + 8 checked_sub + 8 checked_mul + 8 checked_div)
-        // Total: 177 (176 numeric intrinsics + 1 builtin panic)
-        assert_eq!(registry.len(), 177);
+        // Total: 179 (176 numeric intrinsics + 3 builtins)
+        assert_eq!(registry.len(), 179);
     }
 
     #[test]

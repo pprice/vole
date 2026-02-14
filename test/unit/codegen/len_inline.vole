@@ -1,0 +1,32 @@
+tests "inline length intrinsics" {
+    test "array length on literals and empty arrays" {
+        let nums = [10, 20, 30, 40]
+        let empty: [i64] = []
+        assert(nums.length() == 4)
+        assert(empty.length() == 0)
+    }
+
+    test "array length in for-loop header" {
+        let nums = [1, 2, 3, 4, 5]
+        let mut count = 0
+        for n in nums {
+            if n > 0 {
+                count = count + 1
+            }
+        }
+        assert(count == 5)
+    }
+
+    test "string length ascii and unicode code points" {
+        assert("hello".length() == 5)
+        assert("".length() == 0)
+        assert("😀".length() == 1)
+        assert("a😀b".length() == 3)
+        assert("naïve".length() == 5)
+    }
+
+    test "string length matches chars count" {
+        let s = "a😀bç"
+        assert(s.length() == s.chars().count())
+    }
+}

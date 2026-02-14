@@ -907,8 +907,13 @@ impl Cg<'_, '_, '_> {
         if let Some(elem_type_id) = arena.unwrap_array(obj.type_id) {
             return match method_name {
                 "length" => {
-                    let result = self.call_runtime(RuntimeFn::ArrayLen, &[obj.value])?;
-                    Ok(Some(self.i64_value(result)))
+                    let result = self.call_compiler_intrinsic_key_with_line(
+                        crate::IntrinsicKey::from("array_len"),
+                        &[obj.value],
+                        TypeId::I64,
+                        0,
+                    )?;
+                    Ok(Some(result))
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
@@ -941,8 +946,13 @@ impl Cg<'_, '_, '_> {
         if arena.is_string(obj.type_id) {
             return match method_name {
                 "length" => {
-                    let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
-                    Ok(Some(self.i64_value(result)))
+                    let result = self.call_compiler_intrinsic_key_with_line(
+                        crate::IntrinsicKey::from("string_len"),
+                        &[obj.value],
+                        TypeId::I64,
+                        0,
+                    )?;
+                    Ok(Some(result))
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
