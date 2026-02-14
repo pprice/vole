@@ -399,23 +399,13 @@ impl Analyzer {
         &mut self,
         pattern_type_id: ArenaTypeId,
     ) -> Option<Vec<StructFieldId>> {
-        let class_info = {
+        let class_or_struct_info = {
             let arena = self.type_arena();
             arena
-                .unwrap_class(pattern_type_id)
-                .map(|(type_def_id, type_args)| (type_def_id, type_args.clone()))
+                .unwrap_class_or_struct(pattern_type_id)
+                .map(|(type_def_id, type_args, _)| (type_def_id, type_args.clone()))
         };
-        if let Some((type_def_id, type_args)) = class_info {
-            return Some(self.instantiate_nominal_pattern_fields(type_def_id, &type_args));
-        }
-
-        let struct_info = {
-            let arena = self.type_arena();
-            arena
-                .unwrap_struct(pattern_type_id)
-                .map(|(type_def_id, type_args)| (type_def_id, type_args.clone()))
-        };
-        if let Some((type_def_id, type_args)) = struct_info {
+        if let Some((type_def_id, type_args)) = class_or_struct_info {
             return Some(self.instantiate_nominal_pattern_fields(type_def_id, &type_args));
         }
 

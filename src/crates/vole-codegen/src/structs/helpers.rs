@@ -44,10 +44,8 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         "field access: resolved type"
     );
 
-    // Try class first, then struct
-    let (type_def_id, type_args) = arena
-        .unwrap_class(resolved_type_id)
-        .or_else(|| arena.unwrap_struct(resolved_type_id))
+    let (type_def_id, type_args, _) = arena
+        .unwrap_class_or_struct(resolved_type_id)
         .ok_or_else(|| {
             CodegenError::type_mismatch("field access", "class or struct", "other type")
         })?;
