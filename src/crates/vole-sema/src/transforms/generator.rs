@@ -66,14 +66,14 @@ pub fn transform_generators(
     transformer.transform(program)
 }
 
-struct GeneratorTransformer<'a> {
-    interner: &'a mut Interner,
+pub(super) struct GeneratorTransformer<'a> {
+    pub(super) interner: &'a mut Interner,
     /// Counter for generating unique state machine names
-    generator_count: u32,
+    pub(super) generator_count: u32,
     /// Counter for generating unique NodeIds for generated AST nodes
-    next_node_id: u32,
+    pub(super) next_node_id: u32,
     /// Type errors found during transformation
-    errors: Vec<TypeError>,
+    pub(super) errors: Vec<TypeError>,
 }
 
 impl<'a> GeneratorTransformer<'a> {
@@ -87,7 +87,7 @@ impl<'a> GeneratorTransformer<'a> {
     }
 
     /// Generate a unique NodeId for generated AST nodes
-    fn next_id(&mut self) -> NodeId {
+    pub(super) fn next_id(&mut self) -> NodeId {
         let id = NodeId(self.next_node_id);
         self.next_node_id += 1;
         id
@@ -940,225 +940,6 @@ impl<'a> GeneratorTransformer<'a> {
                 span: dummy_span,
             }),
             span,
-        }
-    }
-
-    /// Rewrite identifier references to captured names (parameters and hoisted
-    /// locals) into `self.<name>` field accesses so they resolve correctly
-    /// inside the generated `next()` method.
-    fn rewrite_captured_refs(
-        &mut self,
-        expr: &Expr,
-        captured: &[Symbol],
-        self_sym: Symbol,
-    ) -> Expr {
-        match &expr.kind {
-            ExprKind::Identifier(sym) if captured.contains(sym) => {
-                // Rewrite `name` -> `self.name`
-                let self_expr = Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Identifier(self_sym),
-                    span: expr.span,
-                };
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
-                        object: self_expr,
-                        field: *sym,
-                        field_span: expr.span,
-                    })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::Binary(bin) => Expr {
-                id: self.next_id(),
-                kind: ExprKind::Binary(Box::new(BinaryExpr {
-                    left: self.rewrite_captured_refs(&bin.left, captured, self_sym),
-                    op: bin.op,
-                    right: self.rewrite_captured_refs(&bin.right, captured, self_sym),
-                })),
-                span: expr.span,
-            },
-            ExprKind::Unary(un) => Expr {
-                id: self.next_id(),
-                kind: ExprKind::Unary(Box::new(UnaryExpr {
-                    op: un.op,
-                    operand: self.rewrite_captured_refs(&un.operand, captured, self_sym),
-                })),
-                span: expr.span,
-            },
-            ExprKind::Call(call) => {
-                let callee = self.rewrite_captured_refs(&call.callee, captured, self_sym);
-                let args = call
-                    .args
-                    .iter()
-                    .map(|a| self.rewrite_captured_refs(a, captured, self_sym))
-                    .collect();
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Call(Box::new(CallExpr { callee, args })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::Grouping(inner) => {
-                let rewritten = self.rewrite_captured_refs(inner, captured, self_sym);
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Grouping(Box::new(rewritten)),
-                    span: expr.span,
-                }
-            }
-            ExprKind::FieldAccess(fa) => {
-                let object = self.rewrite_captured_refs(&fa.object, captured, self_sym);
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
-                        object,
-                        field: fa.field,
-                        field_span: fa.field_span,
-                    })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::MethodCall(mc) => {
-                let object = self.rewrite_captured_refs(&mc.object, captured, self_sym);
-                let args = mc
-                    .args
-                    .iter()
-                    .map(|a| self.rewrite_captured_refs(a, captured, self_sym))
-                    .collect();
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
-                        object,
-                        method: mc.method,
-                        args,
-                        method_span: mc.method_span,
-                        type_args: mc.type_args.clone(),
-                    })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::Index(idx) => {
-                let object = self.rewrite_captured_refs(&idx.object, captured, self_sym);
-                let index = self.rewrite_captured_refs(&idx.index, captured, self_sym);
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Index(Box::new(IndexExpr { object, index })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::ArrayLiteral(elems) => {
-                let elems = elems
-                    .iter()
-                    .map(|e| self.rewrite_captured_refs(e, captured, self_sym))
-                    .collect();
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::ArrayLiteral(elems),
-                    span: expr.span,
-                }
-            }
-            ExprKind::StructLiteral(sl) => {
-                let fields = sl
-                    .fields
-                    .iter()
-                    .map(|f| StructFieldInit {
-                        name: f.name,
-                        value: self.rewrite_captured_refs(&f.value, captured, self_sym),
-                        span: f.span,
-                        shorthand: f.shorthand,
-                    })
-                    .collect();
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr {
-                        path: sl.path.clone(),
-                        type_args: sl.type_args.clone(),
-                        fields,
-                    })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::NullCoalesce(nc) => {
-                let value = self.rewrite_captured_refs(&nc.value, captured, self_sym);
-                let default = self.rewrite_captured_refs(&nc.default, captured, self_sym);
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::NullCoalesce(Box::new(NullCoalesceExpr { value, default })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::InterpolatedString(parts) => {
-                let parts = parts
-                    .iter()
-                    .map(|p| match p {
-                        StringPart::Literal(s) => StringPart::Literal(s.clone()),
-                        StringPart::Expr(e) => StringPart::Expr(Box::new(
-                            self.rewrite_captured_refs(e, captured, self_sym),
-                        )),
-                    })
-                    .collect();
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::InterpolatedString(parts),
-                    span: expr.span,
-                }
-            }
-            ExprKind::If(if_expr) => {
-                let condition = self.rewrite_captured_refs(&if_expr.condition, captured, self_sym);
-                let then_branch =
-                    self.rewrite_captured_refs(&if_expr.then_branch, captured, self_sym);
-                let else_branch = if_expr
-                    .else_branch
-                    .as_ref()
-                    .map(|e| self.rewrite_captured_refs(e, captured, self_sym));
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::If(Box::new(IfExpr {
-                        condition,
-                        then_branch,
-                        else_branch,
-                        span: if_expr.span,
-                    })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::Is(is_expr) => {
-                let value = self.rewrite_captured_refs(&is_expr.value, captured, self_sym);
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Is(Box::new(IsExpr {
-                        value,
-                        type_expr: is_expr.type_expr.clone(),
-                        type_span: is_expr.type_span,
-                    })),
-                    span: expr.span,
-                }
-            }
-            ExprKind::Try(inner) => {
-                let rewritten = self.rewrite_captured_refs(inner, captured, self_sym);
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Try(Box::new(rewritten)),
-                    span: expr.span,
-                }
-            }
-            ExprKind::Range(range) => {
-                let start = self.rewrite_captured_refs(&range.start, captured, self_sym);
-                let end = self.rewrite_captured_refs(&range.end, captured, self_sym);
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Range(Box::new(RangeExpr {
-                        start,
-                        end,
-                        inclusive: range.inclusive,
-                    })),
-                    span: expr.span,
-                }
-            }
-            // Leaf expressions and cases where no rewriting is needed
-            _ => expr.clone(),
         }
     }
 

@@ -5,5 +5,6 @@
 //! simpler constructs.
 
 pub mod generator;
+mod rewrite_refs;
 
 pub use generator::transform_generators;

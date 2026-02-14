@@ -1,0 +1,130 @@
+// Generator tests: captured variable references inside nested expressions
+// Tests that parameter references are properly rewritten to self.field
+// accesses inside various expression types in yield values.
+
+// Generator with captured var in a binary expression
+func gen_binary_captured(a: i64) -> Iterator<i64> {
+    yield a + 1
+    yield a * 2
+    yield a - 3
+}
+
+// Generator with captured var in a unary expression
+func gen_unary_captured(a: i64) -> Iterator<i64> {
+    yield -a
+    yield a
+}
+
+// Generator with multiple params captured in expressions
+func gen_multi_captured(a: i64, b: i64) -> Iterator<i64> {
+    yield a + b
+    yield a * b
+    yield a - b
+}
+
+// Generator where captured var is used in a method call
+func gen_method_captured(arr: [i64]) -> Iterator<i64> {
+    yield arr.length()
+}
+
+// Generator with captured var used in index expression
+func gen_index_captured(arr: [i64]) -> Iterator<i64> {
+    yield arr[0]
+    yield arr[1]
+}
+
+// Generator with captured var in nested binary expressions
+func gen_nested_binary(a: i64, b: i64) -> Iterator<i64> {
+    yield (a + b) * (a - b)
+}
+
+tests {
+    test "generator yields captured var in binary expression" {
+        let it = gen_binary_captured(5)
+        let r1 = it.next()
+        assert(r1 is i64)
+        if r1 is i64 {
+            assert(r1 == 6)
+        }
+        let r2 = it.next()
+        assert(r2 is i64)
+        if r2 is i64 {
+            assert(r2 == 10)
+        }
+        let r3 = it.next()
+        assert(r3 is i64)
+        if r3 is i64 {
+            assert(r3 == 2)
+        }
+        let r4 = it.next()
+        assert(r4 is Done)
+    }
+
+    test "generator yields captured var in unary expression" {
+        let it = gen_unary_captured(7)
+        let r1 = it.next()
+        assert(r1 is i64)
+        if r1 is i64 {
+            assert(r1 == -7)
+        }
+        let r2 = it.next()
+        assert(r2 is i64)
+        if r2 is i64 {
+            assert(r2 == 7)
+        }
+        let r3 = it.next()
+        assert(r3 is Done)
+    }
+
+    test "generator with multiple captured params in expressions" {
+        let it = gen_multi_captured(3, 7)
+        let r1 = it.next()
+        assert(r1 is i64)
+        if r1 is i64 {
+            assert(r1 == 10)
+        }
+        let r2 = it.next()
+        assert(r2 is i64)
+        if r2 is i64 {
+            assert(r2 == 21)
+        }
+        let r3 = it.next()
+        assert(r3 is i64)
+        if r3 is i64 {
+            assert(r3 == -4)
+        }
+    }
+
+    test "generator with captured var in method call" {
+        let it = gen_method_captured([10, 20, 30])
+        let r1 = it.next()
+        assert(r1 is i64)
+        if r1 is i64 {
+            assert(r1 == 3)
+        }
+    }
+
+    test "generator with captured var in index expression" {
+        let it = gen_index_captured([100, 200, 300])
+        let r1 = it.next()
+        assert(r1 is i64)
+        if r1 is i64 {
+            assert(r1 == 100)
+        }
+        let r2 = it.next()
+        assert(r2 is i64)
+        if r2 is i64 {
+            assert(r2 == 200)
+        }
+    }
+
+    test "generator with captured vars in nested binary expressions" {
+        let it = gen_nested_binary(5, 3)
+        // (5+3) * (5-3) = 8 * 2 = 16
+        let r1 = it.next()
+        assert(r1 is i64)
+        if r1 is i64 {
+            assert(r1 == 16)
+        }
+    }
+}
