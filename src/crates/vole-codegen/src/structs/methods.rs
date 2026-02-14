@@ -601,20 +601,13 @@ impl Cg<'_, '_, '_> {
                 }
             }
         }
-
         // Handle struct return conventions: sret (large structs) or multi-value (small structs)
-        let is_sret = self.is_sret_struct_return(return_type_id);
-        if is_sret {
-            // Large struct: allocate return buffer and prepend sret pointer as first arg
-            let ptr_type = self.ptr_type();
-            let flat_count = self
-                .struct_flat_slot_count(return_type_id)
-                .expect("INTERNAL: sret method call: missing flat slot count");
-            let total_size = (flat_count as u32) * 8;
-            let slot = self.alloc_stack(total_size);
-            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id) {
             args.insert(0, sret_ptr);
-        }
+            true
+        } else {
+            false
+        };
 
         let coerced = self.coerce_call_args(method_func_ref, &args);
         let call = self.builder.ins().call(method_func_ref, &coerced);
@@ -863,20 +856,14 @@ impl Cg<'_, '_, '_> {
             .codegen_ctx
             .jit_module()
             .declare_func_in_func(func_id, self.builder.func);
-
         // Handle sret convention for large struct returns (3+ flat slots).
-        let is_sret = self.is_sret_struct_return(return_type_id);
         let mut call_args = args;
-        if is_sret {
-            let ptr_type = self.ptr_type();
-            let flat_count = self
-                .struct_flat_slot_count(return_type_id)
-                .expect("INTERNAL: sret module call: missing flat slot count");
-            let total_size = (flat_count as u32) * 8;
-            let slot = self.alloc_stack(total_size);
-            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id) {
             call_args.insert(0, sret_ptr);
-        }
+            true
+        } else {
+            false
+        };
 
         let coerced = self.coerce_call_args(func_ref, &call_args);
         let call_inst = self.builder.ins().call(func_ref, &coerced);
@@ -1786,21 +1773,15 @@ impl Cg<'_, '_, '_> {
             )?;
             args.extend(default_args);
         }
-
         // Handle sret convention for large struct returns (3+ flat slots).
         // The function signature has a hidden first parameter for the return
         // buffer pointer that must be prepended to the call arguments.
-        let is_sret = self.is_sret_struct_return(return_type_id);
-        if is_sret {
-            let ptr_type = self.ptr_type();
-            let flat_count = self
-                .struct_flat_slot_count(return_type_id)
-                .expect("INTERNAL: sret static call: missing flat slot count");
-            let total_size = (flat_count as u32) * 8;
-            let slot = self.alloc_stack(total_size);
-            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id) {
             args.insert(0, sret_ptr);
-        }
+            true
+        } else {
+            false
+        };
 
         // Get function reference and call
         let func_ref = self.func_ref(func_key)?;
@@ -1847,19 +1828,13 @@ impl Cg<'_, '_, '_> {
 
         // Get monomorphized function reference and call
         let return_type_id = instance.func_type.return_type_id;
-
         // Handle sret convention for large struct returns (3+ flat slots).
-        let is_sret = self.is_sret_struct_return(return_type_id);
-        if is_sret {
-            let ptr_type = self.ptr_type();
-            let flat_count = self
-                .struct_flat_slot_count(return_type_id)
-                .expect("INTERNAL: sret static monomorph call: missing flat slot count");
-            let total_size = (flat_count as u32) * 8;
-            let slot = self.alloc_stack(total_size);
-            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id) {
             args.insert(0, sret_ptr);
-        }
+            true
+        } else {
+            false
+        };
 
         let func_key = self.funcs().intern_name_id(instance.mangled_name);
         let func_ref = self.func_ref(func_key)?;

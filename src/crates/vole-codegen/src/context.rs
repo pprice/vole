@@ -1852,6 +1852,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .is_some_and(|count| count > crate::MAX_SMALL_STRUCT_FIELDS)
     }
 
+
+    /// If the return type uses sret convention (large struct), allocate a stack
+    /// buffer for the return value and return a pointer to it. The caller should
+    /// prepend this pointer to the call arguments.
+    pub fn alloc_sret_ptr(&mut self, return_type_id: TypeId) -> Option<Value> {
+        if !self.is_sret_struct_return(return_type_id) {
+            return None;
+        }
+        let ptr_type = self.ptr_type();
+        let flat_count = self
+            .struct_flat_slot_count(return_type_id)
+            .expect("INTERNAL: sret call: missing flat slot count");
+        let total_size = (flat_count as u32) * 8;
+        let slot = self.alloc_stack(total_size);
+        Some(self.builder.ins().stack_addr(ptr_type, slot, 0))
+    }
+
     /// Emit a return for a small struct (1-2 flat slots) via register passing.
     /// Loads flat slots into registers, pads to 2, and emits the return instruction.
     pub fn emit_small_struct_return(&mut self, struct_ptr: Value, ret_type_id: TypeId) {
