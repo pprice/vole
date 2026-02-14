@@ -601,10 +601,10 @@ impl TypeArena {
             SemaType::RuntimeIterator(_) => (70, type_id.0 as u64),
             SemaType::Structural(_) => (65, type_id.0 as u64),
             // Nominal types sorted by TypeDefId (descending) within category
-            SemaType::Class { type_def_id, .. } => (50, type_def_id.index() as u64),
-            SemaType::Struct { type_def_id, .. } => (50, type_def_id.index() as u64),
-            SemaType::Interface { type_def_id, .. } => (50, type_def_id.index() as u64),
-            SemaType::Error { type_def_id } => (50, type_def_id.index() as u64),
+            SemaType::Class { type_def_id, .. }
+            | SemaType::Struct { type_def_id, .. }
+            | SemaType::Interface { type_def_id, .. }
+            | SemaType::Error { type_def_id } => (50, type_def_id.index() as u64),
             // Type params
             SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => (40, type_id.0 as u64),
             // Module types
@@ -957,9 +957,9 @@ impl TypeArena {
     /// Get TypeDefId for nominal types (class, struct, interface, error)
     pub fn type_def_id(&self, id: TypeId) -> Option<TypeDefId> {
         match self.get(id) {
-            SemaType::Class { type_def_id, .. } => Some(*type_def_id),
-            SemaType::Interface { type_def_id, .. } => Some(*type_def_id),
-            SemaType::Error { type_def_id } => Some(*type_def_id),
+            SemaType::Class { type_def_id, .. }
+            | SemaType::Interface { type_def_id, .. }
+            | SemaType::Error { type_def_id } => Some(*type_def_id),
             _ => None,
         }
     }
@@ -967,8 +967,7 @@ impl TypeArena {
     /// Get type arguments for generic types
     pub fn type_args(&self, id: TypeId) -> &[TypeId] {
         match self.get(id) {
-            SemaType::Class { type_args, .. } => type_args,
-            SemaType::Interface { type_args, .. } => type_args,
+            SemaType::Class { type_args, .. } | SemaType::Interface { type_args, .. } => type_args,
             _ => &[],
         }
     }
@@ -1185,7 +1184,10 @@ impl TypeArena {
     ///
     /// This is a convenience wrapper around `unwrap_nominal` that filters out
     /// interfaces, since many call sites only care about field-bearing types.
-    pub fn unwrap_class_or_struct(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec, NominalKind)> {
+    pub fn unwrap_class_or_struct(
+        &self,
+        id: TypeId,
+    ) -> Option<(TypeDefId, &TypeIdVec, NominalKind)> {
         self.unwrap_nominal(id)
             .filter(|(_, _, kind)| kind.is_class_or_struct())
     }
