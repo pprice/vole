@@ -1581,85 +1581,110 @@ impl Cg<'_, '_, '_> {
                 Ok(None)
             }
             PatternKind::Record { type_name, fields } => {
-                let (pattern_check, pattern_type_id) = if let Some(type_expr) = type_name {
-                    let pattern_check =
-                        self.compile_type_pattern_check(scrutinee, pattern.id)?;
-                    let pattern_type_id = self.pattern_type_id_for_record_arm(
-                        scrutinee_type_id,
-                        pattern.id,
-                        type_expr,
+                self.compile_record_pattern(
+                    scrutinee,
+                    pattern,
+                    type_name.as_ref(),
+                    fields,
+                    arm_variables,
+                    arm_block,
+                    next_block,
+                    effective_arm_block,
+                )
+            }
+        }
+    }
+
+    fn compile_record_pattern(
+        &mut self,
+        scrutinee: &CompiledValue,
+        pattern: &Pattern,
+        type_name: Option<&TypeExpr>,
+        fields: &[RecordFieldPattern],
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_block: Block,
+        next_block: Block,
+        effective_arm_block: &mut Block,
+    ) -> CodegenResult<Option<Value>> {
+        let scrutinee_type_id = scrutinee.type_id;
+
+        let (pattern_check, pattern_type_id) = if let Some(type_expr) = type_name {
+            let pattern_check =
+                self.compile_type_pattern_check(scrutinee, pattern.id)?;
+            let pattern_type_id = self.pattern_type_id_for_record_arm(
+                scrutinee_type_id,
+                pattern.id,
+                type_expr,
+            );
+            (pattern_check, pattern_type_id)
+        } else {
+            (None, None)
+        };
+
+        let is_conditional_extract =
+            pattern_check.is_some() && self.arena().is_union(scrutinee_type_id);
+
+        if is_conditional_extract {
+            let extract_block = self.builder.create_block();
+
+            let cond = pattern_check
+                .expect("INTERNAL: match pattern: missing pattern_check condition");
+            let cond_i32 = self.cond_to_i32(cond);
+            self.builder
+                .ins()
+                .brif(cond_i32, extract_block, &[], next_block, &[]);
+            self.builder.seal_block(arm_block);
+            *effective_arm_block = extract_block;
+
+            self.builder.switch_to_block(extract_block);
+
+            let (field_source, field_source_type_id) =
+                if let Some(pt_id) = pattern_type_id {
+                    let payload = self.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        scrutinee.value,
+                        8,
                     );
-                    (pattern_check, pattern_type_id)
+                    (payload, pt_id)
                 } else {
-                    (None, None)
+                    (scrutinee.value, scrutinee_type_id)
                 };
 
-                let is_conditional_extract =
-                    pattern_check.is_some() && self.arena().is_union(scrutinee_type_id);
+            self.extract_record_fields(
+                fields,
+                field_source,
+                field_source_type_id,
+                arm_variables,
+            )?;
 
-                if is_conditional_extract {
-                    let extract_block = self.builder.create_block();
-
-                    let cond = pattern_check
-                        .expect("INTERNAL: match pattern: missing pattern_check condition");
-                    let cond_i32 = self.cond_to_i32(cond);
-                    self.builder
-                        .ins()
-                        .brif(cond_i32, extract_block, &[], next_block, &[]);
-                    self.builder.seal_block(arm_block);
-                    *effective_arm_block = extract_block;
-
-                    self.builder.switch_to_block(extract_block);
-
-                    let (field_source, field_source_type_id) =
-                        if let Some(pt_id) = pattern_type_id {
-                            let payload = self.builder.ins().load(
-                                types::I64,
-                                MemFlags::new(),
-                                scrutinee.value,
-                                8,
-                            );
-                            (payload, pt_id)
-                        } else {
-                            (scrutinee.value, scrutinee_type_id)
-                        };
-
-                    self.extract_record_fields(
-                        fields,
-                        field_source,
-                        field_source_type_id,
-                        arm_variables,
-                    )?;
-
-                    Ok(None)
+            Ok(None)
+        } else {
+            let (field_source, field_source_type_id) =
+                if self.arena().is_union(scrutinee_type_id) {
+                    if let Some(pt_id) = pattern_type_id {
+                        let payload = self.builder.ins().load(
+                            types::I64,
+                            MemFlags::new(),
+                            scrutinee.value,
+                            8,
+                        );
+                        (payload, pt_id)
+                    } else {
+                        (scrutinee.value, scrutinee_type_id)
+                    }
                 } else {
-                    let (field_source, field_source_type_id) =
-                        if self.arena().is_union(scrutinee_type_id) {
-                            if let Some(pt_id) = pattern_type_id {
-                                let payload = self.builder.ins().load(
-                                    types::I64,
-                                    MemFlags::new(),
-                                    scrutinee.value,
-                                    8,
-                                );
-                                (payload, pt_id)
-                            } else {
-                                (scrutinee.value, scrutinee_type_id)
-                            }
-                        } else {
-                            (scrutinee.value, scrutinee_type_id)
-                        };
+                    (scrutinee.value, scrutinee_type_id)
+                };
 
-                    self.extract_record_fields(
-                        fields,
-                        field_source,
-                        field_source_type_id,
-                        arm_variables,
-                    )?;
+            self.extract_record_fields(
+                fields,
+                field_source,
+                field_source_type_id,
+                arm_variables,
+            )?;
 
-                    Ok(pattern_check)
-                }
-            }
+            Ok(pattern_check)
         }
     }
 
