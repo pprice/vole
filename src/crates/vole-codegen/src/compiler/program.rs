@@ -206,33 +206,9 @@ impl Compiler<'_> {
         self.compile_program_body(program)
     }
 
-    /// Compile the main program body (functions, tests, classes, etc.)
-    fn compile_program_body(&mut self, program: &Program) -> CodegenResult<()> {
-        // Count total tests to assign unique IDs
+    /// First pass: declare all functions and tests, collect globals, finalize type metadata.
+    fn declare_program_declarations(&mut self, program: &Program) {
         let mut test_count = 0usize;
-
-        // Pre-pass: Register all class names first so they're available for field type resolution
-        // This allows classes to reference each other (e.g., Company.ceo: Person?)
-        for decl in &program.declarations {
-            match decl {
-                Decl::Class(class) => {
-                    self.pre_register_class(class);
-                }
-                Decl::Struct(s) => {
-                    self.pre_register_struct(s);
-                }
-                Decl::Sentinel(s) => {
-                    self.pre_register_sentinel(s);
-                }
-                Decl::Tests(_) if self.skip_tests => {}
-                Decl::Tests(_) => {
-                    // Scoped types use finalize_module_class in pass 1
-                }
-                _ => {}
-            }
-        }
-
-        // First pass: declare all functions and tests, collect globals, finalize type metadata
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
@@ -297,16 +273,13 @@ impl Compiler<'_> {
                 }
             }
         }
+    }
 
-        // Reset counter for second pass
-        test_count = 0;
-
-        // Declare monomorphized function instances before second pass
-        self.declare_all_monomorphized_instances()?;
-
-        // Second pass: compile function bodies and tests
-        // Note: Decl::Let globals are handled by inlining their initializers
-        // when referenced (see compile_expr for ExprKind::Identifier)
+    /// Second pass: compile function bodies and tests.
+    /// Note: Decl::Let globals are handled by inlining their initializers
+    /// when referenced (see compile_expr for ExprKind::Identifier).
+    fn compile_program_declarations(&mut self, program: &Program) -> CodegenResult<()> {
+        let mut test_count = 0usize;
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
@@ -372,6 +345,40 @@ impl Compiler<'_> {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Compile the main program body (functions, tests, classes, etc.)
+    fn compile_program_body(&mut self, program: &Program) -> CodegenResult<()> {
+        // Pre-pass: Register all class names first so they're available for field type resolution
+        // This allows classes to reference each other (e.g., Company.ceo: Person?)
+        for decl in &program.declarations {
+            match decl {
+                Decl::Class(class) => {
+                    self.pre_register_class(class);
+                }
+                Decl::Struct(s) => {
+                    self.pre_register_struct(s);
+                }
+                Decl::Sentinel(s) => {
+                    self.pre_register_sentinel(s);
+                }
+                Decl::Tests(_) if self.skip_tests => {}
+                Decl::Tests(_) => {
+                    // Scoped types use finalize_module_class in pass 1
+                }
+                _ => {}
+            }
+        }
+
+        // First pass: declare all functions and tests, collect globals, finalize type metadata
+        self.declare_program_declarations(program);
+
+        // Declare monomorphized function instances before second pass
+        self.declare_all_monomorphized_instances()?;
+
+        // Second pass: compile function bodies and tests
+        self.compile_program_declarations(program)?;
 
         // Compile monomorphized instances
         self.compile_all_monomorphized_instances(program)?;
@@ -942,11 +949,7 @@ impl Compiler<'_> {
     /// Declare scoped declarations within a tests block (pass 1).
     /// Handles scoped functions, records, and classes so they're available
     /// during test compilation.
-    fn declare_tests_scoped_decls(
-        &mut self,
-        tests_decl: &TestsDecl,
-        test_count: &mut usize,
-    ) {
+    fn declare_tests_scoped_decls(&mut self, tests_decl: &TestsDecl, test_count: &mut usize) {
         let interner = &self.analyzed.interner;
 
         // Look up the virtual module ID for scoped type declarations
@@ -1118,23 +1121,17 @@ impl Compiler<'_> {
                 Decl::Function(func) => {
                     let name = self.analyzed.interner.resolve(func.name);
                     self.build_function_ir(func)?;
-                    writeln!(writer, "// func {}", name).map_err(|e| {
-                        CodegenError::io(e)
-                    })?;
-                    writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| {
-                        CodegenError::io(e)
-                    })?;
+                    writeln!(writer, "// func {}", name).map_err(CodegenError::io)?;
+                    writeln!(writer, "{}", self.jit.ctx.func).map_err(CodegenError::io)?;
                     self.jit.clear();
                 }
                 Decl::Tests(tests_decl) if include_tests => {
                     for test in &tests_decl.tests {
                         self.build_test_ir(test)?;
-                        writeln!(writer, "// test \"{}\"", test.name).map_err(|e| {
-                            CodegenError::io(e)
-                        })?;
-                        writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| {
-                            CodegenError::io(e)
-                        })?;
+                        writeln!(writer, "// test \"{}\"", test.name)
+                            .map_err(CodegenError::io)?;
+                        writeln!(writer, "{}", self.jit.ctx.func)
+                            .map_err(CodegenError::io)?;
                         self.jit.clear();
                     }
                 }
@@ -1155,10 +1152,7 @@ impl Compiler<'_> {
             .query()
             .function_id(program_module, func.name)
             .ok_or_else(|| {
-                CodegenError::not_found(
-                    "function",
-                    self.analyzed.interner.resolve(func.name),
-                )
+                CodegenError::not_found("function", self.analyzed.interner.resolve(func.name))
             })?;
         let (param_type_ids, return_type_id) = {
             let func_def = self.registry().get_function(semantic_func_id);
@@ -1929,10 +1923,9 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Get method body
-        let body = method
-            .body
-            .as_ref()
-            .ok_or_else(|| CodegenError::internal_with_context("static method has no body", &mangled_name))?;
+        let body = method.body.as_ref().ok_or_else(|| {
+            CodegenError::internal_with_context("static method has no body", &mangled_name)
+        })?;
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
