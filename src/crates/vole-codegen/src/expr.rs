@@ -2840,62 +2840,16 @@ impl Cg<'_, '_, '_> {
         Ok(())
     }
 
-    /// Compile a destructure pattern inside an error pattern (e.g., error Overflow { value, max }).
-    fn compile_error_record_pattern(
+    /// Extract field bindings from an error record pattern. Loads fields from the
+    /// error payload according to their layout (inline single field, wide i128, or
+    /// pointer-based multi-field).
+    fn extract_error_field_bindings(
         &mut self,
-        name: Symbol,
+        error_type_def_id: vole_identity::TypeDefId,
+        scrutinee_value: Value,
         fields: &[RecordFieldPattern],
-        scrutinee: &CompiledValue,
-        tag: Value,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> CodegenResult<Option<Value>> {
-        // Look up error type_def_id via EntityRegistry, with fallback to
-        // searching the fallible's error union for imported module error types
-        let error_type_id = self
-            .resolve_type(name)
-            .and_then(|type_id| {
-                let type_def = self.query().get_type(type_id);
-                if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
-                    Some(type_id)
-                } else {
-                    None
-                }
-            })
-            .or_else(|| {
-                // Fallback: search error types in the fallible's error union by name
-                let name_str = self.interner().resolve(name);
-                let arena = self.arena();
-                let (_, error_union_id) = arena.unwrap_fallible(scrutinee.type_id)?;
-                self.find_error_type_in_union(error_union_id, name_str)
-            });
-
-        let Some(error_type_def_id) = error_type_id else {
-            // Unknown error type
-            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
-        };
-
-        let arena = self.arena();
-        let Some((_success_type_id, fallible_error_type_id)) =
-            arena.unwrap_fallible(scrutinee.type_id)
-        else {
-            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
-        };
-
-        let name_table = self.name_table();
-        let Some(error_tag) = fallible_error_tag_by_id(
-            fallible_error_type_id,
-            name,
-            arena,
-            self.interner(),
-            name_table,
-            self.registry(),
-        ) else {
-            // Error type not found in fallible
-            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
-        };
-
-        let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
-
+    ) -> CodegenResult<()> {
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self
             .query()
@@ -2914,7 +2868,7 @@ impl Cg<'_, '_, '_> {
         let payload = self.builder.ins().load(
             types::I64,
             MemFlags::new(),
-            scrutinee.value,
+            scrutinee_value,
             FALLIBLE_PAYLOAD_OFFSET,
         );
 
@@ -2987,6 +2941,72 @@ impl Cg<'_, '_, '_> {
                 arm_variables.insert(field_pattern.binding, (var, field_ty_id));
             }
         }
+
+        Ok(())
+    }
+
+    /// Compile a destructure pattern inside an error pattern (e.g., error Overflow { value, max }).
+    fn compile_error_record_pattern(
+        &mut self,
+        name: Symbol,
+        fields: &[RecordFieldPattern],
+        scrutinee: &CompiledValue,
+        tag: Value,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+    ) -> CodegenResult<Option<Value>> {
+        // Look up error type_def_id via EntityRegistry, with fallback to
+        // searching the fallible's error union for imported module error types
+        let error_type_id = self
+            .resolve_type(name)
+            .and_then(|type_id| {
+                let type_def = self.query().get_type(type_id);
+                if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
+                    Some(type_id)
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                // Fallback: search error types in the fallible's error union by name
+                let name_str = self.interner().resolve(name);
+                let arena = self.arena();
+                let (_, error_union_id) = arena.unwrap_fallible(scrutinee.type_id)?;
+                self.find_error_type_in_union(error_union_id, name_str)
+            });
+
+        let Some(error_type_def_id) = error_type_id else {
+            // Unknown error type
+            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+        };
+
+        let arena = self.arena();
+        let Some((_success_type_id, fallible_error_type_id)) =
+            arena.unwrap_fallible(scrutinee.type_id)
+        else {
+            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+        };
+
+        let name_table = self.name_table();
+        let Some(error_tag) = fallible_error_tag_by_id(
+            fallible_error_type_id,
+            name,
+            arena,
+            self.interner(),
+            name_table,
+            self.registry(),
+        ) else {
+            // Error type not found in fallible
+            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+        };
+
+        let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
+
+        self.extract_error_field_bindings(
+            error_type_def_id,
+            scrutinee.value,
+            fields,
+            arm_variables,
+        )?;
 
         Ok(Some(is_this_error))
     }
