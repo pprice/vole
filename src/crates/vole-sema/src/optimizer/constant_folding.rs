@@ -65,6 +65,28 @@ pub fn fold_constants(program: &mut Program, expr_data: &mut ExpressionData) -> 
     folder.stats
 }
 
+/// Fold a binary operation on two f64 values at compile time.
+fn fold_float_binary(
+    l: f64,
+    r: f64,
+    suffix: Option<NumericSuffix>,
+    op: BinaryOp,
+) -> Option<ConstValue> {
+    match op {
+        BinaryOp::Add => Some(ConstValue::Float(l + r, suffix)),
+        BinaryOp::Sub => Some(ConstValue::Float(l - r, suffix)),
+        BinaryOp::Mul => Some(ConstValue::Float(l * r, suffix)),
+        BinaryOp::Div => Some(ConstValue::Float(l / r, suffix)),
+        BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
+        BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
+        BinaryOp::Lt => Some(ConstValue::Bool(l < r)),
+        BinaryOp::Gt => Some(ConstValue::Bool(l > r)),
+        BinaryOp::Le => Some(ConstValue::Bool(l <= r)),
+        BinaryOp::Ge => Some(ConstValue::Bool(l >= r)),
+        _ => None,
+    }
+}
+
 /// The constant folder visitor.
 struct ConstantFolder<'a> {
     expr_data: &'a mut ExpressionData,
@@ -433,53 +455,14 @@ impl<'a> ConstantFolder<'a> {
             }
             // Float operations
             (ConstValue::Float(l, l_suffix), ConstValue::Float(r, r_suffix)) => {
-                let result_suffix = l_suffix.or(r_suffix);
-                match bin.op {
-                    BinaryOp::Add => Some(ConstValue::Float(l + r, result_suffix)),
-                    BinaryOp::Sub => Some(ConstValue::Float(l - r, result_suffix)),
-                    BinaryOp::Mul => Some(ConstValue::Float(l * r, result_suffix)),
-                    BinaryOp::Div => Some(ConstValue::Float(l / r, result_suffix)),
-                    BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
-                    BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
-                    BinaryOp::Lt => Some(ConstValue::Bool(l < r)),
-                    BinaryOp::Gt => Some(ConstValue::Bool(l > r)),
-                    BinaryOp::Le => Some(ConstValue::Bool(l <= r)),
-                    BinaryOp::Ge => Some(ConstValue::Bool(l >= r)),
-                    _ => None,
-                }
+                fold_float_binary(l, r, l_suffix.or(r_suffix), bin.op)
             }
             // Mixed int/float (promote to float)
             (ConstValue::Int(l, _), ConstValue::Float(r, suffix)) => {
-                let l = l as f64;
-                match bin.op {
-                    BinaryOp::Add => Some(ConstValue::Float(l + r, suffix)),
-                    BinaryOp::Sub => Some(ConstValue::Float(l - r, suffix)),
-                    BinaryOp::Mul => Some(ConstValue::Float(l * r, suffix)),
-                    BinaryOp::Div => Some(ConstValue::Float(l / r, suffix)),
-                    BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
-                    BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
-                    BinaryOp::Lt => Some(ConstValue::Bool(l < r)),
-                    BinaryOp::Gt => Some(ConstValue::Bool(l > r)),
-                    BinaryOp::Le => Some(ConstValue::Bool(l <= r)),
-                    BinaryOp::Ge => Some(ConstValue::Bool(l >= r)),
-                    _ => None,
-                }
+                fold_float_binary(l as f64, r, suffix, bin.op)
             }
             (ConstValue::Float(l, suffix), ConstValue::Int(r, _)) => {
-                let r = r as f64;
-                match bin.op {
-                    BinaryOp::Add => Some(ConstValue::Float(l + r, suffix)),
-                    BinaryOp::Sub => Some(ConstValue::Float(l - r, suffix)),
-                    BinaryOp::Mul => Some(ConstValue::Float(l * r, suffix)),
-                    BinaryOp::Div => Some(ConstValue::Float(l / r, suffix)),
-                    BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
-                    BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
-                    BinaryOp::Lt => Some(ConstValue::Bool(l < r)),
-                    BinaryOp::Gt => Some(ConstValue::Bool(l > r)),
-                    BinaryOp::Le => Some(ConstValue::Bool(l <= r)),
-                    BinaryOp::Ge => Some(ConstValue::Bool(l >= r)),
-                    _ => None,
-                }
+                fold_float_binary(l, r as f64, suffix, bin.op)
             }
             // Boolean operations
             (ConstValue::Bool(l), ConstValue::Bool(r)) => match bin.op {
