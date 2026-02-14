@@ -49,39 +49,8 @@ impl Analyzer {
         let _required_params = self.validate_lambda_param_defaults(&lambda.params, interner);
 
         // Resolve parameter types as TypeIds
-        let mut param_type_ids = Vec::new();
-
-        for (i, param) in lambda.params.iter().enumerate() {
-            let ty_id = if let Some(type_expr) = &param.ty {
-                // Explicit type annotation
-                self.resolve_type_id(type_expr, interner)
-            } else if let Some(expected) = expected_type {
-                // Infer from expected type - use params_id directly
-                if i < expected.params_id.len() {
-                    expected.params_id[i]
-                } else {
-                    self.add_error(
-                        SemanticError::CannotInferLambdaParam {
-                            name: interner.resolve(param.name).to_string(),
-                            span: param.span.into(),
-                        },
-                        param.span,
-                    );
-                    ArenaTypeId::INVALID
-                }
-            } else {
-                // No type info available
-                self.add_error(
-                    SemanticError::CannotInferLambdaParam {
-                        name: interner.resolve(param.name).to_string(),
-                        span: param.span.into(),
-                    },
-                    param.span,
-                );
-                ArenaTypeId::INVALID
-            };
-            param_type_ids.push(ty_id);
-        }
+        let param_type_ids =
+            self.resolve_lambda_param_types(&lambda.params, expected_type, interner);
 
         // Push new scope for lambda body
         self.push_scope();
@@ -269,6 +238,50 @@ impl Analyzer {
                 }
             }
         }
+    }
+
+    /// Resolve parameter types for a lambda expression, using explicit annotations,
+    /// expected type inference, or reporting errors.
+    fn resolve_lambda_param_types(
+        &mut self,
+        params: &[LambdaParam],
+        expected_type: Option<&FunctionType>,
+        interner: &Interner,
+    ) -> Vec<ArenaTypeId> {
+        let mut param_type_ids = Vec::new();
+
+        for (i, param) in params.iter().enumerate() {
+            let ty_id = if let Some(type_expr) = &param.ty {
+                // Explicit type annotation
+                self.resolve_type_id(type_expr, interner)
+            } else if let Some(expected) = expected_type {
+                // Infer from expected type - use params_id directly
+                if i < expected.params_id.len() {
+                    expected.params_id[i]
+                } else {
+                    self.add_error(
+                        SemanticError::CannotInferLambdaParam {
+                            name: interner.resolve(param.name).to_string(),
+                            span: param.span.into(),
+                        },
+                        param.span,
+                    );
+                    ArenaTypeId::INVALID
+                }
+            } else {
+                // No type info available
+                self.add_error(
+                    SemanticError::CannotInferLambdaParam {
+                        name: interner.resolve(param.name).to_string(),
+                        span: param.span.into(),
+                    },
+                    param.span,
+                );
+                ArenaTypeId::INVALID
+            };
+            param_type_ids.push(ty_id);
+        }
+        param_type_ids
     }
 
     /// Calculate required_params for a lambda (used when storing lambda info).
