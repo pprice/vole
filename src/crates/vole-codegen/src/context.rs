@@ -1450,6 +1450,34 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(result)
     }
 
+    /// Load an instance field by slot index, handling wide (i128) fields.
+    ///
+    /// Wide fields occupy 2 consecutive slots and are loaded via `load_wide_field`.
+    /// Normal fields use a single `InstanceGetField` runtime call + type conversion.
+    /// This is the uncached version for use in destructuring and compound assignment.
+    pub fn get_instance_field(
+        &mut self,
+        instance: Value,
+        slot: usize,
+        field_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        if crate::types::is_wide_type(field_type_id, self.arena()) {
+            let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
+            let value = crate::structs::helpers::load_wide_field(
+                self.builder,
+                get_func_ref,
+                instance,
+                slot,
+            );
+            Ok(CompiledValue::new(value, types::I128, field_type_id))
+        } else {
+            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+            let result_raw =
+                self.call_runtime(RuntimeFn::InstanceGetField, &[instance, slot_val])?;
+            Ok(self.convert_field_value(result_raw, field_type_id))
+        }
+    }
+
     /// Invalidate value caches when entering a control flow branch.
     ///
     /// The `field_cache` and `call_cache` store Cranelift SSA `Value`s that are

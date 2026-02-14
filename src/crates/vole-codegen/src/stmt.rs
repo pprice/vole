@@ -1254,22 +1254,9 @@ impl Cg<'_, '_, '_> {
                     let converted = if is_struct {
                         // Structs are stack-allocated: load field directly from pointer + offset
                         self.struct_field_load(value, slot, field_type_id, ty_id)?
-                    } else if crate::types::is_wide_type(field_type_id, self.arena()) {
-                        // i128 fields use 2 consecutive slots
-                        let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
-                        let wide_val = crate::structs::helpers::load_wide_field(
-                            self.builder,
-                            get_func_ref,
-                            value,
-                            slot,
-                        );
-                        CompiledValue::new(wide_val, types::I128, field_type_id)
                     } else {
                         // Classes are heap-allocated: use runtime field access
-                        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-                        let result_raw =
-                            self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
-                        self.convert_field_value(result_raw, field_type_id)
+                        self.get_instance_field(value, slot, field_type_id)?
                     };
 
                     let var = self.builder.declare_var(converted.ty);

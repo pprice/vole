@@ -1005,22 +1005,7 @@ impl Cg<'_, '_, '_> {
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
 
         // Load current field (i128 uses 2 slots)
-        let is_wide = crate::types::is_wide_type(field_type_id, self.arena());
-        let current = if is_wide {
-            let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
-            let value = super::structs::helpers::load_wide_field(
-                self.builder,
-                get_func_ref,
-                obj.value,
-                slot,
-            );
-            CompiledValue::new(value, types::I128, field_type_id)
-        } else {
-            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-            let current_raw =
-                self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
-            self.convert_field_value(current_raw, field_type_id)
-        };
+        let current = self.get_instance_field(obj.value, slot, field_type_id)?;
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();

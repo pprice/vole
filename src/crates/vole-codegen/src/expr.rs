@@ -2812,22 +2812,9 @@ impl Cg<'_, '_, '_> {
                 // Struct was auto-boxed: field_source is a raw heap pointer
                 // with fields at flat offsets, same layout as stack structs
                 self.struct_field_load(field_source, slot, field_type_id, field_source_type_id)?
-            } else if crate::types::is_wide_type(field_type_id, self.arena()) {
-                // i128 fields use 2 consecutive slots
-                let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
-                let value = crate::structs::helpers::load_wide_field(
-                    self.builder,
-                    get_func_ref,
-                    field_source,
-                    slot,
-                );
-                CompiledValue::new(value, types::I128, field_type_id)
             } else {
                 // Class/instance: use runtime InstanceGetField
-                let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-                let result_raw =
-                    self.call_runtime(RuntimeFn::InstanceGetField, &[field_source, slot_val])?;
-                self.convert_field_value(result_raw, field_type_id)
+                self.get_instance_field(field_source, slot, field_type_id)?
             };
             let var = self.builder.declare_var(converted.ty);
             self.builder.def_var(var, converted.value);
