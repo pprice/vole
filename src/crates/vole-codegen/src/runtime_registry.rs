@@ -91,6 +91,23 @@ pub struct RuntimeSymbol {
     pub exposed_to_codegen: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum AbiTy {
+    Ptr,
+    I8,
+    I32,
+    I64,
+    I128,
+    F32,
+    F64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SigSpec {
+    pub params: &'static [AbiTy],
+    pub ret: Option<AbiTy>,
+}
+
 const RUNTIME_SYMBOLS: &[RuntimeSymbol] = &[
     RuntimeSymbol {
         key: RuntimeKey::StringNew,
@@ -461,6 +478,305 @@ const RUNTIME_SYMBOLS: &[RuntimeSymbol] = &[
 
 pub fn all_symbols() -> &'static [RuntimeSymbol] {
     RUNTIME_SYMBOLS
+}
+
+pub fn codegen_symbols() -> impl Iterator<Item = &'static RuntimeSymbol> {
+    RUNTIME_SYMBOLS
+        .iter()
+        .filter(|symbol| symbol.exposed_to_codegen)
+}
+
+pub fn signature_for(key: RuntimeKey) -> SigSpec {
+    match key {
+        RuntimeKey::StringNew => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::StringConcat => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::StringEq => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::I8),
+        },
+        RuntimeKey::StringLen => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::PrintlnString => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: None,
+        },
+        RuntimeKey::PrintlnI64 => SigSpec {
+            params: &[AbiTy::I64],
+            ret: None,
+        },
+        RuntimeKey::PrintlnF64 => SigSpec {
+            params: &[AbiTy::F64],
+            ret: None,
+        },
+        RuntimeKey::PrintlnBool => SigSpec {
+            params: &[AbiTy::I8],
+            ret: None,
+        },
+        RuntimeKey::PrintString => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: None,
+        },
+        RuntimeKey::PrintI64 => SigSpec {
+            params: &[AbiTy::I64],
+            ret: None,
+        },
+        RuntimeKey::PrintF64 => SigSpec {
+            params: &[AbiTy::F64],
+            ret: None,
+        },
+        RuntimeKey::PrintBool => SigSpec {
+            params: &[AbiTy::I8],
+            ret: None,
+        },
+        RuntimeKey::PrintChar => SigSpec {
+            params: &[AbiTy::I8],
+            ret: None,
+        },
+        RuntimeKey::I64ToString => SigSpec {
+            params: &[AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::I128ToString => SigSpec {
+            params: &[AbiTy::I128],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::I128Sdiv => SigSpec {
+            params: &[AbiTy::I128, AbiTy::I128],
+            ret: Some(AbiTy::I128),
+        },
+        RuntimeKey::I128Srem => SigSpec {
+            params: &[AbiTy::I128, AbiTy::I128],
+            ret: Some(AbiTy::I128),
+        },
+        RuntimeKey::F64ToString => SigSpec {
+            params: &[AbiTy::F64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::F32ToString => SigSpec {
+            params: &[AbiTy::F32],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::BoolToString => SigSpec {
+            params: &[AbiTy::I8],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::NilToString => SigSpec {
+            params: &[],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::ArrayI64ToString => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::Flush => SigSpec {
+            params: &[],
+            ret: None,
+        },
+        RuntimeKey::AssertFail => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I32],
+            ret: None,
+        },
+        RuntimeKey::Panic => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr, AbiTy::I64, AbiTy::I32],
+            ret: None,
+        },
+        RuntimeKey::ArrayNew => SigSpec {
+            params: &[],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::ArrayPush => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
+            ret: None,
+        },
+        RuntimeKey::ArrayGetValue => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::ArrayLen => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::ArrayIter => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::ArrayIterNext => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::ArrayIterCollect => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::ArraySet => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64, AbiTy::I64],
+            ret: None,
+        },
+        RuntimeKey::ArrayFilled => SigSpec {
+            params: &[AbiTy::I64, AbiTy::I64, AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::MapIter => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::MapIterNext => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::MapIterCollect => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::FilterIter => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::FilterIterNext => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::FilterIterCollect => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::TakeIter => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::TakeIterNext => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::TakeIterCollect => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::SkipIter => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::SkipIterNext => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::SkipIterCollect => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::IterCount => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::IterSum => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::IterForEach => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: None,
+        },
+        RuntimeKey::IterReduce => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::IterReduceTagged => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::IterSetElemTag => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64],
+            ret: None,
+        },
+        RuntimeKey::IterSetProducesOwned => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: None,
+        },
+        RuntimeKey::IterFirst => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::IterLast => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::IterNth => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::RangeIter => SigSpec {
+            params: &[AbiTy::I64, AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::StringCharsIter => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::ClosureAlloc => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::ClosureSetCapture => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr],
+            ret: None,
+        },
+        RuntimeKey::ClosureSetCaptureKind => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I8],
+            ret: None,
+        },
+        RuntimeKey::ClosureGetCapture => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::ClosureGetFunc => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::HeapAlloc => SigSpec {
+            params: &[AbiTy::I64],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::InstanceNew => SigSpec {
+            params: &[AbiTy::I32, AbiTy::I32, AbiTy::I32],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::InstanceGetField => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I32],
+            ret: Some(AbiTy::I64),
+        },
+        RuntimeKey::InstanceSetField => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I32, AbiTy::I64],
+            ret: None,
+        },
+        RuntimeKey::SbNew => SigSpec {
+            params: &[],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::SbPushString => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::Ptr],
+            ret: None,
+        },
+        RuntimeKey::SbFinish => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::InterfaceIter => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: Some(AbiTy::Ptr),
+        },
+        RuntimeKey::RcInc | RuntimeKey::RcDec => SigSpec {
+            params: &[AbiTy::Ptr],
+            ret: None,
+        },
+    }
 }
 
 /// Runtime symbols that can be linked into JIT modules.

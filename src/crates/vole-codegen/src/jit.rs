@@ -6,7 +6,9 @@ use cranelift_module::{FuncId, Linkage, Module};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::errors::{CodegenError, CodegenResult};
-use crate::runtime_registry::all_linkable_symbols;
+use crate::runtime_registry::{
+    AbiTy, SigSpec, all_linkable_symbols, codegen_symbols, signature_for,
+};
 
 /// Cache of compiled module functions that can be shared across JitContexts.
 /// Supports incremental growth: new JIT contexts can be added without
@@ -233,428 +235,10 @@ impl JitContext {
 
     /// Import all runtime functions into the module
     fn import_runtime_functions(&mut self) {
-        let ptr_ty = self.pointer_type();
-
-        // vole_string_new(data: *const u8, len: usize) -> *mut RcString
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
-        self.import_function("vole_string_new", &sig);
-
-        // vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
-        self.import_function("vole_string_concat", &sig);
-
-        // vole_string_eq(a: *const RcString, b: *const RcString) -> i8 (0 or 1)
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I8));
-        self.import_function("vole_string_eq", &sig);
-
-        // vole_string_len(ptr: *const RcString) -> usize
-        let sig = self.create_signature(&[ptr_ty], Some(types::I64));
-        self.import_function("vole_string_len", &sig);
-
-        // vole_println_string(ptr: *const RcString)
-        let sig = self.create_signature(&[ptr_ty], None);
-        self.import_function("vole_println_string", &sig);
-
-        // vole_println_i64(value: i64)
-        let sig = self.create_signature(&[types::I64], None);
-        self.import_function("vole_println_i64", &sig);
-
-        // vole_println_f64(value: f64)
-        let sig = self.create_signature(&[types::F64], None);
-        self.import_function("vole_println_f64", &sig);
-
-        // vole_println_bool(value: i8)
-        let sig = self.create_signature(&[types::I8], None);
-        self.import_function("vole_println_bool", &sig);
-
-        // vole_print_string(ptr: *const RcString)
-        let sig = self.create_signature(&[ptr_ty], None);
-        self.import_function("vole_print_string", &sig);
-
-        // vole_print_i64(value: i64)
-        let sig = self.create_signature(&[types::I64], None);
-        self.import_function("vole_print_i64", &sig);
-
-        // vole_print_f64(value: f64)
-        let sig = self.create_signature(&[types::F64], None);
-        self.import_function("vole_print_f64", &sig);
-
-        // vole_print_bool(value: i8)
-        let sig = self.create_signature(&[types::I8], None);
-        self.import_function("vole_print_bool", &sig);
-
-        // vole_print_char(c: u8)
-        let sig = self.create_signature(&[types::I8], None);
-        self.import_function("vole_print_char", &sig);
-
-        // vole_i64_to_string(value: i64) -> *mut RcString
-        let sig = self.create_signature(&[types::I64], Some(ptr_ty));
-        self.import_function("vole_i64_to_string", &sig);
-
-        // vole_f64_to_string(value: f64) -> *mut RcString
-        let sig = self.create_signature(&[types::F64], Some(ptr_ty));
-        self.import_function("vole_f64_to_string", &sig);
-
-        // vole_f32_to_string(value: f32) -> *mut RcString
-        let sig = self.create_signature(&[types::F32], Some(ptr_ty));
-        self.import_function("vole_f32_to_string", &sig);
-
-        // vole_i128_to_string(value: i128) -> *mut RcString
-        let sig = self.create_signature(&[types::I128], Some(ptr_ty));
-        self.import_function("vole_i128_to_string", &sig);
-
-        // vole_i128_sdiv(a: i128, b: i128) -> i128
-        let sig = self.create_signature(&[types::I128, types::I128], Some(types::I128));
-        self.import_function("vole_i128_sdiv", &sig);
-
-        // vole_i128_srem(a: i128, b: i128) -> i128
-        let sig = self.create_signature(&[types::I128, types::I128], Some(types::I128));
-        self.import_function("vole_i128_srem", &sig);
-
-        // vole_bool_to_string(value: i8) -> *mut RcString
-        let sig = self.create_signature(&[types::I8], Some(ptr_ty));
-        self.import_function("vole_bool_to_string", &sig);
-
-        // vole_nil_to_string() -> *mut RcString
-        let sig = self.create_signature(&[], Some(ptr_ty));
-        self.import_function("vole_nil_to_string", &sig);
-
-        // vole_array_i64_to_string(arr: *const RcArray) -> *mut RcString
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_array_i64_to_string", &sig);
-
-        // vole_flush()
-        let sig = self.create_signature(&[], None);
-        self.import_function("vole_flush", &sig);
-
-        // vole_assert_fail(file_ptr: *const u8, file_len: usize, line: u32)
-        let sig = self.create_signature(&[ptr_ty, types::I64, types::I32], None);
-        self.import_function("vole_assert_fail", &sig);
-
-        // vole_panic(msg: *const RcString, file_ptr: *const u8, file_len: usize, line: u32)
-        let sig = self.create_signature(&[ptr_ty, ptr_ty, types::I64, types::I32], None);
-        self.import_function("vole_panic", &sig);
-
-        // vole_array_new() -> *mut RcArray
-        let sig = self.create_signature(&[], Some(ptr_ty));
-        self.import_function("vole_array_new", &sig);
-
-        // vole_array_push(arr: *mut RcArray, tag: u64, value: u64)
-        let sig = self.create_signature(&[ptr_ty, types::I64, types::I64], None);
-        self.import_function("vole_array_push", &sig);
-
-        // vole_array_get_value(arr: *const RcArray, index: usize) -> u64
-        let sig = self.create_signature(&[ptr_ty, types::I64], Some(types::I64));
-        self.import_function("vole_array_get_value", &sig);
-
-        // vole_array_len(arr: *const RcArray) -> usize
-        let sig = self.create_signature(&[ptr_ty], Some(types::I64));
-        self.import_function("vole_array_len", &sig);
-
-        // vole_array_iter(arr: *const RcArray) -> *mut ArrayIterator
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_array_iter", &sig);
-
-        // vole_interface_iter(boxed_interface: *const u8) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_interface_iter", &sig);
-
-        // vole_array_iter_next(iter: *mut ArrayIterator, out_value: *mut i64) -> i64
-        // Returns 1 if value available (stores in out_value), 0 if Done
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_array_iter_next", &sig);
-
-        // vole_array_iter_collect(iter: *mut ArrayIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_array_iter_collect", &sig);
-
-        // vole_map_iter(source: *mut ArrayIterator, transform: *const Closure) -> *mut MapIterator
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
-        self.import_function("vole_map_iter", &sig);
-
-        // vole_map_iter_next(iter: *mut MapIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_map_iter_next", &sig);
-
-        // vole_map_iter_collect(iter: *mut MapIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_map_iter_collect", &sig);
-
-        // vole_filter_iter(source: *mut RcIterator, predicate: *const Closure) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
-        self.import_function("vole_filter_iter", &sig);
-
-        // vole_filter_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_filter_iter_next", &sig);
-
-        // vole_filter_iter_collect(iter: *mut RcIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_filter_iter_collect", &sig);
-
-        // vole_iter_set_elem_tag(iter: *mut RcIterator, tag: u64)
-        let sig = self.create_signature(&[ptr_ty, types::I64], None);
-        self.import_function("vole_iter_set_elem_tag", &sig);
-
-        // vole_iter_set_produces_owned(iter: *mut RcIterator)
-        let sig = self.create_signature(&[ptr_ty], None);
-        self.import_function("vole_iter_set_produces_owned", &sig);
-
-        // vole_iter_count(iter: *mut RcIterator) -> i64
-        let sig = self.create_signature(&[ptr_ty], Some(types::I64));
-        self.import_function("vole_iter_count", &sig);
-
-        // vole_iter_sum(iter: *mut RcIterator) -> i64
-        let sig = self.create_signature(&[ptr_ty], Some(types::I64));
-        self.import_function("vole_iter_sum", &sig);
-
-        // vole_iter_for_each(iter: *mut RcIterator, callback: *const Closure)
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], None);
-        self.import_function("vole_iter_for_each", &sig);
-
-        // vole_iter_reduce(iter: *mut RcIterator, init: i64, reducer: *const Closure) -> i64
-        let sig = self.create_signature(&[ptr_ty, types::I64, ptr_ty], Some(types::I64));
-        self.import_function("vole_iter_reduce", &sig);
-
-        // vole_iter_reduce_tagged(iter, init, reducer, acc_tag, elem_tag) -> i64
-        let sig = self.create_signature(
-            &[ptr_ty, types::I64, ptr_ty, types::I64, types::I64],
-            Some(types::I64),
-        );
-        self.import_function("vole_iter_reduce_tagged", &sig);
-
-        // vole_iter_first(iter: *mut RcIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_iter_first", &sig);
-
-        // vole_iter_last(iter: *mut RcIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_iter_last", &sig);
-
-        // vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
-        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
-        self.import_function("vole_iter_nth", &sig);
-
-        // vole_take_iter(source: *mut RcIterator, count: i64) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
-        self.import_function("vole_take_iter", &sig);
-
-        // vole_take_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_take_iter_next", &sig);
-
-        // vole_take_iter_collect(iter: *mut RcIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_take_iter_collect", &sig);
-
-        // vole_skip_iter(source: *mut RcIterator, count: i64) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
-        self.import_function("vole_skip_iter", &sig);
-
-        // vole_skip_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_skip_iter_next", &sig);
-
-        // vole_skip_iter_collect(iter: *mut RcIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_skip_iter_collect", &sig);
-
-        // vole_chain_iter(first: *mut RcIterator, second: *mut RcIterator) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
-        self.import_function("vole_chain_iter", &sig);
-
-        // vole_chain_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_chain_iter_next", &sig);
-
-        // vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_chain_iter_collect", &sig);
-
-        // vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_flatten_iter", &sig);
-
-        // vole_flatten_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_flatten_iter_next", &sig);
-
-        // vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_flatten_iter_collect", &sig);
-
-        // vole_flat_map_iter(source: *mut RcIterator, transform: *const Closure) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
-        self.import_function("vole_flat_map_iter", &sig);
-
-        // vole_flat_map_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_flat_map_iter_next", &sig);
-
-        // vole_flat_map_iter_collect(iter: *mut RcIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_flat_map_iter_collect", &sig);
-
-        // vole_reverse_iter(iter: *mut RcIterator) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_reverse_iter", &sig);
-
-        // vole_sorted_iter(iter: *mut RcIterator) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_sorted_iter", &sig);
-
-        // vole_unique_iter(iter: *mut RcIterator) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_unique_iter", &sig);
-
-        // vole_unique_iter_next(iter: *mut UniqueIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_unique_iter_next", &sig);
-
-        // vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
-        self.import_function("vole_chunks_iter", &sig);
-
-        // vole_chunks_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_chunks_iter_next", &sig);
-
-        // vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_chunks_iter_collect", &sig);
-
-        // vole_windows_iter(source: *mut RcIterator, window_size: i64) -> *mut RcIterator
-        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
-        self.import_function("vole_windows_iter", &sig);
-
-        // vole_windows_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_windows_iter_next", &sig);
-
-        // vole_windows_iter_collect(iter: *mut RcIterator) -> *mut RcArray
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_windows_iter_collect", &sig);
-
-        // Iterator factory functions
-        // vole_repeat_iter(value: i64) -> *mut RepeatIterator
-        let sig = self.create_signature(&[types::I64], Some(ptr_ty));
-        self.import_function("vole_repeat_iter", &sig);
-
-        // vole_repeat_iter_next(iter: *mut RepeatIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_repeat_iter_next", &sig);
-
-        // vole_once_iter(value: i64) -> *mut OnceIterator
-        let sig = self.create_signature(&[types::I64], Some(ptr_ty));
-        self.import_function("vole_once_iter", &sig);
-
-        // vole_once_iter_next(iter: *mut OnceIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_once_iter_next", &sig);
-
-        // vole_empty_iter() -> *mut EmptyIterator
-        let sig = self.create_signature(&[], Some(ptr_ty));
-        self.import_function("vole_empty_iter", &sig);
-
-        // vole_from_fn_iter(generator: *const Closure) -> *mut FromFnIterator
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_from_fn_iter", &sig);
-
-        // vole_from_fn_iter_next(iter: *mut FromFnIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_from_fn_iter_next", &sig);
-
-        // vole_range_iter(start: i64, end: i64) -> *mut RangeIterator
-        let sig = self.create_signature(&[types::I64, types::I64], Some(ptr_ty));
-        self.import_function("vole_range_iter", &sig);
-
-        // vole_range_iter_next(iter: *mut RangeIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_range_iter_next", &sig);
-
-        // vole_string_chars_iter(string: *const RcString) -> *mut StringCharsIterator
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_string_chars_iter", &sig);
-
-        // vole_string_chars_iter_next(iter: *mut StringCharsIterator, out_value: *mut i64) -> i64
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
-        self.import_function("vole_string_chars_iter_next", &sig);
-
-        // vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64)
-        let sig = self.create_signature(&[ptr_ty, types::I64, types::I64, types::I64], None);
-        self.import_function("vole_array_set", &sig);
-
-        // vole_array_filled(count: i64, tag: u64, value: u64) -> *mut RcArray
-        let sig = self.create_signature(&[types::I64, types::I64, types::I64], Some(ptr_ty));
-        self.import_function("vole_array_filled", &sig);
-
-        // Closure functions
-        // vole_closure_alloc(func_ptr: *const u8, num_captures: usize) -> *mut Closure
-        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
-        self.import_function("vole_closure_alloc", &sig);
-
-        // vole_closure_get_capture(closure: *const Closure, index: usize) -> *mut u8
-        let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
-        self.import_function("vole_closure_get_capture", &sig);
-
-        // vole_closure_set_capture(closure: *mut Closure, index: usize, ptr: *mut u8)
-        let sig = self.create_signature(&[ptr_ty, types::I64, ptr_ty], None);
-        self.import_function("vole_closure_set_capture", &sig);
-
-        // vole_closure_set_capture_kind(closure: *mut Closure, index: usize, kind: u8)
-        let sig = self.create_signature(&[ptr_ty, types::I64, types::I8], None);
-        self.import_function("vole_closure_set_capture_kind", &sig);
-
-        // vole_closure_get_func(closure: *const Closure) -> *const u8
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_closure_get_func", &sig);
-
-        // vole_heap_alloc(size: usize) -> *mut u8
-        let sig = self.create_signature(&[types::I64], Some(ptr_ty));
-        self.import_function("vole_heap_alloc", &sig);
-
-        // Instance functions (classes and records)
-        // vole_instance_new(type_id: u32, field_count: u32, runtime_type_id: u32) -> *mut RcInstance
-        let sig = self.create_signature(&[types::I32, types::I32, types::I32], Some(ptr_ty));
-        self.import_function("vole_instance_new", &sig);
-
-        // vole_instance_inc(ptr: *mut RcInstance)
-        let sig = self.create_signature(&[ptr_ty], None);
-        self.import_function("vole_instance_inc", &sig);
-
-        // vole_instance_dec(ptr: *mut RcInstance)
-        let sig = self.create_signature(&[ptr_ty], None);
-        self.import_function("vole_instance_dec", &sig);
-
-        // vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> u64
-        let sig = self.create_signature(&[ptr_ty, types::I32], Some(types::I64));
-        self.import_function("vole_instance_get_field", &sig);
-
-        // vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value: u64)
-        let sig = self.create_signature(&[ptr_ty, types::I32, types::I64], None);
-        self.import_function("vole_instance_set_field", &sig);
-
-        // StringBuilder functions
-        // vole_sb_new() -> *mut StringBuilder
-        let sig = self.create_signature(&[], Some(ptr_ty));
-        self.import_function("vole_sb_new", &sig);
-
-        // vole_sb_push_string(sb: *mut StringBuilder, s: *const RcString)
-        let sig = self.create_signature(&[ptr_ty, ptr_ty], None);
-        self.import_function("vole_sb_push_string", &sig);
-
-        // vole_sb_finish(sb: *mut StringBuilder) -> *mut RcString
-        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
-        self.import_function("vole_sb_finish", &sig);
-
-        // Unified RC functions
-        // rc_inc(ptr: *mut u8)
-        let sig = self.create_signature(&[ptr_ty], None);
-        self.import_function("rc_inc", &sig);
-
-        // rc_dec(ptr: *mut u8)
-        let sig = self.create_signature(&[ptr_ty], None);
-        self.import_function("rc_dec", &sig);
+        for symbol in codegen_symbols() {
+            let sig = self.create_signature_from_spec(signature_for(symbol.key));
+            self.import_function(symbol.c_name, &sig);
+        }
     }
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {
@@ -691,6 +275,29 @@ impl JitContext {
         }
         if let Some(ret_type) = ret {
             sig.returns.push(AbiParam::new(ret_type));
+        }
+        sig
+    }
+
+    fn abi_ty_to_type(&self, ty: AbiTy) -> Type {
+        match ty {
+            AbiTy::Ptr => self.pointer_type(),
+            AbiTy::I8 => types::I8,
+            AbiTy::I32 => types::I32,
+            AbiTy::I64 => types::I64,
+            AbiTy::I128 => types::I128,
+            AbiTy::F32 => types::F32,
+            AbiTy::F64 => types::F64,
+        }
+    }
+
+    fn create_signature_from_spec(&self, spec: SigSpec) -> Signature {
+        let mut sig = self.module.make_signature();
+        for &param in spec.params {
+            sig.params.push(AbiParam::new(self.abi_ty_to_type(param)));
+        }
+        if let Some(ret) = spec.ret {
+            sig.returns.push(AbiParam::new(self.abi_ty_to_type(ret)));
         }
         sig
     }
