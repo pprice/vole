@@ -28,8 +28,13 @@ impl Analyzer {
                 }
             }
             Stmt::Expr(expr_stmt) => Self::expr_definitely_returns(&expr_stmt.expr),
-            // While/For loops may never execute their body
-            _ => false,
+            // These statements don't guarantee a return from the function
+            Stmt::Let(_)
+            | Stmt::LetTuple(_)
+            | Stmt::While(_)
+            | Stmt::For(_)
+            | Stmt::Break(_)
+            | Stmt::Continue(_) => false,
         }
     }
 
