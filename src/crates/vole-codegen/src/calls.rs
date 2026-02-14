@@ -1067,16 +1067,12 @@ impl Cg<'_, '_, '_> {
         self.call_actual_closure(func_ptr_or_closure, func_type_id, call, call_expr_id)
     }
 
-    /// Call an actual closure (with closure pointer)
-    fn call_actual_closure(
+    /// Build a Cranelift call signature for a closure call, returning the signature
+    /// along with the parameter TypeIds and return TypeId.
+    fn build_closure_call_signature(
         &mut self,
-        closure_ptr: Value,
         func_type_id: TypeId,
-        call: &CallExpr,
-        call_expr_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
-        let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[closure_ptr])?;
-
+    ) -> CodegenResult<(Signature, Vec<TypeId>, TypeId)> {
         // Get function components from arena
         let (params, ret, _is_closure) = {
             let arena = self.arena();
@@ -1117,6 +1113,21 @@ impl Cg<'_, '_, '_> {
                 )));
             }
         }
+
+        Ok((sig, params.to_vec(), ret))
+    }
+
+    /// Call an actual closure (with closure pointer)
+    fn call_actual_closure(
+        &mut self,
+        closure_ptr: Value,
+        func_type_id: TypeId,
+        call: &CallExpr,
+        call_expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[closure_ptr])?;
+
+        let (sig, params, ret) = self.build_closure_call_signature(func_type_id)?;
 
         let mut args: ArgVec = smallvec![closure_ptr];
 
