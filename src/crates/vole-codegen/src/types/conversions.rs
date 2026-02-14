@@ -308,6 +308,22 @@ pub(crate) fn is_wide_fallible(ty: TypeId, arena: &TypeArena) -> bool {
         .is_some_and(|(success_type_id, _)| is_wide_type(success_type_id, arena))
 }
 
+/// Sum the byte sizes of all fields in an error type definition.
+fn error_fields_size(
+    type_def_id: TypeDefId,
+    pointer_type: Type,
+    entity_registry: &EntityRegistry,
+    arena: &TypeArena,
+) -> u32 {
+    entity_registry
+        .fields_on_type(type_def_id)
+        .map(|field_id| {
+            let field = entity_registry.get_field(field_id);
+            type_id_size(field.ty, pointer_type, entity_registry, arena)
+        })
+        .sum()
+}
+
 /// Get the size in bytes for a TypeId.
 ///
 /// # Panics
@@ -367,38 +383,23 @@ pub(crate) fn type_id_size(
             union_layout::TAG_ONLY_SIZE + max_payload.div_ceil(8) * 8
         }
         ArenaType::Error { type_def_id } => {
-            let fields_size: u32 = entity_registry
-                .fields_on_type(*type_def_id)
-                .map(|field_id| {
-                    let field = entity_registry.get_field(field_id);
-                    type_id_size(field.ty, pointer_type, entity_registry, arena)
-                })
-                .sum();
-            fields_size.div_ceil(8) * 8
+            error_fields_size(*type_def_id, pointer_type, entity_registry, arena).div_ceil(8) * 8
         }
         ArenaType::Fallible { success, error } => {
             let success_size = type_id_size(*success, pointer_type, entity_registry, arena);
             let error_size = match arena.get(*error) {
-                ArenaType::Error { type_def_id } => entity_registry
-                    .fields_on_type(*type_def_id)
-                    .map(|field_id| {
-                        let field = entity_registry.get_field(field_id);
-                        type_id_size(field.ty, pointer_type, entity_registry, arena)
-                    })
-                    .sum(),
+                ArenaType::Error { type_def_id } => {
+                    error_fields_size(*type_def_id, pointer_type, entity_registry, arena)
+                }
                 ArenaType::Union(variants) => variants
                     .iter()
                     .filter_map(|&v| match arena.get(v) {
-                        ArenaType::Error { type_def_id } => {
-                            let size: u32 = entity_registry
-                                .fields_on_type(*type_def_id)
-                                .map(|field_id| {
-                                    let field = entity_registry.get_field(field_id);
-                                    type_id_size(field.ty, pointer_type, entity_registry, arena)
-                                })
-                                .sum();
-                            Some(size)
-                        }
+                        ArenaType::Error { type_def_id } => Some(error_fields_size(
+                            *type_def_id,
+                            pointer_type,
+                            entity_registry,
+                            arena,
+                        )),
                         _ => None,
                     })
                     .max()
