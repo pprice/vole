@@ -479,8 +479,8 @@ pub struct SkipSource {
     pub source: *mut RcIterator,
     /// Number of elements to skip
     pub skip_count: i64,
-    /// Whether we've done the initial skip (0 = not skipped, 1 = skipped)
-    pub skipped: i64,
+    /// Whether we've done the initial skip
+    pub skipped: bool,
 }
 
 /// Source data for chain iteration (concatenates two iterators)
@@ -491,8 +491,8 @@ pub struct ChainSource {
     pub first: *mut RcIterator,
     /// Second iterator to consume after first is exhausted
     pub second: *mut RcIterator,
-    /// Whether we've exhausted the first iterator (0 = on first, 1 = on second)
-    pub on_second: i64,
+    /// Whether we've exhausted the first iterator
+    pub on_second: bool,
 }
 
 /// Source data for flatten iteration (flattens nested iterables)
@@ -525,8 +525,8 @@ pub struct UniqueSource {
     pub source: *mut RcIterator,
     /// Previous value (only valid after first element)
     pub prev: i64,
-    /// Whether we've seen the first element (0 = no, 1 = yes)
-    pub has_prev: i64,
+    /// Whether we've seen the first element
+    pub has_prev: bool,
 }
 
 /// Source data for chunks iteration (yields non-overlapping chunks as arrays)
@@ -571,8 +571,8 @@ pub struct RepeatSource {
 pub struct OnceSource {
     /// The value to yield
     pub value: i64,
-    /// Whether the value has been yielded (0 = no, 1 = yes)
-    pub exhausted: i64,
+    /// Whether the value has been yielded
+    pub exhausted: bool,
 }
 
 /// Source data for empty iteration (yields nothing)
@@ -650,8 +650,8 @@ pub struct StringSplitSource {
     pub delimiter: *const RcString,
     /// Current byte position in the string (not character position)
     pub byte_pos: i64,
-    /// Whether the iterator is exhausted (0 = no, 1 = yes)
-    pub exhausted: i64,
+    /// Whether the iterator is exhausted
+    pub exhausted: bool,
 }
 
 /// Source data for string lines iteration (splits string by newlines)
@@ -662,8 +662,8 @@ pub struct StringLinesSource {
     pub string: *const RcString,
     /// Current byte position in the string (not character position)
     pub byte_pos: i64,
-    /// Whether the iterator is exhausted (0 = no, 1 = yes)
-    pub exhausted: i64,
+    /// Whether the iterator is exhausted
+    pub exhausted: bool,
 }
 
 /// Source data for string codepoints iteration (yields unicode codepoints as i32)
@@ -1838,7 +1838,7 @@ pub extern "C" fn vole_skip_iter(source: *mut RcIterator, count: i64) -> *mut Rc
             skip: SkipSource {
                 source,
                 skip_count: count,
-                skipped: 0, // Not yet skipped
+                skipped: false, // Not yet skipped
             },
         },
     )
@@ -1851,8 +1851,8 @@ iter_next_fn!(
     /// Returns 0 if iterator exhausted (Done).
     vole_skip_iter_next, Skip, skip, mut |src, _iter, out| {
         // If we haven't skipped yet, do the initial skip
-        if src.skipped == 0 {
-            src.skipped = 1;
+        if !src.skipped {
+            src.skipped = true;
             let owned_rc = iter_produces_owned_rc(src.source);
             let mut skipped: i64 = 0;
             while skipped < src.skip_count {
@@ -2113,7 +2113,7 @@ pub extern "C" fn vole_chain_iter(
             chain: ChainSource {
                 first,
                 second,
-                on_second: 0, // Start with first iterator
+                on_second: false, // Start with first iterator
             },
         },
     )
@@ -2126,13 +2126,13 @@ iter_next_fn!(
     /// Returns 0 if both iterators exhausted (Done).
     vole_chain_iter_next, Chain, chain, mut |src, _iter, out| {
         // If we're still on the first iterator
-        if src.on_second == 0 {
+        if !src.on_second {
             let has_value = vole_array_iter_next(src.first, out);
             if has_value != 0 {
                 return 1; // Got value from first
             }
             // First exhausted, switch to second
-            src.on_second = 1;
+            src.on_second = true;
         }
 
         // Now try the second iterator
@@ -2576,7 +2576,7 @@ pub extern "C" fn vole_unique_iter(source: *mut RcIterator) -> *mut RcIterator {
             unique: UniqueSource {
                 source,
                 prev: 0,
-                has_prev: 0,
+                has_prev: false,
             },
         },
     )
@@ -2598,8 +2598,8 @@ iter_next_fn!(
             }
 
             // If this is the first element, always yield it
-            if src.has_prev == 0 {
-                src.has_prev = 1;
+            if !src.has_prev {
+                src.has_prev = true;
                 src.prev = value;
                 unsafe { *out = value };
                 return 1;
@@ -2985,7 +2985,7 @@ pub extern "C" fn vole_once_iter(value: i64) -> *mut RcIterator {
         IteratorSource {
             once: OnceSource {
                 value,
-                exhausted: 0,
+                exhausted: false,
             },
         },
     )
@@ -2995,11 +2995,11 @@ iter_next_fn!(
     /// Get next value from once iterator.
     /// Returns 1 with the value on first call, 0 on subsequent calls.
     vole_once_iter_next, Once, once, mut |src, _iter, out| {
-        if src.exhausted != 0 {
+        if src.exhausted {
             return 0; // Already yielded the value
         }
 
-        src.exhausted = 1;
+        src.exhausted = true;
         unsafe { *out = src.value };
         1 // Has value
     }
@@ -3332,7 +3332,7 @@ pub extern "C" fn vole_string_split_iter(
                 string,
                 delimiter,
                 byte_pos: 0,
-                exhausted: 0,
+                exhausted: false,
             },
         },
         TYPE_STRING as u64,
@@ -3344,7 +3344,7 @@ iter_next_fn!(
     /// Returns 1 and stores the substring pointer in out_value if available.
     /// Returns 0 if iterator exhausted (Done).
     vole_string_split_iter_next, StringSplit, string_split, mut |src, _iter, out| {
-        if src.string.is_null() || src.exhausted != 0 {
+        if src.string.is_null() || src.exhausted {
             return 0;
         }
 
@@ -3384,7 +3384,7 @@ iter_next_fn!(
             } else {
                 // No more delimiters - yield remaining string and mark exhausted
                 let new_string = RcString::new(remaining_str);
-                src.exhausted = 1;
+                src.exhausted = true;
 
                 *out = new_string as i64;
                 1 // Has value
@@ -3414,7 +3414,7 @@ pub extern "C" fn vole_string_lines_iter(string: *const RcString) -> *mut RcIter
             string_lines: StringLinesSource {
                 string,
                 byte_pos: 0,
-                exhausted: 0,
+                exhausted: false,
             },
         },
         TYPE_STRING as u64,
@@ -3426,7 +3426,7 @@ iter_next_fn!(
     /// Returns 1 and stores the line pointer in out_value if available.
     /// Returns 0 if iterator exhausted (Done).
     vole_string_lines_iter_next, StringLines, string_lines, mut |src, _iter, out| {
-        if src.string.is_null() || src.exhausted != 0 {
+        if src.string.is_null() || src.exhausted {
             return 0;
         }
 
@@ -3475,7 +3475,7 @@ iter_next_fn!(
                 // Strip trailing \r if present
                 let line = remaining_str.strip_suffix('\r').unwrap_or(remaining_str);
                 let new_string = RcString::new(line);
-                src.exhausted = 1;
+                src.exhausted = true;
 
                 *out = new_string as i64;
                 1 // Has value
