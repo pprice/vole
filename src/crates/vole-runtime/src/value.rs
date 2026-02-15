@@ -144,6 +144,8 @@ pub enum RuntimeTypeId {
     /// When cleaned up: if `is_rc` byte (offset 1) is non-zero, `rc_dec` the payload
     /// at offset 8, then free the 16-byte buffer.
     UnionHeap = 12,
+    /// RC-managed channel for inter-task communication.
+    Channel = 13,
 }
 
 impl RuntimeTypeId {
@@ -161,6 +163,7 @@ impl RuntimeTypeId {
             9 => Some(Self::Buffer),
             11 => Some(Self::Iterator),
             12 => Some(Self::UnionHeap),
+            13 => Some(Self::Channel),
             _ => None,
         }
     }
@@ -179,6 +182,7 @@ impl RuntimeTypeId {
             Self::Buffer => "Buffer",
             Self::Iterator => "Iterator",
             Self::UnionHeap => "UnionHeap",
+            Self::Channel => "Channel",
         }
     }
 }
@@ -196,7 +200,16 @@ pub fn tag_needs_rc(tag: u64) -> bool {
     use RuntimeTypeId as T;
     matches!(
         RuntimeTypeId::from_u32(tag as u32),
-        Some(T::String | T::Array | T::Closure | T::Instance | T::Rng | T::Buffer | T::Iterator)
+        Some(
+            T::String
+                | T::Array
+                | T::Closure
+                | T::Instance
+                | T::Rng
+                | T::Buffer
+                | T::Iterator
+                | T::Channel,
+        )
     )
 }
 

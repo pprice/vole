@@ -232,6 +232,13 @@ runtime_keys! {
     TaskCancel             => "vole_task_cancel"             : (I64) -> Void,
     TaskIsDone             => "vole_task_is_done"            : (I64) -> I64,
     SchedulerRun           => "vole_scheduler_run"           : () -> Void,
+
+    // ── Channels ──────────────────────────────────────────────────────
+    ChannelNew             => "vole_channel_new"             : (I64) -> Ptr,
+    ChannelSend            => "vole_channel_send"            : (Ptr, I64, I64) -> I64,
+    ChannelRecv            => "vole_channel_recv"            : (Ptr, Ptr) -> I64,
+    ChannelClose           => "vole_channel_close"           : (Ptr) -> Void,
+    ChannelIsClosed        => "vole_channel_is_closed"       : (Ptr) -> I8,
 }
 
 pub fn all_symbols() -> &'static [RuntimeSymbol] {
@@ -722,6 +729,27 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_scheduler_run",
         ptr: vole_runtime::scheduler::vole_scheduler_run as *const u8,
+    },
+    // ── Channels ──────────────────────────────────────────────────────
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_new",
+        ptr: vole_runtime::channel::vole_channel_new as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_send",
+        ptr: vole_runtime::channel::vole_channel_send as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_recv",
+        ptr: vole_runtime::channel::vole_channel_recv as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_close",
+        ptr: vole_runtime::channel::vole_channel_close as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_is_closed",
+        ptr: vole_runtime::channel::vole_channel_is_closed as *const u8,
     },
 ];
 

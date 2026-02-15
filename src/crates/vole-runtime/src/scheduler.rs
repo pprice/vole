@@ -18,6 +18,18 @@ use crate::coroutine::VoleCoroutine;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TaskId(u64);
 
+impl TaskId {
+    /// Create a `TaskId` from a raw `u64` (used by channel operations).
+    pub fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    /// Get the raw `u64` value (used by channel operations).
+    pub fn as_raw(self) -> u64 {
+        self.0
+    }
+}
+
 /// Task lifecycle state.
 ///
 /// See vol-u8zh Phase 1 Semantics Contract, Section 1.1.
@@ -386,7 +398,7 @@ thread_local! {
 }
 
 /// Run a function with the thread-local scheduler, lazily initializing it.
-fn with_scheduler<R>(f: impl FnOnce(&mut Scheduler) -> R) -> R {
+pub fn with_scheduler<R>(f: impl FnOnce(&mut Scheduler) -> R) -> R {
     SCHEDULER.with(|cell| {
         let mut borrow = cell.borrow_mut();
         let sched = borrow.get_or_insert_with(Scheduler::new);
