@@ -484,42 +484,7 @@ impl<'src> Parser<'src> {
 
     /// Parse the count in a repeat literal [expr; N]
     fn parse_repeat_count(&mut self) -> Result<usize, ParseError> {
-        let token_ty = self.current.ty;
-        let token_span = self.current.span;
-        if token_ty != TokenType::IntLiteral {
-            return Err(ParseError::new(
-                ParserError::ExpectedExpression {
-                    found: token_ty.as_str().to_string(),
-                    span: token_span.into(),
-                },
-                token_span,
-            ));
-        }
-        self.advance();
-        // Support hex, binary, and underscore-separated repeat counts
-        let cleaned = self.previous.lexeme.replace('_', "");
-        let result = if let Some(hex) = cleaned
-            .strip_prefix("0x")
-            .or_else(|| cleaned.strip_prefix("0X"))
-        {
-            usize::from_str_radix(hex, 16)
-        } else if let Some(bin) = cleaned
-            .strip_prefix("0b")
-            .or_else(|| cleaned.strip_prefix("0B"))
-        {
-            usize::from_str_radix(bin, 2)
-        } else {
-            cleaned.parse::<usize>()
-        };
-        result.map_err(|_| {
-            ParseError::new(
-                ParserError::UnexpectedToken {
-                    token: "invalid repeat count (must be non-negative integer)".to_string(),
-                    span: token_span.into(),
-                },
-                token_span,
-            )
-        })
+        self.parse_usize_literal()
     }
 
     /// Parse a struct literal: Name { field: value, ... } or Name<T> { field: value, ... }

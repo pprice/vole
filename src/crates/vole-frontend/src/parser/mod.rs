@@ -188,6 +188,48 @@ impl<'src> Parser<'src> {
             ))
         }
     }
+
+    /// Parse a `usize` from the current `IntLiteral` token.
+    ///
+    /// Handles hex (`0x`/`0X`), binary (`0b`/`0B`), and underscore-separated
+    /// decimal literals.  Advances past the token on success.
+    pub(super) fn parse_usize_literal(&mut self) -> Result<usize, ParseError> {
+        let token_ty = self.current.ty;
+        let token_span = self.current.span;
+        if token_ty != TokenType::IntLiteral {
+            return Err(ParseError::new(
+                ParserError::ExpectedExpression {
+                    found: token_ty.as_str().to_string(),
+                    span: token_span.into(),
+                },
+                token_span,
+            ));
+        }
+        self.advance();
+        let cleaned = self.previous.lexeme.replace('_', "");
+        let result = if let Some(hex) = cleaned
+            .strip_prefix("0x")
+            .or_else(|| cleaned.strip_prefix("0X"))
+        {
+            usize::from_str_radix(hex, 16)
+        } else if let Some(bin) = cleaned
+            .strip_prefix("0b")
+            .or_else(|| cleaned.strip_prefix("0B"))
+        {
+            usize::from_str_radix(bin, 2)
+        } else {
+            cleaned.parse::<usize>()
+        };
+        result.map_err(|_| {
+            ParseError::new(
+                ParserError::UnexpectedToken {
+                    token: "invalid integer literal".to_string(),
+                    span: token_span.into(),
+                },
+                token_span,
+            )
+        })
+    }
 }
 
 #[cfg(test)]

@@ -318,42 +318,7 @@ impl<'src> Parser<'src> {
 
     /// Parse the size part of a fixed array type [T; SIZE]
     fn parse_fixed_array_size(&mut self) -> Result<usize, ParseError> {
-        let token = self.current.clone();
-        if token.ty != TokenType::IntLiteral {
-            return Err(ParseError::new(
-                ParserError::ExpectedExpression {
-                    found: token.ty.as_str().to_string(),
-                    span: token.span.into(),
-                },
-                token.span,
-            ));
-        }
-        self.advance(); // consume the integer literal
-
-        // Parse the integer value (supports hex, binary, underscore separators)
-        let cleaned = token.lexeme.replace('_', "");
-        let result = if let Some(hex) = cleaned
-            .strip_prefix("0x")
-            .or_else(|| cleaned.strip_prefix("0X"))
-        {
-            usize::from_str_radix(hex, 16)
-        } else if let Some(bin) = cleaned
-            .strip_prefix("0b")
-            .or_else(|| cleaned.strip_prefix("0B"))
-        {
-            usize::from_str_radix(bin, 2)
-        } else {
-            cleaned.parse::<usize>()
-        };
-        result.map_err(|_| {
-            ParseError::new(
-                ParserError::ExpectedExpression {
-                    found: token.lexeme.to_string(),
-                    span: token.span.into(),
-                },
-                token.span,
-            )
-        })
+        self.parse_usize_literal()
     }
 
     /// Parse a structural method parameter: either `name: Type` or bare `Type`.
