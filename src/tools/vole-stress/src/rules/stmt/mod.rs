@@ -14,7 +14,9 @@ mod array_uniform_ops;
 mod assert_stmt;
 mod bool_chain;
 mod bool_chain_edge;
+mod bool_match_let;
 mod bool_negation;
+mod break_continue;
 mod chained_literal_method;
 mod chained_string_methods;
 mod checked_arithmetic;
@@ -25,6 +27,7 @@ mod comparison_chain;
 mod compound_assignment;
 mod compound_bool;
 mod dead_code;
+mod early_return;
 mod edge_case_for_loop;
 mod edge_case_split;
 mod empty_array_iter;
@@ -37,6 +40,7 @@ mod f64_comparison_edge;
 mod f64_literal_ops;
 mod field_closure;
 mod filter_iter_tostring;
+mod fn_param_call;
 mod for_each_stmt;
 mod for_in_match_accum;
 mod for_interpolation_concat;
@@ -298,5 +302,10 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(array_push::ArrayPush),
         Box::new(array_index_assign::ArrayIndexAssign),
         Box::new(array_compound_assign::ArrayCompoundAssign),
+        // -- Control flow & call rules (batch 13) ---------------------------------
+        Box::new(early_return::EarlyReturn),
+        Box::new(break_continue::BreakContinue),
+        Box::new(fn_param_call::FnParamCall),
+        Box::new(bool_match_let::BoolMatchLet),
     ]
 }
