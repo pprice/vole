@@ -11,9 +11,18 @@ mod bool_ops;
 mod comparison;
 mod if_expr;
 mod is_expr;
+mod iter_any_all;
+mod iter_count;
+mod iter_reduce;
+mod iter_sum;
+mod match_expr;
+mod method_interpolation;
+mod null_coalesce;
 mod string_bool;
+mod string_chars;
 mod string_concat;
 mod string_length;
+mod string_split;
 mod string_transform;
 mod to_string;
 mod when_expr;
@@ -44,5 +53,15 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         Box::new(string_concat::StringConcat),
         Box::new(to_string::ToString),
         Box::new(is_expr::IsExpr),
+        // -- batch 2: null coalesce, match, iterators -------------------------
+        Box::new(null_coalesce::NullCoalesce),
+        Box::new(match_expr::MatchExpr),
+        Box::new(method_interpolation::MethodInterpolation),
+        Box::new(string_split::StringSplit),
+        Box::new(string_chars::StringChars),
+        Box::new(iter_count::IterCount),
+        Box::new(iter_sum::IterSum),
+        Box::new(iter_reduce::IterReduce),
+        Box::new(iter_any_all::IterAnyAll),
     ]
 }
