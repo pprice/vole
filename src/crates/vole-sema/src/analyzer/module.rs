@@ -440,7 +440,7 @@ impl Analyzer {
 
         // Parse the module
         let mut parser = Parser::new(&module_info.source);
-        let mut program = match parser.parse_program() {
+        let program = match parser.parse_program() {
             Ok(p) => p,
             Err(e) => {
                 self.add_error(
@@ -455,22 +455,10 @@ impl Analyzer {
             }
         };
 
-        // Transform generators in the imported module (yield -> state machine)
+        // Generator transform is no longer needed -- generators are compiled
+        // directly to coroutine-backed iterators in codegen.
         let mut module_interner = parser.into_interner();
         module_interner.seed_builtin_symbols();
-        let (_, transform_errors) =
-            crate::transforms::transform_generators(&mut program, &mut module_interner);
-        if !transform_errors.is_empty() {
-            self.add_error(
-                SemanticError::ModuleParseError {
-                    path: import_path.to_string(),
-                    message: format!("generator transform error: {}", transform_errors[0].error),
-                    span: span.into(),
-                },
-                span,
-            );
-            return Err(());
-        }
 
         Ok(ParsedModule {
             program,

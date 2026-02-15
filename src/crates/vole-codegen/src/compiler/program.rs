@@ -668,7 +668,15 @@ impl Compiler<'_> {
                     .expect("INTERNAL: module function: name_id not registered");
 
                     let display_name = self.query().display_name(name_id);
-                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
+                    let func_key = self.declare_function_by_name_id(
+                        name_id,
+                        &display_name,
+                        DeclareMode::Import,
+                    );
+                    // Override generator return types for imported module functions
+                    if let Some(func_key) = func_key {
+                        self.override_generator_return_type(func, func_key);
+                    }
                 }
             }
 

@@ -862,6 +862,12 @@ impl Cg<'_, '_, '_> {
                 format!("{}::{}", module_path, method_name_str),
             )
         })?;
+
+        // Use the func_registry's return type if it was overridden (e.g. generators
+        // have their return type changed from Iterator<T> to RuntimeIterator(T) in
+        // pass 1). Fall back to the sema return type otherwise.
+        let return_type_id = self.funcs().return_type(func_key).unwrap_or(return_type_id);
+
         let func_ref = self
             .codegen_ctx
             .jit_module()

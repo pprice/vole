@@ -46,6 +46,9 @@ impl Analyzer {
         // Set generator context if return type is Iterator<T>
         if let Some(element_type_id) = self.extract_iterator_element_type_id(return_type_id) {
             self.env.current_generator_element_type = Some(element_type_id);
+            // Pre-create RuntimeIterator(T) so codegen can look it up when
+            // compiling generator functions (coroutine-backed iterators).
+            self.type_arena_mut().runtime_iterator(element_type_id);
         }
 
         saved

@@ -21,8 +21,6 @@ use crate::runtime::{
     write_to_stderr_capture,
 };
 use crate::sema::{ModuleCache, TypeError, TypeWarning, optimize_all};
-// AST generator transform is disabled -- generators use coroutine-based codegen.
-// use crate::transforms;
 
 // Re-export AnalyzedProgram from codegen
 pub use crate::codegen::AnalyzedProgram;
@@ -38,8 +36,6 @@ pub enum PipelineError {
     Lex(Vec<LexerError>),
     /// Parser encountered syntax errors
     Parse(ParseError),
-    /// Generator transformation failed
-    Transform(Vec<TypeError>),
     /// Type checking failed
     Sema(Vec<TypeError>),
     /// Code generation failed
@@ -163,7 +159,7 @@ pub fn render_pipeline_error(
         PipelineError::Parse(e) => {
             render_parser_error(e, file_path, source, run_mode, w, color_mode);
         }
-        PipelineError::Transform(errors) | PipelineError::Sema(errors) => {
+        PipelineError::Sema(errors) => {
             for e in errors {
                 render_sema_error(e, file_path, source, w, color_mode);
             }
@@ -213,7 +209,7 @@ pub fn compile_source(
     } = opts;
 
     // Parse phase
-    let (mut program, mut interner) = {
+    let (mut program, interner) = {
         let _span = tracing::info_span!("parse", file = %file_path).entered();
         let mut parser = Parser::new(source);
         parser.set_skip_tests(skip_tests);
@@ -240,16 +236,6 @@ pub fn compile_source(
         tracing::debug!(declarations = program.declarations.len(), "parsed");
         (program, interner)
     };
-
-    // Transform phase (generators)
-    // Note: The AST generator-to-state-machine transform is disabled.
-    // Generators are now compiled directly to coroutine-backed iterators in codegen.
-    // Yield type validation is handled by sema (check_yield_expr).
-    {
-        let _span = tracing::info_span!("transform").entered();
-        let _ = &mut program; // Preserve span for tracing
-        let _ = &mut interner;
-    }
 
     // Sema phase (type checking)
     let mut analyzer = {

@@ -6,7 +6,6 @@ pub mod bench;
 pub mod cli;
 pub mod commands;
 pub mod errors;
-pub mod transforms;
 pub mod util;
 
 // Internal crate aliases (not part of the public API).
