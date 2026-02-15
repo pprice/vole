@@ -6,33 +6,22 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use glob::glob;
+use thiserror::Error;
 
 /// Errors that can occur during path expansion
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum PathError {
     /// Glob pattern syntax error
+    #[error("invalid glob pattern '{pattern}': {message}")]
     InvalidPattern { pattern: String, message: String },
     /// IO error (permissions, etc.)
+    #[error("error reading '{}': {source}", path.display())]
     IoError {
         path: PathBuf,
+        #[source]
         source: std::io::Error,
     },
 }
-
-impl std::fmt::Display for PathError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PathError::InvalidPattern { pattern, message } => {
-                write!(f, "invalid glob pattern '{}': {}", pattern, message)
-            }
-            PathError::IoError { path, source } => {
-                write!(f, "error reading '{}': {}", path.display(), source)
-            }
-        }
-    }
-}
-
-impl std::error::Error for PathError {}
 
 /// Result of path expansion, separating explicit files from discovered files.
 #[derive(Debug, Default)]
