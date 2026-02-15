@@ -233,9 +233,25 @@ impl Emit<'_> {
         self.rng.gen_range(min..=max)
     }
 
+    /// Generate a random `i64` in the given inclusive range.
+    pub fn gen_i64_range(&mut self, min: i64, max: i64) -> i64 {
+        if min >= max {
+            return min;
+        }
+        self.rng.gen_range(min..=max)
+    }
+
     /// Shuffle a slice in place.
     pub fn shuffle<T>(&mut self, slice: &mut [T]) {
         slice.shuffle(self.rng);
+    }
+
+    /// Pick a random primitive type suitable for expressions.
+    ///
+    /// Delegates to [`PrimitiveType::random_expr_type`], providing access to
+    /// the RNG through `Emit`.
+    pub fn random_primitive_type(&mut self) -> TypeInfo {
+        TypeInfo::Primitive(PrimitiveType::random_expr_type(self.rng))
     }
 }
 

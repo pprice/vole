@@ -211,7 +211,7 @@ impl PrimitiveType {
     /// The core types (i32, i64, f64, bool, string) appear ~90% of the time.
     /// Wider primitive types (i8, i16, i128, u8, u16, u32, u64, f32) share
     /// the remaining ~10% so they appear occasionally.
-    pub fn random_expr_type<R: Rng>(rng: &mut R) -> Self {
+    pub fn random_expr_type<R: Rng + ?Sized>(rng: &mut R) -> Self {
         match rng.gen_range(0..50) {
             0..=8 => PrimitiveType::I32,
             9..=17 => PrimitiveType::I64,

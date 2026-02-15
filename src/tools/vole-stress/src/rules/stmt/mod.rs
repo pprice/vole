@@ -11,6 +11,17 @@ mod field_closure;
 mod generic_closure_chain;
 mod i32_boundary;
 mod interpolation_concat;
+mod match_array;
+mod match_array_length;
+mod match_closure;
+mod match_computation;
+mod match_iter;
+mod match_let;
+mod match_method;
+mod match_method_result;
+mod match_optional;
+mod match_sorted;
+mod match_string_length;
 mod modulo_edge;
 mod nested_closure;
 mod range_tostring;
@@ -20,6 +31,7 @@ mod string_build_match;
 mod string_char_at;
 mod string_split;
 mod while_string_build;
+mod wildcard_match;
 
 use crate::rule::StmtRule;
 
@@ -49,5 +61,18 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(sentinel_closure::SentinelClosure),
         Box::new(field_closure::FieldClosure),
         Box::new(generic_closure_chain::GenericClosureChain),
+        // -- Match rules --------------------------------------------------------
+        Box::new(match_let::MatchLet),
+        Box::new(match_method::MatchMethod),
+        Box::new(wildcard_match::WildcardMatch),
+        Box::new(match_array::MatchArray),
+        Box::new(match_array_length::MatchArrayLength),
+        Box::new(match_string_length::MatchStringLength),
+        Box::new(match_computation::MatchComputation),
+        Box::new(match_closure::MatchClosure),
+        Box::new(match_optional::MatchOptional),
+        Box::new(match_sorted::MatchSorted),
+        Box::new(match_iter::MatchIter),
+        Box::new(match_method_result::MatchMethodResult),
     ]
 }
