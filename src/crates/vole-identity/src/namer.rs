@@ -25,7 +25,7 @@ impl<'a> Namer<'a> {
     }
 
     pub fn function(&mut self, module: ModuleId, name: Symbol) -> NameId {
-        self.names.intern(module, &[name], self.interner)
+        self.intern_symbol(module, name)
     }
 
     pub fn method(&mut self, name: Symbol) -> NameId {
