@@ -1,5 +1,94 @@
 // src/frontend/token.rs
 
+/// Single source of truth for keyword-to-token mapping.
+///
+/// Each entry `"text" => Variant` generates:
+/// - A match arm in `TokenType::keyword_type`: `"text" => Some(TokenType::Variant)`
+/// - A match arm in `TokenType::as_str`:       `Self::Variant => "text"`
+macro_rules! define_keywords {
+    ( $( $text:literal => $variant:ident ),+ $(,)? ) => {
+        impl TokenType {
+            /// Check if a string is a keyword and return its token type.
+            pub fn keyword_type(text: &str) -> Option<TokenType> {
+                match text {
+                    $( $text => Some(TokenType::$variant), )+
+                    _ => None,
+                }
+            }
+
+            /// String representation for keyword tokens (used by `as_str`).
+            fn keyword_as_str(&self) -> Option<&'static str> {
+                match self {
+                    $( Self::$variant => Some($text), )+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+define_keywords! {
+    // Language keywords
+    "func"        => KwFunc,
+    "let"         => KwLet,
+    "mut"         => KwMut,
+    "while"       => KwWhile,
+    "if"          => KwIf,
+    "else"        => KwElse,
+    "break"       => KwBreak,
+    "return"      => KwReturn,
+    "true"        => KwTrue,
+    "false"       => KwFalse,
+    "tests"       => KwTests,
+    "test"        => KwTest,
+    "for"         => KwFor,
+    "in"          => KwIn,
+    "continue"    => KwContinue,
+    "match"       => KwMatch,
+    "is"          => KwIs,
+    "class"       => KwClass,
+    "struct"      => KwStruct,
+    "interface"   => KwInterface,
+    "implements"  => KwImplements,
+    "implement"   => KwImplement,
+    "extends"     => KwExtends,
+    "Self"        => KwSelfType,
+    "val"         => KwVal,
+    "error"       => KwError,
+    "success"     => KwSuccess,
+    "fallible"    => KwFallible,
+    "raise"       => KwRaise,
+    "try"         => KwTry,
+    "external"    => KwExternal,
+    "as"          => KwAs,
+    "import"      => KwImport,
+    "yield"       => KwYield,
+    "default"     => KwDefault,
+    "statics"     => KwStatics,
+    "static"      => KwStatic,
+    "when"        => KwWhen,
+    "where"       => KwWhere,
+    "unreachable" => KwUnreachable,
+    "sentinel"    => KwSentinel,
+    // Type keywords
+    "i8"          => KwI8,
+    "i16"         => KwI16,
+    "i32"         => KwI32,
+    "i64"         => KwI64,
+    "i128"        => KwI128,
+    "u8"          => KwU8,
+    "u16"         => KwU16,
+    "u32"         => KwU32,
+    "u64"         => KwU64,
+    "f32"         => KwF32,
+    "f64"         => KwF64,
+    "bool"        => KwBool,
+    "string"      => KwString,
+    "handle"      => KwHandle,
+    "never"       => KwNever,
+    "unknown"     => KwUnknown,
+}
+
 /// All token types in the Vole language
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {
@@ -132,6 +221,11 @@ pub enum TokenType {
 impl TokenType {
     /// Get string representation for error messages
     pub fn as_str(&self) -> &'static str {
+        // Keywords are defined once in `define_keywords!`; delegate to the
+        // generated helper so they never diverge from `keyword_type()`.
+        if let Some(s) = self.keyword_as_str() {
+            return s;
+        }
         match self {
             Self::IntLiteral => "integer",
             Self::FloatLiteral => "float",
@@ -141,63 +235,6 @@ impl TokenType {
             Self::StringInterpMiddle => "string interpolation",
             Self::StringInterpEnd => "string interpolation",
             Self::Identifier => "identifier",
-            Self::KwFunc => "func",
-            Self::KwLet => "let",
-            Self::KwMut => "mut",
-            Self::KwWhile => "while",
-            Self::KwIf => "if",
-            Self::KwElse => "else",
-            Self::KwBreak => "break",
-            Self::KwReturn => "return",
-            Self::KwTrue => "true",
-            Self::KwFalse => "false",
-            Self::KwTests => "tests",
-            Self::KwTest => "test",
-            Self::KwFor => "for",
-            Self::KwIn => "in",
-            Self::KwContinue => "continue",
-            Self::KwMatch => "match",
-            Self::KwIs => "is",
-            Self::KwClass => "class",
-            Self::KwStruct => "struct",
-            Self::KwInterface => "interface",
-            Self::KwImplements => "implements",
-            Self::KwImplement => "implement",
-            Self::KwExtends => "extends",
-            Self::KwSelfType => "Self",
-            Self::KwVal => "val",
-            Self::KwError => "error",
-            Self::KwSuccess => "success",
-            Self::KwFallible => "fallible",
-            Self::KwRaise => "raise",
-            Self::KwTry => "try",
-            Self::KwExternal => "external",
-            Self::KwAs => "as",
-            Self::KwImport => "import",
-            Self::KwYield => "yield",
-            Self::KwDefault => "default",
-            Self::KwStatics => "statics",
-            Self::KwStatic => "static",
-            Self::KwWhen => "when",
-            Self::KwWhere => "where",
-            Self::KwUnreachable => "unreachable",
-            Self::KwSentinel => "sentinel",
-            Self::KwI8 => "i8",
-            Self::KwI16 => "i16",
-            Self::KwI32 => "i32",
-            Self::KwI64 => "i64",
-            Self::KwI128 => "i128",
-            Self::KwU8 => "u8",
-            Self::KwU16 => "u16",
-            Self::KwU32 => "u32",
-            Self::KwU64 => "u64",
-            Self::KwF32 => "f32",
-            Self::KwF64 => "f64",
-            Self::KwBool => "bool",
-            Self::KwString => "string",
-            Self::KwHandle => "handle",
-            Self::KwNever => "never",
-            Self::KwUnknown => "unknown",
             Self::Plus => "+",
             Self::Minus => "-",
             Self::Star => "*",
@@ -244,6 +281,8 @@ impl TokenType {
             Self::Newline => "newline",
             Self::Eof => "end of file",
             Self::Error => "error",
+            // All keyword variants are handled by `keyword_as_str()` above.
+            _ => unreachable!("keyword variant not covered by define_keywords! macro"),
         }
     }
 

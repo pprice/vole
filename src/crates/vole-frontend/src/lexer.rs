@@ -449,7 +449,7 @@ impl<'src> Lexer<'src> {
         }
 
         let text = &self.source[self.start..self.current];
-        let ty = Self::keyword_type(text).unwrap_or(TokenType::Identifier);
+        let ty = TokenType::keyword_type(text).unwrap_or(TokenType::Identifier);
         self.make_token(ty)
     }
 
@@ -485,70 +485,6 @@ impl<'src> Lexer<'src> {
             // Bidirectional overrides (security risk)
             | '\u{202A}'..='\u{202E}' // LRE, RLE, PDF, LRO, RLO
         )
-    }
-
-    /// Check if a string is a keyword and return its token type
-    fn keyword_type(text: &str) -> Option<TokenType> {
-        match text {
-            "func" => Some(TokenType::KwFunc),
-            "let" => Some(TokenType::KwLet),
-            "mut" => Some(TokenType::KwMut),
-            "while" => Some(TokenType::KwWhile),
-            "if" => Some(TokenType::KwIf),
-            "else" => Some(TokenType::KwElse),
-            "break" => Some(TokenType::KwBreak),
-            "return" => Some(TokenType::KwReturn),
-            "true" => Some(TokenType::KwTrue),
-            "false" => Some(TokenType::KwFalse),
-            "tests" => Some(TokenType::KwTests),
-            "test" => Some(TokenType::KwTest),
-            "for" => Some(TokenType::KwFor),
-            "in" => Some(TokenType::KwIn),
-            "continue" => Some(TokenType::KwContinue),
-            "match" => Some(TokenType::KwMatch),
-            "is" => Some(TokenType::KwIs),
-            "class" => Some(TokenType::KwClass),
-            "struct" => Some(TokenType::KwStruct),
-            "interface" => Some(TokenType::KwInterface),
-            "implements" => Some(TokenType::KwImplements),
-            "implement" => Some(TokenType::KwImplement),
-            "extends" => Some(TokenType::KwExtends),
-            "Self" => Some(TokenType::KwSelfType),
-            "val" => Some(TokenType::KwVal),
-            "error" => Some(TokenType::KwError),
-            "success" => Some(TokenType::KwSuccess),
-            "fallible" => Some(TokenType::KwFallible),
-            "raise" => Some(TokenType::KwRaise),
-            "try" => Some(TokenType::KwTry),
-            "external" => Some(TokenType::KwExternal),
-            "as" => Some(TokenType::KwAs),
-            "import" => Some(TokenType::KwImport),
-            "yield" => Some(TokenType::KwYield),
-            "default" => Some(TokenType::KwDefault),
-            "statics" => Some(TokenType::KwStatics),
-            "static" => Some(TokenType::KwStatic),
-            "when" => Some(TokenType::KwWhen),
-            "where" => Some(TokenType::KwWhere),
-            "unreachable" => Some(TokenType::KwUnreachable),
-            "sentinel" => Some(TokenType::KwSentinel),
-            "i8" => Some(TokenType::KwI8),
-            "i16" => Some(TokenType::KwI16),
-            "i32" => Some(TokenType::KwI32),
-            "i64" => Some(TokenType::KwI64),
-            "i128" => Some(TokenType::KwI128),
-            "u8" => Some(TokenType::KwU8),
-            "u16" => Some(TokenType::KwU16),
-            "u32" => Some(TokenType::KwU32),
-            "u64" => Some(TokenType::KwU64),
-            "f32" => Some(TokenType::KwF32),
-            "f64" => Some(TokenType::KwF64),
-            "bool" => Some(TokenType::KwBool),
-            "string" => Some(TokenType::KwString),
-            "handle" => Some(TokenType::KwHandle),
-            "never" => Some(TokenType::KwNever),
-            "unknown" => Some(TokenType::KwUnknown),
-            _ => None,
-        }
     }
 
     /// After consuming the integer part of a decimal number, check if it extends
