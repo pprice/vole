@@ -587,38 +587,20 @@ impl Analyzer {
 
     /// Phase 5a (partial): Store sub-analyzer results into the shared context.
     fn store_sub_analyzer_results(&mut self, module_key: &str, sub_analyzer: Analyzer) {
-        self.ctx
-            .module_expr_types
-            .borrow_mut()
-            .insert(module_key.to_string(), sub_analyzer.expr_types.clone());
-        self.ctx.module_method_resolutions.borrow_mut().insert(
+        use crate::expression_data::ModuleAnalysisData;
+        self.ctx.module_data.borrow_mut().insert(
             module_key.to_string(),
-            sub_analyzer.method_resolutions.into_inner(),
+            ModuleAnalysisData {
+                types: sub_analyzer.expr_types.clone(),
+                methods: sub_analyzer.method_resolutions.into_inner(),
+                is_check_results: sub_analyzer.is_check_results.clone(),
+                generic_calls: sub_analyzer.generic_calls.clone(),
+                class_method_calls: sub_analyzer.class_method_calls.clone(),
+                static_method_calls: sub_analyzer.static_method_calls.clone(),
+                declared_var_types: sub_analyzer.declared_var_types,
+                lambda_analysis: sub_analyzer.lambda_analysis,
+            },
         );
-        self.ctx.module_is_check_results.borrow_mut().insert(
-            module_key.to_string(),
-            sub_analyzer.is_check_results.clone(),
-        );
-        self.ctx
-            .module_generic_calls
-            .borrow_mut()
-            .insert(module_key.to_string(), sub_analyzer.generic_calls.clone());
-        self.ctx.module_class_method_calls.borrow_mut().insert(
-            module_key.to_string(),
-            sub_analyzer.class_method_calls.clone(),
-        );
-        self.ctx.module_static_method_calls.borrow_mut().insert(
-            module_key.to_string(),
-            sub_analyzer.static_method_calls.clone(),
-        );
-        self.ctx
-            .module_declared_var_types
-            .borrow_mut()
-            .insert(module_key.to_string(), sub_analyzer.declared_var_types);
-        self.ctx
-            .module_lambda_analysis
-            .borrow_mut()
-            .insert(module_key.to_string(), sub_analyzer.lambda_analysis);
     }
 
     /// Resolve parameter and return types into a function ArenaTypeId.

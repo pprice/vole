@@ -56,6 +56,32 @@ pub struct LambdaDefaults {
     pub lambda_node_id: NodeId,
 }
 
+/// Per-module analysis data collected during multi-module compilation.
+///
+/// Each imported module gets its own set of NodeId-keyed maps because NodeIds
+/// are file-local (they restart at 0 per parse unit). Grouping them into a
+/// single struct replaces the 8 separate `FxHashMap<String, FxHashMap<NodeId, T>>`
+/// fields that previously existed in both `AnalyzerContext` and `ExpressionData`.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleAnalysisData {
+    /// Expression types for this module's AST nodes.
+    pub types: FxHashMap<NodeId, TypeId>,
+    /// Resolved method information for method calls in this module.
+    pub methods: FxHashMap<NodeId, ResolvedMethod>,
+    /// Type check results for `is` expressions and type patterns.
+    pub is_check_results: FxHashMap<NodeId, IsCheckResult>,
+    /// Monomorphization keys for generic function calls.
+    pub generic_calls: FxHashMap<NodeId, MonomorphKey>,
+    /// Monomorphization keys for generic class method calls.
+    pub class_method_calls: FxHashMap<NodeId, ClassMethodMonomorphKey>,
+    /// Monomorphization keys for generic static method calls.
+    pub static_method_calls: FxHashMap<NodeId, StaticMethodMonomorphKey>,
+    /// Declared variable types for let statements with explicit type annotations.
+    pub declared_var_types: FxHashMap<NodeId, TypeId>,
+    /// Lambda analysis results (captures and side effects).
+    pub lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
+}
+
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
 /// This includes expression types, method resolutions, and generic instantiation info.
 #[derive(Debug, Clone, Default)]
@@ -70,18 +96,9 @@ pub struct ExpressionData {
     class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
     /// Monomorphization key for generic static method calls
     static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    /// Per-module type mappings (for multi-module compilation)
-    module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
-    /// Per-module method resolutions (for multi-module compilation)
-    module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
-    /// Per-module is_check_results (for multi-module compilation)
-    module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
-    /// Per-module generic function call keys (for multi-module compilation)
-    module_generics: FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>,
-    /// Per-module class method generic keys (for multi-module compilation)
-    module_class_method_generics: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
-    /// Per-module static method generic keys (for multi-module compilation)
-    module_static_method_generics: FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>,
+    /// Per-module analysis data (for multi-module compilation).
+    /// Each module's NodeIds are file-local, so they need separate maps.
+    module_data: FxHashMap<String, ModuleAnalysisData>,
     /// Substituted return types for generic method calls.
     /// When sema resolves a call like `list.head()` on `List<i32>`, the generic
     /// return type `T` is substituted to `i32`. This map stores the concrete type
@@ -100,14 +117,9 @@ pub struct ExpressionData {
     /// Maps init expression NodeId → declared TypeId, enabling codegen to handle
     /// union wrapping, numeric widening, and interface boxing without re-resolving types.
     declared_var_types: FxHashMap<NodeId, TypeId>,
-    /// Per-module declared variable types (for multi-module compilation).
-    /// Stored separately since NodeIds are per-program and can collide across modules.
-    module_declared_var_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
     /// Lambda analysis results (captures and side effects).
     /// Keyed by lambda expression NodeId.
     lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
-    /// Per-module lambda analysis results (for multi-module compilation).
-    module_lambda_analysis: FxHashMap<String, FxHashMap<NodeId, LambdaAnalysis>>,
 }
 
 /// Builder for `ExpressionData` to reduce construction boilerplate.
@@ -130,20 +142,13 @@ pub struct ExpressionDataBuilder {
     generics: FxHashMap<NodeId, MonomorphKey>,
     class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
     static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
-    module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
-    module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
-    module_generics: FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>,
-    module_class_method_generics: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
-    module_static_method_generics: FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>,
+    module_data: FxHashMap<String, ModuleAnalysisData>,
     substituted_return_types: FxHashMap<NodeId, TypeId>,
     lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
     tests_virtual_modules: FxHashMap<Span, ModuleId>,
     is_check_results: FxHashMap<NodeId, IsCheckResult>,
     declared_var_types: FxHashMap<NodeId, TypeId>,
-    module_declared_var_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
     lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
-    module_lambda_analysis: FxHashMap<String, FxHashMap<NodeId, LambdaAnalysis>>,
 }
 
 impl ExpressionDataBuilder {
@@ -188,60 +193,9 @@ impl ExpressionDataBuilder {
         self
     }
 
-    /// Set per-module type mappings.
-    pub fn module_types(
-        mut self,
-        module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
-    ) -> Self {
-        self.module_types = module_types;
-        self
-    }
-
-    /// Set per-module method resolutions.
-    pub fn module_methods(
-        mut self,
-        module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
-    ) -> Self {
-        self.module_methods = module_methods;
-        self
-    }
-
-    /// Set per-module is_check_results.
-    pub fn module_is_check_results(
-        mut self,
-        module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
-    ) -> Self {
-        self.module_is_check_results = module_is_check_results;
-        self
-    }
-
-    /// Set per-module generic function monomorphization keys.
-    pub fn module_generics(
-        mut self,
-        module_generics: FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>,
-    ) -> Self {
-        self.module_generics = module_generics;
-        self
-    }
-
-    /// Set per-module class method monomorphization keys.
-    pub fn module_class_method_generics(
-        mut self,
-        module_class_method_generics: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
-    ) -> Self {
-        self.module_class_method_generics = module_class_method_generics;
-        self
-    }
-
-    /// Set per-module static method monomorphization keys.
-    pub fn module_static_method_generics(
-        mut self,
-        module_static_method_generics: FxHashMap<
-            String,
-            FxHashMap<NodeId, StaticMethodMonomorphKey>,
-        >,
-    ) -> Self {
-        self.module_static_method_generics = module_static_method_generics;
+    /// Set per-module analysis data.
+    pub fn module_data(mut self, module_data: FxHashMap<String, ModuleAnalysisData>) -> Self {
+        self.module_data = module_data;
         self
     }
 
@@ -281,27 +235,9 @@ impl ExpressionDataBuilder {
         self
     }
 
-    /// Set per-module declared variable types for let statements with explicit type annotations.
-    pub fn module_declared_var_types(
-        mut self,
-        module_declared_var_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
-    ) -> Self {
-        self.module_declared_var_types = module_declared_var_types;
-        self
-    }
-
     /// Set lambda analysis results (captures and side effects).
     pub fn lambda_analysis(mut self, lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>) -> Self {
         self.lambda_analysis = lambda_analysis;
-        self
-    }
-
-    /// Set per-module lambda analysis results.
-    pub fn module_lambda_analysis(
-        mut self,
-        module_lambda_analysis: FxHashMap<String, FxHashMap<NodeId, LambdaAnalysis>>,
-    ) -> Self {
-        self.module_lambda_analysis = module_lambda_analysis;
         self
     }
 
@@ -313,20 +249,13 @@ impl ExpressionDataBuilder {
             generics: self.generics,
             class_method_generics: self.class_method_generics,
             static_method_generics: self.static_method_generics,
-            module_types: self.module_types,
-            module_methods: self.module_methods,
-            module_is_check_results: self.module_is_check_results,
-            module_generics: self.module_generics,
-            module_class_method_generics: self.module_class_method_generics,
-            module_static_method_generics: self.module_static_method_generics,
+            module_data: self.module_data,
             substituted_return_types: self.substituted_return_types,
             lambda_defaults: self.lambda_defaults,
             tests_virtual_modules: self.tests_virtual_modules,
             is_check_results: self.is_check_results,
             declared_var_types: self.declared_var_types,
-            module_declared_var_types: self.module_declared_var_types,
             lambda_analysis: self.lambda_analysis,
-            module_lambda_analysis: self.module_lambda_analysis,
         }
     }
 }
@@ -366,20 +295,20 @@ impl ExpressionData {
         // First check module-specific resolutions
         if let Some(module) = current_module {
             tracing::trace!(module, ?node, "Looking up method in module");
-            if let Some(module_methods) = self.module_methods.get(module) {
-                let node_ids: Vec<_> = module_methods.keys().collect();
+            if let Some(data) = self.module_data.get(module) {
+                let node_ids: Vec<_> = data.methods.keys().collect();
                 tracing::trace!(
-                    count = module_methods.len(),
+                    count = data.methods.len(),
                     ?node_ids,
                     "Found module methods"
                 );
-                if let Some(method) = module_methods.get(&node) {
+                if let Some(method) = data.methods.get(&node) {
                     tracing::trace!(?method, "Found method resolution in module");
                     return Some(method);
                 }
                 tracing::trace!(?node, "Method not found in module methods");
             } else {
-                tracing::trace!("Module not found in module_methods");
+                tracing::trace!("Module not found in module_data");
             }
         }
         // Fall back to main program resolutions
@@ -409,9 +338,9 @@ impl ExpressionData {
             // cause cross-file NodeId collisions (NodeIds restart at 0 per
             // parse unit, so a test file NodeId can alias a module NodeId).
             return self
-                .module_generics
+                .module_data
                 .get(module)
-                .and_then(|keys| keys.get(&node));
+                .and_then(|data| data.generic_calls.get(&node));
         }
         self.generics.get(&node)
     }
@@ -469,9 +398,9 @@ impl ExpressionData {
             // cause cross-file NodeId collisions (NodeIds restart at 0 per
             // parse unit, so a test file NodeId can alias a module NodeId).
             return self
-                .module_class_method_generics
+                .module_data
                 .get(module)
-                .and_then(|keys| keys.get(&node));
+                .and_then(|data| data.class_method_calls.get(&node));
         }
         self.class_method_generics.get(&node)
     }
@@ -508,9 +437,9 @@ impl ExpressionData {
             // cross-file NodeId collisions by never falling through to the
             // top-level map when we know which module we are compiling.
             return self
-                .module_static_method_generics
+                .module_data
                 .get(module)
-                .and_then(|keys| keys.get(&node));
+                .and_then(|data| data.static_method_calls.get(&node));
         }
         self.static_method_generics.get(&node)
     }
@@ -534,36 +463,22 @@ impl ExpressionData {
 
     /// Get types for a specific module (as TypeId handles)
     pub fn module_types(&self, module: &str) -> Option<&FxHashMap<NodeId, TypeId>> {
-        self.module_types.get(module)
+        self.module_data.get(module).map(|d| &d.types)
     }
 
-    /// Set types for a specific module
-    pub fn set_module_types(&mut self, module: String, types: FxHashMap<NodeId, TypeId>) {
-        self.module_types.insert(module, types);
+    /// Get the per-module analysis data map.
+    pub fn module_data(&self) -> &FxHashMap<String, ModuleAnalysisData> {
+        &self.module_data
     }
 
-    /// Get all module type mappings
-    pub fn all_module_types(&self) -> &FxHashMap<String, FxHashMap<NodeId, TypeId>> {
-        &self.module_types
+    /// Get mutable per-module analysis data, inserting a default entry if absent.
+    pub fn module_data_entry(&mut self, module: String) -> &mut ModuleAnalysisData {
+        self.module_data.entry(module).or_default()
     }
 
     /// Get methods for a specific module
     pub fn module_methods(&self, module: &str) -> Option<&FxHashMap<NodeId, ResolvedMethod>> {
-        self.module_methods.get(module)
-    }
-
-    /// Set methods for a specific module
-    pub fn set_module_methods(
-        &mut self,
-        module: String,
-        methods: FxHashMap<NodeId, ResolvedMethod>,
-    ) {
-        self.module_methods.insert(module, methods);
-    }
-
-    /// Get all module method mappings
-    pub fn all_module_methods(&self) -> &FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>> {
-        &self.module_methods
+        self.module_data.get(module).map(|d| &d.methods)
     }
 
     /// Get the substituted return type for a method call.
@@ -629,8 +544,8 @@ impl ExpressionData {
         current_module: Option<&str>,
     ) -> Option<IsCheckResult> {
         if let Some(module) = current_module
-            && let Some(module_results) = self.module_is_check_results.get(module)
-            && let Some(result) = module_results.get(&node)
+            && let Some(data) = self.module_data.get(module)
+            && let Some(result) = data.is_check_results.get(&node)
         {
             return Some(*result);
         }
@@ -665,9 +580,9 @@ impl ExpressionData {
         module_path: &str,
         init_node: NodeId,
     ) -> Option<TypeId> {
-        self.module_declared_var_types
+        self.module_data
             .get(module_path)
-            .and_then(|dvt| dvt.get(&init_node).copied())
+            .and_then(|data| data.declared_var_types.get(&init_node).copied())
     }
 
     /// Set the declared type for a variable's init expression.
@@ -692,8 +607,8 @@ impl ExpressionData {
         current_module: Option<&str>,
     ) -> Option<&LambdaAnalysis> {
         if let Some(module) = current_module
-            && let Some(module_results) = self.module_lambda_analysis.get(module)
-            && let Some(result) = module_results.get(&node)
+            && let Some(data) = self.module_data.get(module)
+            && let Some(result) = data.lambda_analysis.get(&node)
         {
             return Some(result);
         }

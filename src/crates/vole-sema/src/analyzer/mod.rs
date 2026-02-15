@@ -179,14 +179,7 @@ pub struct AnalysisOutput {
 /// `Rc::try_unwrap` populate this struct, letting the `ExpressionData` builder
 /// chain appear exactly once.
 struct ExtractedModuleData {
-    expr_types: FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>,
-    method_resolutions: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
-    is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
-    generic_calls: FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>,
-    class_method_calls: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
-    static_method_calls: FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>,
-    declared_var_types: FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>,
-    lambda_analysis: FxHashMap<String, FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>>,
+    data: FxHashMap<String, crate::expression_data::ModuleAnalysisData>,
 }
 
 /// Tracks return analysis results for a code path.
@@ -324,35 +317,10 @@ pub struct AnalyzerContext {
     pub module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
     /// Parsed module programs and their interners (for compiling pure Vole functions).
     pub module_programs: RefCell<FxHashMap<String, (Program, Interner)>>,
-    /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId).
-    /// Stored separately since NodeIds are per-program and can't be merged into main expr_types.
-    /// Shared across sub-analyzers so prelude modules' expr_types accumulate without cloning.
-    pub module_expr_types: RefCell<FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>>,
-    /// Method resolutions for module programs (keyed by module path -> NodeId -> ResolvedMethod).
-    /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions.
-    /// Shared across sub-analyzers so prelude modules' method resolutions accumulate without cloning.
-    pub module_method_resolutions: RefCell<FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>>,
-    /// Per-module is_check_results (keyed by module path -> NodeId -> IsCheckResult).
-    /// Stored separately since NodeIds are per-program and can't be merged into main is_check_results.
-    pub module_is_check_results: RefCell<FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>>,
-    /// Per-module generic function call keys (module path -> NodeId -> MonomorphKey).
-    /// Needed because NodeIds are file-local and collide across modules.
-    pub module_generic_calls: RefCell<FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>>,
-    /// Per-module class method generic call keys (module path -> NodeId -> ClassMethodMonomorphKey).
-    /// Needed because NodeIds are file-local and collide across modules.
-    pub module_class_method_calls:
-        RefCell<FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>>,
-    /// Per-module static method generic call keys (module path -> NodeId -> StaticMethodMonomorphKey).
-    /// Needed because NodeIds are file-local and collide across modules.
-    pub module_static_method_calls:
-        RefCell<FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>>,
-    /// Per-module declared variable types (module path -> NodeId -> ArenaTypeId).
-    /// Needed because NodeIds are file-local and collide across modules.
-    pub module_declared_var_types: RefCell<FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>>,
-    /// Per-module lambda analysis results (module path -> NodeId -> LambdaAnalysis).
-    /// Needed because NodeIds are file-local and collide across modules.
-    pub module_lambda_analysis:
-        RefCell<FxHashMap<String, FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>>>,
+    /// Per-module analysis data (module path -> ModuleAnalysisData).
+    /// NodeIds are file-local and collide across modules, so each module gets
+    /// its own set of NodeId-keyed maps. Uses ArenaTypeId (= TypeId) internally.
+    pub module_data: RefCell<FxHashMap<String, crate::expression_data::ModuleAnalysisData>>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
@@ -369,14 +337,7 @@ impl AnalyzerContext {
             db,
             module_type_ids: RefCell::new(FxHashMap::default()),
             module_programs: RefCell::new(FxHashMap::default()),
-            module_expr_types: RefCell::new(FxHashMap::default()),
-            module_method_resolutions: RefCell::new(FxHashMap::default()),
-            module_is_check_results: RefCell::new(FxHashMap::default()),
-            module_generic_calls: RefCell::new(FxHashMap::default()),
-            module_class_method_calls: RefCell::new(FxHashMap::default()),
-            module_static_method_calls: RefCell::new(FxHashMap::default()),
-            module_declared_var_types: RefCell::new(FxHashMap::default()),
-            module_lambda_analysis: RefCell::new(FxHashMap::default()),
+            module_data: RefCell::new(FxHashMap::default()),
             module_cache: cache,
             modules_in_progress: RefCell::new(FxHashSet::default()),
         }
@@ -582,28 +543,14 @@ impl Analyzer {
             Ok(ctx) => {
                 // Sole owner: move data out of RefCells without cloning
                 let data = ExtractedModuleData {
-                    expr_types: ctx.module_expr_types.into_inner(),
-                    method_resolutions: ctx.module_method_resolutions.into_inner(),
-                    is_check_results: ctx.module_is_check_results.into_inner(),
-                    generic_calls: ctx.module_generic_calls.into_inner(),
-                    class_method_calls: ctx.module_class_method_calls.into_inner(),
-                    static_method_calls: ctx.module_static_method_calls.into_inner(),
-                    declared_var_types: ctx.module_declared_var_types.into_inner(),
-                    lambda_analysis: ctx.module_lambda_analysis.into_inner(),
+                    data: ctx.module_data.into_inner(),
                 };
                 (data, ctx.module_programs.into_inner(), ctx.db)
             }
             Err(ctx) => {
                 // Other references exist: fall back to cloning (should not happen in practice)
                 let data = ExtractedModuleData {
-                    expr_types: ctx.module_expr_types.borrow().clone(),
-                    method_resolutions: ctx.module_method_resolutions.borrow().clone(),
-                    is_check_results: ctx.module_is_check_results.borrow().clone(),
-                    generic_calls: ctx.module_generic_calls.borrow().clone(),
-                    class_method_calls: ctx.module_class_method_calls.borrow().clone(),
-                    static_method_calls: ctx.module_static_method_calls.borrow().clone(),
-                    declared_var_types: ctx.module_declared_var_types.borrow().clone(),
-                    lambda_analysis: ctx.module_lambda_analysis.borrow().clone(),
+                    data: ctx.module_data.borrow().clone(),
                 };
                 (
                     data,
@@ -619,20 +566,13 @@ impl Analyzer {
             .generics(generic_calls)
             .class_method_generics(class_method_calls)
             .static_method_generics(static_method_calls)
-            .module_types(module_data.expr_types)
-            .module_methods(module_data.method_resolutions)
-            .module_is_check_results(module_data.is_check_results)
-            .module_generics(module_data.generic_calls)
-            .module_class_method_generics(module_data.class_method_calls)
-            .module_static_method_generics(module_data.static_method_calls)
+            .module_data(module_data.data)
             .substituted_return_types(substituted_return_types)
             .lambda_defaults(lambda_defaults)
             .tests_virtual_modules(tests_virtual_modules)
             .is_check_results(is_check_results)
             .declared_var_types(declared_var_types)
-            .module_declared_var_types(module_data.declared_var_types)
             .lambda_analysis(lambda_analysis)
-            .module_lambda_analysis(module_data.lambda_analysis)
             .build();
 
         AnalysisOutput {

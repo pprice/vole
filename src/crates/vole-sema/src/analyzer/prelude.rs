@@ -124,34 +124,22 @@ impl Analyzer {
                 import_path.to_string(),
                 (cached.program.clone(), cached.interner.clone()),
             );
-            self.ctx
-                .module_expr_types
-                .borrow_mut()
-                .insert(import_path.to_string(), cached.expr_types.clone());
-            self.ctx
-                .module_method_resolutions
-                .borrow_mut()
-                .insert(import_path.to_string(), cached.method_resolutions.clone());
-            self.ctx
-                .module_is_check_results
-                .borrow_mut()
-                .insert(import_path.to_string(), cached.is_check_results.clone());
-            self.ctx
-                .module_generic_calls
-                .borrow_mut()
-                .insert(import_path.to_string(), cached.generic_calls.clone());
-            self.ctx.module_class_method_calls.borrow_mut().insert(
-                import_path.to_string(),
-                cached.class_method_generics.clone(),
-            );
-            self.ctx.module_static_method_calls.borrow_mut().insert(
-                import_path.to_string(),
-                cached.static_method_generics.clone(),
-            );
-            self.ctx
-                .module_declared_var_types
-                .borrow_mut()
-                .insert(import_path.to_string(), cached.declared_var_types.clone());
+            {
+                use crate::expression_data::ModuleAnalysisData;
+                self.ctx.module_data.borrow_mut().insert(
+                    import_path.to_string(),
+                    ModuleAnalysisData {
+                        types: cached.expr_types.clone(),
+                        methods: cached.method_resolutions.clone(),
+                        is_check_results: cached.is_check_results.clone(),
+                        generic_calls: cached.generic_calls.clone(),
+                        class_method_calls: cached.class_method_generics.clone(),
+                        static_method_calls: cached.static_method_generics.clone(),
+                        declared_var_types: cached.declared_var_types.clone(),
+                        ..ModuleAnalysisData::default()
+                    },
+                );
+            }
             return;
         }
 
@@ -265,34 +253,22 @@ impl Analyzer {
             .module_programs
             .borrow_mut()
             .insert(import_path.to_string(), (program, prelude_interner));
-        self.ctx
-            .module_expr_types
-            .borrow_mut()
-            .insert(import_path.to_string(), sub_analyzer.expr_types.clone());
-        self.ctx.module_method_resolutions.borrow_mut().insert(
-            import_path.to_string(),
-            sub_analyzer.method_resolutions.into_inner(),
-        );
-        self.ctx.module_is_check_results.borrow_mut().insert(
-            import_path.to_string(),
-            sub_analyzer.is_check_results.clone(),
-        );
-        self.ctx
-            .module_generic_calls
-            .borrow_mut()
-            .insert(import_path.to_string(), sub_analyzer.generic_calls.clone());
-        self.ctx.module_class_method_calls.borrow_mut().insert(
-            import_path.to_string(),
-            sub_analyzer.class_method_calls.clone(),
-        );
-        self.ctx.module_static_method_calls.borrow_mut().insert(
-            import_path.to_string(),
-            sub_analyzer.static_method_calls.clone(),
-        );
-        self.ctx.module_declared_var_types.borrow_mut().insert(
-            import_path.to_string(),
-            sub_analyzer.declared_var_types.clone(),
-        );
+        {
+            use crate::expression_data::ModuleAnalysisData;
+            self.ctx.module_data.borrow_mut().insert(
+                import_path.to_string(),
+                ModuleAnalysisData {
+                    types: sub_analyzer.expr_types.clone(),
+                    methods: sub_analyzer.method_resolutions.into_inner(),
+                    is_check_results: sub_analyzer.is_check_results.clone(),
+                    generic_calls: sub_analyzer.generic_calls.clone(),
+                    class_method_calls: sub_analyzer.class_method_calls.clone(),
+                    static_method_calls: sub_analyzer.static_method_calls.clone(),
+                    declared_var_types: sub_analyzer.declared_var_types.clone(),
+                    lambda_analysis: Default::default(),
+                },
+            );
+        }
     }
 
     /// Check if a function name refers to a generic function in a prelude module.
