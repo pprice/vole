@@ -140,59 +140,6 @@ leak-check *args:
 leak-check-all:
     cargo run -p vole-leak -- test/unit/
 
-# Iterator stress corpus: run leak tracking repeatedly to catch flaky lifetime bugs
-iterator-stress rounds="3":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=(
-      test/unit/language/iterators/iterators.vole
-      test/unit/language/iterators/iterator_chain.vole
-      test/unit/language/iterators/iterator_flatten.vole
-      test/unit/language/iterators/iterator_chunks_windows.vole
-      test/unit/language/iterators/iterator_enumerate_zip.vole
-      test/unit/mem/iterators/iterators.vole
-      test/unit/mem/iterators/consumption.vole
-    )
-    for r in $(seq 1 "{{rounds}}"); do
-      echo "== iterator stress round ${r}/{{rounds}} =="
-      for f in "${files[@]}"; do
-        cargo run -p vole-leak -- "$f"
-      done
-    done
-
-# AddressSanitizer run focused on iterator runtime tests.
-# Requires nightly rust toolchain.
-iterator-asan:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! rustup toolchain list | grep -q '^nightly'; then
-      echo "nightly toolchain not found; install with: rustup toolchain install nightly"
-      exit 1
-    fi
-    ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
-    RUSTFLAGS="-Zsanitizer=address" \
-    cargo +nightly test -p vole-runtime --target x86_64-unknown-linux-gnu iterator_parity -- --test-threads=1
-
-# Record baseline runtime metrics for iterator migration benchmarks.
-# Policy: <=2% expected noise, >2% investigate, >5% regression.
-iterator-bench-baseline output="artifacts/bench/iterator-baseline.json" iterations="12" warmup="3":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p "$(dirname "{{output}}")"
-    cargo run --release --bin vole -- bench run test/bench/iterators/*.vole -n "{{iterations}}" -w "{{warmup}}" -o "{{output}}"
-
-# Compare current runtime metrics against a recorded iterator baseline.
-iterator-bench-compare baseline="artifacts/bench/iterator-baseline.json" output="artifacts/bench/iterator-current.json":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p "$(dirname "{{output}}")"
-    cargo run --release --bin vole -- bench compare "{{baseline}}" -o "{{output}}"
-    echo
-    echo "Regression envelope:"
-    echo "  - <= 2%: expected variance"
-    echo "  - > 2%: investigate"
-    echo "  - > 5%: regression, open a tk bug and block backend default switch"
-
 # Run valgrind on a small RC test suite
 valgrind file="test/unit/mem/basics/cleanup.vole":
     #!/usr/bin/env bash
