@@ -15,7 +15,7 @@ use std::rc::Rc;
 use clap::Parser;
 
 use vole::cli::{ColorMode, expand_paths, should_skip_path};
-use vole::commands::common::{PipelineOptions, compile_source};
+use vole::commands::common::{PipelineOptions, compile_source, render_pipeline_error};
 use vole_codegen::{AnalyzedProgram, CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
 use vole_runtime::{
     JmpBuf, alloc_track, call_setjmp, clear_current_test, clear_test_jmp_buf, recover_from_signal,
@@ -151,19 +151,31 @@ fn compile_and_run_tests(
     let file_path = path.to_string_lossy();
 
     // Parse and type check with shared cache.
-    let analyzed = compile_source(
+    let mut diag_buffer = Vec::new();
+    let analyzed = match compile_source(
         PipelineOptions {
             source: &source,
             file_path: &file_path,
             skip_tests: false,
             project_root: None,
             module_cache: Some(cache),
-            run_mode: false,
             color_mode: ColorMode::Never,
         },
-        &mut io::stderr(),
-    )
-    .map_err(|_| String::new())?;
+        &mut diag_buffer,
+    ) {
+        Ok(a) => a,
+        Err(ref e) => {
+            render_pipeline_error(
+                e,
+                &file_path,
+                &source,
+                &mut io::stderr(),
+                ColorMode::Never,
+                false,
+            );
+            return Err(String::new());
+        }
+    };
 
     // Check if cached modules cover all dependencies.
     let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {

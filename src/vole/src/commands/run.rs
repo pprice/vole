@@ -4,7 +4,10 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use super::common::{PipelineOptions, RunOptions, compile_and_run, compile_source, read_stdin};
+use super::common::{
+    PipelineError, PipelineOptions, RunOptions, compile_and_run, compile_source, read_stdin,
+    render_pipeline_error,
+};
 use crate::cli::ColorMode;
 use crate::codegen::JitOptions;
 use crate::runtime::{push_context, replace_context};
@@ -30,13 +33,7 @@ pub fn run_file(
 
     match execute(path, project_root, release, color_mode) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) => {
-            // Empty error means diagnostics were already rendered
-            if !e.is_empty() {
-                eprintln!("error: {}", e);
-            }
-            ExitCode::FAILURE
-        }
+        Err(_) => ExitCode::FAILURE,
     }
 }
 
@@ -45,14 +42,13 @@ fn execute(
     project_root: Option<&Path>,
     release: bool,
     color_mode: ColorMode,
-) -> Result<(), String> {
+) -> Result<(), PipelineError> {
     // Read source from file or stdin
     let (source, file_path) = if path.as_os_str() == "-" {
-        let source = read_stdin().map_err(|e| format!("could not read stdin: {}", e))?;
+        let source = read_stdin().map_err(PipelineError::Io)?;
         (source, "<stdin>".to_string())
     } else {
-        let source = fs::read_to_string(path)
-            .map_err(|e| format!("could not read '{}': {}", path.display(), e))?;
+        let source = fs::read_to_string(path).map_err(PipelineError::Io)?;
         (source, path.to_string_lossy().to_string())
     };
 
@@ -61,19 +57,28 @@ fn execute(
 
     // Parse and type check (skip tests blocks in run mode)
     replace_context(&format!("{} (parsing)", file_path));
-    let analyzed = compile_source(
+    let compile_result = compile_source(
         PipelineOptions {
             source: &source,
             file_path: &file_path,
             skip_tests: true,
             project_root,
             module_cache: None,
-            run_mode: true,
             color_mode,
         },
         &mut std::io::stderr(),
-    )
-    .map_err(|_| String::new())?;
+    );
+    if let Err(ref e) = compile_result {
+        render_pipeline_error(
+            e,
+            &file_path,
+            &source,
+            &mut std::io::stderr(),
+            color_mode,
+            true,
+        );
+    }
+    let analyzed = compile_result?;
 
     // Codegen + execute phase
     replace_context(&format!("{} (compiling)", file_path));
@@ -85,13 +90,21 @@ fn execute(
 
     let run_opts = RunOptions {
         file_path: &file_path,
-        source: &source,
         jit_options,
         skip_tests: true,
-        color_mode,
     };
 
     replace_context(&format!("{} (executing main)", file_path));
-    let mut errors = std::io::stderr();
-    compile_and_run(&analyzed, &run_opts, &mut errors).map_err(|_| String::new())
+    let result = compile_and_run(&analyzed, &run_opts);
+    if let Err(ref e) = result {
+        render_pipeline_error(
+            e,
+            &file_path,
+            &source,
+            &mut std::io::stderr(),
+            color_mode,
+            true,
+        );
+    }
+    result
 }

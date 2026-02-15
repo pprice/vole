@@ -27,28 +27,30 @@ pub use crate::codegen::AnalyzedProgram;
 
 /// Errors that can occur during the compilation pipeline.
 ///
-/// The actual error details are rendered to the `errors` writer at the point
-/// of failure. This enum exists to provide typed error handling instead of
-/// unit errors, improving readability and allowing callers to know which
-/// phase failed if needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Each variant carries the structured error data from the failed phase,
+/// allowing callers to inspect errors programmatically or render them
+/// via [`render_pipeline_error`].
+#[derive(Debug)]
 pub enum PipelineError {
     /// Lexer encountered invalid tokens
-    Lex,
+    Lex(Vec<LexerError>),
     /// Parser encountered syntax errors
-    Parse,
+    Parse(ParseError),
     /// Generator transformation failed
-    Transform,
+    Transform(Vec<TypeError>),
     /// Type checking failed
-    Sema,
+    Sema(Vec<TypeError>),
     /// Code generation failed
-    Codegen,
+    Codegen(CodegenError),
     /// Program finalization failed
-    Finalize,
+    Finalize(CodegenError),
     /// No main function found
-    NoMain,
+    NoMain {
+        file_path: String,
+        hint: Option<String>,
+    },
     /// I/O error (file not found, permission denied, etc.)
-    Io,
+    Io(io::Error),
 }
 
 /// Render a lexer error to a writer with source context.
@@ -137,6 +139,48 @@ fn render_codegen_error(
     }
 }
 
+/// Render a pipeline error to a writer with source context.
+///
+/// This is the top-level rendering entry point for all compilation errors.
+/// Callers should use this after receiving an `Err(PipelineError)` from
+/// `compile_source` or `compile_and_run`.
+pub fn render_pipeline_error(
+    err: &PipelineError,
+    file_path: &str,
+    source: &str,
+    w: &mut dyn Write,
+    color_mode: ColorMode,
+    run_mode: bool,
+) {
+    match err {
+        PipelineError::Lex(errors) => {
+            for e in errors {
+                render_lexer_error(e, file_path, source, w, color_mode);
+            }
+        }
+        PipelineError::Parse(e) => {
+            render_parser_error(e, file_path, source, run_mode, w, color_mode);
+        }
+        PipelineError::Transform(errors) | PipelineError::Sema(errors) => {
+            for e in errors {
+                render_sema_error(e, file_path, source, w, color_mode);
+            }
+        }
+        PipelineError::Codegen(e) | PipelineError::Finalize(e) => {
+            render_codegen_error(e, file_path, source, w, color_mode);
+        }
+        PipelineError::NoMain { file_path, hint } => {
+            let _ = writeln!(w, "error: no 'main' function found in {}", file_path);
+            if let Some(h) = hint {
+                let _ = writeln!(w, "hint: {}", h);
+            }
+        }
+        PipelineError::Io(e) => {
+            let _ = writeln!(w, "error: {}", e);
+        }
+    }
+}
+
 /// Options for the compile_source pipeline.
 pub struct PipelineOptions<'a> {
     pub source: &'a str,
@@ -144,20 +188,18 @@ pub struct PipelineOptions<'a> {
     pub skip_tests: bool,
     pub project_root: Option<&'a std::path::Path>,
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
-    /// When true, adds context-specific hints for `vole run` (e.g., "wrap in func main").
-    pub run_mode: bool,
-    /// Color mode for diagnostic rendering.
+    /// Color mode for diagnostic rendering (used for warnings).
     pub color_mode: ColorMode,
 }
 
 /// Compile source through the full pipeline: parse -> transform -> analyze -> optimize.
 ///
-/// All diagnostics (errors and warnings) are rendered to the provided `errors` writer.
-/// Returns `Ok(AnalyzedProgram)` on success, or `Err(PipelineError)` indicating which
-/// phase failed.
+/// Warnings are rendered to the `warnings` writer as they are discovered.
+/// Errors are returned as structured `PipelineError` variants for the caller
+/// to render via [`render_pipeline_error`].
 pub fn compile_source(
     opts: PipelineOptions,
-    errors: &mut dyn Write,
+    warnings: &mut dyn Write,
 ) -> Result<AnalyzedProgram, PipelineError> {
     let PipelineOptions {
         source,
@@ -165,7 +207,6 @@ pub fn compile_source(
         skip_tests,
         project_root,
         module_cache,
-        run_mode,
         color_mode,
     } = opts;
 
@@ -179,13 +220,9 @@ pub fn compile_source(
             Err(e) => {
                 let lexer_errors = parser.take_lexer_errors();
                 if !lexer_errors.is_empty() {
-                    for err in &lexer_errors {
-                        render_lexer_error(err, file_path, source, errors, color_mode);
-                    }
-                    return Err(PipelineError::Lex);
+                    return Err(PipelineError::Lex(lexer_errors));
                 } else {
-                    render_parser_error(&e, file_path, source, run_mode, errors, color_mode);
-                    return Err(PipelineError::Parse);
+                    return Err(PipelineError::Parse(e));
                 }
             }
         };
@@ -193,10 +230,7 @@ pub fn compile_source(
         // Check for lexer errors that didn't cause parse failure
         let lexer_errors = parser.take_lexer_errors();
         if !lexer_errors.is_empty() {
-            for err in &lexer_errors {
-                render_lexer_error(err, file_path, source, errors, color_mode);
-            }
-            return Err(PipelineError::Lex);
+            return Err(PipelineError::Lex(lexer_errors));
         }
 
         let mut interner = parser.into_interner();
@@ -210,10 +244,7 @@ pub fn compile_source(
         let _span = tracing::info_span!("transform").entered();
         let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
         if !transform_errors.is_empty() {
-            for err in &transform_errors {
-                render_sema_error(err, file_path, source, errors, color_mode);
-            }
-            return Err(PipelineError::Transform);
+            return Err(PipelineError::Transform(transform_errors));
         }
     }
 
@@ -228,10 +259,7 @@ pub fn compile_source(
         let mut analyzer = builder.build();
         analyzer.set_skip_tests(skip_tests);
         if let Err(errs) = analyzer.analyze(&program, &interner) {
-            for err in &errs {
-                render_sema_error(err, file_path, source, errors, color_mode);
-            }
-            return Err(PipelineError::Sema);
+            return Err(PipelineError::Sema(errs));
         }
         tracing::debug!("type checking complete");
         analyzer
@@ -239,7 +267,7 @@ pub fn compile_source(
 
     // Render any warnings (non-fatal diagnostics)
     for warn in &analyzer.take_warnings() {
-        render_sema_warning(warn, file_path, source, errors, color_mode);
+        render_sema_warning(warn, file_path, source, warnings, color_mode);
     }
 
     let mut output = analyzer.into_analysis_results();
@@ -262,24 +290,19 @@ pub fn compile_source(
 /// Options for the compile_and_run codegen+execution pipeline.
 pub struct RunOptions<'a> {
     pub file_path: &'a str,
-    pub source: &'a str,
     pub jit_options: JitOptions,
     pub skip_tests: bool,
-    pub color_mode: ColorMode,
 }
 
 /// Compile an analyzed program to machine code and execute it.
 ///
 /// Handles: JIT compilation, finalization, main lookup, and execution
-/// with jmp_buf panic recovery. Compilation errors are written to `errors`.
+/// with jmp_buf panic recovery. Returns structured errors in `PipelineError`
+/// for the caller to render.
 ///
 /// The caller is responsible for setting up stdout/stderr capture (via
 /// `set_stdout_capture`/`set_stderr_capture`) before calling if needed.
-pub fn compile_and_run(
-    analyzed: &AnalyzedProgram,
-    opts: &RunOptions,
-    errors: &mut dyn Write,
-) -> Result<(), PipelineError> {
+pub fn compile_and_run(analyzed: &AnalyzedProgram, opts: &RunOptions) -> Result<(), PipelineError> {
     // Codegen phase
     let jit = {
         let _span = tracing::info_span!("codegen").entered();
@@ -289,13 +312,11 @@ pub fn compile_and_run(
             compiler.set_source_file(opts.file_path);
             compiler.set_skip_tests(opts.skip_tests);
             if let Err(e) = compiler.compile_program(&analyzed.program) {
-                render_codegen_error(&e, opts.file_path, opts.source, errors, opts.color_mode);
-                return Err(PipelineError::Codegen);
+                return Err(PipelineError::Codegen(e));
             }
         }
         if let Err(e) = jit.finalize() {
-            render_codegen_error(&e, opts.file_path, opts.source, errors, opts.color_mode);
-            return Err(PipelineError::Finalize);
+            return Err(PipelineError::Finalize(e));
         }
         tracing::debug!("compilation complete");
         jit
@@ -305,15 +326,10 @@ pub fn compile_and_run(
     let fn_ptr = match jit.get_function_ptr("main") {
         Some(ptr) => ptr,
         None => {
-            let _ = writeln!(
-                errors,
-                "error: no 'main' function found in {}",
-                opts.file_path
-            );
-            if let Some(hint) = suggest_main_function(&jit) {
-                let _ = writeln!(errors, "hint: {}", hint);
-            }
-            return Err(PipelineError::NoMain);
+            return Err(PipelineError::NoMain {
+                file_path: opts.file_path.to_string(),
+                hint: suggest_main_function(&jit),
+            });
         }
     };
 
@@ -459,33 +475,36 @@ pub fn read_stdin() -> io::Result<String> {
 
 /// Check a program with captured stderr output.
 ///
-/// Error details are rendered to `stderr`; the returned `PipelineError` indicates
-/// which phase failed.
+/// Errors and warnings are rendered to `stderr`; the returned `PipelineError`
+/// indicates which phase failed.
 pub fn check_captured<W: Write + Send + 'static>(
     source: &str,
     file_path: &str,
     mut stderr: W,
     color_mode: ColorMode,
 ) -> Result<(), PipelineError> {
-    compile_source(
+    let result = compile_source(
         PipelineOptions {
             source,
             file_path,
             skip_tests: false,
             project_root: None,
             module_cache: None,
-            run_mode: false,
             color_mode,
         },
         &mut stderr,
-    )?;
+    );
+    if let Err(ref e) = result {
+        render_pipeline_error(e, file_path, source, &mut stderr, color_mode, false);
+    }
+    result?;
     Ok(())
 }
 
 /// Run a program with captured stdout and stderr.
 ///
-/// Error details are rendered to `stderr`; the returned `PipelineError` indicates
-/// which phase failed.
+/// Errors and warnings are rendered to `stderr`; the returned `PipelineError`
+/// indicates which phase failed.
 pub fn run_captured<W: Write + Send + 'static>(
     source: &str,
     file_path: &str,
@@ -493,25 +512,26 @@ pub fn run_captured<W: Write + Send + 'static>(
     mut stderr: W,
     color_mode: ColorMode,
 ) -> Result<(), PipelineError> {
-    let analyzed = compile_source(
+    let compile_result = compile_source(
         PipelineOptions {
             source,
             file_path,
             skip_tests: true,
             project_root: None,
             module_cache: None,
-            run_mode: true,
             color_mode,
         },
         &mut stderr,
-    )?;
+    );
+    if let Err(ref e) = compile_result {
+        render_pipeline_error(e, file_path, source, &mut stderr, color_mode, true);
+    }
+    let analyzed = compile_result?;
 
     let run_opts = RunOptions {
         file_path,
-        source,
         jit_options: JitOptions::default(),
         skip_tests: true,
-        color_mode,
     };
 
     // Set up stdout/stderr capture for the JIT program's print() calls
@@ -519,13 +539,15 @@ pub fn run_captured<W: Write + Send + 'static>(
     set_stderr_capture(Some(Box::new(stderr)));
     set_capture_mode(true);
 
-    // Codegen errors go to a buffer (capture has taken ownership of stderr)
-    let mut error_buf = Vec::new();
-    let result = compile_and_run(&analyzed, &run_opts, &mut error_buf);
+    let result = compile_and_run(&analyzed, &run_opts);
 
-    // Route any codegen errors to the captured stderr before tearing down
-    if !error_buf.is_empty() {
-        write_to_stderr_capture(&error_buf);
+    // Render any codegen errors to the captured stderr before tearing down
+    if let Err(ref e) = result {
+        let mut error_buf = Vec::new();
+        render_pipeline_error(e, file_path, source, &mut error_buf, color_mode, true);
+        if !error_buf.is_empty() {
+            write_to_stderr_capture(&error_buf);
+        }
     }
 
     // Restore normal stdout and stderr, disable capture mode
@@ -553,24 +575,21 @@ pub fn inspect_ast_captured<W: Write>(
         Ok(prog) => prog,
         Err(e) => {
             let lexer_errors = parser.take_lexer_errors();
-            if !lexer_errors.is_empty() {
-                for err in &lexer_errors {
-                    render_lexer_error(err, file_path, source, &mut stderr, color_mode);
-                }
-                return Err(PipelineError::Lex);
+            let err = if !lexer_errors.is_empty() {
+                PipelineError::Lex(lexer_errors)
             } else {
-                render_parser_error(&e, file_path, source, false, &mut stderr, color_mode);
-                return Err(PipelineError::Parse);
-            }
+                PipelineError::Parse(e)
+            };
+            render_pipeline_error(&err, file_path, source, &mut stderr, color_mode, false);
+            return Err(err);
         }
     };
 
     let lexer_errors = parser.take_lexer_errors();
     if !lexer_errors.is_empty() {
-        for err in &lexer_errors {
-            render_lexer_error(err, file_path, source, &mut stderr, color_mode);
-        }
-        return Err(PipelineError::Lex);
+        let err = PipelineError::Lex(lexer_errors);
+        render_pipeline_error(&err, file_path, source, &mut stderr, color_mode, false);
+        return Err(err);
     }
 
     let interner = parser.into_interner();

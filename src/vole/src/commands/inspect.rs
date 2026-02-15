@@ -3,13 +3,10 @@
 use std::fs;
 use std::process::ExitCode;
 
-use miette::NamedSource;
-
 use crate::cli::{ColorMode, InspectType, expand_paths_flat};
 use crate::codegen::{Compiler, JitContext, JitOptions};
-use crate::commands::common::{PipelineOptions, compile_source};
+use crate::commands::common::{PipelineOptions, compile_source, render_pipeline_error};
 use crate::commands::mir_format::format_mir;
-use crate::errors::render_to_stderr;
 use crate::frontend::{AstPrinter, Parser};
 
 /// Inspect compilation output for the given files
@@ -66,9 +63,20 @@ pub fn inspect_files(
                 let program = match parser.parse_program() {
                     Ok(p) => p,
                     Err(e) => {
-                        let report = miette::Report::new(e.error.clone())
-                            .with_source_code(NamedSource::new(&file_path, source.clone()));
-                        render_to_stderr(report.as_ref(), color_mode);
+                        let lexer_errors = parser.take_lexer_errors();
+                        let err = if !lexer_errors.is_empty() {
+                            super::common::PipelineError::Lex(lexer_errors)
+                        } else {
+                            super::common::PipelineError::Parse(e)
+                        };
+                        render_pipeline_error(
+                            &err,
+                            &file_path,
+                            &source,
+                            &mut std::io::stderr(),
+                            color_mode,
+                            false,
+                        );
                         had_error = true;
                         continue;
                     }
@@ -79,20 +87,28 @@ pub fn inspect_files(
                 print!("{}", printer.print_program(&program));
             }
             InspectType::Ir => {
-                let analyzed = match compile_source(
+                let result = compile_source(
                     PipelineOptions {
                         source: &source,
                         file_path: &file_path,
                         skip_tests: false,
                         project_root: None,
                         module_cache: None,
-                        run_mode: false,
                         color_mode,
                     },
                     &mut std::io::stderr(),
-                ) {
+                );
+                let analyzed = match result {
                     Ok(a) => a,
-                    Err(_) => {
+                    Err(ref e) => {
+                        render_pipeline_error(
+                            e,
+                            &file_path,
+                            &source,
+                            &mut std::io::stderr(),
+                            color_mode,
+                            false,
+                        );
                         had_error = true;
                         continue;
                     }
@@ -115,20 +131,28 @@ pub fn inspect_files(
                 }
             }
             InspectType::Mir => {
-                let analyzed = match compile_source(
+                let result = compile_source(
                     PipelineOptions {
                         source: &source,
                         file_path: &file_path,
                         skip_tests: false,
                         project_root: None,
                         module_cache: None,
-                        run_mode: false,
                         color_mode,
                     },
                     &mut std::io::stderr(),
-                ) {
+                );
+                let analyzed = match result {
                     Ok(a) => a,
-                    Err(_) => {
+                    Err(ref e) => {
+                        render_pipeline_error(
+                            e,
+                            &file_path,
+                            &source,
+                            &mut std::io::stderr(),
+                            color_mode,
+                            false,
+                        );
                         had_error = true;
                         continue;
                     }

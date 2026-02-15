@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use super::common::{
     BoxStyle, PipelineOptions, TermColors, compile_source, print_labeled_box, read_stdin,
+    render_pipeline_error,
 };
 use crate::cli::{ColorMode, expand_paths, should_skip_path};
 use crate::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
@@ -556,8 +557,8 @@ fn run_source_tests_with_modules(
     compiled_modules: &mut Option<CompiledModules>,
     progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
-    // Parse and type check with shared cache, capturing errors
-    let mut error_buffer = Vec::new();
+    // Parse and type check with shared cache, capturing diagnostics
+    let mut diag_buffer = Vec::new();
     let analyzed = match compile_source(
         PipelineOptions {
             source,
@@ -565,14 +566,21 @@ fn run_source_tests_with_modules(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
-            run_mode: false,
             color_mode: config.color_mode,
         },
-        &mut error_buffer,
+        &mut diag_buffer,
     ) {
         Ok(a) => a,
-        Err(_) => {
-            let error_str = String::from_utf8_lossy(&error_buffer).into_owned();
+        Err(ref e) => {
+            render_pipeline_error(
+                e,
+                file_path,
+                source,
+                &mut diag_buffer,
+                config.color_mode,
+                false,
+            );
+            let error_str = String::from_utf8_lossy(&diag_buffer).into_owned();
             return Err(error_str);
         }
     };
@@ -705,8 +713,8 @@ fn run_source_tests_with_progress(
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
 ) -> Result<TestResults, String> {
-    // Parse and type check with shared cache, capturing errors
-    let mut error_buffer = Vec::new();
+    // Parse and type check with shared cache, capturing diagnostics
+    let mut diag_buffer = Vec::new();
     let analyzed = match compile_source(
         PipelineOptions {
             source,
@@ -714,14 +722,21 @@ fn run_source_tests_with_progress(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
-            run_mode: false,
             color_mode: config.color_mode,
         },
-        &mut error_buffer,
+        &mut diag_buffer,
     ) {
         Ok(a) => a,
-        Err(_) => {
-            let error_str = String::from_utf8_lossy(&error_buffer).into_owned();
+        Err(ref e) => {
+            render_pipeline_error(
+                e,
+                file_path,
+                source,
+                &mut diag_buffer,
+                config.color_mode,
+                false,
+            );
+            let error_str = String::from_utf8_lossy(&diag_buffer).into_owned();
             return Err(error_str);
         }
     };
