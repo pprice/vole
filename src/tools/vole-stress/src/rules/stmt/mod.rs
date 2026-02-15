@@ -26,6 +26,7 @@ mod class_let;
 mod closure_capture;
 mod closure_concat;
 mod closure_result_concat;
+mod closure_struct_capture;
 mod comparison_chain;
 mod compound_assignment;
 mod compound_bool;
@@ -68,11 +69,13 @@ mod interpolation_with_iter;
 mod iter_chunks_windows;
 mod iter_in_when_arms;
 mod iter_map_filter_let;
+mod iter_method_map;
 mod iter_predicate_let;
 mod iter_reduce_let;
 mod iter_take_skip_collect;
 mod iter_terminal_chain;
 mod iter_while_accum;
+mod lambda_let;
 mod last_elem_access;
 mod length_comparison;
 mod literal_method;
@@ -115,6 +118,7 @@ mod power_of_two_div;
 mod primitive_let;
 mod raise_stmt;
 mod range_check;
+mod range_iter_let;
 mod range_iter_map_collect;
 mod range_tostring;
 mod range_when_accum;
@@ -137,14 +141,18 @@ mod string_build_match;
 mod string_char_at;
 mod string_concat;
 mod string_equality;
+mod string_interpolation_let;
 mod string_iter_let;
 mod string_length_edge;
 mod string_match_let;
+mod string_method_let;
 mod string_predicate;
 mod string_replace;
 mod string_split;
 mod struct_copy;
 mod struct_destructure;
+mod struct_field_interpolation;
+mod struct_iter_fields;
 mod struct_let;
 mod substring_let;
 mod tautological_when;
@@ -363,5 +371,14 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(sentinel_union_let::SentinelUnionLet),
         Box::new(optional_destructure_match::OptionalDestructureMatch),
         Box::new(match_on_method_result::MatchOnMethodResult),
+        // -- Remaining let-binding rules (batch 18) -----------------------------------
+        Box::new(string_interpolation_let::StringInterpolationLet),
+        Box::new(string_method_let::StringMethodLet),
+        Box::new(struct_field_interpolation::StructFieldInterpolation),
+        Box::new(struct_iter_fields::StructIterFields),
+        Box::new(closure_struct_capture::ClosureStructCapture),
+        Box::new(iter_method_map::IterMethodMap),
+        Box::new(range_iter_let::RangeIterLet),
+        Box::new(lambda_let::LambdaLet),
     ]
 }
