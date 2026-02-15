@@ -56,10 +56,12 @@ mod for_push_collect;
 mod for_range_tostring_build;
 mod for_range_when_accum;
 mod for_reduce_pattern;
+mod for_stmt;
 mod for_when_accumulate;
 mod generic_closure_chain;
 mod i32_boundary;
 mod identity_arithmetic;
+mod if_stmt;
 mod iface_function_call;
 mod interface_let;
 mod interface_method_call;
@@ -106,6 +108,7 @@ mod modulo_edge;
 mod multi_arm_when;
 mod multi_push;
 mod nested_closure;
+mod nested_for_loop;
 mod nested_match;
 mod nested_tostring;
 mod nested_when;
@@ -174,6 +177,7 @@ mod when_string_method_conds;
 mod when_tostring_arms;
 mod when_with_contains;
 mod while_false;
+mod while_stmt;
 mod while_string_build;
 mod whitespace_string_ops;
 mod widening_let;
@@ -380,5 +384,10 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(iter_method_map::IterMethodMap),
         Box::new(range_iter_let::RangeIterLet),
         Box::new(lambda_let::LambdaLet),
+        // -- Control flow rules (batch 19) ----------------------------------------
+        Box::new(if_stmt::IfStmt),
+        Box::new(while_stmt::WhileStmt),
+        Box::new(for_stmt::ForStmt),
+        Box::new(nested_for_loop::NestedForLoop),
     ]
 }
