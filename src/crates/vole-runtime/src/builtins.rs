@@ -275,7 +275,9 @@ pub extern "C" fn vole_flush() {
 /// Print a character (for mandelbrot output)
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_print_char(c: u8) {
-    write_stdout(&(c as char).to_string());
+    let mut buf = [0u8; 4];
+    let s = (c as char).encode_utf8(&mut buf);
+    write_stdout(s);
 }
 
 /// Panic with a message - prints to stderr and exits with code 1.
