@@ -2,8 +2,6 @@
 //
 // Type resolution: converts TypeExpr (AST representation) to Type (semantic representation)
 
-use std::cell::RefCell;
-
 use crate::compilation_db::CompilationDb;
 use crate::entity_defs::TypeDefKind;
 use crate::entity_registry::EntityRegistry;
@@ -104,8 +102,8 @@ impl ResolverEntityExt for Resolver<'_> {
 
 /// Context needed for type resolution
 pub struct TypeResolutionContext<'a> {
-    /// Shared compilation database
-    pub db: &'a RefCell<CompilationDb>,
+    /// Shared compilation database (each field independently borrowable)
+    pub db: &'a CompilationDb,
     pub interner: &'a Interner,
     pub module_id: ModuleId,
     /// Type parameters in scope (for generic contexts)
@@ -121,7 +119,7 @@ pub struct TypeResolutionContext<'a> {
 impl<'a> TypeResolutionContext<'a> {
     /// Create a context with type parameters in scope
     pub fn with_type_params(
-        db: &'a RefCell<CompilationDb>,
+        db: &'a CompilationDb,
         interner: &'a Interner,
         module_id: ModuleId,
         type_params: &'a TypeParamScope,
@@ -138,11 +136,7 @@ impl<'a> TypeResolutionContext<'a> {
     }
 
     /// Create a context without type parameters
-    pub fn new(
-        db: &'a RefCell<CompilationDb>,
-        interner: &'a Interner,
-        module_id: ModuleId,
-    ) -> Self {
+    pub fn new(db: &'a CompilationDb, interner: &'a Interner, module_id: ModuleId) -> Self {
         Self {
             db,
             interner,
@@ -156,45 +150,45 @@ impl<'a> TypeResolutionContext<'a> {
 
     /// Get the entity registry (read access)
     pub fn entity_registry(&self) -> std::cell::Ref<'_, EntityRegistry> {
-        std::cell::Ref::map(self.db.borrow(), |db| &*db.entities)
+        self.db.entities()
     }
 
     /// Get the name table (read access)
     pub fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
-        std::cell::Ref::map(self.db.borrow(), |db| &*db.names)
+        self.db.names()
     }
 
     /// Get the name table (write access) - uses Rc::make_mut for copy-on-write
     pub fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.names_mut())
+        self.db.names_mut()
     }
 
     /// Get the type arena (read access)
     pub fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        std::cell::Ref::map(self.db.borrow(), |db| &*db.types)
+        self.db.types()
     }
 
     /// Get the type arena (write access) - uses Rc::make_mut for copy-on-write
     pub fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.types_mut())
+        self.db.types_mut()
     }
 
     /// Resolve a type or interface by symbol.
-    /// This borrows db for the duration of the call.
     pub fn resolve_type_or_interface(&self, sym: Symbol) -> Option<TypeDefId> {
-        let db = self.db.borrow();
-        let resolver = Resolver::new(self.interner, &db.names, self.module_id, self.imports)
+        let names = self.db.names();
+        let entities = self.db.entities();
+        let resolver = Resolver::new(self.interner, &names, self.module_id, self.imports)
             .with_priority_module(self.priority_module);
-        resolver.resolve_type_or_interface(sym, &db.entities)
+        resolver.resolve_type_or_interface(sym, &entities)
     }
 
     /// Resolve a string to a type or interface.
-    /// This borrows db for the duration of the call.
     pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let db = self.db.borrow();
-        let resolver = Resolver::new(self.interner, &db.names, self.module_id, self.imports)
+        let names = self.db.names();
+        let entities = self.db.entities();
+        let resolver = Resolver::new(self.interner, &names, self.module_id, self.imports)
             .with_priority_module(self.priority_module);
-        resolver.resolve_type_str_or_interface(name, &db.entities)
+        resolver.resolve_type_str_or_interface(name, &entities)
     }
 }
 
@@ -583,10 +577,8 @@ mod tests {
     where
         F: FnOnce(&mut TypeResolutionContext<'_>) -> R,
     {
-        use std::cell::RefCell;
-
-        let db = RefCell::new(CompilationDb::new());
-        let module_id = db.borrow_mut().names.main_module();
+        let db = CompilationDb::new();
+        let module_id = db.main_module();
         let mut ctx = TypeResolutionContext::new(&db, interner, module_id);
         f(&mut ctx)
     }
@@ -679,7 +671,6 @@ mod tests {
     #[test]
     fn resolve_unknown_named_type() {
         // Create a context with an interner that has the symbol
-        use std::cell::RefCell;
         use vole_frontend::Interner;
 
         static TEST_INTERNER: std::sync::LazyLock<Interner> = std::sync::LazyLock::new(|| {
@@ -688,8 +679,8 @@ mod tests {
             interner
         });
 
-        let db = RefCell::new(CompilationDb::new());
-        let module_id = db.borrow_mut().names.main_module();
+        let db = CompilationDb::new();
+        let module_id = db.main_module();
         let mut ctx = TypeResolutionContext::new(&db, &TEST_INTERNER, module_id);
         let named = TypeExpr::synthetic(TypeExprKind::Named(Symbol::new_for_test(0)));
         assert!(resolve_type_to_id(&named, &mut ctx).is_invalid());
@@ -772,45 +763,33 @@ mod tests {
     fn precompute_field_substitutions_creates_types() {
         use crate::entity_defs::{GenericTypeInfo, TypeDefKind};
         use crate::generic::TypeParamInfo;
-        use std::cell::RefCell;
 
         let mut interner = Interner::new();
         let t_sym = interner.intern("T");
         let box_sym = interner.intern("Box");
         let value_sym = interner.intern("value");
 
-        let db = RefCell::new(CompilationDb::new());
-        let module_id = db.borrow().names.main_module();
+        let db = CompilationDb::new();
+        let module_id = db.main_module();
 
         // Create type param name ID
-        let t_name_id = db
-            .borrow_mut()
-            .names_mut()
-            .intern(module_id, &[t_sym], &interner);
-        let box_name_id = db
-            .borrow_mut()
-            .names_mut()
-            .intern(module_id, &[box_sym], &interner);
-        let value_name_id = db
-            .borrow_mut()
-            .names_mut()
-            .intern(module_id, &[value_sym], &interner);
+        let t_name_id = db.names_mut().intern(module_id, &[t_sym], &interner);
+        let box_name_id = db.names_mut().intern(module_id, &[box_sym], &interner);
+        let value_name_id = db.names_mut().intern(module_id, &[value_sym], &interner);
 
         // Create a type param TypeId (T)
-        let t_type_id = db.borrow_mut().types_mut().type_param(t_name_id);
+        let t_type_id = db.types_mut().type_param(t_name_id);
 
         // Register Box<T> type with a field of type T
         let box_type_def_id = {
-            let mut db_mut = db.borrow_mut();
             // First register the type
-            let id =
-                db_mut
-                    .entities_mut()
-                    .register_type(box_name_id, TypeDefKind::Class, module_id);
+            let id = db
+                .entities_mut()
+                .register_type(box_name_id, TypeDefKind::Class, module_id);
             // Set type params
-            db_mut.entities_mut().set_type_params(id, vec![t_name_id]);
+            db.entities_mut().set_type_params(id, vec![t_name_id]);
             // Set generic info with field of type T
-            db_mut.entities_mut().set_generic_info(
+            db.entities_mut().set_generic_info(
                 id,
                 GenericTypeInfo {
                     type_params: vec![TypeParamInfo {

@@ -32,15 +32,14 @@ impl Analyzer {
         if let Some(idx) = field_idx {
             let field_type_id = generic_info.field_types[idx];
 
-            // Use arena-based substitution - get raw pointer to arena to avoid borrow conflict
-            // Rc::make_mut provides copy-on-write (free when refcount is 1)
-            let mut db = self.ctx.db.borrow_mut();
-            let arena = Rc::make_mut(&mut db.types) as *mut _;
-            let substituted_id = Rc::make_mut(&mut db.entities).substitute_type_id_with_args(
+            // Independent borrows via per-field RefCells - no unsafe needed
+            let mut entities = self.entity_registry_mut();
+            let mut types = self.type_arena_mut();
+            let substituted_id = entities.substitute_type_id_with_args(
                 type_def_id,
                 type_args_id,
                 field_type_id,
-                unsafe { &mut *arena },
+                &mut types,
             );
             return Some(substituted_id);
         }

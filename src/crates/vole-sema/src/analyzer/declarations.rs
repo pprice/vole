@@ -1586,18 +1586,13 @@ impl Analyzer {
 
             // Register interface default methods on the implementing type
             // so that find_method_on_type works for inherited default methods.
-            // Destructure db to allow simultaneous mutable access to entities and names.
             {
-                let mut db = self.ctx.db.borrow_mut();
-                let CompilationDb {
-                    ref mut entities,
-                    ref mut names,
-                    ..
-                } = *db;
-                Rc::make_mut(entities).register_interface_default_methods_on_implementing_type(
+                let mut entities = self.entity_registry_mut();
+                let mut names = self.name_table_mut();
+                entities.register_interface_default_methods_on_implementing_type(
                     entity_type_id,
                     interface_type_id,
-                    Rc::make_mut(names),
+                    &mut names,
                 );
             }
 

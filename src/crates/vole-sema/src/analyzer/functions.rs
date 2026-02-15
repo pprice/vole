@@ -480,16 +480,12 @@ impl Analyzer {
 
             // Update the method's return type in EntityRegistry
             {
-                let mut db = self.ctx.db.borrow_mut();
-                let CompilationDb {
-                    ref mut entities,
-                    ref mut types,
-                    ..
-                } = *db;
-                Rc::make_mut(entities).update_method_return_type(
+                let mut entities = self.entity_registry_mut();
+                let mut types = self.type_arena_mut();
+                entities.update_method_return_type(
                     lookup.method_id,
                     inferred_return_type,
-                    Rc::make_mut(types),
+                    &mut types,
                 );
             }
         } else {
@@ -663,19 +659,10 @@ impl Analyzer {
             let inferred_return_type = self.infer_return_type_from_info(&body_info);
 
             // Update the method signature with the inferred return type
-            // Destructure db to get both entities and types to avoid RefCell conflict
             {
-                let mut db = self.ctx.db.borrow_mut();
-                let CompilationDb {
-                    ref mut entities,
-                    ref mut types,
-                    ..
-                } = *db;
-                Rc::make_mut(entities).update_method_return_type(
-                    method_id,
-                    inferred_return_type,
-                    Rc::make_mut(types),
-                );
+                let mut entities = self.entity_registry_mut();
+                let mut types = self.type_arena_mut();
+                entities.update_method_return_type(method_id, inferred_return_type, &mut types);
             }
         }
 

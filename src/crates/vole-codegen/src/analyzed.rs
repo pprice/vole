@@ -34,9 +34,9 @@ impl AnalyzedProgram {
     pub fn from_analysis(program: Program, interner: Interner, output: AnalysisOutput) -> Self {
         let db = match Rc::try_unwrap(output.db) {
             // Non-cached path: sole owner, move data directly (zero-cost)
-            Ok(cell) => cell.into_inner().into_codegen(),
+            Ok(compilation_db) => compilation_db.into_codegen(),
             // Cached path: share Rc-wrapped fields instead of cloning entire CompilationDb
-            Err(rc) => rc.borrow().to_codegen_shared(),
+            Err(rc) => rc.to_codegen_shared(),
         };
         Self {
             program,

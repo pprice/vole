@@ -54,10 +54,11 @@ use vole_frontend::ast::*;
 use vole_frontend::{Interner, Parser, Span};
 use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 
-/// Guard that holds a borrow of the db and provides resolver access.
-/// This allows safe access to the resolver without exposing the RefCell directly.
+/// Guard that holds a borrow of the name table and provides resolver access.
+/// The name table borrow is independent of other CompilationDb fields,
+/// so entities/types/implements can be borrowed simultaneously.
 pub struct ResolverGuard<'a> {
-    _guard: std::cell::Ref<'a, CompilationDb>,
+    names: std::cell::Ref<'a, NameTable>,
     interner: &'a Interner,
     module_id: ModuleId,
     imports: &'a [ModuleId],
@@ -66,15 +67,14 @@ pub struct ResolverGuard<'a> {
 
 impl<'a> ResolverGuard<'a> {
     fn new(
-        db: &'a RefCell<CompilationDb>,
+        db: &'a CompilationDb,
         interner: &'a Interner,
         module_id: ModuleId,
         imports: &'a [ModuleId],
         priority_module: Option<ModuleId>,
     ) -> Self {
-        let guard = db.borrow();
         Self {
-            _guard: guard,
+            names: db.names(),
             interner,
             module_id,
             imports,
@@ -84,9 +84,7 @@ impl<'a> ResolverGuard<'a> {
 
     /// Get the resolver. The lifetime is tied to this guard.
     pub fn resolver(&self) -> Resolver<'_> {
-        // SAFETY: We hold the guard, so the borrow is valid
-        let names = unsafe { &*(&*self._guard.names as *const NameTable) };
-        Resolver::new(self.interner, names, self.module_id, self.imports)
+        Resolver::new(self.interner, &self.names, self.module_id, self.imports)
             .with_priority_module(self.priority_module)
     }
 
@@ -167,8 +165,9 @@ pub struct AnalysisOutput {
     pub expression_data: ExpressionData,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     pub module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Shared compilation database containing all registries
-    pub db: Rc<RefCell<CompilationDb>>,
+    /// Shared compilation database containing all registries.
+    /// Each field within CompilationDb has its own RefCell for independent borrows.
+    pub db: Rc<CompilationDb>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
     pub module_id: ModuleId,
 }
@@ -251,7 +250,7 @@ impl AnalyzerBuilder {
         let (db, has_cache) = if let Some(ref cache) = self.cache {
             (cache.borrow().db(), true)
         } else {
-            (Rc::new(RefCell::new(CompilationDb::new())), false)
+            (Rc::new(CompilationDb::new()), false)
         };
 
         // Step 2: Resolve current file path
@@ -266,9 +265,9 @@ impl AnalyzerBuilder {
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| self.file.clone());
-            db.borrow_mut().names_mut().module_id(&module_path)
+            db.names_mut().module_id(&module_path)
         } else {
-            db.borrow().main_module()
+            db.main_module()
         };
 
         // Step 4: Determine effective project root
@@ -310,9 +309,10 @@ impl AnalyzerBuilder {
 /// Single `Rc` clone instead of 3-4 individual `Rc` clones per sub-analyzer.
 pub struct AnalyzerContext {
     /// Unified compilation database containing all registries.
-    /// Shared via `Rc<RefCell>` so sub-analyzers use the same db, making TypeIds
+    /// Shared via `Rc` so sub-analyzers use the same db, making TypeIds
     /// valid across all analyzers and eliminating clone/merge operations.
-    pub db: Rc<RefCell<CompilationDb>>,
+    /// Each field within CompilationDb has its own RefCell for independent borrows.
+    pub db: Rc<CompilationDb>,
     /// Cached module TypeIds by import path (avoids re-parsing).
     pub module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
     /// Parsed module programs and their interners (for compiling pure Vole functions).
@@ -332,7 +332,7 @@ pub struct AnalyzerContext {
 
 impl AnalyzerContext {
     /// Create a new context with the given db and optional cache.
-    fn new(db: Rc<RefCell<CompilationDb>>, cache: Option<Rc<RefCell<ModuleCache>>>) -> Self {
+    fn new(db: Rc<CompilationDb>, cache: Option<Rc<RefCell<ModuleCache>>>) -> Self {
         Self {
             db,
             module_type_ids: RefCell::new(FxHashMap::default()),
@@ -345,7 +345,7 @@ impl AnalyzerContext {
 
     /// Create an empty context (for Default impl).
     fn empty() -> Self {
-        Self::new(Rc::new(RefCell::new(CompilationDb::new())), None)
+        Self::new(Rc::new(CompilationDb::new()), None)
     }
 }
 
@@ -653,55 +653,54 @@ impl Analyzer {
         }
     }
 
-    // === Backward-compatible accessors for db fields ===
-    // These methods provide the old access patterns while using the shared db.
+    // === Accessors for db fields (each independently borrowable) ===
 
     /// Get the type arena (read access)
     #[inline]
     fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        std::cell::Ref::map(self.ctx.db.borrow(), |db| &*db.types)
+        self.ctx.db.types()
     }
 
     /// Get the type arena (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| db.types_mut())
+        self.ctx.db.types_mut()
     }
 
     /// Get the entity registry (read access)
     #[inline]
     fn entity_registry(&self) -> std::cell::Ref<'_, EntityRegistry> {
-        std::cell::Ref::map(self.ctx.db.borrow(), |db| &*db.entities)
+        self.ctx.db.entities()
     }
 
     /// Get the entity registry (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn entity_registry_mut(&self) -> std::cell::RefMut<'_, EntityRegistry> {
-        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| db.entities_mut())
+        self.ctx.db.entities_mut()
     }
 
     /// Get the name table (read access)
     #[inline]
     fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
-        std::cell::Ref::map(self.ctx.db.borrow(), |db| &*db.names)
+        self.ctx.db.names()
     }
 
     /// Get the name table (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
-        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| db.names_mut())
+        self.ctx.db.names_mut()
     }
 
     /// Get the implement registry (read access)
     #[inline]
     fn implement_registry(&self) -> std::cell::Ref<'_, ImplementRegistry> {
-        std::cell::Ref::map(self.ctx.db.borrow(), |db| &*db.implements)
+        self.ctx.db.implements()
     }
 
     /// Get the implement registry (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn implement_registry_mut(&self) -> std::cell::RefMut<'_, ImplementRegistry> {
-        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| db.implements_mut())
+        self.ctx.db.implements_mut()
     }
 
     /// Check if we're currently inside a lambda
@@ -914,15 +913,10 @@ impl Analyzer {
         self.collect_signatures(program, interner);
 
         // Populate well-known TypeDefIds now that interfaces are registered
-        // Destructure db to allow simultaneous mutable and immutable borrows of different fields
         {
-            let mut db = self.ctx.db.borrow_mut();
-            let CompilationDb {
-                ref mut names,
-                ref entities,
-                ..
-            } = *db;
-            crate::well_known::populate_type_def_ids(Rc::make_mut(names), entities);
+            let entities = self.entity_registry();
+            let mut names = self.name_table_mut();
+            crate::well_known::populate_type_def_ids(&mut names, &entities);
         }
 
         // Process global let declarations

@@ -10,7 +10,7 @@
 //!
 //! ## Design
 //!
-//! All analyzers using the cache share the same `Rc<RefCell<CompilationDb>>`.
+//! All analyzers using the cache share the same `Rc<CompilationDb>`.
 //! This means type definitions, methods, and names are automatically shared -
 //! we only need to cache per-module metadata like expression types and method
 //! resolutions (which are keyed by NodeId, which is per-program).
@@ -83,7 +83,8 @@ pub struct ModuleCache {
     entries: FxHashMap<String, CachedModule>,
     /// Shared compilation database - all analyzers using this cache must share this db
     /// so that TypeIds in cached entries remain valid.
-    db: Rc<RefCell<CompilationDb>>,
+    /// Each field within CompilationDb has its own RefCell for independent borrows.
+    db: Rc<CompilationDb>,
 }
 
 impl Default for ModuleCache {
@@ -97,7 +98,7 @@ impl ModuleCache {
     pub fn new() -> Self {
         Self {
             entries: FxHashMap::default(),
-            db: Rc::new(RefCell::new(CompilationDb::new())),
+            db: Rc::new(CompilationDb::new()),
         }
     }
 
@@ -107,7 +108,7 @@ impl ModuleCache {
     }
 
     /// Get the shared CompilationDb that must be used by all Analyzers using this cache.
-    pub fn db(&self) -> Rc<RefCell<CompilationDb>> {
+    pub fn db(&self) -> Rc<CompilationDb> {
         Rc::clone(&self.db)
     }
 
