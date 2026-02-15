@@ -139,30 +139,54 @@ impl Primitives {
     }
 }
 
-/// Well-known type identifiers from the stdlib prelude.
-/// These are populated after prelude loading for fast type identification.
-#[derive(Debug, Clone, Default)]
-pub struct WellKnownTypes {
-    /// std:prelude/traits::Iterator
-    pub iterator_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Iterable
-    pub iterable_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Equatable
-    pub equatable_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Comparable
-    pub comparable_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Hashable
-    pub hashable_type_def: Option<TypeDefId>,
-    /// std:prelude/traits::Stringable
-    pub stringable_type_def: Option<TypeDefId>,
+/// Macro for defining well-known interface types with a single source of truth.
+/// Each entry is (field_name, "InterfaceName") - the string is the name as it
+/// appears in `std:prelude/traits`.
+macro_rules! define_well_known_interfaces {
+    ($(($field:ident, $name:expr)),* $(,)?) => {
+        /// Well-known type identifiers from the stdlib prelude.
+        /// These are populated after prelude loading for fast type identification.
+        #[derive(Debug, Clone, Default)]
+        pub struct WellKnownTypes {
+            $(
+                pub $field: Option<TypeDefId>,
+            )*
+        }
+
+        impl WellKnownTypes {
+            /// Create an empty WellKnownTypes (before prelude is loaded)
+            pub fn new() -> Self {
+                Self::default()
+            }
+
+            /// Build a fully populated WellKnownTypes.
+            /// `lookup` resolves an interface name string to its TypeDefId.
+            pub fn populated<F>(mut lookup: F) -> Self
+            where
+                F: FnMut(&str) -> Option<TypeDefId>,
+            {
+                Self {
+                    $(
+                        $field: lookup($name),
+                    )*
+                }
+            }
+        }
+    };
 }
 
-impl WellKnownTypes {
-    /// Create an empty WellKnownTypes (before prelude is loaded)
-    pub fn new() -> Self {
-        Self::default()
-    }
+// Single source of truth for well-known interface names.
+// Adding a new well-known type is a single-line change here.
+define_well_known_interfaces!(
+    (iterator_type_def, "Iterator"),
+    (iterable_type_def, "Iterable"),
+    (equatable_type_def, "Equatable"),
+    (comparable_type_def, "Comparable"),
+    (hashable_type_def, "Hashable"),
+    (stringable_type_def, "Stringable"),
+);
 
+impl WellKnownTypes {
     /// Check if a TypeDefId is the Iterator interface
     pub fn is_iterator_type_def(&self, type_def_id: TypeDefId) -> bool {
         self.iterator_type_def == Some(type_def_id)
