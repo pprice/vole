@@ -701,8 +701,8 @@ impl Analyzer {
             }
             // Primitive type keywords: i32.default_value(), bool.default_value()
             ExprKind::TypeLiteral(type_expr) => {
-                use vole_frontend::ast::TypeExpr;
-                if let TypeExpr::Primitive(prim) = type_expr {
+                use vole_frontend::ast::TypeExprKind;
+                if let TypeExprKind::Primitive(prim) = &type_expr.kind {
                     let name_id = self.name_table().primitives.from_ast(*prim);
                     let type_def_id = self.entity_registry().type_by_name(name_id)?;
                     let type_name = self.name_table().display(name_id);

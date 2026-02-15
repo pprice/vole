@@ -11,7 +11,7 @@ use crate::types::{
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
 use vole_frontend::ast::{ClassDecl, ImplementBlock, InterfaceMethod, StaticsBlock, StructDecl};
-use vole_frontend::{Expr, FuncDecl, Interner, Symbol, TypeExpr};
+use vole_frontend::{Expr, FuncDecl, Interner, Symbol, TypeExpr, TypeExprKind};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
 
@@ -249,10 +249,10 @@ impl Compiler<'_> {
     /// Get the type name string from a TypeExpr (works for primitives, named types,
     /// and generic specializations like `Tagged<i64>`)
     fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
-        match ty {
-            TypeExpr::Primitive(p) => Some(primitive_type_name(*p).to_string()),
-            TypeExpr::Handle => Some("handle".to_string()),
-            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+        match &ty.kind {
+            TypeExprKind::Primitive(p) => Some(primitive_type_name(*p).to_string()),
+            TypeExprKind::Handle => Some("handle".to_string()),
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                 Some(self.query().resolve_symbol(*sym).to_string())
             }
             _ => None,
@@ -266,10 +266,10 @@ impl Compiler<'_> {
         ty: &TypeExpr,
         interner: &Interner,
     ) -> Option<String> {
-        match ty {
-            TypeExpr::Primitive(p) => Some(primitive_type_name(*p).to_string()),
-            TypeExpr::Handle => Some("handle".to_string()),
-            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+        match &ty.kind {
+            TypeExprKind::Primitive(p) => Some(primitive_type_name(*p).to_string()),
+            TypeExprKind::Handle => Some("handle".to_string()),
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                 Some(interner.resolve(*sym).to_string())
             }
             _ => None,
@@ -309,19 +309,19 @@ impl Compiler<'_> {
 
         // Get TypeId for self binding (same as register_implement_block_with_interner)
         let (self_type_id, impl_type_id) =
-            match &impl_block.target_type {
-                TypeExpr::Primitive(p) => {
+            match &impl_block.target_type.kind {
+                TypeExprKind::Primitive(p) => {
                     let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                     let type_id = self.arena().primitive(prim_type);
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
-                TypeExpr::Handle => {
+                TypeExprKind::Handle => {
                     let type_id = TypeId::HANDLE;
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
-                TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                     // Use module-specific interner for symbol resolution
                     let type_def_id = self
                         .query()
@@ -502,19 +502,19 @@ impl Compiler<'_> {
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
         // Get type_id directly from metadata to avoid to_type() conversion
         let (self_type_id, impl_type_id) =
-            match &impl_block.target_type {
-                TypeExpr::Primitive(p) => {
+            match &impl_block.target_type.kind {
+                TypeExprKind::Primitive(p) => {
                     let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                     let type_id = self.arena().primitive(prim_type);
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
-                TypeExpr::Handle => {
+                TypeExprKind::Handle => {
                     let type_id = TypeId::HANDLE;
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
-                TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                     // Look up TypeDefId from Symbol (for Generic, uses the base class name)
                     // Use the module-specific interner to resolve symbols from that module's AST
                     // Try given module first, then fall back to program module
@@ -632,16 +632,16 @@ impl Compiler<'_> {
             // Get TypeDefId for this type
             let type_def_id = {
                 let name_table = self.analyzed.name_table();
-                match &impl_block.target_type {
-                    TypeExpr::Primitive(p) => {
+                match &impl_block.target_type.kind {
+                    TypeExprKind::Primitive(p) => {
                         let name_id = name_table.primitives.from_ast(*p);
                         self.query().try_type_def_id(name_id)
                     }
-                    TypeExpr::Handle => {
+                    TypeExprKind::Handle => {
                         let name_id = name_table.primitives.handle;
                         self.query().try_type_def_id(name_id)
                     }
-                    TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                    TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                         let name_id = name_table.name_id(self.program_module(), &[*sym], interner);
                         name_id.and_then(|id| self.query().try_type_def_id(id))
                     }
@@ -747,13 +747,13 @@ impl Compiler<'_> {
 
         // Get the TypeId for `self` binding
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
-        let self_type_id = match &impl_block.target_type {
-            TypeExpr::Primitive(p) => {
+        let self_type_id = match &impl_block.target_type.kind {
+            TypeExprKind::Primitive(p) => {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                 self.arena().primitive(prim_type)
             }
-            TypeExpr::Handle => TypeId::HANDLE,
-            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+            TypeExprKind::Handle => TypeId::HANDLE,
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                 // Try given module first, then fall back to program module
                 let type_def_id = self
                     .query()
@@ -838,13 +838,13 @@ impl Compiler<'_> {
         };
 
         // Get the TypeId for `self` binding
-        let self_type_id = match &impl_block.target_type {
-            TypeExpr::Primitive(p) => {
+        let self_type_id = match &impl_block.target_type.kind {
+            TypeExprKind::Primitive(p) => {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                 self.arena().primitive(prim_type)
             }
-            TypeExpr::Handle => TypeId::HANDLE,
-            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+            TypeExprKind::Handle => TypeId::HANDLE,
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                 // Use module-specific interner for symbol resolution
                 let type_def_id = self
                     .query()

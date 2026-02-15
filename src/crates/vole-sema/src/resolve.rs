@@ -9,7 +9,7 @@ use crate::entity_defs::TypeDefKind;
 use crate::entity_registry::EntityRegistry;
 use crate::generic::TypeParamScope;
 use crate::type_arena::{TypeArena, TypeId, TypeIdVec};
-use vole_frontend::{Interner, Symbol, TypeExpr};
+use vole_frontend::{Interner, Symbol, TypeExpr, TypeExprKind};
 use vole_identity::{ModuleId, NameTable, Resolver, TypeDefId};
 
 /// Extension trait for Resolver that adds entity resolution methods.
@@ -203,31 +203,31 @@ impl<'a> TypeResolutionContext<'a> {
 /// This is the TypeId-based version of resolve_type. It returns an interned TypeId
 /// for O(1) equality and reduced allocations. Uses ctx.type_arena for interning.
 pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> TypeId {
-    match ty {
-        TypeExpr::Primitive(p) => {
+    match &ty.kind {
+        TypeExprKind::Primitive(p) => {
             let prim_type = crate::types::PrimitiveType::from_ast(*p);
             ctx.type_arena_mut().primitive(prim_type)
         }
-        TypeExpr::Named(sym) => resolve_named_type_to_id(*sym, ctx),
-        TypeExpr::Array(elem) => {
+        TypeExprKind::Named(sym) => resolve_named_type_to_id(*sym, ctx),
+        TypeExprKind::Array(elem) => {
             let elem_id = resolve_type_to_id(elem, ctx);
             ctx.type_arena_mut().array(elem_id)
         }
-        TypeExpr::Handle => TypeId::HANDLE,
-        TypeExpr::Never => ctx.type_arena_mut().never(),
-        TypeExpr::Unknown => ctx.type_arena_mut().unknown(),
-        TypeExpr::Optional(inner) => {
+        TypeExprKind::Handle => TypeId::HANDLE,
+        TypeExprKind::Never => ctx.type_arena_mut().never(),
+        TypeExprKind::Unknown => ctx.type_arena_mut().unknown(),
+        TypeExprKind::Optional(inner) => {
             let inner_id = resolve_type_to_id(inner, ctx);
             ctx.type_arena_mut().optional(inner_id)
         }
-        TypeExpr::Union(variants) => {
+        TypeExprKind::Union(variants) => {
             let variant_ids: TypeIdVec = variants
                 .iter()
                 .map(|t| resolve_type_to_id(t, ctx))
                 .collect();
             ctx.type_arena_mut().union(variant_ids)
         }
-        TypeExpr::Function {
+        TypeExprKind::Function {
             params,
             return_type,
         } => {
@@ -235,19 +235,19 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
             let ret_id = resolve_type_to_id(return_type, ctx);
             ctx.type_arena_mut().function(param_ids, ret_id, false)
         }
-        TypeExpr::Tuple(elements) => {
+        TypeExprKind::Tuple(elements) => {
             let elem_ids: TypeIdVec = elements
                 .iter()
                 .map(|e| resolve_type_to_id(e, ctx))
                 .collect();
             ctx.type_arena_mut().tuple(elem_ids)
         }
-        TypeExpr::FixedArray { element, size } => {
+        TypeExprKind::FixedArray { element, size } => {
             let elem_id = resolve_type_to_id(element, ctx);
             ctx.type_arena_mut().fixed_array(elem_id, *size)
         }
-        TypeExpr::Generic { name, args } => resolve_generic_type_to_id(*name, args, ctx),
-        TypeExpr::SelfType => {
+        TypeExprKind::Generic { name, args } => resolve_generic_type_to_id(*name, args, ctx),
+        TypeExprKind::SelfType => {
             // Self resolves to the implementing type when in a method context
             ctx.self_type.unwrap_or_else(|| {
                 // Self in interface signatures - use placeholder for later substitution
@@ -255,7 +255,7 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
                     .placeholder(crate::types::PlaceholderKind::SelfType)
             })
         }
-        TypeExpr::Fallible {
+        TypeExprKind::Fallible {
             success_type,
             error_type,
         } => {
@@ -263,14 +263,14 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
             let error_id = resolve_type_to_id(error_type, ctx);
             ctx.type_arena_mut().fallible(success_id, error_id)
         }
-        TypeExpr::Structural { fields, methods } => {
+        TypeExprKind::Structural { fields, methods } => {
             resolve_structural_type_to_id(fields, methods, ctx)
         }
-        TypeExpr::Combination(_) => {
+        TypeExprKind::Combination(_) => {
             // Type combinations are constraint-only, not resolved to a concrete type
             ctx.type_arena_mut().invalid()
         }
-        TypeExpr::QualifiedPath { .. } => {
+        TypeExprKind::QualifiedPath { .. } => {
             // Qualified paths are handled specially in implement block resolution
             // They should not appear in general type positions
             ctx.type_arena_mut().invalid()
@@ -577,7 +577,7 @@ mod tests {
     use super::*;
     use crate::compilation_db::CompilationDb;
     use crate::type_arena::SemaType;
-    use vole_frontend::PrimitiveType as FrontendPrimitiveType;
+    use vole_frontend::{PrimitiveType as FrontendPrimitiveType, TypeExprKind};
 
     fn with_empty_context<F, R>(interner: &Interner, f: F) -> R
     where
@@ -597,15 +597,24 @@ mod tests {
         with_empty_context(&interner, |ctx| {
             // Use TypeId constants for comparison
             assert_eq!(
-                resolve_type_to_id(&TypeExpr::Primitive(FrontendPrimitiveType::I32), ctx),
+                resolve_type_to_id(
+                    &TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::I32)),
+                    ctx
+                ),
                 TypeId::I32
             );
             assert_eq!(
-                resolve_type_to_id(&TypeExpr::Primitive(FrontendPrimitiveType::Bool), ctx),
+                resolve_type_to_id(
+                    &TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::Bool)),
+                    ctx
+                ),
                 TypeId::BOOL
             );
             assert_eq!(
-                resolve_type_to_id(&TypeExpr::Primitive(FrontendPrimitiveType::String), ctx),
+                resolve_type_to_id(
+                    &TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::String)),
+                    ctx
+                ),
                 TypeId::STRING
             );
         });
@@ -615,8 +624,9 @@ mod tests {
     fn resolve_array_type() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            let array_expr =
-                TypeExpr::Array(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I64)));
+            let array_expr = TypeExpr::synthetic(TypeExprKind::Array(Box::new(
+                TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::I64)),
+            )));
             let type_id = resolve_type_to_id(&array_expr, ctx);
             // Use arena queries to verify structure
             let elem = ctx.type_arena().unwrap_array(type_id);
@@ -628,8 +638,9 @@ mod tests {
     fn resolve_optional_type() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            let opt_expr =
-                TypeExpr::Optional(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::I32)));
+            let opt_expr = TypeExpr::synthetic(TypeExprKind::Optional(Box::new(
+                TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::I32)),
+            )));
             let type_id = resolve_type_to_id(&opt_expr, ctx);
             // Optional should unwrap to inner type
             let inner = ctx.type_arena().unwrap_optional(type_id);
@@ -641,13 +652,15 @@ mod tests {
     fn resolve_function_type() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            let func_expr = TypeExpr::Function {
+            let func_expr = TypeExpr::synthetic(TypeExprKind::Function {
                 params: vec![
-                    TypeExpr::Primitive(FrontendPrimitiveType::I32),
-                    TypeExpr::Primitive(FrontendPrimitiveType::I32),
+                    TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::I32)),
+                    TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::I32)),
                 ],
-                return_type: Box::new(TypeExpr::Primitive(FrontendPrimitiveType::Bool)),
-            };
+                return_type: Box::new(TypeExpr::synthetic(TypeExprKind::Primitive(
+                    FrontendPrimitiveType::Bool,
+                ))),
+            });
             let type_id = resolve_type_to_id(&func_expr, ctx);
             // Use arena queries to verify function structure
             let arena = ctx.type_arena();
@@ -678,7 +691,7 @@ mod tests {
         let db = RefCell::new(CompilationDb::new());
         let module_id = db.borrow_mut().names.main_module();
         let mut ctx = TypeResolutionContext::new(&db, &TEST_INTERNER, module_id);
-        let named = TypeExpr::Named(Symbol::new_for_test(0));
+        let named = TypeExpr::synthetic(TypeExprKind::Named(Symbol::new_for_test(0)));
         assert!(resolve_type_to_id(&named, &mut ctx).is_invalid());
     }
 
@@ -687,7 +700,8 @@ mod tests {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
             // Self without context resolves to SelfType placeholder (for interface signatures)
-            let self_type_id = resolve_type_to_id(&TypeExpr::SelfType, ctx);
+            let self_type_id =
+                resolve_type_to_id(&TypeExpr::synthetic(TypeExprKind::SelfType), ctx);
             let arena = ctx.type_arena();
             assert!(
                 matches!(
@@ -708,7 +722,7 @@ mod tests {
     fn resolve_to_id_interning() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            let i32_expr = TypeExpr::Primitive(FrontendPrimitiveType::I32);
+            let i32_expr = TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::I32));
             let type_id = resolve_type_to_id(&i32_expr, ctx);
 
             // Should get the reserved constant
@@ -719,8 +733,9 @@ mod tests {
             assert_eq!(type_id, type_id2);
 
             // Complex types should also intern
-            let array_expr =
-                TypeExpr::Array(Box::new(TypeExpr::Primitive(FrontendPrimitiveType::String)));
+            let array_expr = TypeExpr::synthetic(TypeExprKind::Array(Box::new(
+                TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::String)),
+            )));
             let arr_id1 = resolve_type_to_id(&array_expr, ctx);
             let arr_id2 = resolve_type_to_id(&array_expr, ctx);
             assert_eq!(arr_id1, arr_id2);
@@ -731,10 +746,10 @@ mod tests {
     fn resolve_to_id_tuple() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            let tuple_expr = TypeExpr::Tuple(vec![
-                TypeExpr::Primitive(FrontendPrimitiveType::I32),
-                TypeExpr::Primitive(FrontendPrimitiveType::String),
-            ]);
+            let tuple_expr = TypeExpr::synthetic(TypeExprKind::Tuple(vec![
+                TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::I32)),
+                TypeExpr::synthetic(TypeExprKind::Primitive(FrontendPrimitiveType::String)),
+            ]));
             let type_id = resolve_type_to_id(&tuple_expr, ctx);
 
             // Use arena queries to verify tuple structure
@@ -815,10 +830,12 @@ mod tests {
 
         // Now resolve Box<String>
         let mut ctx = TypeResolutionContext::new(&db, &interner, module_id);
-        let box_string_expr = TypeExpr::Generic {
+        let box_string_expr = TypeExpr::synthetic(TypeExprKind::Generic {
             name: box_sym,
-            args: vec![TypeExpr::Primitive(FrontendPrimitiveType::String)],
-        };
+            args: vec![TypeExpr::synthetic(TypeExprKind::Primitive(
+                FrontendPrimitiveType::String,
+            ))],
+        });
         let box_string_id = resolve_type_to_id(&box_string_expr, &mut ctx);
 
         // Verify Box<String> was created

@@ -1086,8 +1086,10 @@ impl Analyzer {
                     // Skip generator-transformed implement blocks - their method bodies
                     // reference variables that only exist at codegen time after full
                     // generator state machine transformation
-                    let is_generated = match &impl_block.target_type {
-                        TypeExpr::Named(sym) => interner.resolve(*sym).starts_with("__Generator_"),
+                    let is_generated = match &impl_block.target_type.kind {
+                        TypeExprKind::Named(sym) => {
+                            interner.resolve(*sym).starts_with("__Generator_")
+                        }
                         _ => false,
                     };
 
@@ -1119,13 +1121,13 @@ impl Analyzer {
 
                     // Check static methods in implement blocks
                     if let Some(ref statics) = impl_block.statics {
-                        match &impl_block.target_type {
-                            TypeExpr::Named(type_name) => {
+                        match &impl_block.target_type.kind {
+                            TypeExprKind::Named(type_name) => {
                                 for method in &statics.methods {
                                     self.check_static_method(method, *type_name, interner)?;
                                 }
                             }
-                            TypeExpr::Primitive(prim) => {
+                            TypeExprKind::Primitive(prim) => {
                                 // Get TypeDefId for primitive
                                 let type_def_id = {
                                     let name_id = self.name_table().primitives.from_ast(*prim);

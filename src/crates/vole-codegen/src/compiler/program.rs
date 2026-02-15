@@ -18,7 +18,7 @@ use crate::types::{CodegenCtx, CompileEnv, function_name_id_with_interner, type_
 use vole_frontend::ast::{InterfaceMethod, LetTupleStmt, TestCase, TestsDecl};
 use vole_frontend::{
     Block, Decl, Expr, ExprKind, FuncDecl, Interner, LetInit, PatternKind, Program, Span, Stmt,
-    Symbol, TypeExpr,
+    Symbol, TypeExprKind,
 };
 use vole_identity::{ModuleId, NameId};
 use vole_sema::generic::{
@@ -2020,8 +2020,10 @@ impl Compiler<'_> {
             match decl {
                 Decl::Implement(impl_block) => {
                     // Get the base type name from the target type
-                    let target_sym = match &impl_block.target_type {
-                        TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => Some(*sym),
+                    let target_sym = match &impl_block.target_type.kind {
+                        TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
+                            Some(*sym)
+                        }
                         _ => None,
                     };
                     if let Some(sym) = target_sym {

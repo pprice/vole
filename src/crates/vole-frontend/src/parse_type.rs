@@ -4,7 +4,7 @@
 // This module contains methods for parsing type expressions and function parameters.
 
 use super::TokenType;
-use super::ast::{Param, PrimitiveType, StructuralField, StructuralMethod, TypeExpr};
+use super::ast::{Param, PrimitiveType, StructuralField, StructuralMethod, TypeExpr, TypeExprKind};
 use super::parser::{ParseError, Parser};
 use crate::errors::ParserError;
 
@@ -45,12 +45,15 @@ impl<'src> Parser<'src> {
 
     /// Parse a type expression, handling optionals (T?) and unions (A | B)
     pub(super) fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
+        let start_span = self.current.span;
+
         // Parse the base type first
         let mut base = self.parse_base_type()?;
 
         // Check for optional suffix: T?
         while self.match_token(TokenType::Question) {
-            base = TypeExpr::Optional(Box::new(base));
+            let span = start_span.merge(self.previous.span);
+            base = TypeExpr::new(TypeExprKind::Optional(Box::new(base)), span);
         }
 
         // Check for type combination: A + B + C (binds tighter than |)
@@ -60,11 +63,13 @@ impl<'src> Parser<'src> {
                 let mut part = self.parse_base_type()?;
                 // Handle optional on each part
                 while self.match_token(TokenType::Question) {
-                    part = TypeExpr::Optional(Box::new(part));
+                    let span = start_span.merge(self.previous.span);
+                    part = TypeExpr::new(TypeExprKind::Optional(Box::new(part)), span);
                 }
                 parts.push(part);
             }
-            return Ok(TypeExpr::Combination(parts));
+            let span = start_span.merge(self.previous.span);
+            return Ok(TypeExpr::new(TypeExprKind::Combination(parts), span));
         }
 
         // Check for union: A | B | C
@@ -74,11 +79,13 @@ impl<'src> Parser<'src> {
                 let mut variant = self.parse_base_type()?;
                 // Handle optional on each variant
                 while self.match_token(TokenType::Question) {
-                    variant = TypeExpr::Optional(Box::new(variant));
+                    let span = start_span.merge(self.previous.span);
+                    variant = TypeExpr::new(TypeExprKind::Optional(Box::new(variant)), span);
                 }
                 variants.push(variant);
             }
-            return Ok(TypeExpr::Union(variants));
+            let span = start_span.merge(self.previous.span);
+            return Ok(TypeExpr::new(TypeExprKind::Union(variants), span));
         }
 
         Ok(base)
@@ -107,10 +114,14 @@ impl<'src> Parser<'src> {
                 // If followed by ->, it's a function type
                 if self.match_token(TokenType::Arrow) {
                     let return_type = self.parse_type()?;
-                    Ok(TypeExpr::Function {
-                        params: param_types,
-                        return_type: Box::new(return_type),
-                    })
+                    let span = token.span.merge(self.previous.span);
+                    Ok(TypeExpr::new(
+                        TypeExprKind::Function {
+                            params: param_types,
+                            return_type: Box::new(return_type),
+                        },
+                        span,
+                    ))
                 } else if param_types.len() == 1 {
                     // Single type in parens - grouping
                     Ok(param_types.into_iter().next().expect("len == 1"))
@@ -136,17 +147,25 @@ impl<'src> Parser<'src> {
                     TokenType::RBracket => {
                         // [T] - dynamic array
                         self.advance(); // consume ']'
-                        Ok(TypeExpr::Array(Box::new(first_type)))
+                        let span = token.span.merge(self.previous.span);
+                        Ok(TypeExpr::new(
+                            TypeExprKind::Array(Box::new(first_type)),
+                            span,
+                        ))
                     }
                     TokenType::Semicolon => {
                         // [T; N] - fixed-size array
                         self.advance(); // consume ';'
                         let size = self.parse_fixed_array_size()?;
                         self.consume(TokenType::RBracket, "expected ']' after fixed array size")?;
-                        Ok(TypeExpr::FixedArray {
-                            element: Box::new(first_type),
-                            size,
-                        })
+                        let span = token.span.merge(self.previous.span);
+                        Ok(TypeExpr::new(
+                            TypeExprKind::FixedArray {
+                                element: Box::new(first_type),
+                                size,
+                            },
+                            span,
+                        ))
                     }
                     TokenType::Comma => {
                         // [T, U, ...] - tuple
@@ -160,84 +179,128 @@ impl<'src> Parser<'src> {
                             elements.push(self.parse_type()?);
                         }
                         self.consume(TokenType::RBracket, "expected ']' after tuple types")?;
-                        Ok(TypeExpr::Tuple(elements))
+                        let span = token.span.merge(self.previous.span);
+                        Ok(TypeExpr::new(TypeExprKind::Tuple(elements), span))
                     }
                     _ => {
                         self.consume(
                             TokenType::RBracket,
                             "expected ']', ';', or ',' in bracket type",
                         )?;
-                        Ok(TypeExpr::Array(Box::new(first_type))) // unreachable
+                        let span = token.span.merge(self.previous.span);
+                        Ok(TypeExpr::new(
+                            TypeExprKind::Array(Box::new(first_type)),
+                            span,
+                        )) // unreachable
                     }
                 }
             }
             TokenType::KwNever => {
                 self.advance();
-                Ok(TypeExpr::Never)
+                Ok(TypeExpr::new(TypeExprKind::Never, token.span))
             }
             TokenType::KwUnknown => {
                 self.advance();
-                Ok(TypeExpr::Unknown)
+                Ok(TypeExpr::new(TypeExprKind::Unknown, token.span))
             }
             TokenType::KwI8 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::I8))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::I8),
+                    token.span,
+                ))
             }
             TokenType::KwI16 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::I16))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::I16),
+                    token.span,
+                ))
             }
             TokenType::KwI32 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::I32))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::I32),
+                    token.span,
+                ))
             }
             TokenType::KwI64 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::I64))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::I64),
+                    token.span,
+                ))
             }
             TokenType::KwI128 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::I128))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::I128),
+                    token.span,
+                ))
             }
             TokenType::KwU8 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::U8))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::U8),
+                    token.span,
+                ))
             }
             TokenType::KwU16 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::U16))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::U16),
+                    token.span,
+                ))
             }
             TokenType::KwU32 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::U32))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::U32),
+                    token.span,
+                ))
             }
             TokenType::KwU64 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::U64))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::U64),
+                    token.span,
+                ))
             }
             TokenType::KwF32 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::F32))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::F32),
+                    token.span,
+                ))
             }
             TokenType::KwF64 => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::F64))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::F64),
+                    token.span,
+                ))
             }
             TokenType::KwBool => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::Bool))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::Bool),
+                    token.span,
+                ))
             }
             TokenType::KwString => {
                 self.advance();
-                Ok(TypeExpr::Primitive(PrimitiveType::String))
+                Ok(TypeExpr::new(
+                    TypeExprKind::Primitive(PrimitiveType::String),
+                    token.span,
+                ))
             }
             TokenType::KwHandle => {
                 self.advance();
-                Ok(TypeExpr::Handle)
+                Ok(TypeExpr::new(TypeExprKind::Handle, token.span))
             }
             TokenType::KwSelfType => {
                 self.advance();
-                Ok(TypeExpr::SelfType)
+                Ok(TypeExpr::new(TypeExprKind::SelfType, token.span))
             }
             TokenType::KwFallible => {
                 self.advance(); // consume 'fallible'
@@ -246,15 +309,19 @@ impl<'src> Parser<'src> {
                 self.consume(TokenType::Comma, "expected ',' in fallible type")?;
                 let error_type = self.parse_type()?;
                 self.consume(TokenType::RParen, "expected ')' after fallible type")?;
-                Ok(TypeExpr::Fallible {
-                    success_type: Box::new(success_type),
-                    error_type: Box::new(error_type),
-                })
+                let span = token.span.merge(self.previous.span);
+                Ok(TypeExpr::new(
+                    TypeExprKind::Fallible {
+                        success_type: Box::new(success_type),
+                        error_type: Box::new(error_type),
+                    },
+                    span,
+                ))
             }
             TokenType::LBrace => {
                 // Structural type: { name: Type, func method() -> Type }
                 self.advance(); // consume '{'
-                self.parse_structural_type()
+                self.parse_structural_type(token.span)
             }
             TokenType::Identifier => {
                 self.advance();
@@ -285,7 +352,11 @@ impl<'src> Parser<'src> {
                         Vec::new()
                     };
 
-                    return Ok(TypeExpr::QualifiedPath { segments, args });
+                    let span = token.span.merge(self.previous.span);
+                    return Ok(TypeExpr::new(
+                        TypeExprKind::QualifiedPath { segments, args },
+                        span,
+                    ));
                 }
 
                 // Check for generic arguments: Foo<T, U>
@@ -299,12 +370,16 @@ impl<'src> Parser<'src> {
                         }
                     }
                     self.consume_gt_in_type_context()?;
-                    Ok(TypeExpr::Generic {
-                        name: first_sym,
-                        args,
-                    })
+                    let span = token.span.merge(self.previous.span);
+                    Ok(TypeExpr::new(
+                        TypeExprKind::Generic {
+                            name: first_sym,
+                            args,
+                        },
+                        span,
+                    ))
                 } else {
-                    Ok(TypeExpr::Named(first_sym))
+                    Ok(TypeExpr::new(TypeExprKind::Named(first_sym), token.span))
                 }
             }
             _ => Err(ParseError::new(
@@ -339,14 +414,19 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse a structural type: { name: Type, func method() -> Type }
-    fn parse_structural_type(&mut self) -> Result<TypeExpr, ParseError> {
+    /// Called after consuming the opening '{'.
+    fn parse_structural_type(&mut self, start_span: crate::Span) -> Result<TypeExpr, ParseError> {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
 
         // Handle empty structural type
         if self.check(TokenType::RBrace) {
             self.advance(); // consume '}'
-            return Ok(TypeExpr::Structural { fields, methods });
+            let span = start_span.merge(self.previous.span);
+            return Ok(TypeExpr::new(
+                TypeExprKind::Structural { fields, methods },
+                span,
+            ));
         }
 
         loop {
@@ -417,6 +497,10 @@ impl<'src> Parser<'src> {
         }
 
         self.consume(TokenType::RBrace, "expected '}' after structural type")?;
-        Ok(TypeExpr::Structural { fields, methods })
+        let span = start_span.merge(self.previous.span);
+        Ok(TypeExpr::new(
+            TypeExprKind::Structural { fields, methods },
+            span,
+        ))
     }
 }

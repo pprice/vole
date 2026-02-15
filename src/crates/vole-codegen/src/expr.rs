@@ -14,7 +14,7 @@ use rustc_hash::FxHashMap;
 use vole_frontend::ast::{BlockExpr, IfExpr, RangeExpr, RecordFieldPattern, WhenExpr};
 use vole_frontend::{
     AssignTarget, Expr, ExprKind, MatchExpr, NodeId, Pattern, PatternKind, Symbol, TypeExpr,
-    UnaryOp,
+    TypeExprKind, UnaryOp,
 };
 use vole_identity::ModuleId;
 use vole_sema::IsCheckResult;
@@ -1140,12 +1140,12 @@ impl Cg<'_, '_, '_> {
     /// Handles primitive types, named types (nil, Done, etc.), never, unknown - enough
     /// for `is` checks in generic function bodies that sema didn't analyze.
     fn resolve_simple_type_expr(&self, type_expr: &TypeExpr) -> Option<TypeId> {
-        use vole_frontend::{PrimitiveType, TypeExpr as TE};
+        use vole_frontend::{PrimitiveType, TypeExprKind as TEK};
         let arena = self.arena();
-        match type_expr {
-            TE::Never => Some(TypeId::NEVER),
-            TE::Unknown => Some(TypeId::UNKNOWN),
-            TE::Primitive(p) => Some(match p {
+        match &type_expr.kind {
+            TEK::Never => Some(TypeId::NEVER),
+            TEK::Unknown => Some(TypeId::UNKNOWN),
+            TEK::Primitive(p) => Some(match p {
                 PrimitiveType::Bool => TypeId::BOOL,
                 PrimitiveType::I8 => arena.i8(),
                 PrimitiveType::I16 => arena.i16(),
@@ -1160,7 +1160,7 @@ impl Cg<'_, '_, '_> {
                 PrimitiveType::F64 => arena.f64(),
                 PrimitiveType::String => arena.string(),
             }),
-            TE::Named(sym) => {
+            TEK::Named(sym) => {
                 // Resolve named types (sentinels, structs, classes, etc.) through the
                 // name resolution system. Uses current module context or main module.
                 let name = self.interner().resolve(*sym);
@@ -1215,9 +1215,9 @@ impl Cg<'_, '_, '_> {
     }
 
     fn type_expr_terminal_symbol(type_expr: &TypeExpr) -> Option<Symbol> {
-        match type_expr {
-            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => Some(*sym),
-            TypeExpr::QualifiedPath { segments, .. } => segments.last().copied(),
+        match &type_expr.kind {
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => Some(*sym),
+            TypeExprKind::QualifiedPath { segments, .. } => segments.last().copied(),
             _ => None,
         }
     }

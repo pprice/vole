@@ -312,9 +312,32 @@ pub struct StructuralMethod {
     pub span: Span,
 }
 
-/// Type expression
+/// Type expression with source location
 #[derive(Debug, Clone)]
-pub enum TypeExpr {
+pub struct TypeExpr {
+    pub kind: TypeExprKind,
+    pub span: Span,
+}
+
+impl TypeExpr {
+    /// Create a new TypeExpr with a kind and span.
+    pub fn new(kind: TypeExprKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+
+    /// Create a synthetic TypeExpr with a default (zero) span.
+    /// Used for compiler-generated type expressions that have no source location.
+    pub fn synthetic(kind: TypeExprKind) -> Self {
+        Self {
+            kind,
+            span: Span::default(),
+        }
+    }
+}
+
+/// The kind of a type expression
+#[derive(Debug, Clone)]
+pub enum TypeExprKind {
     Primitive(PrimitiveType),
     Named(Symbol),
     Array(Box<TypeExpr>),       // [i32], [string], etc.
@@ -1162,6 +1185,7 @@ const _: () = {
         assert_send::<Block>();
         assert_send::<Pattern>();
         assert_send::<TypeExpr>();
+        assert_send::<TypeExprKind>();
         // Sync is blocked by LambdaExpr's interior mutability (RefCell/Cell).
         // Uncomment after vol-pqi8 removes RefCell/Cell from LambdaExpr:
         // assert_sync::<Program>();

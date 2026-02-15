@@ -6,7 +6,7 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use crate::type_arena::TypeIdVec;
 use crate::types::StructFieldId;
 use rustc_hash::FxHashMap;
-use vole_frontend::{PatternKind, Symbol, TypeExpr};
+use vole_frontend::{PatternKind, Symbol, TypeExpr, TypeExprKind};
 
 impl Analyzer {
     /// Check pattern and return TypeId directly.
@@ -279,16 +279,16 @@ impl Analyzer {
     }
 
     fn named_type_symbol(type_expr: &TypeExpr) -> Option<Symbol> {
-        match type_expr {
-            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => Some(*sym),
+        match &type_expr.kind {
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => Some(*sym),
             _ => None,
         }
     }
 
     fn terminal_type_symbol(type_expr: &TypeExpr) -> Option<Symbol> {
-        match type_expr {
-            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => Some(*sym),
-            TypeExpr::QualifiedPath { segments, .. } => segments.last().copied(),
+        match &type_expr.kind {
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => Some(*sym),
+            TypeExprKind::QualifiedPath { segments, .. } => segments.last().copied(),
             _ => None,
         }
     }
@@ -353,7 +353,7 @@ impl Analyzer {
         scrutinee_type_id: ArenaTypeId,
         interner: &Interner,
     ) -> ArenaTypeId {
-        if let TypeExpr::Named(name) = type_expr
+        if let TypeExprKind::Named(name) = &type_expr.kind
             && let Some(pattern_type_id) =
                 self.resolve_identifier_pattern_type_id(*name, scrutinee_type_id, interner)
         {

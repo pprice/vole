@@ -582,7 +582,7 @@ fn parse_optional_type() {
     let mut parser = Parser::new("func foo(x: i32?) {}");
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
-        assert!(matches!(&f.params[0].ty, TypeExpr::Optional(_)));
+        assert!(matches!(&f.params[0].ty.kind, TypeExprKind::Optional(_)));
     } else {
         panic!("Expected function declaration");
     }
@@ -593,7 +593,7 @@ fn parse_union_type() {
     let mut parser = Parser::new("func foo(x: i32 | string | nil) {}");
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
-        assert!(matches!(&f.params[0].ty, TypeExpr::Union(v) if v.len() == 3));
+        assert!(matches!(&f.params[0].ty.kind, TypeExprKind::Union(v) if v.len() == 3));
     } else {
         panic!("Expected function declaration");
     }
@@ -620,7 +620,7 @@ fn parse_nil_type() {
     let mut parser = Parser::new("func foo(x: nil) {}");
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
-        assert!(matches!(&f.params[0].ty, TypeExpr::Named(_)));
+        assert!(matches!(&f.params[0].ty.kind, TypeExprKind::Named(_)));
     } else {
         panic!("Expected function declaration");
     }
@@ -632,8 +632,8 @@ fn parse_chained_optional() {
     let mut parser = Parser::new("func foo(x: i32? ?) {}");
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Optional(inner) = &f.params[0].ty {
-            assert!(matches!(inner.as_ref(), TypeExpr::Optional(_)));
+        if let TypeExprKind::Optional(inner) = &f.params[0].ty.kind {
+            assert!(matches!(inner.kind, TypeExprKind::Optional(_)));
         } else {
             panic!("Expected Optional type");
         }
@@ -663,7 +663,7 @@ fn parse_is_with_optional_type() {
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Is(is_expr) => {
-            assert!(matches!(&is_expr.type_expr, TypeExpr::Optional(_)));
+            assert!(matches!(&is_expr.type_expr.kind, TypeExprKind::Optional(_)));
         }
         _ => panic!("expected Is expression"),
     }
@@ -675,7 +675,7 @@ fn parse_is_with_union_type() {
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Is(is_expr) => {
-            assert!(matches!(&is_expr.type_expr, TypeExpr::Union(v) if v.len() == 2));
+            assert!(matches!(&is_expr.type_expr.kind, TypeExprKind::Union(v) if v.len() == 2));
         }
         _ => panic!("expected Is expression"),
     }
@@ -689,10 +689,11 @@ fn parse_function_type() {
     let program = result.unwrap();
     if let Decl::Let(let_stmt) = &program.declarations[0] {
         assert!(let_stmt.ty.is_some());
-        if let Some(TypeExpr::Function {
-            params,
-            return_type: _,
-        }) = &let_stmt.ty
+        if let Some(ty) = &let_stmt.ty
+            && let TypeExprKind::Function {
+                params,
+                return_type: _,
+            } = &ty.kind
         {
             assert_eq!(params.len(), 2);
         } else {
@@ -1028,7 +1029,7 @@ fn test_parse_generic_type() {
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Generic { name: _, args } = &f.params[0].ty {
+        if let TypeExprKind::Generic { name: _, args } = &f.params[0].ty.kind {
             assert_eq!(args.len(), 1);
         } else {
             panic!("expected generic type");
@@ -1043,7 +1044,7 @@ fn test_parse_nested_generic_type() {
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Generic { args, .. } = &f.params[0].ty {
+        if let TypeExprKind::Generic { args, .. } = &f.params[0].ty.kind {
             assert_eq!(args.len(), 2);
         } else {
             panic!("expected generic type");
@@ -1061,12 +1062,12 @@ fn test_parse_deeply_nested_generic_type() {
         .expect("should parse nested generics with >>");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Generic { args, .. } = &f.params[0].ty {
+        if let TypeExprKind::Generic { args, .. } = &f.params[0].ty.kind {
             assert_eq!(args.len(), 2, "Map should have 2 type args");
             // Second arg should be Box<i64>
-            if let TypeExpr::Generic {
+            if let TypeExprKind::Generic {
                 args: inner_args, ..
-            } = &args[1]
+            } = &args[1].kind
             {
                 assert_eq!(inner_args.len(), 1, "Box should have 1 type arg");
             } else {
@@ -1088,16 +1089,16 @@ fn test_parse_triple_nested_generic() {
         .expect("should parse triple nested generics");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Generic { args, .. } = &f.params[0].ty {
+        if let TypeExprKind::Generic { args, .. } = &f.params[0].ty.kind {
             assert_eq!(args.len(), 1);
-            if let TypeExpr::Generic {
+            if let TypeExprKind::Generic {
                 args: middle_args, ..
-            } = &args[0]
+            } = &args[0].kind
             {
                 assert_eq!(middle_args.len(), 1);
-                if let TypeExpr::Generic {
+                if let TypeExprKind::Generic {
                     args: inner_args, ..
-                } = &middle_args[0]
+                } = &middle_args[0].kind
                 {
                     assert_eq!(inner_args.len(), 1);
                 } else {
@@ -1120,15 +1121,15 @@ fn test_parse_tuple_type() {
     let program = parser.parse_program().expect("should parse tuple type");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Tuple(elements) = &f.params[0].ty {
+        if let TypeExprKind::Tuple(elements) = &f.params[0].ty.kind {
             assert_eq!(elements.len(), 2, "tuple should have 2 elements");
             assert!(matches!(
-                elements[0],
-                TypeExpr::Primitive(PrimitiveType::I32)
+                elements[0].kind,
+                TypeExprKind::Primitive(PrimitiveType::I32)
             ));
             assert!(matches!(
-                elements[1],
-                TypeExpr::Primitive(PrimitiveType::String)
+                elements[1].kind,
+                TypeExprKind::Primitive(PrimitiveType::String)
             ));
         } else {
             panic!("expected tuple type, got {:?}", f.params[0].ty);
@@ -1146,7 +1147,7 @@ fn test_parse_tuple_type_three_elements() {
         .expect("should parse 3-element tuple");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Tuple(elements) = &f.params[0].ty {
+        if let TypeExprKind::Tuple(elements) = &f.params[0].ty.kind {
             assert_eq!(elements.len(), 3);
         } else {
             panic!("expected tuple type");
@@ -1164,11 +1165,11 @@ fn test_parse_fixed_array_type() {
         .expect("should parse fixed array type");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::FixedArray { element, size } = &f.params[0].ty {
+        if let TypeExprKind::FixedArray { element, size } = &f.params[0].ty.kind {
             assert_eq!(*size, 10);
             assert!(matches!(
-                element.as_ref(),
-                TypeExpr::Primitive(PrimitiveType::I32)
+                element.kind,
+                TypeExprKind::Primitive(PrimitiveType::I32)
             ));
         } else {
             panic!("expected fixed array type, got {:?}", f.params[0].ty);
@@ -1186,10 +1187,10 @@ fn test_parse_array_type_unchanged() {
         .expect("should parse dynamic array type");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Array(element) = &f.params[0].ty {
+        if let TypeExprKind::Array(element) = &f.params[0].ty.kind {
             assert!(matches!(
-                element.as_ref(),
-                TypeExpr::Primitive(PrimitiveType::I32)
+                element.kind,
+                TypeExprKind::Primitive(PrimitiveType::I32)
             ));
         } else {
             panic!("expected array type, got {:?}", f.params[0].ty);
@@ -1207,7 +1208,7 @@ fn test_parse_tuple_trailing_comma() {
         .expect("should parse tuple with trailing comma");
 
     if let Decl::Function(f) = &program.declarations[0] {
-        if let TypeExpr::Tuple(elements) = &f.params[0].ty {
+        if let TypeExprKind::Tuple(elements) = &f.params[0].ty.kind {
             assert_eq!(elements.len(), 2);
         } else {
             panic!("expected tuple type");

@@ -40,21 +40,22 @@ impl<'src> Parser<'src> {
         &self,
         token: &super::super::token::Token,
     ) -> Option<TypeExpr> {
-        match token.ty {
-            TokenType::KwI8 => Some(TypeExpr::Primitive(PrimitiveType::I8)),
-            TokenType::KwI16 => Some(TypeExpr::Primitive(PrimitiveType::I16)),
-            TokenType::KwI32 => Some(TypeExpr::Primitive(PrimitiveType::I32)),
-            TokenType::KwI64 => Some(TypeExpr::Primitive(PrimitiveType::I64)),
-            TokenType::KwI128 => Some(TypeExpr::Primitive(PrimitiveType::I128)),
-            TokenType::KwU8 => Some(TypeExpr::Primitive(PrimitiveType::U8)),
-            TokenType::KwU16 => Some(TypeExpr::Primitive(PrimitiveType::U16)),
-            TokenType::KwU32 => Some(TypeExpr::Primitive(PrimitiveType::U32)),
-            TokenType::KwU64 => Some(TypeExpr::Primitive(PrimitiveType::U64)),
-            TokenType::KwF32 => Some(TypeExpr::Primitive(PrimitiveType::F32)),
-            TokenType::KwF64 => Some(TypeExpr::Primitive(PrimitiveType::F64)),
-            TokenType::KwBool => Some(TypeExpr::Primitive(PrimitiveType::Bool)),
-            TokenType::KwString => Some(TypeExpr::Primitive(PrimitiveType::String)),
-            _ => None,
-        }
+        let kind = match token.ty {
+            TokenType::KwI8 => TypeExprKind::Primitive(PrimitiveType::I8),
+            TokenType::KwI16 => TypeExprKind::Primitive(PrimitiveType::I16),
+            TokenType::KwI32 => TypeExprKind::Primitive(PrimitiveType::I32),
+            TokenType::KwI64 => TypeExprKind::Primitive(PrimitiveType::I64),
+            TokenType::KwI128 => TypeExprKind::Primitive(PrimitiveType::I128),
+            TokenType::KwU8 => TypeExprKind::Primitive(PrimitiveType::U8),
+            TokenType::KwU16 => TypeExprKind::Primitive(PrimitiveType::U16),
+            TokenType::KwU32 => TypeExprKind::Primitive(PrimitiveType::U32),
+            TokenType::KwU64 => TypeExprKind::Primitive(PrimitiveType::U64),
+            TokenType::KwF32 => TypeExprKind::Primitive(PrimitiveType::F32),
+            TokenType::KwF64 => TypeExprKind::Primitive(PrimitiveType::F64),
+            TokenType::KwBool => TypeExprKind::Primitive(PrimitiveType::Bool),
+            TokenType::KwString => TypeExprKind::Primitive(PrimitiveType::String),
+            _ => return None,
+        };
+        Some(TypeExpr::new(kind, token.span))
     }
 }

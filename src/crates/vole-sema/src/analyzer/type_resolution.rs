@@ -18,41 +18,41 @@ impl Analyzer {
     ) -> ArenaTypeId {
         // Handle QualifiedPath specially - we need scope access for module bindings.
         // This is not in TypeResolutionContext because it requires scope access.
-        if let TypeExpr::QualifiedPath { segments, args } = ty {
+        if let TypeExprKind::QualifiedPath { segments, args } = &ty.kind {
             return self.resolve_qualified_type_id(segments, args, interner, self_type_id);
         }
 
         // Handle container types that might have QualifiedPath elements.
         // We need to handle these here so the recursive calls go through this method
         // rather than resolve_type_to_id (which can't resolve QualifiedPath).
-        match ty {
-            TypeExpr::Array(elem) => {
+        match &ty.kind {
+            TypeExprKind::Array(elem) => {
                 let elem_id = self.resolve_type_id_with_self(elem, interner, self_type_id);
                 return self.type_arena_mut().array(elem_id);
             }
-            TypeExpr::Optional(inner) => {
+            TypeExprKind::Optional(inner) => {
                 let inner_id = self.resolve_type_id_with_self(inner, interner, self_type_id);
                 return self.type_arena_mut().optional(inner_id);
             }
-            TypeExpr::FixedArray { element, size } => {
+            TypeExprKind::FixedArray { element, size } => {
                 let elem_id = self.resolve_type_id_with_self(element, interner, self_type_id);
                 return self.type_arena_mut().fixed_array(elem_id, *size);
             }
-            TypeExpr::Tuple(elements) => {
+            TypeExprKind::Tuple(elements) => {
                 let elem_ids: crate::type_arena::TypeIdVec = elements
                     .iter()
                     .map(|e| self.resolve_type_id_with_self(e, interner, self_type_id))
                     .collect();
                 return self.type_arena_mut().tuple(elem_ids);
             }
-            TypeExpr::Union(variants) => {
+            TypeExprKind::Union(variants) => {
                 let variant_ids: crate::type_arena::TypeIdVec = variants
                     .iter()
                     .map(|t| self.resolve_type_id_with_self(t, interner, self_type_id))
                     .collect();
                 return self.type_arena_mut().union(variant_ids);
             }
-            TypeExpr::Function {
+            TypeExprKind::Function {
                 params,
                 return_type,
             } => {
@@ -63,7 +63,7 @@ impl Analyzer {
                 let ret_id = self.resolve_type_id_with_self(return_type, interner, self_type_id);
                 return self.type_arena_mut().function(param_ids, ret_id, false);
             }
-            TypeExpr::Fallible {
+            TypeExprKind::Fallible {
                 success_type,
                 error_type,
             } => {

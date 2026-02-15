@@ -165,8 +165,8 @@ impl<'a> GeneratorTransformer<'a> {
         func: &FuncDecl,
     ) -> Option<(ClassDecl, ImplementBlock, FuncDecl)> {
         // Extract the element type from Iterator<T>
-        let element_type = match &func.return_type {
-            Some(TypeExpr::Generic { name, args })
+        let element_type = match func.return_type.as_ref().map(|t| &t.kind) {
+            Some(TypeExprKind::Generic { name, args })
                 if self.interner.resolve(*name) == "Iterator" && args.len() == 1 =>
             {
                 args[0].clone()
@@ -201,7 +201,7 @@ impl<'a> GeneratorTransformer<'a> {
         let state_sym = self.interner.intern("__state");
         fields.push(FieldDef {
             name: state_sym,
-            ty: TypeExpr::Primitive(PrimitiveType::I64),
+            ty: TypeExpr::synthetic(TypeExprKind::Primitive(PrimitiveType::I64)),
             default_value: None,
             span: dummy_span,
         });
@@ -229,10 +229,10 @@ impl<'a> GeneratorTransformer<'a> {
         // Create the class declaration
         // Note: implements uses TypeExpr - for Iterator<T>, we use the element type
         let iterator_sym = self.interner.intern("Iterator");
-        let iterator_type = TypeExpr::Generic {
+        let iterator_type = TypeExpr::synthetic(TypeExprKind::Generic {
             name: iterator_sym,
             args: vec![element_type.clone()],
-        };
+        });
         let record_decl = ClassDecl {
             name: record_name,
             type_params: Vec::new(),
@@ -256,7 +256,7 @@ impl<'a> GeneratorTransformer<'a> {
         // Create the implement block for Iterator<T>
         let impl_block = ImplementBlock {
             trait_type: Some(iterator_type),
-            target_type: TypeExpr::Named(record_name),
+            target_type: TypeExpr::synthetic(TypeExprKind::Named(record_name)),
             external: None,
             methods: vec![next_method],
             statics: None,
@@ -338,7 +338,7 @@ impl<'a> GeneratorTransformer<'a> {
                 let name = suffix
                     .map(|s| s.as_str().to_string())
                     .unwrap_or_else(|| "i64".to_string());
-                Some((TypeExpr::Primitive(prim), name))
+                Some((TypeExpr::synthetic(TypeExprKind::Primitive(prim)), name))
             }
             ExprKind::FloatLiteral(_, suffix) => {
                 let prim = suffix
@@ -347,13 +347,14 @@ impl<'a> GeneratorTransformer<'a> {
                 let name = suffix
                     .map(|s| s.as_str().to_string())
                     .unwrap_or_else(|| "f64".to_string());
-                Some((TypeExpr::Primitive(prim), name))
+                Some((TypeExpr::synthetic(TypeExprKind::Primitive(prim)), name))
             }
-            ExprKind::BoolLiteral(_) => {
-                Some((TypeExpr::Primitive(PrimitiveType::Bool), "bool".to_string()))
-            }
+            ExprKind::BoolLiteral(_) => Some((
+                TypeExpr::synthetic(TypeExprKind::Primitive(PrimitiveType::Bool)),
+                "bool".to_string(),
+            )),
             ExprKind::StringLiteral(_) | ExprKind::InterpolatedString(_) => Some((
-                TypeExpr::Primitive(PrimitiveType::String),
+                TypeExpr::synthetic(TypeExprKind::Primitive(PrimitiveType::String)),
                 "string".to_string(),
             )),
             // For non-literals (including identifiers like nil/Done), we can't infer
@@ -364,9 +365,9 @@ impl<'a> GeneratorTransformer<'a> {
 
     /// Check if two TypeExpr are compatible (for basic literal checking).
     fn type_expr_matches(&self, actual: &TypeExpr, expected: &TypeExpr) -> bool {
-        match (actual, expected) {
-            (TypeExpr::Primitive(a), TypeExpr::Primitive(b)) => a == b,
-            (TypeExpr::Named(a), TypeExpr::Named(b)) => a == b,
+        match (&actual.kind, &expected.kind) {
+            (TypeExprKind::Primitive(a), TypeExprKind::Primitive(b)) => a == b,
+            (TypeExprKind::Named(a), TypeExprKind::Named(b)) => a == b,
             // For complex types or optionals, assume compatible and let sema handle it
             _ => true,
         }
@@ -374,8 +375,8 @@ impl<'a> GeneratorTransformer<'a> {
 
     /// Convert a TypeExpr to a string for error messages.
     fn type_expr_to_string(&self, ty: &TypeExpr) -> String {
-        match ty {
-            TypeExpr::Primitive(p) => match p {
+        match &ty.kind {
+            TypeExprKind::Primitive(p) => match p {
                 PrimitiveType::I8 => "i8".to_string(),
                 PrimitiveType::I16 => "i16".to_string(),
                 PrimitiveType::I32 => "i32".to_string(),
@@ -390,18 +391,18 @@ impl<'a> GeneratorTransformer<'a> {
                 PrimitiveType::Bool => "bool".to_string(),
                 PrimitiveType::String => "string".to_string(),
             },
-            TypeExpr::Named(sym) => self.interner.resolve(*sym).to_string(),
-            TypeExpr::Handle => "handle".to_string(),
-            TypeExpr::Never => "never".to_string(),
-            TypeExpr::Unknown => "unknown".to_string(),
-            TypeExpr::Optional(inner) => format!("{}?", self.type_expr_to_string(inner)),
-            TypeExpr::Array(inner) => format!("[{}]", self.type_expr_to_string(inner)),
-            TypeExpr::Union(variants) => variants
+            TypeExprKind::Named(sym) => self.interner.resolve(*sym).to_string(),
+            TypeExprKind::Handle => "handle".to_string(),
+            TypeExprKind::Never => "never".to_string(),
+            TypeExprKind::Unknown => "unknown".to_string(),
+            TypeExprKind::Optional(inner) => format!("{}?", self.type_expr_to_string(inner)),
+            TypeExprKind::Array(inner) => format!("[{}]", self.type_expr_to_string(inner)),
+            TypeExprKind::Union(variants) => variants
                 .iter()
                 .map(|v| self.type_expr_to_string(v))
                 .collect::<Vec<_>>()
                 .join(" | "),
-            TypeExpr::Function {
+            TypeExprKind::Function {
                 params,
                 return_type,
             } => {
@@ -413,8 +414,8 @@ impl<'a> GeneratorTransformer<'a> {
                 let ret = self.type_expr_to_string(return_type);
                 format!("({}) -> {}", params_str, ret)
             }
-            TypeExpr::SelfType => "Self".to_string(),
-            TypeExpr::Fallible {
+            TypeExprKind::SelfType => "Self".to_string(),
+            TypeExprKind::Fallible {
                 success_type,
                 error_type,
             } => format!(
@@ -422,7 +423,7 @@ impl<'a> GeneratorTransformer<'a> {
                 self.type_expr_to_string(success_type),
                 self.type_expr_to_string(error_type)
             ),
-            TypeExpr::Generic { name, args } => {
+            TypeExprKind::Generic { name, args } => {
                 let args_str = args
                     .iter()
                     .map(|a| self.type_expr_to_string(a))
@@ -430,7 +431,7 @@ impl<'a> GeneratorTransformer<'a> {
                     .join(", ");
                 format!("{}<{}>", self.interner.resolve(*name), args_str)
             }
-            TypeExpr::Tuple(elements) => {
+            TypeExprKind::Tuple(elements) => {
                 let elems_str = elements
                     .iter()
                     .map(|e| self.type_expr_to_string(e))
@@ -438,10 +439,10 @@ impl<'a> GeneratorTransformer<'a> {
                     .join(", ");
                 format!("[{}]", elems_str)
             }
-            TypeExpr::FixedArray { element, size } => {
+            TypeExprKind::FixedArray { element, size } => {
                 format!("[{}; {}]", self.type_expr_to_string(element), size)
             }
-            TypeExpr::Structural { fields, methods } => {
+            TypeExprKind::Structural { fields, methods } => {
                 let mut parts = Vec::new();
                 for field in fields {
                     parts.push(format!(
@@ -466,12 +467,12 @@ impl<'a> GeneratorTransformer<'a> {
                 }
                 format!("{{ {} }}", parts.join(", "))
             }
-            TypeExpr::Combination(parts) => parts
+            TypeExprKind::Combination(parts) => parts
                 .iter()
                 .map(|p| self.type_expr_to_string(p))
                 .collect::<Vec<_>>()
                 .join(" + "),
-            TypeExpr::QualifiedPath { segments, args } => {
+            TypeExprKind::QualifiedPath { segments, args } => {
                 let path_str = segments
                     .iter()
                     .map(|s| self.interner.resolve(*s))
@@ -514,7 +515,10 @@ impl<'a> GeneratorTransformer<'a> {
                     } else {
                         // For now, assume i64 for untyped mutable locals
                         // A more complete solution would infer types or require annotations
-                        locals.push((let_stmt.name, TypeExpr::Primitive(PrimitiveType::I64)));
+                        locals.push((
+                            let_stmt.name,
+                            TypeExpr::synthetic(TypeExprKind::Primitive(PrimitiveType::I64)),
+                        ));
                     }
                 }
             }
@@ -668,7 +672,10 @@ impl<'a> GeneratorTransformer<'a> {
 
         // Return type: T | Done
         let done_sym = self.interner.intern("Done");
-        let return_type = TypeExpr::Union(vec![element_type.clone(), TypeExpr::Named(done_sym)]);
+        let return_type = TypeExpr::synthetic(TypeExprKind::Union(vec![
+            element_type.clone(),
+            TypeExpr::synthetic(TypeExprKind::Named(done_sym)),
+        ]));
 
         FuncDecl {
             name: next_sym,
@@ -766,33 +773,32 @@ impl<'a> GeneratorTransformer<'a> {
     /// Get a default value expression for a type.
     fn default_value_for_type(&mut self, ty: &TypeExpr) -> Expr {
         let dummy_span = Span::default();
-        match ty {
-            TypeExpr::Primitive(PrimitiveType::I8)
-            | TypeExpr::Primitive(PrimitiveType::I16)
-            | TypeExpr::Primitive(PrimitiveType::I32)
-            | TypeExpr::Primitive(PrimitiveType::I64)
-            | TypeExpr::Primitive(PrimitiveType::I128)
-            | TypeExpr::Primitive(PrimitiveType::U8)
-            | TypeExpr::Primitive(PrimitiveType::U16)
-            | TypeExpr::Primitive(PrimitiveType::U32)
-            | TypeExpr::Primitive(PrimitiveType::U64) => Expr {
+        match &ty.kind {
+            TypeExprKind::Primitive(PrimitiveType::I8)
+            | TypeExprKind::Primitive(PrimitiveType::I16)
+            | TypeExprKind::Primitive(PrimitiveType::I32)
+            | TypeExprKind::Primitive(PrimitiveType::I64)
+            | TypeExprKind::Primitive(PrimitiveType::I128)
+            | TypeExprKind::Primitive(PrimitiveType::U8)
+            | TypeExprKind::Primitive(PrimitiveType::U16)
+            | TypeExprKind::Primitive(PrimitiveType::U32)
+            | TypeExprKind::Primitive(PrimitiveType::U64) => Expr {
                 id: self.next_id(),
                 kind: ExprKind::IntLiteral(0, None),
                 span: dummy_span,
             },
-            TypeExpr::Primitive(PrimitiveType::F32) | TypeExpr::Primitive(PrimitiveType::F64) => {
-                Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::FloatLiteral(0.0, None),
-                    span: dummy_span,
-                }
-            }
-            TypeExpr::Primitive(PrimitiveType::Bool) => Expr {
+            TypeExprKind::Primitive(PrimitiveType::F32)
+            | TypeExprKind::Primitive(PrimitiveType::F64) => Expr {
+                id: self.next_id(),
+                kind: ExprKind::FloatLiteral(0.0, None),
+                span: dummy_span,
+            },
+            TypeExprKind::Primitive(PrimitiveType::Bool) => Expr {
                 id: self.next_id(),
                 kind: ExprKind::BoolLiteral(false),
                 span: dummy_span,
             },
-            TypeExpr::Primitive(PrimitiveType::String) => Expr {
+            TypeExprKind::Primitive(PrimitiveType::String) => Expr {
                 id: self.next_id(),
                 kind: ExprKind::StringLiteral(String::new()),
                 span: dummy_span,

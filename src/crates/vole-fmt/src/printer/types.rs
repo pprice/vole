@@ -120,27 +120,27 @@ pub(crate) fn print_type_expr<'a>(
     ty: &TypeExpr,
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
-    match ty {
-        TypeExpr::Primitive(prim) => arena.text(primitive_type_str(*prim)),
-        TypeExpr::Named(sym) => arena.text(interner.resolve(*sym).to_string()),
-        TypeExpr::Array(inner) => arena
+    match &ty.kind {
+        TypeExprKind::Primitive(prim) => arena.text(primitive_type_str(*prim)),
+        TypeExprKind::Named(sym) => arena.text(interner.resolve(*sym).to_string()),
+        TypeExprKind::Array(inner) => arena
             .text("[")
             .append(print_type_expr(arena, inner, interner))
             .append(arena.text("]")),
-        TypeExpr::Optional(inner) => {
+        TypeExprKind::Optional(inner) => {
             print_type_expr(arena, inner, interner).append(arena.text("?"))
         }
-        TypeExpr::Union(types) => {
+        TypeExprKind::Union(types) => {
             let type_docs: Vec<_> = types
                 .iter()
                 .map(|t| print_type_expr(arena, t, interner))
                 .collect();
             arena.intersperse(type_docs, arena.text(" | "))
         }
-        TypeExpr::Handle => arena.text("handle"),
-        TypeExpr::Never => arena.text("never"),
-        TypeExpr::Unknown => arena.text("unknown"),
-        TypeExpr::Function {
+        TypeExprKind::Handle => arena.text("handle"),
+        TypeExprKind::Never => arena.text("never"),
+        TypeExprKind::Unknown => arena.text("unknown"),
+        TypeExprKind::Function {
             params,
             return_type,
         } => {
@@ -154,8 +154,8 @@ pub(crate) fn print_type_expr<'a>(
                 .append(arena.text(") -> "))
                 .append(print_type_expr(arena, return_type, interner))
         }
-        TypeExpr::SelfType => arena.text("Self"),
-        TypeExpr::Fallible {
+        TypeExprKind::SelfType => arena.text("Self"),
+        TypeExprKind::Fallible {
             success_type,
             error_type,
         } => arena
@@ -164,7 +164,7 @@ pub(crate) fn print_type_expr<'a>(
             .append(arena.text(", "))
             .append(print_type_expr(arena, error_type, interner))
             .append(arena.text(")")),
-        TypeExpr::Generic { name, args } => {
+        TypeExprKind::Generic { name, args } => {
             let arg_docs: Vec<_> = args
                 .iter()
                 .map(|t| print_type_expr(arena, t, interner))
@@ -175,7 +175,7 @@ pub(crate) fn print_type_expr<'a>(
                 .append(arena.intersperse(arg_docs, arena.text(", ")))
                 .append(arena.text(">"))
         }
-        TypeExpr::Tuple(elements) => {
+        TypeExprKind::Tuple(elements) => {
             let elem_docs: Vec<_> = elements
                 .iter()
                 .map(|t| print_type_expr(arena, t, interner))
@@ -185,23 +185,23 @@ pub(crate) fn print_type_expr<'a>(
                 .append(arena.intersperse(elem_docs, arena.text(", ")))
                 .append(arena.text("]"))
         }
-        TypeExpr::FixedArray { element, size } => arena
+        TypeExprKind::FixedArray { element, size } => arena
             .text("[")
             .append(print_type_expr(arena, element, interner))
             .append(arena.text("; "))
             .append(arena.text(size.to_string()))
             .append(arena.text("]")),
-        TypeExpr::Structural { fields, methods } => {
+        TypeExprKind::Structural { fields, methods } => {
             print_structural_members(arena, fields, methods, interner)
         }
-        TypeExpr::Combination(parts) => {
+        TypeExprKind::Combination(parts) => {
             let type_docs: Vec<_> = parts
                 .iter()
                 .map(|t| print_type_expr(arena, t, interner))
                 .collect();
             arena.intersperse(type_docs, arena.text(" + "))
         }
-        TypeExpr::QualifiedPath { segments, args } => {
+        TypeExprKind::QualifiedPath { segments, args } => {
             let path_doc = arena.intersperse(
                 segments
                     .iter()

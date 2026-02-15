@@ -919,7 +919,11 @@ impl<'src> Parser<'src> {
                 Vec::new()
             };
 
-            return Ok(TypeExpr::QualifiedPath { segments, args });
+            let span = first_token.span.merge(self.previous.span);
+            return Ok(TypeExpr::new(
+                TypeExprKind::QualifiedPath { segments, args },
+                span,
+            ));
         }
 
         // Check for generic arguments: Interface<T>
@@ -933,14 +937,21 @@ impl<'src> Parser<'src> {
                 }
             }
             self.consume_gt_in_type_context()?;
-            return Ok(TypeExpr::Generic {
-                name: first_sym,
-                args,
-            });
+            let span = first_token.span.merge(self.previous.span);
+            return Ok(TypeExpr::new(
+                TypeExprKind::Generic {
+                    name: first_sym,
+                    args,
+                },
+                span,
+            ));
         }
 
         // Simple interface name
-        Ok(TypeExpr::Named(first_sym))
+        Ok(TypeExpr::new(
+            TypeExprKind::Named(first_sym),
+            first_token.span,
+        ))
     }
 
     /// Parse a single field definition: `name: Type` or `name: Type = default_expr`

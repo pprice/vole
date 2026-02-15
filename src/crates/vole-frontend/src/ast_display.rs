@@ -454,8 +454,9 @@ impl<'a> AstPrinter<'a> {
     }
 
     fn write_type_inline(&self, out: &mut String, ty: &TypeExpr) {
-        match ty {
-            TypeExpr::Primitive(p) => {
+        use crate::ast::TypeExprKind;
+        match &ty.kind {
+            TypeExprKind::Primitive(p) => {
                 let s = match p {
                     PrimitiveType::I8 => "i8",
                     PrimitiveType::I16 => "i16",
@@ -473,20 +474,20 @@ impl<'a> AstPrinter<'a> {
                 };
                 out.push_str(s);
             }
-            TypeExpr::Named(sym) => {
+            TypeExprKind::Named(sym) => {
                 let name = self.interner.resolve(*sym);
                 out.push_str(name);
             }
-            TypeExpr::Array(elem_ty) => {
+            TypeExprKind::Array(elem_ty) => {
                 out.push('[');
                 self.write_type_inline(out, elem_ty);
                 out.push(']');
             }
-            TypeExpr::Optional(inner) => {
+            TypeExprKind::Optional(inner) => {
                 self.write_type_inline(out, inner);
                 out.push('?');
             }
-            TypeExpr::Union(types) => {
+            TypeExprKind::Union(types) => {
                 for (i, ty) in types.iter().enumerate() {
                     if i > 0 {
                         out.push_str(" | ");
@@ -494,16 +495,16 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_inline(out, ty);
                 }
             }
-            TypeExpr::Handle => {
+            TypeExprKind::Handle => {
                 out.push_str("handle");
             }
-            TypeExpr::Never => {
+            TypeExprKind::Never => {
                 out.push_str("never");
             }
-            TypeExpr::Unknown => {
+            TypeExprKind::Unknown => {
                 out.push_str("unknown");
             }
-            TypeExpr::Function {
+            TypeExprKind::Function {
                 params,
                 return_type,
             } => {
@@ -517,10 +518,10 @@ impl<'a> AstPrinter<'a> {
                 out.push_str(") -> ");
                 self.write_type_inline(out, return_type);
             }
-            TypeExpr::SelfType => {
+            TypeExprKind::SelfType => {
                 out.push_str("Self");
             }
-            TypeExpr::Fallible {
+            TypeExprKind::Fallible {
                 success_type,
                 error_type,
             } => {
@@ -530,7 +531,7 @@ impl<'a> AstPrinter<'a> {
                 self.write_type_inline(out, error_type);
                 out.push(')');
             }
-            TypeExpr::Generic { name, args } => {
+            TypeExprKind::Generic { name, args } => {
                 out.push_str(self.interner.resolve(*name));
                 out.push('<');
                 for (i, arg) in args.iter().enumerate() {
@@ -541,7 +542,7 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push('>');
             }
-            TypeExpr::Tuple(elements) => {
+            TypeExprKind::Tuple(elements) => {
                 out.push('[');
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
@@ -551,14 +552,14 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push(']');
             }
-            TypeExpr::FixedArray { element, size } => {
+            TypeExprKind::FixedArray { element, size } => {
                 out.push('[');
                 self.write_type_inline(out, element);
                 out.push_str("; ");
                 out.push_str(&size.to_string());
                 out.push(']');
             }
-            TypeExpr::Structural { fields, methods } => {
+            TypeExprKind::Structural { fields, methods } => {
                 out.push_str("{ ");
                 let mut first = true;
                 for field in fields {
@@ -589,7 +590,7 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push_str(" }");
             }
-            TypeExpr::Combination(parts) => {
+            TypeExprKind::Combination(parts) => {
                 for (i, ty) in parts.iter().enumerate() {
                     if i > 0 {
                         out.push_str(" + ");
@@ -597,7 +598,7 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_inline(out, ty);
                 }
             }
-            TypeExpr::QualifiedPath { segments, args } => {
+            TypeExprKind::QualifiedPath { segments, args } => {
                 for (i, sym) in segments.iter().enumerate() {
                     if i > 0 {
                         out.push('.');

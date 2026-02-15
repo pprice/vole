@@ -5,7 +5,7 @@ use crate::errors::{SemanticError, SemanticWarning};
 use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId};
 use crate::type_display::{display_structural_constraint, display_type_id};
 use vole_frontend::Span;
-use vole_frontend::ast::TypeExpr;
+use vole_frontend::ast::{TypeExpr, TypeExprKind};
 
 use super::Analyzer;
 
@@ -198,31 +198,31 @@ impl Analyzer {
     /// Check if a type expression is or contains a `Combination` (intersection type `A + B`)
     /// and emit E2103. Intersection types are only valid in type constraints, not type positions.
     pub(crate) fn check_combination_not_allowed(&mut self, ty: &TypeExpr, span: Span) {
-        match ty {
-            TypeExpr::Combination(_) => {
+        match &ty.kind {
+            TypeExprKind::Combination(_) => {
                 self.add_error(
                     SemanticError::CombinationTypeNotAllowed { span: span.into() },
                     span,
                 );
             }
             // Recurse into container types
-            TypeExpr::Array(inner) | TypeExpr::Optional(inner) => {
+            TypeExprKind::Array(inner) | TypeExprKind::Optional(inner) => {
                 self.check_combination_not_allowed(inner, span);
             }
-            TypeExpr::FixedArray { element, .. } => {
+            TypeExprKind::FixedArray { element, .. } => {
                 self.check_combination_not_allowed(element, span);
             }
-            TypeExpr::Tuple(elements) => {
+            TypeExprKind::Tuple(elements) => {
                 for elem in elements {
                     self.check_combination_not_allowed(elem, span);
                 }
             }
-            TypeExpr::Union(variants) => {
+            TypeExprKind::Union(variants) => {
                 for variant in variants {
                     self.check_combination_not_allowed(variant, span);
                 }
             }
-            TypeExpr::Function {
+            TypeExprKind::Function {
                 params,
                 return_type,
             } => {
@@ -231,14 +231,14 @@ impl Analyzer {
                 }
                 self.check_combination_not_allowed(return_type, span);
             }
-            TypeExpr::Fallible {
+            TypeExprKind::Fallible {
                 success_type,
                 error_type,
             } => {
                 self.check_combination_not_allowed(success_type, span);
                 self.check_combination_not_allowed(error_type, span);
             }
-            TypeExpr::Generic { args, .. } => {
+            TypeExprKind::Generic { args, .. } => {
                 for arg in args {
                     self.check_combination_not_allowed(arg, span);
                 }
@@ -250,11 +250,11 @@ impl Analyzer {
     /// Check if a type expression contains a union with `never` or `unknown` and emit W3004.
     /// This walks the type expression tree to catch nested unions like `[i32 | never]`.
     pub(crate) fn check_union_simplification(&mut self, ty: &TypeExpr, span: Span) {
-        match ty {
-            TypeExpr::Union(variants) => {
+        match &ty.kind {
+            TypeExprKind::Union(variants) => {
                 for variant in variants {
-                    match variant {
-                        TypeExpr::Never => {
+                    match &variant.kind {
+                        TypeExprKind::Never => {
                             self.add_warning(
                                 SemanticWarning::UnionSimplification {
                                     ty: "never".to_string(),
@@ -265,7 +265,7 @@ impl Analyzer {
                                 span,
                             );
                         }
-                        TypeExpr::Unknown => {
+                        TypeExprKind::Unknown => {
                             self.add_warning(
                                 SemanticWarning::UnionSimplification {
                                     ty: "unknown".to_string(),
@@ -283,18 +283,18 @@ impl Analyzer {
                 }
             }
             // Recurse into container types
-            TypeExpr::Array(inner) | TypeExpr::Optional(inner) => {
+            TypeExprKind::Array(inner) | TypeExprKind::Optional(inner) => {
                 self.check_union_simplification(inner, span);
             }
-            TypeExpr::FixedArray { element, .. } => {
+            TypeExprKind::FixedArray { element, .. } => {
                 self.check_union_simplification(element, span);
             }
-            TypeExpr::Tuple(elements) => {
+            TypeExprKind::Tuple(elements) => {
                 for elem in elements {
                     self.check_union_simplification(elem, span);
                 }
             }
-            TypeExpr::Function {
+            TypeExprKind::Function {
                 params,
                 return_type,
             } => {
@@ -303,14 +303,14 @@ impl Analyzer {
                 }
                 self.check_union_simplification(return_type, span);
             }
-            TypeExpr::Fallible {
+            TypeExprKind::Fallible {
                 success_type,
                 error_type,
             } => {
                 self.check_union_simplification(success_type, span);
                 self.check_union_simplification(error_type, span);
             }
-            TypeExpr::Generic { args, .. } => {
+            TypeExprKind::Generic { args, .. } => {
                 for arg in args {
                     self.check_union_simplification(arg, span);
                 }

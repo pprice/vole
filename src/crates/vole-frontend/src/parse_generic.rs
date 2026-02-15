@@ -5,7 +5,7 @@
 use crate::errors::ParserError;
 
 use super::TokenType;
-use super::ast::{ConstraintInterface, TypeConstraint, TypeExpr, TypeParam};
+use super::ast::{ConstraintInterface, TypeConstraint, TypeExpr, TypeExprKind, TypeParam};
 use super::parser::{ParseError, Parser};
 
 impl<'src> Parser<'src> {
@@ -185,12 +185,12 @@ impl<'src> Parser<'src> {
         // Check for multiple interface constraints: T: Hashable + Eq
         if self.check(TokenType::Plus) {
             // First must be a named type (interface), possibly parameterized
-            let first_iface = match first {
-                TypeExpr::Named(sym) => ConstraintInterface {
+            let first_iface = match first.kind {
+                TypeExprKind::Named(sym) => ConstraintInterface {
                     name: sym,
                     type_args: vec![],
                 },
-                TypeExpr::Generic { name, args } => ConstraintInterface {
+                TypeExprKind::Generic { name, args } => ConstraintInterface {
                     name,
                     type_args: args,
                 },
@@ -208,12 +208,12 @@ impl<'src> Parser<'src> {
             let mut interfaces = vec![first_iface];
             while self.match_token(TokenType::Plus) {
                 let next = self.parse_base_type()?;
-                let iface = match next {
-                    TypeExpr::Named(sym) => ConstraintInterface {
+                let iface = match next.kind {
+                    TypeExprKind::Named(sym) => ConstraintInterface {
                         name: sym,
                         type_args: vec![],
                     },
-                    TypeExpr::Generic { name, args } => ConstraintInterface {
+                    TypeExprKind::Generic { name, args } => ConstraintInterface {
                         name,
                         type_args: args,
                     },
@@ -234,18 +234,18 @@ impl<'src> Parser<'src> {
         }
 
         // Check what kind of constraint we have
-        match first {
-            TypeExpr::Named(sym) => Ok(TypeConstraint::Interface(vec![ConstraintInterface {
+        match first.kind {
+            TypeExprKind::Named(sym) => Ok(TypeConstraint::Interface(vec![ConstraintInterface {
                 name: sym,
                 type_args: vec![],
             }])),
-            TypeExpr::Generic { name, args } => {
+            TypeExprKind::Generic { name, args } => {
                 Ok(TypeConstraint::Interface(vec![ConstraintInterface {
                     name,
                     type_args: args,
                 }]))
             }
-            TypeExpr::Structural { fields, methods } => {
+            TypeExprKind::Structural { fields, methods } => {
                 Ok(TypeConstraint::Structural { fields, methods })
             }
             _ => Ok(TypeConstraint::Union(vec![first])),

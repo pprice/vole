@@ -5,7 +5,9 @@ use super::*;
 use crate::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
 use crate::generic::TypeConstraint;
 use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId, TypeIdVec};
-use vole_frontend::ast::{ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr, TypeMapping};
+use vole_frontend::ast::{
+    ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr, TypeExprKind, TypeMapping,
+};
 
 /// Data needed for function registration in the entity registry.
 struct FuncRegistrationData {
@@ -18,29 +20,29 @@ struct FuncRegistrationData {
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
 /// For `mod.Interface` returns the last segment `Interface`.
 fn interface_base_name(type_expr: &TypeExpr) -> Option<Symbol> {
-    match type_expr {
-        TypeExpr::Named(sym) => Some(*sym),
-        TypeExpr::Generic { name, .. } => Some(*name),
-        TypeExpr::QualifiedPath { segments, .. } => segments.last().copied(),
+    match &type_expr.kind {
+        TypeExprKind::Named(sym) => Some(*sym),
+        TypeExprKind::Generic { name, .. } => Some(*name),
+        TypeExprKind::QualifiedPath { segments, .. } => segments.last().copied(),
         _ => None,
     }
 }
 
 /// Check if a TypeExpr is a qualified path (mod.Interface).
 fn is_qualified_path(type_expr: &TypeExpr) -> bool {
-    matches!(type_expr, TypeExpr::QualifiedPath { .. })
+    matches!(type_expr.kind, TypeExprKind::QualifiedPath { .. })
 }
 
 /// Format a TypeExpr for error messages.
 fn format_type_expr(type_expr: &TypeExpr, interner: &Interner) -> String {
-    match type_expr {
-        TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
-        TypeExpr::Generic { name, args } => {
+    match &type_expr.kind {
+        TypeExprKind::Named(sym) => interner.resolve(*sym).to_string(),
+        TypeExprKind::Generic { name, args } => {
             let args_str: Vec<String> =
                 args.iter().map(|a| format_type_expr(a, interner)).collect();
             format!("{}<{}>", interner.resolve(*name), args_str.join(", "))
         }
-        TypeExpr::QualifiedPath { segments, args } => {
+        TypeExprKind::QualifiedPath { segments, args } => {
             let path_str: String = segments
                 .iter()
                 .map(|s| interner.resolve(*s))
@@ -260,8 +262,8 @@ impl Analyzer {
         interner: &Interner,
         type_param_scope: Option<&TypeParamScope>,
     ) -> Option<InternedStructural> {
-        match ty {
-            TypeExpr::Structural {
+        match &ty.kind {
+            TypeExprKind::Structural {
                 fields: _,
                 methods: _,
             } => {
@@ -280,7 +282,7 @@ impl Analyzer {
                 let type_id = resolve_type_to_id(ty, &mut ctx);
                 self.type_arena().unwrap_structural(type_id).cloned()
             }
-            TypeExpr::Named(sym) => {
+            TypeExprKind::Named(sym) => {
                 // Check if this named type is a type alias that resolves to a structural type
                 let _name_str = interner.resolve(*sym);
                 if let Some(type_def_id) = self
@@ -722,9 +724,9 @@ impl Analyzer {
         interner: &Interner,
         type_param_scope: Option<&TypeParamScope>,
     ) {
-        // For TypeExpr::Named, check if the type is resolvable
-        match type_expr {
-            TypeExpr::Named(sym) => {
+        // For TypeExprKind::Named, check if the type is resolvable
+        match &type_expr.kind {
+            TypeExprKind::Named(sym) => {
                 let name_str = interner.resolve(*sym);
                 // Skip primitive types, "void", and well-known sentinel types
                 if matches!(name_str, "void" | "nil" | "Done") {
@@ -759,10 +761,10 @@ impl Analyzer {
                     );
                 }
             }
-            TypeExpr::Generic { name, args } => {
+            TypeExprKind::Generic { name, args } => {
                 // Validate the base type
                 self.validate_type_annotation(
-                    &TypeExpr::Named(*name),
+                    &TypeExpr::synthetic(TypeExprKind::Named(*name)),
                     span,
                     interner,
                     type_param_scope,
@@ -771,7 +773,7 @@ impl Analyzer {
                 for arg in args {
                     self.validate_type_annotation(arg, span, interner, type_param_scope);
                     // Check if type argument is a struct type (not allowed as generic args)
-                    if let TypeExpr::Named(sym) = arg {
+                    if let TypeExprKind::Named(sym) = &arg.kind {
                         let resolved = self
                             .resolver(interner)
                             .resolve_type(*sym, &self.entity_registry());
@@ -790,24 +792,24 @@ impl Analyzer {
                     }
                 }
             }
-            TypeExpr::Array(elem) | TypeExpr::Optional(elem) => {
+            TypeExprKind::Array(elem) | TypeExprKind::Optional(elem) => {
                 self.validate_type_annotation(elem, span, interner, type_param_scope);
             }
-            TypeExpr::FixedArray { element, .. } => {
+            TypeExprKind::FixedArray { element, .. } => {
                 self.validate_type_annotation(element, span, interner, type_param_scope);
             }
-            TypeExpr::Tuple(elements) => {
+            TypeExprKind::Tuple(elements) => {
                 for elem in elements {
                     self.validate_type_annotation(elem, span, interner, type_param_scope);
                 }
             }
-            TypeExpr::Union(variants) => {
+            TypeExprKind::Union(variants) => {
                 for variant in variants {
                     self.validate_type_annotation(variant, span, interner, type_param_scope);
                     // Structs are allowed in unions via auto-boxing (v-7d4b)
                 }
             }
-            TypeExpr::Function {
+            TypeExprKind::Function {
                 params,
                 return_type,
             } => {
@@ -816,7 +818,7 @@ impl Analyzer {
                 }
                 self.validate_type_annotation(return_type, span, interner, type_param_scope);
             }
-            TypeExpr::Fallible {
+            TypeExprKind::Fallible {
                 success_type,
                 error_type,
             } => {
@@ -1524,8 +1526,8 @@ impl Analyzer {
             };
 
             // Extract and resolve type arguments directly to TypeId
-            let type_arg_ids: Vec<ArenaTypeId> = match iface_type {
-                TypeExpr::Generic { args, .. } => args
+            let type_arg_ids: Vec<ArenaTypeId> = match &iface_type.kind {
+                TypeExprKind::Generic { args, .. } => args
                     .iter()
                     .map(|arg| self.resolve_type_id(arg, interner))
                     .collect(),
@@ -1938,8 +1940,8 @@ impl Analyzer {
         trait_type: &'a TypeExpr,
         interner: &Interner,
     ) -> Option<(TypeDefId, &'a [TypeExpr])> {
-        match trait_type {
-            TypeExpr::QualifiedPath { segments, args } => {
+        match &trait_type.kind {
+            TypeExprKind::QualifiedPath { segments, args } => {
                 // Qualified path: mod.Interface or mod.sub.Interface
                 if segments.is_empty() {
                     return None;
@@ -2002,7 +2004,7 @@ impl Analyzer {
                 }
                 None
             }
-            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                 // Non-qualified: use standard resolver
                 let iface_str = interner.resolve(*sym);
                 let type_def_id = self
@@ -2031,8 +2033,8 @@ impl Analyzer {
                 let type_def_id = final_type_def_id;
 
                 // Return type args as references for caller to resolve
-                let type_args: &[TypeExpr] = match trait_type {
-                    TypeExpr::Generic { args, .. } => args.as_slice(),
+                let type_args: &[TypeExpr] = match &trait_type.kind {
+                    TypeExprKind::Generic { args, .. } => args.as_slice(),
                     _ => &[],
                 };
 
@@ -2059,7 +2061,7 @@ impl Analyzer {
         let mut scope = TypeParamScope::new();
 
         // Only Generic target types can introduce type params
-        let TypeExpr::Generic { name, args } = target_type else {
+        let TypeExprKind::Generic { name, args } = &target_type.kind else {
             return scope;
         };
 
@@ -2089,7 +2091,7 @@ impl Analyzer {
         // An arg is a type param if it's a Named symbol that doesn't resolve to a known type.
         let mut seen = Vec::new();
         for arg in args {
-            if let TypeExpr::Named(sym) = arg {
+            if let TypeExprKind::Named(sym) = &arg.kind {
                 let arg_name = interner.resolve(*sym);
                 let is_known_type = self
                     .resolver(interner)
@@ -2141,7 +2143,7 @@ impl Analyzer {
 
             // Provide more specific error for qualified paths
             if is_qualified_path(trait_type) {
-                if let TypeExpr::QualifiedPath { segments, .. } = trait_type {
+                if let TypeExprKind::QualifiedPath { segments, .. } = &trait_type.kind {
                     let first_sym = segments[0];
                     // Check if first segment is a module
                     if let Some(type_id) = self.get_variable_type_id(first_sym) {
@@ -2191,8 +2193,8 @@ impl Analyzer {
 
         // Validate target type exists
         if target_type_id.is_invalid() {
-            let type_name = match &impl_block.target_type {
-                TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
+            let type_name = match &impl_block.target_type.kind {
+                TypeExprKind::Named(sym) => interner.resolve(*sym).to_string(),
                 _ => "unknown".to_string(),
             };
             self.add_error(
@@ -2392,11 +2394,11 @@ impl Analyzer {
                 // This enables codegen to look up method signatures via find_method_on_type
                 if let Some(entity_type_id) = entity_type_id {
                     // Build full method name for entity registry
-                    let type_name_str = match &impl_block.target_type {
-                        TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                    let type_name_str = match &impl_block.target_type.kind {
+                        TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                             interner.resolve(*sym).to_string()
                         }
-                        TypeExpr::Primitive(prim) => {
+                        TypeExprKind::Primitive(prim) => {
                             let name_id = self.name_table().primitives.from_ast(*prim);
                             self.name_table().display(name_id)
                         }
@@ -2451,11 +2453,11 @@ impl Analyzer {
                     .or_else(|| self.entity_registry().type_by_name(impl_type_id.name_id()));
 
                 if let Some(entity_type_id) = entity_type_id {
-                    let type_name_str = match &impl_block.target_type {
-                        TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                    let type_name_str = match &impl_block.target_type.kind {
+                        TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                             interner.resolve(*sym).to_string()
                         }
-                        TypeExpr::Primitive(prim) => {
+                        TypeExprKind::Primitive(prim) => {
                             let name_id = self.name_table().primitives.from_ast(*prim);
                             self.name_table_mut().display(name_id)
                         }

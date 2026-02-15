@@ -246,7 +246,7 @@ impl<'src> Parser<'src> {
                 }
 
                 // Explicit type syntax in patterns is always a type pattern.
-                if !matches!(type_expr, TypeExpr::Named(_)) {
+                if !matches!(type_expr.kind, TypeExprKind::Named(_)) {
                     let span = token.span.merge(self.previous.span);
                     return Ok(Pattern {
                         id: self.next_id(),
@@ -400,6 +400,8 @@ impl<'src> Parser<'src> {
         &mut self,
         first: Symbol,
     ) -> Result<TypeExpr, ParseError> {
+        // The identifier was already consumed; its span is in self.previous
+        let start_span = self.previous.span;
         let mut segments = vec![first];
 
         while self.match_token(TokenType::Dot) {
@@ -423,12 +425,19 @@ impl<'src> Parser<'src> {
             Vec::new()
         };
 
+        let span = start_span.merge(self.previous.span);
         if segments.len() > 1 {
-            Ok(TypeExpr::QualifiedPath { segments, args })
+            Ok(TypeExpr::new(
+                TypeExprKind::QualifiedPath { segments, args },
+                span,
+            ))
         } else if args.is_empty() {
-            Ok(TypeExpr::Named(first))
+            Ok(TypeExpr::new(TypeExprKind::Named(first), start_span))
         } else {
-            Ok(TypeExpr::Generic { name: first, args })
+            Ok(TypeExpr::new(
+                TypeExprKind::Generic { name: first, args },
+                span,
+            ))
         }
     }
 }

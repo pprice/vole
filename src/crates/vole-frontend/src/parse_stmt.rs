@@ -269,7 +269,7 @@ impl<'src> Parser<'src> {
         // 1. Explicit `: type` annotation forces type parsing
         // 2. Unambiguous type patterns (union, structural, etc.)
         let is_type_alias = ty.as_ref().is_some_and(
-            |t| matches!(t, TypeExpr::Named(s) if self.interner.resolve(*s) == "type"),
+            |t| matches!(t.kind, TypeExprKind::Named(s) if self.interner.resolve(s) == "type"),
         ) || self.is_unambiguous_type_pattern();
 
         let (init, end_span) = if is_type_alias {
