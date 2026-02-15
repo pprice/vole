@@ -5,6 +5,8 @@
 //! its implementation file and adding one line here.
 
 mod array_from_vars;
+mod array_length_guard;
+mod array_length_zero_check;
 mod array_uniform_ops;
 mod assert_stmt;
 mod bool_chain;
@@ -23,24 +25,37 @@ mod edge_case_split;
 mod empty_array_iter;
 mod empty_range;
 mod empty_string_concat;
+mod empty_string_iter_let;
 mod empty_string_ops;
 mod f64_comparison_edge;
 mod f64_literal_ops;
 mod field_closure;
+mod filter_iter_tostring;
+mod for_in_match_accum;
 mod for_interpolation_concat;
+mod for_iter_when_string_body;
+mod for_length_indexed;
+mod for_push_collect;
 mod for_range_tostring_build;
 mod for_range_when_accum;
+mod for_reduce_pattern;
+mod for_when_accumulate;
 mod generic_closure_chain;
 mod i32_boundary;
 mod identity_arithmetic;
 mod interpolation_concat;
 mod interpolation_expr;
 mod interpolation_with_iter;
+mod iter_in_when_arms;
+mod iter_reduce_let;
+mod iter_take_skip_collect;
 mod iter_terminal_chain;
+mod iter_while_accum;
 mod last_elem_access;
 mod length_comparison;
 mod literal_method;
 mod manual_minmax;
+mod map_tostring_reduce;
 mod match_array;
 mod match_array_length;
 mod match_closure;
@@ -52,6 +67,7 @@ mod match_method;
 mod match_method_result;
 mod match_optional;
 mod match_sorted;
+mod match_sorted_length;
 mod match_string_length;
 mod match_to_string_arms;
 mod match_tostring_arms;
@@ -73,10 +89,13 @@ mod range_when_accum;
 mod reassign_from_when;
 mod repeat_literal;
 mod repeated_string_ops;
+mod reverse_collect;
 mod sentinel_closure;
 mod single_char_string_ops;
 mod single_elem_array_ops;
 mod single_elem_range;
+mod sorted_collect;
+mod sorted_iter_accum;
 mod split_for_loop;
 mod string_build_match;
 mod string_char_at;
@@ -93,6 +112,7 @@ mod tostring_length;
 mod variable_shadow;
 mod when_concat_arms;
 mod when_f64_cond;
+mod when_iter_predicate;
 mod when_length_compare;
 mod when_match_combo;
 mod when_replace_result;
@@ -103,6 +123,7 @@ mod when_with_contains;
 mod while_false;
 mod while_string_build;
 mod whitespace_string_ops;
+mod widening_let;
 mod wildcard_match;
 mod zero_division_guard;
 
@@ -221,5 +242,28 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(when_length_compare::WhenLengthCompare),
         Box::new(split_for_loop::SplitForLoop),
         Box::new(closure_result_concat::ClosureResultConcat),
+        // -- Array-dependent rules (batch 8) ------------------------------------
+        Box::new(map_tostring_reduce::MapTostringReduce),
+        Box::new(when_iter_predicate::WhenIterPredicate),
+        Box::new(iter_in_when_arms::IterInWhenArms),
+        Box::new(sorted_collect::SortedCollect),
+        Box::new(reverse_collect::ReverseCollect),
+        Box::new(iter_take_skip_collect::IterTakeSkipCollect),
+        Box::new(array_length_guard::ArrayLengthGuard),
+        Box::new(array_length_zero_check::ArrayLengthZeroCheck),
+        Box::new(match_sorted_length::MatchSortedLength),
+        Box::new(for_when_accumulate::ForWhenAccumulate),
+        Box::new(for_iter_when_string_body::ForIterWhenStringBody),
+        // -- Complex array loop rules (batch 9) ---------------------------------
+        Box::new(iter_while_accum::IterWhileAccum),
+        Box::new(for_in_match_accum::ForInMatchAccum),
+        Box::new(for_push_collect::ForPushCollect),
+        Box::new(for_length_indexed::ForLengthIndexed),
+        Box::new(iter_reduce_let::IterReduceLet),
+        Box::new(for_reduce_pattern::ForReducePattern),
+        Box::new(sorted_iter_accum::SortedIterAccum),
+        Box::new(filter_iter_tostring::FilterIterTostring),
+        Box::new(widening_let::WideningLet),
+        Box::new(empty_string_iter_let::EmptyStringIterLet),
     ]
 }
