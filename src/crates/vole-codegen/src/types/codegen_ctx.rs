@@ -1,6 +1,6 @@
 // types/codegen_ctx.rs
 //
-// JIT context with mutable infrastructure for code generation.
+// Codegen context with mutable infrastructure for code generation.
 
 use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
@@ -8,7 +8,7 @@ use cranelift_module::Module;
 
 use crate::FunctionRegistry;
 
-/// JIT context - mutable infrastructure for code generation.
+/// Codegen context - mutable infrastructure for code generation.
 ///
 /// This holds only the mutable parts needed during compilation:
 /// - JIT module for declaring/defining functions
@@ -16,14 +16,14 @@ use crate::FunctionRegistry;
 ///
 /// Read-only data (analyzed program, type metadata, etc.) lives in CompileEnv.
 /// Per-function state (return type, substitutions) lives in FunctionCtx.
-pub struct JitCtx<'a> {
+pub struct CodegenCtx<'a> {
     /// Cranelift JIT module for function declarations
     pub module: &'a mut JITModule,
     /// Function identity and ID management
     pub func_registry: &'a mut FunctionRegistry,
 }
 
-impl<'a> JitCtx<'a> {
+impl<'a> CodegenCtx<'a> {
     pub fn new(module: &'a mut JITModule, func_registry: &'a mut FunctionRegistry) -> Self {
         Self {
             module,
@@ -55,6 +55,3 @@ impl<'a> JitCtx<'a> {
         self.module
     }
 }
-
-// Keep CodegenCtx as a type alias during migration
-pub type CodegenCtx<'a> = JitCtx<'a>;

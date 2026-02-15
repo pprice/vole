@@ -1241,6 +1241,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         variant_idx
     }
 
+    /// Compute a pointer to the `idx`-th `TaggedValue` slot in a dynamic array,
+    /// without any bounds check.  The caller must guarantee `idx < len`.
+    pub fn dynamic_array_elem_ptr_unchecked(&mut self, arr_ptr: Value, idx: Value) -> Value {
+        let ptr_type = self.ptr_type();
+        let data_offset = std::mem::offset_of!(vole_runtime::array::RcArray, data) as i32;
+        let tagged_value_size = size_of::<vole_runtime::value::TaggedValue>() as i64;
+        let data_ptr = self
+            .builder
+            .ins()
+            .load(ptr_type, MemFlags::new(), arr_ptr, data_offset);
+        let idx_ptr = if ptr_type == types::I64 {
+            idx
+        } else {
+            self.builder.ins().ireduce(ptr_type, idx)
+        };
+        let stride = self.builder.ins().iconst(ptr_type, tagged_value_size);
+        let elem_offset = self.builder.ins().imul(idx_ptr, stride);
+        self.builder.ins().iadd(data_ptr, elem_offset)
+    }
+
     /// Convert a value to dynamic array storage representation for a known element type.
     ///
     /// Returns `(tag, payload_bits, stored_value_for_lifecycle)`.
@@ -1574,6 +1594,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Call a pure runtime function with caching (CSE)
+    #[allow(dead_code)]
     pub fn call_runtime_cached(&mut self, func: RuntimeFn, args: &[Value]) -> CodegenResult<Value> {
         let key = (func, SmallVec::from_slice(args));
         if let Some(&cached) = self.call_cache.get(&key) {
