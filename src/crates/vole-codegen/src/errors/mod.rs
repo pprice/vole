@@ -6,10 +6,11 @@
 //! for debugging.
 
 use std::fmt;
+use vole_frontend::Span;
 
-/// Code generation error with context for debugging.
+/// The kind of code generation error.
 #[derive(Debug, Clone)]
-pub enum CodegenError {
+pub enum CodegenErrorKind {
     /// Feature not yet implemented in codegen
     UnsupportedFeature {
         feature: &'static str,
@@ -46,30 +47,42 @@ pub enum CodegenError {
     },
 }
 
+/// Code generation error with optional source span for diagnostics.
+#[derive(Debug, Clone)]
+pub struct CodegenError {
+    /// The kind of error.
+    pub kind: CodegenErrorKind,
+    /// Source location where the error occurred, if available.
+    pub span: Option<Span>,
+}
+
 impl CodegenError {
     /// Create an unsupported feature error
     pub fn unsupported(feature: &'static str) -> Self {
-        CodegenError::UnsupportedFeature {
+        CodegenErrorKind::UnsupportedFeature {
             feature,
             context: None,
         }
+        .into()
     }
 
     /// Create an unsupported feature error with context
     pub fn unsupported_with_context(feature: &'static str, context: impl Into<String>) -> Self {
-        CodegenError::UnsupportedFeature {
+        CodegenErrorKind::UnsupportedFeature {
             feature,
             context: Some(context.into()),
         }
+        .into()
     }
 
     /// Create an argument count error
     pub fn arg_count(function: impl Into<String>, expected: usize, found: usize) -> Self {
-        CodegenError::ArgumentCount {
+        CodegenErrorKind::ArgumentCount {
             function: function.into(),
             expected,
             found,
         }
+        .into()
     }
 
     /// Create a type mismatch error
@@ -78,73 +91,92 @@ impl CodegenError {
         expected: impl Into<String>,
         found: impl Into<String>,
     ) -> Self {
-        CodegenError::TypeMismatch {
+        CodegenErrorKind::TypeMismatch {
             context,
             expected: expected.into(),
             found: found.into(),
         }
+        .into()
     }
 
     /// Create a not found error
     pub fn not_found(kind: &'static str, name: impl Into<String>) -> Self {
-        CodegenError::NotFound {
+        CodegenErrorKind::NotFound {
             kind,
             name: name.into(),
         }
+        .into()
     }
 
     /// Create an internal error
     pub fn internal(message: &'static str) -> Self {
-        CodegenError::InternalError {
+        CodegenErrorKind::InternalError {
             message,
             context: None,
         }
+        .into()
     }
 
     /// Create an internal error with context
     pub fn internal_with_context(message: &'static str, context: impl Into<String>) -> Self {
-        CodegenError::InternalError {
+        CodegenErrorKind::InternalError {
             message,
             context: Some(context.into()),
         }
+        .into()
     }
 
     /// Wrap a Cranelift module error
     pub fn cranelift(e: impl fmt::Display) -> Self {
-        CodegenError::InternalError {
+        CodegenErrorKind::InternalError {
             message: "cranelift error",
             context: Some(e.to_string()),
         }
+        .into()
     }
 
     /// Wrap an IO error
     pub fn io(e: impl fmt::Display) -> Self {
-        CodegenError::InternalError {
+        CodegenErrorKind::InternalError {
             message: "io error",
             context: Some(e.to_string()),
         }
+        .into()
     }
 
     /// Create a missing resource error
     pub fn missing_resource(resource: &'static str) -> Self {
-        CodegenError::MissingResource {
+        CodegenErrorKind::MissingResource {
             resource,
             context: None,
         }
+        .into()
+    }
+
+    /// Attach a source span to this error for diagnostics.
+    pub fn with_span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+}
+
+impl From<CodegenErrorKind> for CodegenError {
+    fn from(kind: CodegenErrorKind) -> Self {
+        CodegenError { kind, span: None }
     }
 }
 
 impl fmt::Display for CodegenError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            CodegenError::UnsupportedFeature { feature, context } => {
+        match &self.kind {
+            CodegenErrorKind::UnsupportedFeature { feature, context } => {
                 write!(f, "unsupported feature: {}", feature)?;
                 if let Some(ctx) = context {
                     write!(f, " ({})", ctx)?;
                 }
                 Ok(())
             }
-            CodegenError::ArgumentCount {
+            CodegenErrorKind::ArgumentCount {
                 function,
                 expected,
                 found,
@@ -155,24 +187,24 @@ impl fmt::Display for CodegenError {
                     function, expected, found
                 )
             }
-            CodegenError::TypeMismatch {
+            CodegenErrorKind::TypeMismatch {
                 context,
                 expected,
                 found,
             } => {
                 write!(f, "{}: expected {}, found {}", context, expected, found)
             }
-            CodegenError::NotFound { kind, name } => {
+            CodegenErrorKind::NotFound { kind, name } => {
                 write!(f, "{} not found: {}", kind, name)
             }
-            CodegenError::InternalError { message, context } => {
+            CodegenErrorKind::InternalError { message, context } => {
                 write!(f, "internal error: {}", message)?;
                 if let Some(ctx) = context {
                     write!(f, " ({})", ctx)?;
                 }
                 Ok(())
             }
-            CodegenError::MissingResource { resource, context } => {
+            CodegenErrorKind::MissingResource { resource, context } => {
                 write!(f, "missing resource: {}", resource)?;
                 if let Some(ctx) = context {
                     write!(f, " ({})", ctx)?;
@@ -251,5 +283,26 @@ mod tests {
     fn test_missing_resource() {
         let err = CodegenError::missing_resource("heap allocator");
         assert_eq!(err.to_string(), "missing resource: heap allocator");
+    }
+
+    #[test]
+    fn test_with_span() {
+        let span = Span {
+            start: 10,
+            end: 20,
+            line: 1,
+            column: 10,
+            end_line: 1,
+            end_column: 20,
+        };
+        let err = CodegenError::unsupported("test feature").with_span(span);
+        assert_eq!(err.span, Some(span));
+        assert_eq!(err.to_string(), "unsupported feature: test feature");
+    }
+
+    #[test]
+    fn test_no_span_by_default() {
+        let err = CodegenError::internal("test");
+        assert_eq!(err.span, None);
     }
 }
