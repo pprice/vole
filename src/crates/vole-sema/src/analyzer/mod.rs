@@ -1,6 +1,7 @@
 // src/sema/analyzer/mod.rs
 
 mod builtins;
+mod context;
 mod declarations;
 mod errors;
 mod expr;
@@ -9,8 +10,10 @@ mod inference;
 mod lambda;
 mod methods;
 mod module;
+mod output;
 mod patterns;
 mod prelude;
+mod state;
 mod stmt;
 mod test_checking;
 mod type_constraints;
@@ -20,22 +23,19 @@ mod type_resolution;
 use type_constraints::validate_defaults;
 
 use crate::ExpressionData;
-use crate::analysis_cache::{IsCheckResult, ModuleCache};
-use crate::compilation_db::CompilationDb;
+use crate::analysis_cache::IsCheckResult;
 use crate::entity_defs::{GenericFuncInfo, TypeDefKind};
 use crate::entity_registry::{EntityRegistry, MethodDefBuilder};
 use crate::errors::{SemanticError, SemanticWarning, unknown_type_hint};
-use crate::expression_data::LambdaDefaults;
 use crate::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
-    TypeParamInfo, TypeParamScope, TypeParamScopeStack, TypeParamVariance,
+    TypeParamInfo, TypeParamScope, TypeParamVariance,
 };
 use crate::implement_registry::{
     ExternalMethodInfo, GenericExternalInfo, ImplTypeId, ImplementRegistry, MethodImpl,
     TypeMappingEntry,
 };
-use crate::module::ModuleLoader;
-use crate::resolution::{MethodResolutions, ResolvedMethod};
+use crate::resolution::ResolvedMethod;
 pub use crate::resolve::ResolverEntityExt;
 use crate::resolve::resolve_type_to_id;
 use crate::type_arena::{TypeArena, TypeId as ArenaTypeId};
@@ -46,420 +46,21 @@ use crate::{
     scope::{Scope, Variable},
 };
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
 use vole_frontend::ast::*;
 use vole_frontend::{Interner, Parser, Span};
-use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
+use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, TypeDefId};
 
-/// Guard that holds a borrow of the name table and provides resolver access.
-/// The name table borrow is independent of other CompilationDb fields,
-/// so entities/types/implements can be borrowed simultaneously.
-pub(crate) struct ResolverGuard<'a> {
-    names: std::cell::Ref<'a, NameTable>,
-    interner: &'a Interner,
-    module_id: ModuleId,
-    imports: &'a [ModuleId],
-    priority_module: Option<ModuleId>,
-}
-
-impl<'a> ResolverGuard<'a> {
-    fn new(
-        db: &'a CompilationDb,
-        interner: &'a Interner,
-        module_id: ModuleId,
-        imports: &'a [ModuleId],
-        priority_module: Option<ModuleId>,
-    ) -> Self {
-        Self {
-            names: db.names(),
-            interner,
-            module_id,
-            imports,
-            priority_module,
-        }
-    }
-
-    /// Get the resolver. The lifetime is tied to this guard.
-    pub(crate) fn resolver(&self) -> Resolver<'_> {
-        Resolver::new(self.interner, &self.names, self.module_id, self.imports)
-            .with_priority_module(self.priority_module)
-    }
-
-    /// Resolve a Symbol to a TypeDefId through the resolution chain.
-    pub(crate) fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId> {
-        use crate::resolve::ResolverEntityExt;
-        self.resolver().resolve_type(sym, registry)
-    }
-
-    /// Resolve a type with fallback to interface/class short name search.
-    pub(crate) fn resolve_type_or_interface(
-        &self,
-        sym: Symbol,
-        registry: &EntityRegistry,
-    ) -> Option<TypeDefId> {
-        use crate::resolve::ResolverEntityExt;
-        self.resolver().resolve_type_or_interface(sym, registry)
-    }
-
-    /// Resolve a type string with fallback to interface/class short name search.
-    pub(crate) fn resolve_type_str_or_interface(
-        &self,
-        name: &str,
-        registry: &EntityRegistry,
-    ) -> Option<TypeDefId> {
-        use crate::resolve::ResolverEntityExt;
-        self.resolver()
-            .resolve_type_str_or_interface(name, registry)
-    }
-}
-
-/// Information about a captured variable during lambda analysis
-#[derive(Debug, Clone)]
-pub(super) struct CaptureInfo {
-    name: Symbol,
-    is_mutable: bool, // Was the captured variable declared with `let mut`
-    is_mutated: bool, // Does the lambda assign to this variable
-}
-
-/// A type error wrapping a miette-enabled SemanticError
-#[derive(Debug, Clone)]
-pub struct TypeError {
-    pub error: SemanticError,
-    pub span: Span,
-}
-
-impl TypeError {
-    /// Create a new type error
-    pub fn new(error: SemanticError, span: Span) -> Self {
-        Self { error, span }
-    }
-}
-
-/// A type warning wrapping a miette-enabled SemanticWarning
-#[derive(Debug, Clone)]
-pub struct TypeWarning {
-    pub warning: SemanticWarning,
-    pub span: Span,
-}
-
-impl TypeWarning {
-    /// Create a new type warning
-    pub fn new(warning: SemanticWarning, span: Span) -> Self {
-        Self { warning, span }
-    }
-}
-
-/// Output from semantic analysis, bundling all analysis results.
-/// Used to construct AnalyzedProgram with program and interner.
-pub struct AnalysisOutput {
-    /// All expression-level metadata (types, method resolutions, generic calls)
-    pub expression_data: ExpressionData,
-    /// Parsed module programs and their interners (for compiling pure Vole functions)
-    pub module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Shared compilation database containing all registries.
-    /// Each field within CompilationDb has its own RefCell for independent borrows.
-    pub db: Rc<CompilationDb>,
-    /// The module ID for the main program (may differ from main_module when using shared cache)
-    pub module_id: ModuleId,
-}
-
-/// Module-level data extracted from `AnalyzerContext` during `into_analysis_results`.
-///
-/// Both the `Ok` (sole owner, move) and `Err` (shared, clone) branches of
-/// `Rc::try_unwrap` populate this struct, letting the `ExpressionData` builder
-/// chain appear exactly once.
-struct ExtractedModuleData {
-    data: FxHashMap<String, crate::expression_data::ModuleAnalysisData>,
-}
-
-/// Tracks return analysis results for a code path.
-///
-/// This struct collects information about return statements encountered during
-/// analysis of a block or function body, used to:
-/// - Infer return types when not declared
-/// - Check for missing returns in non-void functions
-/// - Validate return type consistency across branches
-#[derive(Default, Clone)]
-pub(crate) struct ReturnInfo {
-    /// Whether this code path definitely returns or raises.
-    /// A path "definitely returns" if every control flow path ends in a
-    /// return/raise statement.
-    pub definitely_returns: bool,
-    /// Types and spans from all return statements encountered on this path.
-    /// Used for return type inference, consistency checking, and error reporting.
-    /// Each entry is (type, span) where span points to the return expression.
-    pub return_types: Vec<(ArenaTypeId, Span)>,
-}
-
-/// Builder for creating Analyzer instances with various configurations.
-/// Reduces code duplication across constructors by centralizing initialization logic.
-pub struct AnalyzerBuilder {
-    file: String,
-    cache: Option<Rc<RefCell<ModuleCache>>>,
-    project_root: Option<PathBuf>,
-    auto_detect_root: bool,
-    skip_tests: bool,
-}
-
-impl AnalyzerBuilder {
-    /// Create a new builder for the given file path.
-    pub fn new(file: &str) -> Self {
-        Self {
-            file: file.to_string(),
-            cache: None,
-            project_root: None,
-            auto_detect_root: true,
-            skip_tests: false,
-        }
-    }
-
-    /// Use a shared module cache. The analyzer will use the CompilationDb from the cache.
-    pub fn with_cache(mut self, cache: Rc<RefCell<ModuleCache>>) -> Self {
-        self.cache = Some(cache);
-        self
-    }
-
-    /// Skip processing of tests blocks during analysis.
-    /// When true, `Decl::Tests` is ignored in all analysis passes.
-    pub fn skip_tests(mut self, skip: bool) -> Self {
-        self.skip_tests = skip;
-        self
-    }
-
-    /// Set an explicit project root. If None is passed, auto-detection is still used.
-    pub fn with_project_root(mut self, root: Option<&std::path::Path>) -> Self {
-        self.project_root = root.map(|p| p.to_path_buf());
-        if root.is_some() {
-            self.auto_detect_root = false;
-        }
-        self
-    }
-
-    /// Build the Analyzer with the configured options.
-    pub fn build(self) -> Analyzer {
-        // Step 1: Resolve the db (new or from cache)
-        let (db, has_cache) = if let Some(ref cache) = self.cache {
-            (cache.borrow().db(), true)
-        } else {
-            (Rc::new(CompilationDb::new()), false)
-        };
-
-        // Step 2: Resolve current file path
-        let file_path = std::path::Path::new(&self.file);
-        let current_file_path = file_path.canonicalize().ok();
-
-        // Step 3: Determine module ID
-        // When using shared cache, each file gets its own module ID based on its path
-        // to prevent type conflicts when different files define types with the same name.
-        let current_module = if has_cache {
-            let module_path = current_file_path
-                .as_ref()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| self.file.clone());
-            db.names_mut().module_id(&module_path)
-        } else {
-            db.main_module()
-        };
-
-        // Step 4: Determine effective project root
-        let effective_root = if let Some(root) = self.project_root {
-            Some(root)
-        } else if self.auto_detect_root {
-            current_file_path
-                .as_ref()
-                .map(|p| ModuleLoader::detect_project_root(p))
-        } else {
-            None
-        };
-
-        // Step 5: Create module loader with project root
-        let mut module_loader = ModuleLoader::new();
-        if let Some(root) = effective_root {
-            module_loader.set_project_root(root);
-        }
-
-        // Step 6: Create shared context and the analyzer
-        let ctx = Rc::new(AnalyzerContext::new(db, self.cache));
-        let mut analyzer = Analyzer {
-            ctx,
-            module: ModuleContext {
-                current_module,
-                current_file_path,
-                module_loader,
-                skip_tests: self.skip_tests,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-
-        // Step 7: Register built-in interfaces and implementations
-        analyzer.register_builtins();
-
-        analyzer
-    }
-}
-
-/// Shared state across all Analyzer instances (parent + sub-analyzers).
-/// Single `Rc` clone instead of 3-4 individual `Rc` clones per sub-analyzer.
-pub(crate) struct AnalyzerContext {
-    /// Unified compilation database containing all registries.
-    /// Shared via `Rc` so sub-analyzers use the same db, making TypeIds
-    /// valid across all analyzers and eliminating clone/merge operations.
-    /// Each field within CompilationDb has its own RefCell for independent borrows.
-    pub(crate) db: Rc<CompilationDb>,
-    /// Cached module TypeIds by import path (avoids re-parsing).
-    pub(crate) module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
-    /// Parsed module programs and their interners (for compiling pure Vole functions).
-    pub(crate) module_programs: RefCell<FxHashMap<String, (Program, Interner)>>,
-    /// Per-module analysis data (module path -> ModuleAnalysisData).
-    /// NodeIds are file-local and collide across modules, so each module gets
-    /// its own set of NodeId-keyed maps. Uses ArenaTypeId (= TypeId) internally.
-    pub(crate) module_data: RefCell<FxHashMap<String, crate::expression_data::ModuleAnalysisData>>,
-    /// Optional shared cache for module analysis results.
-    /// When set, modules are cached after analysis and reused across Analyzer instances.
-    pub(crate) module_cache: Option<Rc<RefCell<ModuleCache>>>,
-    /// Set of modules currently being analyzed (for circular import detection).
-    /// Shared across all sub-analyzers via Rc<AnalyzerContext> so that cycles
-    /// are detected even across nested module imports.
-    pub(crate) modules_in_progress: RefCell<FxHashSet<String>>,
-}
-
-impl AnalyzerContext {
-    /// Create a new context with the given db and optional cache.
-    fn new(db: Rc<CompilationDb>, cache: Option<Rc<RefCell<ModuleCache>>>) -> Self {
-        Self {
-            db,
-            module_type_ids: RefCell::new(FxHashMap::default()),
-            module_programs: RefCell::new(FxHashMap::default()),
-            module_data: RefCell::new(FxHashMap::default()),
-            module_cache: cache,
-            modules_in_progress: RefCell::new(FxHashSet::default()),
-        }
-    }
-
-    /// Create an empty context (for Default impl).
-    fn empty() -> Self {
-        Self::new(Rc::new(CompilationDb::new()), None)
-    }
-}
-
-/// Type checking environment: scope, type overrides, and function context.
-#[derive(Default)]
-pub(super) struct TypeCheckEnv {
-    pub scope: Scope,
-    /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
-    pub type_overrides: FxHashMap<Symbol, ArenaTypeId>,
-    pub current_function_return: Option<ArenaTypeId>,
-    /// Current function's error type (if fallible)
-    pub current_function_error_type: Option<ArenaTypeId>,
-    /// Generator context: if inside a generator function, this holds the Iterator element type.
-    /// None means we're not in a generator (or not in a function at all).
-    pub current_generator_element_type: Option<ArenaTypeId>,
-    /// If we're inside a static method, this holds the method name (for error reporting).
-    /// None means we're not in a static method.
-    pub current_static_method: Option<String>,
-    /// Stack of type parameter scopes for nested generic contexts.
-    pub type_param_stack: TypeParamScopeStack,
-    /// Parent module IDs for hierarchical resolution (e.g., virtual test modules
-    /// that need to see parent module types). These are searched after the current
-    /// module but before the builtin module, providing scope inheritance for types.
-    pub parent_modules: Vec<ModuleId>,
-    /// Priority module for type resolution in tests blocks. When set, this module
-    /// is checked BEFORE current_module during type resolution, enabling types
-    /// defined in tests blocks to shadow parent module types of the same name.
-    pub type_priority_module: Option<ModuleId>,
-}
-
-/// Lambda/closure capture analysis state.
-#[derive(Default)]
-pub(super) struct LambdaState {
-    /// Stack of lambda scopes for capture analysis. Each entry is a FxHashMap
-    /// mapping captured variable names to their capture info.
-    pub captures: Vec<FxHashMap<Symbol, CaptureInfo>>,
-    /// Stack of sets tracking variables defined locally in each lambda
-    /// (parameters and let bindings inside the lambda body)
-    pub locals: Vec<HashSet<Symbol>>,
-    /// Stack of side effect flags for currently analyzed lambdas
-    pub side_effects: Vec<bool>,
-    /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
-    /// Maps Symbol -> (lambda_node_id, required_params)
-    pub variables: FxHashMap<Symbol, (NodeId, usize)>,
-    /// Lambda defaults for closure calls. Maps call site NodeId to lambda info.
-    pub defaults: FxHashMap<NodeId, LambdaDefaults>,
-    /// Lambda analysis results (captures and side effects).
-    /// Maps lambda expression NodeId -> LambdaAnalysis.
-    pub analysis: FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>,
-}
-
-/// Analysis results collected during type checking for codegen.
-#[derive(Default)]
-pub(super) struct AnalysisResults {
-    /// Resolved types for each expression node (for codegen)
-    /// Maps expression node IDs to their interned type handles for O(1) equality.
-    pub expr_types: FxHashMap<NodeId, ArenaTypeId>,
-    /// Type check results for `is` expressions and type patterns (for codegen)
-    /// Maps NodeId -> IsCheckResult to eliminate runtime type lookups
-    pub is_check_results: FxHashMap<NodeId, IsCheckResult>,
-    /// Resolved method calls for codegen
-    pub method_resolutions: MethodResolutions,
-    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
-    pub generic_calls: FxHashMap<NodeId, MonomorphKey>,
-    /// Mapping from method call expression NodeId to ClassMethodMonomorphKey (for generic class method calls)
-    pub class_method_calls: FxHashMap<NodeId, ClassMethodMonomorphKey>,
-    /// Mapping from static method call expression NodeId to StaticMethodMonomorphKey (for generic static method calls)
-    pub static_method_calls: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    /// Substituted return types for generic method calls.
-    /// When a method like `list.head()` is called on `List<i32>`, the generic return type `T`
-    /// is substituted to `i32`. This map stores the concrete type so codegen doesn't recompute.
-    pub substituted_return_types: FxHashMap<NodeId, ArenaTypeId>,
-    /// Declared variable types for let statements with explicit type annotations.
-    /// Maps init expression NodeId -> declared TypeId for codegen to use.
-    pub declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
-    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    /// Used by codegen to compile scoped type declarations (records, classes) within tests blocks.
-    pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
-}
-
-/// Function and global variable symbol tables.
-#[derive(Default)]
-pub(super) struct SymbolTables {
-    pub functions: FxHashMap<Symbol, FunctionType>,
-    /// Functions registered by string name (for prelude functions that cross interner boundaries)
-    pub functions_by_name: FxHashMap<String, FunctionType>,
-    /// Generic prelude functions by string name -> NameId (for cross-interner generic function lookup)
-    pub generic_prelude_functions: FxHashMap<String, NameId>,
-    pub globals: FxHashMap<Symbol, ArenaTypeId>,
-    /// Globals with constant initializers (for constant expression checking)
-    pub constant_globals: HashSet<Symbol>,
-}
-
-/// Module loading and file context state.
-#[derive(Default)]
-pub(super) struct ModuleContext {
-    /// Module loader for handling imports
-    pub module_loader: ModuleLoader,
-    /// Flag to prevent recursive prelude loading
-    pub loading_prelude: bool,
-    /// Current module being analyzed (for proper NameId registration)
-    pub current_module: ModuleId,
-    /// Current file path being analyzed (for relative imports).
-    /// This is set from the file path passed to Analyzer::new() and updated
-    /// when analyzing imported modules.
-    pub current_file_path: Option<PathBuf>,
-    /// When true, skip processing of `Decl::Tests` in all analysis passes.
-    /// Set by `vole run` to avoid sema/codegen cost for tests blocks in production.
-    pub skip_tests: bool,
-}
-
-/// Diagnostic errors and warnings collected during analysis.
-#[derive(Default)]
-pub(super) struct Diagnostics {
-    pub errors: Vec<TypeError>,
-    pub warnings: Vec<TypeWarning>,
-}
+// Re-export extracted types to preserve the existing API.
+use context::ExtractedModuleData;
+pub(crate) use context::{AnalyzerContext, ResolverGuard};
+pub(crate) use output::MethodLookup;
+pub use output::{AnalysisOutput, AnalyzerBuilder, TypeError, TypeWarning};
+pub(super) use output::{AnalysisResults, SymbolTables};
+pub(crate) use state::ReturnInfo;
+pub(super) use state::{CaptureInfo, Diagnostics, LambdaState, ModuleContext, TypeCheckEnv};
 
 pub struct Analyzer {
     // Shared state (single Rc clone for sub-analyzers)
@@ -472,12 +73,6 @@ pub struct Analyzer {
     pub(super) symbols: SymbolTables,
     pub(super) module: ModuleContext,
     pub(super) diagnostics: Diagnostics,
-}
-
-/// Result of looking up a method on a type via EntityRegistry
-pub(crate) struct MethodLookup {
-    pub(crate) method_id: MethodId,
-    pub(crate) signature_id: ArenaTypeId,
 }
 
 impl Analyzer {
