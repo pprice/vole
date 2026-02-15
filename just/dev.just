@@ -7,6 +7,46 @@ set working-directory := ".."
 default:
     @just --list dev
 
+# Open a new zellij tab and start a ticket agent workflow.
+# Usage:
+#   just dev start-ticket [ticket_id] [agent_name]
+# Notes:
+#   - Must be run inside an active zellij session.
+#   - If ticket_id is omitted, this reads it from .ticket in repo root.
+start-ticket ticket_id="" agent_name="claude":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v zellij >/dev/null 2>&1; then
+      echo "ERROR: zellij not found in PATH" >&2
+      exit 1
+    fi
+
+    if [[ -z "${ZELLIJ:-}" ]]; then
+      echo "ERROR: this command must be run inside a zellij session" >&2
+      exit 1
+    fi
+
+    repo_root="$(git rev-parse --show-toplevel)"
+    ticket_id="{{ticket_id}}"
+
+    if [[ -z "${ticket_id}" ]]; then
+      if [[ -f "${repo_root}/.ticket" || -L "${repo_root}/.ticket" ]]; then
+        ticket_id="$(head -n1 "${repo_root}/.ticket" | tr -d '[:space:]')"
+      fi
+    fi
+
+    if [[ -z "${ticket_id}" ]]; then
+      echo "ERROR: no ticket_id provided and .ticket is missing/empty" >&2
+      exit 1
+    fi
+
+    tab_name="agent-${ticket_id}"
+    zellij action new-tab --name "${tab_name}" --cwd "${repo_root}"
+    zellij action go-to-tab-name "${tab_name}"
+    zellij action write-chars "cd ${repo_root} && just agent start-ticket ${ticket_id} --agent {{agent_name}}"
+    zellij action write 10
+
 # Show next available error code for a category (lexer, parser, sema)
 next-error category:
     #!/usr/bin/env bash
