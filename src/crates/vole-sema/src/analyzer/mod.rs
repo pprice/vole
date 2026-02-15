@@ -172,6 +172,21 @@ pub struct AnalysisOutput {
     pub module_id: ModuleId,
 }
 
+/// Module-level data extracted from `AnalyzerContext` during `into_analysis_results`.
+///
+/// Both the `Ok` (sole owner, move) and `Err` (shared, clone) branches of
+/// `Rc::try_unwrap` populate this struct, letting the `ExpressionData` builder
+/// chain appear exactly once.
+struct ExtractedModuleData {
+    expr_types: FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>,
+    method_resolutions: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
+    is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
+    generic_calls: FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>,
+    class_method_calls: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
+    static_method_calls: FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>,
+    declared_var_types: FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>,
+}
+
 /// Tracks return analysis results for a code path.
 ///
 /// This struct collects information about return statements encountered during
@@ -552,79 +567,64 @@ impl Analyzer {
 
         // Try to take ownership of the shared context to avoid cloning AST trees.
         // By this point all sub-analyzers should be dropped, so Rc strong count is 1.
-        match Rc::try_unwrap(self.ctx) {
+        let (module_data, module_programs, db) = match Rc::try_unwrap(self.ctx) {
             Ok(ctx) => {
                 // Sole owner: move data out of RefCells without cloning
-                let module_expr_types = ctx.module_expr_types.into_inner();
-                let module_method_resolutions = ctx.module_method_resolutions.into_inner();
-                let module_is_check_results = ctx.module_is_check_results.into_inner();
-                let module_generic_calls = ctx.module_generic_calls.into_inner();
-                let module_class_method_calls = ctx.module_class_method_calls.into_inner();
-                let module_static_method_calls = ctx.module_static_method_calls.into_inner();
-                let module_declared_var_types = ctx.module_declared_var_types.into_inner();
-                let module_programs = ctx.module_programs.into_inner();
-                let db = ctx.db;
-                let expression_data = ExpressionData::builder()
-                    .types(expr_types)
-                    .methods(method_resolutions)
-                    .generics(generic_calls)
-                    .class_method_generics(class_method_calls)
-                    .static_method_generics(static_method_calls)
-                    .module_types(module_expr_types)
-                    .module_methods(module_method_resolutions)
-                    .module_is_check_results(module_is_check_results)
-                    .module_generics(module_generic_calls)
-                    .module_class_method_generics(module_class_method_calls)
-                    .module_static_method_generics(module_static_method_calls)
-                    .substituted_return_types(substituted_return_types)
-                    .lambda_defaults(lambda_defaults)
-                    .tests_virtual_modules(tests_virtual_modules)
-                    .is_check_results(is_check_results)
-                    .declared_var_types(declared_var_types)
-                    .module_declared_var_types(module_declared_var_types)
-                    .build();
-                AnalysisOutput {
-                    expression_data,
-                    module_programs,
-                    db,
-                    module_id: current_module,
-                }
+                let data = ExtractedModuleData {
+                    expr_types: ctx.module_expr_types.into_inner(),
+                    method_resolutions: ctx.module_method_resolutions.into_inner(),
+                    is_check_results: ctx.module_is_check_results.into_inner(),
+                    generic_calls: ctx.module_generic_calls.into_inner(),
+                    class_method_calls: ctx.module_class_method_calls.into_inner(),
+                    static_method_calls: ctx.module_static_method_calls.into_inner(),
+                    declared_var_types: ctx.module_declared_var_types.into_inner(),
+                };
+                (data, ctx.module_programs.into_inner(), ctx.db)
             }
             Err(ctx) => {
                 // Other references exist: fall back to cloning (should not happen in practice)
-                let module_expr_types = ctx.module_expr_types.borrow().clone();
-                let module_method_resolutions = ctx.module_method_resolutions.borrow().clone();
-                let module_is_check_results = ctx.module_is_check_results.borrow().clone();
-                let module_generic_calls = ctx.module_generic_calls.borrow().clone();
-                let module_class_method_calls = ctx.module_class_method_calls.borrow().clone();
-                let module_static_method_calls = ctx.module_static_method_calls.borrow().clone();
-                let module_declared_var_types = ctx.module_declared_var_types.borrow().clone();
-                let expression_data = ExpressionData::builder()
-                    .types(expr_types)
-                    .methods(method_resolutions)
-                    .generics(generic_calls)
-                    .class_method_generics(class_method_calls)
-                    .static_method_generics(static_method_calls)
-                    .module_types(module_expr_types)
-                    .module_methods(module_method_resolutions)
-                    .module_is_check_results(module_is_check_results)
-                    .module_generics(module_generic_calls)
-                    .module_class_method_generics(module_class_method_calls)
-                    .module_static_method_generics(module_static_method_calls)
-                    .substituted_return_types(substituted_return_types)
-                    .lambda_defaults(lambda_defaults)
-                    .tests_virtual_modules(tests_virtual_modules)
-                    .is_check_results(is_check_results)
-                    .declared_var_types(declared_var_types)
-                    .module_declared_var_types(module_declared_var_types)
-                    .build();
-                AnalysisOutput {
-                    expression_data,
-                    module_programs: ctx.module_programs.borrow().clone(),
-                    db: Rc::clone(&ctx.db),
-                    module_id: current_module,
-                }
+                let data = ExtractedModuleData {
+                    expr_types: ctx.module_expr_types.borrow().clone(),
+                    method_resolutions: ctx.module_method_resolutions.borrow().clone(),
+                    is_check_results: ctx.module_is_check_results.borrow().clone(),
+                    generic_calls: ctx.module_generic_calls.borrow().clone(),
+                    class_method_calls: ctx.module_class_method_calls.borrow().clone(),
+                    static_method_calls: ctx.module_static_method_calls.borrow().clone(),
+                    declared_var_types: ctx.module_declared_var_types.borrow().clone(),
+                };
+                (
+                    data,
+                    ctx.module_programs.borrow().clone(),
+                    Rc::clone(&ctx.db),
+                )
             }
+        };
+
+        let expression_data = ExpressionData::builder()
+            .types(expr_types)
+            .methods(method_resolutions)
+            .generics(generic_calls)
+            .class_method_generics(class_method_calls)
+            .static_method_generics(static_method_calls)
+            .module_types(module_data.expr_types)
+            .module_methods(module_data.method_resolutions)
+            .module_is_check_results(module_data.is_check_results)
+            .module_generics(module_data.generic_calls)
+            .module_class_method_generics(module_data.class_method_calls)
+            .module_static_method_generics(module_data.static_method_calls)
+            .substituted_return_types(substituted_return_types)
+            .lambda_defaults(lambda_defaults)
+            .tests_virtual_modules(tests_virtual_modules)
+            .is_check_results(is_check_results)
+            .declared_var_types(declared_var_types)
+            .module_declared_var_types(module_data.declared_var_types)
+            .build();
+
+        AnalysisOutput {
+            expression_data,
+            module_programs,
+            db,
+            module_id: current_module,
         }
     }
 
