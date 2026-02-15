@@ -292,19 +292,7 @@ pub extern "C" fn str_hash(s: *const RcString) -> i64 {
     if s.is_null() {
         return 0;
     }
-    unsafe {
-        let bytes = (*s).as_str().as_bytes();
-        // FNV-1a 64-bit hash
-        const FNV_OFFSET: u64 = 14695981039346656037;
-        const FNV_PRIME: u64 = 1099511628211;
-
-        let mut hash = FNV_OFFSET;
-        for byte in bytes {
-            hash ^= *byte as u64;
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-        hash as i64
-    }
+    unsafe { crate::fnv1a_hash((*s).as_str().as_bytes()) as i64 }
 }
 
 /// Check if a string contains a substring

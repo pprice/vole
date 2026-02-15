@@ -46,5 +46,5 @@ pub use signal::{
     clear_context, clear_current_test, install_segfault_handler, pop_context, push_context,
     recover_from_signal, replace_context, set_current_file, set_current_test, take_stack_overflow,
 };
-pub use string::{RcString, fnv1a_hash};
+pub use string::{Fnv1aHasher, RcString, fnv1a_hash};
 pub use value::{Context, RC_PINNED, RcHeader, TYPE_STRING};

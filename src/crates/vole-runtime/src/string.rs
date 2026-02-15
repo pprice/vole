@@ -7,15 +7,46 @@ use std::ptr;
 use std::slice;
 use std::str;
 
+/// Incremental FNV-1a 64-bit hasher. Allows hashing multiple byte slices
+/// sequentially to produce the same result as hashing their concatenation.
+pub struct Fnv1aHasher {
+    hash: u64,
+}
+
+impl Default for Fnv1aHasher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Fnv1aHasher {
+    const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+
+    pub fn new() -> Self {
+        Self {
+            hash: Self::OFFSET_BASIS,
+        }
+    }
+
+    pub fn update(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.hash ^= b as u64;
+            self.hash = self.hash.wrapping_mul(Self::PRIME);
+        }
+    }
+
+    pub fn finish(self) -> u64 {
+        self.hash
+    }
+}
+
 /// FNV-1a hash for string bytes. Used by both runtime allocation and
 /// compile-time static string embedding in codegen.
 pub fn fnv1a_hash(bytes: &[u8]) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for &byte in bytes {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
+    let mut hasher = Fnv1aHasher::new();
+    hasher.update(bytes);
+    hasher.finish()
 }
 
 /// Reference-counted string
@@ -97,11 +128,10 @@ impl RcString {
 
         // Hash both parts sequentially to produce the same result as hashing
         // the concatenated bytes.
-        let mut hash: u64 = 0xcbf29ce484222325;
-        for &byte in a.iter().chain(b.iter()) {
-            hash ^= byte as u64;
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
+        let mut hasher = Fnv1aHasher::new();
+        hasher.update(a);
+        hasher.update(b);
+        let hash = hasher.finish();
 
         let layout = Self::layout_for_len(total_len);
 
