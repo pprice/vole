@@ -10,7 +10,9 @@ use std::rc::Rc;
 
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext, JitOptions};
-use crate::errors::{LexerError, ParserError, WithExtraHelp, render_to_writer_terminal};
+use crate::errors::{
+    CodegenError, LexerError, ParserError, WithExtraHelp, render_to_writer_terminal,
+};
 use crate::frontend::{AstPrinter, ParseError, Parser};
 use crate::runtime::{
     JmpBuf, call_setjmp, clear_test_jmp_buf, recover_from_signal, set_capture_mode,
@@ -112,6 +114,27 @@ fn render_sema_warning(
     let report = miette::Report::new(warn.warning.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
     let _ = render_to_writer_terminal(report.as_ref(), w, color_mode);
+}
+
+/// Render a codegen error to a writer with source context.
+///
+/// If the error has a span, renders a full miette diagnostic with labeled source.
+/// Otherwise, falls back to a plain "compilation error: ..." message since some
+/// codegen errors (e.g., cranelift internal, IO) genuinely have no source location.
+fn render_codegen_error(
+    err: &CodegenError,
+    file_path: &str,
+    source: &str,
+    w: &mut dyn Write,
+    color_mode: ColorMode,
+) {
+    if err.span.is_some() {
+        let report = miette::Report::new(err.clone())
+            .with_source_code(NamedSource::new(file_path, source.to_string()));
+        let _ = render_to_writer_terminal(report.as_ref(), w, color_mode);
+    } else {
+        let _ = writeln!(w, "compilation error: {}", err);
+    }
 }
 
 /// Options for the compile_source pipeline.
@@ -239,8 +262,10 @@ pub fn compile_source(
 /// Options for the compile_and_run codegen+execution pipeline.
 pub struct RunOptions<'a> {
     pub file_path: &'a str,
+    pub source: &'a str,
     pub jit_options: JitOptions,
     pub skip_tests: bool,
+    pub color_mode: ColorMode,
 }
 
 /// Compile an analyzed program to machine code and execute it.
@@ -264,12 +289,12 @@ pub fn compile_and_run(
             compiler.set_source_file(opts.file_path);
             compiler.set_skip_tests(opts.skip_tests);
             if let Err(e) = compiler.compile_program(&analyzed.program) {
-                let _ = writeln!(errors, "compilation error: {}", e);
+                render_codegen_error(&e, opts.file_path, opts.source, errors, opts.color_mode);
                 return Err(PipelineError::Codegen);
             }
         }
         if let Err(e) = jit.finalize() {
-            let _ = writeln!(errors, "finalization error: {}", e);
+            render_codegen_error(&e, opts.file_path, opts.source, errors, opts.color_mode);
             return Err(PipelineError::Finalize);
         }
         tracing::debug!("compilation complete");
@@ -483,8 +508,10 @@ pub fn run_captured<W: Write + Send + 'static>(
 
     let run_opts = RunOptions {
         file_path,
+        source,
         jit_options: JitOptions::default(),
         skip_tests: true,
+        color_mode,
     };
 
     // Set up stdout/stderr capture for the JIT program's print() calls

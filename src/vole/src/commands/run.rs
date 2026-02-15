@@ -85,8 +85,10 @@ fn execute(
 
     let run_opts = RunOptions {
         file_path: &file_path,
+        source: &source,
         jit_options,
         skip_tests: true,
+        color_mode,
     };
 
     replace_context(&format!("{} (executing main)", file_path));
