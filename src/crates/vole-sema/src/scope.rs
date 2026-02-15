@@ -18,10 +18,6 @@ pub struct Scope {
 }
 
 impl Scope {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn with_parent(parent: Scope) -> Self {
         Self {
             variables: FxHashMap::default(),

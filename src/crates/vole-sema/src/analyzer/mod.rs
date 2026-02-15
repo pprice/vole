@@ -20,7 +20,6 @@ mod type_resolution;
 use type_constraints::validate_defaults;
 
 use crate::ExpressionData;
-pub use crate::ResolverEntityExt;
 use crate::analysis_cache::{IsCheckResult, ModuleCache};
 use crate::compilation_db::CompilationDb;
 use crate::entity_defs::{GenericFuncInfo, TypeDefKind};
@@ -37,6 +36,7 @@ use crate::implement_registry::{
 };
 use crate::module::ModuleLoader;
 use crate::resolution::{MethodResolutions, ResolvedMethod};
+pub use crate::resolve::ResolverEntityExt;
 use crate::resolve::resolve_type_to_id;
 use crate::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::types::ConstantValue;

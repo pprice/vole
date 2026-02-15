@@ -6,8 +6,8 @@
 use crate::EntityRegistry;
 use vole_identity::NameTable;
 
-// Re-export from identity.rs for compatibility
-pub use vole_identity::{WellKnownMethods, WellKnownTypes};
+// Re-export from identity.rs for internal use
+pub use vole_identity::WellKnownTypes;
 
 /// Populate TypeDefId fields from EntityRegistry after analysis.
 /// Call this after semantic analysis is complete and EntityRegistry is populated.

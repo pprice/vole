@@ -153,11 +153,6 @@ impl<'a> TypeResolutionContext<'a> {
         self.db.entities()
     }
 
-    /// Get the name table (read access)
-    pub fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
-        self.db.names()
-    }
-
     /// Get the name table (write access) - uses Rc::make_mut for copy-on-write
     pub fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
         self.db.names_mut()
@@ -180,15 +175,6 @@ impl<'a> TypeResolutionContext<'a> {
         let resolver = Resolver::new(self.interner, &names, self.module_id, self.imports)
             .with_priority_module(self.priority_module);
         resolver.resolve_type_or_interface(sym, &entities)
-    }
-
-    /// Resolve a string to a type or interface.
-    pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let names = self.db.names();
-        let entities = self.db.entities();
-        let resolver = Resolver::new(self.interner, &names, self.module_id, self.imports)
-            .with_priority_module(self.priority_module);
-        resolver.resolve_type_str_or_interface(name, &entities)
     }
 }
 

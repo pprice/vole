@@ -1,8 +1,7 @@
 //! Vole semantic analysis: type checking, entity registry, and type inference.
 
-pub mod analysis_cache;
+// Public modules (used by vole-codegen and tools)
 pub mod analyzer;
-pub mod compatibility;
 pub mod compilation_db;
 pub mod entity_defs;
 pub mod entity_registry;
@@ -10,49 +9,40 @@ pub mod errors;
 pub mod expression_data;
 pub mod generic;
 pub mod implement_registry;
-pub mod infer;
 pub mod memory_kind;
 pub mod module;
 pub mod optimizer;
 pub mod query;
 pub mod resolution;
-pub mod resolve;
-pub mod scope;
 pub mod transforms;
 pub mod type_arena;
-pub mod type_display;
 pub mod types;
-pub mod well_known;
 
+// Internal modules (not part of the public API)
+pub(crate) mod analysis_cache;
+pub(crate) mod compatibility;
+pub(crate) mod resolve;
+pub(crate) mod scope;
+pub(crate) mod type_display;
+pub(crate) mod well_known;
+
+// Re-exports: public API surface
 pub use analysis_cache::{CachedModule, IsCheckResult, ModuleCache};
 pub use analyzer::{AnalysisOutput, Analyzer, AnalyzerBuilder, TypeError, TypeWarning};
 pub use compilation_db::{CodegenDb, CompilationDb};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::{EntityRegistry, MethodDefBuilder};
+pub use errors::{SemanticError, SemanticWarning};
 pub use expression_data::{
     ExpressionData, ExpressionDataBuilder, LambdaAnalysis, ModuleAnalysisData,
 };
 pub use implement_registry::{
     ImplTypeId, ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId,
 };
-pub use infer::{InferCtx, InferType, InferVarId, UnifyError};
+pub use memory_kind::MemoryKind;
+pub use module::{LoadError, ModuleInfo, ModuleLoader};
+pub use optimizer::{OptimizerConfig, OptimizerStats, optimize, optimize_all};
 pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
-pub use resolve::ResolverEntityExt;
-pub use types::{ClassType, ErrorTypeInfo, FunctionType, PrimitiveType};
-pub use well_known::{WellKnownMethods, WellKnownTypes};
-
-// TypeArena for interned type representation
-// SemaType is the canonical type representation - use TypeId handles for O(1) equality
-// Note: type_arena::TypeId is accessed via module path to avoid conflict with implement_registry::TypeId
-pub use memory_kind::MemoryKind;
 pub use type_arena::{SemaType, TypeArena};
-
-// Error types
-pub use errors::{SemanticError, SemanticWarning};
-
-// Module loading
-pub use module::{LoadError, ModuleInfo, ModuleLoader};
-
-// Optimizer
-pub use optimizer::{OptimizerConfig, OptimizerStats, optimize, optimize_all};
+pub use types::{ClassType, ErrorTypeInfo, FunctionType, PrimitiveType};
