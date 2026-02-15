@@ -195,12 +195,25 @@ impl std::fmt::Display for PlaceholderKind {
 /// let PI = 3.14159
 /// let MAX_SIZE = 1024
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum ConstantValue {
     I64(i64),
     F64(f64),
     Bool(bool),
     String(String),
+}
+
+// Manual PartialEq: compare f64 by bits so NaN == NaN, matching Hash and satisfying Eq.
+impl PartialEq for ConstantValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ConstantValue::I64(a), ConstantValue::I64(b)) => a == b,
+            (ConstantValue::F64(a), ConstantValue::F64(b)) => a.to_bits() == b.to_bits(),
+            (ConstantValue::Bool(a), ConstantValue::Bool(b)) => a == b,
+            (ConstantValue::String(a), ConstantValue::String(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl Eq for ConstantValue {}
@@ -238,6 +251,25 @@ mod tests {
         let err1 = AnalysisError::new("a", "message 1");
         let err2 = AnalysisError::new("b", "message 2");
         assert_eq!(err1, err2);
+    }
+
+    #[test]
+    fn test_constant_value_nan_eq() {
+        // Eq contract: NaN == NaN must hold (bitwise comparison via to_bits)
+        let nan1 = ConstantValue::F64(f64::NAN);
+        let nan2 = ConstantValue::F64(f64::NAN);
+        assert_eq!(nan1, nan2);
+
+        // Reflexivity
+        let val = ConstantValue::F64(f64::NAN);
+        assert_eq!(val, val);
+
+        // Normal f64 equality still works
+        assert_eq!(ConstantValue::F64(1.0), ConstantValue::F64(1.0));
+        assert_ne!(ConstantValue::F64(1.0), ConstantValue::F64(2.0));
+
+        // Cross-variant inequality
+        assert_ne!(ConstantValue::I64(1), ConstantValue::F64(1.0));
     }
 
     #[test]
