@@ -307,17 +307,18 @@ impl Analyzer {
         interner: &Interner,
     ) -> bool {
         if let ExprKind::Lambda(lambda) = &init_expr.kind
-            && let Some(fn_type_id) = self.lambda_explicit_type_id(lambda, interner) {
-                self.env.scope.define(
-                    let_stmt.name,
-                    Variable {
-                        ty: fn_type_id,
-                        mutable: let_stmt.mutable,
-                        declaration_span: let_stmt.span,
-                    },
-                );
-                return true;
-            }
+            && let Some(fn_type_id) = self.lambda_explicit_type_id(lambda, interner)
+        {
+            self.env.scope.define(
+                let_stmt.name,
+                Variable {
+                    ty: fn_type_id,
+                    mutable: let_stmt.mutable,
+                    declaration_span: let_stmt.span,
+                },
+            );
+            return true;
+        }
         false
     }
 
