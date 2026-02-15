@@ -11,15 +11,11 @@
 use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
-// Placeholder types (replaced by vol-0bex and vol-fosu)
+// Re-exports
 // ---------------------------------------------------------------------------
 
+pub use crate::emit::Emit;
 pub use crate::scope::Scope;
-
-/// Placeholder for the emit abstraction that handles sub-generation and RNG.
-///
-/// Will be replaced with a real implementation in vol-fosu.
-pub struct Emit;
 
 // ---------------------------------------------------------------------------
 // Parameter value types
@@ -152,6 +148,11 @@ impl Params {
             Some(other) => panic!("param '{key}' is {other:?}, expected Flag"),
             None => panic!("param '{key}' not found"),
         }
+    }
+
+    /// Check whether a parameter with the given name exists.
+    pub fn contains(&self, key: &str) -> bool {
+        self.values.contains_key(key)
     }
 }
 
@@ -298,11 +299,24 @@ mod tests {
 
     // -- Trait object construction ------------------------------------------
 
+    use crate::emit::ResolvedParams;
     use crate::symbols::SymbolTable;
+    use rand::SeedableRng;
 
     /// Create a minimal Scope for tests that don't inspect scope contents.
     fn test_scope(table: &SymbolTable) -> Scope<'_> {
         Scope::new(&[], table)
+    }
+
+    fn test_rng() -> rand::rngs::StdRng {
+        rand::rngs::StdRng::seed_from_u64(42)
+    }
+
+    fn test_emit<'a>(rng: &'a mut dyn rand::RngCore, resolved: &'a ResolvedParams) -> Emit<'a> {
+        // No rules needed -- tests only check trait-object plumbing.
+        static EMPTY_STMT: &[Box<dyn StmtRule>] = &[];
+        static EMPTY_EXPR: &[Box<dyn ExprRule>] = &[];
+        Emit::new(rng, EMPTY_STMT, EMPTY_EXPR, resolved)
     }
 
     /// Minimal statement rule used only for trait-object tests.
@@ -357,7 +371,10 @@ mod tests {
         let mut scope = test_scope(&table);
         assert!(rule.precondition(&scope, &params));
 
-        let result = rule.generate(&mut scope, &mut Emit, &params);
+        let mut rng = test_rng();
+        let resolved = ResolvedParams::new();
+        let mut emit = test_emit(&mut rng, &resolved);
+        let result = rule.generate(&mut scope, &mut emit, &params);
         assert_eq!(result.as_deref(), Some("let x = 1"));
     }
 
@@ -374,7 +391,10 @@ mod tests {
         let scope = test_scope(&table);
         assert!(rule.precondition(&scope, &params));
 
-        let result = rule.generate(&scope, &mut Emit, &params);
+        let mut rng = test_rng();
+        let resolved = ResolvedParams::new();
+        let mut emit = test_emit(&mut rng, &resolved);
+        let result = rule.generate(&scope, &mut emit, &params);
         assert_eq!(result.as_deref(), Some("42"));
     }
 
@@ -443,7 +463,10 @@ mod tests {
         let rule: Box<dyn ExprRule> = Box::new(EmptyRule);
         let params = Params::from_iter([]);
         let scope = test_scope(&table);
-        assert!(rule.generate(&scope, &mut Emit, &params).is_none());
+        let mut rng = test_rng();
+        let resolved = ResolvedParams::new();
+        let mut emit = test_emit(&mut rng, &resolved);
+        assert!(rule.generate(&scope, &mut emit, &params).is_none());
     }
 
     // -- Send + Sync --------------------------------------------------------

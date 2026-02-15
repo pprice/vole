@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod emit;
 mod emitter;
 mod entrypoints;
 mod expr;
