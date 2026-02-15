@@ -1,0 +1,8 @@
+func send_value<T: Sendable>(value: T) -> T {
+    return value
+}
+
+func test_violation() {
+    let arr = [1, 2, 3]
+    send_value(arr)
+}

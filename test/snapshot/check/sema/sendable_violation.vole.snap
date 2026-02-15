@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2074]: type argument for 'T' does not satisfy constraint 'Sendable'
+   ╭─[<path>/sendable_violation.vole:7:5]
+ 6 │     let arr = [1, 2, 3]
+ 7 │     send_value(arr)
+   ·     ───────┬───────
+   ·            ╰── found '[i64]'
+ 8 │ }
+   ╰────

@@ -97,6 +97,8 @@ fn constraint_satisfied(
     };
 
     match (found, required) {
+        // Sendable satisfies Sendable
+        (TypeConstraint::Sendable, TypeConstraint::Sendable) => true,
         // Interface constraints: found must have all interfaces that required has
         (
             TypeConstraint::Interface(found_interfaces),
@@ -119,18 +121,7 @@ fn constraint_satisfied(
             found_struct == required_struct
         }
         // Different constraint kinds don't satisfy each other
-        (
-            TypeConstraint::Interface(_),
-            TypeConstraint::UnionId(_) | TypeConstraint::Structural(_),
-        )
-        | (
-            TypeConstraint::UnionId(_),
-            TypeConstraint::Interface(_) | TypeConstraint::Structural(_),
-        )
-        | (
-            TypeConstraint::Structural(_),
-            TypeConstraint::Interface(_) | TypeConstraint::UnionId(_),
-        ) => false,
+        _ => false,
     }
 }
 
@@ -236,6 +227,7 @@ impl Analyzer {
     ) -> Option<crate::generic::TypeConstraint> {
         tracing::debug!(?constraint, "resolve_type_param_constraint");
         match constraint {
+            TypeConstraint::Sendable => Some(crate::generic::TypeConstraint::Sendable),
             TypeConstraint::Interface(ifaces) => {
                 tracing::debug!(
                     num_interfaces = ifaces.len(),
@@ -507,6 +499,20 @@ impl Analyzer {
                         }
                     }
                 }
+                crate::generic::TypeConstraint::Sendable => {
+                    if !self.is_sendable(found_id, interner) {
+                        let found_display = self.type_display_id(found_id);
+                        self.add_error(
+                            SemanticError::TypeParamConstraintMismatch {
+                                type_param: self.get_type_param_display_name(param, interner),
+                                expected: "Sendable".to_string(),
+                                found: found_display,
+                                span: span.into(),
+                            },
+                            span,
+                        );
+                    }
+                }
                 crate::generic::TypeConstraint::Structural(structural) => {
                     // Substitute any type params in the structural constraint before checking.
                     // This handles cases like `func foo<T, __T0: { name: T }>(a: __T0)` where
@@ -669,5 +675,127 @@ impl Analyzer {
             }
         }
         Ok(())
+    }
+
+    /// Check if a type is Sendable by walking the type tree.
+    /// A type is Sendable if it can safely cross thread/actor boundaries.
+    pub(crate) fn is_sendable(&self, ty_id: ArenaTypeId, interner: &Interner) -> bool {
+        use crate::type_arena::SemaType;
+
+        let arena = self.type_arena();
+        match arena.get(ty_id) {
+            // Primitives: always Sendable (i64, f64, bool, string, etc.)
+            SemaType::Primitive(_) => true,
+
+            // Special value types: Sendable
+            SemaType::Void | SemaType::Never | SemaType::Range | SemaType::MetaType => true,
+            SemaType::Handle => true,
+
+            // Fixed arrays: Sendable if element type is Sendable
+            SemaType::FixedArray { element, .. } => {
+                let elem = *element;
+                drop(arena);
+                self.is_sendable(elem, interner)
+            }
+
+            // Structs: Sendable if ALL fields are Sendable
+            SemaType::Struct {
+                type_def_id,
+                type_args,
+            } => {
+                let td = *type_def_id;
+                let args = type_args.clone();
+                drop(arena);
+                self.all_struct_fields_sendable(td, &args, interner)
+            }
+
+            // Dynamic arrays: never Sendable (shared RC heap data)
+            SemaType::Array(_) => false,
+
+            // Classes: never Sendable (shared reference-counted, aliased)
+            // Transferable support comes in vol-dxr4
+            SemaType::Class { .. } => false,
+
+            // Closures: never Sendable (conservative for now)
+            SemaType::Function {
+                is_closure: true, ..
+            } => false,
+
+            // Non-closure function references: Sendable (just a pointer)
+            SemaType::Function {
+                is_closure: false, ..
+            } => true,
+
+            // Tuples: Sendable if all elements are Sendable
+            SemaType::Tuple(elements) => {
+                let elems: Vec<_> = elements.to_vec();
+                drop(arena);
+                elems.iter().all(|&e| self.is_sendable(e, interner))
+            }
+
+            // Unions: Sendable if all variants are Sendable
+            SemaType::Union(variants) => {
+                let vars: Vec<_> = variants.to_vec();
+                drop(arena);
+                vars.iter().all(|&v| self.is_sendable(v, interner))
+            }
+
+            // Fallible: Sendable if both success and error types are Sendable
+            SemaType::Fallible { success, error } => {
+                let s = *success;
+                let e = *error;
+                drop(arena);
+                self.is_sendable(s, interner) && self.is_sendable(e, interner)
+            }
+
+            // Type params: check if their constraint implies Sendable
+            // Full constraint lookup comes in vol-7p6p
+            SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => false,
+
+            // Interfaces, modules, iterators, errors, structural, etc.: not Sendable
+            _ => false,
+        }
+    }
+
+    /// Check if all fields of a struct are Sendable.
+    /// Applies type argument substitution for generic structs.
+    fn all_struct_fields_sendable(
+        &self,
+        type_def_id: TypeDefId,
+        type_args: &[ArenaTypeId],
+        interner: &Interner,
+    ) -> bool {
+        let registry = self.entity_registry();
+        let field_ids = registry.type_fields(type_def_id);
+        let type_params = registry.type_params(type_def_id);
+
+        // Get field types
+        let field_type_ids: Vec<ArenaTypeId> = field_ids
+            .iter()
+            .map(|&fid| registry.field_type(fid))
+            .collect();
+        drop(registry);
+
+        // Build substitution map for generic structs
+        if !type_args.is_empty() && type_params.len() == type_args.len() {
+            let subs: FxHashMap<NameId, ArenaTypeId> = type_params
+                .iter()
+                .zip(type_args.iter())
+                .map(|(&param, &arg)| (param, arg))
+                .collect();
+
+            for field_ty in &field_type_ids {
+                let substituted = self.type_arena().lookup_substitute(*field_ty, &subs);
+                let ty_to_check = substituted.unwrap_or(*field_ty);
+                if !self.is_sendable(ty_to_check, interner) {
+                    return false;
+                }
+            }
+            true
+        } else {
+            field_type_ids
+                .iter()
+                .all(|&fty| self.is_sendable(fty, interner))
+        }
     }
 }

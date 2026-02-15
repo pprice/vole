@@ -64,6 +64,9 @@ pub enum TypeConstraint {
         fields: Vec<StructuralField>,
         methods: Vec<StructuralMethod>,
     },
+    /// Built-in Sendable constraint: T: Sendable
+    /// Checked by walking the type tree, not by interface satisfaction.
+    Sendable,
 }
 
 /// A complete program
