@@ -5,6 +5,7 @@ mod manifest;
 mod names;
 mod planner;
 mod profile;
+mod rule;
 mod stmt;
 mod symbols;
 
