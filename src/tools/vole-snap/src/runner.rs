@@ -101,7 +101,7 @@ pub fn discover_tests(
 }
 
 /// Extract command from path: test/snapshot/{cmd}/... -> cmd
-pub fn extract_command(path: &Path) -> Option<&str> {
+pub(crate) fn extract_command(path: &Path) -> Option<&str> {
     let path_str = path.to_str()?;
     let marker = "snapshot/";
     let idx = path_str.find(marker)?;
@@ -115,7 +115,7 @@ pub fn extract_command(path: &Path) -> Option<&str> {
 
 /// Extract subcommand from path: test/snapshot/{cmd}/{subcmd}/... -> subcmd
 /// Returns None if there's no subcommand (e.g., test/snapshot/run/file.vole)
-pub fn extract_subcommand(path: &Path) -> Option<&str> {
+pub(crate) fn extract_subcommand(path: &Path) -> Option<&str> {
     let path_str = path.to_str()?;
     let marker = "snapshot/";
     let idx = path_str.find(marker)?;
@@ -140,7 +140,7 @@ pub fn extract_subcommand(path: &Path) -> Option<&str> {
 }
 
 /// Normalize paths in output: /full/path/to/file.vole -> <path>/file.vole
-pub fn normalize_paths(content: &str, file_path: &Path) -> String {
+pub(crate) fn normalize_paths(content: &str, file_path: &Path) -> String {
     let file_path_str = file_path.to_string_lossy();
     let basename = file_path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     let replacement = format!("<path>/{}", basename);

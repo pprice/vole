@@ -18,23 +18,23 @@ use crate::workspace::Workspace;
 
 /// Aggregate statistics collected across all reduction passes.
 #[derive(Debug, Default)]
-pub struct ReductionStats {
+pub(crate) struct ReductionStats {
     /// Total number of oracle invocations.
-    pub oracle_invocations: u32,
+    pub(crate) oracle_invocations: u32,
     /// Number of reductions that the oracle confirmed as Same.
-    pub successful_reductions: u32,
+    pub(crate) successful_reductions: u32,
     /// Total line count of all `.vole` files before reduction.
-    pub total_lines_before: u64,
+    pub(crate) total_lines_before: u64,
     /// Total line count of all `.vole` files after reduction.
-    pub total_lines_after: u64,
+    pub(crate) total_lines_after: u64,
     /// Total number of `.vole` files before reduction.
-    pub files_before: u32,
+    pub(crate) files_before: u32,
     /// Total number of `.vole` files after reduction.
-    pub files_after: u32,
+    pub(crate) files_after: u32,
     /// Number of divergent failure snapshots saved.
-    pub divergent_failures: u32,
+    pub(crate) divergent_failures: u32,
     /// Total wall-clock time spent in oracle invocations.
-    pub total_oracle_time: Duration,
+    pub(crate) total_oracle_time: Duration,
 }
 
 // ---------------------------------------------------------------------------
@@ -42,37 +42,37 @@ pub struct ReductionStats {
 // ---------------------------------------------------------------------------
 
 /// Top-level reducer that drives all passes.
-pub struct Reducer<'a> {
-    pub oracle: &'a Oracle,
-    pub workspace: &'a Workspace,
-    pub file_path: String,
-    pub dir_path: String,
-    pub baseline: &'a Baseline,
-    pub entrypoint: PathBuf,
-    pub test_filter: Option<String>,
-    pub verbose: bool,
-    pub max_iterations: u32,
-    pub stats: ReductionStats,
+pub(crate) struct Reducer<'a> {
+    pub(crate) oracle: &'a Oracle,
+    pub(crate) workspace: &'a Workspace,
+    pub(crate) file_path: String,
+    pub(crate) dir_path: String,
+    pub(crate) baseline: &'a Baseline,
+    pub(crate) entrypoint: PathBuf,
+    pub(crate) test_filter: Option<String>,
+    pub(crate) verbose: bool,
+    pub(crate) max_iterations: u32,
+    pub(crate) stats: ReductionStats,
 }
 
 /// Arguments for constructing a [`Reducer`].
 ///
 /// Bundled into a struct to keep the argument count manageable.
-pub struct ReducerConfig<'a> {
-    pub oracle: &'a Oracle,
-    pub workspace: &'a Workspace,
-    pub file_path: String,
-    pub dir_path: String,
-    pub baseline: &'a Baseline,
-    pub entrypoint: PathBuf,
-    pub test_filter: Option<String>,
-    pub verbose: bool,
-    pub max_iterations: u32,
+pub(crate) struct ReducerConfig<'a> {
+    pub(crate) oracle: &'a Oracle,
+    pub(crate) workspace: &'a Workspace,
+    pub(crate) file_path: String,
+    pub(crate) dir_path: String,
+    pub(crate) baseline: &'a Baseline,
+    pub(crate) entrypoint: PathBuf,
+    pub(crate) test_filter: Option<String>,
+    pub(crate) verbose: bool,
+    pub(crate) max_iterations: u32,
 }
 
 impl<'a> Reducer<'a> {
     /// Create a new reducer from the given configuration.
-    pub fn new(config: ReducerConfig<'a>) -> Self {
+    pub(crate) fn new(config: ReducerConfig<'a>) -> Self {
         Self {
             oracle: config.oracle,
             workspace: config.workspace,
@@ -88,7 +88,7 @@ impl<'a> Reducer<'a> {
     }
 
     /// Run all reduction passes in order.
-    pub fn run(&mut self) -> Result<(), String> {
+    pub(crate) fn run(&mut self) -> Result<(), String> {
         self.stats.total_lines_before = count_vole_lines(&self.workspace.result)?;
         self.stats.files_before = count_vole_files(&self.workspace.result)?;
 
@@ -109,7 +109,7 @@ impl<'a> Reducer<'a> {
     }
 
     /// Print a summary of the reduction statistics.
-    pub fn print_stats(&self) {
+    pub(crate) fn print_stats(&self) {
         let s = &self.stats;
         println!("--- Reduction Summary ---");
         println!();
@@ -151,7 +151,7 @@ impl<'a> Reducer<'a> {
     }
 
     /// Format a summary string suitable for writing to the log file.
-    pub fn format_log_summary(&self) -> String {
+    pub(crate) fn format_log_summary(&self) -> String {
         let s = &self.stats;
         let mut out = String::new();
         out.push_str("--- Reduction Summary ---\n\n");
