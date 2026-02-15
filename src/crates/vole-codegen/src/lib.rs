@@ -23,6 +23,7 @@ mod stmt;
 mod structs;
 mod type_ops;
 mod types;
+mod value_builders;
 
 // Organized submodules
 mod control_flow;
