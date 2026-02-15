@@ -17,9 +17,6 @@ pub trait ResolverEntityExt {
     /// Resolve a Symbol to a TypeDefId through the resolution chain.
     fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId>;
 
-    /// Resolve a string to a TypeDefId through the resolution chain.
-    fn resolve_type_str(&self, name: &str, registry: &EntityRegistry) -> Option<TypeDefId>;
-
     /// Resolve a type with fallback to interface/class short name search.
     fn resolve_type_or_interface(
         &self,
@@ -58,15 +55,6 @@ impl ResolverEntityExt for Resolver<'_> {
             return Some(sentinel);
         }
         self.resolve(sym)
-            .and_then(|name_id| registry.type_by_name(name_id))
-            .or_else(|| registry.sentinel_by_short_name(name, self.table()))
-    }
-
-    fn resolve_type_str(&self, name: &str, registry: &EntityRegistry) -> Option<TypeDefId> {
-        if let Some(sentinel) = resolve_sentinel(name, registry, self.table()) {
-            return Some(sentinel);
-        }
-        self.resolve_str(name)
             .and_then(|name_id| registry.type_by_name(name_id))
             .or_else(|| registry.sentinel_by_short_name(name, self.table()))
     }

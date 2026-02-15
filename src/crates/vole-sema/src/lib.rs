@@ -1,7 +1,7 @@
 //! Vole semantic analysis: type checking, entity registry, and type inference.
 
 // Public modules (used by vole-codegen and tools)
-pub mod analyzer;
+pub(crate) mod analyzer;
 pub mod compilation_db;
 pub mod entity_defs;
 pub mod entity_registry;

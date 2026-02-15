@@ -57,7 +57,7 @@ use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver
 /// Guard that holds a borrow of the name table and provides resolver access.
 /// The name table borrow is independent of other CompilationDb fields,
 /// so entities/types/implements can be borrowed simultaneously.
-pub struct ResolverGuard<'a> {
+pub(crate) struct ResolverGuard<'a> {
     names: std::cell::Ref<'a, NameTable>,
     interner: &'a Interner,
     module_id: ModuleId,
@@ -83,19 +83,19 @@ impl<'a> ResolverGuard<'a> {
     }
 
     /// Get the resolver. The lifetime is tied to this guard.
-    pub fn resolver(&self) -> Resolver<'_> {
+    pub(crate) fn resolver(&self) -> Resolver<'_> {
         Resolver::new(self.interner, &self.names, self.module_id, self.imports)
             .with_priority_module(self.priority_module)
     }
 
     /// Resolve a Symbol to a TypeDefId through the resolution chain.
-    pub fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId> {
+    pub(crate) fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId> {
         use crate::resolve::ResolverEntityExt;
         self.resolver().resolve_type(sym, registry)
     }
 
     /// Resolve a type with fallback to interface/class short name search.
-    pub fn resolve_type_or_interface(
+    pub(crate) fn resolve_type_or_interface(
         &self,
         sym: Symbol,
         registry: &EntityRegistry,
@@ -104,14 +104,8 @@ impl<'a> ResolverGuard<'a> {
         self.resolver().resolve_type_or_interface(sym, registry)
     }
 
-    /// Resolve a string to a TypeDefId through the resolution chain.
-    pub fn resolve_type_str(&self, name: &str, registry: &EntityRegistry) -> Option<TypeDefId> {
-        use crate::resolve::ResolverEntityExt;
-        self.resolver().resolve_type_str(name, registry)
-    }
-
     /// Resolve a type string with fallback to interface/class short name search.
-    pub fn resolve_type_str_or_interface(
+    pub(crate) fn resolve_type_str_or_interface(
         &self,
         name: &str,
         registry: &EntityRegistry,
@@ -310,27 +304,27 @@ impl AnalyzerBuilder {
 
 /// Shared state across all Analyzer instances (parent + sub-analyzers).
 /// Single `Rc` clone instead of 3-4 individual `Rc` clones per sub-analyzer.
-pub struct AnalyzerContext {
+pub(crate) struct AnalyzerContext {
     /// Unified compilation database containing all registries.
     /// Shared via `Rc` so sub-analyzers use the same db, making TypeIds
     /// valid across all analyzers and eliminating clone/merge operations.
     /// Each field within CompilationDb has its own RefCell for independent borrows.
-    pub db: Rc<CompilationDb>,
+    pub(crate) db: Rc<CompilationDb>,
     /// Cached module TypeIds by import path (avoids re-parsing).
-    pub module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
+    pub(crate) module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
     /// Parsed module programs and their interners (for compiling pure Vole functions).
-    pub module_programs: RefCell<FxHashMap<String, (Program, Interner)>>,
+    pub(crate) module_programs: RefCell<FxHashMap<String, (Program, Interner)>>,
     /// Per-module analysis data (module path -> ModuleAnalysisData).
     /// NodeIds are file-local and collide across modules, so each module gets
     /// its own set of NodeId-keyed maps. Uses ArenaTypeId (= TypeId) internally.
-    pub module_data: RefCell<FxHashMap<String, crate::expression_data::ModuleAnalysisData>>,
+    pub(crate) module_data: RefCell<FxHashMap<String, crate::expression_data::ModuleAnalysisData>>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
-    pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
+    pub(crate) module_cache: Option<Rc<RefCell<ModuleCache>>>,
     /// Set of modules currently being analyzed (for circular import detection).
     /// Shared across all sub-analyzers via Rc<AnalyzerContext> so that cycles
     /// are detected even across nested module imports.
-    pub modules_in_progress: RefCell<FxHashSet<String>>,
+    pub(crate) modules_in_progress: RefCell<FxHashSet<String>>,
 }
 
 impl AnalyzerContext {
@@ -469,7 +463,7 @@ pub(super) struct Diagnostics {
 
 pub struct Analyzer {
     // Shared state (single Rc clone for sub-analyzers)
-    pub ctx: Rc<AnalyzerContext>,
+    pub(crate) ctx: Rc<AnalyzerContext>,
 
     // Grouped per-analysis state
     pub(super) env: TypeCheckEnv,
@@ -481,9 +475,9 @@ pub struct Analyzer {
 }
 
 /// Result of looking up a method on a type via EntityRegistry
-pub struct MethodLookup {
-    pub method_id: MethodId,
-    pub signature_id: ArenaTypeId,
+pub(crate) struct MethodLookup {
+    pub(crate) method_id: MethodId,
+    pub(crate) signature_id: ArenaTypeId,
 }
 
 impl Analyzer {
@@ -530,7 +524,7 @@ impl Analyzer {
     /// Create a resolver for name resolution.
     /// Note: The returned resolver holds a borrow of the db's name_table.
     /// Parent modules are included in the search chain for virtual test modules.
-    pub fn resolver<'a>(&'a self, interner: &'a Interner) -> ResolverGuard<'a> {
+    pub(crate) fn resolver<'a>(&'a self, interner: &'a Interner) -> ResolverGuard<'a> {
         ResolverGuard::new(
             &self.ctx.db,
             interner,
@@ -542,7 +536,7 @@ impl Analyzer {
 
     /// Create a resolver for a specific module context.
     /// Use this when resolving types in an imported module's context.
-    pub fn resolver_for_module<'a>(
+    pub(crate) fn resolver_for_module<'a>(
         &'a self,
         interner: &'a Interner,
         module_id: ModuleId,
