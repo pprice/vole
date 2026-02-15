@@ -175,9 +175,10 @@ impl<'src> Parser<'src> {
 
         // Check for built-in Sendable constraint
         if let TypeExprKind::Named(sym) = &first.kind
-            && self.interner.resolve(*sym) == "Sendable" {
-                return Ok(TypeConstraint::Sendable);
-            }
+            && self.interner.resolve(*sym) == "Sendable"
+        {
+            return Ok(TypeConstraint::Sendable);
+        }
 
         // Check for union constraint: T: i32 | i64
         if self.check(TokenType::Pipe) {

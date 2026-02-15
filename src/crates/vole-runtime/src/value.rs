@@ -137,6 +137,7 @@ pub enum RuntimeTypeId {
     Closure = 6,
     Instance = 7,
     Rng = 8,
+    Buffer = 9,
     Iterator = 11,
     /// Heap-allocated union buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
     /// Not RC-managed itself (no RcHeader), but may contain an RC payload.
@@ -157,6 +158,7 @@ impl RuntimeTypeId {
             6 => Some(Self::Closure),
             7 => Some(Self::Instance),
             8 => Some(Self::Rng),
+            9 => Some(Self::Buffer),
             11 => Some(Self::Iterator),
             12 => Some(Self::UnionHeap),
             _ => None,
@@ -174,6 +176,7 @@ impl RuntimeTypeId {
             Self::Closure => "Closure",
             Self::Instance => "Instance",
             Self::Rng => "Rng",
+            Self::Buffer => "Buffer",
             Self::Iterator => "Iterator",
             Self::UnionHeap => "UnionHeap",
         }
@@ -193,7 +196,7 @@ pub fn tag_needs_rc(tag: u64) -> bool {
     use RuntimeTypeId as T;
     matches!(
         RuntimeTypeId::from_u32(tag as u32),
-        Some(T::String | T::Array | T::Closure | T::Instance | T::Rng | T::Iterator)
+        Some(T::String | T::Array | T::Closure | T::Instance | T::Rng | T::Buffer | T::Iterator)
     )
 }
 

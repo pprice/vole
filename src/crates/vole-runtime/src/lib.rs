@@ -13,6 +13,7 @@
 pub mod alloc_track;
 pub mod array;
 pub mod assert;
+pub mod buffer;
 pub mod builtins;
 pub mod closure;
 pub mod coroutine;

@@ -1,6 +1,7 @@
 // src/runtime/stdlib/mod.rs
 //! Standard library native modules for Vole.
 
+pub mod buffer;
 pub mod builtins;
 pub mod crypto;
 pub mod env;
@@ -16,6 +17,7 @@ use super::native_registry::NativeRegistry;
 
 /// Register all standard library modules
 pub fn register_stdlib(registry: &mut NativeRegistry) {
+    registry.register_module("std:buffer", buffer::module());
     registry.register_module("vole:builtins", builtins::module());
     registry.register_module("std:crypto/hash", crypto::module());
     registry.register_module("std:env", env::module());
