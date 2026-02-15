@@ -9,6 +9,7 @@ mod array_from_vars;
 mod array_index_assign;
 mod array_length_guard;
 mod array_length_zero_check;
+mod array_let;
 mod array_push;
 mod array_uniform_ops;
 mod assert_stmt;
@@ -20,6 +21,8 @@ mod break_continue;
 mod chained_literal_method;
 mod chained_string_methods;
 mod checked_arithmetic;
+mod class_destructure;
+mod class_let;
 mod closure_capture;
 mod closure_concat;
 mod closure_result_concat;
@@ -41,6 +44,7 @@ mod f64_comparison_edge;
 mod f64_literal_ops;
 mod field_closure;
 mod filter_iter_tostring;
+mod fixed_array_let;
 mod fn_param_call;
 mod for_each_stmt;
 mod for_in_match_accum;
@@ -56,6 +60,7 @@ mod generic_closure_chain;
 mod i32_boundary;
 mod identity_arithmetic;
 mod iface_function_call;
+mod interface_let;
 mod interface_method_call;
 mod interpolation_concat;
 mod interpolation_expr;
@@ -105,6 +110,7 @@ mod nested_when_string;
 mod nth_let;
 mod numeric_to_string;
 mod power_of_two_div;
+mod primitive_let;
 mod raise_stmt;
 mod range_check;
 mod range_iter_map_collect;
@@ -133,11 +139,15 @@ mod string_length_edge;
 mod string_predicate;
 mod string_replace;
 mod string_split;
+mod struct_copy;
+mod struct_destructure;
+mod struct_let;
 mod substring_let;
 mod tautological_when;
 mod to_string_let;
 mod tostring_length;
 mod try_let;
+mod tuple_let;
 mod variable_shadow;
 mod when_concat_arms;
 mod when_f64_cond;
@@ -329,5 +339,16 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(method_call::MethodCall),
         Box::new(interface_method_call::InterfaceMethodCall),
         Box::new(iface_function_call::IfaceFunctionCall),
+        // -- Construction/destructuring rules (batch 16) ------------------------------
+        Box::new(class_let::ClassLet),
+        Box::new(struct_let::StructLet),
+        Box::new(interface_let::InterfaceLet),
+        Box::new(struct_destructure::StructDestructure),
+        Box::new(class_destructure::ClassDestructure),
+        Box::new(struct_copy::StructCopy),
+        Box::new(array_let::ArrayLet),
+        Box::new(tuple_let::TupleLet),
+        Box::new(fixed_array_let::FixedArrayLet),
+        Box::new(primitive_let::PrimitiveLet),
     ]
 }

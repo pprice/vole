@@ -248,7 +248,7 @@ impl PrimitiveType {
     /// Arrays in Vole require element types that fit in 64 bits, so i128 is
     /// excluded. Otherwise uses the same distribution as `random_expr_type`:
     /// core types ~90%, wider types ~10%.
-    pub fn random_array_element_type<R: Rng>(rng: &mut R) -> Self {
+    pub fn random_array_element_type<R: Rng + ?Sized>(rng: &mut R) -> Self {
         match rng.gen_range(0..50) {
             0..=8 => PrimitiveType::I32,
             9..=17 => PrimitiveType::I64,
@@ -279,7 +279,7 @@ impl TypeInfo {
     ///
     /// Uses core types (i32, i64, f64, bool, string) for element types to
     /// keep generated tuples simple and widely compatible.
-    pub fn random_tuple_type<R: Rng>(rng: &mut R) -> Self {
+    pub fn random_tuple_type<R: Rng + ?Sized>(rng: &mut R) -> Self {
         let elem_count = rng.gen_range(2..=3);
         let elems: Vec<TypeInfo> = (0..elem_count)
             .map(|_| TypeInfo::Primitive(PrimitiveType::random_expr_type(rng)))
@@ -333,7 +333,7 @@ impl TypeInfo {
     /// Generate a random fixed-size array type with 2-4 elements.
     ///
     /// Uses primitive types suitable for arrays (excluding i128) for element types.
-    pub fn random_fixed_array_type<R: Rng>(rng: &mut R) -> Self {
+    pub fn random_fixed_array_type<R: Rng + ?Sized>(rng: &mut R) -> Self {
         let elem_type = PrimitiveType::random_array_element_type(rng);
         let size = rng.gen_range(2..=4);
         TypeInfo::FixedArray(Box::new(TypeInfo::Primitive(elem_type)), size)

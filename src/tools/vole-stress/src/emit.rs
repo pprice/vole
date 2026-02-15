@@ -307,6 +307,28 @@ impl Emit<'_> {
     pub fn random_primitive_type(&mut self) -> TypeInfo {
         TypeInfo::Primitive(PrimitiveType::random_expr_type(self.rng))
     }
+
+    /// Pick a random primitive type suitable for array elements.
+    ///
+    /// Delegates to [`PrimitiveType::random_array_element_type`], which
+    /// excludes `i128` (not valid for array elements).
+    pub fn random_array_element_type(&mut self) -> PrimitiveType {
+        PrimitiveType::random_array_element_type(self.rng)
+    }
+
+    /// Pick a random tuple type.
+    ///
+    /// Delegates to [`TypeInfo::random_tuple_type`].
+    pub fn random_tuple_type(&mut self) -> TypeInfo {
+        TypeInfo::random_tuple_type(self.rng)
+    }
+
+    /// Pick a random fixed-array type.
+    ///
+    /// Delegates to [`TypeInfo::random_fixed_array_type`].
+    pub fn random_fixed_array_type(&mut self) -> TypeInfo {
+        TypeInfo::random_fixed_array_type(self.rng)
+    }
 }
 
 // ---------------------------------------------------------------------------
