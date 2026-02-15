@@ -11,18 +11,25 @@ mod bool_ops;
 mod class_construction;
 mod comparison;
 mod field_access;
+mod fixed_array_index;
 mod if_expr;
 mod interface_value;
 mod is_expr;
 mod iter_any_all;
+mod iter_chain_collect;
 mod iter_collect;
 mod iter_count;
+mod iter_filter_collect;
+mod iter_first_last_nth;
+mod iter_flat_map_collect;
+mod iter_map_collect;
 mod iter_reduce;
 mod iter_sum;
 mod lambda_expr;
 mod match_expr;
 mod method_interpolation;
 mod null_coalesce;
+mod optional_chaining;
 mod string_bool;
 mod string_chars;
 mod string_concat;
@@ -30,6 +37,8 @@ mod string_length;
 mod string_split;
 mod string_transform;
 mod to_string;
+mod tuple_index;
+mod type_param_method;
 mod when_expr;
 
 use crate::rule::ExprRule;
@@ -74,5 +83,15 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         Box::new(interface_value::InterfaceValue),
         Box::new(lambda_expr::LambdaExpr),
         Box::new(iter_collect::IterCollect),
+        // -- batch 4: fixed array, tuple, optional chain, type params, more iterators
+        Box::new(fixed_array_index::FixedArrayIndex),
+        Box::new(tuple_index::TupleIndex),
+        Box::new(optional_chaining::OptionalChaining),
+        Box::new(type_param_method::TypeParamMethod),
+        Box::new(iter_map_collect::IterMapCollect),
+        Box::new(iter_filter_collect::IterFilterCollect),
+        Box::new(iter_chain_collect::IterChainCollect),
+        Box::new(iter_flat_map_collect::IterFlatMapCollect),
+        Box::new(iter_first_last_nth::IterFirstLastNth),
     ]
 }
