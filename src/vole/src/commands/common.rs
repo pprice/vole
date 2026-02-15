@@ -2,6 +2,7 @@
 //! Shared utilities for CLI commands.
 
 use std::io::{self, IsTerminal, Read, Write};
+use std::path::PathBuf;
 
 use miette::NamedSource;
 
@@ -50,7 +51,7 @@ pub enum PipelineError {
         hint: Option<String>,
     },
     /// I/O error (file not found, permission denied, etc.)
-    Io(io::Error),
+    Io { path: PathBuf, source: io::Error },
 }
 
 /// Render a lexer error to a writer with source context.
@@ -175,8 +176,8 @@ pub fn render_pipeline_error(
                 let _ = writeln!(w, "hint: {}", h);
             }
         }
-        PipelineError::Io(e) => {
-            let _ = writeln!(w, "error: {}", e);
+        PipelineError::Io { path, source } => {
+            let _ = writeln!(w, "error: {}: {}", path.display(), source);
         }
     }
 }

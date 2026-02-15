@@ -1,7 +1,7 @@
 // src/commands/run.rs
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use super::common::{
@@ -45,10 +45,16 @@ fn execute(
 ) -> Result<(), PipelineError> {
     // Read source from file or stdin
     let (source, file_path) = if path.as_os_str() == "-" {
-        let source = read_stdin().map_err(PipelineError::Io)?;
+        let source = read_stdin().map_err(|e| PipelineError::Io {
+            path: PathBuf::from("<stdin>"),
+            source: e,
+        })?;
         (source, "<stdin>".to_string())
     } else {
-        let source = fs::read_to_string(path).map_err(PipelineError::Io)?;
+        let source = fs::read_to_string(path).map_err(|e| PipelineError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
         (source, path.to_string_lossy().to_string())
     };
 

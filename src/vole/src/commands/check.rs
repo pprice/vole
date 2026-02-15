@@ -89,7 +89,10 @@ fn check_single_file(path: &Path, color_mode: ColorMode) -> Result<(), PipelineE
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: could not read '{}': {}", path.display(), e);
-            return Err(PipelineError::Io(e));
+            return Err(PipelineError::Io {
+                path: path.to_path_buf(),
+                source: e,
+            });
         }
     };
 
