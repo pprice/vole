@@ -1341,32 +1341,42 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let result_name = ctx.new_local_name();
 
         // Collect string vars for .length() / .to_upper() match
-        let string_vars: Vec<String> = ctx
-            .locals
-            .iter()
-            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
-            .map(|(name, _, _)| name.clone())
-            .chain(
-                ctx.params
-                    .iter()
-                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
-                    .map(|p| p.name.clone()),
-            )
-            .collect();
+        // (only when string matching is enabled)
+        let string_vars: Vec<String> = if self.config.string_match_probability > 0.0 {
+            ctx.locals
+                .iter()
+                .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+                .map(|(name, _, _)| name.clone())
+                .chain(
+                    ctx.params
+                        .iter()
+                        .filter(|p| {
+                            matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
+                        })
+                        .map(|p| p.name.clone()),
+                )
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         // Collect i64 vars for .to_string() match
-        let i64_vars: Vec<String> = ctx
-            .locals
-            .iter()
-            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
-            .map(|(name, _, _)| name.clone())
-            .chain(
-                ctx.params
-                    .iter()
-                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
-                    .map(|p| p.name.clone()),
-            )
-            .collect();
+        // (only when i64 matching is enabled)
+        let i64_vars: Vec<String> = if self.config.match_probability > 0.0 {
+            ctx.locals
+                .iter()
+                .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+                .map(|(name, _, _)| name.clone())
+                .chain(
+                    ctx.params
+                        .iter()
+                        .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                        .map(|p| p.name.clone()),
+                )
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         if string_vars.is_empty() && i64_vars.is_empty() {
             return None;
@@ -5999,13 +6009,41 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// }
     /// ```
     pub(super) fn generate_wildcard_only_match(&mut self, ctx: &mut StmtContext) -> Option<String> {
-        // Find any variable in scope to use as scrutinee
-        let scrutinee = if !ctx.locals.is_empty() && self.rng.gen_bool(0.7) {
-            let idx = self.rng.gen_range(0..ctx.locals.len());
-            ctx.locals[idx].0.clone()
-        } else if !ctx.params.is_empty() {
-            let idx = self.rng.gen_range(0..ctx.params.len());
-            ctx.params[idx].name.clone()
+        // Collect candidate variables, filtering out types whose match
+        // probability is disabled (e.g. string variables when
+        // string_match_probability is 0.0, or integer variables when
+        // match_probability is 0.0).
+        let is_type_allowed = |ty: &TypeInfo| -> bool {
+            match ty {
+                TypeInfo::Primitive(PrimitiveType::String) => {
+                    self.config.string_match_probability > 0.0
+                }
+                TypeInfo::Primitive(PrimitiveType::I64 | PrimitiveType::I32) => {
+                    self.config.match_probability > 0.0
+                }
+                _ => true,
+            }
+        };
+
+        let mut candidates: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| is_type_allowed(ty))
+            .map(|(name, _, _)| name.clone())
+            .collect();
+        let param_candidates: Vec<String> = ctx
+            .params
+            .iter()
+            .filter(|p| is_type_allowed(&p.param_type))
+            .map(|p| p.name.clone())
+            .collect();
+
+        let scrutinee = if !candidates.is_empty() && self.rng.gen_bool(0.7) {
+            let idx = self.rng.gen_range(0..candidates.len());
+            candidates.swap_remove(idx)
+        } else if !param_candidates.is_empty() {
+            let idx = self.rng.gen_range(0..param_candidates.len());
+            param_candidates[idx].clone()
         } else {
             return None;
         };

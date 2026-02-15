@@ -334,7 +334,8 @@ fn test_array_let_has_sufficient_elements() {
         ..StmtConfig::default()
     };
 
-    // Generate array lets and verify they have 2-4 elements
+    // Generate array lets and verify they have 2-10 elements
+    // (standard 2-4 or large 6-10; single-element arrays are handled elsewhere)
     for seed in 0..200 {
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let mut generator = StmtGenerator::new(&mut rng, &config);
@@ -353,10 +354,10 @@ fn test_array_let_has_sufficient_elements() {
         let bracket_end = stmt.rfind(']').unwrap();
         let inner = &stmt[bracket_start + 1..bracket_end];
         let comma_count = inner.matches(',').count();
-        // 2-4 elements means 1-3 commas
+        // 2-10 elements means 1-9 commas
         assert!(
-            comma_count >= 1 && comma_count <= 3,
-            "Expected 2-4 elements (1-3 commas), got {} commas in: {}",
+            comma_count >= 1 && comma_count <= 9,
+            "Expected 2-10 elements (1-9 commas), got {} commas in: {}",
             comma_count,
             stmt,
         );

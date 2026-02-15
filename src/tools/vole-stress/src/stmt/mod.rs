@@ -3153,12 +3153,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let is_mutable = self.rng.gen_bool(self.config.mutable_array_probability);
 
         // Array size distribution:
-        //   ~15% single-element (boundary condition stress)
-        //   ~10% large 6-10 elements (stress iterator codegen with more data)
-        //   ~75% standard 2-4 elements
-        let elem_count = if self.rng.gen_bool(0.15) {
-            1
-        } else if self.rng.gen_bool(0.12) {
+        //   ~12% large 6-10 elements (stress iterator codegen with more data)
+        //   ~88% standard 2-4 elements
+        // Note: single-element arrays are covered by generate_single_elem_array_ops.
+        let elem_count = if self.rng.gen_bool(0.12) {
             self.rng.gen_range(6..=10)
         } else {
             self.rng.gen_range(2..=4)
