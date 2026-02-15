@@ -1392,12 +1392,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Note: We convert the Symbol to string first because the current interner
     /// may be module-specific while the query uses the main program's interner.
     pub fn resolve_type(&self, sym: Symbol) -> Option<TypeDefId> {
-        let name = self.interner().resolve(sym);
-        let query = self.query();
-        let module_id = self
-            .current_module_id()
-            .unwrap_or(self.env.analyzed.module_id);
-        query.resolve_type_def_by_str(module_id, name)
+        self.resolve_type_str_or_interface(self.interner().resolve(sym))
     }
 
     /// Resolve a type name string to its TypeDefId using the full resolution chain.
@@ -1958,9 +1953,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// with RC fields.
     /// This sets lifecycle metadata without emitting any rc_inc/rc_dec.
     pub fn mark_borrowed_if_rc(&self, cv: &mut CompiledValue) {
-        if self.rc_state(cv.type_id).needs_cleanup()
-            || self.rc_state(cv.type_id).union_variants().is_some()
-            || self.rc_state(cv.type_id).shallow_offsets().is_some()
+        let state = self.rc_state(cv.type_id);
+        if state.needs_cleanup()
+            || state.union_variants().is_some()
+            || state.shallow_offsets().is_some()
         {
             cv.mark_borrowed();
         }
@@ -1980,12 +1976,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// The raw_value is the value field from the TaggedValue (already loaded from offset 8).
     /// This converts it to the appropriate Cranelift type based on the narrowed type.
     pub fn extract_unknown_value(&mut self, raw_value: Value, type_id: TypeId) -> CompiledValue {
-        // The value is stored as u64, need to convert to proper type
-        // This is similar to convert_field_value but for TaggedValue
-        let arena = self.env.analyzed.type_arena();
-        let (value, ty) =
-            super::structs::convert_field_value_id(self.builder, raw_value, type_id, arena);
-        CompiledValue::new(value, ty, type_id)
+        self.convert_field_value(raw_value, type_id)
     }
 
     /// Compile a list of expression arguments into Cranelift values.

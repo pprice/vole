@@ -28,7 +28,7 @@ pub use callable_registry::{
     CallableBackendPreference, CallableKey, CallableResolutionError, ResolvedCallable,
     resolve_callable_with_preference,
 };
-pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
+pub use compiler::{Compiler, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
 pub use intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, IntrinsicsRegistry};
 pub use jit::{CompiledModules, JitContext, JitOptions};

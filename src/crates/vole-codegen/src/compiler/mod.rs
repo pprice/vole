@@ -66,7 +66,7 @@ use vole_identity::{ModuleId, NameId};
 use vole_runtime::NativeRegistry;
 use vole_sema::{ImplTypeId, ProgramQuery, type_arena::TypeId};
 
-pub use state::{ControlFlowCtx, TestInfo};
+pub use state::TestInfo;
 
 /// Compiler for generating Cranelift IR from AST
 pub struct Compiler<'a> {
