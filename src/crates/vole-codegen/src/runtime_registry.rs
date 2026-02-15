@@ -3,175 +3,6 @@
 //! This module is the staged source of truth for runtime callables. It starts
 //! as metadata-only and is wired into JIT import/symbol paths in later phases.
 
-/// Typed key for a runtime callable exposed to codegen.
-///
-/// This avoids ad-hoc string literals in Rust call sites.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RuntimeKey {
-    StringNew,
-    StringConcat,
-    StringEq,
-    StringLen,
-    PrintlnString,
-    PrintlnI64,
-    PrintlnF64,
-    PrintlnBool,
-    PrintString,
-    PrintI64,
-    PrintF64,
-    PrintBool,
-    PrintChar,
-    I64ToString,
-    I128ToString,
-    I128Sdiv,
-    I128Srem,
-    F64ToString,
-    F32ToString,
-    BoolToString,
-    NilToString,
-    ArrayI64ToString,
-    Flush,
-    AssertFail,
-    Panic,
-    ArrayNew,
-    ArrayPush,
-    ArrayGetTag,
-    ArrayGetValue,
-    ArrayLen,
-    ArrayIter,
-    ArrayIterNext,
-    ArrayIterCollect,
-    ArraySet,
-    ArrayFilled,
-    MapIter,
-    MapIterNext,
-    MapIterCollect,
-    FilterIter,
-    FilterIterNext,
-    FilterIterCollect,
-    TakeIter,
-    TakeIterNext,
-    TakeIterCollect,
-    SkipIter,
-    SkipIterNext,
-    SkipIterCollect,
-    IterCount,
-    IterSum,
-    IterForEach,
-    IterReduce,
-    IterReduceTagged,
-    IterSetElemTag,
-    IterSetProducesOwned,
-    IterFirst,
-    IterLast,
-    IterNth,
-    RangeIter,
-    StringCharsIter,
-    ClosureAlloc,
-    ClosureSetCapture,
-    ClosureSetCaptureKind,
-    ClosureGetCapture,
-    ClosureGetFunc,
-    HeapAlloc,
-    InstanceNew,
-    InstanceGetField,
-    InstanceSetField,
-    SbNew,
-    SbPushString,
-    SbFinish,
-    InterfaceIter,
-    RcInc,
-    RcDec,
-}
-
-impl RuntimeKey {
-    pub const ALL: &'static [RuntimeKey] = &[
-        RuntimeKey::StringNew,
-        RuntimeKey::StringConcat,
-        RuntimeKey::StringEq,
-        RuntimeKey::StringLen,
-        RuntimeKey::PrintlnString,
-        RuntimeKey::PrintlnI64,
-        RuntimeKey::PrintlnF64,
-        RuntimeKey::PrintlnBool,
-        RuntimeKey::PrintString,
-        RuntimeKey::PrintI64,
-        RuntimeKey::PrintF64,
-        RuntimeKey::PrintBool,
-        RuntimeKey::PrintChar,
-        RuntimeKey::I64ToString,
-        RuntimeKey::I128ToString,
-        RuntimeKey::I128Sdiv,
-        RuntimeKey::I128Srem,
-        RuntimeKey::F64ToString,
-        RuntimeKey::F32ToString,
-        RuntimeKey::BoolToString,
-        RuntimeKey::NilToString,
-        RuntimeKey::ArrayI64ToString,
-        RuntimeKey::Flush,
-        RuntimeKey::AssertFail,
-        RuntimeKey::Panic,
-        RuntimeKey::ArrayNew,
-        RuntimeKey::ArrayPush,
-        RuntimeKey::ArrayGetTag,
-        RuntimeKey::ArrayGetValue,
-        RuntimeKey::ArrayLen,
-        RuntimeKey::ArrayIter,
-        RuntimeKey::ArrayIterNext,
-        RuntimeKey::ArrayIterCollect,
-        RuntimeKey::ArraySet,
-        RuntimeKey::ArrayFilled,
-        RuntimeKey::MapIter,
-        RuntimeKey::MapIterNext,
-        RuntimeKey::MapIterCollect,
-        RuntimeKey::FilterIter,
-        RuntimeKey::FilterIterNext,
-        RuntimeKey::FilterIterCollect,
-        RuntimeKey::TakeIter,
-        RuntimeKey::TakeIterNext,
-        RuntimeKey::TakeIterCollect,
-        RuntimeKey::SkipIter,
-        RuntimeKey::SkipIterNext,
-        RuntimeKey::SkipIterCollect,
-        RuntimeKey::IterCount,
-        RuntimeKey::IterSum,
-        RuntimeKey::IterForEach,
-        RuntimeKey::IterReduce,
-        RuntimeKey::IterReduceTagged,
-        RuntimeKey::IterSetElemTag,
-        RuntimeKey::IterSetProducesOwned,
-        RuntimeKey::IterFirst,
-        RuntimeKey::IterLast,
-        RuntimeKey::IterNth,
-        RuntimeKey::RangeIter,
-        RuntimeKey::StringCharsIter,
-        RuntimeKey::ClosureAlloc,
-        RuntimeKey::ClosureSetCapture,
-        RuntimeKey::ClosureSetCaptureKind,
-        RuntimeKey::ClosureGetCapture,
-        RuntimeKey::ClosureGetFunc,
-        RuntimeKey::HeapAlloc,
-        RuntimeKey::InstanceNew,
-        RuntimeKey::InstanceGetField,
-        RuntimeKey::InstanceSetField,
-        RuntimeKey::SbNew,
-        RuntimeKey::SbPushString,
-        RuntimeKey::SbFinish,
-        RuntimeKey::InterfaceIter,
-        RuntimeKey::RcInc,
-        RuntimeKey::RcDec,
-    ];
-
-    pub fn name(self) -> &'static str {
-        for symbol in RUNTIME_SYMBOLS {
-            if symbol.key == self {
-                return symbol.c_name;
-            }
-        }
-        panic!("missing runtime symbol name for key: {self:?}");
-    }
-}
-
 /// Metadata for a runtime callable.
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeSymbol {
@@ -196,304 +27,113 @@ pub struct SigSpec {
     pub ret: Option<AbiTy>,
 }
 
-const RUNTIME_SYMBOLS: &[RuntimeSymbol] = &[
-    RuntimeSymbol {
-        key: RuntimeKey::StringNew,
-        c_name: "vole_string_new",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::StringConcat,
-        c_name: "vole_string_concat",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::StringEq,
-        c_name: "vole_string_eq",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::StringLen,
-        c_name: "vole_string_len",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintlnString,
-        c_name: "vole_println_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintlnI64,
-        c_name: "vole_println_i64",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintlnF64,
-        c_name: "vole_println_f64",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintlnBool,
-        c_name: "vole_println_bool",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintString,
-        c_name: "vole_print_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintI64,
-        c_name: "vole_print_i64",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintF64,
-        c_name: "vole_print_f64",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintBool,
-        c_name: "vole_print_bool",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::PrintChar,
-        c_name: "vole_print_char",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::I64ToString,
-        c_name: "vole_i64_to_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::I128ToString,
-        c_name: "vole_i128_to_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::I128Sdiv,
-        c_name: "vole_i128_sdiv",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::I128Srem,
-        c_name: "vole_i128_srem",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::F64ToString,
-        c_name: "vole_f64_to_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::F32ToString,
-        c_name: "vole_f32_to_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::BoolToString,
-        c_name: "vole_bool_to_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::NilToString,
-        c_name: "vole_nil_to_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayI64ToString,
-        c_name: "vole_array_i64_to_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::Flush,
-        c_name: "vole_flush",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::AssertFail,
-        c_name: "vole_assert_fail",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::Panic,
-        c_name: "vole_panic",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayNew,
-        c_name: "vole_array_new",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayPush,
-        c_name: "vole_array_push",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayGetTag,
-        c_name: "vole_array_get_tag",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayGetValue,
-        c_name: "vole_array_get_value",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayLen,
-        c_name: "vole_array_len",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayIter,
-        c_name: "vole_array_iter",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayIterNext,
-        c_name: "vole_array_iter_next",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayIterCollect,
-        c_name: "vole_array_iter_collect",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArraySet,
-        c_name: "vole_array_set",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ArrayFilled,
-        c_name: "vole_array_filled",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::MapIter,
-        c_name: "vole_map_iter",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::MapIterNext,
-        c_name: "vole_map_iter_next",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::MapIterCollect,
-        c_name: "vole_map_iter_collect",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::FilterIter,
-        c_name: "vole_filter_iter",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::FilterIterNext,
-        c_name: "vole_filter_iter_next",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::FilterIterCollect,
-        c_name: "vole_filter_iter_collect",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::TakeIter,
-        c_name: "vole_take_iter",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::TakeIterNext,
-        c_name: "vole_take_iter_next",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::TakeIterCollect,
-        c_name: "vole_take_iter_collect",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::SkipIter,
-        c_name: "vole_skip_iter",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::SkipIterNext,
-        c_name: "vole_skip_iter_next",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::SkipIterCollect,
-        c_name: "vole_skip_iter_collect",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterCount,
-        c_name: "vole_iter_count",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterSum,
-        c_name: "vole_iter_sum",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterForEach,
-        c_name: "vole_iter_for_each",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterReduce,
-        c_name: "vole_iter_reduce",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterReduceTagged,
-        c_name: "vole_iter_reduce_tagged",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterSetElemTag,
-        c_name: "vole_iter_set_elem_tag",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterSetProducesOwned,
-        c_name: "vole_iter_set_produces_owned",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterFirst,
-        c_name: "vole_iter_first",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterLast,
-        c_name: "vole_iter_last",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::IterNth,
-        c_name: "vole_iter_nth",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::RangeIter,
-        c_name: "vole_range_iter",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::StringCharsIter,
-        c_name: "vole_string_chars_iter",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ClosureAlloc,
-        c_name: "vole_closure_alloc",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ClosureSetCapture,
-        c_name: "vole_closure_set_capture",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ClosureSetCaptureKind,
-        c_name: "vole_closure_set_capture_kind",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ClosureGetCapture,
-        c_name: "vole_closure_get_capture",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::ClosureGetFunc,
-        c_name: "vole_closure_get_func",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::HeapAlloc,
-        c_name: "vole_heap_alloc",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::InstanceNew,
-        c_name: "vole_instance_new",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::InstanceGetField,
-        c_name: "vole_instance_get_field",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::InstanceSetField,
-        c_name: "vole_instance_set_field",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::SbNew,
-        c_name: "vole_sb_new",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::SbPushString,
-        c_name: "vole_sb_push_string",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::SbFinish,
-        c_name: "vole_sb_finish",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::InterfaceIter,
-        c_name: "vole_interface_iter",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::RcInc,
-        c_name: "rc_inc",
-    },
-    RuntimeSymbol {
-        key: RuntimeKey::RcDec,
-        c_name: "rc_dec",
-    },
-];
+/// Generates the `RuntimeKey` enum, `RuntimeKey::ALL`, `RuntimeKey::name()`,
+/// and `RUNTIME_SYMBOLS` from a single declaration. Adding a variant in one
+/// place is all that is needed; forgetting an entry is a compile error.
+macro_rules! runtime_keys {
+    ( $( $variant:ident => $c_name:literal ),+ $(,)? ) => {
+        /// Typed key for a runtime callable exposed to codegen.
+        ///
+        /// This avoids ad-hoc string literals in Rust call sites.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum RuntimeKey {
+            $( $variant, )+
+        }
+
+        impl RuntimeKey {
+            pub const ALL: &'static [RuntimeKey] = &[
+                $( RuntimeKey::$variant, )+
+            ];
+
+            pub fn name(self) -> &'static str {
+                match self {
+                    $( RuntimeKey::$variant => $c_name, )+
+                }
+            }
+        }
+
+        const RUNTIME_SYMBOLS: &[RuntimeSymbol] = &[
+            $( RuntimeSymbol { key: RuntimeKey::$variant, c_name: $c_name }, )+
+        ];
+    };
+}
+
+runtime_keys! {
+    StringNew          => "vole_string_new",
+    StringConcat       => "vole_string_concat",
+    StringEq           => "vole_string_eq",
+    StringLen          => "vole_string_len",
+    PrintlnString      => "vole_println_string",
+    PrintlnI64         => "vole_println_i64",
+    PrintlnF64         => "vole_println_f64",
+    PrintlnBool        => "vole_println_bool",
+    PrintString        => "vole_print_string",
+    PrintI64           => "vole_print_i64",
+    PrintF64           => "vole_print_f64",
+    PrintBool          => "vole_print_bool",
+    PrintChar          => "vole_print_char",
+    I64ToString        => "vole_i64_to_string",
+    I128ToString       => "vole_i128_to_string",
+    I128Sdiv           => "vole_i128_sdiv",
+    I128Srem           => "vole_i128_srem",
+    F64ToString        => "vole_f64_to_string",
+    F32ToString        => "vole_f32_to_string",
+    BoolToString       => "vole_bool_to_string",
+    NilToString        => "vole_nil_to_string",
+    ArrayI64ToString   => "vole_array_i64_to_string",
+    Flush              => "vole_flush",
+    AssertFail         => "vole_assert_fail",
+    Panic              => "vole_panic",
+    ArrayNew           => "vole_array_new",
+    ArrayPush          => "vole_array_push",
+    ArrayGetTag        => "vole_array_get_tag",
+    ArrayGetValue      => "vole_array_get_value",
+    ArrayLen           => "vole_array_len",
+    ArrayIter          => "vole_array_iter",
+    ArrayIterNext      => "vole_array_iter_next",
+    ArrayIterCollect   => "vole_array_iter_collect",
+    ArraySet           => "vole_array_set",
+    ArrayFilled        => "vole_array_filled",
+    MapIter            => "vole_map_iter",
+    MapIterNext        => "vole_map_iter_next",
+    MapIterCollect     => "vole_map_iter_collect",
+    FilterIter         => "vole_filter_iter",
+    FilterIterNext     => "vole_filter_iter_next",
+    FilterIterCollect  => "vole_filter_iter_collect",
+    TakeIter           => "vole_take_iter",
+    TakeIterNext       => "vole_take_iter_next",
+    TakeIterCollect    => "vole_take_iter_collect",
+    SkipIter           => "vole_skip_iter",
+    SkipIterNext       => "vole_skip_iter_next",
+    SkipIterCollect    => "vole_skip_iter_collect",
+    IterCount          => "vole_iter_count",
+    IterSum            => "vole_iter_sum",
+    IterForEach        => "vole_iter_for_each",
+    IterReduce         => "vole_iter_reduce",
+    IterReduceTagged   => "vole_iter_reduce_tagged",
+    IterSetElemTag     => "vole_iter_set_elem_tag",
+    IterSetProducesOwned => "vole_iter_set_produces_owned",
+    IterFirst          => "vole_iter_first",
+    IterLast           => "vole_iter_last",
+    IterNth            => "vole_iter_nth",
+    RangeIter          => "vole_range_iter",
+    StringCharsIter    => "vole_string_chars_iter",
+    ClosureAlloc       => "vole_closure_alloc",
+    ClosureSetCapture  => "vole_closure_set_capture",
+    ClosureSetCaptureKind => "vole_closure_set_capture_kind",
+    ClosureGetCapture  => "vole_closure_get_capture",
+    ClosureGetFunc     => "vole_closure_get_func",
+    HeapAlloc          => "vole_heap_alloc",
+    InstanceNew        => "vole_instance_new",
+    InstanceGetField   => "vole_instance_get_field",
+    InstanceSetField   => "vole_instance_set_field",
+    SbNew              => "vole_sb_new",
+    SbPushString       => "vole_sb_push_string",
+    SbFinish           => "vole_sb_finish",
+    InterfaceIter      => "vole_interface_iter",
+    RcInc              => "rc_inc",
+    RcDec              => "rc_dec",
+}
 
 pub fn all_symbols() -> &'static [RuntimeSymbol] {
     RUNTIME_SYMBOLS
