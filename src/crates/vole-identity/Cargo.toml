@@ -10,6 +10,8 @@ vole-frontend = { path = "../vole-frontend" }
 
 # High-performance hash map
 rustc-hash = "2.1"
+# raw_entry API for zero-allocation name lookups
+hashbrown = "0.16.1"
 
 [lints]
 workspace = true

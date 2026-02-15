@@ -2,7 +2,9 @@
 //
 // Shared name interning for fully-qualified item identities.
 
-use rustc_hash::FxHashMap;
+use std::hash::{BuildHasher, Hash, Hasher};
+
+use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use vole_frontend::{Interner, Span, Symbol};
 
@@ -221,12 +223,24 @@ impl WellKnownMethods {
     }
 }
 
+/// Compute the hash for a `(ModuleId, segments)` pair using borrowed slices.
+///
+/// This produces the same hash as `NameKey::hash()` for the same logical content,
+/// because `[&str]` and `[String]` hash identically (str and String have the same
+/// Hash impl, and slice hashing is element-wise).
+fn name_hash(hasher: &FxBuildHasher, module: ModuleId, segments: &[&str]) -> u64 {
+    let mut state = hasher.build_hasher();
+    module.hash(&mut state);
+    segments.hash(&mut state);
+    state.finish()
+}
+
 #[derive(Debug, Clone)]
 pub struct NameTable {
     modules: Vec<String>,
     module_lookup: FxHashMap<String, ModuleId>,
     names: Vec<QualifiedName>,
-    name_lookup: FxHashMap<NameKey, NameId>,
+    name_lookup: hashbrown::HashMap<NameKey, NameId, FxBuildHasher>,
     main_module: ModuleId,
     diagnostics: FxHashMap<NameId, DefLocation>,
     pub primitives: Primitives,
@@ -240,7 +254,7 @@ impl NameTable {
             modules: Vec::new(),
             module_lookup: FxHashMap::default(),
             names: Vec::new(),
-            name_lookup: FxHashMap::default(),
+            name_lookup: hashbrown::HashMap::with_hasher(FxBuildHasher),
             main_module: ModuleId(0),
             diagnostics: FxHashMap::default(),
             primitives: Primitives::placeholder(NameId(0)),
@@ -304,34 +318,47 @@ impl NameTable {
     }
 
     pub fn intern(&mut self, module: ModuleId, segments: &[Symbol], interner: &Interner) -> NameId {
-        let string_segments: Vec<String> = segments
-            .iter()
-            .map(|s| interner.resolve(*s).to_string())
-            .collect();
-        self.intern_raw(
-            module,
-            &string_segments
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>(),
-        )
+        // Resolve symbols to &str without allocating Strings yet.
+        // SmallVec-style: stack-allocate for the common case (<=4 segments).
+        let resolved: Vec<&str> = segments.iter().map(|s| interner.resolve(*s)).collect();
+        self.intern_raw(module, &resolved)
     }
 
+    /// Intern a qualified name from borrowed string segments.
+    ///
+    /// Uses `raw_entry_mut` for zero-allocation lookups on cache hit.
+    /// On cache miss, allocates one `Vec<String>` shared (via clone)
+    /// between the lookup key and QualifiedName storage.
     pub fn intern_raw(&mut self, module: ModuleId, segments: &[&str]) -> NameId {
-        let key = NameKey {
-            module,
-            segments: segments.iter().map(|s| (*s).to_string()).collect(),
-        };
-        if let Some(id) = self.name_lookup.get(&key) {
-            return *id;
-        }
-        let id = NameId(self.names.len() as u32);
-        self.names.push(QualifiedName {
-            module,
-            segments: segments.iter().map(|s| (*s).to_string()).collect(),
+        use hashbrown::hash_map::RawEntryMut;
+
+        let hash = name_hash(self.name_lookup.hasher(), module, segments);
+        let entry = self.name_lookup.raw_entry_mut().from_hash(hash, |key| {
+            key.module == module
+                && key.segments.len() == segments.len()
+                && key.segments.iter().zip(segments).all(|(a, b)| a == *b)
         });
-        self.name_lookup.insert(key, id);
-        id
+
+        match entry {
+            RawEntryMut::Occupied(e) => *e.get(),
+            RawEntryMut::Vacant(e) => {
+                let id = NameId(self.names.len() as u32);
+                let owned: Vec<String> = segments.iter().map(|s| (*s).to_string()).collect();
+                self.names.push(QualifiedName {
+                    module,
+                    segments: owned.clone(),
+                });
+                e.insert_hashed_nocheck(
+                    hash,
+                    NameKey {
+                        module,
+                        segments: owned,
+                    },
+                    id,
+                );
+                id
+            }
+        }
     }
 
     pub fn intern_indexed_raw(&mut self, module: ModuleId, prefix: &str, index: usize) -> NameId {
@@ -345,25 +372,22 @@ impl NameTable {
         segments: &[Symbol],
         interner: &Interner,
     ) -> Option<NameId> {
-        let string_segments: Vec<String> = segments
-            .iter()
-            .map(|s| interner.resolve(*s).to_string())
-            .collect();
-        self.name_id_raw(
-            module,
-            &string_segments
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>(),
-        )
+        // Resolve symbols to &str without allocating Strings.
+        let resolved: Vec<&str> = segments.iter().map(|s| interner.resolve(*s)).collect();
+        self.name_id_raw(module, &resolved)
     }
 
+    /// Read-only lookup by borrowed segments. Zero allocations.
     pub fn name_id_raw(&self, module: ModuleId, segments: &[&str]) -> Option<NameId> {
-        let key = NameKey {
-            module,
-            segments: segments.iter().map(|s| (*s).to_string()).collect(),
-        };
-        self.name_lookup.get(&key).copied()
+        let hash = name_hash(self.name_lookup.hasher(), module, segments);
+        self.name_lookup
+            .raw_entry()
+            .from_hash(hash, |key| {
+                key.module == module
+                    && key.segments.len() == segments.len()
+                    && key.segments.iter().zip(segments).all(|(a, b)| a == *b)
+            })
+            .map(|(_, id)| *id)
     }
 
     pub fn name(&self, id: NameId) -> &QualifiedName {
@@ -380,25 +404,52 @@ impl NameTable {
         symbol: Symbol,
         interner: &Interner,
     ) -> NameId {
-        let name = self.name(prefix);
+        use hashbrown::hash_map::RawEntryMut;
+
+        // Access names directly by index to allow disjoint borrows of
+        // self.names and self.name_lookup.
+        let name = &self.names[prefix.0 as usize];
         let module = name.module;
-        let mut segments = name.segments.clone();
-        segments.push(interner.resolve(symbol).to_string());
-        let key = NameKey {
-            module,
-            segments: segments.clone(),
-        };
-        if let Some(id) = self.name_lookup.get(&key) {
-            return *id;
+        let suffix = interner.resolve(symbol);
+
+        // Build borrowed segments for hashing/comparison without allocating Strings.
+        let mut all_strs: Vec<&str> = Vec::with_capacity(name.segments.len() + 1);
+        for s in &name.segments {
+            all_strs.push(s.as_str());
         }
-        let id = NameId(self.names.len() as u32);
-        self.names.push(QualifiedName { module, segments });
-        self.name_lookup.insert(key, id);
-        id
+        all_strs.push(suffix);
+
+        let hash = name_hash(self.name_lookup.hasher(), module, &all_strs);
+        let entry = self.name_lookup.raw_entry_mut().from_hash(hash, |key| {
+            key.module == module
+                && key.segments.len() == all_strs.len()
+                && key.segments.iter().zip(&all_strs).all(|(a, b)| a == *b)
+        });
+
+        match entry {
+            RawEntryMut::Occupied(e) => *e.get(),
+            RawEntryMut::Vacant(e) => {
+                let id = NameId(self.names.len() as u32);
+                let owned: Vec<String> = all_strs.iter().map(|s| (*s).to_string()).collect();
+                self.names.push(QualifiedName {
+                    module,
+                    segments: owned.clone(),
+                });
+                e.insert_hashed_nocheck(
+                    hash,
+                    NameKey {
+                        module,
+                        segments: owned,
+                    },
+                    id,
+                );
+                id
+            }
+        }
     }
 
     /// Read-only lookup for a name built from a prefix NameId plus a symbol segment.
-    /// Returns `None` if the name has not been interned.
+    /// Returns `None` if the name has not been interned. Zero allocations.
     pub fn name_id_with_symbol(
         &self,
         prefix: NameId,
@@ -407,10 +458,22 @@ impl NameTable {
     ) -> Option<NameId> {
         let name = self.name(prefix);
         let module = name.module;
-        let mut segments = name.segments.clone();
-        segments.push(interner.resolve(symbol).to_string());
-        let key = NameKey { module, segments };
-        self.name_lookup.get(&key).copied()
+        let suffix = interner.resolve(symbol);
+
+        // Build borrowed segments for hashing/comparison without allocating Strings.
+        let prefix_strs: Vec<&str> = name.segments.iter().map(|s| s.as_str()).collect();
+        let mut all_strs: Vec<&str> = prefix_strs;
+        all_strs.push(suffix);
+
+        let hash = name_hash(self.name_lookup.hasher(), module, &all_strs);
+        self.name_lookup
+            .raw_entry()
+            .from_hash(hash, |key| {
+                key.module == module
+                    && key.segments.len() == all_strs.len()
+                    && key.segments.iter().zip(&all_strs).all(|(a, b)| a == *b)
+            })
+            .map(|(_, id)| *id)
     }
 
     pub fn display(&self, id: NameId) -> String {
