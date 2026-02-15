@@ -1,0 +1,106 @@
+# Deep-nesting profile — stress parser stack and AST depth.
+#
+# Generates code with significant nesting to test:
+# - Parser recursion limits and stack usage
+# - AST traversal efficiency in all compiler phases
+# - Memory usage with deeply nested structures
+#
+# Target: expressions nested 5 levels, statements nested 6 levels.
+
+[plan]
+layers = 1
+modules_per_layer = 1
+structs_per_module = [0, 0]
+classes_per_module = [0, 1]
+interfaces_per_module = [0, 0]
+errors_per_module = [0, 0]
+functions_per_module = [3, 5]
+globals_per_module = [1, 2]
+fields_per_struct = [0, 0]
+fields_per_class = [1, 2]
+methods_per_class = [1, 2]
+static_methods_per_class = [0, 0]
+static_methods_per_struct = [0, 0]
+methods_per_interface = [0, 0]
+fields_per_error = [0, 0]
+params_per_function = [2, 4]
+type_params_per_class = [0, 0]
+type_params_per_interface = [0, 0]
+type_params_per_function = [0, 0]
+constraints_per_type_param = [0, 0]
+interface_extends_probability = 0.0
+implement_blocks_per_module = [0, 0]
+cross_layer_import_probability = 0.0
+enable_diamond_dependencies = false
+fallible_probability = 0.0
+generator_probability = 0.0
+never_probability = 0.0
+nested_class_field_probability = 0.15
+interface_param_probability = 0.0
+generic_closure_interface_fn_probability = 0.0
+closure_return_probability = 0.0
+sentinels_per_module = [0, 2]
+
+[emit]
+expr_body_probability = 0.15
+
+[emit.stmt_config]
+max_depth = 4
+statements_per_block = [1, 2]
+if_probability = 0.5
+for_probability = 0.15
+reassign_probability = 0.12
+raise_probability = 0.0
+try_probability = 0.0
+tuple_probability = 0.08
+fixed_array_probability = 0.08
+struct_destructure_probability = 0.08
+class_destructure_probability = 0.06
+early_return_probability = 0.1
+else_if_probability = 0.4
+static_call_probability = 0.0
+array_index_assign_probability = 0.08
+array_push_probability = 0.05
+array_index_compound_assign_probability = 0.08
+mutable_array_probability = 0.3
+method_call_probability = 0.08
+interface_dispatch_probability = 0.0
+match_probability = 0.1
+nested_loop_probability = 0.1
+union_match_probability = 0.06
+iter_map_filter_probability = 0.06
+iface_function_call_probability = 0.0
+generic_closure_interface_probability = 0.0
+empty_array_iter_probability = 0.04
+match_closure_arm_probability = 0.06
+range_iter_probability = 0.04
+field_closure_let_probability = 0.04
+sentinel_union_probability = 0.1
+optional_destructure_match_probability = 0.08
+sentinel_closure_capture_probability = 0.08
+closure_struct_capture_probability = 0.08
+nested_closure_capture_probability = 0.08
+string_interpolation_probability = 0.1
+match_on_method_result_probability = 0.06
+iter_method_map_probability = 0.06
+string_split_probability = 0.06
+string_method_probability = 0.08
+iter_predicate_probability = 0.06
+iter_chunks_windows_probability = 0.05
+
+[emit.stmt_config.expr_config]
+max_depth = 5
+binary_probability = 0.6
+when_probability = 0.15
+match_probability = 0.1
+if_expr_probability = 0.15
+lambda_probability = 0.05
+method_chain_probability = 0.1
+max_match_arms = 8
+inline_expr_arg_probability = 0.15
+tuple_index_probability = 0.1
+string_method_probability = 0.1
+multi_arm_when_probability = 0.25
+match_guard_probability = 0.1
+closure_capture_probability = 0.2
+interface_upcast_probability = 0.0

@@ -1,0 +1,107 @@
+# Closures-heavy profile — stress lambda/closure and function type codegen.
+#
+# Generates code emphasizing:
+# - Lambda expressions as arguments and return values
+# - Higher-order functions (functions taking/returning functions)
+# - Expression-bodied functions (=> syntax)
+# - Method chains with closures (map, filter, reduce)
+# - Iterator pipelines with closure-heavy transforms
+# - Elevated match/when expression probabilities (closures in arms)
+
+[plan]
+layers = 2
+modules_per_layer = 3
+structs_per_module = [1, 2]
+classes_per_module = [1, 3]
+interfaces_per_module = [1, 2]
+errors_per_module = [0, 1]
+functions_per_module = [4, 8]
+globals_per_module = [1, 2]
+fields_per_struct = [1, 3]
+fields_per_class = [2, 4]
+static_methods_per_class = [0, 1]
+static_methods_per_struct = [0, 1]
+methods_per_interface = [1, 3]
+fields_per_error = [0, 2]
+params_per_function = [2, 5]
+type_params_per_class = [0, 1]
+type_params_per_interface = [0, 1]
+type_params_per_function = [0, 1]
+constraints_per_type_param = [0, 1]
+interface_extends_probability = 0.3
+cross_layer_import_probability = 0.2
+enable_diamond_dependencies = false
+fallible_probability = 0.1
+generator_probability = 0.25
+never_probability = 0.01
+nested_class_field_probability = 0.15
+struct_param_probability = 0.05
+struct_return_probability = 0.05
+interface_param_probability = 0.1
+generic_closure_interface_fn_probability = 0.1
+closure_return_probability = 0.2
+sentinels_per_module = [0, 2]
+
+[emit]
+expr_body_probability = 0.4
+
+[emit.stmt_config]
+if_probability = 0.2
+while_probability = 0.1
+for_probability = 0.15
+break_continue_probability = 0.08
+compound_assign_probability = 0.1
+reassign_probability = 0.1
+raise_probability = 0.08
+try_probability = 0.1
+tuple_probability = 0.1
+fixed_array_probability = 0.08
+struct_destructure_probability = 0.1
+class_destructure_probability = 0.08
+early_return_probability = 0.1
+else_if_probability = 0.25
+static_call_probability = 0.2
+array_index_assign_probability = 0.08
+array_push_probability = 0.06
+array_index_compound_assign_probability = 0.08
+method_call_probability = 0.12
+when_let_probability = 0.08
+nested_loop_probability = 0.04
+union_match_probability = 0.08
+iter_map_filter_probability = 0.25
+iface_function_call_probability = 0.08
+generic_closure_interface_probability = 0.1
+match_closure_arm_probability = 0.15
+range_iter_probability = 0.06
+field_closure_let_probability = 0.12
+sentinel_union_probability = 0.1
+optional_destructure_match_probability = 0.1
+sentinel_closure_capture_probability = 0.12
+closure_struct_capture_probability = 0.15
+nested_closure_capture_probability = 0.15
+string_interpolation_probability = 0.08
+match_on_method_result_probability = 0.06
+iter_method_map_probability = 0.1
+string_split_probability = 0.06
+string_method_probability = 0.08
+iter_predicate_probability = 0.06
+iter_chunks_windows_probability = 0.05
+
+[emit.stmt_config.expr_config]
+binary_probability = 0.35
+when_probability = 0.15
+match_probability = 0.12
+if_expr_probability = 0.2
+lambda_probability = 0.35
+method_chain_probability = 0.3
+max_chain_depth = 3
+unreachable_probability = 0.03
+max_match_arms = 5
+inline_expr_arg_probability = 0.1
+tuple_index_probability = 0.12
+chained_coalesce_probability = 0.25
+string_method_probability = 0.1
+multi_arm_when_probability = 0.25
+match_guard_probability = 0.08
+closure_capture_probability = 0.5
+interface_upcast_probability = 0.25

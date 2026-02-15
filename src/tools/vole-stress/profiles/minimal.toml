@@ -1,0 +1,118 @@
+# Minimal profile — small but valid codebase for quick sanity checks.
+#
+# Target characteristics:
+# - 1 module + main.vole
+# - 2-3 simple functions
+# - Basic types only (i64, string, bool)
+# - No generics, no interfaces
+# - Simple expressions (arithmetic, comparisons, calls)
+# - Target: <100 lines total, compiles in <100ms
+
+[plan]
+layers = 1
+modules_per_layer = 1
+structs_per_module = [0, 0]
+classes_per_module = [0, 0]
+interfaces_per_module = [0, 0]
+errors_per_module = [0, 0]
+functions_per_module = [2, 3]
+globals_per_module = [1, 1]
+fields_per_struct = [0, 0]
+fields_per_class = [0, 0]
+methods_per_class = [0, 0]
+static_methods_per_class = [0, 0]
+static_methods_per_struct = [0, 0]
+methods_per_interface = [0, 0]
+fields_per_error = [0, 0]
+params_per_function = [0, 2]
+type_params_per_class = [0, 0]
+type_params_per_interface = [0, 0]
+type_params_per_function = [0, 0]
+constraints_per_type_param = [0, 0]
+interface_extends_probability = 0.0
+implement_blocks_per_module = [0, 0]
+cross_layer_import_probability = 0.0
+enable_diamond_dependencies = false
+fallible_probability = 0.0
+generator_probability = 0.0
+never_probability = 0.0
+nested_class_field_probability = 0.0
+struct_param_probability = 0.0
+struct_return_probability = 0.0
+interface_param_probability = 0.0
+generic_closure_interface_fn_probability = 0.0
+closure_return_probability = 0.0
+sentinels_per_module = [0, 0]
+
+[emit]
+expr_body_probability = 0.0
+
+[emit.stmt_config]
+max_depth = 1
+statements_per_block = [1, 2]
+if_probability = 0.0
+while_probability = 0.0
+for_probability = 0.0
+break_continue_probability = 0.0
+compound_assign_probability = 0.0
+reassign_probability = 0.0
+raise_probability = 0.0
+try_probability = 0.0
+tuple_probability = 0.0
+fixed_array_probability = 0.0
+struct_destructure_probability = 0.0
+class_destructure_probability = 0.0
+discard_probability = 0.0
+early_return_probability = 0.0
+else_if_probability = 0.0
+static_call_probability = 0.0
+array_index_assign_probability = 0.0
+array_push_probability = 0.0
+array_index_compound_assign_probability = 0.0
+mutable_array_probability = 0.0
+method_call_probability = 0.0
+interface_dispatch_probability = 0.0
+match_probability = 0.06
+string_match_probability = 0.04
+when_let_probability = 0.04
+nested_loop_probability = 0.0
+union_match_probability = 0.0
+iter_map_filter_probability = 0.0
+iface_function_call_probability = 0.0
+generic_closure_interface_probability = 0.0
+empty_array_iter_probability = 0.0
+match_closure_arm_probability = 0.0
+range_iter_probability = 0.0
+field_closure_let_probability = 0.0
+sentinel_union_probability = 0.0
+optional_destructure_match_probability = 0.0
+sentinel_closure_capture_probability = 0.0
+closure_struct_capture_probability = 0.0
+nested_closure_capture_probability = 0.0
+string_interpolation_probability = 0.0
+match_on_method_result_probability = 0.0
+iter_method_map_probability = 0.0
+string_split_probability = 0.0
+string_method_probability = 0.0
+iter_predicate_probability = 0.0
+iter_chunks_windows_probability = 0.0
+
+[emit.stmt_config.expr_config]
+max_depth = 2
+binary_probability = 0.3
+when_probability = 0.0
+match_probability = 0.0
+if_expr_probability = 0.0
+lambda_probability = 0.0
+method_chain_probability = 0.0
+max_chain_depth = 0
+unreachable_probability = 0.0
+max_match_arms = 3
+inline_expr_arg_probability = 0.0
+tuple_index_probability = 0.0
+chained_coalesce_probability = 0.0
+string_method_probability = 0.0
+multi_arm_when_probability = 0.0
+match_guard_probability = 0.0
+closure_capture_probability = 0.0
+interface_upcast_probability = 0.0

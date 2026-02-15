@@ -27,7 +27,8 @@ pub struct FieldPathSearch<'a> {
 }
 
 /// Configuration for expression generation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 #[allow(dead_code)]
 pub struct ExprConfig {
     /// Maximum nesting depth for expressions.
@@ -98,26 +99,26 @@ pub struct ExprConfig {
 
 impl Default for ExprConfig {
     fn default() -> Self {
+        // Default values match the "full" profile so TOML files only specify overrides.
         Self {
-            max_depth: 3,
-            binary_probability: 0.4,
-            when_probability: 0.1,
-            match_probability: 0.1,
-            if_expr_probability: 0.15,
-            lambda_probability: 0.05,
+            max_depth: 4,
+            binary_probability: 0.5,
+            when_probability: 0.2,
+            match_probability: 0.15,
+            if_expr_probability: 0.2,
+            lambda_probability: 0.15,
             method_chain_probability: 0.20,
             max_chain_depth: 2,
             unreachable_probability: 0.05,
-            max_match_arms: 4,
+            max_match_arms: 6,
             inline_expr_arg_probability: 0.12,
             tuple_index_probability: 0.15,
             chained_coalesce_probability: 0.30,
             string_method_probability: 0.15,
-            multi_arm_when_probability: 0.30,
-            match_guard_probability: 0.10,
-            // Default 0.0; profiles override (cross-module bug fixed in 3573bef5)
-            closure_capture_probability: 0.0,
-            interface_upcast_probability: 0.25,
+            multi_arm_when_probability: 0.35,
+            match_guard_probability: 0.15,
+            closure_capture_probability: 0.30,
+            interface_upcast_probability: 0.30,
         }
     }
 }
@@ -4779,7 +4780,17 @@ mod tests {
 
     #[test]
     fn test_bitwise_shift_rhs_is_small_literal() {
-        let config = ExprConfig::default();
+        let config = ExprConfig {
+            // Use moderate probabilities so generated bitwise expressions stay
+            // simple enough for the rfind-based shift RHS parser below.
+            max_depth: 3,
+            binary_probability: 0.4,
+            when_probability: 0.1,
+            match_probability: 0.1,
+            if_expr_probability: 0.15,
+            lambda_probability: 0.05,
+            ..ExprConfig::default()
+        };
         let table = SymbolTable::new();
         let ctx = ExprContext::new(&[], &[], &table);
 

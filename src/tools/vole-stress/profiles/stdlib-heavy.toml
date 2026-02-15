@@ -1,0 +1,93 @@
+# Stdlib-heavy profile — stress standard library usage and method chaining.
+#
+# Generates code that heavily exercises the standard library:
+# - String methods, string interpolation, string matching
+# - Array methods: push, index, iteration via map/filter/reduce/sum
+# - Iterator chains: `.iter().map(...).filter(...).collect()`
+# - Method chaining on class instances
+# - Higher lambda usage for iterator callbacks
+#
+# Target: stress runtime builtins, string/array codegen paths,
+# iterator protocol, and method dispatch.
+
+[plan]
+layers = 2
+modules_per_layer = 7
+structs_per_module = [1, 2]
+interfaces_per_module = [1, 2]
+errors_per_module = [0, 1]
+functions_per_module = [4, 7]
+globals_per_module = [2, 4]
+fields_per_class = [2, 4]
+fields_per_error = [0, 2]
+type_params_per_class = [0, 1]
+type_params_per_interface = [0, 1]
+type_params_per_function = [0, 1]
+constraints_per_type_param = [0, 1]
+interface_extends_probability = 0.3
+fallible_probability = 0.1
+generator_probability = 0.12
+never_probability = 0.0
+nested_class_field_probability = 0.2
+interface_param_probability = 0.1
+generic_closure_interface_fn_probability = 0.08
+closure_return_probability = 0.08
+sentinels_per_module = [0, 2]
+
+[emit]
+
+[emit.stmt_config]
+max_depth = 2
+if_probability = 0.25
+while_probability = 0.1
+for_probability = 0.25
+break_continue_probability = 0.1
+tuple_probability = 0.1
+fixed_array_probability = 0.2
+struct_destructure_probability = 0.12
+class_destructure_probability = 0.1
+early_return_probability = 0.12
+else_if_probability = 0.25
+static_call_probability = 0.25
+array_index_assign_probability = 0.15
+array_push_probability = 0.15
+array_index_compound_assign_probability = 0.15
+mutable_array_probability = 0.6
+method_call_probability = 0.2
+match_probability = 0.1
+string_match_probability = 0.12
+union_match_probability = 0.08
+iter_map_filter_probability = 0.25
+iface_function_call_probability = 0.08
+generic_closure_interface_probability = 0.08
+empty_array_iter_probability = 0.08
+match_closure_arm_probability = 0.08
+range_iter_probability = 0.1
+field_closure_let_probability = 0.06
+sentinel_union_probability = 0.1
+optional_destructure_match_probability = 0.0
+sentinel_closure_capture_probability = 0.0
+closure_struct_capture_probability = 0.0
+nested_closure_capture_probability = 0.0
+string_interpolation_probability = 0.1
+match_on_method_result_probability = 0.06
+iter_method_map_probability = 0.08
+string_split_probability = 0.1
+string_method_probability = 0.12
+raise_probability = 0.08
+try_probability = 0.1
+
+[emit.stmt_config.expr_config]
+binary_probability = 0.4
+when_probability = 0.15
+match_probability = 0.12
+if_expr_probability = 0.15
+lambda_probability = 0.25
+method_chain_probability = 0.35
+max_chain_depth = 3
+max_match_arms = 8
+tuple_index_probability = 0.12
+string_method_probability = 0.25
+multi_arm_when_probability = 0.3
+match_guard_probability = 0.1
+interface_upcast_probability = 0.25

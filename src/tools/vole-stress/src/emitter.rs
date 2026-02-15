@@ -19,7 +19,8 @@ use crate::symbols::{
 };
 
 /// Configuration for the emitter phase.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct EmitConfig {
     /// Configuration for statement generation.
     pub stmt_config: StmtConfig,
@@ -37,10 +38,11 @@ pub struct EmitConfig {
 
 impl Default for EmitConfig {
     fn default() -> Self {
+        // Default values match the "full" profile so TOML files only specify overrides.
         Self {
             stmt_config: StmtConfig::default(),
             destructured_import_probability: 0.0,
-            expr_body_probability: 0.0,
+            expr_body_probability: 0.20,
             lowlevel_import_probability: 0.0,
         }
     }

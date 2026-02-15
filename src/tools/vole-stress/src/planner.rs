@@ -18,7 +18,8 @@ use crate::symbols::{
 };
 
 /// Configuration for the planning phase.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PlanConfig {
     /// Number of module layers (depth of import hierarchy).
     pub layers: usize,
@@ -110,41 +111,42 @@ pub struct PlanConfig {
 
 impl Default for PlanConfig {
     fn default() -> Self {
+        // Default values match the "full" profile so TOML files only specify overrides.
         Self {
             layers: 3,
-            modules_per_layer: 5,
-            structs_per_module: (0, 2),
-            classes_per_module: (1, 3),
-            interfaces_per_module: (0, 2),
-            errors_per_module: (0, 2),
-            functions_per_module: (2, 5),
+            modules_per_layer: 4,
+            structs_per_module: (1, 3),
+            classes_per_module: (2, 4),
+            interfaces_per_module: (1, 3),
+            errors_per_module: (1, 2),
+            functions_per_module: (3, 6),
             globals_per_module: (1, 3),
             fields_per_struct: (2, 4),
-            fields_per_class: (1, 4),
-            methods_per_class: (1, 3),
-            static_methods_per_class: (0, 2),
-            static_methods_per_struct: (0, 2),
-            methods_per_interface: (1, 2),
-            fields_per_error: (0, 2),
-            params_per_function: (0, 3),
+            fields_per_class: (2, 5),
+            methods_per_class: (2, 4),
+            static_methods_per_class: (1, 2),
+            static_methods_per_struct: (1, 2),
+            methods_per_interface: (2, 3),
+            fields_per_error: (1, 3),
+            params_per_function: (1, 4),
             type_params_per_class: (0, 2),
-            type_params_per_interface: (0, 1),
+            type_params_per_interface: (0, 2),
             type_params_per_function: (0, 2),
             constraints_per_type_param: (0, 2),
-            interface_extends_probability: 0.3,
-            implement_blocks_per_module: (0, 2),
-            cross_layer_import_probability: 0.2,
+            interface_extends_probability: 0.4,
+            implement_blocks_per_module: (1, 2),
+            cross_layer_import_probability: 0.3,
             enable_diamond_dependencies: true,
-            fallible_probability: 0.15,
-            generator_probability: 0.10,
+            fallible_probability: 0.18,
+            generator_probability: 0.15,
             never_probability: 0.02,
-            nested_class_field_probability: 0.20,
+            nested_class_field_probability: 0.25,
             struct_param_probability: 0.10,
             struct_return_probability: 0.10,
-            interface_param_probability: 0.10,
-            generic_closure_interface_fn_probability: 0.0,
-            closure_return_probability: 0.0,
-            sentinels_per_module: (0, 2),
+            interface_param_probability: 0.12,
+            generic_closure_interface_fn_probability: 0.15,
+            closure_return_probability: 0.12,
+            sentinels_per_module: (1, 3),
         }
     }
 }

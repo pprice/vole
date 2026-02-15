@@ -1,0 +1,6 @@
+# Full profile — comprehensive syntax coverage at moderate size.
+#
+# This is the default profile. All fields here match the built-in defaults,
+# so this file can be empty. It is included for documentation purposes.
+#
+# Target: ~2000-5000 lines, exercises all compiler paths.

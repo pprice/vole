@@ -12,7 +12,8 @@ use crate::symbols::{
 };
 
 /// Configuration for statement generation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct StmtConfig {
     /// Configuration for expression generation.
     pub expr_config: ExprConfig,
@@ -245,26 +246,27 @@ pub struct StmtConfig {
 
 impl Default for StmtConfig {
     fn default() -> Self {
+        // Default values match the "full" profile so TOML files only specify overrides.
         Self {
             expr_config: ExprConfig::default(),
-            max_depth: 2,
-            statements_per_block: (1, 3),
-            if_probability: 0.2,
-            while_probability: 0.1,
-            for_probability: 0.15,
+            max_depth: 3,
+            statements_per_block: (2, 4),
+            if_probability: 0.3,
+            while_probability: 0.15,
+            for_probability: 0.2,
             break_continue_probability: 0.12,
             compound_assign_probability: 0.15,
             reassign_probability: 0.15,
-            raise_probability: 0.10,
-            try_probability: 0.12,
-            tuple_probability: 0.10,
-            fixed_array_probability: 0.10,
-            struct_destructure_probability: 0.12,
-            class_destructure_probability: 0.10,
+            raise_probability: 0.12,
+            try_probability: 0.15,
+            tuple_probability: 0.12,
+            fixed_array_probability: 0.12,
+            struct_destructure_probability: 0.15,
+            class_destructure_probability: 0.12,
             discard_probability: 0.05,
             early_return_probability: 0.15,
-            else_if_probability: 0.3,
-            static_call_probability: 0.3,
+            else_if_probability: 0.30,
+            static_call_probability: 0.30,
             array_index_assign_probability: 0.10,
             array_push_probability: 0.08,
             array_index_compound_assign_probability: 0.10,
@@ -275,26 +277,26 @@ impl Default for StmtConfig {
             string_match_probability: 0.06,
             when_let_probability: 0.08,
             nested_loop_probability: 0.06,
-            union_match_probability: 0.08,
-            iter_map_filter_probability: 0.08,
-            iface_function_call_probability: 0.08,
-            generic_closure_interface_probability: 0.0,
-            empty_array_iter_probability: 0.0,
-            match_closure_arm_probability: 0.0,
-            range_iter_probability: 0.0,
-            field_closure_let_probability: 0.0,
-            sentinel_union_probability: 0.0,
-            optional_destructure_match_probability: 0.0,
-            sentinel_closure_capture_probability: 0.0,
-            closure_struct_capture_probability: 0.0,
-            nested_closure_capture_probability: 0.0,
-            string_interpolation_probability: 0.0,
-            match_on_method_result_probability: 0.0,
-            iter_method_map_probability: 0.0,
-            string_split_probability: 0.0,
-            string_method_probability: 0.0,
-            iter_predicate_probability: 0.0,
-            iter_chunks_windows_probability: 0.0,
+            union_match_probability: 0.10,
+            iter_map_filter_probability: 0.10,
+            iface_function_call_probability: 0.10,
+            generic_closure_interface_probability: 0.15,
+            empty_array_iter_probability: 0.06,
+            match_closure_arm_probability: 0.10,
+            range_iter_probability: 0.08,
+            field_closure_let_probability: 0.08,
+            sentinel_union_probability: 0.15,
+            optional_destructure_match_probability: 0.12,
+            sentinel_closure_capture_probability: 0.10,
+            closure_struct_capture_probability: 0.12,
+            nested_closure_capture_probability: 0.10,
+            string_interpolation_probability: 0.12,
+            match_on_method_result_probability: 0.10,
+            iter_method_map_probability: 0.10,
+            string_split_probability: 0.08,
+            string_method_probability: 0.10,
+            iter_predicate_probability: 0.08,
+            iter_chunks_windows_probability: 0.06,
             checked_arithmetic_probability: 0.0,
         }
     }
@@ -14561,7 +14563,13 @@ mod tests {
     #[test]
     fn test_array_let_generation() {
         let table = SymbolTable::new();
-        let config = StmtConfig::default();
+        let config = StmtConfig {
+            // Disable range/iterator patterns so array lets produce array literals.
+            range_iter_probability: 0.0,
+            empty_array_iter_probability: 0.0,
+            iter_map_filter_probability: 0.0,
+            ..StmtConfig::default()
+        };
 
         let mut found_array_let = false;
         for seed in 0..500 {
@@ -14594,7 +14602,13 @@ mod tests {
     #[test]
     fn test_array_let_has_sufficient_elements() {
         let table = SymbolTable::new();
-        let config = StmtConfig::default();
+        let config = StmtConfig {
+            // Disable range/iterator patterns so array lets produce array literals.
+            range_iter_probability: 0.0,
+            empty_array_iter_probability: 0.0,
+            iter_map_filter_probability: 0.0,
+            ..StmtConfig::default()
+        };
 
         // Generate array lets and verify they have 2-4 elements
         for seed in 0..200 {
