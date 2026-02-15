@@ -19,6 +19,7 @@ mod rc_state;
 mod runtime_registry;
 mod stmt;
 mod structs;
+mod type_ops;
 mod types;
 
 // Organized submodules
