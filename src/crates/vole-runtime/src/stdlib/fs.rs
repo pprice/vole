@@ -268,7 +268,7 @@ pub extern "C" fn fs_append_string(
 #[unsafe(no_mangle)]
 pub extern "C" fn fs_list(path_ptr: *const RcString) -> ListResult {
     use crate::array::RcArray;
-    use crate::value::{TYPE_STRING, TaggedValue};
+    use crate::value::{RuntimeTypeId, TaggedValue};
 
     if path_ptr.is_null() {
         return ListResult { code: 1, value: 0 };
@@ -287,7 +287,7 @@ pub extern "C" fn fs_list(path_ptr: *const RcString) -> ListResult {
                         RcArray::push(
                             arr,
                             TaggedValue {
-                                tag: TYPE_STRING as u64,
+                                tag: RuntimeTypeId::String as u64,
                                 value: s as u64,
                             },
                         );

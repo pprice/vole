@@ -98,29 +98,80 @@ pub extern "C" fn rc_dec(ptr: *mut u8) {
 /// Sentinel refcount for static/pinned objects — rc_inc/rc_dec are no-ops.
 pub const RC_PINNED: u32 = u32::MAX;
 
-/// Type IDs for runtime objects
-pub const TYPE_STRING: u32 = 1;
-pub const TYPE_I64: u32 = 2;
-pub const TYPE_F64: u32 = 3;
-pub const TYPE_BOOL: u32 = 4;
-pub const TYPE_ARRAY: u32 = 5;
-pub const TYPE_CLOSURE: u32 = 6;
-pub const TYPE_INSTANCE: u32 = 7;
-pub const TYPE_RNG: u32 = 8;
-pub const TYPE_ITERATOR: u32 = 11;
-/// Heap-allocated union buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
-/// Not RC-managed itself (no RcHeader), but may contain an RC payload.
-/// When cleaned up: if `is_rc` byte (offset 1) is non-zero, `rc_dec` the payload
-/// at offset 8, then free the 16-byte buffer.
-pub const TYPE_UNION_HEAP: u32 = 12;
+/// Runtime type IDs for heap-allocated objects and tagged values.
+///
+/// Each variant maps to a `u32` discriminant used in `RcHeader::type_id`,
+/// `TaggedValue::tag`, and allocation tracking. Gaps (9, 10) are reserved
+/// for future types. Use `as u32` / `as u64` / `as i64` for FFI and
+/// Cranelift `iconst` emission.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RuntimeTypeId {
+    String = 1,
+    I64 = 2,
+    F64 = 3,
+    Bool = 4,
+    Array = 5,
+    Closure = 6,
+    Instance = 7,
+    Rng = 8,
+    Iterator = 11,
+    /// Heap-allocated union buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
+    /// Not RC-managed itself (no RcHeader), but may contain an RC payload.
+    /// When cleaned up: if `is_rc` byte (offset 1) is non-zero, `rc_dec` the payload
+    /// at offset 8, then free the 16-byte buffer.
+    UnionHeap = 12,
+}
+
+impl RuntimeTypeId {
+    /// Convert from a raw `u32` value. Returns `None` for unknown type IDs.
+    pub fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            1 => Some(Self::String),
+            2 => Some(Self::I64),
+            3 => Some(Self::F64),
+            4 => Some(Self::Bool),
+            5 => Some(Self::Array),
+            6 => Some(Self::Closure),
+            7 => Some(Self::Instance),
+            8 => Some(Self::Rng),
+            11 => Some(Self::Iterator),
+            12 => Some(Self::UnionHeap),
+            _ => None,
+        }
+    }
+
+    /// Human-readable name for this type ID.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::String => "String",
+            Self::I64 => "I64",
+            Self::F64 => "F64",
+            Self::Bool => "Bool",
+            Self::Array => "Array",
+            Self::Closure => "Closure",
+            Self::Instance => "Instance",
+            Self::Rng => "Rng",
+            Self::Iterator => "Iterator",
+            Self::UnionHeap => "UnionHeap",
+        }
+    }
+}
+
+impl std::fmt::Display for RuntimeTypeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
 
 /// Check if a type tag represents an RC-managed (heap-allocated) type.
 /// These types need rc_inc/rc_dec when ownership changes.
 #[inline]
 pub fn tag_needs_rc(tag: u64) -> bool {
+    use RuntimeTypeId as T;
     matches!(
-        tag as u32,
-        TYPE_STRING | TYPE_ARRAY | TYPE_CLOSURE | TYPE_INSTANCE | TYPE_RNG | TYPE_ITERATOR
+        RuntimeTypeId::from_u32(tag as u32),
+        Some(T::String | T::Array | T::Closure | T::Instance | T::Rng | T::Iterator)
     )
 }
 
@@ -136,28 +187,28 @@ pub struct TaggedValue {
 impl TaggedValue {
     pub fn from_i64(v: i64) -> Self {
         Self {
-            tag: TYPE_I64 as u64,
+            tag: RuntimeTypeId::I64 as u64,
             value: v as u64,
         }
     }
 
     pub fn from_f64(v: f64) -> Self {
         Self {
-            tag: TYPE_F64 as u64,
+            tag: RuntimeTypeId::F64 as u64,
             value: v.to_bits(),
         }
     }
 
     pub fn from_bool(v: bool) -> Self {
         Self {
-            tag: TYPE_BOOL as u64,
+            tag: RuntimeTypeId::Bool as u64,
             value: v as u64,
         }
     }
 
     pub fn from_string(ptr: *mut crate::string::RcString) -> Self {
         Self {
-            tag: TYPE_STRING as u64,
+            tag: RuntimeTypeId::String as u64,
             value: ptr as u64,
         }
     }
@@ -190,7 +241,7 @@ impl TaggedValue {
         }
         if self.needs_rc() {
             rc_dec(self.value as *mut u8);
-        } else if self.tag == TYPE_UNION_HEAP as u64 {
+        } else if self.tag == RuntimeTypeId::UnionHeap as u64 {
             union_heap_cleanup(self.value as *mut u8);
         }
     }
@@ -277,7 +328,7 @@ mod tests {
 
     #[test]
     fn rc_header_inc_dec() {
-        let header = RcHeader::new(TYPE_STRING);
+        let header = RcHeader::new(RuntimeTypeId::String as u32);
         assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
 
         header.inc();
@@ -296,19 +347,19 @@ mod tests {
 
     #[test]
     fn rc_header_with_drop_fn() {
-        let header = RcHeader::with_drop_fn(TYPE_STRING, dummy_drop);
+        let header = RcHeader::with_drop_fn(RuntimeTypeId::String as u32, dummy_drop);
         assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
         assert!(header.drop_fn.is_some());
 
-        let header_none = RcHeader::new(TYPE_STRING);
+        let header_none = RcHeader::new(RuntimeTypeId::String as u32);
         assert!(header_none.drop_fn.is_none());
     }
 
     #[test]
     fn rc_header_new_has_none_drop_fn() {
-        let header = RcHeader::new(TYPE_ARRAY);
+        let header = RcHeader::new(RuntimeTypeId::Array as u32);
         assert!(header.drop_fn.is_none());
-        assert_eq!(header.type_id, TYPE_ARRAY);
+        assert_eq!(header.type_id, RuntimeTypeId::Array as u32);
     }
 
     static DROP_CALLED: AtomicBool = AtomicBool::new(false);
@@ -325,7 +376,7 @@ mod tests {
         assert!(!ptr.is_null());
         let header = RcHeader {
             ref_count: AtomicU32::new(1),
-            type_id: TYPE_STRING,
+            type_id: RuntimeTypeId::String as u32,
             drop_fn,
         };
         unsafe { std::ptr::write(ptr as *mut RcHeader, header) };
@@ -390,7 +441,7 @@ mod tests {
         assert!(!ptr.is_null());
         let header = RcHeader {
             ref_count: AtomicU32::new(RC_PINNED),
-            type_id: TYPE_STRING,
+            type_id: RuntimeTypeId::String as u32,
             drop_fn,
         };
         unsafe { std::ptr::write(ptr as *mut RcHeader, header) };

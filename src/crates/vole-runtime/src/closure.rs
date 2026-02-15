@@ -20,7 +20,7 @@ use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
 use crate::alloc_track;
-use crate::value::{RcHeader, TYPE_CLOSURE, rc_dec};
+use crate::value::{RcHeader, RuntimeTypeId, rc_dec};
 
 /// Capture kind constants
 pub const CAPTURE_KIND_VALUE: u8 = 0;
@@ -106,7 +106,7 @@ impl Closure {
             // Initialize RcHeader with closure_drop
             ptr::write(
                 &mut (*ptr).header,
-                RcHeader::with_drop_fn(TYPE_CLOSURE, closure_drop),
+                RcHeader::with_drop_fn(RuntimeTypeId::Closure as u32, closure_drop),
             );
             (*ptr).func_ptr = func_ptr;
             (*ptr).num_captures = num_captures;
@@ -118,7 +118,7 @@ impl Closure {
             for i in 0..num_captures {
                 *captures.add(i) = ptr::null_mut();
             }
-            alloc_track::track_alloc(TYPE_CLOSURE);
+            alloc_track::track_alloc(RuntimeTypeId::Closure as u32);
             ptr
         }
     }
@@ -212,7 +212,7 @@ impl Closure {
 /// # Safety
 /// `ptr` must point to a valid `Closure` allocation with refcount at zero.
 unsafe extern "C" fn closure_drop(ptr: *mut u8) {
-    alloc_track::track_dealloc(TYPE_CLOSURE);
+    alloc_track::track_dealloc(RuntimeTypeId::Closure as u32);
     unsafe {
         let closure = ptr as *mut Closure;
         let num = (*closure).num_captures;
@@ -336,7 +336,7 @@ mod tests {
 
             // Verify RcHeader is initialized
             assert_eq!((*closure).header.ref_count.load(Ordering::Relaxed), 1);
-            assert_eq!((*closure).header.type_id, TYPE_CLOSURE);
+            assert_eq!((*closure).header.type_id, RuntimeTypeId::Closure as u32);
             assert!((*closure).header.drop_fn.is_some());
 
             // Verify captures are initialized to null
@@ -386,7 +386,7 @@ mod tests {
 
             assert_eq!((*closure).func_ptr, func_ptr);
             assert_eq!((*closure).num_captures, 0);
-            assert_eq!((*closure).header.type_id, TYPE_CLOSURE);
+            assert_eq!((*closure).header.type_id, RuntimeTypeId::Closure as u32);
 
             Closure::free(closure);
         }
@@ -473,7 +473,7 @@ mod tests {
             let rc_ptr = alloc(rc_layout);
             ptr::write(
                 rc_ptr as *mut RcHeader,
-                RcHeader::with_drop_fn(crate::value::TYPE_STRING, test_drop),
+                RcHeader::with_drop_fn(RuntimeTypeId::String as u32, test_drop),
             );
             // Give it refcount 2 so the first dec doesn't free it
             (*(rc_ptr as *mut RcHeader)).inc();

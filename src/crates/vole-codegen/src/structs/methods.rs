@@ -966,7 +966,7 @@ impl Cg<'_, '_, '_> {
                                 "INTERNAL: string iterator: RuntimeIterator<string> type not pre-created",
                             )
                     });
-                    // Set elem_tag to TYPE_STRING so terminal methods can properly
+                    // Set elem_tag to RuntimeTypeId::String so terminal methods can properly
                     // free owned char strings produced by the string chars iterator.
                     let string_tag = crate::types::unknown_type_tag(TypeId::STRING, self.arena());
                     if string_tag != 0 {

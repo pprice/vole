@@ -3,7 +3,7 @@
 use crate::alloc_track;
 use crate::closure::vole_heap_free;
 use crate::type_registry::{FieldTypeTag, get_instance_type_info};
-use crate::value::{RcHeader, TYPE_INSTANCE, rc_dec, rc_inc, union_heap_cleanup};
+use crate::value::{RcHeader, RuntimeTypeId, rc_dec, rc_inc, union_heap_cleanup};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -41,7 +41,7 @@ impl RcInstance {
                 ptr::write(fields_ptr.add(i), 0u64);
             }
 
-            alloc_track::track_alloc(TYPE_INSTANCE);
+            alloc_track::track_alloc(RuntimeTypeId::Instance as u32);
             ptr
         }
     }
@@ -120,7 +120,7 @@ impl RcInstance {
 /// # Safety
 /// `ptr` must point to a valid `RcInstance` allocation with refcount already at zero.
 unsafe extern "C" fn instance_drop(ptr: *mut u8) {
-    alloc_track::track_dealloc(TYPE_INSTANCE);
+    alloc_track::track_dealloc(RuntimeTypeId::Instance as u32);
     unsafe {
         let inst = ptr as *mut RcInstance;
         let type_id = (*inst).type_id;
@@ -208,11 +208,11 @@ pub extern "C" fn vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::TYPE_INSTANCE;
+    use crate::value::RuntimeTypeId;
 
     #[test]
     fn create_and_access_instance() {
-        let inst = RcInstance::new(1, 2, TYPE_INSTANCE);
+        let inst = RcInstance::new(1, 2, RuntimeTypeId::Instance as u32);
         unsafe {
             assert_eq!((*inst).field_count, 2);
 

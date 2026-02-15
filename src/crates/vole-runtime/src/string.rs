@@ -1,7 +1,7 @@
 // src/runtime/string.rs
 
 use crate::alloc_track;
-use crate::value::{RcHeader, TYPE_STRING, rc_dec, rc_inc};
+use crate::value::{RcHeader, RuntimeTypeId, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 use std::slice;
@@ -78,7 +78,7 @@ impl RcString {
             // Initialize header with drop_fn for unified rc_dec cleanup
             ptr::write(
                 &mut (*ptr).header,
-                RcHeader::with_drop_fn(TYPE_STRING, string_drop),
+                RcHeader::with_drop_fn(RuntimeTypeId::String as u32, string_drop),
             );
             ptr::write(&mut (*ptr).len, len);
             ptr::write(&mut (*ptr).char_count, char_count);
@@ -88,7 +88,7 @@ impl RcString {
             let data_ptr = (ptr as *mut u8).add(size_of::<RcString>());
             ptr::copy_nonoverlapping(s.as_ptr(), data_ptr, len);
 
-            alloc_track::track_alloc(TYPE_STRING);
+            alloc_track::track_alloc(RuntimeTypeId::String as u32);
             ptr
         }
     }
@@ -152,7 +152,7 @@ impl RcString {
 
             ptr::write(
                 &mut (*ptr).header,
-                RcHeader::with_drop_fn(TYPE_STRING, string_drop),
+                RcHeader::with_drop_fn(RuntimeTypeId::String as u32, string_drop),
             );
             ptr::write(&mut (*ptr).len, total_len);
             ptr::write(&mut (*ptr).char_count, char_count);
@@ -162,7 +162,7 @@ impl RcString {
             ptr::copy_nonoverlapping(a.as_ptr(), data_ptr, a.len());
             ptr::copy_nonoverlapping(b.as_ptr(), data_ptr.add(a.len()), b.len());
 
-            alloc_track::track_alloc(TYPE_STRING);
+            alloc_track::track_alloc(RuntimeTypeId::String as u32);
             ptr
         }
     }
@@ -192,7 +192,7 @@ impl RcString {
 /// # Safety
 /// `ptr` must point to a valid `RcString` allocation with refcount already at zero.
 unsafe extern "C" fn string_drop(ptr: *mut u8) {
-    alloc_track::track_dealloc(TYPE_STRING);
+    alloc_track::track_dealloc(RuntimeTypeId::String as u32);
     unsafe {
         let s = ptr as *mut RcString;
         let len = (*s).len;

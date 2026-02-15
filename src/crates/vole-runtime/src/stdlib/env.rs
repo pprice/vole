@@ -9,7 +9,7 @@
 use crate::array::RcArray;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 use crate::string::RcString;
-use crate::value::{TYPE_ARRAY, TYPE_STRING, TaggedValue};
+use crate::value::{RuntimeTypeId, TaggedValue};
 use std::alloc::{Layout, alloc};
 
 /// Create the std:env native module
@@ -108,7 +108,7 @@ pub extern "C" fn env_args() -> *mut RcArray {
             RcArray::push(
                 arr,
                 TaggedValue {
-                    tag: TYPE_STRING as u64,
+                    tag: RuntimeTypeId::String as u64,
                     value: s as u64,
                 },
             );
@@ -175,14 +175,14 @@ pub extern "C" fn env_vars() -> *mut RcArray {
             RcArray::push(
                 pair,
                 TaggedValue {
-                    tag: TYPE_STRING as u64,
+                    tag: RuntimeTypeId::String as u64,
                     value: key_str as u64,
                 },
             );
             RcArray::push(
                 pair,
                 TaggedValue {
-                    tag: TYPE_STRING as u64,
+                    tag: RuntimeTypeId::String as u64,
                     value: value_str as u64,
                 },
             );
@@ -191,7 +191,7 @@ pub extern "C" fn env_vars() -> *mut RcArray {
             RcArray::push(
                 arr,
                 TaggedValue {
-                    tag: TYPE_ARRAY as u64,
+                    tag: RuntimeTypeId::Array as u64,
                     value: pair as u64,
                 },
             );

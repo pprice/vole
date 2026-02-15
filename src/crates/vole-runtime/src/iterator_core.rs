@@ -34,7 +34,7 @@ impl CoreIter {
                 data: Arc::<[i64]>::from(values),
                 index: 0,
             },
-            elem_tag: ElemTag(crate::value::TYPE_I64 as u64),
+            elem_tag: ElemTag(crate::value::RuntimeTypeId::I64 as u64),
             ownership: OwnershipMode::Borrowed,
         }
     }
@@ -46,7 +46,7 @@ impl CoreIter {
                 source: Box::new(self),
                 map_fn,
             },
-            elem_tag: ElemTag(crate::value::TYPE_I64 as u64),
+            elem_tag: ElemTag(crate::value::RuntimeTypeId::I64 as u64),
             ownership: OwnershipMode::Owned,
         }
     }

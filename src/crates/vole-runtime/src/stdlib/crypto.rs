@@ -8,7 +8,7 @@
 use crate::array::RcArray;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 use crate::string::RcString;
-use crate::value::{TYPE_I64, TaggedValue};
+use crate::value::{RuntimeTypeId, TaggedValue};
 use sha2::{Digest, Sha256};
 
 /// Create the std:crypto/hash native module
@@ -78,7 +78,7 @@ pub extern "C" fn crypto_sha256_bytes(input: *const RcString) -> *mut RcArray {
                 RcArray::push(
                     arr,
                     TaggedValue {
-                        tag: TYPE_I64 as u64,
+                        tag: RuntimeTypeId::I64 as u64,
                         value: 0,
                     },
                 );
@@ -99,7 +99,7 @@ pub extern "C" fn crypto_sha256_bytes(input: *const RcString) -> *mut RcArray {
             RcArray::push(
                 arr,
                 TaggedValue {
-                    tag: TYPE_I64 as u64,
+                    tag: RuntimeTypeId::I64 as u64,
                     value: *byte as u64,
                 },
             );

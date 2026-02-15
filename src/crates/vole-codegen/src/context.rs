@@ -1149,13 +1149,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Returns true when a union array can be stored inline as (runtime_tag, payload)
     /// without losing variant identity.
     ///
-    /// If two variants map to the same runtime tag (e.g. `i64 | nil` -> TYPE_I64),
+    /// If two variants map to the same runtime tag (e.g. `i64 | nil` -> RuntimeTypeId::I64),
     /// inline storage cannot recover the original union variant on read, so we must
     /// fall back to heap-boxed union buffers.
     pub fn union_array_prefers_inline_storage(&self, union_type_id: TypeId) -> bool {
         use crate::types::unknown_type_tag;
         use rustc_hash::FxHashSet;
-        use vole_runtime::value::TYPE_I64;
+        use vole_runtime::value::RuntimeTypeId;
 
         let resolved_union_id = self.try_substitute_type(union_type_id);
         let Some(variants) = self.arena().unwrap_union(resolved_union_id) else {
@@ -1170,7 +1170,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
 
             let tag = unknown_type_tag(variant, arena);
-            if tag == TYPE_I64 as u64 && !arena.is_integer(variant) && !arena.is_sentinel(variant) {
+            if tag == RuntimeTypeId::I64 as u64
+                && !arena.is_integer(variant)
+                && !arena.is_sentinel(variant)
+            {
                 return false;
             }
             if !seen_tags.insert(tag) {

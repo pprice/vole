@@ -205,7 +205,7 @@ fn parity_collect_tagged() {
     run_conformance_case("collect_tagged", |backend| match backend {
         IteratorBackend::Legacy => {
             let iter = mk_legacy_array_iter(&[1, 2, 3, 4]);
-            let collected = vole_iter_collect_tagged(iter, crate::value::TYPE_I64 as u64);
+            let collected = vole_iter_collect_tagged(iter, crate::value::RuntimeTypeId::I64 as u64);
             collect_i64_values(collected)
         }
         IteratorBackend::NewCore => CoreIter::from_i64_slice(&[1, 2, 3, 4])
@@ -291,7 +291,7 @@ fn parity_find_any_all() {
 fn adapter_dispatch_array_paths() {
     let collected = collect_i64_values(vole_iter_collect_tagged(
         mk_legacy_array_iter(&[5, 6, 7]),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
     let first = decode_optional_i64(vole_iter_first(mk_legacy_array_iter(&[5, 6, 7])));
     let last = decode_optional_i64(vole_iter_last(mk_legacy_array_iter(&[5, 6, 7])));
@@ -321,33 +321,33 @@ fn adapter_dispatch_slice_b_iterators() {
     let map_fn = alloc_closure_for_unary_i64_i64(map_times_two_legacy);
     let mapped = collect_i64_values(vole_iter_collect_tagged(
         vole_map_iter(mk_legacy_array_iter(&[1, 2, 3]), map_fn),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
 
     let pred = alloc_closure_for_unary_i64_bool(predicate_even_legacy);
     let filtered = collect_i64_values(vole_iter_collect_tagged(
         vole_filter_iter(mk_legacy_array_iter(&[1, 2, 3, 4, 5]), pred),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
 
     let taken = collect_i64_values(vole_iter_collect_tagged(
         vole_take_iter(mk_legacy_array_iter(&[10, 11, 12, 13]), 2),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
 
     let skipped = collect_i64_values(vole_iter_collect_tagged(
         vole_skip_iter(mk_legacy_array_iter(&[10, 11, 12, 13]), 2),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
 
     let chained = collect_i64_values(vole_iter_collect_tagged(
         vole_chain_iter(mk_legacy_array_iter(&[1, 2]), mk_legacy_array_iter(&[3, 4])),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
 
     let unique = collect_i64_values(vole_iter_collect_tagged(
         vole_unique_iter(mk_legacy_array_iter(&[1, 1, 2, 2, 2, 3, 1, 1])),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
 
     assert_eq!(mapped, vec![2, 4, 6]);
@@ -362,18 +362,18 @@ fn adapter_dispatch_slice_b_iterators() {
 fn adapter_dispatch_slice_c_composites() {
     let flattened_chunks = collect_i64_values(vole_iter_collect_tagged(
         vole_flatten_iter(vole_chunks_iter(mk_legacy_array_iter(&[1, 2, 3, 4, 5]), 2)),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
     let flattened_windows = collect_i64_values(vole_iter_collect_tagged(
         vole_flatten_iter(vole_windows_iter(mk_legacy_array_iter(&[1, 2, 3, 4]), 3)),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
     let flat_mapped = collect_i64_values(vole_iter_collect_tagged(
         vole_flat_map_iter(
             mk_legacy_array_iter(&[2, 3]),
             alloc_closure_for_unary_i64_i64(flat_map_pair_legacy),
         ),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
 
     assert_eq!(flattened_chunks, vec![1, 2, 3, 4, 5]);
@@ -385,14 +385,14 @@ fn adapter_dispatch_slice_c_composites() {
 fn adapter_dispatch_slice_c_tuple_iterators() {
     let enumerated = collect_tuple_values_and_free(vole_iter_collect_tagged(
         vole_enumerate_iter(mk_legacy_array_iter(&[7, 8, 9])),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
     let zipped = collect_tuple_values_and_free(vole_iter_collect_tagged(
         vole_zip_iter(
             mk_legacy_array_iter(&[1, 2, 3]),
             mk_legacy_array_iter(&[10, 20]),
         ),
-        crate::value::TYPE_I64 as u64,
+        crate::value::RuntimeTypeId::I64 as u64,
     ));
 
     assert_eq!(enumerated, vec![(0, 7), (1, 8), (2, 9)]);

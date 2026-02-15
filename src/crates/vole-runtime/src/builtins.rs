@@ -5,7 +5,7 @@
 
 use crate::RcString;
 use crate::array::RcArray;
-use crate::value::{TYPE_UNION_HEAP, TaggedValue};
+use crate::value::{RuntimeTypeId, TaggedValue};
 use std::alloc::Layout;
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
@@ -444,7 +444,7 @@ pub extern "C" fn vole_array_filled(count: i64, tag: u64, value: u64) -> *mut Rc
     let arr = RcArray::with_capacity(n);
     let tv = TaggedValue { tag, value };
     unsafe {
-        if tag == TYPE_UNION_HEAP as u64 && value != 0 {
+        if tag == RuntimeTypeId::UnionHeap as u64 && value != 0 {
             // Union heap buffers: each slot needs its own clone of the buffer
             // (with rc_inc on the payload if RC). Sharing the same pointer
             // would cause double-free on array drop.

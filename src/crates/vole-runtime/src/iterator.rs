@@ -22,7 +22,7 @@ use crate::closure::Closure;
 use crate::iterator_abi::{NextTag, TaggedNextWord};
 use crate::iterator_core::CoreIter;
 use crate::string::RcString;
-use crate::value::{RcHeader, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc, tag_needs_rc};
+use crate::value::{RcHeader, RuntimeTypeId, rc_dec, rc_inc, tag_needs_rc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -539,7 +539,7 @@ pub struct ChunksSource {
     pub chunk_size: i64,
     /// Current position in the elements array
     pub position: i64,
-    /// Element type tag for inner elements (e.g. TYPE_F64 for [f64] chunks)
+    /// Element type tag for inner elements (e.g. RuntimeTypeId::F64 for [f64] chunks)
     pub inner_elem_tag: u64,
 }
 
@@ -553,7 +553,7 @@ pub struct WindowsSource {
     pub window_size: i64,
     /// Current position in the elements array
     pub position: i64,
-    /// Element type tag for inner elements (e.g. TYPE_F64 for [f64] windows)
+    /// Element type tag for inner elements (e.g. RuntimeTypeId::F64 for [f64] windows)
     pub inner_elem_tag: u64,
 }
 
@@ -688,14 +688,14 @@ pub struct UnifiedIterator {
 ///
 /// Layout: [RcHeader (16 bytes)] [UnifiedIterator (kind + source)] [elem_tag: u64]
 ///
-/// `elem_tag` is the runtime type tag (e.g., TYPE_STRING) for the element type flowing
+/// `elem_tag` is the runtime type tag (e.g., RuntimeTypeId::String) for the element type flowing
 /// through this iterator. Used by next() to rc_inc produced values and by filter/take/etc.
 /// to rc_dec rejected/discarded values.
 #[repr(C)]
 pub struct RcIterator {
     pub header: RcHeader,
     pub iter: UnifiedIterator,
-    /// Runtime type tag for elements (0 = unset/i64, TYPE_STRING = 1, etc.)
+    /// Runtime type tag for elements (0 = unset/i64, RuntimeTypeId::String = 1, etc.)
     pub elem_tag: u64,
     /// True if this iterator's next() produces freshly owned values (e.g. generators).
     /// Used to decide whether terminal methods should rc_dec consumed elements.
@@ -718,13 +718,13 @@ impl RcIterator {
             }
             ptr::write(
                 &mut (*ptr).header,
-                RcHeader::with_drop_fn(TYPE_ITERATOR, iterator_drop),
+                RcHeader::with_drop_fn(RuntimeTypeId::Iterator as u32, iterator_drop),
             );
             ptr::write(&mut (*ptr).iter.kind, kind);
             ptr::write(&mut (*ptr).iter.source, source);
             ptr::write(&mut (*ptr).elem_tag, elem_tag);
             ptr::write(&mut (*ptr).produces_owned, false);
-            alloc_track::track_alloc(TYPE_ITERATOR);
+            alloc_track::track_alloc(RuntimeTypeId::Iterator as u32);
             ptr
         }
     }
@@ -872,7 +872,7 @@ pub extern "C" fn vole_interface_iter_tagged(
 /// # Safety
 /// `ptr` must point to a valid `RcIterator` allocation.
 unsafe extern "C" fn iterator_drop(ptr: *mut u8) {
-    alloc_track::track_dealloc(TYPE_ITERATOR);
+    alloc_track::track_dealloc(RuntimeTypeId::Iterator as u32);
     unsafe {
         let rc_iter = ptr as *mut RcIterator;
         let iter_ref = &(*rc_iter).iter;
@@ -1186,8 +1186,8 @@ pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
 
     // For Flatten iterators, use vole_flatten_iter_collect which reads
     // the correct inner element tag. The codegen-set elem_tag may incorrectly
-    // be TYPE_ARRAY (the pre-flatten outer element type) rather than the
-    // flattened inner element type (e.g. TYPE_F64).
+    // be RuntimeTypeId::Array (the pre-flatten outer element type) rather than the
+    // flattened inner element type (e.g. RuntimeTypeId::F64).
     if kind == IteratorKind::Flatten {
         return vole_flatten_iter_collect(iter);
     }
@@ -1196,7 +1196,7 @@ pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
 }
 
 /// Collect all remaining iterator values into a new array with proper element type tags.
-/// `elem_tag` is the runtime type tag for the element type (e.g. TYPE_STRING, TYPE_INSTANCE).
+/// `elem_tag` is the runtime type tag for the element type (e.g. RuntimeTypeId::String, RuntimeTypeId::Instance).
 /// This ensures the resulting array properly tracks RC types for cleanup.
 /// Handles both "owned" values (from map/string_chars) and "borrowed" values (from array)
 /// by rc_inc-ing borrowed RC values so the collected array properly owns them.
@@ -1522,13 +1522,13 @@ pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
 /// Sum all elements in any iterator.
 /// Reads the iterator's stored `elem_tag` to determine whether to perform
 /// integer or floating-point addition.
-/// When `elem_tag` == TYPE_F64, interprets raw bits as f64 and returns f64 bits as i64.
+/// When `elem_tag` == RuntimeTypeId::F64, interprets raw bits as f64 and returns f64 bits as i64.
 /// Otherwise performs integer (i64) addition.
 /// Returns the sum as i64 (raw bits).
 /// Frees the iterator after summing.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
-    use crate::value::TYPE_F64;
+    use crate::value::RuntimeTypeId;
 
     if iter.is_null() {
         return 0;
@@ -1536,7 +1536,7 @@ pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
 
     let elem_tag = unsafe { (*iter).elem_tag };
 
-    if elem_tag == TYPE_F64 as u64 {
+    if elem_tag == RuntimeTypeId::F64 as u64 {
         // Float summation: interpret raw bits as f64
         let mut sum: f64 = 0.0;
         loop {
@@ -2191,8 +2191,8 @@ pub extern "C" fn vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray
 pub extern "C" fn vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator {
     // Determine the inner element tag for the flattened output.
     // When the source is a Chunks or Windows iterator, use inner_elem_tag
-    // (the element type of the sub-arrays, e.g. TYPE_F64 for [f64] chunks).
-    // This is critical because codegen may set elem_tag to TYPE_ARRAY
+    // (the element type of the sub-arrays, e.g. RuntimeTypeId::F64 for [f64] chunks).
+    // This is critical because codegen may set elem_tag to RuntimeTypeId::Array
     // (the outer element type) on the flatten iterator, but flatten actually
     // yields individual elements from the inner arrays.
     let inner_tag = if !source.is_null() {
@@ -2278,7 +2278,7 @@ pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArr
     }
 
     // Determine the inner element type tag. The flatten iterator's elem_tag
-    // may be TYPE_ARRAY (incorrectly set by codegen for the pre-flatten type).
+    // may be RuntimeTypeId::Array (incorrectly set by codegen for the pre-flatten type).
     // When the outer source is Chunks or Windows, use inner_elem_tag.
     // Otherwise, fall back to the iterator's stored elem_tag.
     let elem_tag = unsafe {
@@ -2290,9 +2290,9 @@ pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArr
                 IteratorKind::Windows => (*outer).iter.source.windows.inner_elem_tag,
                 _ => {
                     let tag = (*iter).elem_tag;
-                    // If the codegen-set tag is TYPE_ARRAY but we're flattening,
+                    // If the codegen-set tag is RuntimeTypeId::Array but we're flattening,
                     // the actual elements aren't arrays - use 0 (i64) as fallback
-                    if tag == crate::value::TYPE_ARRAY as u64 {
+                    if tag == RuntimeTypeId::Array as u64 {
                         0
                     } else {
                         tag
@@ -2677,7 +2677,7 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
     }
 
     // The chunks iterator yields sub-arrays, so its elem_tag should be
-    // TYPE_ARRAY (not the inner element type). The inner_elem_tag is stored
+    // RuntimeTypeId::Array (not the inner element type). The inner_elem_tag is stored
     // on ChunksSource so sub-arrays can preserve the correct inner type.
 
     RcIterator::new_with_tag(
@@ -2690,7 +2690,7 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
                 inner_elem_tag: source_elem_tag,
             },
         },
-        crate::value::TYPE_ARRAY as u64,
+        RuntimeTypeId::Array as u64,
     )
 }
 
@@ -2759,13 +2759,13 @@ pub extern "C" fn vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArra
             break;
         }
 
-        // Push chunk array to result with TYPE_ARRAY tag so cleanup
+        // Push chunk array to result with RuntimeTypeId::Array tag so cleanup
         // properly dec_ref's sub-arrays
         unsafe {
             RcArray::push(
                 result,
                 TaggedValue {
-                    tag: crate::value::TYPE_ARRAY as u64,
+                    tag: RuntimeTypeId::Array as u64,
                     value: value as u64,
                 },
             );
@@ -2842,7 +2842,7 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
     }
 
     // The windows iterator yields sub-arrays, so its elem_tag should be
-    // TYPE_ARRAY (not the inner element type). The inner_elem_tag is stored
+    // RuntimeTypeId::Array (not the inner element type). The inner_elem_tag is stored
     // on WindowsSource so sub-arrays can preserve the correct inner type.
 
     RcIterator::new_with_tag(
@@ -2855,7 +2855,7 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
                 inner_elem_tag: source_elem_tag,
             },
         },
-        crate::value::TYPE_ARRAY as u64,
+        RuntimeTypeId::Array as u64,
     )
 }
 
@@ -2924,13 +2924,13 @@ pub extern "C" fn vole_windows_iter_collect(iter: *mut RcIterator) -> *mut RcArr
             break;
         }
 
-        // Push window array to result with TYPE_ARRAY tag so cleanup
+        // Push window array to result with RuntimeTypeId::Array tag so cleanup
         // properly dec_ref's sub-arrays
         unsafe {
             RcArray::push(
                 result,
                 TaggedValue {
-                    tag: crate::value::TYPE_ARRAY as u64,
+                    tag: RuntimeTypeId::Array as u64,
                     value: value as u64,
                 },
             );
@@ -3136,7 +3136,7 @@ pub extern "C" fn vole_string_chars_iter(string: *const RcString) -> *mut RcIter
                 byte_pos: 0,
             },
         },
-        TYPE_STRING as u64,
+        RuntimeTypeId::String as u64,
     )
 }
 
@@ -3335,7 +3335,7 @@ pub extern "C" fn vole_string_split_iter(
                 exhausted: false,
             },
         },
-        TYPE_STRING as u64,
+        RuntimeTypeId::String as u64,
     )
 }
 
@@ -3417,7 +3417,7 @@ pub extern "C" fn vole_string_lines_iter(string: *const RcString) -> *mut RcIter
                 exhausted: false,
             },
         },
-        TYPE_STRING as u64,
+        RuntimeTypeId::String as u64,
     )
 }
 

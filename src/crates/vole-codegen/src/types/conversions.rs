@@ -705,42 +705,39 @@ pub(crate) fn word_to_value_type_id(
 }
 
 /// Get the runtime tag value for an array element type.
-/// These tags must match the runtime TYPE_* constants in vole_runtime::value
+/// These tags must match the `RuntimeTypeId` variants in `vole_runtime::value`
 /// so that `tag_needs_rc` correctly identifies RC-managed elements for cleanup
 /// in `array_drop`.
 pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
-    use vole_runtime::value::{
-        TYPE_ARRAY, TYPE_BOOL, TYPE_CLOSURE, TYPE_F64, TYPE_I64, TYPE_INSTANCE, TYPE_RNG,
-        TYPE_STRING, TYPE_UNION_HEAP,
-    };
+    use vole_runtime::value::RuntimeTypeId;
     use vole_sema::type_arena::SemaType as ArenaType;
     // Handle type uses a special TypeId sentinel, check before SemaType match
     if arena.is_handle(ty) {
-        return TYPE_RNG as i64;
+        return RuntimeTypeId::Rng as i64;
     }
     // Sentinel types (nil, Done, user-defined) are non-RC stack values
     if arena.is_sentinel(ty) {
-        return TYPE_I64 as i64;
+        return RuntimeTypeId::I64 as i64;
     }
     match arena.get(ty) {
-        ArenaType::Primitive(PrimitiveType::String) => TYPE_STRING as i64,
+        ArenaType::Primitive(PrimitiveType::String) => RuntimeTypeId::String as i64,
         ArenaType::Primitive(PrimitiveType::I64)
         | ArenaType::Primitive(PrimitiveType::I32)
         | ArenaType::Primitive(PrimitiveType::I16)
-        | ArenaType::Primitive(PrimitiveType::I8) => TYPE_I64 as i64,
+        | ArenaType::Primitive(PrimitiveType::I8) => RuntimeTypeId::I64 as i64,
         ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => {
-            TYPE_F64 as i64
+            RuntimeTypeId::F64 as i64
         }
-        ArenaType::Primitive(PrimitiveType::Bool) => TYPE_BOOL as i64,
-        ArenaType::Array(_) => TYPE_ARRAY as i64,
-        ArenaType::Function { .. } => TYPE_CLOSURE as i64,
-        ArenaType::Class { .. } => TYPE_INSTANCE as i64,
+        ArenaType::Primitive(PrimitiveType::Bool) => RuntimeTypeId::Bool as i64,
+        ArenaType::Array(_) => RuntimeTypeId::Array as i64,
+        ArenaType::Function { .. } => RuntimeTypeId::Closure as i64,
+        ArenaType::Class { .. } => RuntimeTypeId::Instance as i64,
         // Union values boxed by codegen use raw heap buffers (tag+payload), not
-        // RcHeader-prefixed allocations. Tagged as TYPE_UNION_HEAP so array_drop
+        // RcHeader-prefixed allocations. Tagged as RuntimeTypeId::UnionHeap so array_drop
         // calls union_heap_cleanup (which frees the buffer and conditionally
         // rc_dec's the RC payload inside).
-        ArenaType::Union(_) => TYPE_UNION_HEAP as i64,
-        _ => TYPE_I64 as i64,
+        ArenaType::Union(_) => RuntimeTypeId::UnionHeap as i64,
+        _ => RuntimeTypeId::I64 as i64,
     }
 }
 
@@ -751,12 +748,10 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
 /// Get the runtime tag for boxing a value into the unknown type (TaggedValue).
 /// Returns the tag that should be stored in the TaggedValue.tag field.
 pub(crate) fn unknown_type_tag(ty: TypeId, arena: &TypeArena) -> u64 {
-    use vole_runtime::value::{
-        TYPE_ARRAY, TYPE_BOOL, TYPE_CLOSURE, TYPE_F64, TYPE_I64, TYPE_INSTANCE, TYPE_STRING,
-    };
+    use vole_runtime::value::RuntimeTypeId;
     use vole_sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
-        ArenaType::Primitive(PrimitiveType::String) => TYPE_STRING as u64,
+        ArenaType::Primitive(PrimitiveType::String) => RuntimeTypeId::String as u64,
         ArenaType::Primitive(PrimitiveType::I64)
         | ArenaType::Primitive(PrimitiveType::I32)
         | ArenaType::Primitive(PrimitiveType::I16)
@@ -764,16 +759,16 @@ pub(crate) fn unknown_type_tag(ty: TypeId, arena: &TypeArena) -> u64 {
         | ArenaType::Primitive(PrimitiveType::U64)
         | ArenaType::Primitive(PrimitiveType::U32)
         | ArenaType::Primitive(PrimitiveType::U16)
-        | ArenaType::Primitive(PrimitiveType::U8) => TYPE_I64 as u64,
+        | ArenaType::Primitive(PrimitiveType::U8) => RuntimeTypeId::I64 as u64,
         ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => {
-            TYPE_F64 as u64
+            RuntimeTypeId::F64 as u64
         }
-        ArenaType::Primitive(PrimitiveType::Bool) => TYPE_BOOL as u64,
-        ArenaType::Array(_) | ArenaType::FixedArray { .. } => TYPE_ARRAY as u64,
-        ArenaType::Function { .. } => TYPE_CLOSURE as u64,
-        ArenaType::Class { .. } => TYPE_INSTANCE as u64,
+        ArenaType::Primitive(PrimitiveType::Bool) => RuntimeTypeId::Bool as u64,
+        ArenaType::Array(_) | ArenaType::FixedArray { .. } => RuntimeTypeId::Array as u64,
+        ArenaType::Function { .. } => RuntimeTypeId::Closure as u64,
+        ArenaType::Class { .. } => RuntimeTypeId::Instance as u64,
         // For other types (nil, done, tuples, unions, etc.), default to I64 representation
-        _ => TYPE_I64 as u64,
+        _ => RuntimeTypeId::I64 as u64,
     }
 }
 

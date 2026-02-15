@@ -8,7 +8,7 @@
 
 use crate::alloc_track;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
-use crate::value::{RcHeader, TYPE_RNG};
+use crate::value::{RcHeader, RuntimeTypeId};
 use rand::rngs::StdRng;
 use rand::{Rng as RandRng, SeedableRng};
 use std::alloc::{Layout, dealloc};
@@ -29,7 +29,7 @@ pub struct RcRng {
 /// # Safety
 /// `ptr` must point to a valid `RcRng` allocation with refcount already at zero.
 unsafe extern "C" fn rng_drop(ptr: *mut u8) {
-    alloc_track::track_dealloc(TYPE_RNG);
+    alloc_track::track_dealloc(RuntimeTypeId::Rng as u32);
     unsafe {
         let rng_ptr = ptr as *mut RcRng;
         // Drop the StdRng in place, then deallocate
@@ -137,10 +137,10 @@ pub extern "C" fn random_seeded(seed: i64) -> *mut RcRng {
         }
         std::ptr::write(
             &mut (*ptr).header,
-            RcHeader::with_drop_fn(TYPE_RNG, rng_drop),
+            RcHeader::with_drop_fn(RuntimeTypeId::Rng as u32, rng_drop),
         );
         std::ptr::write(&mut (*ptr).rng, rng);
-        alloc_track::track_alloc(TYPE_RNG);
+        alloc_track::track_alloc(RuntimeTypeId::Rng as u32);
         ptr
     }
 }
@@ -391,7 +391,7 @@ mod tests {
         let rng = random_seeded(42);
         unsafe {
             let header = &(*rng).header;
-            assert_eq!(header.type_id, TYPE_RNG);
+            assert_eq!(header.type_id, RuntimeTypeId::Rng as u32);
             assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
             assert!(header.drop_fn.is_some());
         }

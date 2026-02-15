@@ -8,10 +8,10 @@
 
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
-/// Number of type slots. Must be greater than the highest TYPE_* constant.
-const NUM_TYPE_SLOTS: usize = 12;
+/// Number of type slots. Must be greater than the highest RuntimeTypeId variant.
+const NUM_TYPE_SLOTS: usize = 13;
 
-/// Per-type allocation counters, indexed by TYPE_* constants.
+/// Per-type allocation counters, indexed by RuntimeTypeId discriminant.
 static TYPE_COUNTERS: [AtomicI64; NUM_TYPE_SLOTS] = {
     #[expect(clippy::declare_interior_mutable_const)]
     const ZERO: AtomicI64 = AtomicI64::new(0);
@@ -77,18 +77,10 @@ pub fn report() -> Vec<(u32, i64)> {
 
 /// Return a human-readable name for a runtime type ID.
 pub fn type_name(type_id: u32) -> &'static str {
-    match type_id {
-        1 => "String",
-        2 => "I64",
-        3 => "F64",
-        4 => "Bool",
-        5 => "Array",
-        6 => "Closure",
-        7 => "Instance",
-        8 => "Rng",
-        11 => "Iterator",
-        _ => "Unknown",
-    }
+    use crate::value::RuntimeTypeId;
+    RuntimeTypeId::from_u32(type_id)
+        .map(|id| id.name())
+        .unwrap_or("Unknown")
 }
 
 /// Reset all counters to zero.
@@ -102,9 +94,7 @@ pub fn reset() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::{
-        TYPE_ARRAY, TYPE_CLOSURE, TYPE_INSTANCE, TYPE_ITERATOR, TYPE_RNG, TYPE_STRING,
-    };
+    use crate::value::RuntimeTypeId;
     use std::sync::Mutex;
 
     // These tests manipulate global state (ENABLED flag, counters, reset) and must
@@ -122,11 +112,11 @@ mod tests {
         // Temporarily disable to test the disabled path.
         let was_enabled = ENABLED.load(Ordering::Relaxed);
         ENABLED.store(false, Ordering::Relaxed);
-        let before = type_count(TYPE_RNG);
+        let before = type_count(RuntimeTypeId::Rng as u32);
 
-        track_alloc(TYPE_RNG);
+        track_alloc(RuntimeTypeId::Rng as u32);
         // RNG counter should not have changed when disabled
-        assert_eq!(type_count(TYPE_RNG), before);
+        assert_eq!(type_count(RuntimeTypeId::Rng as u32), before);
 
         // Restore previous state
         ENABLED.store(was_enabled, Ordering::Relaxed);
@@ -143,70 +133,73 @@ mod tests {
     fn test_track_alloc_increments_type_counter() {
         let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
-        let before = type_count(TYPE_ITERATOR);
+        let before = type_count(RuntimeTypeId::Iterator as u32);
 
-        track_alloc(TYPE_ITERATOR);
-        assert_eq!(type_count(TYPE_ITERATOR), before + 1);
+        track_alloc(RuntimeTypeId::Iterator as u32);
+        assert_eq!(type_count(RuntimeTypeId::Iterator as u32), before + 1);
 
-        track_alloc(TYPE_ITERATOR);
-        assert_eq!(type_count(TYPE_ITERATOR), before + 2);
+        track_alloc(RuntimeTypeId::Iterator as u32);
+        assert_eq!(type_count(RuntimeTypeId::Iterator as u32), before + 2);
 
         // Clean up
-        track_dealloc(TYPE_ITERATOR);
-        track_dealloc(TYPE_ITERATOR);
+        track_dealloc(RuntimeTypeId::Iterator as u32);
+        track_dealloc(RuntimeTypeId::Iterator as u32);
     }
 
     #[test]
     fn test_track_dealloc_decrements_type_counter() {
         let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
-        let before = type_count(TYPE_RNG);
+        let before = type_count(RuntimeTypeId::Rng as u32);
 
-        track_alloc(TYPE_RNG);
-        track_alloc(TYPE_RNG);
-        assert_eq!(type_count(TYPE_RNG), before + 2);
+        track_alloc(RuntimeTypeId::Rng as u32);
+        track_alloc(RuntimeTypeId::Rng as u32);
+        assert_eq!(type_count(RuntimeTypeId::Rng as u32), before + 2);
 
-        track_dealloc(TYPE_RNG);
-        assert_eq!(type_count(TYPE_RNG), before + 1);
+        track_dealloc(RuntimeTypeId::Rng as u32);
+        assert_eq!(type_count(RuntimeTypeId::Rng as u32), before + 1);
 
-        track_dealloc(TYPE_RNG);
-        assert_eq!(type_count(TYPE_RNG), before);
+        track_dealloc(RuntimeTypeId::Rng as u32);
+        assert_eq!(type_count(RuntimeTypeId::Rng as u32), before);
     }
 
     #[test]
     fn test_snapshot_and_delta_on_type_counter() {
         let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
-        let before = type_count(TYPE_CLOSURE);
+        let before = type_count(RuntimeTypeId::Closure as u32);
 
-        track_alloc(TYPE_CLOSURE);
-        track_alloc(TYPE_CLOSURE);
-        assert_eq!(type_count(TYPE_CLOSURE), before + 2);
+        track_alloc(RuntimeTypeId::Closure as u32);
+        track_alloc(RuntimeTypeId::Closure as u32);
+        assert_eq!(type_count(RuntimeTypeId::Closure as u32), before + 2);
 
-        track_dealloc(TYPE_CLOSURE);
-        assert_eq!(type_count(TYPE_CLOSURE), before + 1);
+        track_dealloc(RuntimeTypeId::Closure as u32);
+        assert_eq!(type_count(RuntimeTypeId::Closure as u32), before + 1);
 
         // Clean up
-        track_dealloc(TYPE_CLOSURE);
+        track_dealloc(RuntimeTypeId::Closure as u32);
     }
 
     #[test]
     fn test_report_includes_tracked_types() {
         let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
-        let before = type_count(TYPE_ITERATOR);
+        let before = type_count(RuntimeTypeId::Iterator as u32);
 
-        track_alloc(TYPE_ITERATOR);
-        track_alloc(TYPE_ITERATOR);
+        track_alloc(RuntimeTypeId::Iterator as u32);
+        track_alloc(RuntimeTypeId::Iterator as u32);
 
         let r = report();
-        let iter_count = TYPE_COUNTERS[TYPE_ITERATOR as usize].load(Ordering::Relaxed);
+        let iter_count = TYPE_COUNTERS[RuntimeTypeId::Iterator as usize].load(Ordering::Relaxed);
         assert_eq!(iter_count - before, 2);
-        assert!(r.iter().any(|&(id, _)| id == TYPE_ITERATOR));
+        assert!(
+            r.iter()
+                .any(|&(id, _)| id == RuntimeTypeId::Iterator as u32)
+        );
 
         // Clean up
-        track_dealloc(TYPE_ITERATOR);
-        track_dealloc(TYPE_ITERATOR);
+        track_dealloc(RuntimeTypeId::Iterator as u32);
+        track_dealloc(RuntimeTypeId::Iterator as u32);
     }
 
     #[test]
@@ -214,28 +207,28 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
 
-        track_alloc(TYPE_RNG);
-        assert!(type_count(TYPE_RNG) >= 1);
+        track_alloc(RuntimeTypeId::Rng as u32);
+        assert!(type_count(RuntimeTypeId::Rng as u32) >= 1);
 
         reset();
         // After reset, individual type counters should be zero
-        assert_eq!(type_count(TYPE_RNG), 0);
-        assert_eq!(type_count(TYPE_ITERATOR), 0);
+        assert_eq!(type_count(RuntimeTypeId::Rng as u32), 0);
+        assert_eq!(type_count(RuntimeTypeId::Iterator as u32), 0);
     }
 
     #[test]
     fn test_negative_on_double_free() {
         let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
-        let before = type_count(TYPE_ITERATOR);
+        let before = type_count(RuntimeTypeId::Iterator as u32);
 
-        track_alloc(TYPE_ITERATOR);
-        track_dealloc(TYPE_ITERATOR);
-        track_dealloc(TYPE_ITERATOR); // double free
-        assert_eq!(type_count(TYPE_ITERATOR), before - 1);
+        track_alloc(RuntimeTypeId::Iterator as u32);
+        track_dealloc(RuntimeTypeId::Iterator as u32);
+        track_dealloc(RuntimeTypeId::Iterator as u32); // double free
+        assert_eq!(type_count(RuntimeTypeId::Iterator as u32), before - 1);
 
         // Clean up (add one back)
-        track_alloc(TYPE_ITERATOR);
+        track_alloc(RuntimeTypeId::Iterator as u32);
     }
 
     #[test]
@@ -244,12 +237,12 @@ mod tests {
         enable_tracking();
 
         let types = [
-            TYPE_STRING,
-            TYPE_ARRAY,
-            TYPE_CLOSURE,
-            TYPE_INSTANCE,
-            TYPE_RNG,
-            TYPE_ITERATOR,
+            RuntimeTypeId::String as u32,
+            RuntimeTypeId::Array as u32,
+            RuntimeTypeId::Closure as u32,
+            RuntimeTypeId::Instance as u32,
+            RuntimeTypeId::Rng as u32,
+            RuntimeTypeId::Iterator as u32,
         ];
 
         let before: Vec<i64> = types.iter().map(|&t| type_count(t)).collect();

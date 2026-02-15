@@ -38,7 +38,7 @@ pub(crate) fn compile_string_literal(
     module: &mut JITModule,
     func_registry: &mut FunctionRegistry,
 ) -> CodegenResult<Value> {
-    use vole_runtime::{RC_PINNED, TYPE_STRING, fnv1a_hash};
+    use vole_runtime::{RC_PINNED, RuntimeTypeId, fnv1a_hash};
 
     // Build complete RcString struct as bytes:
     //   RcHeader { ref_count: u32, type_id: u32, drop_fn: Option<fn> }  = 16 bytes
@@ -49,7 +49,7 @@ pub(crate) fn compile_string_literal(
     let mut data = Vec::with_capacity(40 + s.len());
     // RcHeader
     data.extend_from_slice(&RC_PINNED.to_ne_bytes()); // ref_count = pinned (no-op inc/dec)
-    data.extend_from_slice(&TYPE_STRING.to_ne_bytes()); // type_id
+    data.extend_from_slice(&(RuntimeTypeId::String as u32).to_ne_bytes()); // type_id
     data.extend_from_slice(&0u64.to_ne_bytes()); // drop_fn = null (no cleanup needed)
     // RcString fields
     data.extend_from_slice(&s.len().to_ne_bytes()); // len (byte length)
