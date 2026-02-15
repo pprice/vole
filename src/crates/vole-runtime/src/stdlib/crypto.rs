@@ -55,11 +55,12 @@ pub extern "C" fn crypto_sha256(input: *const RcString) -> *const RcString {
     hasher.update(input_str.as_bytes());
     let result = hasher.finalize();
 
-    // Convert to hex string
-    let hex_string = result
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
+    // Convert to hex string (single allocation of exactly 64 bytes)
+    use std::fmt::Write;
+    let mut hex_string = String::with_capacity(64);
+    for b in &result {
+        write!(hex_string, "{:02x}", b).unwrap();
+    }
 
     RcString::new(&hex_string)
 }
