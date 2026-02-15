@@ -36,6 +36,10 @@ pub extern "C" fn vole_sb_finish(sb: *mut StringBuilder) -> *mut RcString {
     }
     unsafe {
         let builder = Box::from_raw(sb);
+        debug_assert!(
+            std::str::from_utf8(&builder.buf).is_ok(),
+            "StringBuilder buffer contains invalid UTF-8"
+        );
         let s = std::str::from_utf8_unchecked(&builder.buf);
         RcString::new(s)
     }
