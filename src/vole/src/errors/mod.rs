@@ -15,6 +15,5 @@ pub use vole_sema::errors::{SemanticError, SemanticWarning};
 pub use vole_codegen::errors::CodegenError;
 
 pub use report::{
-    WithExtraHelp, get_color_mode, render_to_stderr, render_to_string, render_to_writer,
-    render_to_writer_terminal, set_color_mode,
+    WithExtraHelp, render_to_stderr, render_to_string, render_to_writer, render_to_writer_terminal,
 };

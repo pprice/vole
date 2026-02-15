@@ -11,35 +11,12 @@ use miette::{
 };
 use std::fmt;
 use std::io::Write as IoWrite;
-use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::cli::ColorMode;
 
-/// Global color mode setting (set once at startup)
-static COLOR_MODE: AtomicU8 = AtomicU8::new(0); // 0 = Auto, 1 = Always, 2 = Never
-
-/// Set the global color mode (call once at startup)
-pub fn set_color_mode(mode: ColorMode) {
-    let value = match mode {
-        ColorMode::Auto => 0,
-        ColorMode::Always => 1,
-        ColorMode::Never => 2,
-    };
-    COLOR_MODE.store(value, Ordering::SeqCst);
-}
-
-/// Get the current color mode
-pub fn get_color_mode() -> ColorMode {
-    match COLOR_MODE.load(Ordering::SeqCst) {
-        1 => ColorMode::Always,
-        2 => ColorMode::Never,
-        _ => ColorMode::Auto,
-    }
-}
-
-/// Check if colors should be used based on current mode
-fn should_use_color() -> bool {
-    match get_color_mode() {
+/// Check if colors should be used for the given mode.
+fn should_use_color(color_mode: ColorMode) -> bool {
+    match color_mode {
         ColorMode::Auto => crate::commands::common::stdout_supports_color(),
         ColorMode::Always => true,
         ColorMode::Never => false,
@@ -192,8 +169,8 @@ impl Diagnostic for WithExtraHelp<'_> {
 }
 
 /// Create a handler for terminal output (unicode + colors based on mode).
-fn terminal_handler() -> GraphicalReportHandler {
-    let styles = if should_use_color() {
+fn terminal_handler(color_mode: ColorMode) -> GraphicalReportHandler {
+    let styles = if should_use_color(color_mode) {
         ThemeStyles::ansi()
     } else {
         ThemeStyles::none()
@@ -215,8 +192,8 @@ fn snapshot_handler() -> GraphicalReportHandler {
 }
 
 /// Render to stderr with unicode/colors.
-pub fn render_to_stderr(report: &dyn Diagnostic) {
-    let handler = terminal_handler();
+pub fn render_to_stderr(report: &dyn Diagnostic, color_mode: ColorMode) {
+    let handler = terminal_handler(color_mode);
     let wrapped = InlineCodeDiagnostic::new(report);
     let mut output = String::new();
     if handler.render_report(&mut output, &wrapped).is_ok() {
@@ -243,8 +220,9 @@ pub fn render_to_writer<W: IoWrite>(report: &dyn Diagnostic, mut writer: W) -> s
 pub fn render_to_writer_terminal<W: IoWrite>(
     report: &dyn Diagnostic,
     mut writer: W,
+    color_mode: ColorMode,
 ) -> std::io::Result<()> {
-    let handler = terminal_handler();
+    let handler = terminal_handler(color_mode);
     let wrapped = InlineCodeDiagnostic::new(report);
     let mut output = String::new();
     if handler.render_report(&mut output, &wrapped).is_ok() {

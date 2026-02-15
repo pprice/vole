@@ -5,15 +5,15 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use super::common::{PipelineError, PipelineOptions, compile_source, read_stdin};
-use crate::cli::expand_paths_flat;
+use crate::cli::{ColorMode, expand_paths_flat};
 use crate::runtime::push_context;
 
 /// Check Vole source files (parse + type check, no execution)
 /// Use "-" to read from stdin.
-pub fn check_files(patterns: &[String]) -> ExitCode {
+pub fn check_files(patterns: &[String], color_mode: ColorMode) -> ExitCode {
     // Handle stdin specially
     if patterns.len() == 1 && patterns[0] == "-" {
-        return check_stdin();
+        return check_stdin(color_mode);
     }
 
     let files = match expand_paths_flat(patterns) {
@@ -32,7 +32,7 @@ pub fn check_files(patterns: &[String]) -> ExitCode {
     let mut had_error = false;
 
     for path in &files {
-        if check_single_file(path).is_err() {
+        if check_single_file(path, color_mode).is_err() {
             had_error = true;
         }
     }
@@ -45,7 +45,7 @@ pub fn check_files(patterns: &[String]) -> ExitCode {
 }
 
 /// Check source from stdin
-fn check_stdin() -> ExitCode {
+fn check_stdin(color_mode: ColorMode) -> ExitCode {
     let source = match read_stdin() {
         Ok(s) => s,
         Err(e) => {
@@ -62,6 +62,7 @@ fn check_stdin() -> ExitCode {
             project_root: None,
             module_cache: None,
             run_mode: false,
+            color_mode,
         },
         &mut std::io::stderr(),
     ) {
@@ -71,7 +72,7 @@ fn check_stdin() -> ExitCode {
 }
 
 /// Check a single file, returns Ok(()) on success
-fn check_single_file(path: &Path) -> Result<(), PipelineError> {
+fn check_single_file(path: &Path, color_mode: ColorMode) -> Result<(), PipelineError> {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -90,6 +91,7 @@ fn check_single_file(path: &Path) -> Result<(), PipelineError> {
             project_root: None,
             module_cache: None,
             run_mode: false,
+            color_mode,
         },
         &mut std::io::stderr(),
     )?;

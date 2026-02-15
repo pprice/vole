@@ -32,7 +32,6 @@ use vole::commands::inspect::inspect_files;
 use vole::commands::run::run_file;
 use vole::commands::test::{TestRunOptions, run_tests};
 use vole::commands::version::print_version;
-use vole::errors::set_color_mode;
 use vole::runtime::install_segfault_handler;
 
 fn main() -> ExitCode {
@@ -85,12 +84,9 @@ fn main() -> ExitCode {
     )
     .expect("failed to parse arguments");
 
-    // Set global color mode before any output
-    set_color_mode(cli.color);
-
     match cli.command {
-        Commands::Run { file, root } => run_file(&file, root.as_deref(), cli.release),
-        Commands::Check { paths } => check_files(&paths),
+        Commands::Run { file, root } => run_file(&file, root.as_deref(), cli.release, cli.color),
+        Commands::Check { paths } => check_files(&paths, cli.color),
         Commands::Test {
             paths,
             filter,
@@ -123,6 +119,7 @@ fn main() -> ExitCode {
             imports.as_deref(),
             cli.release,
             all,
+            cli.color,
         ),
         Commands::Version => print_version(),
         #[cfg(feature = "bench")]
@@ -150,7 +147,7 @@ fn main() -> ExitCode {
             check,
             stdout,
         } => format_files(&paths, FmtOptions { check, stdout }),
-        Commands::External(args) => handle_external_args(&args, cli.release),
+        Commands::External(args) => handle_external_args(&args, cli.release, cli.color),
     }
 }
 
@@ -201,7 +198,11 @@ fn is_stdout_tty() -> bool {
 /// This enables shebang support: `#!/usr/bin/env vole` in a .vole file causes
 /// the kernel to invoke `vole script.vole`, which arrives here as an external
 /// subcommand.
-fn handle_external_args(args: &[OsString], release: bool) -> ExitCode {
+fn handle_external_args(
+    args: &[OsString],
+    release: bool,
+    color_mode: vole::cli::ColorMode,
+) -> ExitCode {
     let first = args
         .first()
         .expect("external subcommand requires at least one argument");
@@ -217,5 +218,5 @@ fn handle_external_args(args: &[OsString], release: bool) -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    run_file(&path, None, release)
+    run_file(&path, None, release, color_mode)
 }

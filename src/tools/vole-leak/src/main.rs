@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use clap::Parser;
 
+use vole::cli::ColorMode;
 use vole::cli::{expand_paths, should_skip_path};
 use vole::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
 use vole::commands::common::{PipelineOptions, compile_source};
@@ -159,6 +160,7 @@ fn compile_and_run_tests(
             project_root: None,
             module_cache: Some(cache),
             run_mode: false,
+            color_mode: ColorMode::Never,
         },
         &mut io::stderr(),
     )

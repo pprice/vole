@@ -50,10 +50,16 @@ pub enum PipelineError {
 }
 
 /// Render a lexer error to a writer with source context.
-fn render_lexer_error(err: &LexerError, file_path: &str, source: &str, w: &mut dyn Write) {
+fn render_lexer_error(
+    err: &LexerError,
+    file_path: &str,
+    source: &str,
+    w: &mut dyn Write,
+    color_mode: ColorMode,
+) {
     let report = miette::Report::new(err.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer_terminal(report.as_ref(), w);
+    let _ = render_to_writer_terminal(report.as_ref(), w, color_mode);
 }
 
 /// Render a parser error to a writer with source context.
@@ -65,6 +71,7 @@ fn render_parser_error(
     source: &str,
     run_mode: bool,
     w: &mut dyn Write,
+    color_mode: ColorMode,
 ) {
     let report = miette::Report::new(err.error.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
@@ -75,24 +82,36 @@ fn render_parser_error(
             report.as_ref(),
             "wrap your code in `func main() { ... }` to make it runnable",
         );
-        let _ = render_to_writer_terminal(&wrapped, w);
+        let _ = render_to_writer_terminal(&wrapped, w, color_mode);
     } else {
-        let _ = render_to_writer_terminal(report.as_ref(), w);
+        let _ = render_to_writer_terminal(report.as_ref(), w, color_mode);
     }
 }
 
 /// Render a semantic error to a writer with source context.
-fn render_sema_error(err: &TypeError, file_path: &str, source: &str, w: &mut dyn Write) {
+fn render_sema_error(
+    err: &TypeError,
+    file_path: &str,
+    source: &str,
+    w: &mut dyn Write,
+    color_mode: ColorMode,
+) {
     let report = miette::Report::new(err.error.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer_terminal(report.as_ref(), w);
+    let _ = render_to_writer_terminal(report.as_ref(), w, color_mode);
 }
 
 /// Render a semantic warning to a writer with source context.
-fn render_sema_warning(warn: &TypeWarning, file_path: &str, source: &str, w: &mut dyn Write) {
+fn render_sema_warning(
+    warn: &TypeWarning,
+    file_path: &str,
+    source: &str,
+    w: &mut dyn Write,
+    color_mode: ColorMode,
+) {
     let report = miette::Report::new(warn.warning.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer_terminal(report.as_ref(), w);
+    let _ = render_to_writer_terminal(report.as_ref(), w, color_mode);
 }
 
 /// Options for the compile_source pipeline.
@@ -104,6 +123,8 @@ pub struct PipelineOptions<'a> {
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
     /// When true, adds context-specific hints for `vole run` (e.g., "wrap in func main").
     pub run_mode: bool,
+    /// Color mode for diagnostic rendering.
+    pub color_mode: ColorMode,
 }
 
 /// Compile source through the full pipeline: parse -> transform -> analyze -> optimize.
@@ -122,6 +143,7 @@ pub fn compile_source(
         project_root,
         module_cache,
         run_mode,
+        color_mode,
     } = opts;
 
     // Parse phase
@@ -135,11 +157,11 @@ pub fn compile_source(
                 let lexer_errors = parser.take_lexer_errors();
                 if !lexer_errors.is_empty() {
                     for err in &lexer_errors {
-                        render_lexer_error(err, file_path, source, errors);
+                        render_lexer_error(err, file_path, source, errors, color_mode);
                     }
                     return Err(PipelineError::Lex);
                 } else {
-                    render_parser_error(&e, file_path, source, run_mode, errors);
+                    render_parser_error(&e, file_path, source, run_mode, errors, color_mode);
                     return Err(PipelineError::Parse);
                 }
             }
@@ -149,7 +171,7 @@ pub fn compile_source(
         let lexer_errors = parser.take_lexer_errors();
         if !lexer_errors.is_empty() {
             for err in &lexer_errors {
-                render_lexer_error(err, file_path, source, errors);
+                render_lexer_error(err, file_path, source, errors, color_mode);
             }
             return Err(PipelineError::Lex);
         }
@@ -166,7 +188,7 @@ pub fn compile_source(
         let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
         if !transform_errors.is_empty() {
             for err in &transform_errors {
-                render_sema_error(err, file_path, source, errors);
+                render_sema_error(err, file_path, source, errors, color_mode);
             }
             return Err(PipelineError::Transform);
         }
@@ -184,7 +206,7 @@ pub fn compile_source(
         analyzer.set_skip_tests(skip_tests);
         if let Err(errs) = analyzer.analyze(&program, &interner) {
             for err in &errs {
-                render_sema_error(err, file_path, source, errors);
+                render_sema_error(err, file_path, source, errors, color_mode);
             }
             return Err(PipelineError::Sema);
         }
@@ -194,7 +216,7 @@ pub fn compile_source(
 
     // Render any warnings (non-fatal diagnostics)
     for warn in &analyzer.take_warnings() {
-        render_sema_warning(warn, file_path, source, errors);
+        render_sema_warning(warn, file_path, source, errors, color_mode);
     }
 
     let mut output = analyzer.into_analysis_results();
@@ -418,6 +440,7 @@ pub fn check_captured<W: Write + Send + 'static>(
     source: &str,
     file_path: &str,
     mut stderr: W,
+    color_mode: ColorMode,
 ) -> Result<(), PipelineError> {
     compile_source(
         PipelineOptions {
@@ -427,6 +450,7 @@ pub fn check_captured<W: Write + Send + 'static>(
             project_root: None,
             module_cache: None,
             run_mode: false,
+            color_mode,
         },
         &mut stderr,
     )?;
@@ -442,6 +466,7 @@ pub fn run_captured<W: Write + Send + 'static>(
     file_path: &str,
     stdout: W,
     mut stderr: W,
+    color_mode: ColorMode,
 ) -> Result<(), PipelineError> {
     let analyzed = compile_source(
         PipelineOptions {
@@ -451,6 +476,7 @@ pub fn run_captured<W: Write + Send + 'static>(
             project_root: None,
             module_cache: None,
             run_mode: true,
+            color_mode,
         },
         &mut stderr,
     )?;
@@ -492,6 +518,7 @@ pub fn inspect_ast_captured<W: Write>(
     file_path: &str,
     mut stdout: W,
     mut stderr: W,
+    color_mode: ColorMode,
 ) -> Result<(), PipelineError> {
     // Parse
     let mut parser = Parser::new(source);
@@ -501,11 +528,11 @@ pub fn inspect_ast_captured<W: Write>(
             let lexer_errors = parser.take_lexer_errors();
             if !lexer_errors.is_empty() {
                 for err in &lexer_errors {
-                    render_lexer_error(err, file_path, source, &mut stderr);
+                    render_lexer_error(err, file_path, source, &mut stderr, color_mode);
                 }
                 return Err(PipelineError::Lex);
             } else {
-                render_parser_error(&e, file_path, source, false, &mut stderr);
+                render_parser_error(&e, file_path, source, false, &mut stderr, color_mode);
                 return Err(PipelineError::Parse);
             }
         }
@@ -514,7 +541,7 @@ pub fn inspect_ast_captured<W: Write>(
     let lexer_errors = parser.take_lexer_errors();
     if !lexer_errors.is_empty() {
         for err in &lexer_errors {
-            render_lexer_error(err, file_path, source, &mut stderr);
+            render_lexer_error(err, file_path, source, &mut stderr, color_mode);
         }
         return Err(PipelineError::Lex);
     }

@@ -12,6 +12,7 @@ use glob::glob;
 use crate::ReportMode;
 use crate::diff::{unified_diff, unified_diff_colored};
 use crate::snapshot::Snapshot;
+use vole::cli::ColorMode;
 use vole::commands::common::{check_captured, inspect_ast_captured, run_captured};
 
 /// Result of running a single test
@@ -199,10 +200,16 @@ pub fn run_test(test_path: &Path, use_color: bool) -> TestResult {
 
     match cmd {
         "run" => {
-            let _ = run_captured(&source, &file_path, stdout_buf.clone(), stderr_buf.clone());
+            let _ = run_captured(
+                &source,
+                &file_path,
+                stdout_buf.clone(),
+                stderr_buf.clone(),
+                ColorMode::Never,
+            );
         }
         "check" => {
-            let _ = check_captured(&source, &file_path, stderr_buf.clone());
+            let _ = check_captured(&source, &file_path, stderr_buf.clone(), ColorMode::Never);
         }
         "inspect" => {
             let subcmd = extract_subcommand(test_path);
@@ -213,6 +220,7 @@ pub fn run_test(test_path: &Path, use_color: bool) -> TestResult {
                         &file_path,
                         stdout_buf.clone(),
                         stderr_buf.clone(),
+                        ColorMode::Never,
                     );
                 }
                 Some(other) => {
@@ -286,10 +294,16 @@ pub fn bless_test(test_path: &Path) -> Result<bool, String> {
 
     match cmd {
         "run" => {
-            let _ = run_captured(&source, &file_path, stdout_buf.clone(), stderr_buf.clone());
+            let _ = run_captured(
+                &source,
+                &file_path,
+                stdout_buf.clone(),
+                stderr_buf.clone(),
+                ColorMode::Never,
+            );
         }
         "check" => {
-            let _ = check_captured(&source, &file_path, stderr_buf.clone());
+            let _ = check_captured(&source, &file_path, stderr_buf.clone(), ColorMode::Never);
         }
         "inspect" => {
             let subcmd = extract_subcommand(test_path);
@@ -300,6 +314,7 @@ pub fn bless_test(test_path: &Path) -> Result<bool, String> {
                         &file_path,
                         stdout_buf.clone(),
                         stderr_buf.clone(),
+                        ColorMode::Never,
                     );
                 }
                 Some(other) => return Err(format!("Unknown inspect subcommand: {}", other)),

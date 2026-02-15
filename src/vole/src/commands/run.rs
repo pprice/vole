@@ -5,11 +5,17 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use super::common::{PipelineOptions, RunOptions, compile_and_run, compile_source, read_stdin};
+use crate::cli::ColorMode;
 use crate::codegen::JitOptions;
 use crate::runtime::{push_context, replace_context};
 
 /// Run a Vole source file (or stdin if path is "-")
-pub fn run_file(path: &Path, project_root: Option<&Path>, release: bool) -> ExitCode {
+pub fn run_file(
+    path: &Path,
+    project_root: Option<&Path>,
+    release: bool,
+    color_mode: ColorMode,
+) -> ExitCode {
     // Validate project root if provided
     if let Some(root) = project_root {
         if !root.exists() {
@@ -22,7 +28,7 @@ pub fn run_file(path: &Path, project_root: Option<&Path>, release: bool) -> Exit
         }
     }
 
-    match execute(path, project_root, release) {
+    match execute(path, project_root, release, color_mode) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // Empty error means diagnostics were already rendered
@@ -34,7 +40,12 @@ pub fn run_file(path: &Path, project_root: Option<&Path>, release: bool) -> Exit
     }
 }
 
-fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<(), String> {
+fn execute(
+    path: &Path,
+    project_root: Option<&Path>,
+    release: bool,
+    color_mode: ColorMode,
+) -> Result<(), String> {
     // Read source from file or stdin
     let (source, file_path) = if path.as_os_str() == "-" {
         let source = read_stdin().map_err(|e| format!("could not read stdin: {}", e))?;
@@ -58,6 +69,7 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
             project_root,
             module_cache: None,
             run_mode: true,
+            color_mode,
         },
         &mut std::io::stderr(),
     )

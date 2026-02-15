@@ -5,7 +5,7 @@ use std::process::ExitCode;
 
 use miette::NamedSource;
 
-use crate::cli::{InspectType, expand_paths_flat};
+use crate::cli::{ColorMode, InspectType, expand_paths_flat};
 use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::commands::common::{PipelineOptions, compile_source};
 use crate::commands::mir_format::format_mir;
@@ -20,6 +20,7 @@ pub fn inspect_files(
     _imports: Option<&str>,
     release: bool,
     show_all: bool,
+    color_mode: ColorMode,
 ) -> ExitCode {
     // Expand patterns and collect unique files
     let files = match expand_paths_flat(patterns) {
@@ -67,7 +68,7 @@ pub fn inspect_files(
                     Err(e) => {
                         let report = miette::Report::new(e.error.clone())
                             .with_source_code(NamedSource::new(&file_path, source.clone()));
-                        render_to_stderr(report.as_ref());
+                        render_to_stderr(report.as_ref(), color_mode);
                         had_error = true;
                         continue;
                     }
@@ -86,6 +87,7 @@ pub fn inspect_files(
                         project_root: None,
                         module_cache: None,
                         run_mode: false,
+                        color_mode,
                     },
                     &mut std::io::stderr(),
                 ) {
@@ -121,6 +123,7 @@ pub fn inspect_files(
                         project_root: None,
                         module_cache: None,
                         run_mode: false,
+                        color_mode,
                     },
                     &mut std::io::stderr(),
                 ) {

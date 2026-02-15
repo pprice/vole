@@ -200,6 +200,8 @@ struct TestRunConfig<'a> {
     release: bool,
     /// Terminal color configuration
     colors: TermColors,
+    /// Color mode for diagnostic rendering
+    color_mode: ColorMode,
 }
 
 /// A thread-safe buffer for capturing stdout during test execution
@@ -333,6 +335,7 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
         project_root: options.project_root,
         release: options.release,
         colors: TermColors::with_mode(options.color),
+        color_mode: options.color,
     };
 
     // Handle stdin specially (must be alone)
@@ -563,6 +566,7 @@ fn run_source_tests_with_modules(
             project_root: config.project_root,
             module_cache: Some(cache),
             run_mode: false,
+            color_mode: config.color_mode,
         },
         &mut error_buffer,
     ) {
@@ -711,6 +715,7 @@ fn run_source_tests_with_progress(
             project_root: config.project_root,
             module_cache: Some(cache),
             run_mode: false,
+            color_mode: config.color_mode,
         },
         &mut error_buffer,
     ) {
