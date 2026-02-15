@@ -18,6 +18,10 @@ cranelift-module = "0.127"
 cranelift-codegen = "0.127"
 cranelift-native = "0.127"
 
+# Error handling and diagnostics
+miette = "7.4"
+thiserror = "2.0"
+
 # Fast hashing for internal compiler maps (non-cryptographic)
 rustc-hash = "2.1"
 

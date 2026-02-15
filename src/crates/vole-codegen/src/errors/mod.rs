@@ -4,8 +4,16 @@
 //! These are internal compiler errors (ICEs) that indicate bugs in the compiler
 //! or unimplemented features, not user errors. They provide structured context
 //! for debugging.
+//!
+//! Error code ranges:
+//! - E0xxx: Lexer errors
+//! - E1xxx: Parser errors
+//! - E2xxx: Semantic errors
+//! - E3xxx: Codegen errors (this module)
 
+use miette::{Diagnostic, LabeledSpan};
 use std::fmt;
+use thiserror::Error;
 use vole_frontend::Span;
 
 /// The kind of code generation error.
@@ -48,7 +56,8 @@ pub enum CodegenErrorKind {
 }
 
 /// Code generation error with optional source span for diagnostics.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
+#[error("{kind}")]
 pub struct CodegenError {
     /// The kind of error.
     pub kind: CodegenErrorKind,
@@ -166,9 +175,50 @@ impl From<CodegenErrorKind> for CodegenError {
     }
 }
 
-impl fmt::Display for CodegenError {
+impl Diagnostic for CodegenError {
+    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        let code: &'static str = match &self.kind {
+            CodegenErrorKind::UnsupportedFeature { .. } => "E3001",
+            CodegenErrorKind::ArgumentCount { .. } => "E3002",
+            CodegenErrorKind::TypeMismatch { .. } => "E3003",
+            CodegenErrorKind::NotFound { .. } => "E3004",
+            CodegenErrorKind::InternalError { .. } => "E3005",
+            CodegenErrorKind::MissingResource { .. } => "E3006",
+        };
+        Some(Box::new(code))
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        let span = self.span?;
+        let len = span.end.saturating_sub(span.start);
+        let label = match &self.kind {
+            CodegenErrorKind::UnsupportedFeature { feature, .. } => {
+                format!("{} is not supported", feature)
+            }
+            CodegenErrorKind::ArgumentCount {
+                expected, found, ..
+            } => {
+                format!("expected {} argument(s), found {}", expected, found)
+            }
+            CodegenErrorKind::TypeMismatch {
+                expected, found, ..
+            } => {
+                format!("expected {}, found {}", expected, found)
+            }
+            CodegenErrorKind::NotFound { kind, .. } => format!("{} not found", kind),
+            CodegenErrorKind::InternalError { message, .. } => message.to_string(),
+            CodegenErrorKind::MissingResource { resource, .. } => {
+                format!("{} not available", resource)
+            }
+        };
+        let labeled = LabeledSpan::new(Some(label), span.start, len);
+        Some(Box::new(std::iter::once(labeled)))
+    }
+}
+
+impl fmt::Display for CodegenErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.kind {
+        match self {
             CodegenErrorKind::UnsupportedFeature { feature, context } => {
                 write!(f, "unsupported feature: {}", feature)?;
                 if let Some(ctx) = context {
@@ -214,8 +264,6 @@ impl fmt::Display for CodegenError {
         }
     }
 }
-
-impl std::error::Error for CodegenError {}
 
 /// Result type alias for codegen operations.
 pub type CodegenResult<T> = Result<T, CodegenError>;
@@ -304,5 +352,45 @@ mod tests {
     fn test_no_span_by_default() {
         let err = CodegenError::internal("test");
         assert_eq!(err.span, None);
+    }
+
+    #[test]
+    fn test_error_codes() {
+        use miette::Diagnostic;
+        let cases: Vec<(CodegenError, &str)> = vec![
+            (CodegenError::unsupported("x"), "E3001"),
+            (CodegenError::arg_count("f", 1, 2), "E3002"),
+            (CodegenError::type_mismatch("c", "a", "b"), "E3003"),
+            (CodegenError::not_found("fn", "x"), "E3004"),
+            (CodegenError::internal("x"), "E3005"),
+            (CodegenError::missing_resource("x"), "E3006"),
+        ];
+        for (err, expected_code) in cases {
+            let code = err.code().expect("should have error code");
+            assert_eq!(code.to_string(), expected_code);
+        }
+    }
+
+    #[test]
+    fn test_labels_with_span() {
+        use miette::Diagnostic;
+        let span = Span {
+            start: 10,
+            end: 20,
+            line: 1,
+            column: 10,
+            end_line: 1,
+            end_column: 20,
+        };
+        let err = CodegenError::unsupported("closures").with_span(span);
+        let labels: Vec<_> = err.labels().unwrap().collect();
+        assert_eq!(labels.len(), 1);
+    }
+
+    #[test]
+    fn test_labels_without_span() {
+        use miette::Diagnostic;
+        let err = CodegenError::unsupported("closures");
+        assert!(err.labels().is_none());
     }
 }

@@ -1626,6 +1626,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "terminal_size",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
  "vergen",
@@ -1647,9 +1648,11 @@ dependencies = [
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native",
+ "miette",
  "paste",
  "rustc-hash",
  "smallvec",
+ "thiserror",
  "tracing",
  "vole-frontend",
  "vole-identity",
@@ -1693,6 +1696,9 @@ dependencies = [
  "clap",
  "glob",
  "vole",
+ "vole-codegen",
+ "vole-runtime",
+ "vole-sema",
 ]
 
 [[package]]
