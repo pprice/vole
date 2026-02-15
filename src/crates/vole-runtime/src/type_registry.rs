@@ -185,10 +185,25 @@ pub fn force_unlock_type_registry() {
     TYPE_REGISTRY.force_unlock();
 }
 
+// =============================================================================
 // FFI functions for JIT-compiled code
+// =============================================================================
 
-/// Register field types for an instance type (FFI)
-/// field_types is an array of u8 tags (0=Value, 1=Rc)
+/// Register field type information for a class instance type.
+///
+/// Called by the JIT at compile time (before any instances of this class are
+/// created) so that `instance_drop` knows which fields need RC cleanup.
+///
+/// `field_types` is an array of `field_count` bytes, where each byte encodes
+/// a `FieldTypeTag`: 0=Value, 1=Rc, 2=UnionHeap, 3=Interface. Invalid byte
+/// values silently fall back to `FieldTypeTag::Value` (no cleanup) in release
+/// builds, but trigger a debug_assert in development to catch codegen bugs.
+///
+/// # JIT contract
+/// - `type_id` is a unique ID from `alloc_type_id()`.
+/// - `field_types` points to `field_count` valid bytes, or is null when
+///   `field_count` is 0.
+/// - This is called once per class definition before any instance allocation.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_register_instance_type(
     type_id: u32,
@@ -204,11 +219,19 @@ pub extern "C" fn vole_register_instance_type(
     } else {
         unsafe {
             (0..field_count as usize)
-                .map(|i| match *field_types.add(i) {
-                    1 => FieldTypeTag::Rc,
-                    2 => FieldTypeTag::UnionHeap,
-                    3 => FieldTypeTag::Interface,
-                    _ => FieldTypeTag::Value,
+                .map(|i| {
+                    let byte = *field_types.add(i);
+                    debug_assert!(
+                        byte <= 3,
+                        "invalid FieldTypeTag byte {byte} for type_id {type_id}, field {i} \
+                         (expected 0=Value, 1=Rc, 2=UnionHeap, 3=Interface)"
+                    );
+                    match byte {
+                        1 => FieldTypeTag::Rc,
+                        2 => FieldTypeTag::UnionHeap,
+                        3 => FieldTypeTag::Interface,
+                        _ => FieldTypeTag::Value,
+                    }
                 })
                 .collect()
         }

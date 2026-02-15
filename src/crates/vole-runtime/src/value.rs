@@ -1,4 +1,17 @@
 // value.rs
+//
+// Core value representation and reference counting for the Vole runtime.
+//
+// FFI safety contract for rc_inc / rc_dec:
+//
+// These are the lowest-level RC primitives called by JIT-generated code.
+// The JIT guarantees that every pointer passed is either null or points to
+// a live allocation whose first bytes are a valid `RcHeader`. Null is
+// always handled as a no-op -- this is fundamental to Vole's nil-propagation
+// semantics, where nil values flow through RC operations without crashing.
+//
+// Pinned objects (refcount == RC_PINNED) are also no-ops for both inc and
+// dec, supporting static/immortal allocations like interned string literals.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 

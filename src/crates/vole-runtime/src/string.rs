@@ -201,9 +201,24 @@ unsafe extern "C" fn string_drop(ptr: *mut u8) {
     }
 }
 
-// Functions exposed to JIT-compiled code
-// These functions are called from JIT-generated code which is responsible for
-// ensuring pointer validity.
+// =============================================================================
+// FFI functions for JIT-compiled code
+// =============================================================================
+//
+// Safety contract: the JIT guarantees pointer validity for all arguments.
+// String pointers are either null or valid RcString allocations. The `data`
+// pointer in `vole_string_new` points to valid UTF-8 bytes embedded in the
+// JIT code segment or in a live RcString.
+//
+// Null handling: functions that read from string pointers (len, data, eq)
+// return zero/null/false for null inputs, supporting nil-propagation.
+// RC operations (inc/dec) delegate to rc_inc/rc_dec which handle null.
+
+/// Create a new RC string from raw UTF-8 bytes. Returns non-null with refcount 1.
+///
+/// # JIT contract
+/// `data` must point to `len` bytes of valid UTF-8. The JIT emits this for
+/// string literals (pointing into the code segment) and runtime concatenations.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_new(data: *const u8, len: usize) -> *mut RcString {
     let s = unsafe {
@@ -213,16 +228,21 @@ pub extern "C" fn vole_string_new(data: *const u8, len: usize) -> *mut RcString 
     RcString::new(s)
 }
 
+/// Increment string reference count. Null is a no-op (delegated to `rc_inc`).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_inc(ptr: *mut RcString) {
     rc_inc(ptr as *mut u8);
 }
 
+/// Decrement string reference count. Frees the string (via `string_drop`)
+/// when the count reaches zero. Null is a no-op (delegated to `rc_dec`).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_dec(ptr: *mut RcString) {
     rc_dec(ptr as *mut u8);
 }
 
+/// Get the character count of a string (O(1), cached at construction).
+/// Returns 0 for null pointers (nil-propagation).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_len(ptr: *const RcString) -> usize {
     if ptr.is_null() {
@@ -232,6 +252,8 @@ pub extern "C" fn vole_string_len(ptr: *const RcString) -> usize {
     unsafe { (*ptr).char_count }
 }
 
+/// Get a pointer to the string's raw UTF-8 byte data.
+/// Returns null for null pointers (nil-propagation).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
     if ptr.is_null() {
@@ -240,7 +262,8 @@ pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
     unsafe { (ptr as *const u8).add(size_of::<RcString>()) }
 }
 
-/// Compare two strings for equality, returns 1 if equal, 0 otherwise
+/// Compare two strings for equality. Returns 1 if equal, 0 otherwise.
+/// Two null pointers are considered equal; a null and non-null are unequal.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_eq(a: *const RcString, b: *const RcString) -> i8 {
     if a.is_null() && b.is_null() {

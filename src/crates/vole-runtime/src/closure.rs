@@ -301,63 +301,111 @@ unsafe extern "C" fn closure_drop(ptr: *mut u8) {
     }
 }
 
-// Functions exposed to JIT-compiled code
-// These functions are called from JIT-generated code which is responsible for
-// ensuring pointer validity.
+// =============================================================================
+// FFI functions for JIT-compiled code
+// =============================================================================
+//
+// Safety contract: the JIT generates closure allocation and capture setup
+// as a carefully sequenced series of calls:
+//   1. vole_closure_alloc(func_ptr, num_captures) -- allocate
+//   2. vole_closure_set_capture(closure, i, ptr)  -- set each capture pointer
+//   3. vole_closure_set_capture_kind(closure, i, kind) -- tag Value vs Rc
+//   4. vole_closure_set_capture_size(closure, i, size) -- record alloc size
+//
+// The JIT guarantees:
+// - `closure` pointers are always valid (non-null) for alloc/get/set calls.
+// - `index` is always < num_captures (statically known from the AST).
+// - `func_ptr` points to valid JIT-compiled code.
+// - Capture pointers are either null or valid heap allocations.
+//
+// Unlike instance field access, closures do not need null-guard behavior
+// because a closure is never nil at the point of capture setup.
 
-/// Allocate a new closure with space for captures
+/// Allocate a new closure with space for `num_captures` captured variables.
+/// Returns a non-null pointer with refcount 1.
+///
+/// # Safety
+/// `func_ptr` must be a valid function pointer or null (for partially
+/// constructed closures that will have their func_ptr set later).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_alloc(func_ptr: *const u8, num_captures: usize) -> *mut Closure {
-    // Safety: Called from JIT code which ensures func_ptr validity
+    // SAFETY: Called from JIT code which ensures func_ptr validity
     unsafe { Closure::alloc(func_ptr, num_captures) }
 }
 
-/// Get capture at index
+/// Get the heap pointer for capture at `index`.
+///
+/// # Safety
+/// The JIT guarantees `closure` is valid and `index` < num_captures.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_get_capture(closure: *const Closure, index: usize) -> *mut u8 {
-    // Safety: Called from JIT code which ensures pointer validity and index bounds
+    // SAFETY: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::get_capture(closure, index) }
 }
 
-/// Set capture at index
+/// Set the heap pointer for capture at `index`.
+///
+/// # Safety
+/// The JIT guarantees `closure` is valid, `index` < num_captures, and
+/// `ptr` is a valid heap allocation or null.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_set_capture(closure: *mut Closure, index: usize, ptr: *mut u8) {
-    // Safety: Called from JIT code which ensures pointer validity and index bounds
+    // SAFETY: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::set_capture(closure, index, ptr) }
 }
 
-/// Set capture kind at index (0=Value, 1=Rc)
+/// Set capture kind at `index` (0=Value, 1=Rc). Used by `closure_drop` to
+/// know which captures need `rc_dec` during cleanup.
+///
+/// # Safety
+/// The JIT guarantees `closure` is valid and `index` < num_captures.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_set_capture_kind(closure: *mut Closure, index: usize, kind: u8) {
-    // Safety: Called from JIT code which ensures pointer validity and index bounds
+    // SAFETY: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::set_capture_kind(closure, index, kind) }
 }
 
-/// Set capture allocation size at index (in bytes)
+/// Set the allocation size (in bytes) for capture at `index`. Used by
+/// `closure_drop` to correctly free each capture's heap slot with the
+/// right `Layout`.
+///
+/// # Safety
+/// The JIT guarantees `closure` is valid and `index` < num_captures.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_set_capture_size(closure: *mut Closure, index: usize, size: u32) {
-    // Safety: Called from JIT code which ensures pointer validity and index bounds
+    // SAFETY: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::set_capture_size(closure, index, size) }
 }
 
-/// Get the function pointer from a closure
+/// Get the compiled function pointer from a closure.
+///
+/// # Safety
+/// The JIT guarantees `closure` is a valid, non-null closure pointer.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_get_func(closure: *const Closure) -> *const u8 {
-    // Safety: Called from JIT code which ensures pointer validity
+    // SAFETY: Called from JIT code which ensures pointer validity
     unsafe { Closure::get_func(closure) }
 }
 
-/// Free a closure (decrements refcount; cleanup via closure_drop when zero)
+/// Decrement closure refcount. When it reaches zero, `closure_drop` walks
+/// captures and frees RC pointers and heap slots.
+///
+/// # Safety
+/// `closure` must be null or a valid closure pointer. Null is handled by
+/// `Closure::free` -> `rc_dec`.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_free(closure: *mut Closure) {
-    // Safety: Called from JIT code which ensures pointer validity
+    // SAFETY: Called from JIT code which ensures pointer validity
     unsafe { Closure::free(closure) }
 }
 
-/// Allocate heap memory for a captured variable
+/// Allocate heap memory for a captured variable or other runtime use.
+/// All allocations use 8-byte alignment. Returns a dangling pointer for
+/// size 0 (consistent with Rust's allocator API).
 ///
-/// Returns a pointer to heap-allocated memory of the given size.
-/// The caller is responsible for freeing this memory.
+/// # JIT contract
+/// The JIT pairs every `vole_heap_alloc(size)` with a corresponding
+/// `vole_heap_free(ptr, size)` using the same size.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_heap_alloc(size: usize) -> *mut u8 {
     use std::alloc::{Layout, alloc};
@@ -365,11 +413,15 @@ pub extern "C" fn vole_heap_alloc(size: usize) -> *mut u8 {
         return ptr::NonNull::dangling().as_ptr();
     }
     let layout = Layout::from_size_align(size, 8).expect("invalid layout");
-    // Safety: layout is valid and non-zero size
+    // SAFETY: layout is valid and non-zero size
     unsafe { alloc(layout) }
 }
 
-/// Free heap-allocated memory
+/// Free heap-allocated memory. Null pointers and size 0 are no-ops.
+///
+/// # Safety
+/// `ptr` must have been allocated by `vole_heap_alloc` with the same `size`,
+/// or be null.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_heap_free(ptr: *mut u8, size: usize) {
     use std::alloc::{Layout, dealloc};
@@ -377,7 +429,7 @@ pub extern "C" fn vole_heap_free(ptr: *mut u8, size: usize) {
         return;
     }
     let layout = Layout::from_size_align(size, 8).expect("invalid layout");
-    // Safety: Called from JIT code which ensures pointer validity
+    // SAFETY: Called from JIT code which ensures pointer validity
     unsafe { dealloc(ptr, layout) }
 }
 

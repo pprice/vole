@@ -1,3 +1,17 @@
+// String interpolation support for JIT-compiled code.
+//
+// The JIT compiles string interpolation (`"hello {name}"`) into a sequence:
+//   1. vole_sb_new()             -- allocate builder
+//   2. vole_sb_push_string(sb, s) -- push each fragment/value
+//   3. vole_sb_finish(sb)         -- consume builder, return RcString
+//
+// The StringBuilder is Box-allocated (not RC) because it has a single owner
+// (the interpolation expression) and is consumed by finish().
+//
+// Null handling: push_string no-ops on null builder or null string pointers,
+// and finish() returns an empty string for a null builder, supporting
+// nil-propagation through string interpolation.
+
 use crate::string::RcString;
 
 pub struct StringBuilder {
@@ -5,6 +19,8 @@ pub struct StringBuilder {
 }
 
 /// Create a new StringBuilder with pre-allocated capacity.
+/// Returns a non-null Box pointer. The caller must eventually call
+/// `vole_sb_finish` to consume it and get the resulting string.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_sb_new() -> *mut StringBuilder {
     let sb = Box::new(StringBuilder {

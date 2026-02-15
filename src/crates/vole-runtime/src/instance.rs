@@ -169,7 +169,38 @@ unsafe extern "C" fn instance_drop(ptr: *mut u8) {
     }
 }
 
-// Functions exposed to JIT-compiled code
+// =============================================================================
+// FFI functions for JIT-compiled code
+// =============================================================================
+//
+// Safety contract between JIT codegen and runtime:
+//
+// The JIT guarantees that all pointers passed to these functions are either:
+//   (a) null, or
+//   (b) valid pointers to properly initialized, live allocations.
+//
+// Null handling philosophy: all FFI functions that receive a pointer defensively
+// check for null and return a zero/nil/no-op result rather than crashing. This
+// provides a safety net for the common case where nil propagates through field
+// access chains (e.g. `obj.field.subfield` where `obj` is nil). The JIT does
+// NOT emit null checks before every FFI call -- instead, the runtime absorbs
+// nil gracefully, matching Vole's "nil propagates" semantics.
+//
+// Bounds checking: `vole_instance_get_field` and `vole_instance_set_field` do
+// NOT bounds-check `slot` in release builds. The JIT statically knows the field
+// count for each class from type-checking, so an out-of-bounds slot would be a
+// compiler bug, not a user error. A debug_assert in the underlying methods
+// catches this during development.
+// =============================================================================
+
+/// Allocate a new class instance with the given type ID, field count, and
+/// runtime type ID (used for RC header / drop dispatch).
+///
+/// # JIT contract
+/// - `type_id` and `runtime_type_id` come from the type registry; codegen
+///   ensures they are valid IDs registered via `vole_register_instance_type`.
+/// - `field_count` matches the class definition known at compile time.
+/// - The returned pointer is non-null and has refcount 1.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_new(
     type_id: u32,
@@ -179,16 +210,37 @@ pub extern "C" fn vole_instance_new(
     RcInstance::new(type_id, field_count, runtime_type_id)
 }
 
+/// Increment the reference count of an instance.
+///
+/// # JIT contract
+/// `ptr` must be null or a valid `RcInstance` pointer. Null is a no-op
+/// (delegated to `rc_inc`).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_inc(ptr: *mut RcInstance) {
     rc_inc(ptr as *mut u8);
 }
 
+/// Decrement the reference count of an instance. Frees the instance
+/// (via `instance_drop`) when the count reaches zero.
+///
+/// # JIT contract
+/// `ptr` must be null or a valid `RcInstance` pointer. Null is a no-op
+/// (delegated to `rc_dec`).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_dec(ptr: *mut RcInstance) {
     rc_dec(ptr as *mut u8);
 }
 
+/// Read a field value from an instance by slot index.
+///
+/// Returns 0 if `ptr` is null, supporting Vole's nil-propagation semantics
+/// (e.g. `nil_instance.field` evaluates to 0/nil rather than crashing).
+///
+/// # JIT contract
+/// - `ptr` is null or a valid `RcInstance` pointer.
+/// - `slot` is within bounds (< field_count). The JIT knows the field count
+///   from static type-checking, so this is not bounds-checked in release.
+///   A debug_assert in `RcInstance::get_field` catches bugs during development.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> u64 {
     if ptr.is_null() {
@@ -197,6 +249,14 @@ pub extern "C" fn vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> 
     unsafe { RcInstance::get_field(ptr, slot as usize) }
 }
 
+/// Write a field value to an instance by slot index.
+///
+/// No-ops if `ptr` is null, supporting nil-propagation semantics.
+///
+/// # JIT contract
+/// - `ptr` is null or a valid `RcInstance` pointer.
+/// - `slot` is within bounds (< field_count). Not bounds-checked in release;
+///   the JIT guarantees correctness from static type information.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value: u64) {
     if ptr.is_null() {

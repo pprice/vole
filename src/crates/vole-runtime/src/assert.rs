@@ -74,10 +74,20 @@ pub unsafe fn call_setjmp(buf: *mut JmpBuf) -> i32 {
     unsafe { sigsetjmp(buf, 0) }
 }
 
-/// Runtime function called when an assertion fails.
+/// Runtime function called when a Vole `assert(...)` expression fails.
 ///
-/// If in test context (jmp_buf is set), records the failure and longjmps back.
-/// If not in test context, prints an error and aborts.
+/// The JIT emits a call to this function when an assert condition is false,
+/// passing the source file path (as raw UTF-8 bytes) and line number from
+/// the AST.
+///
+/// If in test context (a jmp_buf has been set via `set_test_jmp_buf`), records
+/// the failure location and longjmps back to the test harness. If not in test
+/// context, prints an error to stderr and aborts the process.
+///
+/// # JIT contract
+/// - `file` points to `file_len` bytes of valid UTF-8 (the source file path),
+///   or is null.
+/// - `line` is the 1-based line number from the source.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_assert_fail(file: *const u8, file_len: usize, line: u32) {
     let file_str = unsafe {

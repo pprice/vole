@@ -2,6 +2,24 @@
 //!
 //! Core runtime FFI functions for the Vole JIT compiler.
 //! Includes I/O, string conversion, and array operations.
+//!
+//! # JIT-Runtime FFI safety contract
+//!
+//! All `extern "C"` functions in this module are called directly from
+//! JIT-compiled code via symbol lookup. The JIT guarantees:
+//!
+//! - **Pointer validity**: every pointer argument is either null or points
+//!   to a live, properly initialized allocation of the expected type.
+//! - **Null handling**: functions that receive pointers defensively check
+//!   for null and return a zero/empty/no-op result. This supports Vole's
+//!   nil-propagation semantics where `nil.method()` flows through gracefully
+//!   rather than crashing. The JIT does not emit null guards before calls.
+//! - **String pointers**: `*const RcString` / `*mut RcString` are always
+//!   valid RC-managed strings or null. The JIT manages their lifetimes via
+//!   `rc_inc` / `rc_dec`.
+//! - **Array pointers**: `*const RcArray` / `*mut RcArray` are always valid
+//!   RC-managed arrays or null. Index bounds ARE checked at runtime (unlike
+//!   instance field slots) because array indices come from user expressions.
 
 use crate::RcString;
 use crate::array::RcArray;
@@ -45,6 +63,11 @@ to_string_ffi!(i128, i128);
 // i128 arithmetic helpers (Cranelift x64 doesn't support sdiv/srem for i128)
 // =============================================================================
 
+/// Signed 128-bit integer division.
+///
+/// Cranelift's x64 backend does not support i128 sdiv/srem natively, so
+/// the JIT calls out to this runtime helper. Panics on division by zero
+/// or overflow (i128::MIN / -1).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_i128_sdiv(a: i128, b: i128) -> i128 {
     if b == 0 {
@@ -60,6 +83,10 @@ pub extern "C" fn vole_i128_sdiv(a: i128, b: i128) -> i128 {
     a / b
 }
 
+/// Signed 128-bit integer remainder.
+///
+/// See `vole_i128_sdiv` for why this is a runtime helper.
+/// Panics on division by zero or overflow (i128::MIN % -1).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_i128_srem(a: i128, b: i128) -> i128 {
     if b == 0 {
@@ -221,7 +248,10 @@ print_fns!(bool, i8, |v| {
     }
 });
 
-/// Concatenate two strings
+/// Concatenate two strings, returning a new RC string with refcount 1.
+///
+/// Null pointers are treated as empty strings (nil-propagation): `nil + "x"`
+/// produces `"x"`, and `nil + nil` produces `""`.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString {
     unsafe {
@@ -338,7 +368,14 @@ pub extern "C" fn vole_panic(
     std::process::exit(1);
 }
 
+// =============================================================================
 // Array FFI functions
+// =============================================================================
+//
+// Unlike instance field access (where the JIT statically knows field indices),
+// array indices come from user expressions and must be bounds-checked at
+// runtime. Out-of-bounds access triggers a Vole panic via the longjmp error
+// path, which unwinds to the test harness or exits the process.
 
 /// Trigger a clean Vole panic for array index out of bounds.
 /// Uses the longjmp-based error path so extern "C" functions don't unwind.
@@ -353,16 +390,19 @@ fn array_index_oob(index: usize, len: usize) -> ! {
     vole_panic(msg, file.as_ptr(), file.len(), 0);
 }
 
+/// Allocate a new empty array. Returns a non-null pointer with refcount 1.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_new() -> *mut RcArray {
     RcArray::new()
 }
 
+/// Allocate a new empty array with pre-allocated capacity. Returns non-null with refcount 1.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_with_capacity(capacity: usize) -> *mut RcArray {
     RcArray::with_capacity(capacity)
 }
 
+/// Push a tagged value onto the array. The JIT guarantees `arr` is a valid array pointer.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
     unsafe {
@@ -370,6 +410,8 @@ pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
     }
 }
 
+/// Get the type tag of an array element. Returns 0 for null arrays.
+/// Panics with a Vole error on out-of-bounds index (user-facing bounds check).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
     if arr.is_null() {
@@ -382,6 +424,8 @@ pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
     unsafe { RcArray::get(arr, index).tag }
 }
 
+/// Get the value of an array element. Returns 0 for null arrays.
+/// Panics with a Vole error on out-of-bounds index (user-facing bounds check).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64 {
     if arr.is_null() {
@@ -394,6 +438,8 @@ pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64
     unsafe { RcArray::get(arr, index).value }
 }
 
+/// Set an array element by index. No-ops for null arrays.
+/// Panics with a Vole error on out-of-bounds index (user-facing bounds check).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64) {
     if arr.is_null() {
@@ -408,6 +454,7 @@ pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, valu
     }
 }
 
+/// Get the length of an array. Returns 0 for null arrays (nil-propagation).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_len(arr: *const RcArray) -> usize {
     if arr.is_null() {
@@ -416,11 +463,14 @@ pub extern "C" fn vole_array_len(arr: *const RcArray) -> usize {
     unsafe { RcArray::len(arr) }
 }
 
+/// Increment array reference count. Null is a no-op (delegated to `rc_inc`).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_inc(ptr: *mut RcArray) {
     crate::value::rc_inc(ptr as *mut u8);
 }
 
+/// Decrement array reference count. Frees the array when count reaches zero.
+/// Null is a no-op (delegated to `rc_dec`).
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_dec(ptr: *mut RcArray) {
     crate::value::rc_dec(ptr as *mut u8);
