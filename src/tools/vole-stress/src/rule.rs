@@ -14,10 +14,7 @@ use std::collections::HashMap;
 // Placeholder types (replaced by vol-0bex and vol-fosu)
 // ---------------------------------------------------------------------------
 
-/// Placeholder for the scope abstraction that tracks locals and type context.
-///
-/// Will be replaced with a real implementation in vol-0bex.
-pub struct Scope;
+pub use crate::scope::Scope;
 
 /// Placeholder for the emit abstraction that handles sub-generation and RNG.
 ///
@@ -301,6 +298,13 @@ mod tests {
 
     // -- Trait object construction ------------------------------------------
 
+    use crate::symbols::SymbolTable;
+
+    /// Create a minimal Scope for tests that don't inspect scope contents.
+    fn test_scope(table: &SymbolTable) -> Scope<'_> {
+        Scope::new(&[], table)
+    }
+
     /// Minimal statement rule used only for trait-object tests.
     struct DummyStmtRule;
 
@@ -342,6 +346,7 @@ mod tests {
 
     #[test]
     fn stmt_rule_as_trait_object() {
+        let table = SymbolTable::new();
         let rule: Box<dyn StmtRule> = Box::new(DummyStmtRule);
         assert_eq!(rule.name(), "dummy_stmt");
         assert_eq!(rule.params().len(), 1);
@@ -349,14 +354,16 @@ mod tests {
 
         // Default precondition returns true.
         let params = Params::from_iter([("p", ParamValue::Probability(0.5))]);
-        assert!(rule.precondition(&Scope, &params));
+        let mut scope = test_scope(&table);
+        assert!(rule.precondition(&scope, &params));
 
-        let result = rule.generate(&mut Scope, &mut Emit, &params);
+        let result = rule.generate(&mut scope, &mut Emit, &params);
         assert_eq!(result.as_deref(), Some("let x = 1"));
     }
 
     #[test]
     fn expr_rule_as_trait_object() {
+        let table = SymbolTable::new();
         let rule: Box<dyn ExprRule> = Box::new(DummyExprRule);
         assert_eq!(rule.name(), "dummy_expr");
         assert_eq!(rule.params().len(), 1);
@@ -364,9 +371,10 @@ mod tests {
 
         // Default precondition returns true.
         let params = Params::from_iter([("n", ParamValue::Count(1))]);
-        assert!(rule.precondition(&Scope, &params));
+        let scope = test_scope(&table);
+        assert!(rule.precondition(&scope, &params));
 
-        let result = rule.generate(&Scope, &mut Emit, &params);
+        let result = rule.generate(&scope, &mut Emit, &params);
         assert_eq!(result.as_deref(), Some("42"));
     }
 
@@ -397,13 +405,15 @@ mod tests {
             }
         }
 
+        let table = SymbolTable::new();
         let rule: Box<dyn StmtRule> = Box::new(GatedRule);
 
         let off = Params::from_iter([("active", ParamValue::Flag(false))]);
-        assert!(!rule.precondition(&Scope, &off));
+        let scope = test_scope(&table);
+        assert!(!rule.precondition(&scope, &off));
 
         let on = Params::from_iter([("active", ParamValue::Flag(true))]);
-        assert!(rule.precondition(&Scope, &on));
+        assert!(rule.precondition(&scope, &on));
     }
 
     #[test]
@@ -429,9 +439,11 @@ mod tests {
             }
         }
 
+        let table = SymbolTable::new();
         let rule: Box<dyn ExprRule> = Box::new(EmptyRule);
         let params = Params::from_iter([]);
-        assert!(rule.generate(&Scope, &mut Emit, &params).is_none());
+        let scope = test_scope(&table);
+        assert!(rule.generate(&scope, &mut Emit, &params).is_none());
     }
 
     // -- Send + Sync --------------------------------------------------------

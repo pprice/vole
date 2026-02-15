@@ -6,6 +6,7 @@ mod names;
 mod planner;
 mod profile;
 mod rule;
+mod scope;
 mod stmt;
 mod symbols;
 
