@@ -184,8 +184,20 @@ fn main() -> ExitCode {
     // Plan phase: generate declaration skeleton
     let symbol_table = plan(&mut rng, &profile.plan);
 
+    // Build rule registry and resolve parameters
+    let registry = rules::RuleRegistry::new();
+    let resolved_params = resolver::resolve(&registry, Some(&profile.rules));
+
     // Fill phase: emit Vole source code
-    if let Err(e) = emit_all(&mut rng, &symbol_table, &profile.emit, &output_dir) {
+    if let Err(e) = emit_all(
+        &mut rng,
+        &symbol_table,
+        &profile.emit,
+        &output_dir,
+        &registry.stmt_rules,
+        &registry.expr_rules,
+        &resolved_params,
+    ) {
         eprintln!("error: failed to write modules: {}", e);
         return ExitCode::FAILURE;
     }

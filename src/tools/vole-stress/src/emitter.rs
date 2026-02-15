@@ -9,9 +9,12 @@ use std::fmt::Write as _;
 use std::io;
 use std::path::Path;
 
+use crate::emit::Emit;
 use crate::entrypoints::{emit_integration_tests, emit_main};
-use crate::expr::{ExprConfig, ExprContext, ExprGenerator};
-use crate::stmt::{StmtConfig, StmtContext, StmtGenerator};
+use crate::resolver::ResolvedParams;
+use crate::rule::{ExprRule, StmtRule};
+use crate::scope::Scope;
+use crate::stmt::StmtConfig;
 use crate::symbols::{
     ClassInfo, FieldInfo, FunctionInfo, ImplementBlockInfo, InterfaceInfo, MethodInfo, ModuleId,
     ModuleSymbols, ParamInfo, PrimitiveType, StaticMethodInfo, Symbol, SymbolId, SymbolKind,
@@ -54,9 +57,20 @@ pub fn emit_all<R: Rng>(
     table: &SymbolTable,
     config: &EmitConfig,
     output_dir: &Path,
+    stmt_rules: &[Box<dyn StmtRule>],
+    expr_rules: &[Box<dyn ExprRule>],
+    resolved_params: &ResolvedParams,
 ) -> io::Result<()> {
     for module in table.modules() {
-        let code = emit_module(rng, table, module, config);
+        let code = emit_module(
+            rng,
+            table,
+            module,
+            config,
+            stmt_rules,
+            expr_rules,
+            resolved_params,
+        );
         let path = output_dir.join(&module.path);
         std::fs::write(path, code)?;
     }
@@ -80,8 +94,19 @@ pub fn emit_module<R: Rng>(
     table: &SymbolTable,
     module: &ModuleSymbols,
     config: &EmitConfig,
+    stmt_rules: &[Box<dyn StmtRule>],
+    expr_rules: &[Box<dyn ExprRule>],
+    resolved_params: &ResolvedParams,
 ) -> String {
-    let mut ctx = EmitContext::new(rng, table, module, config);
+    let mut ctx = EmitContext::new(
+        rng,
+        table,
+        module,
+        config,
+        stmt_rules,
+        expr_rules,
+        resolved_params,
+    );
     ctx.emit_module();
     ctx.output
 }
@@ -99,6 +124,12 @@ struct EmitContext<'a, R> {
     current_class: Option<(ModuleId, SymbolId)>,
     /// Whether this module imported `std:lowlevel` for arithmetic intrinsics.
     has_lowlevel_import: bool,
+    /// Registered statement rules for the rule-based dispatch system.
+    stmt_rules: &'a [Box<dyn StmtRule>],
+    /// Registered expression rules for the rule-based dispatch system.
+    expr_rules: &'a [Box<dyn ExprRule>],
+    /// Resolved per-rule parameters (merged defaults + profile overrides).
+    resolved_params: &'a ResolvedParams,
 }
 
 impl<'a, R: Rng> EmitContext<'a, R> {
@@ -107,6 +138,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         table: &'a SymbolTable,
         module: &'a ModuleSymbols,
         config: &'a EmitConfig,
+        stmt_rules: &'a [Box<dyn StmtRule>],
+        expr_rules: &'a [Box<dyn ExprRule>],
+        resolved_params: &'a ResolvedParams,
     ) -> Self {
         // Decide whether this module imports std:lowlevel
         let has_lowlevel_import = config.lowlevel_import_probability > 0.0
@@ -120,6 +154,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             indent: 0,
             current_class: None,
             has_lowlevel_import,
+            stmt_rules,
+            expr_rules,
+            resolved_params,
         }
     }
 
@@ -580,16 +617,16 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 // For interface types, find a class that implements it and construct one
                 self.generate_interface_test_value(*mod_id, *sym_id)
             }
-            TypeInfo::Function {
-                param_types,
-                return_type,
-            } => {
-                // Generate a lambda matching the function type
-                let config = ExprConfig::default();
-                let mut expr_gen = ExprGenerator::new(self.rng, &config);
-                let table = self.table;
-                let ctx = ExprContext::new(&[], &[], table);
-                expr_gen.generate_lambda(param_types, return_type, &ctx, config.max_depth)
+            ty @ TypeInfo::Function { .. } => {
+                // Generate a lambda matching the function type via rule dispatch
+                let scope = Scope::with_module(&[], self.table, self.module.id);
+                let mut emit = Emit::new(
+                    self.rng,
+                    self.stmt_rules,
+                    self.expr_rules,
+                    self.resolved_params,
+                );
+                emit.sub_expr(ty, &scope)
             }
             _ => "nil".to_string(),
         }
@@ -1086,15 +1123,16 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// Generate a simple expression for the return type.
     ///
     /// Used for expression-bodied functions where the entire body is a single
-    /// expression. Uses `generate_simple` to avoid complex multi-line expressions
-    /// that would break parsing when formatted across multiple lines.
+    /// expression. Uses rule-based dispatch to generate a suitable expression.
     fn generate_return_expr(&mut self, return_type: &TypeInfo, params: &[ParamInfo]) -> String {
-        // For fallible functions, use the success type for expression generation
-        let effective_return_type = return_type.success_type().clone();
-
-        let expr_ctx = ExprContext::new(params, &[], self.table);
-        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.stmt_config.expr_config);
-        expr_gen.generate_simple(&effective_return_type, &expr_ctx)
+        let scope = Scope::with_module(params, self.table, self.module.id);
+        let mut emit = Emit::new(
+            self.rng,
+            self.stmt_rules,
+            self.expr_rules,
+            self.resolved_params,
+        );
+        emit.generate_return_expr(return_type, &scope)
     }
 
     fn emit_function_body(
@@ -1117,33 +1155,42 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             return;
         }
 
-        let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
-        stmt_ctx.has_lowlevel_import = self.has_lowlevel_import;
+        let mut scope = Scope::with_module(params, self.table, self.module.id);
+        scope.has_lowlevel_import = self.has_lowlevel_import;
 
         // Track the current function name to prevent self-recursion
-        stmt_ctx.current_function_name = function_name.map(String::from);
+        scope.current_function_name = function_name.map(String::from);
 
         // Track the current free function's symbol ID to prevent mutual recursion.
         // When set, only free functions with a lower symbol ID may be called.
-        stmt_ctx.current_function_sym_id = function_sym_id;
+        scope.current_function_sym_id = function_sym_id;
 
         // Track the current class to prevent mutual recursion between methods
-        stmt_ctx.current_class_sym_id = self.current_class;
+        scope.current_class_sym_id = self.current_class;
 
         // Pass type parameters for generic functions (enables interface method calls)
-        stmt_ctx.type_params = type_params.to_vec();
+        scope.type_params = type_params.to_vec();
 
         // If this function has a fallible return type, mark the context as fallible
         if let TypeInfo::Fallible { error, .. } = return_type {
-            stmt_ctx.is_fallible = true;
+            scope.is_fallible = true;
             // Collect fallible functions in this module for try expressions
-            stmt_ctx.fallible_error_type = Some(error.as_ref().clone());
+            scope.fallible_error_type = Some(error.as_ref().clone());
         }
 
-        let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
-        stmt_gen.set_indent(self.indent);
+        let stmt_count = self.rng.gen_range(
+            self.config.stmt_config.statements_per_block.0
+                ..=self.config.stmt_config.statements_per_block.1,
+        );
+        let mut emit = Emit::new(
+            self.rng,
+            self.stmt_rules,
+            self.expr_rules,
+            self.resolved_params,
+        );
+        emit.set_indent(self.indent);
 
-        let lines = stmt_gen.generate_body(return_type, &mut stmt_ctx, 0);
+        let lines = emit.generate_body(return_type, &mut scope, stmt_count);
 
         for line in lines {
             self.emit_line(&line);
@@ -1161,12 +1208,16 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// }
     /// ```
     fn emit_generator_body(&mut self, elem_type: &TypeInfo, params: &[ParamInfo]) {
-        let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
-        stmt_gen.set_indent(self.indent);
+        let scope = Scope::with_module(params, self.table, self.module.id);
+        let mut emit = Emit::new(
+            self.rng,
+            self.stmt_rules,
+            self.expr_rules,
+            self.resolved_params,
+        );
+        emit.set_indent(self.indent);
 
-        let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
-        stmt_ctx.has_lowlevel_import = self.has_lowlevel_import;
-        let lines = stmt_gen.generate_generator_body(elem_type, &stmt_ctx);
+        let lines = emit.generate_generator_body(elem_type, &scope);
 
         for line in lines {
             self.emit_line(&line);
@@ -1549,24 +1600,30 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         // First, generate the field values for construction (uses self.rng)
         let field_values = self.generate_self_field_values(target_fields);
 
-        // Now generate the statements using StmtGenerator
-        let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
-        stmt_ctx.has_lowlevel_import = self.has_lowlevel_import;
+        // Now generate the statements using rule-based dispatch
+        let mut scope = Scope::with_module(params, self.table, self.module.id);
+        scope.has_lowlevel_import = self.has_lowlevel_import;
         // Set the current method name so that method chain generation can
         // exclude this method, preventing infinite recursion (e.g. selfMethod6
         // chaining back to selfMethod6).
-        stmt_ctx.current_function_name = Some(method_name.to_string());
+        scope.current_function_name = Some(method_name.to_string());
         // Track the current class to prevent mutual recursion between methods
-        stmt_ctx.current_class_sym_id = self.current_class;
-        let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
-        stmt_gen.set_indent(self.indent);
+        scope.current_class_sym_id = self.current_class;
+
+        let mut emit = Emit::new(
+            self.rng,
+            self.stmt_rules,
+            self.expr_rules,
+            self.resolved_params,
+        );
+        emit.set_indent(self.indent);
 
         // Generate a few statements (but not as many as full body since we handle return)
         // Collect all lines first, then emit to avoid borrow issues
-        let stmt_count = 1 + (stmt_gen.gen_range_usize(0..2)); // 1-2 statements
+        let stmt_count = 1 + emit.gen_range(0..2); // 1-2 statements
         let mut lines = Vec::with_capacity(stmt_count + 1);
         for _ in 0..stmt_count {
-            let stmt = stmt_gen.generate_statement(&mut stmt_ctx, 0);
+            let stmt = emit.generate_statement(&mut scope);
             lines.push(stmt);
         }
 
@@ -1589,79 +1646,26 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     }
 
     fn literal_for_type(&mut self, type_info: &TypeInfo) -> String {
-        let config = ExprConfig::default();
-        let mut expr_gen = ExprGenerator::new(self.rng, &config);
-
-        match type_info {
-            TypeInfo::Primitive(p) => expr_gen.literal_for_primitive(*p),
-            TypeInfo::Optional(inner) => {
-                // Generate a typed value rather than nil so the literal carries
-                // type information when nested inside containers like [T?].
-                self.literal_for_type(inner)
-            }
-            TypeInfo::Void => "nil".to_string(),
-            TypeInfo::Union(variants) => {
-                // For union types, generate a literal for the first variant
-                if let Some(first) = variants.first() {
-                    self.literal_for_type(first)
-                } else {
-                    "nil".to_string()
-                }
-            }
-            TypeInfo::Array(elem) => {
-                // Minimum 2 elements: method bodies index arrays at 0..=1,
-                // so arrays must always have at least 2 elements to prevent OOB panics.
-                let elem_val1 = self.literal_for_type(elem);
-                let elem_val2 = self.literal_for_type(elem);
-                format!("[{}, {}]", elem_val1, elem_val2)
-            }
-            TypeInfo::Tuple(elems) => {
-                let values: Vec<String> = elems.iter().map(|t| self.literal_for_type(t)).collect();
-                format!("[{}]", values.join(", "))
-            }
-            TypeInfo::FixedArray(elem, size) => {
-                let elem_val = self.literal_for_type(elem);
-                format!("[{}; {}]", elem_val, size)
-            }
-            _ => "nil".to_string(),
-        }
+        let mut emit = Emit::new(
+            self.rng,
+            self.stmt_rules,
+            self.expr_rules,
+            self.resolved_params,
+        );
+        emit.literal(type_info)
     }
 
     /// Generate a constant-safe literal for a type. Only produces values that
     /// the module analyzer recognizes as compile-time constants (no unary
     /// negation, no complex expressions).
     fn constant_literal_for_type(&mut self, type_info: &TypeInfo) -> String {
-        let config = ExprConfig::default();
-        let mut expr_gen = ExprGenerator::new(self.rng, &config);
-
-        match type_info {
-            TypeInfo::Primitive(p) => expr_gen.constant_literal_for_primitive(*p),
-            TypeInfo::Optional(inner) => {
-                // Generate a typed constant rather than nil so the literal carries
-                // type information when nested inside containers like [T?].
-                self.constant_literal_for_type(inner)
-            }
-            TypeInfo::Void => "nil".to_string(),
-            TypeInfo::Union(variants) => {
-                if let Some(first) = variants.first() {
-                    self.constant_literal_for_type(first)
-                } else {
-                    "nil".to_string()
-                }
-            }
-            TypeInfo::Array(elem) => {
-                // Minimum 2 elements: method bodies index arrays at 0..=1,
-                // so arrays must always have at least 2 elements to prevent OOB panics.
-                let elem_val1 = self.constant_literal_for_type(elem);
-                let elem_val2 = self.constant_literal_for_type(elem);
-                format!("[{}, {}]", elem_val1, elem_val2)
-            }
-            TypeInfo::FixedArray(elem, size) => {
-                let elem_val = self.constant_literal_for_type(elem);
-                format!("[{}; {}]", elem_val, size)
-            }
-            _ => "nil".to_string(),
-        }
+        let mut emit = Emit::new(
+            self.rng,
+            self.stmt_rules,
+            self.expr_rules,
+            self.resolved_params,
+        );
+        emit.constant_literal(type_info)
     }
 
     fn emit_line(&mut self, line: &str) {
@@ -1678,8 +1682,36 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 mod tests {
     use super::*;
     use crate::planner::{PlanConfig, plan};
+    use crate::resolver;
+    use crate::rules::RuleRegistry;
     use crate::symbols::ModuleId;
     use rand::SeedableRng;
+
+    /// Build a test registry + resolved params with default settings.
+    fn test_rules() -> (RuleRegistry, ResolvedParams) {
+        let registry = RuleRegistry::new();
+        let resolved = resolver::resolve(&registry, None);
+        (registry, resolved)
+    }
+
+    /// Helper to call emit_module with test rules.
+    fn test_emit_module<R: Rng>(
+        rng: &mut R,
+        table: &SymbolTable,
+        module: &crate::symbols::ModuleSymbols,
+        config: &EmitConfig,
+    ) -> String {
+        let (registry, resolved) = test_rules();
+        emit_module(
+            rng,
+            table,
+            module,
+            config,
+            &registry.stmt_rules,
+            &registry.expr_rules,
+            &resolved,
+        )
+    }
 
     #[test]
     fn emit_module_produces_code() {
@@ -1696,7 +1728,7 @@ mod tests {
         let module = table.get_module(ModuleId(0)).unwrap();
         let emit_config = EmitConfig::default();
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         assert!(code.contains("// Module:"));
         assert!(code.contains("func"));
@@ -1720,7 +1752,7 @@ mod tests {
         let module = table.get_module(ModuleId(0)).unwrap();
         let emit_config = EmitConfig::default();
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         assert!(code.contains("class Class"));
     }
@@ -1743,7 +1775,7 @@ mod tests {
         let module = table.get_module(ModuleId(0)).unwrap();
         let emit_config = EmitConfig::default();
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         assert!(code.contains("interface IFace"));
     }
@@ -1756,12 +1788,12 @@ mod tests {
         let mut rng1 = rand::rngs::StdRng::seed_from_u64(12345);
         let table1 = plan(&mut rng1, &plan_config);
         let module1 = table1.get_module(ModuleId(0)).unwrap();
-        let code1 = emit_module(&mut rng1, &table1, module1, &emit_config);
+        let code1 = test_emit_module(&mut rng1, &table1, module1, &emit_config);
 
         let mut rng2 = rand::rngs::StdRng::seed_from_u64(12345);
         let table2 = plan(&mut rng2, &plan_config);
         let module2 = table2.get_module(ModuleId(0)).unwrap();
-        let code2 = emit_module(&mut rng2, &table2, module2, &emit_config);
+        let code2 = test_emit_module(&mut rng2, &table2, module2, &emit_config);
 
         assert_eq!(code1, code2);
     }
@@ -1786,7 +1818,7 @@ mod tests {
         let module = table.get_module(ModuleId(0)).unwrap();
         let emit_config = EmitConfig::default();
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should contain a tests block
         assert!(code.contains("tests \""));
@@ -1815,7 +1847,7 @@ mod tests {
         let module = table.get_module(ModuleId(0)).unwrap();
         let emit_config = EmitConfig::default();
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should contain function tests
         assert!(code.contains("test \"func"));
@@ -1841,7 +1873,7 @@ mod tests {
         let module = table.get_module(ModuleId(0)).unwrap();
         let emit_config = EmitConfig::default();
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should contain class construction test
         assert!(code.contains("construction\""));
@@ -1867,7 +1899,7 @@ mod tests {
         let module = table.get_module(ModuleId(0)).unwrap();
         let emit_config = EmitConfig::default();
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         assert!(
             code.contains("struct Struct"),
@@ -1895,7 +1927,7 @@ mod tests {
         let module = table.get_module(ModuleId(0)).unwrap();
         let emit_config = EmitConfig::default();
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should contain struct construction test
         assert!(
@@ -2030,7 +2062,7 @@ mod tests {
             ..Default::default()
         };
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should use destructured import syntax: let { name } = import "path"
         assert!(
@@ -2065,7 +2097,7 @@ mod tests {
             ..Default::default()
         };
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should NOT use destructured import syntax.
         // Check for `} = import` which is the destructured import pattern
@@ -2110,7 +2142,7 @@ mod tests {
             ..Default::default()
         };
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should contain expression-bodied function syntax: func name(...) -> T => expr
         // The pattern is "-> T => " where T is the return type
@@ -2149,7 +2181,7 @@ mod tests {
             ..Default::default()
         };
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Count lines with "func" that also have "=> " (expression-bodied)
         // vs lines with "func" that have " {" (block-bodied)
@@ -2201,7 +2233,7 @@ mod tests {
             ..Default::default()
         };
 
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should contain expression-bodied method syntax in class methods
         // Methods can return void, so not all will be expression-bodied
@@ -2255,7 +2287,7 @@ mod tests {
 
         // Now emit the module and check the output
         let emit_config = EmitConfig::default();
-        let code = emit_module(&mut rng, &table, module, &emit_config);
+        let code = test_emit_module(&mut rng, &table, module, &emit_config);
 
         // Should contain statics block
         assert!(

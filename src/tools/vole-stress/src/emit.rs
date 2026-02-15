@@ -33,10 +33,15 @@ pub struct Emit<'a> {
     resolved_params: &'a ResolvedParams,
     /// Current indentation level (number of indent units, not spaces).
     indent: usize,
+    /// Current expression nesting depth (prevents infinite recursion).
+    expr_depth: usize,
 }
 
 /// Number of spaces per indentation level.
 const INDENT_WIDTH: usize = 4;
+
+/// Maximum expression nesting depth before falling back to literals.
+const MAX_EXPR_DEPTH: usize = 4;
 
 /// An empty [`Params`] bag returned when a rule has no resolved params.
 fn empty_params() -> Params {
@@ -61,6 +66,7 @@ impl<'a> Emit<'a> {
             expr_rules,
             resolved_params,
             indent: 0,
+            expr_depth: 0,
         }
     }
 }
@@ -193,6 +199,66 @@ impl Emit<'_> {
             PrimitiveType::F64 => {
                 let val: f64 = self.rng.gen_range(1.0..100.0);
                 format!("{:.2}_f64", val)
+            }
+            _ => self.literal_for_primitive(prim),
+        }
+    }
+
+    /// Generate a constant-safe literal for a type.
+    ///
+    /// Only produces values the compiler recognizes as compile-time constants
+    /// (non-negative, no unary negation). Used for global variable initialization.
+    pub fn constant_literal(&mut self, ty: &TypeInfo) -> String {
+        match ty {
+            TypeInfo::Primitive(p) => self.constant_literal_for_primitive(*p),
+            TypeInfo::Optional(inner) => self.constant_literal(inner),
+            TypeInfo::Void => "nil".to_string(),
+            TypeInfo::Union(variants) => {
+                if let Some(first) = variants.first() {
+                    self.constant_literal(first)
+                } else {
+                    "nil".to_string()
+                }
+            }
+            TypeInfo::Array(elem) => {
+                let v1 = self.constant_literal(elem);
+                let v2 = self.constant_literal(elem);
+                format!("[{}, {}]", v1, v2)
+            }
+            TypeInfo::Tuple(elems) => {
+                let parts: Vec<String> = elems.iter().map(|e| self.constant_literal(e)).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            TypeInfo::FixedArray(elem, size) => {
+                let value = self.constant_literal(elem);
+                format!("[{}; {}]", value, size)
+            }
+            _ => "nil".to_string(),
+        }
+    }
+
+    /// Generate a non-negative literal for a primitive type (constant-safe).
+    fn constant_literal_for_primitive(&mut self, prim: PrimitiveType) -> String {
+        match prim {
+            PrimitiveType::I8 => {
+                let val: i8 = self.rng.gen_range(0..=127);
+                format!("{}_i8", val)
+            }
+            PrimitiveType::I16 => {
+                let val: i16 = self.rng.gen_range(0..=1000);
+                format!("{}_i16", val)
+            }
+            PrimitiveType::I32 => {
+                let val: i32 = self.rng.gen_range(0..100);
+                format!("{}_i32", val)
+            }
+            PrimitiveType::I64 => {
+                let val: i64 = self.rng.gen_range(0..1000);
+                format!("{}_i64", val)
+            }
+            PrimitiveType::I128 => {
+                let val: i64 = self.rng.gen_range(0..10000);
+                format!("{}_i128", val)
             }
             _ => self.literal_for_primitive(prim),
         }
@@ -383,6 +449,92 @@ impl Emit<'_> {
 }
 
 // ---------------------------------------------------------------------------
+// Higher-level generation entry points
+// ---------------------------------------------------------------------------
+
+impl Emit<'_> {
+    /// Set the indentation level (e.g., to match the emitter's current depth).
+    pub fn set_indent(&mut self, indent: usize) {
+        self.indent = indent;
+    }
+
+    /// Generate a function body: several statements followed by a return.
+    ///
+    /// Mirrors the old `StmtGenerator::generate_body`: generates `stmt_count`
+    /// statements via rule dispatch, then appends a `return <expr>` for
+    /// non-void functions.
+    pub fn generate_body(
+        &mut self,
+        return_type: &TypeInfo,
+        scope: &mut Scope,
+        stmt_count: usize,
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+        let effective_return_type = return_type.success_type().clone();
+        scope.return_type = Some(effective_return_type.clone());
+
+        // Generate statements
+        for _ in 0..stmt_count {
+            let stmt = self.sub_stmt(scope);
+            lines.push(stmt);
+        }
+
+        // Generate final return statement for non-void functions
+        if !matches!(effective_return_type, TypeInfo::Void) {
+            let return_expr = self.sub_expr(&effective_return_type, scope);
+            lines.push(format!("return {}", return_expr));
+        }
+
+        lines
+    }
+
+    /// Generate a generator function body with a while loop and yield.
+    ///
+    /// Produces:
+    /// ```vole
+    /// let mut _gi = 0
+    /// while _gi < N {
+    ///     yield <expr>
+    ///     _gi = _gi + 1
+    /// }
+    /// ```
+    pub fn generate_generator_body(&mut self, elem_type: &TypeInfo, scope: &Scope) -> Vec<String> {
+        let mut lines = Vec::new();
+        let limit = self.random_in(2, 5);
+
+        // Initialize counter
+        lines.push("let mut _gi = 0".to_string());
+
+        // For generator yield expressions, use a literal only (compiler bug
+        // prevents referencing params inside generators).
+        let yield_expr = self.literal(elem_type);
+
+        // Build the while loop with yield
+        let indent = " ".repeat((self.indent + 1) * INDENT_WIDTH);
+        lines.push(format!("while _gi < {} {{", limit));
+        lines.push(format!("{}yield {}", indent, yield_expr));
+        lines.push(format!("{}_gi = _gi + 1", indent));
+        lines.push("}".to_string());
+
+        lines
+    }
+
+    /// Generate a single statement for use in contexts like
+    /// `emit_self_returning_body` where individual statements are needed.
+    pub fn generate_statement(&mut self, scope: &mut Scope) -> String {
+        self.sub_stmt(scope)
+    }
+
+    /// Generate a simple return expression for expression-bodied functions.
+    ///
+    /// Dispatches through the expr rule registry, falling back to a literal.
+    pub fn generate_return_expr(&mut self, return_type: &TypeInfo, scope: &Scope) -> String {
+        let effective_return_type = return_type.success_type().clone();
+        self.sub_expr(&effective_return_type, scope)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch (private)
 // ---------------------------------------------------------------------------
 
@@ -461,9 +613,14 @@ impl Emit<'_> {
     /// Falls back to a literal of the expected type.
     fn dispatch_expr(&mut self, scope: &Scope, expected_type: &TypeInfo) -> String {
         let rule_count = self.expr_rules.len();
-        if rule_count == 0 {
+
+        // At max depth, always return a simple literal to prevent infinite
+        // recursion through expr rules that call sub_expr.
+        if rule_count == 0 || self.expr_depth >= MAX_EXPR_DEPTH {
             return self.literal(expected_type);
         }
+
+        self.expr_depth += 1;
 
         // Build a shuffled index list.
         let mut indices: Vec<usize> = (0..rule_count).collect();
@@ -502,10 +659,12 @@ impl Emit<'_> {
                 unsafe { &*rule_ptr }.generate(scope, self, unsafe { &*params_ptr }, expected_type);
 
             if let Some(text) = result {
+                self.expr_depth -= 1;
                 return text;
             }
         }
 
+        self.expr_depth -= 1;
         // Fallback: generate a literal.
         self.literal(expected_type)
     }
