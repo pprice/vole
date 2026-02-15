@@ -42,7 +42,7 @@ mod tests {
     fn registry_construction_succeeds() {
         let registry = RuleRegistry::new();
         assert_eq!(registry.stmt_rules.len(), 176);
-        assert!(registry.expr_rules.is_empty());
+        assert_eq!(registry.expr_rules.len(), 15);
     }
 
     #[test]
@@ -53,6 +53,16 @@ mod tests {
         names.sort();
         names.dedup();
         assert_eq!(names.len(), original_len, "duplicate rule names found");
+    }
+
+    #[test]
+    fn expr_rule_names_are_unique() {
+        let registry = RuleRegistry::new();
+        let mut names: Vec<&str> = registry.expr_rules.iter().map(|r| r.name()).collect();
+        let original_len = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), original_len, "duplicate expr rule names found");
     }
 
     #[test]
