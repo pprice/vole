@@ -41,9 +41,18 @@ mod tests {
     #[test]
     fn registry_construction_succeeds() {
         let registry = RuleRegistry::new();
-        // Initially empty -- rules are added during migration tickets.
-        assert!(registry.stmt_rules.is_empty());
+        assert_eq!(registry.stmt_rules.len(), 11);
         assert!(registry.expr_rules.is_empty());
+    }
+
+    #[test]
+    fn stmt_rule_names_are_unique() {
+        let registry = RuleRegistry::new();
+        let mut names: Vec<&str> = registry.stmt_rules.iter().map(|r| r.name()).collect();
+        let original_len = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), original_len, "duplicate rule names found");
     }
 
     #[test]
