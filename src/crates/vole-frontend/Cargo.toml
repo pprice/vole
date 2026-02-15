@@ -5,6 +5,9 @@ edition = "2024"
 description = "Lexer, parser, and AST for the Vole programming language"
 
 [dependencies]
+# Workspace crates
+vole-identity = { path = "../vole-identity" }
+
 # Error handling
 thiserror = "2.0"
 miette = { version = "7.4", features = ["fancy"] }
@@ -19,7 +22,7 @@ tracing = "0.1"
 rustc-hash = "2.1"
 
 [features]
-testing = []
+testing = ["vole-identity/testing"]
 
 [lints]
 workspace = true

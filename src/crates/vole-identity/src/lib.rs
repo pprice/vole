@@ -1,12 +1,21 @@
 // src/identity.rs
 //
 // Shared name interning for fully-qualified item identities.
+// Defines Symbol, Span, and Interner as foundational primitives.
 
 use std::hash::{BuildHasher, Hash, Hasher};
 
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
-use vole_frontend::{Interner, Span, Symbol};
+mod intern;
+mod primitive_type;
+mod span;
+mod symbol;
+
+pub use intern::Interner;
+pub use primitive_type::PrimitiveType;
+pub use span::Span;
+pub use symbol::Symbol;
 
 mod entities;
 mod namer;
@@ -120,9 +129,8 @@ define_name_primitives!(
 );
 
 impl Primitives {
-    /// Map AST PrimitiveType to NameId
-    pub fn from_ast(&self, prim: vole_frontend::ast::PrimitiveType) -> NameId {
-        use vole_frontend::ast::PrimitiveType;
+    /// Map PrimitiveType to NameId
+    pub fn from_ast(&self, prim: PrimitiveType) -> NameId {
         match prim {
             PrimitiveType::I8 => self.i8,
             PrimitiveType::I16 => self.i16,
@@ -523,7 +531,7 @@ impl Default for NameTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vole_frontend::Interner;
+    use crate::Interner;
 
     #[test]
     fn name_table_displays_module_and_segments() {

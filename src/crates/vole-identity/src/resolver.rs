@@ -1,8 +1,8 @@
 // Scoped resolver for hierarchical name lookup.
 // Bridges Symbol (AST) to NameId (semantic) with layered resolution.
 
+use crate::{Interner, Symbol};
 use crate::{ModuleId, NameId, NameTable};
-use vole_frontend::{Interner, Symbol};
 
 /// Scoped resolver - the bridge from Symbol to NameId.
 ///

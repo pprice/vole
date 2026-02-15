@@ -1674,6 +1674,7 @@ dependencies = [
  "thiserror",
  "tracing",
  "unicode-ident",
+ "vole-identity",
 ]
 
 [[package]]
@@ -1681,8 +1682,8 @@ name = "vole-identity"
 version = "0.1.0"
 dependencies = [
  "hashbrown 0.16.1",
+ "miette",
  "rustc-hash",
- "vole-frontend",
 ]
 
 [[package]]

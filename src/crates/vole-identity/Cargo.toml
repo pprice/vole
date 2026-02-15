@@ -5,13 +5,16 @@ edition = "2024"
 description = "Name identity system for the Vole programming language"
 
 [dependencies]
-# Workspace crates
-vole-frontend = { path = "../vole-frontend" }
+# Error reporting (for Span -> SourceSpan conversions)
+miette = "7.4"
 
 # High-performance hash map
 rustc-hash = "2.1"
 # raw_entry API for zero-allocation name lookups
 hashbrown = "0.16.1"
+
+[features]
+testing = []
 
 [lints]
 workspace = true

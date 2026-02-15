@@ -1,5 +1,5 @@
+use crate::{Interner, Symbol};
 use crate::{ModuleId, NameId, NameTable};
-use vole_frontend::{Interner, Symbol};
 
 pub struct Namer<'a> {
     interner: &'a Interner,
