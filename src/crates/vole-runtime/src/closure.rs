@@ -13,6 +13,7 @@
 //! [func_ptr: *const u8]                    (8 bytes)
 //! [num_captures: usize]                    (8 bytes)
 //! [capture_kinds: u8 * num_captures]       (num_captures bytes, padded to 8)
+//! [capture_sizes: u32 * num_captures]      (num_captures * 4 bytes, padded to 8)
 //! [captures: *mut u8 * num_captures]       (num_captures * 8 bytes)
 //! ```
 
@@ -59,12 +60,19 @@ impl Closure {
         let ptr_size = size_of::<*mut u8>();
         // capture_kinds: num_captures bytes, padded to pointer alignment
         let kinds_size = align_to_ptr(num_captures);
+        // capture_sizes: num_captures u32s, padded to pointer alignment
+        let sizes_size = align_to_ptr(
+            num_captures
+                .checked_mul(size_of::<u32>())
+                .expect("closure capture_sizes overflow"),
+        );
         // captures: num_captures pointers
         let captures_size = num_captures
             .checked_mul(ptr_size)
             .expect("closure captures size overflow");
         let trailing = kinds_size
-            .checked_add(captures_size)
+            .checked_add(sizes_size)
+            .and_then(|s| s.checked_add(captures_size))
             .expect("closure trailing size overflow");
         let total_size = Self::FIXED_SIZE
             .checked_add(trailing)
@@ -80,7 +88,19 @@ impl Closure {
         unsafe { (closure as *mut u8).add(Self::FIXED_SIZE) }
     }
 
-    /// Get pointer to the captures array (pointers, after the padded capture_kinds)
+    /// Get pointer to the capture_sizes array (u32 per capture, after padded capture_kinds)
+    ///
+    /// # Safety
+    /// The closure pointer must be valid and properly initialized.
+    unsafe fn capture_sizes_ptr(closure: *mut Closure) -> *mut u32 {
+        unsafe {
+            let num = (*closure).num_captures;
+            let kinds_size = align_to_ptr(num);
+            (closure as *mut u8).add(Self::FIXED_SIZE + kinds_size) as *mut u32
+        }
+    }
+
+    /// Get pointer to the captures array (pointers, after padded capture_kinds and capture_sizes)
     ///
     /// # Safety
     /// The closure pointer must be valid and properly initialized.
@@ -88,7 +108,8 @@ impl Closure {
         unsafe {
             let num = (*closure).num_captures;
             let kinds_size = align_to_ptr(num);
-            (closure as *mut u8).add(Self::FIXED_SIZE + kinds_size) as *mut *mut u8
+            let sizes_size = align_to_ptr(num * size_of::<u32>());
+            (closure as *mut u8).add(Self::FIXED_SIZE + kinds_size + sizes_size) as *mut *mut u8
         }
     }
 
@@ -113,6 +134,9 @@ impl Closure {
             // Zero-initialize capture_kinds
             let kinds = Self::capture_kinds_ptr(ptr);
             ptr::write_bytes(kinds, 0, align_to_ptr(num_captures));
+            // Zero-initialize capture_sizes
+            let sizes = Self::capture_sizes_ptr(ptr);
+            ptr::write_bytes(sizes, 0, num_captures);
             // Initialize capture pointers to null
             let captures = Self::captures_ptr(ptr);
             for i in 0..num_captures {
@@ -180,6 +204,34 @@ impl Closure {
         }
     }
 
+    /// Set the capture allocation size at index (in bytes)
+    ///
+    /// # Safety
+    /// - The closure pointer must be valid and properly initialized.
+    /// - The index must be less than num_captures.
+    #[inline]
+    pub unsafe fn set_capture_size(closure: *mut Closure, index: usize, size: u32) {
+        unsafe {
+            debug_assert!(index < (*closure).num_captures);
+            let sizes = Self::capture_sizes_ptr(closure);
+            *sizes.add(index) = size;
+        }
+    }
+
+    /// Get the capture allocation size at index (in bytes)
+    ///
+    /// # Safety
+    /// - The closure pointer must be valid and properly initialized.
+    /// - The index must be less than num_captures.
+    #[inline]
+    pub unsafe fn get_capture_size(closure: *const Closure, index: usize) -> u32 {
+        unsafe {
+            debug_assert!(index < (*closure).num_captures);
+            let sizes = Self::capture_sizes_ptr(closure as *mut Closure);
+            *sizes.add(index)
+        }
+    }
+
     /// Get the function pointer from a closure
     ///
     /// # Safety
@@ -217,6 +269,7 @@ unsafe extern "C" fn closure_drop(ptr: *mut u8) {
         let closure = ptr as *mut Closure;
         let num = (*closure).num_captures;
         let kinds = Closure::capture_kinds_ptr(closure);
+        let sizes = Closure::capture_sizes_ptr(closure);
         let captures = Closure::captures_ptr(closure);
 
         for i in 0..num {
@@ -233,12 +286,13 @@ unsafe extern "C" fn closure_drop(ptr: *mut u8) {
                     rc_dec(rc_ptr);
                 }
             }
-            // Free the heap-allocated capture slot.
-            // Capture slots are allocated with vole_heap_alloc which uses
-            // 8-byte alignment and variable size. We use 8 bytes as the
-            // standard capture slot size (one i64/pointer value).
-            let slot_layout = Layout::from_size_align_unchecked(8, 8);
-            dealloc(capture_ptr, slot_layout);
+            // Free the heap-allocated capture slot using the stored size.
+            let slot_size = *sizes.add(i) as usize;
+            if slot_size > 0 {
+                let slot_layout =
+                    Layout::from_size_align(slot_size, 8).expect("invalid capture slot layout");
+                dealloc(capture_ptr, slot_layout);
+            }
         }
 
         // Free the closure struct itself
@@ -277,6 +331,13 @@ pub extern "C" fn vole_closure_set_capture(closure: *mut Closure, index: usize, 
 pub extern "C" fn vole_closure_set_capture_kind(closure: *mut Closure, index: usize, kind: u8) {
     // Safety: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::set_capture_kind(closure, index, kind) }
+}
+
+/// Set capture allocation size at index (in bytes)
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_closure_set_capture_size(closure: *mut Closure, index: usize, size: u32) {
+    // Safety: Called from JIT code which ensures pointer validity and index bounds
+    unsafe { Closure::set_capture_size(closure, index, size) }
 }
 
 /// Get the function pointer from a closure
@@ -444,11 +505,13 @@ mod tests {
             *(slot0 as *mut i64) = 42;
             Closure::set_capture(closure, 0, slot0);
             Closure::set_capture_kind(closure, 0, CAPTURE_KIND_VALUE);
+            Closure::set_capture_size(closure, 0, 8);
 
             let slot1 = vole_heap_alloc(8);
             *(slot1 as *mut i64) = 100;
             Closure::set_capture(closure, 1, slot1);
             Closure::set_capture_kind(closure, 1, CAPTURE_KIND_VALUE);
+            Closure::set_capture_size(closure, 1, 8);
 
             // Free should call closure_drop which frees the heap slots
             Closure::free(closure);
@@ -488,6 +551,7 @@ mod tests {
             *(slot as *mut *mut u8) = rc_ptr;
             Closure::set_capture(closure, 0, slot);
             Closure::set_capture_kind(closure, 0, CAPTURE_KIND_RC);
+            Closure::set_capture_size(closure, 0, 8);
 
             // Free closure — should rc_dec the RC object
             Closure::free(closure);
@@ -503,14 +567,51 @@ mod tests {
     }
 
     #[test]
+    fn test_closure_drop_with_variable_size_captures() {
+        // Verify closure_drop correctly frees captures of different sizes.
+        // Before the fix, closure_drop hardcoded 8-byte Layout for all captures,
+        // which is UB for 1-byte (bool), 16-byte (i128/Range), and other sizes.
+        unsafe {
+            let func_ptr = 0x1234 as *const u8;
+            let closure = Closure::alloc(func_ptr, 3);
+
+            // 1-byte capture (simulating bool/i8)
+            let slot0 = vole_heap_alloc(1);
+            *(slot0 as *mut u8) = 1;
+            Closure::set_capture(closure, 0, slot0);
+            Closure::set_capture_kind(closure, 0, CAPTURE_KIND_VALUE);
+            Closure::set_capture_size(closure, 0, 1);
+
+            // 8-byte capture (simulating i64/f64/pointer)
+            let slot1 = vole_heap_alloc(8);
+            *(slot1 as *mut i64) = 42;
+            Closure::set_capture(closure, 1, slot1);
+            Closure::set_capture_kind(closure, 1, CAPTURE_KIND_VALUE);
+            Closure::set_capture_size(closure, 1, 8);
+
+            // 16-byte capture (simulating i128/Range)
+            let slot2 = vole_heap_alloc(16);
+            *(slot2 as *mut i128) = 999;
+            Closure::set_capture(closure, 2, slot2);
+            Closure::set_capture_kind(closure, 2, CAPTURE_KIND_VALUE);
+            Closure::set_capture_size(closure, 2, 16);
+
+            // Free should call closure_drop which frees all slots with correct sizes
+            Closure::free(closure);
+            // If this didn't crash, the variable-size slots were freed correctly
+        }
+    }
+
+    #[test]
     fn test_closure_layout_alignment() {
         // Verify layout calculations for various capture counts
         for n in 0..=17 {
             let layout = Closure::layout(n);
             assert!(layout.align() >= 8, "alignment must be >= 8");
-            // Total size must fit: fixed + kinds_padded + captures
+            // Total size must fit: fixed + kinds_padded + sizes_padded + captures
             let expected_kinds = align_to_ptr(n);
-            let expected = Closure::FIXED_SIZE + expected_kinds + n * 8;
+            let expected_sizes = align_to_ptr(n * size_of::<u32>());
+            let expected = Closure::FIXED_SIZE + expected_kinds + expected_sizes + n * 8;
             assert_eq!(layout.size(), expected, "layout size for {} captures", n);
         }
     }

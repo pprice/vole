@@ -121,6 +121,7 @@ runtime_keys! {
     ClosureAlloc       => "vole_closure_alloc",
     ClosureSetCapture  => "vole_closure_set_capture",
     ClosureSetCaptureKind => "vole_closure_set_capture_kind",
+    ClosureSetCaptureSize => "vole_closure_set_capture_size",
     ClosureGetCapture  => "vole_closure_get_capture",
     ClosureGetFunc     => "vole_closure_get_func",
     HeapAlloc          => "vole_heap_alloc",
@@ -391,6 +392,10 @@ pub fn signature_for(key: RuntimeKey) -> SigSpec {
         },
         RuntimeKey::ClosureSetCaptureKind => SigSpec {
             params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I8],
+            ret: None,
+        },
+        RuntimeKey::ClosureSetCaptureSize => SigSpec {
+            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I32],
             ret: None,
         },
         RuntimeKey::ClosureGetCapture => SigSpec {
@@ -835,6 +840,10 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_closure_set_capture_kind",
         ptr: vole_runtime::closure::vole_closure_set_capture_kind as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_closure_set_capture_size",
+        ptr: vole_runtime::closure::vole_closure_set_capture_size as *const u8,
     },
     LinkableRuntimeSymbol {
         c_name: "vole_closure_get_func",

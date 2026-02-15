@@ -241,6 +241,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<()> {
         let set_capture_ref = self.runtime_func_ref(RuntimeKey::ClosureSetCapture)?;
         let set_kind_ref = self.runtime_func_ref(RuntimeKey::ClosureSetCaptureKind)?;
+        let set_size_ref = self.runtime_func_ref(RuntimeKey::ClosureSetCaptureSize)?;
         let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
         let rc_inc_ref = self.runtime_func_ref(RuntimeKey::RcInc)?;
 
@@ -278,6 +279,12 @@ impl Cg<'_, '_, '_> {
             self.builder
                 .ins()
                 .call(set_kind_ref, &[closure_ptr, index_val, kind_val]);
+
+            // Store the allocation size so closure_drop can free with correct layout
+            let size_i32 = self.builder.ins().iconst(types::I32, size as i64);
+            self.builder
+                .ins()
+                .call(set_size_ref, &[closure_ptr, index_val, size_i32]);
         }
 
         Ok(())
