@@ -786,11 +786,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            // Convert std HashMap to FxHashMap for arena compatibility
-            let subs: FxHashMap<NameId, TypeId> =
-                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
             let arena = self.env.analyzed.type_arena();
-            let result = arena.expect_substitute(ty, &subs, "Cg::substitute_type");
+            let result = arena.expect_substitute(ty, substitutions, "Cg::substitute_type");
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
             result
@@ -929,10 +926,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            let subs: FxHashMap<NameId, TypeId> =
-                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
             let arena = self.env.analyzed.type_arena();
-            if let Some(result) = arena.lookup_substitute(ty, &subs) {
+            if let Some(result) = arena.lookup_substitute(ty, substitutions) {
                 self.substitution_cache.borrow_mut().insert(ty, result);
                 result
             } else {
