@@ -289,7 +289,21 @@ pub extern "C" fn vole_panic(
     file_len: usize,
     line: u32,
 ) -> ! {
-    let msg_str = unsafe { if msg.is_null() { "" } else { (*msg).as_str() } };
+    // Extract the message into an owned String so we can free the RcString
+    // before diverging (longjmp or exit). msg_str borrows from the RcString,
+    // so we must copy it first.
+    let msg_owned = unsafe {
+        if msg.is_null() {
+            String::new()
+        } else {
+            (*msg).as_str().to_string()
+        }
+    };
+
+    // Free the message RcString before we diverge
+    if !msg.is_null() {
+        crate::value::rc_dec(msg as *mut u8);
+    }
 
     let file_str = unsafe {
         if file.is_null() || file_len == 0 {
@@ -299,7 +313,7 @@ pub extern "C" fn vole_panic(
         }
     };
 
-    writeln_stderr(&format!("panic: {}", msg_str));
+    writeln_stderr(&format!("panic: {}", msg_owned));
     writeln_stderr(&format!("  at {}:{}", file_str, line));
 
     // If a test jmp_buf is set, longjmp back to the test harness.
