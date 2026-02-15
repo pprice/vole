@@ -366,3 +366,27 @@ iter_next_fn!(
         1 // Has value
     }
 );
+
+// =============================================================================
+// CoroutineIterator - iterator backed by a VoleCoroutine
+// =============================================================================
+
+iter_next_fn!(
+    /// Get next value from coroutine-backed iterator.
+    vole_coroutine_iter_next, Coroutine, coroutine, mut |src, _iter, out| {
+        if src.coroutine.is_null() {
+            return 0;
+        }
+        let coro = unsafe { &mut *src.coroutine };
+        match coro.resume(0) {
+            Some(value) => {
+                unsafe { *out = value };
+                1
+            }
+            None => {
+                src.coroutine = ptr::null_mut();
+                0
+            }
+        }
+    }
+);

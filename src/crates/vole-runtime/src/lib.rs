@@ -15,6 +15,7 @@ pub mod array;
 pub mod assert;
 pub mod builtins;
 pub mod closure;
+pub mod coroutine;
 pub mod instance;
 pub mod iterator;
 pub(crate) mod iterator_abi;

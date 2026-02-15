@@ -35,6 +35,7 @@ pub union IteratorSource {
     pub string_split: StringSplitSource,
     pub string_lines: StringLinesSource,
     pub string_codepoints: StringCodepointsSource,
+    pub coroutine: CoroutineSource,
 }
 
 /// Source data for array iteration
@@ -278,6 +279,14 @@ pub struct StringCodepointsSource {
     pub string: *const RcString,
     /// Current byte position in the string (not character position)
     pub byte_pos: i64,
+}
+
+/// Source data for coroutine-backed iteration (yields values from a VoleCoroutine)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CoroutineSource {
+    /// Pointer to a heap-allocated VoleCoroutine (owned by the iterator)
+    pub coroutine: *mut crate::coroutine::VoleCoroutine,
 }
 
 /// Unified iterator structure

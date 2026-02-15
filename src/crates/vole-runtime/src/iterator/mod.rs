@@ -98,6 +98,8 @@ macro_rules! for_all_iterator_kinds {
             StringLines = 21, source: string_lines, next: vole_string_lines_iter_next, owned: [true];
             // String codepoints iterator - yields unicode codepoints as i32
             StringCodepoints = 22, source: string_codepoints, next: vole_string_codepoints_iter_next, owned: [true];
+            // Coroutine-backed iterator - yields values from a VoleCoroutine
+            Coroutine = 23, source: coroutine, next: vole_coroutine_iter_next, owned: [true];
         }
     };
 }
@@ -232,6 +234,12 @@ macro_rules! drop_iter_source {
         let string = $iter_ref.source.string_codepoints.string;
         if !string.is_null() {
             RcString::dec_ref(string as *mut RcString);
+        }
+    };
+    (Coroutine, $iter_ref:expr) => {
+        let coro = $iter_ref.source.coroutine.coroutine;
+        if !coro.is_null() {
+            drop(Box::from_raw(coro));
         }
     };
 }
