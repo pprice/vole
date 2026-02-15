@@ -24,7 +24,7 @@ pub fn run_bench(
     // Check for debug build
     let vole_info = VoleInfo::current();
     if vole_info.is_debug() && !force {
-        eprintln!("Error: Refusing to benchmark on debug build\n");
+        eprintln!("error: Refusing to benchmark on debug build\n");
         eprintln!("Results from debug builds are misleading. Build with:");
         eprintln!("    cargo build --release\n");
         eprintln!("To run anyway, use --force");
@@ -35,13 +35,13 @@ pub fn run_bench(
     let files = match expand_paths_flat(paths) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Error: {}", e);
+            eprintln!("error: {}", e);
             return ExitCode::FAILURE;
         }
     };
 
     if files.is_empty() {
-        eprintln!("Error: No .vole files found");
+        eprintln!("error: No .vole files found");
         return ExitCode::FAILURE;
     }
 
@@ -50,7 +50,7 @@ pub fn run_bench(
     // Run benchmarks with progress callback
     let run = run_files(&files, &config, detailed, |path, _result, error| {
         if let Some(e) = error {
-            eprintln!("Error in {}: {}", path.display(), e);
+            eprintln!("error in {}: {}", path.display(), e);
         } else {
             eprintln!("Benchmarking {}...", path.display());
         }
@@ -152,7 +152,7 @@ pub fn run_compare(baseline: &PathBuf, output: Option<&PathBuf>, force: bool) ->
     // Check for debug build
     let vole_info = VoleInfo::current();
     if vole_info.is_debug() && !force {
-        eprintln!("Error: Refusing to benchmark on debug build\n");
+        eprintln!("error: Refusing to benchmark on debug build\n");
         eprintln!("Results from debug builds are misleading. Build with:");
         eprintln!("    cargo build --release\n");
         eprintln!("To run anyway, use --force");
@@ -175,7 +175,7 @@ pub fn run_compare(baseline: &PathBuf, output: Option<&PathBuf>, force: bool) ->
     let baseline_run: BenchmarkRun = match serde_json::from_str(&baseline_json) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error: Invalid baseline JSON: {}", e);
+            eprintln!("error: Invalid baseline JSON: {}", e);
             return ExitCode::FAILURE;
         }
     };
@@ -188,7 +188,7 @@ pub fn run_compare(baseline: &PathBuf, output: Option<&PathBuf>, force: bool) ->
         .collect();
 
     if files.is_empty() {
-        eprintln!("Error: Baseline contains no results");
+        eprintln!("error: Baseline contains no results");
         return ExitCode::FAILURE;
     }
 
@@ -213,7 +213,7 @@ pub fn run_compare(baseline: &PathBuf, output: Option<&PathBuf>, force: bool) ->
     let config = baseline_run.config.clone();
     let current_run = run_files(&files, &config, false, |path, _, error| {
         if let Some(e) = error {
-            eprintln!("Error in {}: {}", path.display(), e);
+            eprintln!("error in {}: {}", path.display(), e);
         } else {
             eprintln!("Benchmarking {}...", path.display());
         }
