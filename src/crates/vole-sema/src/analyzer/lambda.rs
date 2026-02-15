@@ -7,9 +7,11 @@ use vole_frontend::LambdaParam;
 
 impl Analyzer {
     /// Analyze a lambda expression, optionally with an expected function type for inference.
+    /// The `node_id` is the NodeId of the parent Expr containing this lambda.
     pub(crate) fn analyze_lambda(
         &mut self,
         lambda: &LambdaExpr,
+        node_id: NodeId,
         expected_type: Option<&FunctionType>,
         interner: &Interner,
     ) -> ArenaTypeId {
@@ -135,22 +137,29 @@ impl Analyzer {
             self.type_param_stack.pop();
         }
 
-        // Pop capture stacks, side effects flag, and store results in the lambda
+        // Pop capture stacks, side effects flag, and store results in the side table
         self.lambda_locals.pop();
         let has_side_effects = self.lambda_side_effects.pop().unwrap_or(false);
-        lambda.has_side_effects.set(has_side_effects);
 
-        if let Some(captures) = self.lambda_captures.pop() {
-            let capture_list: Vec<Capture> = captures
+        let capture_list = if let Some(captures) = self.lambda_captures.pop() {
+            captures
                 .into_values()
                 .map(|info| Capture {
                     name: info.name,
                     is_mutable: info.is_mutable,
                     is_mutated: info.is_mutated,
                 })
-                .collect();
-            *lambda.captures.borrow_mut() = capture_list;
-        }
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.lambda_analysis.insert(
+            node_id,
+            crate::expression_data::LambdaAnalysis {
+                captures: capture_list,
+                has_side_effects,
+            },
+        );
 
         // Determine final return type
         let return_type_id = declared_return_id

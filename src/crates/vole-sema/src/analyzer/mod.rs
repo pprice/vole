@@ -186,6 +186,7 @@ struct ExtractedModuleData {
     class_method_calls: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
     static_method_calls: FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>,
     declared_var_types: FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>,
+    lambda_analysis: FxHashMap<String, FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>>,
 }
 
 /// Tracks return analysis results for a code path.
@@ -348,6 +349,10 @@ pub struct AnalyzerContext {
     /// Per-module declared variable types (module path -> NodeId -> ArenaTypeId).
     /// Needed because NodeIds are file-local and collide across modules.
     pub module_declared_var_types: RefCell<FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>>,
+    /// Per-module lambda analysis results (module path -> NodeId -> LambdaAnalysis).
+    /// Needed because NodeIds are file-local and collide across modules.
+    pub module_lambda_analysis:
+        RefCell<FxHashMap<String, FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>>>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
@@ -371,6 +376,7 @@ impl AnalyzerContext {
             module_class_method_calls: RefCell::new(FxHashMap::default()),
             module_static_method_calls: RefCell::new(FxHashMap::default()),
             module_declared_var_types: RefCell::new(FxHashMap::default()),
+            module_lambda_analysis: RefCell::new(FxHashMap::default()),
             module_cache: cache,
             modules_in_progress: RefCell::new(FxHashSet::default()),
         }
@@ -450,6 +456,9 @@ pub struct Analyzer {
     /// Declared variable types for let statements with explicit type annotations.
     /// Maps init expression NodeId -> declared TypeId for codegen to use.
     declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
+    /// Lambda analysis results (captures and side effects).
+    /// Maps lambda expression NodeId -> LambdaAnalysis.
+    lambda_analysis: FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
     /// Stack of type parameter scopes for nested generic contexts.
@@ -564,6 +573,7 @@ impl Analyzer {
         let tests_virtual_modules = self.tests_virtual_modules;
         let is_check_results = self.is_check_results;
         let declared_var_types = self.declared_var_types;
+        let lambda_analysis = self.lambda_analysis;
         let current_module = self.current_module;
 
         // Try to take ownership of the shared context to avoid cloning AST trees.
@@ -579,6 +589,7 @@ impl Analyzer {
                     class_method_calls: ctx.module_class_method_calls.into_inner(),
                     static_method_calls: ctx.module_static_method_calls.into_inner(),
                     declared_var_types: ctx.module_declared_var_types.into_inner(),
+                    lambda_analysis: ctx.module_lambda_analysis.into_inner(),
                 };
                 (data, ctx.module_programs.into_inner(), ctx.db)
             }
@@ -592,6 +603,7 @@ impl Analyzer {
                     class_method_calls: ctx.module_class_method_calls.borrow().clone(),
                     static_method_calls: ctx.module_static_method_calls.borrow().clone(),
                     declared_var_types: ctx.module_declared_var_types.borrow().clone(),
+                    lambda_analysis: ctx.module_lambda_analysis.borrow().clone(),
                 };
                 (
                     data,
@@ -619,6 +631,8 @@ impl Analyzer {
             .is_check_results(is_check_results)
             .declared_var_types(declared_var_types)
             .module_declared_var_types(module_data.declared_var_types)
+            .lambda_analysis(lambda_analysis)
+            .module_lambda_analysis(module_data.lambda_analysis)
             .build();
 
         AnalysisOutput {
@@ -1254,6 +1268,7 @@ impl Default for Analyzer {
             lambda_variables: FxHashMap::default(),
             tests_virtual_modules: FxHashMap::default(),
             declared_var_types: FxHashMap::default(),
+            lambda_analysis: FxHashMap::default(),
             current_module: ModuleId::default(),
             type_param_stack: TypeParamScopeStack::new(),
             current_file_path: None,

@@ -258,8 +258,6 @@ pub fn map_expr_children(kind: &ExprKind, map: &mut impl FnMut(&Expr) -> Expr) -
                 return_type: lambda.return_type.clone(),
                 body,
                 span: lambda.span,
-                captures: lambda.captures.clone(),
-                has_side_effects: lambda.has_side_effects.clone(),
             }))
         }
         ExprKind::Block(block) => ExprKind::Block(Box::new(BlockExpr {

@@ -537,8 +537,12 @@ impl Analyzer {
                                 params_id: input_params.into(),
                                 return_type_id: ArenaTypeId::INVALID,
                             };
-                            let lambda_ty_id =
-                                self.analyze_lambda(lambda, Some(&param_only_expected), interner);
+                            let lambda_ty_id = self.analyze_lambda(
+                                lambda,
+                                arg.id,
+                                Some(&param_only_expected),
+                                interner,
+                            );
                             self.record_expr_type_id(arg, lambda_ty_id);
                             lambda_ty_id
                         } else {

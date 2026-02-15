@@ -122,7 +122,10 @@ impl Cg<'_, '_, '_> {
         lambda: &LambdaExpr,
         node_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
-        let captures = lambda.captures.borrow();
+        let captures = self
+            .get_lambda_analysis(node_id)
+            .map(|a| a.captures.clone())
+            .unwrap_or_default();
         let num_captures = captures.len();
         let has_captures = num_captures > 0;
 

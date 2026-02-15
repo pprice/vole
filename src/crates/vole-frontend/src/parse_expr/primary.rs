@@ -319,8 +319,6 @@ impl<'src> Parser<'src> {
                                         return_type,
                                         body,
                                         span: start_span.merge(end_span),
-                                        captures: std::cell::RefCell::new(Vec::new()),
-                                        has_side_effects: std::cell::Cell::new(false),
                                     })),
                                     span: start_span.merge(end_span),
                                 });

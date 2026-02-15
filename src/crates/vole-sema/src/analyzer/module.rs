@@ -615,6 +615,10 @@ impl Analyzer {
             .module_declared_var_types
             .borrow_mut()
             .insert(module_key.to_string(), sub_analyzer.declared_var_types);
+        self.ctx
+            .module_lambda_analysis
+            .borrow_mut()
+            .insert(module_key.to_string(), sub_analyzer.lambda_analysis);
     }
 
     /// Resolve parameter and return types into a function ArenaTypeId.
@@ -935,6 +939,9 @@ impl Analyzer {
         // Merge tests_virtual_modules
         self.tests_virtual_modules
             .extend(sub.tests_virtual_modules.iter().map(|(&k, &v)| (k, v)));
+        // Merge lambda_analysis
+        self.lambda_analysis
+            .extend(sub.lambda_analysis.iter().map(|(&k, v)| (k, v.clone())));
         // Merge errors and warnings
         self.errors.extend(sub.errors.iter().cloned());
         self.warnings.extend(sub.warnings.iter().cloned());

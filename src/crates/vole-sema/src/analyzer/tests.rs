@@ -204,18 +204,19 @@ fn analyze_i64_to_i32_narrowing_error() {
     assert!(result.is_err());
 }
 
-// Helper to parse and analyze, returning the AST for capture inspection
-fn parse_and_analyze(source: &str) -> (Program, Interner) {
+// Helper to parse and analyze, returning the AST and expression data for capture inspection
+fn parse_and_analyze(source: &str) -> (Program, Interner, ExpressionData) {
     let mut parser = Parser::new(source);
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
     analyzer.analyze(&program, &interner).unwrap();
-    (program, interner)
+    let output = analyzer.into_analysis_results();
+    (program, interner, output.expression_data)
 }
 
-// Helper to extract lambda from first statement of main function
-fn get_first_lambda(program: &Program) -> &LambdaExpr {
+// Helper to extract lambda and its NodeId from first statement of main function
+fn get_first_lambda(program: &Program) -> (&LambdaExpr, NodeId) {
     use vole_frontend::FuncBody;
     for decl in &program.declarations {
         if let Decl::Function(func) = decl {
@@ -225,7 +226,7 @@ fn get_first_lambda(program: &Program) -> &LambdaExpr {
                         && let Some(init_expr) = let_stmt.init.as_expr()
                         && let ExprKind::Lambda(lambda) = &init_expr.kind
                     {
-                        return lambda;
+                        return (lambda, init_expr.id);
                     }
                 }
             }
@@ -243,9 +244,10 @@ fn lambda_no_captures_when_only_params() {
             apply(f, 10)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(lambda.captures.borrow().is_empty());
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(analysis.captures.is_empty());
 }
 
 #[test]
@@ -258,14 +260,14 @@ fn lambda_captures_outer_variable() {
             apply(f)
         }
     "#;
-    let (program, interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    let captures = lambda.captures.borrow();
-    assert_eq!(captures.len(), 1);
-    let name = interner.resolve(captures[0].name);
+    let (program, interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert_eq!(analysis.captures.len(), 1);
+    let name = interner.resolve(analysis.captures[0].name);
     assert_eq!(name, "x");
-    assert!(!captures[0].is_mutable);
-    assert!(!captures[0].is_mutated);
+    assert!(!analysis.captures[0].is_mutable);
+    assert!(!analysis.captures[0].is_mutated);
 }
 
 #[test]
@@ -278,14 +280,14 @@ fn lambda_captures_mutable_variable() {
             apply(f)
         }
     "#;
-    let (program, interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    let captures = lambda.captures.borrow();
-    assert_eq!(captures.len(), 1);
-    let name = interner.resolve(captures[0].name);
+    let (program, interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert_eq!(analysis.captures.len(), 1);
+    let name = interner.resolve(analysis.captures[0].name);
     assert_eq!(name, "x");
-    assert!(captures[0].is_mutable);
-    assert!(!captures[0].is_mutated);
+    assert!(analysis.captures[0].is_mutable);
+    assert!(!analysis.captures[0].is_mutated);
 }
 
 #[test]
@@ -301,14 +303,14 @@ fn lambda_captures_and_mutates_variable() {
             apply(f)
         }
     "#;
-    let (program, interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    let captures = lambda.captures.borrow();
-    assert_eq!(captures.len(), 1);
-    let name = interner.resolve(captures[0].name);
+    let (program, interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert_eq!(analysis.captures.len(), 1);
+    let name = interner.resolve(analysis.captures[0].name);
     assert_eq!(name, "x");
-    assert!(captures[0].is_mutable);
-    assert!(captures[0].is_mutated);
+    assert!(analysis.captures[0].is_mutable);
+    assert!(analysis.captures[0].is_mutated);
 }
 
 #[test]
@@ -320,9 +322,10 @@ fn lambda_does_not_capture_its_own_params() {
             apply(f, 5)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(lambda.captures.borrow().is_empty());
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(analysis.captures.is_empty());
 }
 
 #[test]
@@ -336,10 +339,11 @@ fn lambda_does_not_capture_its_own_locals() {
             apply(f, 5)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
     // Parameters should not be treated as captures
-    assert!(lambda.captures.borrow().is_empty());
+    assert!(analysis.captures.is_empty());
 }
 
 #[test]
@@ -355,10 +359,11 @@ fn lambda_block_body_with_local() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
     // Local y should not be captured
-    assert!(lambda.captures.borrow().is_empty());
+    assert!(analysis.captures.is_empty());
 }
 
 // Tests for side effect tracking and purity
@@ -372,10 +377,11 @@ fn lambda_pure_no_captures_no_side_effects() {
             apply(f, 10)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(!lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::Pure);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(!analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::Pure);
 }
 
 #[test]
@@ -390,10 +396,11 @@ fn lambda_has_side_effects_println() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::HasSideEffects);
 }
 
 #[test]
@@ -408,10 +415,11 @@ fn lambda_has_side_effects_print() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::HasSideEffects);
 }
 
 #[test]
@@ -427,10 +435,11 @@ fn lambda_has_side_effects_assert() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::HasSideEffects);
 }
 
 #[test]
@@ -443,10 +452,11 @@ fn lambda_has_side_effects_calling_user_function() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::HasSideEffects);
 }
 
 #[test]
@@ -459,10 +469,11 @@ fn lambda_purity_captures_immutable() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(!lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::CapturesImmutable);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(!analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::CapturesImmutable);
 }
 
 #[test]
@@ -475,10 +486,11 @@ fn lambda_purity_captures_mutable() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(!lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::CapturesMutable);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(!analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::CapturesMutable);
 }
 
 #[test]
@@ -494,10 +506,11 @@ fn lambda_purity_mutates_captures() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(!lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::MutatesCaptures);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(!analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::MutatesCaptures);
 }
 
 #[test]
@@ -515,10 +528,11 @@ fn lambda_side_effects_take_precedence_over_captures() {
             apply(f)
         }
     "#;
-    let (program, _interner) = parse_and_analyze(source);
-    let lambda = get_first_lambda(&program);
-    assert!(lambda.has_side_effects.get());
-    assert_eq!(lambda.purity(), LambdaPurity::HasSideEffects);
+    let (program, _interner, expr_data) = parse_and_analyze(source);
+    let (_lambda, node_id) = get_first_lambda(&program);
+    let analysis = expr_data.get_lambda_analysis(node_id).unwrap();
+    assert!(analysis.has_side_effects);
+    assert_eq!(analysis.purity(), LambdaPurity::HasSideEffects);
 }
 
 // Helper for satisfies_interface tests

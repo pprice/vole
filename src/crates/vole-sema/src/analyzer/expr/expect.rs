@@ -245,7 +245,7 @@ impl Analyzer {
                         None
                     }
                 });
-                Ok(self.analyze_lambda(lambda, expected_fn.as_ref(), interner))
+                Ok(self.analyze_lambda(lambda, expr.id, expected_fn.as_ref(), interner))
             }
             // Match expressions: propagate expected type for bidirectional inference
             ExprKind::Match(match_expr) => self.check_match_expr(match_expr, expected, interner),

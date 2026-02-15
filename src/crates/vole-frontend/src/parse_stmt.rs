@@ -181,8 +181,6 @@ impl<'src> Parser<'src> {
             params,
             return_type,
             body,
-            captures: std::cell::RefCell::new(Vec::new()),
-            has_side_effects: std::cell::Cell::new(false),
             span: lambda_span,
         };
 

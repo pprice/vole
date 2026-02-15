@@ -94,7 +94,7 @@ impl Analyzer {
             ExprKind::Is(is_expr) => self.check_is_expr(expr, is_expr, interner),
 
             // Lambda - delegate to existing analyze_lambda
-            ExprKind::Lambda(lambda) => Ok(self.analyze_lambda(lambda, None, interner)),
+            ExprKind::Lambda(lambda) => Ok(self.analyze_lambda(lambda, expr.id, None, interner)),
 
             // Struct and field access (existing helpers)
             ExprKind::StructLiteral(struct_lit) => {

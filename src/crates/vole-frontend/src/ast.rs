@@ -1052,10 +1052,6 @@ pub struct LambdaExpr {
     pub return_type: Option<TypeExpr>,
     pub body: FuncBody,
     pub span: Span,
-    /// Captured variables from enclosing scopes (populated during semantic analysis)
-    pub captures: std::cell::RefCell<Vec<Capture>>,
-    /// Whether the lambda has side effects (populated during semantic analysis)
-    pub has_side_effects: std::cell::Cell<bool>,
 }
 
 /// Lambda parameter (may have inferred type)
@@ -1083,33 +1079,6 @@ pub enum LambdaPurity {
     CapturesMutable,
     MutatesCaptures,
     HasSideEffects,
-}
-
-impl LambdaExpr {
-    /// Compute the purity level of this lambda based on its captures and side effects.
-    ///
-    /// Returns the most restrictive purity classification:
-    /// - `HasSideEffects`: Calls print/println/assert or user functions
-    /// - `MutatesCaptures`: Assigns to captured variables
-    /// - `CapturesMutable`: Captures mutable variables (may observe external changes)
-    /// - `CapturesImmutable`: Captures exist, but none are mutable
-    /// - `Pure`: No captures, no side effects
-    pub fn purity(&self) -> LambdaPurity {
-        if self.has_side_effects.get() {
-            return LambdaPurity::HasSideEffects;
-        }
-        let captures = self.captures.borrow();
-        if captures.iter().any(|c| c.is_mutated) {
-            return LambdaPurity::MutatesCaptures;
-        }
-        if captures.iter().any(|c| c.is_mutable) {
-            return LambdaPurity::CapturesMutable;
-        }
-        if !captures.is_empty() {
-            return LambdaPurity::CapturesImmutable;
-        }
-        LambdaPurity::Pure
-    }
 }
 
 /// Field binding for record destructuring: x or x: alias
@@ -1166,15 +1135,10 @@ pub enum PatternKind {
 //
 // These assertions verify that AST types can be safely shared across threads,
 // enabling future parallel compilation pipelines.
-//
-// NOTE: Sync assertions are currently blocked by RefCell/Cell in LambdaExpr
-// (captures: RefCell<Vec<Capture>>, has_side_effects: Cell<bool>).
-// Once vol-pqi8 moves these to a side table, uncomment the Sync assertions.
-// See: vol-78xx, vol-pqi8
 #[allow(dead_code)]
 const _: () = {
     fn assert_send<T: Send>() {}
-    // fn assert_sync<T: Sync>() {}
+    fn assert_sync<T: Sync>() {}
     fn check() {
         assert_send::<Program>();
         assert_send::<Expr>();
@@ -1186,17 +1150,15 @@ const _: () = {
         assert_send::<Pattern>();
         assert_send::<TypeExpr>();
         assert_send::<TypeExprKind>();
-        // Sync is blocked by LambdaExpr's interior mutability (RefCell/Cell).
-        // Uncomment after vol-pqi8 removes RefCell/Cell from LambdaExpr:
-        // assert_sync::<Program>();
-        // assert_sync::<Expr>();
-        // assert_sync::<ExprKind>();
-        // assert_sync::<LambdaExpr>();
-        // assert_sync::<Stmt>();
-        // assert_sync::<Decl>();
-        // assert_sync::<Block>();
-        // assert_sync::<Pattern>();
-        // assert_sync::<TypeExpr>();
+        assert_sync::<Program>();
+        assert_sync::<Expr>();
+        assert_sync::<ExprKind>();
+        assert_sync::<LambdaExpr>();
+        assert_sync::<Stmt>();
+        assert_sync::<Decl>();
+        assert_sync::<Block>();
+        assert_sync::<Pattern>();
+        assert_sync::<TypeExpr>();
     }
 };
 

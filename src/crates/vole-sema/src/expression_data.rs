@@ -9,8 +9,42 @@ use crate::analysis_cache::IsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
-use vole_frontend::{NodeId, Span};
+use vole_frontend::{Capture, LambdaPurity, NodeId, Span};
 use vole_identity::ModuleId;
+
+/// Analysis results for a lambda expression (captures and side effects).
+/// Stored in ExpressionData keyed by the lambda expression's NodeId.
+#[derive(Debug, Clone, Default)]
+pub struct LambdaAnalysis {
+    pub captures: Vec<Capture>,
+    pub has_side_effects: bool,
+}
+
+impl LambdaAnalysis {
+    /// Compute the purity level of this lambda based on its captures and side effects.
+    ///
+    /// Returns the most restrictive purity classification:
+    /// - `HasSideEffects`: Calls print/println/assert or user functions
+    /// - `MutatesCaptures`: Assigns to captured variables
+    /// - `CapturesMutable`: Captures mutable variables (may observe external changes)
+    /// - `CapturesImmutable`: Captures exist, but none are mutable
+    /// - `Pure`: No captures, no side effects
+    pub fn purity(&self) -> LambdaPurity {
+        if self.has_side_effects {
+            return LambdaPurity::HasSideEffects;
+        }
+        if self.captures.iter().any(|c| c.is_mutated) {
+            return LambdaPurity::MutatesCaptures;
+        }
+        if self.captures.iter().any(|c| c.is_mutable) {
+            return LambdaPurity::CapturesMutable;
+        }
+        if !self.captures.is_empty() {
+            return LambdaPurity::CapturesImmutable;
+        }
+        LambdaPurity::Pure
+    }
+}
 
 /// Information about a lambda's parameter defaults.
 /// Used to support calling closures with default arguments.
@@ -69,6 +103,11 @@ pub struct ExpressionData {
     /// Per-module declared variable types (for multi-module compilation).
     /// Stored separately since NodeIds are per-program and can collide across modules.
     module_declared_var_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
+    /// Lambda analysis results (captures and side effects).
+    /// Keyed by lambda expression NodeId.
+    lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
+    /// Per-module lambda analysis results (for multi-module compilation).
+    module_lambda_analysis: FxHashMap<String, FxHashMap<NodeId, LambdaAnalysis>>,
 }
 
 /// Builder for `ExpressionData` to reduce construction boilerplate.
@@ -103,6 +142,8 @@ pub struct ExpressionDataBuilder {
     is_check_results: FxHashMap<NodeId, IsCheckResult>,
     declared_var_types: FxHashMap<NodeId, TypeId>,
     module_declared_var_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
+    lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
+    module_lambda_analysis: FxHashMap<String, FxHashMap<NodeId, LambdaAnalysis>>,
 }
 
 impl ExpressionDataBuilder {
@@ -249,6 +290,21 @@ impl ExpressionDataBuilder {
         self
     }
 
+    /// Set lambda analysis results (captures and side effects).
+    pub fn lambda_analysis(mut self, lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>) -> Self {
+        self.lambda_analysis = lambda_analysis;
+        self
+    }
+
+    /// Set per-module lambda analysis results.
+    pub fn module_lambda_analysis(
+        mut self,
+        module_lambda_analysis: FxHashMap<String, FxHashMap<NodeId, LambdaAnalysis>>,
+    ) -> Self {
+        self.module_lambda_analysis = module_lambda_analysis;
+        self
+    }
+
     /// Build the `ExpressionData` from this builder.
     pub fn build(self) -> ExpressionData {
         ExpressionData {
@@ -269,6 +325,8 @@ impl ExpressionDataBuilder {
             is_check_results: self.is_check_results,
             declared_var_types: self.declared_var_types,
             module_declared_var_types: self.module_declared_var_types,
+            lambda_analysis: self.lambda_analysis,
+            module_lambda_analysis: self.module_lambda_analysis,
         }
     }
 }
@@ -620,5 +678,35 @@ impl ExpressionData {
     /// Get all declared variable types
     pub fn declared_var_types(&self) -> &FxHashMap<NodeId, TypeId> {
         &self.declared_var_types
+    }
+
+    /// Get lambda analysis results for a lambda expression
+    pub fn get_lambda_analysis(&self, node: NodeId) -> Option<&LambdaAnalysis> {
+        self.lambda_analysis.get(&node)
+    }
+
+    /// Get lambda analysis results, checking module-specific results first
+    pub fn get_lambda_analysis_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&LambdaAnalysis> {
+        if let Some(module) = current_module
+            && let Some(module_results) = self.module_lambda_analysis.get(module)
+            && let Some(result) = module_results.get(&node)
+        {
+            return Some(result);
+        }
+        self.lambda_analysis.get(&node)
+    }
+
+    /// Set lambda analysis results for a lambda expression
+    pub fn set_lambda_analysis(&mut self, node: NodeId, analysis: LambdaAnalysis) {
+        self.lambda_analysis.insert(node, analysis);
+    }
+
+    /// Get all lambda analysis results
+    pub fn lambda_analysis(&self) -> &FxHashMap<NodeId, LambdaAnalysis> {
+        &self.lambda_analysis
     }
 }

@@ -69,11 +69,14 @@ impl Cg<'_, '_, '_> {
         name: Symbol,
         init_expr: &vole_frontend::Expr,
     ) -> Option<Variable> {
-        let ExprKind::Lambda(lambda) = &init_expr.kind else {
+        let ExprKind::Lambda(_) = &init_expr.kind else {
             return None;
         };
-        let captures = lambda.captures.borrow();
-        if !captures.iter().any(|c| c.name == name) {
+        let analysis = self.get_lambda_analysis(init_expr.id);
+        let has_self_capture = analysis
+            .map(|a| a.captures.iter().any(|c| c.name == name))
+            .unwrap_or(false);
+        if !has_self_capture {
             return None;
         }
         let func_type_id = self.get_expr_type(&init_expr.id)?;
