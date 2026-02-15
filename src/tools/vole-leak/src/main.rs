@@ -14,16 +14,15 @@ use std::rc::Rc;
 
 use clap::Parser;
 
-use vole::cli::ColorMode;
-use vole::cli::{expand_paths, should_skip_path};
-use vole::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
+use vole::cli::{ColorMode, expand_paths, should_skip_path};
 use vole::commands::common::{PipelineOptions, compile_source};
-use vole::runtime::{
+use vole_codegen::{AnalyzedProgram, CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
+use vole_runtime::{
     JmpBuf, alloc_track, call_setjmp, clear_current_test, clear_test_jmp_buf, recover_from_signal,
     set_current_file, set_current_test, set_stdout_capture, set_test_jmp_buf, take_assert_failure,
     take_stack_overflow,
 };
-use vole::sema::ModuleCache;
+use vole_sema::ModuleCache;
 
 /// Default glob pattern for RC-specific test files.
 const DEFAULT_GLOB: &str = "test/unit/codegen/rc_*.vole";
@@ -197,7 +196,7 @@ fn compile_and_run_tests(
 
 /// Compile using pre-compiled cached modules.
 fn compile_with_cached_modules(
-    analyzed: &vole::codegen::AnalyzedProgram,
+    analyzed: &AnalyzedProgram,
     compiled_modules: &mut Option<CompiledModules>,
     options: JitOptions,
     file_path: &str,
@@ -218,7 +217,7 @@ fn compile_with_cached_modules(
 
 /// Compile from scratch, caching modules for subsequent files.
 fn compile_fresh(
-    analyzed: &vole::codegen::AnalyzedProgram,
+    analyzed: &AnalyzedProgram,
     compiled_modules: &mut Option<CompiledModules>,
     options: JitOptions,
     file_path: &str,

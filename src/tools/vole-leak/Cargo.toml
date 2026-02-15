@@ -8,8 +8,13 @@ description = "Leak detection for Vole test suites"
 # CLI
 clap = { version = "4", features = ["derive"] }
 
-# Vole library crate (for compilation and test execution)
+# Vole library crate (for compilation pipeline and CLI utilities)
 vole = { path = "../../vole" }
+
+# Direct sub-crate dependencies (for types not re-exported through vole)
+vole-codegen = { path = "../../crates/vole-codegen" }
+vole-runtime = { path = "../../crates/vole-runtime" }
+vole-sema = { path = "../../crates/vole-sema" }
 
 # File globbing for default test suite
 glob = "0.3"

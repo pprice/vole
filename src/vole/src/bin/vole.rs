@@ -32,7 +32,7 @@ use vole::commands::inspect::inspect_files;
 use vole::commands::run::run_file;
 use vole::commands::test::{TestRunOptions, run_tests};
 use vole::commands::version::print_version;
-use vole::runtime::install_segfault_handler;
+use vole::install_segfault_handler;
 
 fn main() -> ExitCode {
     // Install signal handler early for segfault debugging
