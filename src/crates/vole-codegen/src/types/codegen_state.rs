@@ -16,8 +16,57 @@ use crate::intrinsics::IntrinsicsRegistry;
 use super::TypeMetadata;
 
 /// Type metadata lookup map.
+///
 /// Keyed by TypeDefId for stable cross-interner identity.
-pub type TypeMetadataMap = FxHashMap<TypeDefId, TypeMetadata>;
+/// Also maintains a secondary NameId -> TypeDefId index for O(1) lookup
+/// by NameId (used by vtable dispatch to resolve types across interners).
+pub(crate) struct TypeMetadataMap {
+    /// Primary map: TypeDefId -> TypeMetadata
+    entries: FxHashMap<TypeDefId, TypeMetadata>,
+    /// Secondary index: NameId -> TypeDefId for cross-interner lookups
+    name_id_index: FxHashMap<NameId, TypeDefId>,
+}
+
+impl TypeMetadataMap {
+    /// Create a new empty TypeMetadataMap.
+    pub fn new() -> Self {
+        Self {
+            entries: FxHashMap::default(),
+            name_id_index: FxHashMap::default(),
+        }
+    }
+
+    /// Insert type metadata, also updating the NameId secondary index.
+    pub fn insert_with_name_id(
+        &mut self,
+        type_def_id: TypeDefId,
+        name_id: NameId,
+        metadata: TypeMetadata,
+    ) {
+        self.name_id_index.insert(name_id, type_def_id);
+        self.entries.insert(type_def_id, metadata);
+    }
+
+    /// Look up TypeMetadata by NameId using the secondary index (O(1)).
+    pub fn get_by_name_id(&self, name_id: NameId) -> Option<&TypeMetadata> {
+        let type_def_id = self.name_id_index.get(&name_id)?;
+        self.entries.get(type_def_id)
+    }
+}
+
+impl std::ops::Deref for TypeMetadataMap {
+    type Target = FxHashMap<TypeDefId, TypeMetadata>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl Default for TypeMetadataMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Key for monomorphized generic class type_id cache.
 /// Combines the base class TypeDefId with concrete type arguments.
@@ -30,7 +79,7 @@ type MonoTypeKey = (TypeDefId, Vec<TypeId>);
 ///
 /// Fields using interior mutability (RefCell, Cell) can be mutated through
 /// shared references during compilation.
-pub struct CodegenState {
+pub(crate) struct CodegenState {
     /// Class metadata for struct literals, field access, and method calls.
     pub type_metadata: TypeMetadataMap,
     /// Unified method function key lookup: (type_name_id, method_name_id) -> FunctionKey
@@ -56,7 +105,7 @@ impl CodegenState {
     /// Create a new CodegenState with empty lookup tables.
     pub fn new(native_registry: NativeRegistry) -> Self {
         Self {
-            type_metadata: FxHashMap::default(),
+            type_metadata: TypeMetadataMap::new(),
             method_func_keys: FxHashMap::default(),
             interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
             native_registry,

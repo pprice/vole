@@ -140,41 +140,14 @@ pub(crate) struct MethodInfo {
 
 /// Look up TypeMetadata by NameId (cross-interner safe)
 /// Returns the TypeMetadata for a class with the given name_id
-pub(crate) fn type_metadata_by_name_id<'a>(
-    type_metadata: &'a TypeMetadataMap,
+pub(crate) fn type_metadata_by_name_id(
+    type_metadata: &TypeMetadataMap,
     name_id: NameId,
-    entity_registry: &EntityRegistry,
-    arena: &TypeArena,
-) -> Option<&'a TypeMetadata> {
-    tracing::trace!(
-        ?name_id,
-        count = type_metadata.len(),
-        "type_metadata_by_name_id lookup"
-    );
-    let result = type_metadata.values().find(|meta| {
-        // Use arena queries to check if this is a class with matching name_id
-        if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
-            let class_name_id = entity_registry.get_type(type_def_id).name_id;
-            tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
-            return class_name_id == name_id;
-        }
-        false
-    });
+) -> Option<&TypeMetadata> {
+    tracing::trace!(?name_id, "type_metadata_by_name_id lookup");
+    let result = type_metadata.get_by_name_id(name_id);
     if result.is_none() {
-        // Log all class name_ids for debugging
-        let class_name_ids: Vec<_> = type_metadata
-            .values()
-            .filter_map(|meta| {
-                arena
-                    .unwrap_class(meta.vole_type)
-                    .map(|(type_def_id, _)| entity_registry.get_type(type_def_id).name_id)
-            })
-            .collect();
-        tracing::debug!(
-            ?name_id,
-            ?class_name_ids,
-            "type_metadata_by_name_id: no match found"
-        );
+        tracing::debug!(?name_id, "type_metadata_by_name_id: no match found");
     }
     result
 }

@@ -1128,12 +1128,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         let type_def_id = arena.unwrap_class(concrete_type_id).map(|(id, _)| id)?;
 
         let type_name_id = ctx.query().get_type(type_def_id).name_id;
-        let meta = type_metadata_by_name_id(
-            ctx.type_metadata(),
-            type_name_id,
-            ctx.registry(),
-            ctx.arena(),
-        )?;
+        let meta = type_metadata_by_name_id(ctx.type_metadata(), type_name_id)?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
         // Look up method signature via EntityRegistry - require TypeId fields

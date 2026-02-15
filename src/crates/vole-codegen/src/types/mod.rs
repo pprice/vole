@@ -12,7 +12,7 @@ mod type_ctx;
 
 // Re-export all public types and functions
 pub use codegen_ctx::CodegenCtx;
-pub use codegen_state::{CodegenState, TypeMetadataMap};
+pub(crate) use codegen_state::{CodegenState, TypeMetadataMap};
 pub use compile_env::{CompileEnv, ModuleExportBinding};
 pub use type_ctx::TypeCtx;
 

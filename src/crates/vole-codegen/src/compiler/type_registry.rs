@@ -91,8 +91,9 @@ impl Compiler<'_> {
             .base_type_id
             .expect("INTERNAL: pre_register_class: missing base_type_id from sema");
 
-        self.state.type_metadata.insert(
+        self.state.type_metadata.insert_with_name_id(
             type_def_id,
+            name_id,
             TypeMetadata {
                 type_id,
                 field_slots: FxHashMap::default(),
@@ -186,8 +187,10 @@ impl Compiler<'_> {
                 )
             })
             .vole_type;
-        self.state.type_metadata.insert(
+        let name_id = self.query().get_type(type_def_id).name_id;
+        self.state.type_metadata.insert_with_name_id(
             type_def_id,
+            name_id,
             TypeMetadata {
                 type_id,
                 field_slots,
@@ -384,8 +387,9 @@ impl Compiler<'_> {
         // Structs don't need a runtime type_id since they're stack-allocated,
         // but we still need type_metadata for field slot lookup during codegen.
         // Use type_id 0 as a sentinel since it won't be used at runtime.
-        self.state.type_metadata.insert(
+        self.state.type_metadata.insert_with_name_id(
             type_def_id,
+            name_id,
             TypeMetadata {
                 type_id: 0,
                 field_slots: FxHashMap::default(),
@@ -416,8 +420,9 @@ impl Compiler<'_> {
             .expect("INTERNAL: pre_register_sentinel: missing base_type_id from sema");
 
         // Sentinels are zero-field structs, use type_id 0 as a placeholder.
-        self.state.type_metadata.insert(
+        self.state.type_metadata.insert_with_name_id(
             type_def_id,
+            name_id,
             TypeMetadata {
                 type_id: 0,
                 field_slots: FxHashMap::default(),
@@ -461,8 +466,10 @@ impl Compiler<'_> {
             .expect("INTERNAL: finalize_module_sentinel: missing base_type_id from sema");
 
         // Sentinels are zero-field structs, use type_id 0 as a placeholder.
-        self.state.type_metadata.insert(
+        let name_id = self.query().get_type(type_def_id).name_id;
+        self.state.type_metadata.insert_with_name_id(
             type_def_id,
+            name_id,
             TypeMetadata {
                 type_id: 0,
                 field_slots: FxHashMap::default(),
@@ -604,8 +611,10 @@ impl Compiler<'_> {
                     type_kind
                 )
             });
-        self.state.type_metadata.insert(
+        let name_id = self.query().get_type(type_def_id).name_id;
+        self.state.type_metadata.insert_with_name_id(
             type_def_id,
+            name_id,
             TypeMetadata {
                 type_id,
                 field_slots,
