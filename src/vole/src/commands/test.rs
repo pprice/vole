@@ -215,14 +215,17 @@ impl CaptureBuffer {
     }
 
     fn take_string(&self) -> String {
-        let bytes = std::mem::take(&mut *self.0.lock().unwrap());
+        let bytes = std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()));
         String::from_utf8_lossy(&bytes).into_owned()
     }
 }
 
 impl Write for CaptureBuffer {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend_from_slice(buf);
         Ok(buf.len())
     }
 
