@@ -3,87 +3,51 @@
 //! These types provide type-safe identifiers for types, methods, fields, and functions,
 //! eliminating string-based lookups and preventing mix-ups between different entity kinds.
 
-/// Identity for a type definition (interface, class, struct, error type, primitive)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TypeDefId(u32);
+macro_rules! define_entity_id {
+    ($(#[$meta:meta])* $vis:vis struct $name:ident;) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        $vis struct $name(u32);
 
-impl TypeDefId {
-    pub fn new(index: u32) -> Self {
-        Self(index)
-    }
+        impl $name {
+            pub fn new(index: u32) -> Self {
+                Self(index)
+            }
 
-    pub fn index(self) -> u32 {
-        self.0
-    }
+            pub fn index(self) -> u32 {
+                self.0
+            }
+        }
+    };
 }
 
-/// Identity for a method (always has a defining type)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MethodId(u32);
-
-impl MethodId {
-    pub fn new(index: u32) -> Self {
-        Self(index)
-    }
-
-    pub fn index(self) -> u32 {
-        self.0
-    }
+define_entity_id! {
+    /// Identity for a type definition (interface, class, struct, error type, primitive)
+    pub struct TypeDefId;
 }
 
-/// Identity for a field (always has a defining type)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FieldId(u32);
-
-impl FieldId {
-    pub fn new(index: u32) -> Self {
-        Self(index)
-    }
-
-    pub fn index(self) -> u32 {
-        self.0
-    }
+define_entity_id! {
+    /// Identity for a method (always has a defining type)
+    pub struct MethodId;
 }
 
-/// Identity for a free function (belongs to a module)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FunctionId(u32);
-
-impl FunctionId {
-    pub fn new(index: u32) -> Self {
-        Self(index)
-    }
-
-    pub fn index(self) -> u32 {
-        self.0
-    }
+define_entity_id! {
+    /// Identity for a field (always has a defining type)
+    pub struct FieldId;
 }
 
-/// Identity for a global variable (module-level let/var)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct GlobalId(u32);
-
-impl GlobalId {
-    pub fn new(index: u32) -> Self {
-        Self(index)
-    }
-
-    pub fn index(self) -> u32 {
-        self.0
-    }
+define_entity_id! {
+    /// Identity for a free function (belongs to a module)
+    pub struct FunctionId;
 }
 
-/// Identity for a type parameter (e.g., T in `func identity<T>(x: T) -> T`)
-/// Distinct from NameId to avoid confusion with inference variables.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TypeParamId(u32);
+define_entity_id! {
+    /// Identity for a global variable (module-level let/var)
+    pub struct GlobalId;
+}
 
-impl TypeParamId {
-    pub fn new(index: u32) -> Self {
-        Self(index)
-    }
-
-    pub fn index(self) -> u32 {
-        self.0
-    }
+define_entity_id! {
+    /// Identity for a type parameter (e.g., T in `func identity<T>(x: T) -> T`)
+    /// Distinct from NameId to avoid confusion with inference variables.
+    pub struct TypeParamId;
 }
