@@ -444,5 +444,4 @@ impl Analyzer {
             _ => None,
         }
     }
-
 }
