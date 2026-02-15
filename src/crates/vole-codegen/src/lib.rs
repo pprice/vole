@@ -3,6 +3,7 @@
 mod analyzed;
 mod callable_registry;
 mod calls;
+mod coercion_ops;
 pub mod compiler;
 mod context;
 pub mod errors;
