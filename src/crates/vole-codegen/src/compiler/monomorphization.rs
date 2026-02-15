@@ -26,6 +26,8 @@ impl Compiler<'_> {
         instance: &T,
         has_self_param: bool,
     ) {
+        use super::signatures::SelfParam;
+
         let mangled_name = self.query().display_name(instance.mangled_name());
         let func_type = instance.func_type();
 
@@ -33,16 +35,15 @@ impl Compiler<'_> {
         let param_type_ids: Vec<TypeId> = func_type.params_id.to_vec();
         let return_type_id = func_type.return_type_id;
 
-        // Create signature from the concrete function type (TypeId-native)
-        let mut params = if has_self_param {
-            vec![self.pointer_type]
+        // Build signature using the shared builder which handles struct returns,
+        // fallible returns, and other special calling conventions.
+        let self_param = if has_self_param {
+            SelfParam::Pointer
         } else {
-            Vec::new()
+            SelfParam::None
         };
-        params.extend(self.type_ids_to_cranelift(&param_type_ids));
-        let ret = self.return_type_to_cranelift(return_type_id);
-
-        let sig = self.jit.create_signature(&params, ret);
+        let sig =
+            self.build_signature_from_type_ids(&param_type_ids, Some(return_type_id), self_param);
         let func_id = self.jit.declare_function(&mangled_name, &sig);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name());
         self.func_registry.set_func_id(func_key, func_id);
@@ -241,8 +242,11 @@ impl Compiler<'_> {
             .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
             .collect();
 
-        let ret = self.return_type_to_cranelift(return_type_id);
-        let sig = self.jit.create_signature(&param_cranelift_types, ret);
+        let sig = self.build_signature_from_type_ids(
+            &param_type_ids,
+            Some(return_type_id),
+            super::signatures::SelfParam::None,
+        );
         self.jit.ctx.func.signature = sig;
 
         let source_file_ptr = self.source_file_ptr();
@@ -299,9 +303,12 @@ impl Compiler<'_> {
             .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
             .collect();
 
-        // Create function signature from concrete types
-        let ret = self.return_type_to_cranelift(return_type_id);
-        let sig = self.jit.create_signature(&param_cranelift_types, ret);
+        // Create function signature from concrete types using shared builder
+        let sig = self.build_signature_from_type_ids(
+            &param_type_ids,
+            Some(return_type_id),
+            super::signatures::SelfParam::None,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Create function builder and compile
@@ -501,11 +508,12 @@ impl Compiler<'_> {
             .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
             .collect();
 
-        // Create method signature (self + params) with concrete types
-        let mut sig_params = vec![self.pointer_type]; // self
-        sig_params.extend_from_slice(&param_cranelift_types);
-        let ret = self.return_type_to_cranelift(return_type_id);
-        let sig = self.jit.create_signature(&sig_params, ret);
+        // Create method signature (self + params) with concrete types using shared builder
+        let sig = self.build_signature_from_type_ids(
+            &param_type_ids,
+            Some(return_type_id),
+            super::signatures::SelfParam::Pointer,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Use pre-computed self type from sema
@@ -680,9 +688,12 @@ impl Compiler<'_> {
             .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
             .collect();
 
-        // Create signature (no self parameter) with concrete types
-        let ret = self.return_type_to_cranelift(return_type_id);
-        let sig = self.jit.create_signature(&param_cranelift_types, ret);
+        // Create signature (no self parameter) with concrete types using shared builder
+        let sig = self.build_signature_from_type_ids(
+            &param_type_ids,
+            Some(return_type_id),
+            super::signatures::SelfParam::None,
+        );
         self.jit.ctx.func.signature = sig;
 
         // Get method body

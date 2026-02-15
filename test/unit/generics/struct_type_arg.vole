@@ -1,0 +1,28 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+func identity<T>(x: T) -> T {
+    return x
+}
+
+func wrap<T>(x: T) -> [T] {
+    return [x]
+}
+
+tests {
+    test "struct as generic function arg" {
+        let p = Point { x: 1, y: 2 }
+        let result = identity(p)
+        assert(result.x == 1)
+        assert(result.y == 2)
+    }
+
+    test "struct in generic container" {
+        let p = Point { x: 10, y: 20 }
+        let arr = wrap(p)
+        assert(arr[0].x == 10)
+        assert(arr[0].y == 20)
+    }
+}

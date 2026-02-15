@@ -671,19 +671,6 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
-    #[error("struct type '{name}' cannot be used as a generic type argument")]
-    #[diagnostic(
-        code(E2102),
-        help(
-            "structs are value types and cannot be used as generic type parameters; use a class instead"
-        )
-    )]
-    StructAsTypeArg {
-        name: String,
-        #[label("struct type not allowed as type argument")]
-        span: SourceSpan,
-    },
-
     #[error("intersection types (`A + B`) are not supported in type positions")]
     #[diagnostic(code(E2103), help("use type constraints instead: `<T: A + B>`"))]
     CombinationTypeNotAllowed {
