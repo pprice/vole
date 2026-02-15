@@ -27,11 +27,51 @@ pub struct SigSpec {
     pub ret: Option<AbiTy>,
 }
 
+/// Maps a type token (`Ptr`, `I8`, etc.) to `AbiTy`. `Void` is not a real
+/// AbiTy -- it is handled by the return-type position in `sig_ret!`.
+macro_rules! abi_ty {
+    (Ptr) => {
+        AbiTy::Ptr
+    };
+    (I8) => {
+        AbiTy::I8
+    };
+    (I32) => {
+        AbiTy::I32
+    };
+    (I64) => {
+        AbiTy::I64
+    };
+    (I128) => {
+        AbiTy::I128
+    };
+    (F32) => {
+        AbiTy::F32
+    };
+    (F64) => {
+        AbiTy::F64
+    };
+}
+
+/// Maps a return-type token to `Option<AbiTy>`. `Void` yields `None`.
+macro_rules! sig_ret {
+    (Void) => {
+        None
+    };
+    ($ty:ident) => {
+        Some(abi_ty!($ty))
+    };
+}
+
 /// Generates the `RuntimeKey` enum, `RuntimeKey::ALL`, `RuntimeKey::name()`,
-/// and `RUNTIME_SYMBOLS` from a single declaration. Adding a variant in one
-/// place is all that is needed; forgetting an entry is a compile error.
+/// `RUNTIME_SYMBOLS`, and `signature_for()` from a single declaration table.
+///
+/// Each entry has the form:
+///     Variant => "c_name" : (Param, ...) -> Ret
+///
+/// where `Ret` is either a type token or `Void` (no return value).
 macro_rules! runtime_keys {
-    ( $( $variant:ident => $c_name:literal ),+ $(,)? ) => {
+    ( $( $variant:ident => $c_name:literal : ( $($param:ident),* ) -> $ret:ident ),+ $(,)? ) => {
         /// Typed key for a runtime callable exposed to codegen.
         ///
         /// This avoids ad-hoc string literals in Rust call sites.
@@ -55,85 +95,129 @@ macro_rules! runtime_keys {
         const RUNTIME_SYMBOLS: &[RuntimeSymbol] = &[
             $( RuntimeSymbol { key: RuntimeKey::$variant, c_name: $c_name }, )+
         ];
+
+        pub fn signature_for(key: RuntimeKey) -> SigSpec {
+            match key {
+                $( RuntimeKey::$variant => SigSpec {
+                    params: &[ $( abi_ty!($param) ),* ],
+                    ret: sig_ret!($ret),
+                }, )+
+            }
+        }
     };
 }
 
 runtime_keys! {
-    StringNew          => "vole_string_new",
-    StringConcat       => "vole_string_concat",
-    StringEq           => "vole_string_eq",
-    StringLen          => "vole_string_len",
-    PrintlnString      => "vole_println_string",
-    PrintlnI64         => "vole_println_i64",
-    PrintlnF64         => "vole_println_f64",
-    PrintlnBool        => "vole_println_bool",
-    PrintString        => "vole_print_string",
-    PrintI64           => "vole_print_i64",
-    PrintF64           => "vole_print_f64",
-    PrintBool          => "vole_print_bool",
-    PrintChar          => "vole_print_char",
-    I64ToString        => "vole_i64_to_string",
-    I128ToString       => "vole_i128_to_string",
-    I128Sdiv           => "vole_i128_sdiv",
-    I128Srem           => "vole_i128_srem",
-    F64ToString        => "vole_f64_to_string",
-    F32ToString        => "vole_f32_to_string",
-    BoolToString       => "vole_bool_to_string",
-    NilToString        => "vole_nil_to_string",
-    ArrayI64ToString   => "vole_array_i64_to_string",
-    Flush              => "vole_flush",
-    AssertFail         => "vole_assert_fail",
-    Panic              => "vole_panic",
-    ArrayNew           => "vole_array_new",
-    ArrayPush          => "vole_array_push",
-    ArrayGetTag        => "vole_array_get_tag",
-    ArrayGetValue      => "vole_array_get_value",
-    ArrayLen           => "vole_array_len",
-    ArrayIter          => "vole_array_iter",
-    ArrayIterNext      => "vole_array_iter_next",
-    ArrayIterCollect   => "vole_array_iter_collect",
-    ArraySet           => "vole_array_set",
-    ArrayFilled        => "vole_array_filled",
-    MapIter            => "vole_map_iter",
-    MapIterNext        => "vole_map_iter_next",
-    MapIterCollect     => "vole_map_iter_collect",
-    FilterIter         => "vole_filter_iter",
-    FilterIterNext     => "vole_filter_iter_next",
-    FilterIterCollect  => "vole_filter_iter_collect",
-    TakeIter           => "vole_take_iter",
-    TakeIterNext       => "vole_take_iter_next",
-    TakeIterCollect    => "vole_take_iter_collect",
-    SkipIter           => "vole_skip_iter",
-    SkipIterNext       => "vole_skip_iter_next",
-    SkipIterCollect    => "vole_skip_iter_collect",
-    IterCount          => "vole_iter_count",
-    IterSum            => "vole_iter_sum",
-    IterForEach        => "vole_iter_for_each",
-    IterReduce         => "vole_iter_reduce",
-    IterReduceTagged   => "vole_iter_reduce_tagged",
-    IterSetElemTag     => "vole_iter_set_elem_tag",
-    IterSetProducesOwned => "vole_iter_set_produces_owned",
-    IterFirst          => "vole_iter_first",
-    IterLast           => "vole_iter_last",
-    IterNth            => "vole_iter_nth",
-    RangeIter          => "vole_range_iter",
-    StringCharsIter    => "vole_string_chars_iter",
-    ClosureAlloc       => "vole_closure_alloc",
-    ClosureSetCapture  => "vole_closure_set_capture",
-    ClosureSetCaptureKind => "vole_closure_set_capture_kind",
-    ClosureSetCaptureSize => "vole_closure_set_capture_size",
-    ClosureGetCapture  => "vole_closure_get_capture",
-    ClosureGetFunc     => "vole_closure_get_func",
-    HeapAlloc          => "vole_heap_alloc",
-    InstanceNew        => "vole_instance_new",
-    InstanceGetField   => "vole_instance_get_field",
-    InstanceSetField   => "vole_instance_set_field",
-    SbNew              => "vole_sb_new",
-    SbPushString       => "vole_sb_push_string",
-    SbFinish           => "vole_sb_finish",
-    InterfaceIter      => "vole_interface_iter",
-    RcInc              => "rc_inc",
-    RcDec              => "rc_dec",
+    // ── Strings ──────────────────────────────────────────────────────
+    StringNew              => "vole_string_new"              : (Ptr, Ptr) -> Ptr,
+    StringConcat           => "vole_string_concat"           : (Ptr, Ptr) -> Ptr,
+    StringEq               => "vole_string_eq"               : (Ptr, Ptr) -> I8,
+    StringLen              => "vole_string_len"              : (Ptr) -> I64,
+
+    // ── Printing ─────────────────────────────────────────────────────
+    PrintlnString          => "vole_println_string"          : (Ptr) -> Void,
+    PrintlnI64             => "vole_println_i64"             : (I64) -> Void,
+    PrintlnF64             => "vole_println_f64"             : (F64) -> Void,
+    PrintlnBool            => "vole_println_bool"            : (I8) -> Void,
+    PrintString            => "vole_print_string"            : (Ptr) -> Void,
+    PrintI64               => "vole_print_i64"               : (I64) -> Void,
+    PrintF64               => "vole_print_f64"               : (F64) -> Void,
+    PrintBool              => "vole_print_bool"              : (I8) -> Void,
+    PrintChar              => "vole_print_char"              : (I8) -> Void,
+
+    // ── Conversions ──────────────────────────────────────────────────
+    I64ToString            => "vole_i64_to_string"           : (I64) -> Ptr,
+    I128ToString           => "vole_i128_to_string"          : (I128) -> Ptr,
+    I128Sdiv               => "vole_i128_sdiv"               : (I128, I128) -> I128,
+    I128Srem               => "vole_i128_srem"               : (I128, I128) -> I128,
+    F64ToString            => "vole_f64_to_string"           : (F64) -> Ptr,
+    F32ToString            => "vole_f32_to_string"           : (F32) -> Ptr,
+    BoolToString           => "vole_bool_to_string"          : (I8) -> Ptr,
+    NilToString            => "vole_nil_to_string"           : () -> Ptr,
+    ArrayI64ToString       => "vole_array_i64_to_string"     : (Ptr) -> Ptr,
+
+    // ── IO ───────────────────────────────────────────────────────────
+    Flush                  => "vole_flush"                   : () -> Void,
+
+    // ── Diagnostics ──────────────────────────────────────────────────
+    AssertFail             => "vole_assert_fail"             : (Ptr, I64, I32) -> Void,
+    Panic                  => "vole_panic"                   : (Ptr, Ptr, I64, I32) -> Void,
+
+    // ── Arrays ───────────────────────────────────────────────────────
+    ArrayNew               => "vole_array_new"               : () -> Ptr,
+    ArrayPush              => "vole_array_push"              : (Ptr, I64, I64) -> Void,
+    ArrayGetTag            => "vole_array_get_tag"           : (Ptr, I64) -> I64,
+    ArrayGetValue          => "vole_array_get_value"         : (Ptr, I64) -> I64,
+    ArrayLen               => "vole_array_len"               : (Ptr) -> I64,
+    ArrayIter              => "vole_array_iter"              : (Ptr) -> Ptr,
+    ArrayIterNext          => "vole_array_iter_next"         : (Ptr, Ptr) -> I64,
+    ArrayIterCollect       => "vole_array_iter_collect"      : (Ptr) -> Ptr,
+    ArraySet               => "vole_array_set"               : (Ptr, I64, I64, I64) -> Void,
+    ArrayFilled            => "vole_array_filled"            : (I64, I64, I64) -> Ptr,
+
+    // ── Map iterator ─────────────────────────────────────────────────
+    MapIter                => "vole_map_iter"                : (Ptr, Ptr) -> Ptr,
+    MapIterNext            => "vole_map_iter_next"           : (Ptr, Ptr) -> I64,
+    MapIterCollect         => "vole_map_iter_collect"        : (Ptr) -> Ptr,
+
+    // ── Filter iterator ──────────────────────────────────────────────
+    FilterIter             => "vole_filter_iter"             : (Ptr, Ptr) -> Ptr,
+    FilterIterNext         => "vole_filter_iter_next"        : (Ptr, Ptr) -> I64,
+    FilterIterCollect      => "vole_filter_iter_collect"     : (Ptr) -> Ptr,
+
+    // ── Take iterator ────────────────────────────────────────────────
+    TakeIter               => "vole_take_iter"               : (Ptr, I64) -> Ptr,
+    TakeIterNext           => "vole_take_iter_next"          : (Ptr, Ptr) -> I64,
+    TakeIterCollect        => "vole_take_iter_collect"       : (Ptr) -> Ptr,
+
+    // ── Skip iterator ────────────────────────────────────────────────
+    SkipIter               => "vole_skip_iter"               : (Ptr, I64) -> Ptr,
+    SkipIterNext           => "vole_skip_iter_next"          : (Ptr, Ptr) -> I64,
+    SkipIterCollect        => "vole_skip_iter_collect"       : (Ptr) -> Ptr,
+
+    // ── Iterator consumers ───────────────────────────────────────────
+    IterCount              => "vole_iter_count"              : (Ptr) -> I64,
+    IterSum                => "vole_iter_sum"                : (Ptr) -> I64,
+    IterForEach            => "vole_iter_for_each"           : (Ptr, Ptr) -> Void,
+    IterReduce             => "vole_iter_reduce"             : (Ptr, I64, Ptr) -> I64,
+    IterReduceTagged       => "vole_iter_reduce_tagged"      : (Ptr, I64, Ptr, I64, I64) -> I64,
+    IterSetElemTag         => "vole_iter_set_elem_tag"       : (Ptr, I64) -> Void,
+    IterSetProducesOwned   => "vole_iter_set_produces_owned" : (Ptr) -> Void,
+    IterFirst              => "vole_iter_first"              : (Ptr) -> Ptr,
+    IterLast               => "vole_iter_last"               : (Ptr) -> Ptr,
+    IterNth                => "vole_iter_nth"                : (Ptr, I64) -> Ptr,
+
+    // ── Range / string char iterators ────────────────────────────────
+    RangeIter              => "vole_range_iter"              : (I64, I64) -> Ptr,
+    StringCharsIter        => "vole_string_chars_iter"       : (Ptr) -> Ptr,
+
+    // ── Closures ─────────────────────────────────────────────────────
+    ClosureAlloc           => "vole_closure_alloc"           : (Ptr, I64) -> Ptr,
+    ClosureSetCapture      => "vole_closure_set_capture"     : (Ptr, I64, Ptr) -> Void,
+    ClosureSetCaptureKind  => "vole_closure_set_capture_kind": (Ptr, I64, I8) -> Void,
+    ClosureSetCaptureSize  => "vole_closure_set_capture_size": (Ptr, I64, I32) -> Void,
+    ClosureGetCapture      => "vole_closure_get_capture"     : (Ptr, I64) -> Ptr,
+    ClosureGetFunc         => "vole_closure_get_func"        : (Ptr) -> Ptr,
+
+    // ── Heap ─────────────────────────────────────────────────────────
+    HeapAlloc              => "vole_heap_alloc"              : (I64) -> Ptr,
+
+    // ── Instances ────────────────────────────────────────────────────
+    InstanceNew            => "vole_instance_new"            : (I32, I32, I32) -> Ptr,
+    InstanceGetField       => "vole_instance_get_field"      : (Ptr, I32) -> I64,
+    InstanceSetField       => "vole_instance_set_field"      : (Ptr, I32, I64) -> Void,
+
+    // ── String builder ───────────────────────────────────────────────
+    SbNew                  => "vole_sb_new"                  : () -> Ptr,
+    SbPushString           => "vole_sb_push_string"          : (Ptr, Ptr) -> Void,
+    SbFinish               => "vole_sb_finish"               : (Ptr) -> Ptr,
+
+    // ── Interface ────────────────────────────────────────────────────
+    InterfaceIter          => "vole_interface_iter"          : (Ptr) -> Ptr,
+
+    // ── Reference counting ───────────────────────────────────────────
+    RcInc                  => "rc_inc"                       : (Ptr) -> Void,
+    RcDec                  => "rc_dec"                       : (Ptr) -> Void,
 }
 
 pub fn all_symbols() -> &'static [RuntimeSymbol] {
@@ -142,307 +226,6 @@ pub fn all_symbols() -> &'static [RuntimeSymbol] {
 
 pub fn codegen_symbols() -> impl Iterator<Item = &'static RuntimeSymbol> {
     RUNTIME_SYMBOLS.iter()
-}
-
-pub fn signature_for(key: RuntimeKey) -> SigSpec {
-    match key {
-        RuntimeKey::StringNew => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::StringConcat => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::StringEq => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::I8),
-        },
-        RuntimeKey::StringLen => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::PrintlnString => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: None,
-        },
-        RuntimeKey::PrintlnI64 => SigSpec {
-            params: &[AbiTy::I64],
-            ret: None,
-        },
-        RuntimeKey::PrintlnF64 => SigSpec {
-            params: &[AbiTy::F64],
-            ret: None,
-        },
-        RuntimeKey::PrintlnBool => SigSpec {
-            params: &[AbiTy::I8],
-            ret: None,
-        },
-        RuntimeKey::PrintString => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: None,
-        },
-        RuntimeKey::PrintI64 => SigSpec {
-            params: &[AbiTy::I64],
-            ret: None,
-        },
-        RuntimeKey::PrintF64 => SigSpec {
-            params: &[AbiTy::F64],
-            ret: None,
-        },
-        RuntimeKey::PrintBool => SigSpec {
-            params: &[AbiTy::I8],
-            ret: None,
-        },
-        RuntimeKey::PrintChar => SigSpec {
-            params: &[AbiTy::I8],
-            ret: None,
-        },
-        RuntimeKey::I64ToString => SigSpec {
-            params: &[AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::I128ToString => SigSpec {
-            params: &[AbiTy::I128],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::I128Sdiv => SigSpec {
-            params: &[AbiTy::I128, AbiTy::I128],
-            ret: Some(AbiTy::I128),
-        },
-        RuntimeKey::I128Srem => SigSpec {
-            params: &[AbiTy::I128, AbiTy::I128],
-            ret: Some(AbiTy::I128),
-        },
-        RuntimeKey::F64ToString => SigSpec {
-            params: &[AbiTy::F64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::F32ToString => SigSpec {
-            params: &[AbiTy::F32],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::BoolToString => SigSpec {
-            params: &[AbiTy::I8],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::NilToString => SigSpec {
-            params: &[],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::ArrayI64ToString => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::Flush => SigSpec {
-            params: &[],
-            ret: None,
-        },
-        RuntimeKey::AssertFail => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I32],
-            ret: None,
-        },
-        RuntimeKey::Panic => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr, AbiTy::I64, AbiTy::I32],
-            ret: None,
-        },
-        RuntimeKey::ArrayNew => SigSpec {
-            params: &[],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::ArrayPush => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
-            ret: None,
-        },
-        RuntimeKey::ArrayGetTag => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::ArrayGetValue => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::ArrayLen => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::ArrayIter => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::ArrayIterNext => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::ArrayIterCollect => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::ArraySet => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I64, AbiTy::I64],
-            ret: None,
-        },
-        RuntimeKey::ArrayFilled => SigSpec {
-            params: &[AbiTy::I64, AbiTy::I64, AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::MapIter => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::MapIterNext => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::MapIterCollect => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::FilterIter => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::FilterIterNext => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::FilterIterCollect => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::TakeIter => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::TakeIterNext => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::TakeIterCollect => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::SkipIter => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::SkipIterNext => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::SkipIterCollect => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::IterCount => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::IterSum => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::IterForEach => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: None,
-        },
-        RuntimeKey::IterReduce => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::IterReduceTagged => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr, AbiTy::I64, AbiTy::I64],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::IterSetElemTag => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64],
-            ret: None,
-        },
-        RuntimeKey::IterSetProducesOwned => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: None,
-        },
-        RuntimeKey::IterFirst => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::IterLast => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::IterNth => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::RangeIter => SigSpec {
-            params: &[AbiTy::I64, AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::StringCharsIter => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::ClosureAlloc => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::ClosureSetCapture => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::Ptr],
-            ret: None,
-        },
-        RuntimeKey::ClosureSetCaptureKind => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I8],
-            ret: None,
-        },
-        RuntimeKey::ClosureSetCaptureSize => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64, AbiTy::I32],
-            ret: None,
-        },
-        RuntimeKey::ClosureGetCapture => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::ClosureGetFunc => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::HeapAlloc => SigSpec {
-            params: &[AbiTy::I64],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::InstanceNew => SigSpec {
-            params: &[AbiTy::I32, AbiTy::I32, AbiTy::I32],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::InstanceGetField => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I32],
-            ret: Some(AbiTy::I64),
-        },
-        RuntimeKey::InstanceSetField => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::I32, AbiTy::I64],
-            ret: None,
-        },
-        RuntimeKey::SbNew => SigSpec {
-            params: &[],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::SbPushString => SigSpec {
-            params: &[AbiTy::Ptr, AbiTy::Ptr],
-            ret: None,
-        },
-        RuntimeKey::SbFinish => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::InterfaceIter => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::Ptr),
-        },
-        RuntimeKey::RcInc | RuntimeKey::RcDec => SigSpec {
-            params: &[AbiTy::Ptr],
-            ret: None,
-        },
-    }
 }
 
 /// Runtime symbols that can be linked into JIT modules.
