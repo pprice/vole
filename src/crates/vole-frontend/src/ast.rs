@@ -1094,6 +1094,43 @@ pub enum PatternKind {
     },
 }
 
+// Compile-time Send + Sync assertions for key AST types.
+//
+// These assertions verify that AST types can be safely shared across threads,
+// enabling future parallel compilation pipelines.
+//
+// NOTE: Sync assertions are currently blocked by RefCell/Cell in LambdaExpr
+// (captures: RefCell<Vec<Capture>>, has_side_effects: Cell<bool>).
+// Once vol-pqi8 moves these to a side table, uncomment the Sync assertions.
+// See: vol-78xx, vol-pqi8
+#[allow(dead_code)]
+const _: () = {
+    fn assert_send<T: Send>() {}
+    // fn assert_sync<T: Sync>() {}
+    fn check() {
+        assert_send::<Program>();
+        assert_send::<Expr>();
+        assert_send::<ExprKind>();
+        assert_send::<LambdaExpr>();
+        assert_send::<Stmt>();
+        assert_send::<Decl>();
+        assert_send::<Block>();
+        assert_send::<Pattern>();
+        assert_send::<TypeExpr>();
+        // Sync is blocked by LambdaExpr's interior mutability (RefCell/Cell).
+        // Uncomment after vol-pqi8 removes RefCell/Cell from LambdaExpr:
+        // assert_sync::<Program>();
+        // assert_sync::<Expr>();
+        // assert_sync::<ExprKind>();
+        // assert_sync::<LambdaExpr>();
+        // assert_sync::<Stmt>();
+        // assert_sync::<Decl>();
+        // assert_sync::<Block>();
+        // assert_sync::<Pattern>();
+        // assert_sync::<TypeExpr>();
+    }
+};
+
 #[cfg(test)]
 mod tests {
     use super::*;
