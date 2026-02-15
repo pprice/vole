@@ -8,13 +8,18 @@ mod array_index;
 mod array_length;
 mod binary_arith;
 mod bool_ops;
+mod class_construction;
 mod comparison;
+mod field_access;
 mod if_expr;
+mod interface_value;
 mod is_expr;
 mod iter_any_all;
+mod iter_collect;
 mod iter_count;
 mod iter_reduce;
 mod iter_sum;
+mod lambda_expr;
 mod match_expr;
 mod method_interpolation;
 mod null_coalesce;
@@ -63,5 +68,11 @@ pub fn all() -> Vec<Box<dyn ExprRule>> {
         Box::new(iter_sum::IterSum),
         Box::new(iter_reduce::IterReduce),
         Box::new(iter_any_all::IterAnyAll),
+        // -- batch 3: field access, construction, lambda, iterators -----------
+        Box::new(field_access::FieldAccess),
+        Box::new(class_construction::ClassConstruction),
+        Box::new(interface_value::InterfaceValue),
+        Box::new(lambda_expr::LambdaExpr),
+        Box::new(iter_collect::IterCollect),
     ]
 }
