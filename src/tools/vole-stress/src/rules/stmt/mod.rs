@@ -90,6 +90,7 @@ mod match_let;
 mod match_method;
 mod match_method_result;
 mod match_on_method;
+mod match_on_method_result;
 mod match_optional;
 mod match_sorted;
 mod match_sorted_length;
@@ -109,6 +110,7 @@ mod nested_when_let;
 mod nested_when_string;
 mod nth_let;
 mod numeric_to_string;
+mod optional_destructure_match;
 mod power_of_two_div;
 mod primitive_let;
 mod raise_stmt;
@@ -123,6 +125,7 @@ mod repeat_literal;
 mod repeated_string_ops;
 mod reverse_collect;
 mod sentinel_closure;
+mod sentinel_union_let;
 mod single_char_string_ops;
 mod single_elem_array_ops;
 mod single_elem_range;
@@ -136,6 +139,7 @@ mod string_concat;
 mod string_equality;
 mod string_iter_let;
 mod string_length_edge;
+mod string_match_let;
 mod string_predicate;
 mod string_replace;
 mod string_split;
@@ -148,11 +152,13 @@ mod to_string_let;
 mod tostring_length;
 mod try_let;
 mod tuple_let;
+mod union_match_let;
 mod variable_shadow;
 mod when_concat_arms;
 mod when_f64_cond;
 mod when_iter_predicate;
 mod when_length_compare;
+mod when_let;
 mod when_match_combo;
 mod when_replace_result;
 mod when_result_method;
@@ -350,5 +356,12 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(tuple_let::TupleLet),
         Box::new(fixed_array_let::FixedArrayLet),
         Box::new(primitive_let::PrimitiveLet),
+        // -- Match/when/union rules from match_stmts.rs (batch 17) --------------------
+        Box::new(string_match_let::StringMatchLet),
+        Box::new(when_let::WhenLet),
+        Box::new(union_match_let::UnionMatchLet),
+        Box::new(sentinel_union_let::SentinelUnionLet),
+        Box::new(optional_destructure_match::OptionalDestructureMatch),
+        Box::new(match_on_method_result::MatchOnMethodResult),
     ]
 }

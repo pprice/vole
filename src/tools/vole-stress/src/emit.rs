@@ -308,6 +308,14 @@ impl Emit<'_> {
         TypeInfo::Primitive(PrimitiveType::random_expr_type(self.rng))
     }
 
+    /// Pick a random primitive type suitable for expressions (unwrapped).
+    ///
+    /// Like [`random_primitive_type`](Self::random_primitive_type) but returns
+    /// the [`PrimitiveType`] directly instead of wrapping it in `TypeInfo`.
+    pub fn random_expr_primitive(&mut self) -> PrimitiveType {
+        PrimitiveType::random_expr_type(self.rng)
+    }
+
     /// Pick a random primitive type suitable for array elements.
     ///
     /// Delegates to [`PrimitiveType::random_array_element_type`], which
