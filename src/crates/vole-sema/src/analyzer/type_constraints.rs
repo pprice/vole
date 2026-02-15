@@ -749,8 +749,32 @@ impl Analyzer {
             }
 
             // Type params: check if their constraint implies Sendable
-            // Full constraint lookup comes in vol-7p6p
-            SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => false,
+            SemaType::TypeParam(name_id) => {
+                let name_id = *name_id;
+                drop(arena);
+                self.env
+                    .type_param_stack
+                    .get_by_name_id(name_id)
+                    .is_some_and(|info| {
+                        matches!(
+                            info.constraint,
+                            Some(crate::generic::TypeConstraint::Sendable)
+                        )
+                    })
+            }
+            SemaType::TypeParamRef(type_param_id) => {
+                let type_param_id = *type_param_id;
+                drop(arena);
+                self.env
+                    .type_param_stack
+                    .get_by_type_param_id(type_param_id)
+                    .is_some_and(|info| {
+                        matches!(
+                            info.constraint,
+                            Some(crate::generic::TypeConstraint::Sendable)
+                        )
+                    })
+            }
 
             // Interfaces, modules, iterators, errors, structural, etc.: not Sendable
             _ => false,
