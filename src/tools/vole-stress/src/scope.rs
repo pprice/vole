@@ -293,6 +293,25 @@ impl Scope<'_> {
         vars
     }
 
+    /// Get all interface-typed variables in scope.
+    ///
+    /// Returns `(name, module_id, symbol_id)` triples for variables of type
+    /// `TypeInfo::Interface(mod_id, sym_id)`.
+    pub fn interface_typed_vars(&self) -> Vec<(String, ModuleId, SymbolId)> {
+        let mut vars = Vec::new();
+        for (name, ty, _) in &self.locals {
+            if let TypeInfo::Interface(mod_id, sym_id) = ty {
+                vars.push((name.clone(), *mod_id, *sym_id));
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Interface(mod_id, sym_id) = &param.param_type {
+                vars.push((param.name.clone(), *mod_id, *sym_id));
+            }
+        }
+        vars
+    }
+
     /// Get all variables whose type is a constrained type parameter.
     ///
     /// Returns `(var_name, type_param_name, interface_constraints)` triples.

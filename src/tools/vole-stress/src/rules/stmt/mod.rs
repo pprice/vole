@@ -27,6 +27,7 @@ mod comparison_chain;
 mod compound_assignment;
 mod compound_bool;
 mod dead_code;
+mod discard_stmt;
 mod early_return;
 mod edge_case_for_loop;
 mod edge_case_split;
@@ -54,6 +55,8 @@ mod for_when_accumulate;
 mod generic_closure_chain;
 mod i32_boundary;
 mod identity_arithmetic;
+mod iface_function_call;
+mod interface_method_call;
 mod interpolation_concat;
 mod interpolation_expr;
 mod interpolation_with_iter;
@@ -89,6 +92,7 @@ mod match_string_length;
 mod match_to_string_arms;
 mod match_tostring_arms;
 mod match_when_arm;
+mod method_call;
 mod modulo_edge;
 mod multi_arm_when;
 mod multi_push;
@@ -101,6 +105,7 @@ mod nested_when_string;
 mod nth_let;
 mod numeric_to_string;
 mod power_of_two_div;
+mod raise_stmt;
 mod range_check;
 mod range_iter_map_collect;
 mod range_tostring;
@@ -118,6 +123,7 @@ mod single_elem_range;
 mod sorted_collect;
 mod sorted_iter_accum;
 mod split_for_loop;
+mod static_call;
 mod string_build_match;
 mod string_char_at;
 mod string_concat;
@@ -131,6 +137,7 @@ mod substring_let;
 mod tautological_when;
 mod to_string_let;
 mod tostring_length;
+mod try_let;
 mod variable_shadow;
 mod when_concat_arms;
 mod when_f64_cond;
@@ -314,5 +321,13 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(match_iter_terminal::MatchIterTerminal),
         Box::new(match_array_elem::MatchArrayElem),
         Box::new(nested_when_let::NestedWhenLet),
+        // -- SymbolTable-dependent rules (batch 15) -----------------------------------
+        Box::new(raise_stmt::RaiseStmt),
+        Box::new(try_let::TryLet),
+        Box::new(discard_stmt::DiscardStmt),
+        Box::new(static_call::StaticCall),
+        Box::new(method_call::MethodCall),
+        Box::new(interface_method_call::InterfaceMethodCall),
+        Box::new(iface_function_call::IfaceFunctionCall),
     ]
 }
