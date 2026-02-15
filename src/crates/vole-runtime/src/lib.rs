@@ -24,6 +24,7 @@ pub(crate) mod iterator_core;
 #[cfg(test)]
 mod iterator_parity;
 pub mod native_registry;
+pub mod scheduler;
 pub mod signal;
 pub mod stdlib;
 pub mod string;

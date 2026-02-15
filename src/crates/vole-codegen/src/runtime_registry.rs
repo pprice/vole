@@ -222,6 +222,16 @@ runtime_keys! {
     // ── Reference counting ───────────────────────────────────────────
     RcInc                  => "rc_inc"                       : (Ptr) -> Void,
     RcDec                  => "rc_dec"                       : (Ptr) -> Void,
+
+    // ── Task scheduler ─────────────────────────────────────────────────
+    TaskSpawn              => "vole_task_spawn"              : (Ptr, Ptr) -> I64,
+    TaskYield              => "vole_task_yield"              : () -> Void,
+    TaskBlock              => "vole_task_block"              : () -> I64,
+    TaskUnblock            => "vole_task_unblock"            : (I64) -> Void,
+    TaskJoin               => "vole_task_join"               : (I64) -> I64,
+    TaskCancel             => "vole_task_cancel"             : (I64) -> Void,
+    TaskIsDone             => "vole_task_is_done"            : (I64) -> I64,
+    SchedulerRun           => "vole_scheduler_run"           : () -> Void,
 }
 
 pub fn all_symbols() -> &'static [RuntimeSymbol] {
@@ -679,6 +689,39 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_instance_set_field",
         ptr: vole_runtime::instance::vole_instance_set_field as *const u8,
+    },
+    // ── Task scheduler ─────────────────────────────────────────────────
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_spawn",
+        ptr: vole_runtime::scheduler::vole_task_spawn as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_yield",
+        ptr: vole_runtime::scheduler::vole_task_yield as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_block",
+        ptr: vole_runtime::scheduler::vole_task_block as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_unblock",
+        ptr: vole_runtime::scheduler::vole_task_unblock as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_join",
+        ptr: vole_runtime::scheduler::vole_task_join as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_cancel",
+        ptr: vole_runtime::scheduler::vole_task_cancel as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_is_done",
+        ptr: vole_runtime::scheduler::vole_task_is_done as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_scheduler_run",
+        ptr: vole_runtime::scheduler::vole_scheduler_run as *const u8,
     },
 ];
 
