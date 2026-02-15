@@ -724,8 +724,8 @@ mod tests {
         let mut names = vole_identity::NameTable::new();
         let mut scope = TypeParamScope::new();
 
-        // Symbol(0) for testing - in real code these come from interner
-        let t = Symbol(0);
+        // Symbol for testing - in real code these come from interner
+        let t = Symbol::new_for_test(0);
         let t_name_id = names.intern_raw(names.main_module(), &["T"]);
         scope.add(TypeParamInfo {
             name: t,
@@ -739,7 +739,7 @@ mod tests {
         assert!(scope.get(t).is_some());
 
         // Different symbol should not be found
-        let u = Symbol(1);
+        let u = Symbol::new_for_test(1);
         assert!(!scope.is_type_param(u));
         assert!(scope.get(u).is_none());
     }

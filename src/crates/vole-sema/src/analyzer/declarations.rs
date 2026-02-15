@@ -354,7 +354,7 @@ impl Analyzer {
             // Use a high value that won't collide with user symbols.
             // This is safe because synthetic type params are never looked up by Symbol,
             // only by name_id during monomorphization/codegen.
-            let synthetic_symbol = Symbol(0x8000_0000 + i as u32);
+            let synthetic_symbol = Symbol::synthetic(i as u32);
 
             tracing::debug!(
                 ?synthetic_name,

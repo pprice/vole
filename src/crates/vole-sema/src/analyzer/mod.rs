@@ -648,12 +648,12 @@ impl Analyzer {
     /// since the Symbol is not a real interned string.
     fn get_type_param_display_name(&self, param: &TypeParamInfo, interner: &Interner) -> String {
         // Synthetic type params have Symbol values >= 0x80000000
-        // (we use Symbol(0x8000_0000 + i) for them)
-        if param.name.0 >= 0x8000_0000 {
+        // (we use Symbol::synthetic(i) for them)
+        if param.name.index() >= 0x8000_0000 {
             // Use name_id for synthetic type params
             self.name_table()
                 .last_segment_str(param.name_id)
-                .unwrap_or_else(|| format!("__T{}", param.name.0 - 0x8000_0000))
+                .unwrap_or_else(|| format!("__T{}", param.name.index() - 0x8000_0000))
         } else {
             // Try name_id first (cross-interner safe), fall back to interner
             self.name_table()

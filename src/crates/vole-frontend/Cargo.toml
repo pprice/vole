@@ -18,5 +18,8 @@ tracing = "0.1"
 # High-performance hash map
 rustc-hash = "2.1"
 
+[features]
+testing = []
+
 [lints]
 workspace = true

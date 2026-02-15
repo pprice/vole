@@ -4,7 +4,34 @@ use crate::Span;
 
 /// Unique identifier for symbols (interned strings)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Symbol(pub u32);
+pub struct Symbol(u32);
+
+impl Symbol {
+    /// The unknown/fallback symbol (index 0).
+    pub const UNKNOWN: Self = Self(0);
+
+    /// Create a Symbol from a raw index. Only the interner should use this.
+    pub(crate) fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    /// Return the underlying index.
+    pub fn index(self) -> u32 {
+        self.0
+    }
+
+    /// Create a synthetic symbol with a high-bit index that won't collide
+    /// with user symbols. Used for synthetic type parameters.
+    pub fn synthetic(offset: u32) -> Self {
+        Self(0x8000_0000 + offset)
+    }
+
+    /// Create a Symbol with an arbitrary index in test code.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_for_test(index: u32) -> Self {
+        Self(index)
+    }
+}
 
 /// Unique identifier for AST nodes (expressions, statements, declarations)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -1139,7 +1166,7 @@ mod tests {
     fn external_func_native_name() {
         let ef = ExternalFunc {
             native_name: Some("string_length".to_string()),
-            vole_name: Symbol(1),
+            vole_name: Symbol::new_for_test(1),
             type_params: vec![],
             params: vec![],
             return_type: None,
@@ -1153,7 +1180,7 @@ mod tests {
     fn external_func_default_name() {
         let ef = ExternalFunc {
             native_name: None,
-            vole_name: Symbol(1),
+            vole_name: Symbol::new_for_test(1),
             type_params: vec![],
             params: vec![],
             return_type: None,

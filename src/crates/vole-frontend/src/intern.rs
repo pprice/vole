@@ -20,14 +20,14 @@ impl Interner {
             return sym;
         }
 
-        let sym = Symbol(self.strings.len() as u32);
+        let sym = Symbol::new(self.strings.len() as u32);
         self.strings.push(s.to_string());
         self.map.insert(s.to_string(), sym);
         sym
     }
 
     pub fn resolve(&self, sym: Symbol) -> &str {
-        &self.strings[sym.0 as usize]
+        &self.strings[sym.index() as usize]
     }
 
     /// Returns the number of interned strings.

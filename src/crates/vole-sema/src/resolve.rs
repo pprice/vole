@@ -678,7 +678,7 @@ mod tests {
         let db = RefCell::new(CompilationDb::new());
         let module_id = db.borrow_mut().names.main_module();
         let mut ctx = TypeResolutionContext::new(&db, &TEST_INTERNER, module_id);
-        let named = TypeExpr::Named(Symbol(0));
+        let named = TypeExpr::Named(Symbol::new_for_test(0));
         assert!(resolve_type_to_id(&named, &mut ctx).is_invalid());
     }
 

@@ -286,7 +286,7 @@ mod tests {
     use crate::TypeArena;
 
     fn sym(id: u32) -> Symbol {
-        Symbol(id)
+        Symbol::new_for_test(id)
     }
 
     #[test]

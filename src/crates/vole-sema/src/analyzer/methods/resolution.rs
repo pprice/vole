@@ -309,7 +309,9 @@ impl Analyzer {
 
             // Get the Symbol for this interface name in the current interner
             // (needed for downstream ResolvedMethod::InterfaceMethod)
-            let interface_sym = interner.lookup(interface_name_str).unwrap_or(Symbol(0));
+            let interface_sym = interner
+                .lookup(interface_name_str)
+                .unwrap_or(Symbol::UNKNOWN);
 
             if let Some(resolved) = self.find_method_in_constraint_interface(
                 interface_type_id,
@@ -816,7 +818,7 @@ impl Analyzer {
                 .name_table()
                 .last_segment_str(interface_name_id)
                 .and_then(|s| ctx.interner.lookup(&s))
-                .unwrap_or(Symbol(0));
+                .unwrap_or(Symbol::UNKNOWN);
 
             let func_type = {
                 let arena = self.type_arena();
