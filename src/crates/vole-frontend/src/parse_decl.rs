@@ -483,33 +483,7 @@ impl<'src> Parser<'src> {
                     methods.push(func);
                 }
             } else if self.check(TokenType::Identifier) {
-                // Parse field: name: Type
-                let field_span = self.current.span;
-                let field_name_token = self.current.clone();
-                self.advance();
-                let field_name = self.interner.intern(&field_name_token.lexeme);
-
-                self.consume(TokenType::Colon, "expected ':' after field name")?;
-                let ty = self.parse_type()?;
-
-                // Parse optional default value: field: Type = expr
-                let default_value = if self.match_token(TokenType::Eq) {
-                    Some(Box::new(self.expression(0)?))
-                } else {
-                    None
-                };
-
-                // Allow optional comma
-                if self.check(TokenType::Comma) {
-                    self.advance();
-                }
-
-                fields.push(FieldDef {
-                    name: field_name,
-                    ty,
-                    default_value,
-                    span: field_span.merge(self.previous.span),
-                });
+                fields.push(self.parse_field_def()?);
             } else {
                 return Err(ParseError::new(
                     ParserError::UnexpectedToken {
@@ -548,33 +522,7 @@ impl<'src> Parser<'src> {
 
         let mut fields = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            // Parse field: name: Type
-            let field_span = self.current.span;
-            let field_name_token = self.current.clone();
-            self.consume(TokenType::Identifier, "expected field name")?;
-            let field_name = self.interner.intern(&field_name_token.lexeme);
-
-            self.consume(TokenType::Colon, "expected ':' after field name")?;
-            let ty = self.parse_type()?;
-
-            // Parse optional default value: field: Type = expr
-            let default_value = if self.match_token(TokenType::Eq) {
-                Some(Box::new(self.expression(0)?))
-            } else {
-                None
-            };
-
-            // Allow optional comma
-            if self.check(TokenType::Comma) {
-                self.advance();
-            }
-
-            fields.push(FieldDef {
-                name: field_name,
-                ty,
-                default_value,
-                span: field_span.merge(self.previous.span),
-            });
+            fields.push(self.parse_field_def()?);
             self.skip_newlines();
         }
 
@@ -761,33 +709,7 @@ impl<'src> Parser<'src> {
                         self.current.span,
                     ));
                 }
-                // Field: name: type
-                let field_span = self.current.span;
-                let name_token = self.current.clone();
-                self.advance();
-                let field_name = self.interner.intern(&name_token.lexeme);
-
-                self.consume(TokenType::Colon, "expected ':' after field name")?;
-                let ty = self.parse_type()?;
-
-                // Parse optional default value: field: Type = expr
-                let default_value = if self.match_token(TokenType::Eq) {
-                    Some(Box::new(self.expression(0)?))
-                } else {
-                    None
-                };
-
-                // Allow optional comma
-                if self.check(TokenType::Comma) {
-                    self.advance();
-                }
-
-                fields.push(FieldDef {
-                    name: field_name,
-                    ty,
-                    default_value,
-                    span: field_span.merge(self.previous.span),
-                });
+                fields.push(self.parse_field_def()?);
             } else {
                 return Err(ParseError::new(
                     ParserError::UnexpectedToken {
@@ -1021,6 +943,37 @@ impl<'src> Parser<'src> {
         Ok(TypeExpr::Named(first_sym))
     }
 
+    /// Parse a single field definition: `name: Type` or `name: Type = default_expr`
+    /// Consumes an optional trailing comma. Used by class, struct, interface, and error declarations.
+    fn parse_field_def(&mut self) -> Result<FieldDef, ParseError> {
+        let field_span = self.current.span;
+        let name_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected field name")?;
+        let name = self.interner.intern(&name_token.lexeme);
+
+        self.consume(TokenType::Colon, "expected ':' after field name")?;
+        let ty = self.parse_type()?;
+
+        // Parse optional default value: field: Type = expr
+        let default_value = if self.match_token(TokenType::Eq) {
+            Some(Box::new(self.expression(0)?))
+        } else {
+            None
+        };
+
+        // Allow optional comma
+        if self.check(TokenType::Comma) {
+            self.advance();
+        }
+
+        Ok(FieldDef {
+            name,
+            ty,
+            default_value,
+            span: field_span.merge(self.previous.span),
+        })
+    }
+
     fn parse_class_body(&mut self) -> Result<ClassBodyParseResult, ParseError> {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
@@ -1054,33 +1007,7 @@ impl<'src> Parser<'src> {
                     methods.push(func);
                 }
             } else if self.check(TokenType::Identifier) {
-                // Parse field: name: Type,
-                let field_span = self.current.span;
-                let name_token = self.current.clone();
-                self.advance();
-                let name = self.interner.intern(&name_token.lexeme);
-
-                self.consume(TokenType::Colon, "expected ':' after field name")?;
-                let ty = self.parse_type()?;
-
-                // Parse optional default value: field: Type = expr
-                let default_value = if self.match_token(TokenType::Eq) {
-                    Some(Box::new(self.expression(0)?))
-                } else {
-                    None
-                };
-
-                // Expect comma (required, trailing allowed)
-                if self.check(TokenType::Comma) {
-                    self.advance();
-                }
-
-                fields.push(FieldDef {
-                    name,
-                    ty,
-                    default_value,
-                    span: field_span.merge(self.previous.span),
-                });
+                fields.push(self.parse_field_def()?);
             } else {
                 return Err(ParseError::new(
                     ParserError::UnexpectedToken {
