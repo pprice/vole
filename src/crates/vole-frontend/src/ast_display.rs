@@ -23,9 +23,9 @@ use crate::Interner;
 use crate::ast::{
     AssignTarget, BinaryOp, Block, ClassDecl, CompoundOp, Decl, ErrorDecl, Expr, ExprKind,
     ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, LetInit,
-    LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, Param, PrimitiveType, Program,
-    RaiseStmt, SentinelDecl, Stmt, StringPart, StructDecl, StructLiteralExpr, TestCase, TestsDecl,
-    TypeExpr, UnaryOp,
+    LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, Param, Program, RaiseStmt,
+    SentinelDecl, Stmt, StringPart, StructDecl, StructLiteralExpr, TestCase, TestsDecl, TypeExpr,
+    UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -457,22 +457,7 @@ impl<'a> AstPrinter<'a> {
         use crate::ast::TypeExprKind;
         match &ty.kind {
             TypeExprKind::Primitive(p) => {
-                let s = match p {
-                    PrimitiveType::I8 => "i8",
-                    PrimitiveType::I16 => "i16",
-                    PrimitiveType::I32 => "i32",
-                    PrimitiveType::I64 => "i64",
-                    PrimitiveType::I128 => "i128",
-                    PrimitiveType::U8 => "u8",
-                    PrimitiveType::U16 => "u16",
-                    PrimitiveType::U32 => "u32",
-                    PrimitiveType::U64 => "u64",
-                    PrimitiveType::F32 => "f32",
-                    PrimitiveType::F64 => "f64",
-                    PrimitiveType::Bool => "bool",
-                    PrimitiveType::String => "string",
-                };
-                out.push_str(s);
+                out.push_str(p.as_str());
             }
             TypeExprKind::Named(sym) => {
                 let name = self.interner.resolve(*sym);

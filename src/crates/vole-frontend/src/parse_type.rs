@@ -4,7 +4,7 @@
 // This module contains methods for parsing type expressions and function parameters.
 
 use super::TokenType;
-use super::ast::{Param, PrimitiveType, StructuralField, StructuralMethod, TypeExpr, TypeExprKind};
+use super::ast::{Param, StructuralField, StructuralMethod, TypeExpr, TypeExprKind};
 use super::parser::{ParseError, Parser};
 use crate::errors::ParserError;
 
@@ -95,6 +95,13 @@ impl<'src> Parser<'src> {
     /// Public within the crate so parse_generic.rs can use it for constraint parsing.
     pub(super) fn parse_base_type(&mut self) -> Result<TypeExpr, ParseError> {
         let token = self.current.clone();
+
+        // Check for primitive type keywords first
+        if let Some(prim) = token.ty.to_primitive_type() {
+            self.advance();
+            return Ok(TypeExpr::new(TypeExprKind::Primitive(prim), token.span));
+        }
+
         match token.ty {
             TokenType::LParen => {
                 // Could be:
@@ -202,97 +209,6 @@ impl<'src> Parser<'src> {
             TokenType::KwUnknown => {
                 self.advance();
                 Ok(TypeExpr::new(TypeExprKind::Unknown, token.span))
-            }
-            TokenType::KwI8 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::I8),
-                    token.span,
-                ))
-            }
-            TokenType::KwI16 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::I16),
-                    token.span,
-                ))
-            }
-            TokenType::KwI32 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::I32),
-                    token.span,
-                ))
-            }
-            TokenType::KwI64 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::I64),
-                    token.span,
-                ))
-            }
-            TokenType::KwI128 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::I128),
-                    token.span,
-                ))
-            }
-            TokenType::KwU8 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::U8),
-                    token.span,
-                ))
-            }
-            TokenType::KwU16 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::U16),
-                    token.span,
-                ))
-            }
-            TokenType::KwU32 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::U32),
-                    token.span,
-                ))
-            }
-            TokenType::KwU64 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::U64),
-                    token.span,
-                ))
-            }
-            TokenType::KwF32 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::F32),
-                    token.span,
-                ))
-            }
-            TokenType::KwF64 => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::F64),
-                    token.span,
-                ))
-            }
-            TokenType::KwBool => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::Bool),
-                    token.span,
-                ))
-            }
-            TokenType::KwString => {
-                self.advance();
-                Ok(TypeExpr::new(
-                    TypeExprKind::Primitive(PrimitiveType::String),
-                    token.span,
-                ))
             }
             TokenType::KwHandle => {
                 self.advance();

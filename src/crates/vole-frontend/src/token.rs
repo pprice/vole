@@ -219,6 +219,27 @@ pub enum TokenType {
 }
 
 impl TokenType {
+    /// Convert a type keyword to its corresponding PrimitiveType, if applicable.
+    pub fn to_primitive_type(self) -> Option<vole_identity::PrimitiveType> {
+        use vole_identity::PrimitiveType;
+        match self {
+            Self::KwI8 => Some(PrimitiveType::I8),
+            Self::KwI16 => Some(PrimitiveType::I16),
+            Self::KwI32 => Some(PrimitiveType::I32),
+            Self::KwI64 => Some(PrimitiveType::I64),
+            Self::KwI128 => Some(PrimitiveType::I128),
+            Self::KwU8 => Some(PrimitiveType::U8),
+            Self::KwU16 => Some(PrimitiveType::U16),
+            Self::KwU32 => Some(PrimitiveType::U32),
+            Self::KwU64 => Some(PrimitiveType::U64),
+            Self::KwF32 => Some(PrimitiveType::F32),
+            Self::KwF64 => Some(PrimitiveType::F64),
+            Self::KwBool => Some(PrimitiveType::Bool),
+            Self::KwString => Some(PrimitiveType::String),
+            _ => None,
+        }
+    }
+
     /// Get string representation for error messages
     pub fn as_str(&self) -> &'static str {
         // Keywords are defined once in `define_keywords!`; delegate to the

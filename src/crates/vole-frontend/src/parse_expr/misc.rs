@@ -1,6 +1,5 @@
 use super::super::ast::*;
 use super::super::parser::{ParseError, Parser};
-use super::super::token::TokenType;
 
 impl<'src> Parser<'src> {
     /// Parse a try expression (propagation operator)
@@ -35,27 +34,12 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Convert a token to a TypeExpr if it's a primitive type or nil keyword
+    /// Convert a token to a TypeExpr if it's a primitive type keyword
     pub(super) fn token_to_type_expr(
         &self,
         token: &super::super::token::Token,
     ) -> Option<TypeExpr> {
-        let kind = match token.ty {
-            TokenType::KwI8 => TypeExprKind::Primitive(PrimitiveType::I8),
-            TokenType::KwI16 => TypeExprKind::Primitive(PrimitiveType::I16),
-            TokenType::KwI32 => TypeExprKind::Primitive(PrimitiveType::I32),
-            TokenType::KwI64 => TypeExprKind::Primitive(PrimitiveType::I64),
-            TokenType::KwI128 => TypeExprKind::Primitive(PrimitiveType::I128),
-            TokenType::KwU8 => TypeExprKind::Primitive(PrimitiveType::U8),
-            TokenType::KwU16 => TypeExprKind::Primitive(PrimitiveType::U16),
-            TokenType::KwU32 => TypeExprKind::Primitive(PrimitiveType::U32),
-            TokenType::KwU64 => TypeExprKind::Primitive(PrimitiveType::U64),
-            TokenType::KwF32 => TypeExprKind::Primitive(PrimitiveType::F32),
-            TokenType::KwF64 => TypeExprKind::Primitive(PrimitiveType::F64),
-            TokenType::KwBool => TypeExprKind::Primitive(PrimitiveType::Bool),
-            TokenType::KwString => TypeExprKind::Primitive(PrimitiveType::String),
-            _ => return None,
-        };
-        Some(TypeExpr::new(kind, token.span))
+        let prim = token.ty.to_primitive_type()?;
+        Some(TypeExpr::new(TypeExprKind::Primitive(prim), token.span))
     }
 }
