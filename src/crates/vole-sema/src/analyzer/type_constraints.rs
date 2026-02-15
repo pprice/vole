@@ -712,9 +712,12 @@ impl Analyzer {
             // Dynamic arrays: never Sendable (shared RC heap data)
             SemaType::Array(_) => false,
 
-            // Classes: never Sendable (shared reference-counted, aliased)
-            // Transferable support comes in vol-dxr4
-            SemaType::Class { .. } => false,
+            // Classes: Sendable only if they implement Transferable
+            SemaType::Class { type_def_id, .. } => {
+                let td = *type_def_id;
+                drop(arena);
+                self.class_implements_transferable(td)
+            }
 
             // Closures: never Sendable (conservative for now)
             SemaType::Function {
@@ -779,6 +782,18 @@ impl Analyzer {
             // Interfaces, modules, iterators, errors, structural, etc.: not Sendable
             _ => false,
         }
+    }
+
+    /// Check if a class implements the Transferable interface.
+    /// Used by is_sendable to allow classes with Transferable to satisfy Sendable constraints.
+    fn class_implements_transferable(&self, type_def_id: TypeDefId) -> bool {
+        let well_known = &self.name_table().well_known;
+        let Some(transferable_id) = well_known.transferable_type_def else {
+            return false;
+        };
+        let registry = self.entity_registry();
+        let implemented = registry.get_implemented_interfaces(type_def_id);
+        implemented.contains(&transferable_id)
     }
 
     /// Check if all fields of a struct are Sendable.

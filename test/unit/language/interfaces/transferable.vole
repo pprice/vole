@@ -1,0 +1,17 @@
+class Connection {
+    id: i64
+}
+
+implement Transferable for Connection {
+    func transfer() -> Connection {
+        return Connection { id: self.id }
+    }
+}
+
+tests {
+    test "transferable basic implementation" {
+        let c = Connection { id: 42 }
+        let c2 = c.transfer()
+        assert(c2.id == 42)
+    }
+}

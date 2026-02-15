@@ -194,6 +194,7 @@ define_well_known_interfaces!(
     (comparable_type_def, "Comparable"),
     (hashable_type_def, "Hashable"),
     (stringable_type_def, "Stringable"),
+    (transferable_type_def, "Transferable"),
 );
 
 impl WellKnownTypes {
@@ -205,6 +206,11 @@ impl WellKnownTypes {
     /// Check if a TypeDefId is the Iterable interface
     pub fn is_iterable_type_def(&self, type_def_id: TypeDefId) -> bool {
         self.iterable_type_def == Some(type_def_id)
+    }
+
+    /// Check if a TypeDefId is the Transferable interface
+    pub fn is_transferable_type_def(&self, type_def_id: TypeDefId) -> bool {
+        self.transferable_type_def == Some(type_def_id)
     }
 }
 
