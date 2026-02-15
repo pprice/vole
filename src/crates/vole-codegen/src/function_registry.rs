@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 
 use cranelift_module::FuncId;
 
-pub use crate::runtime_registry::RuntimeKey as RuntimeFn;
+use crate::runtime_registry::RuntimeKey;
 use vole_identity::{ModuleId, NameId, NameTable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -17,7 +17,7 @@ pub struct FunctionKey(u32);
 #[derive(Debug, Clone)]
 enum FunctionName {
     Qualified(NameId),
-    Runtime(RuntimeFn),
+    Runtime(RuntimeKey),
     Lambda(usize),
     Test(usize),
 }
@@ -35,7 +35,7 @@ pub struct FunctionRegistry {
     names: Rc<NameTable>,
     entries: Vec<FunctionEntry>,
     qualified_lookup: FxHashMap<NameId, FunctionKey>,
-    runtime_lookup: FxHashMap<RuntimeFn, FunctionKey>,
+    runtime_lookup: FxHashMap<RuntimeKey, FunctionKey>,
     /// Counter for unique string data names in JIT module
     string_data_counter: u32,
 }
@@ -64,7 +64,7 @@ impl FunctionRegistry {
         key
     }
 
-    pub fn intern_runtime(&mut self, runtime: RuntimeFn) -> FunctionKey {
+    pub fn intern_runtime(&mut self, runtime: RuntimeKey) -> FunctionKey {
         if let Some(key) = self.runtime_lookup.get(&runtime) {
             return *key;
         }
@@ -110,13 +110,13 @@ impl FunctionRegistry {
         }
     }
 
-    pub fn runtime_key(&self, runtime: RuntimeFn) -> Option<FunctionKey> {
+    pub fn runtime_key(&self, runtime: RuntimeKey) -> Option<FunctionKey> {
         self.runtime_lookup.get(&runtime).copied()
     }
 
     /// Check if a runtime function is registered and has a compiled func_id
     #[must_use]
-    pub fn has_runtime(&self, runtime: RuntimeFn) -> bool {
+    pub fn has_runtime(&self, runtime: RuntimeKey) -> bool {
         self.runtime_key(runtime)
             .and_then(|key| self.func_id(key))
             .is_some()

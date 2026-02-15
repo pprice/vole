@@ -4,7 +4,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 use smallvec::{SmallVec, smallvec};
 
-use crate::RuntimeFn;
+use crate::RuntimeKey;
 use crate::union_layout;
 
 /// SmallVec for call arguments - most calls have <= 8 args
@@ -747,7 +747,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Call vole_range_iter(start, end) -> RuntimeIterator<i64>
-        let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
+        let result = self.call_runtime(RuntimeKey::RangeIter, &[start.value, end_value])?;
 
         // Use sema's pre-computed RuntimeIterator type, or look it up from the
         // element type (needed for monomorphized generic functions where sema
@@ -916,7 +916,7 @@ impl Cg<'_, '_, '_> {
                     Ok(Some(result))
                 }
                 "iter" => {
-                    let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
+                    let result = self.call_runtime(RuntimeKey::ArrayIter, &[obj.value])?;
                     // Use sema's pre-computed RuntimeIterator type, or look it up from
                     // the element type (needed for monomorphized generic functions where
                     // sema resolution is skipped).
@@ -930,7 +930,7 @@ impl Cg<'_, '_, '_> {
                     let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
                     if tag != 0 {
                         let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
-                        self.call_runtime_void(RuntimeFn::IterSetElemTag, &[result, tag_val])?;
+                        self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
                     }
                     Ok(Some(CompiledValue::owned(
                         result,
@@ -955,7 +955,7 @@ impl Cg<'_, '_, '_> {
                     Ok(Some(result))
                 }
                 "iter" => {
-                    let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
+                    let result = self.call_runtime(RuntimeKey::StringCharsIter, &[obj.value])?;
                     // Use sema's pre-computed RuntimeIterator type, or look it up
                     // (needed for monomorphized generic functions where sema
                     // resolution is skipped).
@@ -971,7 +971,7 @@ impl Cg<'_, '_, '_> {
                     let string_tag = crate::types::unknown_type_tag(TypeId::STRING, self.arena());
                     if string_tag != 0 {
                         let tag_val = self.builder.ins().iconst(types::I64, string_tag as i64);
-                        self.call_runtime_void(RuntimeFn::IterSetElemTag, &[result, tag_val])?;
+                        self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
                     }
                     Ok(Some(CompiledValue::owned(
                         result,
@@ -998,7 +998,7 @@ impl Cg<'_, '_, '_> {
                     .builder
                     .ins()
                     .load(types::I64, MemFlags::new(), obj.value, 8);
-                let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
+                let result = self.call_runtime(RuntimeKey::RangeIter, &[start, end])?;
                 // Use sema's pre-computed RuntimeIterator type, or look it up from
                 // the element type (needed for monomorphized generic functions where
                 // sema resolution is skipped).
@@ -1052,7 +1052,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Get the runtime function reference
-        let push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
+        let push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
 
         // i128 cannot fit in a TaggedValue (u64 payload)
         if value.ty == types::I128 {
@@ -1183,7 +1183,7 @@ impl Cg<'_, '_, '_> {
             let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
             args.push(tag_val); // acc_tag
             args.push(tag_val); // elem_tag
-            let result_val = self.call_runtime(RuntimeFn::IterReduceTagged, &args)?;
+            let result_val = self.call_runtime(RuntimeKey::IterReduceTagged, &args)?;
             // IterReduceTagged always returns i64 (word-sized generic value).
             // When the element type is not i64 (e.g. f64, bool, i8), convert
             // the raw i64 bits back to the proper Cranelift type.
@@ -1214,7 +1214,7 @@ impl Cg<'_, '_, '_> {
             // For non-numeric T (e.g. Iterator<[i64]> after flatten()), the type
             // system says T=[i64] but the runtime actually sums i64 values. We
             // fall back to i64 in that case to avoid RC cleanup on a raw integer.
-            let result_val = self.call_runtime(RuntimeFn::IterSum, &args)?;
+            let result_val = self.call_runtime(RuntimeKey::IterSum, &args)?;
             let effective_return_type = if return_type_id.is_numeric() {
                 return_type_id
             } else {
@@ -1270,7 +1270,7 @@ impl Cg<'_, '_, '_> {
             if tag != 0 {
                 // Only set tag for non-default types (RC types, etc.)
                 let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
-                self.call_runtime_void(RuntimeFn::IterSetElemTag, &[result.value, tag_val])?;
+                self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result.value, tag_val])?;
             }
         }
 
@@ -1343,7 +1343,7 @@ impl Cg<'_, '_, '_> {
         // lambda's compilation, not the interface's generic signature.
         if is_closure {
             // It's a closure - extract function pointer and pass closure
-            let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[func_ptr_or_closure])?;
+            let func_ptr = self.call_runtime(RuntimeKey::ClosureGetFunc, &[func_ptr_or_closure])?;
 
             // Build the Cranelift signature for the closure call
             // First param is the closure pointer, then the user params
@@ -1488,7 +1488,7 @@ impl Cg<'_, '_, '_> {
         }
         let sig_ref = self.builder.import_signature(sig);
 
-        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
 
         // Pass the full boxed interface pointer (not just data_word) so wrappers can
         // access both data and vtable. This is needed for Iterator methods that create
@@ -2013,7 +2013,7 @@ impl Cg<'_, '_, '_> {
             self.prepare_dynamic_array_store(value, elem_type_id)?;
 
         // Call vole_array_filled(count, tag, value) -> *mut RcArray
-        let filled_ref = self.runtime_func_ref(RuntimeFn::ArrayFilled)?;
+        let filled_ref = self.runtime_func_ref(RuntimeKey::ArrayFilled)?;
         let args = self.coerce_call_args(filled_ref, &[count.value, tag_val, value_bits]);
         let call = self.builder.ins().call(filled_ref, &args);
         let result_val = self.builder.inst_results(call)[0];

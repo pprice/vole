@@ -1,7 +1,7 @@
 // src/codegen/structs/access.rs
 
 use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg, reconstruct_i128};
-use crate::RuntimeFn;
+use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle, module_name_id};
@@ -121,7 +121,7 @@ impl Cg<'_, '_, '_> {
         // i128 fields use 2 consecutive slots - load both and reconstruct
         let is_wide = crate::types::is_wide_type(field_type_id, self.arena());
         let mut cv = if is_wide {
-            let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
+            let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
             let value =
                 super::helpers::load_wide_field(self.builder, get_func_ref, obj.value, slot);
             CompiledValue::new(value, types::I128, field_type_id)
@@ -364,7 +364,7 @@ impl Cg<'_, '_, '_> {
         // 4. rc_dec old (after store, in case old == new)
         let rc_old =
             if self.rc_scopes.has_active_scope() && self.rc_state(field_type_id).needs_cleanup() {
-                let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
+                let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
                 let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                 let call = self
                     .builder
@@ -379,7 +379,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Store field value, handling i128 which needs 2 slots
-        let set_func_ref = self.runtime_func_ref(RuntimeFn::InstanceSetField)?;
+        let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
         super::helpers::store_field_value(self.builder, set_func_ref, obj.value, slot, &value);
         self.field_cache.clear(); // Invalidate cached field reads
 

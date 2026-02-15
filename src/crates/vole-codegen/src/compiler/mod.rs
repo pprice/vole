@@ -60,7 +60,7 @@ use crate::errors::CodegenResult;
 use crate::types::CodegenState;
 
 use crate::AnalyzedProgram;
-use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeFn};
+use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId};
 use vole_runtime::NativeRegistry;
@@ -105,7 +105,7 @@ impl<'a> Compiler<'a> {
         vole_runtime::stdlib::register_stdlib(&mut native_registry);
 
         let mut func_registry = FunctionRegistry::new(Rc::clone(analyzed.name_table_ref()));
-        for runtime in RuntimeFn::ALL {
+        for runtime in RuntimeKey::ALL {
             // Runtime functions are in imported_func_ids (Import linkage)
             if let Some(func_id) = jit.imported_func_ids.get(runtime.name()) {
                 let key = func_registry.intern_runtime(*runtime);

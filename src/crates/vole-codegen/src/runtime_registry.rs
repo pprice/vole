@@ -1245,7 +1245,7 @@ pub fn all_linkable_symbols() -> &'static [LinkableRuntimeSymbol] {
 /// Linkable runtime symbols intentionally not exposed through `RuntimeKey` imports.
 ///
 /// These are currently invoked via NativeRegistry external dispatch or runtime-internal
-/// pathways rather than `RuntimeFn`-typed call sites.
+/// pathways rather than `RuntimeKey`-typed call sites.
 #[cfg(test)]
 const NON_CODEGEN_LINKABLE_SYMBOLS: &[&str] = &[
     "vole_string_inc",

@@ -4,7 +4,7 @@
 
 use cranelift::prelude::*;
 
-use crate::RuntimeFn;
+use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use vole_frontend::{
@@ -933,7 +933,7 @@ impl Cg<'_, '_, '_> {
         // For interface-boxed iterators (user-defined Iterator<T> implementations),
         // wrap in an RcIterator via vole_interface_iter so the native loop dispatch works.
         if is_interface_iter {
-            let wrapped = self.call_runtime(RuntimeFn::InterfaceIter, &[iter.value])?;
+            let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter.value])?;
             iter = self.compiled(wrapped, iter.type_id);
         }
 
@@ -970,7 +970,7 @@ impl Cg<'_, '_, '_> {
 
         // Header: call iter_next, check result
         self.builder.switch_to_block(header);
-        let has_value = self.call_runtime(RuntimeFn::ArrayIterNext, &[iter.value, slot_addr])?;
+        let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter.value, slot_addr])?;
         let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
         self.builder
             .ins()
@@ -1022,7 +1022,7 @@ impl Cg<'_, '_, '_> {
         let mut string_val = self.expr(&for_stmt.iterable)?;
 
         // Create a string chars iterator from the string
-        let iter_val = self.call_runtime(RuntimeFn::StringCharsIter, &[string_val.value])?;
+        let iter_val = self.call_runtime(RuntimeKey::StringCharsIter, &[string_val.value])?;
 
         // Create a stack slot for the out_value parameter
         let slot_data = self.alloc_stack(8);
@@ -1045,7 +1045,7 @@ impl Cg<'_, '_, '_> {
 
         // Header: call iter_next, check result
         self.builder.switch_to_block(header);
-        let has_value = self.call_runtime(RuntimeFn::ArrayIterNext, &[iter_val, slot_addr])?;
+        let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter_val, slot_addr])?;
         let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
         self.builder
             .ins()
@@ -1065,7 +1065,7 @@ impl Cg<'_, '_, '_> {
         // Each iteration produces a new owned string from string_chars_next.
         self.builder.switch_to_block(continue_block);
         let cur_elem = self.builder.use_var(elem_var);
-        self.call_runtime_void(RuntimeFn::RcDec, &[cur_elem])?;
+        self.call_runtime_void(RuntimeKey::RcDec, &[cur_elem])?;
         self.builder.ins().jump(header, &[]);
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
@@ -1075,7 +1075,7 @@ impl Cg<'_, '_, '_> {
         // already freed the previous iteration's char string.
 
         // Free the string chars iterator after the loop
-        self.call_runtime_void(RuntimeFn::RcDec, &[iter_val])?;
+        self.call_runtime_void(RuntimeKey::RcDec, &[iter_val])?;
 
         // Safety net: consume the string iterable's RC value after the loop
         self.consume_rc_value(&mut string_val)?;

@@ -3,19 +3,19 @@
 //! This is the single typed boundary for selecting callable backends.
 
 use crate::runtime_registry::AbiTy;
-use crate::{IntrinsicKey, RuntimeFn};
+use crate::{IntrinsicKey, RuntimeKey};
 
 /// Typed callable identity used by codegen call sites.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CallableKey {
-    Runtime(RuntimeFn),
+    Runtime(RuntimeKey),
     Intrinsic(IntrinsicKey),
 }
 
 /// Resolved callable backend target.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ResolvedCallable {
-    Runtime(RuntimeFn),
+    Runtime(RuntimeKey),
     InlineIntrinsic(IntrinsicKey),
 }
 
@@ -90,7 +90,7 @@ pub fn strategy_for_callable(key: &CallableKey) -> CallableStrategy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallableResolutionError {
     InvalidRuntimeStrategy {
-        runtime: RuntimeFn,
+        runtime: RuntimeKey,
     },
     MissingRuntimePeer {
         intrinsic: String,
@@ -100,7 +100,7 @@ pub enum CallableResolutionError {
     },
     MissingRuntimeAdapterSignature {
         intrinsic: String,
-        runtime: RuntimeFn,
+        runtime: RuntimeKey,
     },
     SignatureMismatch {
         intrinsic: String,
@@ -143,11 +143,11 @@ fn strategy_for_intrinsic(intrinsic: &IntrinsicKey) -> CallableStrategy {
     }
 }
 
-fn runtime_peer_for_intrinsic(key: &IntrinsicKey) -> Option<RuntimeFn> {
+fn runtime_peer_for_intrinsic(key: &IntrinsicKey) -> Option<RuntimeKey> {
     match key.as_str() {
-        "panic" => Some(RuntimeFn::Panic),
-        "array_len" => Some(RuntimeFn::ArrayLen),
-        "string_len" => Some(RuntimeFn::StringLen),
+        "panic" => Some(RuntimeKey::Panic),
+        "array_len" => Some(RuntimeKey::ArrayLen),
+        "string_len" => Some(RuntimeKey::StringLen),
         _ => None,
     }
 }
@@ -170,18 +170,18 @@ fn intrinsic_signature(key: &IntrinsicKey) -> Option<CallableSig> {
     }
 }
 
-fn runtime_adapter_signature(key: &IntrinsicKey, runtime: RuntimeFn) -> Option<CallableSig> {
+fn runtime_adapter_signature(key: &IntrinsicKey, runtime: RuntimeKey) -> Option<CallableSig> {
     match (key.as_str(), runtime) {
         // The runtime backend for panic enriches args with source-file metadata.
-        ("panic", RuntimeFn::Panic) => Some(CallableSig {
+        ("panic", RuntimeKey::Panic) => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: None,
         }),
-        ("array_len", RuntimeFn::ArrayLen) => Some(CallableSig {
+        ("array_len", RuntimeKey::ArrayLen) => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: Some(AbiTy::I64),
         }),
-        ("string_len", RuntimeFn::StringLen) => Some(CallableSig {
+        ("string_len", RuntimeKey::StringLen) => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: Some(AbiTy::I64),
         }),
@@ -191,7 +191,7 @@ fn runtime_adapter_signature(key: &IntrinsicKey, runtime: RuntimeFn) -> Option<C
 
 fn validate_runtime_swap_contract(
     key: &IntrinsicKey,
-    runtime: RuntimeFn,
+    runtime: RuntimeKey,
 ) -> Result<(), CallableResolutionError> {
     let intrinsic = intrinsic_signature(key).ok_or_else(|| {
         CallableResolutionError::MissingIntrinsicSignature {
@@ -219,13 +219,13 @@ mod tests {
     #[test]
     fn runtime_key_resolves_to_runtime_backend() {
         let resolved = resolve_callable_with_preference(
-            CallableKey::Runtime(RuntimeFn::StringNew),
+            CallableKey::Runtime(RuntimeKey::StringNew),
             CallableBackendPreference::PreferInline,
         )
         .expect("runtime callable resolution");
         assert!(matches!(
             resolved,
-            ResolvedCallable::Runtime(RuntimeFn::StringNew)
+            ResolvedCallable::Runtime(RuntimeKey::StringNew)
         ));
     }
 
@@ -258,13 +258,13 @@ mod tests {
                 .expect("runtime panic callable resolution");
         assert!(matches!(
             runtime,
-            ResolvedCallable::Runtime(RuntimeFn::Panic)
+            ResolvedCallable::Runtime(RuntimeKey::Panic)
         ));
     }
 
     #[test]
     fn panic_runtime_swap_contract_is_valid() {
-        validate_runtime_swap_contract(&IntrinsicKey::from("panic"), RuntimeFn::Panic)
+        validate_runtime_swap_contract(&IntrinsicKey::from("panic"), RuntimeKey::Panic)
             .expect("panic swap contract must remain valid");
     }
 
@@ -278,7 +278,7 @@ mod tests {
             .expect("len callable resolution");
             assert!(matches!(
                 resolved,
-                ResolvedCallable::Runtime(RuntimeFn::ArrayLen | RuntimeFn::StringLen)
+                ResolvedCallable::Runtime(RuntimeKey::ArrayLen | RuntimeKey::StringLen)
             ));
         }
     }

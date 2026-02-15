@@ -6,7 +6,7 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Module};
 
-use crate::RuntimeFn;
+use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use rustc_hash::FxHashMap;
@@ -465,7 +465,7 @@ impl Cg<'_, '_, '_> {
         let wrapper_func_addr = self.builder.ins().func_addr(ptr_type, wrapper_func_ref);
 
         // Wrap in a closure struct with zero captures
-        let alloc_ref = self.runtime_func_ref(RuntimeFn::ClosureAlloc)?;
+        let alloc_ref = self.runtime_func_ref(RuntimeKey::ClosureAlloc)?;
         let zero_captures = self.builder.ins().iconst(types::I64, 0);
         let alloc_call = self
             .builder
@@ -690,8 +690,8 @@ impl Cg<'_, '_, '_> {
         }
 
         // Otherwise, create a dynamic array
-        let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
-        let array_push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
+        let arr_ptr = self.call_runtime(RuntimeKey::ArrayNew, &[])?;
+        let array_push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
         let inferred_elem_type =
             inferred_type_id.and_then(|array_type_id| self.arena().unwrap_array(array_type_id));
         let expected_elem_type = forced_union_elem.or(inferred_elem_type);
@@ -963,12 +963,13 @@ impl Cg<'_, '_, '_> {
         if let Some(element_id) = arena.unwrap_array(obj.type_id) {
             // Dynamic array indexing
             let idx = self.expr(index)?;
-            let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
+            let raw_value =
+                self.call_runtime(RuntimeKey::ArrayGetValue, &[obj.value, idx.value])?;
             let resolved_element_id = self.try_substitute_type(element_id);
             if self.arena().is_union(resolved_element_id) {
                 let cv = if self.union_array_prefers_inline_storage(resolved_element_id) {
                     let raw_tag =
-                        self.call_runtime(RuntimeFn::ArrayGetTag, &[obj.value, idx.value])?;
+                        self.call_runtime(RuntimeKey::ArrayGetTag, &[obj.value, idx.value])?;
                     self.decode_dynamic_array_union_element(raw_tag, raw_value, resolved_element_id)
                 } else {
                     self.copy_union_heap_to_stack(raw_value, resolved_element_id)
@@ -1111,7 +1112,7 @@ impl Cg<'_, '_, '_> {
                 ));
             }
 
-            let set_value_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
+            let set_value_ref = self.runtime_func_ref(RuntimeKey::ArraySet)?;
 
             let set_args =
                 self.coerce_call_args(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
@@ -1364,7 +1365,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Value> {
         let arena = self.arena();
         Ok(if arena.is_string(type_id) {
-            self.call_runtime(RuntimeFn::StringEq, &[left, right])?
+            self.call_runtime(RuntimeKey::StringEq, &[left, right])?
         } else if arena.is_float(type_id) {
             self.builder.ins().fcmp(FloatCC::Equal, left, right)
         } else if type_id.is_integer() || type_id.is_bool() {
@@ -1473,7 +1474,7 @@ impl Cg<'_, '_, '_> {
 
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
         let heap_ptr =
-            self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
+            self.call_runtime(RuntimeKey::ClosureGetCapture, &[closure_ptr, index_val])?;
 
         // Structs are captured by value — the heap slot contains the full struct
         // data (not a pointer to a pointer). Return heap_ptr directly as the
@@ -1511,7 +1512,7 @@ impl Cg<'_, '_, '_> {
 
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
         let heap_ptr =
-            self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
+            self.call_runtime(RuntimeKey::ClosureGetCapture, &[closure_ptr, index_val])?;
 
         // Structs: copy all flat slots from value (stack ptr) to heap slot
         if let Some(flat_count) = self.struct_flat_slot_count(binding.vole_type) {

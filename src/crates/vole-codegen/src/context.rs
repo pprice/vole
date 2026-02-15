@@ -20,7 +20,7 @@ use crate::callable_registry::{
 };
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
-use crate::{FunctionKey, RuntimeFn};
+use crate::{FunctionKey, RuntimeKey};
 use smallvec::SmallVec;
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId, TypeDefId};
@@ -105,7 +105,7 @@ pub(crate) struct Captures<'a> {
 }
 
 /// Key for caching pure runtime function calls
-pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
+pub type CallCacheKey = (RuntimeKey, SmallVec<[Value; 4]>);
 
 // Re-export ModuleExportBinding from types module
 pub use crate::types::ModuleExportBinding;
@@ -498,7 +498,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(());
         }
 
-        let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+        let rc_dec_ref = self.runtime_func_ref(RuntimeKey::RcDec)?;
 
         // 1. Unions first (optionally filtering out skip_var): payloads may reference container-owned values.
         if !unions.is_empty() {
@@ -559,13 +559,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Used when creating a new reference to an existing RC value.
     #[inline]
     pub fn emit_rc_inc(&mut self, value: Value) -> CodegenResult<()> {
-        self.call_runtime_void(RuntimeFn::RcInc, &[value])
+        self.call_runtime_void(RuntimeKey::RcInc, &[value])
     }
 
     /// Emit rc_inc for a value, handling interface fat pointers by loading the
     /// data word at offset 0 before incrementing.
     pub fn emit_rc_inc_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
-        self.emit_rc_op_for_type(value, type_id, RuntimeFn::RcInc)
+        self.emit_rc_op_for_type(value, type_id, RuntimeKey::RcInc)
     }
 
     /// Increment RC for a borrowed value being stored into a container.
@@ -598,7 +598,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         union_ptr: Value,
         rc_tags: &[(u8, bool)],
     ) -> CodegenResult<()> {
-        self.emit_union_rc_op(union_ptr, rc_tags, RuntimeFn::RcInc)
+        self.emit_union_rc_op(union_ptr, rc_tags, RuntimeKey::RcInc)
     }
 
     /// Emit rc_dec for the RC payload of a union value, based on its current tag.
@@ -609,7 +609,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         union_ptr: Value,
         rc_tags: &[(u8, bool)],
     ) -> CodegenResult<()> {
-        self.emit_union_rc_op(union_ptr, rc_tags, RuntimeFn::RcDec)
+        self.emit_union_rc_op(union_ptr, rc_tags, RuntimeKey::RcDec)
     }
 
     /// Shared implementation for `emit_union_rc_inc` and `emit_union_rc_dec`.
@@ -621,7 +621,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         union_ptr: Value,
         rc_tags: &[(u8, bool)],
-        rc_fn: RuntimeFn,
+        rc_fn: RuntimeKey,
     ) -> CodegenResult<()> {
         use cranelift::prelude::{InstBuilder, IntCC, MemFlags, types};
 
@@ -676,7 +676,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         value: Value,
         type_id: TypeId,
-        rc_fn: RuntimeFn,
+        rc_fn: RuntimeKey,
     ) -> CodegenResult<()> {
         if self.arena().is_interface(type_id) {
             let data_word = self
@@ -693,13 +693,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Used when destroying a reference (e.g., reassignment).
     #[inline]
     pub fn emit_rc_dec(&mut self, value: Value) -> CodegenResult<()> {
-        self.call_runtime_void(RuntimeFn::RcDec, &[value])
+        self.call_runtime_void(RuntimeKey::RcDec, &[value])
     }
 
     /// Emit rc_dec for a value, handling interface fat pointers by loading the
     /// data word at offset 0 before decrementing.
     pub fn emit_rc_dec_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
-        self.emit_rc_op_for_type(value, type_id, RuntimeFn::RcDec)
+        self.emit_rc_op_for_type(value, type_id, RuntimeKey::RcDec)
     }
 
     /// Emit rc_dec for an owned RC value and mark it as consumed.
@@ -1474,10 +1474,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(module.declare_func_in_func(func_id, self.builder.func))
     }
 
-    /// Get a FuncRef for a runtime function (RuntimeFn -> FuncRef in one call)
+    /// Get a FuncRef for a runtime function (RuntimeKey -> FuncRef in one call)
     pub fn runtime_func_ref(
         &mut self,
-        runtime: RuntimeFn,
+        runtime: RuntimeKey,
     ) -> CodegenResult<cranelift::codegen::ir::FuncRef> {
         let key = self
             .funcs()
@@ -1568,7 +1568,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Call a runtime function and return the first result (or error if no results)
-    pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<Value> {
+    pub fn call_runtime(&mut self, runtime: RuntimeKey, args: &[Value]) -> CodegenResult<Value> {
         let func_ref = self.runtime_func_ref(runtime)?;
         let coerced = self.coerce_call_args(func_ref, args);
         let call = self.builder.ins().call(func_ref, &coerced);
@@ -1585,7 +1585,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a pure runtime function with caching (CSE)
     #[allow(dead_code)]
-    pub fn call_runtime_cached(&mut self, func: RuntimeFn, args: &[Value]) -> CodegenResult<Value> {
+    pub fn call_runtime_cached(
+        &mut self,
+        func: RuntimeKey,
+        args: &[Value],
+    ) -> CodegenResult<Value> {
         let key = (func, SmallVec::from_slice(args));
         if let Some(&cached) = self.call_cache.get(&key) {
             return Ok(cached);
@@ -1602,7 +1606,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(cached);
         }
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let result = self.call_runtime(RuntimeFn::InstanceGetField, &[instance, slot_val])?;
+        let result = self.call_runtime(RuntimeKey::InstanceGetField, &[instance, slot_val])?;
         self.field_cache.insert(key, result);
         Ok(result)
     }
@@ -1619,7 +1623,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         field_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         if crate::types::is_wide_type(field_type_id, self.arena()) {
-            let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
+            let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
             let value = crate::structs::helpers::load_wide_field(
                 self.builder,
                 get_func_ref,
@@ -1630,7 +1634,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
             let result_raw =
-                self.call_runtime(RuntimeFn::InstanceGetField, &[instance, slot_val])?;
+                self.call_runtime(RuntimeKey::InstanceGetField, &[instance, slot_val])?;
             Ok(self.convert_field_value(result_raw, field_type_id))
         }
     }
@@ -1651,7 +1655,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Call a runtime function that returns void
-    pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<()> {
+    pub fn call_runtime_void(&mut self, runtime: RuntimeKey, args: &[Value]) -> CodegenResult<()> {
         let func_ref = self.runtime_func_ref(runtime)?;
         let coerced = self.coerce_call_args(func_ref, args);
         self.builder.ins().call(func_ref, &coerced);
@@ -2263,7 +2267,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
 
         // Heap-allocate storage
-        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
         let size_val = self.builder.ins().iconst(ptr_type, total_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
@@ -2874,7 +2878,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.compile_inline_intrinsic(&intrinsic_key, args, return_type_id, call_line)
             }
             ResolvedCallable::Runtime(runtime) => {
-                if matches!(runtime, RuntimeFn::Panic) {
+                if matches!(runtime, RuntimeKey::Panic) {
                     self.emit_runtime_panic(args, call_line)?;
                     return Ok(self.void_value());
                 }
@@ -3123,7 +3127,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
 
         self.call_runtime_void(
-            RuntimeFn::Panic,
+            RuntimeKey::Panic,
             &[msg, file_ptr_val, file_len_val, line_val],
         )?;
 

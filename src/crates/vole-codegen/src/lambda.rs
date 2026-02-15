@@ -10,7 +10,7 @@ use cranelift_module::Module;
 use vole_frontend::{Capture, LambdaExpr, NodeId, Symbol};
 use vole_sema::type_arena::{TypeArena, TypeId};
 
-use super::RuntimeFn;
+use super::RuntimeKey;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
 use super::types::{CompiledValue, is_wide_fallible};
@@ -209,7 +209,7 @@ impl Cg<'_, '_, '_> {
         let func_addr = self.builder.ins().func_addr(ptr_type, func_ref);
 
         // Allocate closure
-        let alloc_ref = self.runtime_func_ref(RuntimeFn::ClosureAlloc)?;
+        let alloc_ref = self.runtime_func_ref(RuntimeKey::ClosureAlloc)?;
         let num_captures_val = self.builder.ins().iconst(types::I64, num_captures as i64);
         let alloc_call = self
             .builder
@@ -236,10 +236,10 @@ impl Cg<'_, '_, '_> {
         captures: &[Capture],
         closure_ptr: Value,
     ) -> CodegenResult<()> {
-        let set_capture_ref = self.runtime_func_ref(RuntimeFn::ClosureSetCapture)?;
-        let set_kind_ref = self.runtime_func_ref(RuntimeFn::ClosureSetCaptureKind)?;
-        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
-        let rc_inc_ref = self.runtime_func_ref(RuntimeFn::RcInc)?;
+        let set_capture_ref = self.runtime_func_ref(RuntimeKey::ClosureSetCapture)?;
+        let set_kind_ref = self.runtime_func_ref(RuntimeKey::ClosureSetCaptureKind)?;
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
+        let rc_inc_ref = self.runtime_func_ref(RuntimeKey::RcInc)?;
 
         for (i, capture) in captures.iter().enumerate() {
             let (current_value, vole_type_id, is_self_capture) =

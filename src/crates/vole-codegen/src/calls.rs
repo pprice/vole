@@ -24,7 +24,7 @@ use super::context::Cg;
 use super::types::{
     CompiledValue, is_wide_fallible, native_type_to_cranelift, type_id_to_cranelift,
 };
-use super::{FunctionKey, FunctionRegistry, RuntimeFn};
+use super::{FunctionKey, FunctionRegistry, RuntimeKey};
 
 /// Compile a string literal as a static RcString baked into the JIT data section.
 /// Returns the raw Cranelift Value (pointer to the static RcString) - caller should
@@ -129,13 +129,13 @@ impl Cg<'_, '_, '_> {
         }
 
         // Multi-part: use StringBuilder — one allocation instead of N concats
-        let sb = self.call_runtime(RuntimeFn::SbNew, &[])?;
+        let sb = self.call_runtime(RuntimeKey::SbNew, &[])?;
 
         for &sv in &string_values {
-            self.call_runtime_void(RuntimeFn::SbPushString, &[sb, sv])?;
+            self.call_runtime_void(RuntimeKey::SbPushString, &[sb, sv])?;
         }
 
-        let result = self.call_runtime(RuntimeFn::SbFinish, &[sb])?;
+        let result = self.call_runtime(RuntimeKey::SbFinish, &[sb])?;
 
         // Free all owned input parts — builder has copied the bytes
         for (val, is_owned) in string_values.iter().zip(owned_flags.iter()) {
@@ -155,12 +155,12 @@ impl Cg<'_, '_, '_> {
 
         // Handle arrays
         if self.arena().is_array(val.type_id) {
-            return self.call_runtime(RuntimeFn::ArrayI64ToString, &[val.value]);
+            return self.call_runtime(RuntimeKey::ArrayI64ToString, &[val.value]);
         }
 
         // Handle nil type directly
         if val.type_id.is_nil() {
-            return self.call_runtime(RuntimeFn::NilToString, &[]);
+            return self.call_runtime(RuntimeKey::NilToString, &[]);
         }
 
         // Handle optionals (unions with nil variant)
@@ -182,20 +182,20 @@ impl Cg<'_, '_, '_> {
         }
 
         let (runtime, call_val) = if val.ty == types::F64 {
-            (RuntimeFn::F64ToString, val.value)
+            (RuntimeKey::F64ToString, val.value)
         } else if val.ty == types::F32 {
-            (RuntimeFn::F32ToString, val.value)
+            (RuntimeKey::F32ToString, val.value)
         } else if val.ty == types::I128 {
-            (RuntimeFn::I128ToString, val.value)
+            (RuntimeKey::I128ToString, val.value)
         } else if val.ty == types::I8 {
-            (RuntimeFn::BoolToString, val.value)
+            (RuntimeKey::BoolToString, val.value)
         } else {
             let extended = if val.ty.is_int() && val.ty != types::I64 {
                 self.builder.ins().sextend(types::I64, val.value)
             } else {
                 val.value
             };
-            (RuntimeFn::I64ToString, extended)
+            (RuntimeKey::I64ToString, extended)
         };
 
         self.call_runtime(runtime, &[call_val])
@@ -226,7 +226,7 @@ impl Cg<'_, '_, '_> {
 
         // Nil case: return "nil"
         self.builder.switch_to_block(nil_block);
-        let nil_str = self.call_runtime(RuntimeFn::NilToString, &[])?;
+        let nil_str = self.call_runtime(RuntimeKey::NilToString, &[])?;
         self.builder.ins().jump(merge_block, &[nil_str.into()]);
 
         // Some case: extract inner value and convert to string
@@ -1009,7 +1009,7 @@ impl Cg<'_, '_, '_> {
             ));
         };
 
-        self.call_runtime_void(RuntimeFn::PrintChar, &[char_val])?;
+        self.call_runtime_void(RuntimeKey::PrintChar, &[char_val])?;
         Ok(self.void_value())
     }
 
@@ -1041,7 +1041,7 @@ impl Cg<'_, '_, '_> {
         let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
 
         self.call_runtime_void(
-            RuntimeFn::AssertFail,
+            RuntimeKey::AssertFail,
             &[file_ptr_val, file_len_val, line_val],
         )?;
         self.builder.ins().jump(pass_block, &[]);
@@ -1067,7 +1067,7 @@ impl Cg<'_, '_, '_> {
         let line_val = self.builder.ins().iconst(types::I32, line as i64);
 
         self.call_runtime_void(
-            RuntimeFn::Panic,
+            RuntimeKey::Panic,
             &[msg_val.value, file_ptr_val, file_len_val, line_val],
         )?;
 
@@ -1165,7 +1165,7 @@ impl Cg<'_, '_, '_> {
         call: &CallExpr,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
-        let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[closure_ptr])?;
+        let func_ptr = self.call_runtime(RuntimeKey::ClosureGetFunc, &[closure_ptr])?;
 
         let (sig, params, ret) = self.build_closure_call_signature(func_type_id)?;
 

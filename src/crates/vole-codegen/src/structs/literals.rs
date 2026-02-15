@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use rustc_hash::FxHashMap;
 
 use super::helpers::{convert_to_i64_for_storage, split_i128_for_storage, store_field_value};
-use crate::RuntimeFn;
+use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
@@ -154,11 +154,11 @@ impl Cg<'_, '_, '_> {
         let runtime_type = self.builder.ins().iconst(types::I32, TYPE_INSTANCE as i64);
 
         let instance_ptr = self.call_runtime(
-            RuntimeFn::InstanceNew,
+            RuntimeKey::InstanceNew,
             &[type_id_val, field_count_val, runtime_type],
         )?;
 
-        let set_func_ref = self.runtime_func_ref(RuntimeFn::InstanceSetField)?;
+        let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
 
         let field_types: HashMap<String, TypeId> = self
             .registry()
@@ -433,7 +433,7 @@ impl Cg<'_, '_, '_> {
             self.find_union_variant_tag(&value, union_type_id, &variants)?;
 
         // Get heap_alloc function ref
-        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
 
         // Allocate union storage on the heap
         let ptr_type = self.ptr_type();
@@ -481,7 +481,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         value: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
-        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
         let ptr_type = self.ptr_type();
         let union_size = self.type_size(value.type_id);
         let size_val = self.builder.ins().iconst(ptr_type, union_size as i64);
@@ -531,7 +531,7 @@ impl Cg<'_, '_, '_> {
 
         self.builder.switch_to_block(then_block);
         self.builder.seal_block(then_block);
-        let rc_inc_ref = self.runtime_func_ref(RuntimeFn::RcInc)?;
+        let rc_inc_ref = self.runtime_func_ref(RuntimeKey::RcInc)?;
         let payload_ptr = self
             .builder
             .ins()
@@ -559,7 +559,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         value: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
-        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
         let ptr_type = self.ptr_type();
         let word_bytes = ptr_type.bytes() as i64;
 

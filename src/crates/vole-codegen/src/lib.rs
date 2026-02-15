@@ -29,7 +29,7 @@ pub use callable_registry::{
     resolve_callable_with_preference,
 };
 pub use compiler::{Compiler, TestInfo};
-pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
+pub use function_registry::{FunctionKey, FunctionRegistry};
 pub use intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, IntrinsicsRegistry};
 pub use jit::{CompiledModules, JitContext, JitOptions};
 pub use runtime_registry::{RuntimeKey, all_symbols as all_runtime_symbols};

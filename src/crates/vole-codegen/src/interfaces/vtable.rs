@@ -6,7 +6,7 @@ use cranelift_codegen::ir::FuncRef;
 use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use super::vtable_ctx::{VtableCtx, VtableCtxView};
-use crate::RuntimeFn;
+use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use crate::types::{
@@ -565,7 +565,7 @@ fn compile_function_wrapper<C: VtableCtx>(
     let (func_ptr, call_args, sig) = if is_closure {
         let closure_get_key = ctx
             .funcs()
-            .runtime_key(RuntimeFn::ClosureGetFunc)
+            .runtime_key(RuntimeKey::ClosureGetFunc)
             .ok_or_else(|| CodegenError::missing_resource("ClosureGetFunc runtime function"))?;
         let closure_get_id = ctx
             .funcs()
@@ -1371,7 +1371,7 @@ fn runtime_heap_alloc_ref<C: VtableCtx>(
 ) -> CodegenResult<FuncRef> {
     let key = ctx
         .funcs()
-        .runtime_key(RuntimeFn::HeapAlloc)
+        .runtime_key(RuntimeKey::HeapAlloc)
         .ok_or_else(|| CodegenError::missing_resource("HeapAlloc runtime function"))?;
     let func_id = ctx
         .funcs()

@@ -5,7 +5,7 @@
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 
-use crate::RuntimeFn;
+use crate::RuntimeKey;
 use vole_frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr, ExprKind};
 use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
@@ -368,7 +368,7 @@ impl Cg<'_, '_, '_> {
 
         // Call vole_string_concat(left, right_string)
         let concat_result =
-            self.call_runtime(RuntimeFn::StringConcat, &[left.value, right_string])?;
+            self.call_runtime(RuntimeKey::StringConcat, &[left.value, right_string])?;
 
         // Consume RC operands used by string concat
         self.consume_rc_value(&mut left)?;
@@ -600,7 +600,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().fdiv(left_val, right_val)
                 } else if result_ty == types::I128 {
                     // Cranelift x64 doesn't support sdiv.i128; use runtime helper
-                    self.call_runtime(RuntimeFn::I128Sdiv, &[left_val, right_val])?
+                    self.call_runtime(RuntimeKey::I128Sdiv, &[left_val, right_val])?
                 } else if left_type_id.is_unsigned_int() {
                     // Unsigned division: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
@@ -620,7 +620,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().fsub(left_val, mul)
                 } else if result_ty == types::I128 {
                     // Cranelift x64 doesn't support srem.i128; use runtime helper
-                    self.call_runtime(RuntimeFn::I128Srem, &[left_val, right_val])?
+                    self.call_runtime(RuntimeKey::I128Srem, &[left_val, right_val])?
                 } else if left_type_id.is_unsigned_int() {
                     // Unsigned remainder: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
@@ -737,8 +737,8 @@ impl Cg<'_, '_, '_> {
 
     /// String equality comparison
     fn string_eq(&mut self, left: Value, right: Value) -> CodegenResult<Value> {
-        if self.funcs().has_runtime(RuntimeFn::StringEq) {
-            self.call_runtime(RuntimeFn::StringEq, &[left, right])
+        if self.funcs().has_runtime(RuntimeKey::StringEq) {
+            self.call_runtime(RuntimeKey::StringEq, &[left, right])
         } else {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
         }
@@ -954,10 +954,11 @@ impl Cg<'_, '_, '_> {
         };
 
         // Load current element
-        let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
+        let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[arr.value, idx.value])?;
         let current = if self.arena().is_union(elem_type_id) {
             if self.union_array_prefers_inline_storage(elem_type_id) {
-                let raw_tag = self.call_runtime(RuntimeFn::ArrayGetTag, &[arr.value, idx.value])?;
+                let raw_tag =
+                    self.call_runtime(RuntimeKey::ArrayGetTag, &[arr.value, idx.value])?;
                 self.decode_dynamic_array_union_element(raw_tag, raw_value, elem_type_id)
             } else {
                 self.copy_union_heap_to_stack(raw_value, elem_type_id)
@@ -981,7 +982,7 @@ impl Cg<'_, '_, '_> {
         }
         let (tag_val, store_value, _stored) =
             self.prepare_dynamic_array_store(result, elem_type_id)?;
-        let array_set_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
+        let array_set_ref = self.runtime_func_ref(RuntimeKey::ArraySet)?;
 
         let set_args =
             self.coerce_call_args(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
@@ -1011,7 +1012,7 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op, line)?;
 
         // Store back (i128 uses 2 slots)
-        let set_func_ref = self.runtime_func_ref(RuntimeFn::InstanceSetField)?;
+        let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
         super::structs::helpers::store_field_value(
             self.builder,
             set_func_ref,
