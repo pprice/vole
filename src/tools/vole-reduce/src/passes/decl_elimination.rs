@@ -9,8 +9,7 @@
 //! Falls back to line-based removal when span-based removal produces
 //! unparseable output.
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use vole_frontend::Parser;
 use vole_frontend::ast::Decl;
@@ -18,6 +17,8 @@ use vole_frontend::ast::Decl;
 use crate::oracle::MatchResult;
 use crate::reducer::Reducer;
 use crate::span_remove;
+
+use super::file_utils::{discover_vole_files, read_file, relative_display, write_file};
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -607,53 +608,6 @@ fn test_modification(
             Ok(TrialOutcome::Divergent)
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// File helpers
-// ---------------------------------------------------------------------------
-
-/// Discover all `.vole` files in the workspace result directory.
-fn discover_vole_files(result_dir: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut files = Vec::new();
-    collect_vole_files_recursive(result_dir, &mut files)?;
-    files.sort();
-    Ok(files)
-}
-
-/// Recursively collect `.vole` files.
-fn collect_vole_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
-    let entries = fs::read_dir(dir)
-        .map_err(|e| format!("failed to read directory '{}': {e}", dir.display()))?;
-
-    for entry in entries {
-        let entry =
-            entry.map_err(|e| format!("failed to read entry in '{}': {e}", dir.display()))?;
-        let path = entry.path();
-
-        if path.is_dir() {
-            collect_vole_files_recursive(&path, out)?;
-        } else if path.extension().is_some_and(|ext| ext == "vole") {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn read_file(path: &Path) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| format!("failed to read '{}': {e}", path.display()))
-}
-
-fn write_file(path: &Path, content: &str) -> Result<(), String> {
-    fs::write(path, content).map_err(|e| format!("failed to write '{}': {e}", path.display()))
-}
-
-/// Format a path relative to the workspace result directory for display.
-fn relative_display(path: &Path, result_dir: &Path) -> String {
-    path.strip_prefix(result_dir)
-        .unwrap_or(path)
-        .display()
-        .to_string()
 }
 
 /// Count lines in a string.

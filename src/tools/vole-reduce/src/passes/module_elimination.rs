@@ -12,6 +12,8 @@ use std::time::SystemTime;
 use crate::oracle::MatchResult;
 use crate::reducer::Reducer;
 
+use super::file_utils::copy_dir_recursive;
+
 // ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
@@ -336,38 +338,4 @@ fn build_snapshot_info(
     }
 
     info
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Recursively copy a directory tree.
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
-    fs::create_dir_all(dst)
-        .map_err(|e| format!("failed to create directory '{}': {e}", dst.display()))?;
-
-    let entries = fs::read_dir(src)
-        .map_err(|e| format!("failed to read directory '{}': {e}", src.display()))?;
-
-    for entry in entries {
-        let entry =
-            entry.map_err(|e| format!("failed to read entry in '{}': {e}", src.display()))?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            fs::copy(&src_path, &dst_path).map_err(|e| {
-                format!(
-                    "failed to copy '{}' -> '{}': {e}",
-                    src_path.display(),
-                    dst_path.display()
-                )
-            })?;
-        }
-    }
-
-    Ok(())
 }
