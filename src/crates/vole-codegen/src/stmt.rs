@@ -7,9 +7,8 @@ use cranelift::prelude::*;
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
-use vole_frontend::{
-    self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, RaiseStmt, ReturnStmt, Stmt, Symbol,
-};
+use vole_frontend::ast::{RaiseStmt, ReturnStmt};
+use vole_frontend::{self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, Stmt, Symbol};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 
@@ -650,8 +649,8 @@ impl Cg<'_, '_, '_> {
     /// counter is incremented before jumping back to header.
     fn for_range(
         &mut self,
-        for_stmt: &vole_frontend::ForStmt,
-        range: &vole_frontend::RangeExpr,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        range: &vole_frontend::ast::RangeExpr,
     ) -> CodegenResult<bool> {
         let start_val = self.expr(&range.start)?;
         let end_val = self.expr(&range.end)?;
@@ -678,8 +677,8 @@ impl Cg<'_, '_, '_> {
     /// and one jump instruction per iteration.
     fn for_range_optimized(
         &mut self,
-        for_stmt: &vole_frontend::ForStmt,
-        range: &vole_frontend::RangeExpr,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        range: &vole_frontend::ast::RangeExpr,
         var: Variable,
         end_val: Value,
     ) -> CodegenResult<bool> {
@@ -743,8 +742,8 @@ impl Cg<'_, '_, '_> {
     /// jump to the continue block to increment the counter before looping.
     fn for_range_with_continue(
         &mut self,
-        for_stmt: &vole_frontend::ForStmt,
-        range: &vole_frontend::RangeExpr,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        range: &vole_frontend::ast::RangeExpr,
         var: Variable,
         end_val: Value,
     ) -> CodegenResult<bool> {
@@ -788,7 +787,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a for loop over an array
-    fn for_array(&mut self, for_stmt: &vole_frontend::ForStmt) -> CodegenResult<bool> {
+    fn for_array(&mut self, for_stmt: &vole_frontend::ast::ForStmt) -> CodegenResult<bool> {
         let mut arr = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena method
@@ -912,7 +911,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a for loop over an iterator
-    fn for_iterator(&mut self, for_stmt: &vole_frontend::ForStmt) -> CodegenResult<bool> {
+    fn for_iterator(&mut self, for_stmt: &vole_frontend::ast::ForStmt) -> CodegenResult<bool> {
         let mut iter = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena methods
@@ -1017,7 +1016,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a for loop over a string (iterating characters)
-    fn for_string(&mut self, for_stmt: &vole_frontend::ForStmt) -> CodegenResult<bool> {
+    fn for_string(&mut self, for_stmt: &vole_frontend::ast::ForStmt) -> CodegenResult<bool> {
         // Compile the string expression
         let mut string_val = self.expr(&for_stmt.iterable)?;
 
@@ -1327,7 +1326,7 @@ impl Cg<'_, '_, '_> {
     /// No runtime code is generated; bindings are used at compile time for calls.
     fn compile_module_destructure(
         &mut self,
-        fields: &[vole_frontend::RecordFieldPattern],
+        fields: &[vole_frontend::ast::RecordFieldPattern],
         module_info: &vole_sema::type_arena::InternedModule,
     ) -> CodegenResult<()> {
         for field_pattern in fields {
@@ -1478,7 +1477,7 @@ impl Cg<'_, '_, '_> {
     fn build_raise_payload(
         &mut self,
         error_fields: &[vole_sema::entity_defs::FieldDef],
-        raise_fields: &[vole_frontend::StructFieldInit],
+        raise_fields: &[vole_frontend::ast::StructFieldInit],
     ) -> CodegenResult<Value> {
         if error_fields.is_empty() {
             // No fields - payload is 0

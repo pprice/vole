@@ -10,10 +10,8 @@ use crate::types::{
 };
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
-use vole_frontend::{
-    ClassDecl, Expr, FuncDecl, ImplementBlock, InterfaceMethod, Interner, StaticsBlock, StructDecl,
-    Symbol, TypeExpr,
-};
+use vole_frontend::ast::{ClassDecl, ImplementBlock, InterfaceMethod, StaticsBlock, StructDecl};
+use vole_frontend::{Expr, FuncDecl, Interner, Symbol, TypeExpr};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
 

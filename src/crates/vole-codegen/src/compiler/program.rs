@@ -15,9 +15,10 @@ use crate::FunctionKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv, function_name_id_with_interner, type_id_to_cranelift};
+use vole_frontend::ast::{InterfaceMethod, LetTupleStmt, TestCase, TestsDecl};
 use vole_frontend::{
-    Block, Decl, Expr, ExprKind, FuncDecl, InterfaceMethod, Interner, LetInit, LetTupleStmt,
-    PatternKind, Program, Span, Stmt, Symbol, TestCase, TestsDecl, TypeExpr,
+    Block, Decl, Expr, ExprKind, FuncDecl, Interner, LetInit, PatternKind, Program, Span, Stmt,
+    Symbol, TypeExpr,
 };
 use vole_identity::{ModuleId, NameId};
 use vole_sema::generic::{
@@ -662,7 +663,7 @@ impl Compiler<'_> {
     /// Used when modules are already compiled in a shared cache.
     fn import_module_class(
         &mut self,
-        class: &vole_frontend::ClassDecl,
+        class: &vole_frontend::ast::ClassDecl,
         module_interner: &Interner,
         module_id: ModuleId,
     ) {
@@ -678,7 +679,7 @@ impl Compiler<'_> {
     /// Used when modules are already compiled in a shared cache.
     fn import_module_struct(
         &mut self,
-        struct_decl: &vole_frontend::StructDecl,
+        struct_decl: &vole_frontend::ast::StructDecl,
         module_interner: &Interner,
         module_id: ModuleId,
     ) {
@@ -1970,7 +1971,7 @@ impl Compiler<'_> {
     fn build_generic_type_asts<'a>(
         &self,
         program: &'a Program,
-    ) -> FxHashMap<NameId, &'a vole_frontend::ClassDecl> {
+    ) -> FxHashMap<NameId, &'a vole_frontend::ast::ClassDecl> {
         let mut result = FxHashMap::default();
         let program_module = self.program_module();
         self.collect_generic_class_asts(&program.declarations, program_module, &mut result);
@@ -1982,7 +1983,7 @@ impl Compiler<'_> {
         &self,
         decls: &'a [Decl],
         module_id: ModuleId,
-        result: &mut FxHashMap<NameId, &'a vole_frontend::ClassDecl>,
+        result: &mut FxHashMap<NameId, &'a vole_frontend::ast::ClassDecl>,
     ) {
         for decl in decls {
             match decl {

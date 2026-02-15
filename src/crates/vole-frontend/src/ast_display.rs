@@ -19,11 +19,12 @@ macro_rules! wln {
     }};
 }
 
-use crate::{
+use crate::Interner;
+use crate::ast::{
     AssignTarget, BinaryOp, Block, ClassDecl, CompoundOp, Decl, ErrorDecl, Expr, ExprKind,
-    ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, Interner,
-    LetInit, LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, Param, PrimitiveType,
-    Program, RaiseStmt, SentinelDecl, Stmt, StringPart, StructLiteralExpr, TestCase, TestsDecl,
+    ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, LetInit,
+    LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, Param, PrimitiveType, Program,
+    RaiseStmt, SentinelDecl, Stmt, StringPart, StructDecl, StructLiteralExpr, TestCase, TestsDecl,
     TypeExpr, UnaryOp,
 };
 
@@ -176,7 +177,7 @@ impl<'a> AstPrinter<'a> {
         wln!(out, "SentinelDecl \"{}\"", name);
     }
 
-    fn write_struct_decl(&self, out: &mut String, struct_decl: &crate::StructDecl) {
+    fn write_struct_decl(&self, out: &mut String, struct_decl: &StructDecl) {
         self.write_indent(out);
         let name = self.interner.resolve(struct_decl.name);
         wln!(out, "StructDecl \"{}\"", name);

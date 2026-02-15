@@ -50,7 +50,8 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
-use vole_frontend::*;
+use vole_frontend::ast::*;
+use vole_frontend::{Interner, Parser, Span};
 use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 
 /// Guard that holds a borrow of the db and provides resolver access.
@@ -1166,7 +1167,6 @@ impl Analyzer {
     /// array/tuple literals with constant elements, and references to
     /// immutable globals with constant initializers.
     fn is_constant_expr(&self, expr: &Expr) -> bool {
-        use ast::ExprKind;
         match &expr.kind {
             // Literals are constant
             ExprKind::IntLiteral(..)

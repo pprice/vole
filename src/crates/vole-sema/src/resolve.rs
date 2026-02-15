@@ -530,8 +530,8 @@ fn precompute_interface_method_substitutions(
 
 /// Resolve a structural type to TypeId
 fn resolve_structural_type_to_id(
-    fields: &[vole_frontend::StructuralField],
-    methods: &[vole_frontend::StructuralMethod],
+    fields: &[vole_frontend::ast::StructuralField],
+    methods: &[vole_frontend::ast::StructuralMethod],
     ctx: &mut TypeResolutionContext<'_>,
 ) -> TypeId {
     use crate::type_arena::InternedStructuralMethod;

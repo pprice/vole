@@ -21,9 +21,9 @@
 
 use crate::ExpressionData;
 use std::collections::HashMap;
+use vole_frontend::ast::{NumericSuffix, StringPart, UnaryExpr};
 use vole_frontend::{
-    BinaryExpr, BinaryOp, Block, Decl, Expr, ExprKind, FuncBody, FuncDecl, NumericSuffix, Program,
-    Stmt, Symbol,
+    BinaryExpr, BinaryOp, Block, Decl, Expr, ExprKind, FuncBody, FuncDecl, Program, Stmt, Symbol,
 };
 
 /// Statistics from constant folding.
@@ -397,7 +397,7 @@ impl<'a> ConstantFolder<'a> {
             }
             ExprKind::InterpolatedString(parts) => {
                 for part in parts {
-                    if let vole_frontend::StringPart::Expr(e) = part {
+                    if let StringPart::Expr(e) = part {
                         self.fold_expr(e);
                     }
                 }
@@ -478,7 +478,7 @@ impl<'a> ConstantFolder<'a> {
     }
 
     /// Try to fold a unary expression.
-    fn try_fold_unary(&self, unary: &vole_frontend::UnaryExpr) -> Option<ConstValue> {
+    fn try_fold_unary(&self, unary: &UnaryExpr) -> Option<ConstValue> {
         let operand = self.get_const_value(&unary.operand)?;
 
         match (unary.op, operand) {

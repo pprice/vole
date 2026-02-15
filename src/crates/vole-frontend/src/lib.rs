@@ -16,7 +16,12 @@ mod parse_type;
 pub mod parser;
 pub mod token;
 
-pub use ast::*;
+pub use ast::{
+    AssignTarget, BinaryExpr, BinaryOp, Block, Capture, CompoundAssignExpr, Decl, Expr, ExprId,
+    ExprKind, FieldAccessExpr, FieldDef, FuncBody, FuncDecl, LambdaExpr, LambdaParam, LambdaPurity,
+    LetInit, LetStmt, MatchExpr, MethodCallExpr, NodeId, OptionalChainExpr, Param, Pattern,
+    PatternKind, PrimitiveType, Program, Stmt, StructLiteralExpr, Symbol, TypeExpr, UnaryOp,
+};
 pub use ast_display::AstPrinter;
 pub use errors::{LexerError, ParserError};
 pub use intern::Interner;

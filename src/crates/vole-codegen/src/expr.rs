@@ -11,9 +11,10 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use rustc_hash::FxHashMap;
 
+use vole_frontend::ast::{BlockExpr, IfExpr, RangeExpr, RecordFieldPattern, WhenExpr};
 use vole_frontend::{
-    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, NodeId, Pattern, PatternKind,
-    RangeExpr, RecordFieldPattern, Symbol, TypeExpr, UnaryOp, WhenExpr,
+    AssignTarget, Expr, ExprKind, MatchExpr, NodeId, Pattern, PatternKind, Symbol, TypeExpr,
+    UnaryOp,
 };
 use vole_identity::ModuleId;
 use vole_sema::IsCheckResult;
@@ -481,7 +482,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a unary expression
-    fn unary(&mut self, un: &vole_frontend::UnaryExpr) -> CodegenResult<CompiledValue> {
+    fn unary(&mut self, un: &vole_frontend::ast::UnaryExpr) -> CodegenResult<CompiledValue> {
         let operand = self.expr(&un.operand)?;
         let result = match un.op {
             UnaryOp::Neg => {
@@ -509,7 +510,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an assignment expression
-    fn assign(&mut self, assign: &vole_frontend::AssignExpr) -> CodegenResult<CompiledValue> {
+    fn assign(&mut self, assign: &vole_frontend::ast::AssignExpr) -> CodegenResult<CompiledValue> {
         match &assign.target {
             AssignTarget::Discard => {
                 // Discard pattern: _ = expr
@@ -1250,7 +1251,7 @@ impl Cg<'_, '_, '_> {
     /// Used to eliminate dead branches in monomorphized generics.
     pub(crate) fn try_static_is_check(
         &self,
-        is_expr: &vole_frontend::IsExpr,
+        is_expr: &vole_frontend::ast::IsExpr,
         expr_id: NodeId,
     ) -> Option<IsCheckResult> {
         // First check sema's pre-computed result
@@ -1273,7 +1274,7 @@ impl Cg<'_, '_, '_> {
     /// Compile an `is` type check expression
     fn is_expr(
         &mut self,
-        is_expr: &vole_frontend::IsExpr,
+        is_expr: &vole_frontend::ast::IsExpr,
         expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let value = self.expr(&is_expr.value)?;
@@ -1378,7 +1379,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a null coalesce expression (??)
     fn null_coalesce(
         &mut self,
-        nc: &vole_frontend::NullCoalesceExpr,
+        nc: &vole_frontend::ast::NullCoalesceExpr,
     ) -> CodegenResult<CompiledValue> {
         let value = self.expr(&nc.value)?;
         let nil_tag = self.find_nil_variant(value.type_id).ok_or_else(|| {

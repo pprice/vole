@@ -732,7 +732,7 @@ impl Cg<'_, '_, '_> {
     /// `iter_type_hint` is the pre-computed RuntimeIterator type from sema's concrete_return_hint.
     fn range_iter(
         &mut self,
-        range: &vole_frontend::RangeExpr,
+        range: &vole_frontend::ast::RangeExpr,
         iter_type_hint: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
         // Compile start and end expressions

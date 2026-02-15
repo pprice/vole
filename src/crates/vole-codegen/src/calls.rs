@@ -13,9 +13,8 @@ use crate::union_layout;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
-use vole_frontend::{
-    CallExpr, Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt, StringPart, Symbol,
-};
+use vole_frontend::ast::{CallExpr, StringPart};
+use vole_frontend::{Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt, Symbol};
 use vole_identity::{ModuleId, NameId};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::TypeId;
