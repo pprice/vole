@@ -16,10 +16,10 @@ impl Analyzer {
             // For generic external functions in prelude, use builtin_mod so they're globally accessible
             // (can be called from any module without import). For non-prelude modules, use the
             // current module so explicit import is required.
-            let name_module = if !func.type_params.is_empty() && self.loading_prelude {
+            let name_module = if !func.type_params.is_empty() && self.module.loading_prelude {
                 builtin_mod
             } else {
-                self.current_module
+                self.module.current_module
             };
             let name_id = self
                 .name_table_mut()
@@ -42,7 +42,7 @@ impl Analyzer {
                     self.build_type_params_with_constraints(&func.type_params, interner);
 
                 // Resolve with type params in scope
-                let module_id = self.current_module;
+                let module_id = self.module.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
                     &self.ctx.db,
                     interner,
@@ -68,14 +68,14 @@ impl Analyzer {
                 if let Err(errs) =
                     self.check_param_defaults(&func.params, &signature.params_id, interner)
                 {
-                    self.errors.extend(errs);
+                    self.diagnostics.errors.extend(errs);
                 }
 
                 // Register in EntityRegistry with default expressions (like regular generic functions)
                 let func_id = self.entity_registry_mut().register_function_full(
                     name_id,
                     name_id,
-                    self.current_module,
+                    self.module.current_module,
                     signature.clone(),
                     required_params,
                     param_defaults,
@@ -91,8 +91,8 @@ impl Analyzer {
                     },
                 );
 
-                // NOTE: Don't register in self.functions for generic externals!
-                // The call handler checks self.functions first without doing type inference.
+                // NOTE: Don't register in self.symbols.functions for generic externals!
+                // The call handler checks self.symbols.functions first without doing type inference.
                 // Generic functions must go through EntityRegistry's generic_info path.
 
                 // Store external info for codegen
@@ -153,22 +153,25 @@ impl Analyzer {
                 if let Err(errs) =
                     self.check_param_defaults(&func.params, &func_type.params_id, interner)
                 {
-                    self.errors.extend(errs);
+                    self.diagnostics.errors.extend(errs);
                 }
 
                 // Register the function with its Vole name (Symbol)
-                self.functions.insert(func.vole_name, func_type.clone());
+                self.symbols
+                    .functions
+                    .insert(func.vole_name, func_type.clone());
 
                 // Also register by string name for cross-interner lookups (prelude functions)
                 let name_str = interner.resolve(func.vole_name).to_string();
-                self.functions_by_name
+                self.symbols
+                    .functions_by_name
                     .insert(name_str.clone(), func_type.clone());
 
                 // Register in EntityRegistry with default expressions
                 self.entity_registry_mut().register_function_full(
                     name_id,
                     name_id,
-                    self.current_module,
+                    self.module.current_module,
                     func_type,
                     required_params,
                     param_defaults,

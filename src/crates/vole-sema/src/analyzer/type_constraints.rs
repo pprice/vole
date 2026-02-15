@@ -304,7 +304,7 @@ impl Analyzer {
                 }
 
                 // Resolve interface type arguments within the type param scope
-                let module_id = self.current_module;
+                let module_id = self.module.current_module;
                 Some(crate::generic::TypeConstraint::Interface(
                     ifaces
                         .iter()
@@ -329,7 +329,7 @@ impl Analyzer {
                 ))
             }
             TypeConstraint::Union(types) => {
-                let module_id = self.current_module;
+                let module_id = self.module.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
                     &self.ctx.db,
                     interner,
@@ -343,7 +343,7 @@ impl Analyzer {
                 Some(crate::generic::TypeConstraint::UnionId(resolved_ids))
             }
             TypeConstraint::Structural { fields, methods } => {
-                let module_id = self.current_module;
+                let module_id = self.module.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
                     &self.ctx.db,
                     interner,
@@ -437,9 +437,11 @@ impl Analyzer {
             let found_param = {
                 let arena = self.type_arena();
                 if let Some(found_name_id) = arena.unwrap_type_param(found_id) {
-                    self.type_param_stack.get_by_name_id(found_name_id)
+                    self.env.type_param_stack.get_by_name_id(found_name_id)
                 } else if let Some(type_param_id) = arena.unwrap_type_param_ref(found_id) {
-                    self.type_param_stack.get_by_type_param_id(type_param_id)
+                    self.env
+                        .type_param_stack
+                        .get_by_type_param_id(type_param_id)
                 } else {
                     None
                 }

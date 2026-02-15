@@ -109,7 +109,7 @@ impl Analyzer {
     ) -> TypeDefId {
         let name_id = self
             .name_table_mut()
-            .intern(self.current_module, &[name], interner);
+            .intern(self.module.current_module, &[name], interner);
 
         // Check if type already exists (important for shared cache across test files)
         if let Some(existing_id) = self.entity_registry().type_by_name(name_id) {
@@ -117,6 +117,6 @@ impl Analyzer {
         }
 
         self.entity_registry_mut()
-            .register_type(name_id, kind, self.current_module)
+            .register_type(name_id, kind, self.module.current_module)
     }
 }

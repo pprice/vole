@@ -89,7 +89,7 @@ impl Analyzer {
                     self.analyze_module(import_path, init_expr.span, interner)
                 {
                     // Register in scope so it's available for implement block resolution
-                    self.scope.define(
+                    self.env.scope.define(
                         let_stmt.name,
                         Variable {
                             ty: module_type_id,
@@ -98,7 +98,7 @@ impl Analyzer {
                         },
                     );
                     // Also register in globals for consistency
-                    self.globals.insert(let_stmt.name, module_type_id);
+                    self.symbols.globals.insert(let_stmt.name, module_type_id);
                     // Record the expression type so codegen can look it up
                     self.record_expr_type_id(init_expr, module_type_id);
                 }
@@ -223,7 +223,7 @@ impl Analyzer {
         }
     }
 
-    #[expect(clippy::result_unit_err)] // Error is added to self.errors vector
+    #[expect(clippy::result_unit_err)] // Error is added to self.diagnostics.errors vector
     #[tracing::instrument(skip(self, span, _interner), fields(path = %import_path))]
     pub fn analyze_module(
         &mut self,
@@ -294,7 +294,7 @@ impl Analyzer {
             tracing::warn!(import_path, ?errors, "module analysis errors");
             for err in errors {
                 if matches!(err.error, SemanticError::CircularImport { .. }) {
-                    self.errors.push(err.clone());
+                    self.diagnostics.errors.push(err.clone());
                 }
             }
         }
@@ -366,8 +366,9 @@ impl Analyzer {
     /// Phase 1: Resolve the import path and canonicalize it for use as a cache key.
     fn resolve_module_path(&mut self, import_path: &str, span: Span) -> Result<String, ()> {
         match self
+            .module
             .module_loader
-            .resolve_path(import_path, self.current_file_path.as_deref())
+            .resolve_path(import_path, self.module.current_file_path.as_deref())
         {
             Ok(path) => {
                 // Canonicalize to ensure consistent cache keys (resolves `..` components)
@@ -395,8 +396,9 @@ impl Analyzer {
     fn load_and_parse_module(&mut self, import_path: &str, span: Span) -> Result<ParsedModule, ()> {
         let is_relative = import_path.starts_with("./") || import_path.starts_with("../");
         let module_info = if is_relative {
-            match &self.current_file_path {
+            match &self.module.current_file_path {
                 Some(current_path) => self
+                    .module
                     .module_loader
                     .load_relative(import_path, current_path)
                     .map_err(|e| {
@@ -422,7 +424,7 @@ impl Analyzer {
                 }
             }
         } else {
-            self.module_loader.load(import_path).map_err(|e| {
+            self.module.module_loader.load(import_path).map_err(|e| {
                 self.add_error(
                     SemanticError::ModuleNotFound {
                         path: import_path.to_string(),
@@ -591,14 +593,14 @@ impl Analyzer {
         self.ctx.module_data.borrow_mut().insert(
             module_key.to_string(),
             ModuleAnalysisData {
-                types: sub_analyzer.expr_types.clone(),
-                methods: sub_analyzer.method_resolutions.into_inner(),
-                is_check_results: sub_analyzer.is_check_results.clone(),
-                generic_calls: sub_analyzer.generic_calls.clone(),
-                class_method_calls: sub_analyzer.class_method_calls.clone(),
-                static_method_calls: sub_analyzer.static_method_calls.clone(),
-                declared_var_types: sub_analyzer.declared_var_types,
-                lambda_analysis: sub_analyzer.lambda_analysis,
+                types: sub_analyzer.results.expr_types.clone(),
+                methods: sub_analyzer.results.method_resolutions.into_inner(),
+                is_check_results: sub_analyzer.results.is_check_results.clone(),
+                generic_calls: sub_analyzer.results.generic_calls.clone(),
+                class_method_calls: sub_analyzer.results.class_method_calls.clone(),
+                static_method_calls: sub_analyzer.results.static_method_calls.clone(),
+                declared_var_types: sub_analyzer.results.declared_var_types,
+                lambda_analysis: sub_analyzer.lambda.analysis,
             },
         );
     }
@@ -831,10 +833,13 @@ impl Analyzer {
     fn fork_for_module(&self, module_id: ModuleId, module_file_path: Option<PathBuf>) -> Analyzer {
         Analyzer {
             ctx: Rc::clone(&self.ctx),
-            current_module: module_id,
-            current_file_path: module_file_path,
-            loading_prelude: true, // Prevent sub-analyzer from loading prelude
-            module_loader: self.module_loader.new_child(),
+            module: ModuleContext {
+                current_module: module_id,
+                current_file_path: module_file_path,
+                loading_prelude: true,
+                module_loader: self.module.module_loader.new_child(),
+                ..Default::default()
+            },
             ..Default::default()
         }
     }
@@ -850,30 +855,34 @@ impl Analyzer {
         // Build a child scope from the parent's current scope.
         // The sub-analyzer gets a fresh scope that has the parent scope as parent,
         // so lookups chain to parent definitions.
-        let parent_scope = std::mem::take(&mut self.scope);
+        let parent_scope = std::mem::take(&mut self.env.scope);
         let child_scope = Scope::with_parent(parent_scope);
 
         let mut sub = Analyzer {
             ctx: Rc::clone(&self.ctx),
-            // Keep the parent's module ID for all lookups
-            current_module: self.current_module,
-            current_file_path: self.current_file_path.clone(),
-            loading_prelude: true, // Prevent sub-analyzer from loading prelude
-            module_loader: self.module_loader.new_child(),
-            scope: child_scope,
-            // Inherit parent functions and globals so tests can call parent functions
-            functions: self.functions.clone(),
-            functions_by_name: self.functions_by_name.clone(),
-            globals: self.globals.clone(),
-            constant_globals: self.constant_globals.clone(),
-            // Inherit parent_modules chain
-            parent_modules: self.parent_modules.clone(),
-            // Inherit generic prelude functions so tests can call generic functions like print/println
-            generic_prelude_functions: self.generic_prelude_functions.clone(),
+            env: TypeCheckEnv {
+                scope: child_scope,
+                parent_modules: self.env.parent_modules.clone(),
+                ..Default::default()
+            },
+            symbols: SymbolTables {
+                functions: self.symbols.functions.clone(),
+                functions_by_name: self.symbols.functions_by_name.clone(),
+                globals: self.symbols.globals.clone(),
+                constant_globals: self.symbols.constant_globals.clone(),
+                generic_prelude_functions: self.symbols.generic_prelude_functions.clone(),
+            },
+            module: ModuleContext {
+                current_module: self.module.current_module,
+                current_file_path: self.module.current_file_path.clone(),
+                loading_prelude: true,
+                module_loader: self.module.module_loader.new_child(),
+                ..Default::default()
+            },
             ..Default::default()
         };
         // Carry over the type_param_stack so type params from parent scope are visible
-        sub.type_param_stack = self.type_param_stack.clone();
+        sub.env.type_param_stack = self.env.type_param_stack.clone();
         sub
     }
 
@@ -883,50 +892,79 @@ impl Analyzer {
     pub(super) fn restore_scope_from_tests_module(&mut self, mut sub: Analyzer) {
         // The sub-analyzer scope chain: sub.scope -> parent_scope
         // We want the parent scope back.
-        if let Some(parent) = std::mem::take(&mut sub.scope).into_parent() {
-            self.scope = parent;
+        if let Some(parent) = std::mem::take(&mut sub.env.scope).into_parent() {
+            self.env.scope = parent;
         }
     }
 
     /// Merge analysis results from a tests module sub-analyzer back into the parent.
     pub(super) fn merge_tests_module_results(&mut self, sub: &Analyzer) {
         // Merge expr_types
-        self.expr_types
-            .extend(sub.expr_types.iter().map(|(&k, &v)| (k, v)));
+        self.results
+            .expr_types
+            .extend(sub.results.expr_types.iter().map(|(&k, &v)| (k, v)));
         // Merge method_resolutions
-        for (k, v) in sub.method_resolutions.clone_inner() {
-            self.method_resolutions.insert(k, v);
+        for (k, v) in sub.results.method_resolutions.clone_inner() {
+            self.results.method_resolutions.insert(k, v);
         }
         // Merge generic_calls
-        self.generic_calls
-            .extend(sub.generic_calls.iter().map(|(&k, v)| (k, v.clone())));
+        self.results.generic_calls.extend(
+            sub.results
+                .generic_calls
+                .iter()
+                .map(|(&k, v)| (k, v.clone())),
+        );
         // Merge class_method_calls
-        self.class_method_calls
-            .extend(sub.class_method_calls.iter().map(|(&k, v)| (k, v.clone())));
+        self.results.class_method_calls.extend(
+            sub.results
+                .class_method_calls
+                .iter()
+                .map(|(&k, v)| (k, v.clone())),
+        );
         // Merge static_method_calls
-        self.static_method_calls
-            .extend(sub.static_method_calls.iter().map(|(&k, v)| (k, v.clone())));
+        self.results.static_method_calls.extend(
+            sub.results
+                .static_method_calls
+                .iter()
+                .map(|(&k, v)| (k, v.clone())),
+        );
         // Merge substituted_return_types
-        self.substituted_return_types
-            .extend(sub.substituted_return_types.iter().map(|(&k, &v)| (k, v)));
+        self.results.substituted_return_types.extend(
+            sub.results
+                .substituted_return_types
+                .iter()
+                .map(|(&k, &v)| (k, v)),
+        );
         // Merge lambda_defaults
-        self.lambda_defaults
-            .extend(sub.lambda_defaults.iter().map(|(&k, v)| (k, v.clone())));
+        self.lambda
+            .defaults
+            .extend(sub.lambda.defaults.iter().map(|(&k, v)| (k, v.clone())));
         // Merge is_check_results
-        self.is_check_results
-            .extend(sub.is_check_results.iter().map(|(&k, v)| (k, *v)));
+        self.results
+            .is_check_results
+            .extend(sub.results.is_check_results.iter().map(|(&k, v)| (k, *v)));
         // Merge declared_var_types
-        self.declared_var_types
-            .extend(sub.declared_var_types.iter().map(|(&k, &v)| (k, v)));
+        self.results
+            .declared_var_types
+            .extend(sub.results.declared_var_types.iter().map(|(&k, &v)| (k, v)));
         // Merge tests_virtual_modules
-        self.tests_virtual_modules
-            .extend(sub.tests_virtual_modules.iter().map(|(&k, &v)| (k, v)));
+        self.results.tests_virtual_modules.extend(
+            sub.results
+                .tests_virtual_modules
+                .iter()
+                .map(|(&k, &v)| (k, v)),
+        );
         // Merge lambda_analysis
-        self.lambda_analysis
-            .extend(sub.lambda_analysis.iter().map(|(&k, v)| (k, v.clone())));
+        self.lambda
+            .analysis
+            .extend(sub.lambda.analysis.iter().map(|(&k, v)| (k, v.clone())));
         // Merge errors and warnings
-        self.errors.extend(sub.errors.iter().cloned());
-        self.warnings.extend(sub.warnings.iter().cloned());
+        self.diagnostics
+            .errors
+            .extend(sub.diagnostics.errors.iter().cloned());
+        self.diagnostics
+            .warnings
+            .extend(sub.diagnostics.warnings.iter().cloned());
     }
 
     /// Fork for analyzing a prelude file.
@@ -935,10 +973,13 @@ impl Analyzer {
     pub(super) fn fork_for_prelude(&self, module_id: ModuleId, file_path: PathBuf) -> Analyzer {
         Analyzer {
             ctx: Rc::clone(&self.ctx),
-            current_module: module_id,
-            current_file_path: Some(file_path),
-            loading_prelude: true, // Prevent sub-analyzer from loading prelude
-            module_loader: self.module_loader.new_child(),
+            module: ModuleContext {
+                current_module: module_id,
+                current_file_path: Some(file_path),
+                loading_prelude: true,
+                module_loader: self.module.module_loader.new_child(),
+                ..Default::default()
+            },
             ..Default::default()
         }
     }

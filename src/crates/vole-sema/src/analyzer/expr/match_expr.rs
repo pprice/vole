@@ -92,7 +92,7 @@ impl Analyzer {
             self.push_scope();
 
             // Save current type overrides
-            let saved_overrides = self.type_overrides.clone();
+            let saved_overrides = self.env.type_overrides.clone();
 
             // Check pattern and get narrowing info (using TypeId version)
             let narrowed_type_id = self.check_pattern_id(&arm.pattern, scrutinee_type_id, interner);
@@ -129,7 +129,7 @@ impl Analyzer {
 
             // Apply type narrowing if scrutinee is an identifier and pattern provides narrowing
             if let (Some(sym), Some(narrow_ty_id)) = (scrutinee_sym, effective_narrowed_id) {
-                self.type_overrides.insert(sym, narrow_ty_id);
+                self.env.type_overrides.insert(sym, narrow_ty_id);
             }
 
             // Check guard if present (must be bool) using TypeId
@@ -151,21 +151,21 @@ impl Analyzer {
             // coercion, empty-array element inference, etc.). Prefer caller-provided
             // expected (let binding / return), fall back to previous arms' type.
             let hint = expected.or(result_type_id).filter(|id| !id.is_never());
-            let errors_before = self.errors.len();
+            let errors_before = self.diagnostics.errors.len();
             let mut body_type_id =
                 self.check_expr_expecting_id_in_arm(&arm.body, hint, interner)?;
 
             // When the hint (from a previous arm, not the caller) caused type-mismatch
             // errors, this arm genuinely produces a different type. Discard the errors
             // and re-infer without the hint so the natural type flows into the union.
-            let hint_caused_errors = self.errors.len() > errors_before;
+            let hint_caused_errors = self.diagnostics.errors.len() > errors_before;
             if hint_caused_errors && expected.is_none() {
-                self.errors.truncate(errors_before);
+                self.diagnostics.errors.truncate(errors_before);
                 body_type_id = self.check_expr_in_arm(&arm.body, interner)?;
             }
 
             // Restore type overrides
-            self.type_overrides = saved_overrides;
+            self.env.type_overrides = saved_overrides;
 
             // Unify with previous arms, handling top/bottom types
             match result_type_id {

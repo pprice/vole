@@ -16,7 +16,7 @@ impl Analyzer {
         let name_str = interner.resolve(interface_decl.name).to_string();
         let name_id = self
             .name_table_mut()
-            .intern_raw(self.current_module, &[&name_str]);
+            .intern_raw(self.module.current_module, &[&name_str]);
 
         // Lookup shell registered in pass 0.5
         let entity_type_id = self
@@ -46,7 +46,7 @@ impl Analyzer {
             );
         }
 
-        let module_id = self.current_module;
+        let module_id = self.module.current_module;
         let mut type_ctx = TypeResolutionContext::with_type_params(
             &self.ctx.db,
             interner,
@@ -186,7 +186,7 @@ impl Analyzer {
                 let parent_str = interner.resolve(parent_sym);
                 let parent_name_id = self
                     .name_table_mut()
-                    .intern_raw(self.current_module, &[parent_str]);
+                    .intern_raw(self.module.current_module, &[parent_str]);
                 let parent_type_id = self.entity_registry().type_by_name(parent_name_id);
                 (parent_name_id, parent_type_id)
             })
@@ -212,7 +212,7 @@ impl Analyzer {
                 .intern_raw(builtin_mod, &[method_name_str]);
             let full_method_name_id = self
                 .name_table_mut()
-                .intern_raw(self.current_module, &[&name_str, method_name_str]);
+                .intern_raw(self.module.current_module, &[&name_str, method_name_str]);
             let signature_id = FunctionType::from_ids(params_id, *return_type_id, false)
                 .intern(&mut self.type_arena_mut());
             // Look up external binding for this method
@@ -271,7 +271,7 @@ impl Analyzer {
                     .intern_raw(builtin_mod, &[&method_name_str]);
                 let full_method_name_id = self
                     .name_table_mut()
-                    .intern_raw(self.current_module, &[&name_str, &method_name_str]);
+                    .intern_raw(self.module.current_module, &[&name_str, &method_name_str]);
 
                 // Create a fresh type context for each static method
                 let mut static_type_ctx = TypeResolutionContext::with_type_params(
@@ -321,7 +321,7 @@ impl Analyzer {
                 .intern_raw(builtin_mod, &[&field_name_str]);
             let full_field_name_id = self
                 .name_table_mut()
-                .intern_raw(self.current_module, &[&name_str, &field_name_str]);
+                .intern_raw(self.module.current_module, &[&name_str, &field_name_str]);
             self.entity_registry_mut().register_field(
                 entity_type_id,
                 field_name_id,

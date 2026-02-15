@@ -387,7 +387,7 @@ impl Analyzer {
 
                     // Store resolution as a structural method call
                     // Use method.name as method_name_id for structural methods
-                    self.method_resolutions.insert(
+                    self.results.method_resolutions.insert(
                         expr.id,
                         ResolvedMethod::Implemented {
                             type_def_id: None, // Structural methods don't have a TypeDefId
@@ -446,7 +446,7 @@ impl Analyzer {
                     }
                     other => other,
                 };
-                self.method_resolutions.insert(expr.id, updated);
+                self.results.method_resolutions.insert(expr.id, updated);
                 return Ok(func_type.return_type_id);
             }
 
@@ -606,7 +606,7 @@ impl Analyzer {
                 resolved.return_type_id()
             };
 
-            self.method_resolutions.insert(expr.id, resolved);
+            self.results.method_resolutions.insert(expr.id, resolved);
 
             // Record class method monomorphization for generic classes/records
             self.record_class_method_monomorph(
@@ -645,14 +645,17 @@ impl Analyzer {
                         let substituted = self
                             .type_arena_mut()
                             .substitute(func_type.return_type_id, &subs);
-                        self.substituted_return_types.insert(expr.id, substituted);
+                        self.results
+                            .substituted_return_types
+                            .insert(expr.id, substituted);
                         return Ok(substituted);
                     }
                 }
 
                 // For interface methods, the return type is already substituted in resolved.
                 // Store it for codegen to use.
-                self.substituted_return_types
+                self.results
+                    .substituted_return_types
                     .insert(expr.id, resolved_return_id);
                 resolved_return_id
             };
@@ -911,7 +914,7 @@ impl Analyzer {
                 params_id: final_param_ids.into(),
                 return_type_id: final_return_id,
             };
-            self.method_resolutions.insert(
+            self.results.method_resolutions.insert(
                 expr.id,
                 ResolvedMethod::Static {
                     method_name_id,
@@ -924,7 +927,8 @@ impl Analyzer {
 
             // Record substituted return type if generic substitution occurred
             if maybe_inferred.is_some() && final_return_id != return_type_id {
-                self.substituted_return_types
+                self.results
+                    .substituted_return_types
                     .insert(expr.id, final_return_id);
             }
 
@@ -1059,7 +1063,7 @@ impl Analyzer {
             );
             let mangled_name = self
                 .name_table_mut()
-                .intern_raw(self.current_module, &[&mangled_name_str]);
+                .intern_raw(self.module.current_module, &[&mangled_name_str]);
 
             // Class method monomorphs must carry a concrete signature.
             // Leaving TypeParam-based signatures here can produce verifier
@@ -1105,7 +1109,7 @@ impl Analyzer {
 
         // Record the call site → key mapping
         tracing::debug!(expr_id = ?expr.id, key = ?key, "recording call site");
-        self.class_method_calls.insert(expr.id, key);
+        self.results.class_method_calls.insert(expr.id, key);
     }
 
     /// Record a static method monomorphization for generic class static method calls.
@@ -1168,7 +1172,7 @@ impl Analyzer {
             );
             let mangled_name = self
                 .name_table_mut()
-                .intern_raw(self.current_module, &[&mangled_name_str]);
+                .intern_raw(self.module.current_module, &[&mangled_name_str]);
 
             // Get param TypeIds from func_type
             let param_type_ids: Vec<ArenaTypeId> = func_type.params_id.iter().copied().collect();
@@ -1231,7 +1235,7 @@ impl Analyzer {
 
         // Record the call site → key mapping
         tracing::debug!(expr_id = ?expr.id, key = ?key, "recording static method call site");
-        self.static_method_calls.insert(expr.id, key);
+        self.results.static_method_calls.insert(expr.id, key);
     }
 
     /// Handle module method calls (e.g., `math.sqrt(16.0)`).
@@ -1374,7 +1378,7 @@ impl Analyzer {
             None
         };
 
-        self.method_resolutions.insert(
+        self.results.method_resolutions.insert(
             expr.id,
             ResolvedMethod::Implemented {
                 type_def_id: None,
@@ -1479,7 +1483,7 @@ impl Analyzer {
             );
         }
 
-        self.generic_calls.insert(expr.id, key);
+        self.results.generic_calls.insert(expr.id, key);
 
         Ok((concrete_params, concrete_ret))
     }

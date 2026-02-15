@@ -37,9 +37,10 @@ impl Analyzer {
             .name_table_mut()
             .intern_raw(builtin_mod, &[method_name_str]);
         let type_name_str = interner.resolve(type_name);
-        let full_method_name_id = self
-            .name_table_mut()
-            .intern_raw(self.current_module, &[type_name_str, method_name_str]);
+        let full_method_name_id = self.name_table_mut().intern_raw(
+            self.module.current_module,
+            &[type_name_str, method_name_str],
+        );
         (method_name_id, full_method_name_id)
     }
 
@@ -53,7 +54,7 @@ impl Analyzer {
         type_param_scope: Option<&TypeParamScope>,
         self_type: Option<ArenaTypeId>,
     ) -> ArenaTypeId {
-        let module_id = self.current_module;
+        let module_id = self.module.current_module;
         let params_id: Vec<ArenaTypeId> = params
             .iter()
             .map(|p| {
@@ -128,6 +129,7 @@ impl Analyzer {
                 }
                 // Check from type_param_stack too
                 if self
+                    .env
                     .type_param_stack
                     .current()
                     .is_some_and(|s| s.get(*sym).is_some())

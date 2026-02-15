@@ -10,7 +10,7 @@ impl Analyzer {
     ) {
         let name_id =
             self.name_table_mut()
-                .intern(self.current_module, &[struct_decl.name], interner);
+                .intern(self.module.current_module, &[struct_decl.name], interner);
 
         let entity_type_id = self
             .entity_registry_mut()
@@ -94,9 +94,11 @@ impl Analyzer {
         sentinel_decl: &SentinelDecl,
         interner: &Interner,
     ) {
-        let name_id =
-            self.name_table_mut()
-                .intern(self.current_module, &[sentinel_decl.name], interner);
+        let name_id = self.name_table_mut().intern(
+            self.module.current_module,
+            &[sentinel_decl.name],
+            interner,
+        );
 
         let entity_type_id = self
             .entity_registry_mut()

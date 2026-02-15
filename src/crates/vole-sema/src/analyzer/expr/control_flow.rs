@@ -71,16 +71,16 @@ impl Analyzer {
         let narrowing_info = self.extract_is_narrowing_info(&if_expr.condition, interner);
 
         // Save current overrides
-        let saved_overrides = self.type_overrides.clone();
+        let saved_overrides = self.env.type_overrides.clone();
 
         // Type check then branch with narrowing if applicable
         if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
-            self.type_overrides.insert(*sym, *narrowed_type_id);
+            self.env.type_overrides.insert(*sym, *narrowed_type_id);
         }
         let then_ty_id = self.check_expr(&if_expr.then_branch, interner)?;
 
         // Restore overrides for else branch
-        self.type_overrides = saved_overrides.clone();
+        self.env.type_overrides = saved_overrides.clone();
 
         // Check else branch if present
         let else_ty_id = if let Some(else_branch) = &if_expr.else_branch {
@@ -89,17 +89,17 @@ impl Analyzer {
                 && let Some(else_narrowed) =
                     self.compute_else_narrowed_type(*tested_type_id, *original_type_id)
             {
-                self.type_overrides.insert(*sym, else_narrowed);
+                self.env.type_overrides.insert(*sym, else_narrowed);
             }
 
             let else_ty_id = self.check_expr(else_branch, interner)?;
 
             // Restore original overrides
-            self.type_overrides = saved_overrides;
+            self.env.type_overrides = saved_overrides;
 
             else_ty_id
         } else {
-            self.type_overrides = saved_overrides;
+            self.env.type_overrides = saved_overrides;
             ArenaTypeId::VOID
         };
 
@@ -164,7 +164,7 @@ impl Analyzer {
         let mut result_type = ArenaTypeId::INVALID;
 
         // Save overrides once before processing arms
-        let saved_overrides = self.type_overrides.clone();
+        let saved_overrides = self.env.type_overrides.clone();
 
         for (i, arm) in when_expr.arms.iter().enumerate() {
             // Check condition (if not wildcard) and extract narrowing info
@@ -188,14 +188,14 @@ impl Analyzer {
 
             // Apply narrowing for this arm's body
             if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
-                self.type_overrides.insert(*sym, *narrowed_type_id);
+                self.env.type_overrides.insert(*sym, *narrowed_type_id);
             }
 
             // Check body with narrowed type (arm bodies allow trailing expressions)
             let body_ty = self.check_expr_in_arm(&arm.body, interner)?;
 
             // Restore overrides for next arm
-            self.type_overrides = saved_overrides.clone();
+            self.env.type_overrides = saved_overrides.clone();
 
             if i == 0 {
                 result_type = body_ty;

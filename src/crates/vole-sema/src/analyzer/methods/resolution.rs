@@ -153,7 +153,10 @@ impl Analyzer {
                 self.resolve_method_on_type_param(param_name_id, method_name, interner)
             }
             TypeParamResult::TypeParamRef(type_param_id) => {
-                let info = self.type_param_stack.get_by_type_param_id(type_param_id)?;
+                let info = self
+                    .env
+                    .type_param_stack
+                    .get_by_type_param_id(type_param_id)?;
                 self.resolve_method_on_type_param(info.name_id, method_name, interner)
             }
             TypeParamResult::None => None,
@@ -262,7 +265,7 @@ impl Analyzer {
         // This is critical for lambdas inside generic class methods: the lambda
         // pushes its own scope (possibly empty), but the class-level constraints
         // live in an outer scope.
-        let type_param = match self.type_param_stack.get_by_name_id(param_name_id) {
+        let type_param = match self.env.type_param_stack.get_by_name_id(param_name_id) {
             Some(tp) => tp,
             None => {
                 tracing::trace!(?param_name_id, "type param not found in any scope");

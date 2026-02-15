@@ -23,17 +23,17 @@ impl Analyzer {
     /// then all other prelude files are auto-discovered and loaded.
     pub(super) fn load_prelude(&mut self) {
         // Don't load prelude if we're already loading it (prevents recursion)
-        if self.loading_prelude {
+        if self.module.loading_prelude {
             return;
         }
 
         // Check if stdlib is available
-        let stdlib_root = match self.module_loader.stdlib_root() {
+        let stdlib_root = match self.module.module_loader.stdlib_root() {
             Some(root) => root.to_path_buf(),
             None => return,
         };
 
-        self.loading_prelude = true;
+        self.module.loading_prelude = true;
 
         // Auto-discover prelude files from stdlib/prelude/*.vole
         let prelude_dir = stdlib_root.join("prelude");
@@ -51,7 +51,7 @@ impl Analyzer {
             self.load_prelude_file(&import_path);
         }
 
-        self.loading_prelude = false;
+        self.module.loading_prelude = false;
     }
 
     /// Discover prelude files from the prelude directory.
@@ -79,6 +79,7 @@ impl Analyzer {
     pub(super) fn load_prelude_file(&mut self, import_path: &str) {
         // Resolve path first, then canonicalize for consistent cache keys
         let resolved_path = self
+            .module
             .module_loader
             .resolve_path(import_path, None)
             .unwrap_or_else(|err| {
@@ -99,7 +100,8 @@ impl Analyzer {
         {
             // Use cached analysis results.
             for (name, func_type) in &cached.functions_by_name {
-                self.functions_by_name
+                self.symbols
+                    .functions_by_name
                     .insert(name.clone(), func_type.clone());
             }
             // Register generic prelude functions from cached module
@@ -115,7 +117,9 @@ impl Analyzer {
                             &[func.name],
                             &cached.interner,
                         );
-                        self.generic_prelude_functions.insert(name_str, name_id);
+                        self.symbols
+                            .generic_prelude_functions
+                            .insert(name_str, name_id);
                     }
                 }
             }
@@ -144,12 +148,16 @@ impl Analyzer {
         }
 
         // Load source via module_loader
-        let module_info = self.module_loader.load(import_path).unwrap_or_else(|err| {
-            panic!(
-                "Failed to load prelude file '{import_path}': {err}\n\
+        let module_info = self
+            .module
+            .module_loader
+            .load(import_path)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Failed to load prelude file '{import_path}': {err}\n\
                      This is a bug in the standard library or installation."
-            )
-        });
+                )
+            });
 
         // Parse the module
         let mut parser = Parser::new(&module_info.source);
@@ -188,21 +196,21 @@ impl Analyzer {
                 CachedModule {
                     program: program.clone(),
                     interner: prelude_interner.clone(),
-                    expr_types: sub_analyzer.expr_types.clone(),
-                    method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
-                    generic_calls: sub_analyzer.generic_calls.clone(),
-                    class_method_generics: sub_analyzer.class_method_calls.clone(),
-                    static_method_generics: sub_analyzer.static_method_calls.clone(),
-                    functions_by_name: sub_analyzer.functions_by_name.clone(),
-                    is_check_results: sub_analyzer.is_check_results.clone(),
-                    declared_var_types: sub_analyzer.declared_var_types.clone(),
+                    expr_types: sub_analyzer.results.expr_types.clone(),
+                    method_resolutions: sub_analyzer.results.method_resolutions.clone_inner(),
+                    generic_calls: sub_analyzer.results.generic_calls.clone(),
+                    class_method_generics: sub_analyzer.results.class_method_calls.clone(),
+                    static_method_generics: sub_analyzer.results.static_method_calls.clone(),
+                    functions_by_name: sub_analyzer.symbols.functions_by_name.clone(),
+                    is_check_results: sub_analyzer.results.is_check_results.clone(),
+                    declared_var_types: sub_analyzer.results.declared_var_types.clone(),
                 },
             );
         }
 
         // Merge functions by name
-        for (name, func_type) in sub_analyzer.functions_by_name {
-            self.functions_by_name.insert(name, func_type);
+        for (name, func_type) in sub_analyzer.symbols.functions_by_name {
+            self.symbols.functions_by_name.insert(name, func_type);
         }
 
         // Register generic prelude functions for cross-interner generic lookup
@@ -214,7 +222,9 @@ impl Analyzer {
                 let name_id =
                     self.name_table_mut()
                         .intern(prelude_module, &[func.name], &prelude_interner);
-                self.generic_prelude_functions.insert(name_str, name_id);
+                self.symbols
+                    .generic_prelude_functions
+                    .insert(name_str, name_id);
             }
         }
 
@@ -258,13 +268,13 @@ impl Analyzer {
             self.ctx.module_data.borrow_mut().insert(
                 import_path.to_string(),
                 ModuleAnalysisData {
-                    types: sub_analyzer.expr_types.clone(),
-                    methods: sub_analyzer.method_resolutions.into_inner(),
-                    is_check_results: sub_analyzer.is_check_results.clone(),
-                    generic_calls: sub_analyzer.generic_calls.clone(),
-                    class_method_calls: sub_analyzer.class_method_calls.clone(),
-                    static_method_calls: sub_analyzer.static_method_calls.clone(),
-                    declared_var_types: sub_analyzer.declared_var_types.clone(),
+                    types: sub_analyzer.results.expr_types.clone(),
+                    methods: sub_analyzer.results.method_resolutions.into_inner(),
+                    is_check_results: sub_analyzer.results.is_check_results.clone(),
+                    generic_calls: sub_analyzer.results.generic_calls.clone(),
+                    class_method_calls: sub_analyzer.results.class_method_calls.clone(),
+                    static_method_calls: sub_analyzer.results.static_method_calls.clone(),
+                    declared_var_types: sub_analyzer.results.declared_var_types.clone(),
                     lambda_analysis: Default::default(),
                 },
             );

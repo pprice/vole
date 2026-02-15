@@ -102,7 +102,7 @@ impl Analyzer {
         // Lookup shell registered in register_all_type_shells
         let name_id = self
             .name_table_mut()
-            .intern(self.current_module, &[name], interner);
+            .intern(self.module.current_module, &[name], interner);
         let Some(type_id) = self.entity_registry_mut().type_by_name(name_id) else {
             // Shell not found - this can happen when the parser misidentifies
             // an expression as a type alias (e.g. `let r = a | b` where a/b are
@@ -208,8 +208,8 @@ impl Analyzer {
                                 let_stmt.span,
                             );
                         }
-                        self.globals.insert(let_stmt.name, var_type_id);
-                        self.scope.define(
+                        self.symbols.globals.insert(let_stmt.name, var_type_id);
+                        self.env.scope.define(
                             let_stmt.name,
                             Variable {
                                 ty: var_type_id,
@@ -221,19 +221,19 @@ impl Analyzer {
                         // Track if this immutable global has a constant initializer
                         // This enables using it in other constant expressions (e.g., default params)
                         if !let_stmt.mutable && self.is_constant_expr(init_expr) {
-                            self.constant_globals.insert(let_stmt.name);
+                            self.symbols.constant_globals.insert(let_stmt.name);
                         }
 
                         // Register in entity registry for proper global variable tracking
                         let global_name_id = self.name_table_mut().intern(
-                            self.current_module,
+                            self.module.current_module,
                             &[let_stmt.name],
                             interner,
                         );
                         self.entity_registry_mut().register_global(
                             global_name_id,
                             var_type_id,
-                            self.current_module,
+                            self.module.current_module,
                             let_stmt.mutable,
                             init_expr.id,
                         );
@@ -270,19 +270,19 @@ impl Analyzer {
         // Try current module first
         let name_id = self
             .name_table()
-            .name_id(self.current_module, &[type_name], interner);
+            .name_id(self.module.current_module, &[type_name], interner);
         if name_id.is_some() {
             return name_id;
         }
         // Try priority module (virtual test module for type shadowing)
-        if let Some(priority) = self.type_priority_module {
+        if let Some(priority) = self.env.type_priority_module {
             let name_id = self.name_table().name_id(priority, &[type_name], interner);
             if name_id.is_some() {
                 return name_id;
             }
         }
         // Try parent modules (includes virtual test modules added during check_tests)
-        for &parent in &self.parent_modules {
+        for &parent in &self.env.parent_modules {
             let name_id = self.name_table().name_id(parent, &[type_name], interner);
             if name_id.is_some() {
                 return name_id;
@@ -319,7 +319,7 @@ impl Analyzer {
             for tp in type_params {
                 scope.add(tp.clone());
             }
-            self.type_param_stack.push_scope(scope);
+            self.env.type_param_stack.push_scope(scope);
         }
 
         // Type-check field default expressions
@@ -351,7 +351,7 @@ impl Analyzer {
 
         // Pop type param scope after checking methods
         if generic_type_params.is_some() {
-            self.type_param_stack.pop();
+            self.env.type_param_stack.pop();
         }
 
         // Validate interface satisfaction
@@ -368,9 +368,9 @@ impl Analyzer {
         interner: &Interner,
     ) {
         let maybe_type_def_id = {
-            let name_id = self
-                .name_table()
-                .name_id(self.current_module, &[type_name], interner);
+            let name_id =
+                self.name_table()
+                    .name_id(self.module.current_module, &[type_name], interner);
             name_id.and_then(|name_id| self.entity_registry().type_by_name(name_id))
         };
 
@@ -414,7 +414,8 @@ impl Analyzer {
         let label = tests_decl.label.as_deref().unwrap_or("anonymous");
         let synthetic_path = format!(
             "{}::tests_{}_{}",
-            self.current_file_path
+            self.module
+                .current_file_path
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
@@ -424,7 +425,8 @@ impl Analyzer {
         let virtual_module_id = self.name_table_mut().module_id(&synthetic_path);
 
         // Store the virtual module ID for codegen to look up
-        self.tests_virtual_modules
+        self.results
+            .tests_virtual_modules
             .insert(tests_decl.span, virtual_module_id);
 
         // Create a sub-analyzer that inherits the parent scope

@@ -276,7 +276,11 @@ impl Analyzer {
 
         // If the pattern is a type param ref, resolve to name_id and bind
         if let Some(type_param_id) = arena.unwrap_type_param_ref(pattern_id) {
-            if let Some(info) = self.type_param_stack.get_by_type_param_id(type_param_id) {
+            if let Some(info) = self
+                .env
+                .type_param_stack
+                .get_by_type_param_id(type_param_id)
+            {
                 drop(arena);
                 self.unify_type_param_id(info.name_id, actual_id, type_params, inferred);
             }
@@ -453,7 +457,7 @@ impl Analyzer {
                 // scope with the same name_id. If so, bind to the type param instead of Nil.
                 if actual_id == ArenaTypeId::NIL {
                     // Check if this type param is in our current scope - if so, preserve it
-                    if let Some(scope) = self.type_param_stack.current()
+                    if let Some(scope) = self.env.type_param_stack.current()
                         && scope.get_by_name_id(name_id).is_some()
                     {
                         // Preserve the type param - create a TypeParam TypeId
@@ -464,7 +468,7 @@ impl Analyzer {
                     }
                 } else if let Some(actual_name_id) = arena.unwrap_type_param(actual_id) {
                     // If actual is also a type param, check if it's in our scope
-                    if let Some(scope) = self.type_param_stack.current()
+                    if let Some(scope) = self.env.type_param_stack.current()
                         && scope.get_by_name_id(actual_name_id).is_some()
                     {
                         // Preserve the actual type param

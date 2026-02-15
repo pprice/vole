@@ -18,7 +18,7 @@ impl Analyzer {
                 methods: _,
             } => {
                 // Direct structural type - resolve it to an InternedStructural
-                let module_id = self.current_module;
+                let module_id = self.module.current_module;
                 let mut ctx = if let Some(scope) = type_param_scope {
                     TypeResolutionContext::with_type_params(
                         &self.ctx.db,
@@ -178,7 +178,7 @@ impl Analyzer {
         type_param_scope: &TypeParamScope,
         synthetic_param_map: &FxHashMap<usize, NameId>,
     ) -> (Vec<ArenaTypeId>, ArenaTypeId) {
-        let module_id = self.current_module;
+        let module_id = self.module.current_module;
         let mut ctx = TypeResolutionContext::with_type_params(
             &self.ctx.db,
             interner,
@@ -240,13 +240,13 @@ impl Analyzer {
         let return_type_id = self.resolve_non_generic_return(func, interner);
 
         let signature = FunctionType::from_ids(&params_id, return_type_id, false);
-        self.functions.insert(func.name, signature.clone());
+        self.symbols.functions.insert(func.name, signature.clone());
 
         // Register in EntityRegistry with default expressions
         self.entity_registry_mut().register_function_full(
             reg_data.name_id,
             reg_data.name_id, // For top-level functions, name_id == full_name_id
-            self.current_module,
+            self.module.current_module,
             signature,
             reg_data.required_params,
             reg_data.param_defaults,
@@ -280,7 +280,7 @@ impl Analyzer {
         let func_id = self.entity_registry_mut().register_function_full(
             reg_data.name_id,
             reg_data.name_id, // For top-level functions, name_id == full_name_id
-            self.current_module,
+            self.module.current_module,
             signature,
             reg_data.required_params,
             reg_data.param_defaults,
@@ -299,9 +299,9 @@ impl Analyzer {
     }
 
     pub(super) fn collect_function_signature(&mut self, func: &FuncDecl, interner: &Interner) {
-        let name_id = self
-            .name_table_mut()
-            .intern(self.current_module, &[func.name], interner);
+        let name_id =
+            self.name_table_mut()
+                .intern(self.module.current_module, &[func.name], interner);
 
         // Validate parameter default ordering: non-defaulted params must come before defaulted
         let required_params = self.validate_param_defaults(&func.params, interner);

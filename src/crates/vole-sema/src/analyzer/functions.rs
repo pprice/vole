@@ -23,14 +23,14 @@ impl Analyzer {
         return_type_id: ArenaTypeId,
     ) -> FunctionCheckContext {
         let saved = FunctionCheckContext {
-            return_type: self.current_function_return.take(),
-            error_type: self.current_function_error_type.take(),
-            generator_element_type: self.current_generator_element_type.take(),
-            static_method: self.current_static_method.take(),
-            type_param_stack_depth: self.type_param_stack.depth(),
+            return_type: self.env.current_function_return.take(),
+            error_type: self.env.current_function_error_type.take(),
+            generator_element_type: self.env.current_generator_element_type.take(),
+            static_method: self.env.current_static_method.take(),
+            type_param_stack_depth: self.env.type_param_stack.depth(),
         };
 
-        self.current_function_return = Some(return_type_id);
+        self.env.current_function_return = Some(return_type_id);
 
         // Set error type context if this is a fallible function
         let error_type = self
@@ -38,12 +38,12 @@ impl Analyzer {
             .unwrap_fallible(return_type_id)
             .map(|(_, e)| e);
         if let Some(error) = error_type {
-            self.current_function_error_type = Some(error);
+            self.env.current_function_error_type = Some(error);
         }
 
         // Set generator context if return type is Iterator<T>
         if let Some(element_type_id) = self.extract_iterator_element_type_id(return_type_id) {
-            self.current_generator_element_type = Some(element_type_id);
+            self.env.current_generator_element_type = Some(element_type_id);
         }
 
         saved
@@ -54,23 +54,23 @@ impl Analyzer {
     pub(super) fn enter_function_context_inferring(&mut self) -> FunctionCheckContext {
         // current_function_return stays None to signal inference mode
         FunctionCheckContext {
-            return_type: self.current_function_return.take(),
-            error_type: self.current_function_error_type.take(),
-            generator_element_type: self.current_generator_element_type.take(),
-            static_method: self.current_static_method.take(),
-            type_param_stack_depth: self.type_param_stack.depth(),
+            return_type: self.env.current_function_return.take(),
+            error_type: self.env.current_function_error_type.take(),
+            generator_element_type: self.env.current_generator_element_type.take(),
+            static_method: self.env.current_static_method.take(),
+            type_param_stack_depth: self.env.type_param_stack.depth(),
         }
     }
 
     /// Exit function/method check context, restoring saved state.
     pub(super) fn exit_function_context(&mut self, saved: FunctionCheckContext) {
-        self.current_function_return = saved.return_type;
-        self.current_function_error_type = saved.error_type;
-        self.current_generator_element_type = saved.generator_element_type;
-        self.current_static_method = saved.static_method;
+        self.env.current_function_return = saved.return_type;
+        self.env.current_function_error_type = saved.error_type;
+        self.env.current_generator_element_type = saved.generator_element_type;
+        self.env.current_static_method = saved.static_method;
         // Pop any scopes that were pushed during this context
-        while self.type_param_stack.depth() > saved.type_param_stack_depth {
-            self.type_param_stack.pop();
+        while self.env.type_param_stack.depth() > saved.type_param_stack_depth {
+            self.env.type_param_stack.pop();
         }
     }
 
@@ -78,7 +78,7 @@ impl Analyzer {
     pub(super) fn enter_param_scope(&mut self, params: &[Param], type_ids: &[ArenaTypeId]) {
         self.push_scope();
         for (param, &ty_id) in params.iter().zip(type_ids.iter()) {
-            self.scope.define(
+            self.env.scope.define(
                 param.name,
                 Variable {
                     ty: ty_id,
@@ -126,9 +126,9 @@ impl Analyzer {
 
         // Also skip implicitly generified functions (structural types in parameters)
         // These have generic_info but no AST-level type_params
-        let name_id = self
-            .name_table_mut()
-            .intern(self.current_module, &[func.name], interner);
+        let name_id =
+            self.name_table_mut()
+                .intern(self.module.current_module, &[func.name], interner);
         let has_generic_info = self
             .entity_registry()
             .function_by_name(name_id)
@@ -144,6 +144,7 @@ impl Analyzer {
         }
 
         let func_type = self
+            .symbols
             .functions
             .get(&func.name)
             .cloned()
@@ -173,15 +174,15 @@ impl Analyzer {
             let inferred_return_type = self.infer_return_type_from_info(&body_info);
 
             // Update the function signature with the inferred return type
-            if let Some(existing) = self.functions.get_mut(&func.name) {
+            if let Some(existing) = self.symbols.functions.get_mut(&func.name) {
                 existing.return_type_id = inferred_return_type;
             }
 
             // Also update in entity_registry
             // Get func_id first, then drop borrow before mutating
-            let name_id = self
-                .name_table_mut()
-                .intern(self.current_module, &[func.name], interner);
+            let name_id =
+                self.name_table_mut()
+                    .intern(self.module.current_module, &[func.name], interner);
             let func_id = self.entity_registry().function_by_name(name_id);
             if let Some(func_id) = func_id {
                 self.entity_registry_mut()
@@ -226,9 +227,9 @@ impl Analyzer {
         interner: &Interner,
     ) {
         // Get the generic function info to resolve parameter and return types
-        let name_id = self
-            .name_table_mut()
-            .intern(self.current_module, &[func.name], interner);
+        let name_id =
+            self.name_table_mut()
+                .intern(self.module.current_module, &[func.name], interner);
         let generic_info = {
             let registry = self.entity_registry();
             registry
@@ -265,7 +266,7 @@ impl Analyzer {
             // Create TypeParamInfo with the substituted type
             type_param_scope.add(tp.clone());
         }
-        self.type_param_stack.push_scope(type_param_scope);
+        self.env.type_param_stack.push_scope(type_param_scope);
 
         // Store substitutions for use during type resolution
         // We need to make type param lookups return the substituted concrete types
@@ -276,7 +277,7 @@ impl Analyzer {
         let _ = self.check_func_body(&func.body, interner);
 
         // Pop type parameter scope
-        self.type_param_stack.pop();
+        self.env.type_param_stack.pop();
 
         // Restore scope
         self.pop_scope();
@@ -294,9 +295,11 @@ impl Analyzer {
             .iter()
             .filter_map(|decl| {
                 if let Decl::Function(func) = decl {
-                    let name_id =
-                        self.name_table_mut()
-                            .intern(self.current_module, &[func.name], interner);
+                    let name_id = self.name_table_mut().intern(
+                        self.module.current_module,
+                        &[func.name],
+                        interner,
+                    );
 
                     // Check for explicit type params OR implicit generic_info
                     let has_explicit_type_params = !func.type_params.is_empty();
@@ -437,7 +440,7 @@ impl Analyzer {
             | TypeDefKind::Primitive
             | TypeDefKind::Alias => self.type_arena().invalid(),
         };
-        self.scope.define(
+        self.env.scope.define(
             self_sym,
             Variable {
                 ty: self_type_id,
@@ -453,7 +456,7 @@ impl Analyzer {
             .filter(|p| interner.resolve(p.name) != "self")
             .collect();
         for (param, &ty_id) in non_self_params.iter().zip(params_id.iter()) {
-            self.scope.define(
+            self.env.scope.define(
                 param.name,
                 Variable {
                     ty: ty_id,
@@ -527,7 +530,7 @@ impl Analyzer {
                 let expr_type = self.check_expr(expr, interner)?;
 
                 // Handle return type inference or checking
-                if let Some(expected_return) = self.current_function_return {
+                if let Some(expected_return) = self.env.current_function_return {
                     // Explicit return type - check for match
                     if !self.types_compatible_id(expr_type, expected_return, interner) {
                         let expected_str = self.type_display_id(expected_return);
@@ -543,7 +546,7 @@ impl Analyzer {
                     }
                 } else {
                     // Inference mode - set the return type
-                    self.current_function_return = Some(expr_type);
+                    self.env.current_function_return = Some(expr_type);
                 }
                 // Expression body definitely returns with the expression type
                 Ok(ReturnInfo {
@@ -567,7 +570,7 @@ impl Analyzer {
             && let Some(Stmt::Expr(expr_stmt)) = block.stmts.last()
         {
             // Check if we have a recorded type for this expression
-            if let Some(&expr_type) = self.expr_types.get(&expr_stmt.expr.id) {
+            if let Some(&expr_type) = self.results.expr_types.get(&expr_stmt.expr.id) {
                 // Check if it matches the expected return type
                 if self.types_compatible_id(expr_type, expected_return_type, interner) {
                     return "did you mean to add `return` before the last expression?".to_string();
@@ -639,12 +642,12 @@ impl Analyzer {
         };
 
         // Mark that we're in a static method (for self-usage detection)
-        self.current_static_method = Some(interner.resolve(method.name).to_string());
+        self.env.current_static_method = Some(interner.resolve(method.name).to_string());
 
         // Push method-level type params onto the stack (merged with any class type params)
         let has_method_type_params = !method_type_params.is_empty();
         if has_method_type_params {
-            self.type_param_stack.push_merged(method_type_params);
+            self.env.type_param_stack.push_merged(method_type_params);
         }
 
         // Create scope WITHOUT 'self', define parameters
@@ -723,7 +726,7 @@ impl Analyzer {
         let self_sym = interner
             .lookup("self")
             .expect("'self' should be interned during parsing");
-        self.scope.define(
+        self.env.scope.define(
             self_sym,
             Variable {
                 ty: target_type_id,
@@ -739,7 +742,7 @@ impl Analyzer {
             .filter(|p| interner.resolve(p.name) != "self")
             .collect();
         for (param, &ty_id) in non_self_params.iter().zip(params_id.iter()) {
-            self.scope.define(
+            self.env.scope.define(
                 param.name,
                 Variable {
                     ty: ty_id,
@@ -1166,7 +1169,7 @@ impl Analyzer {
         );
         let mangled_name = self
             .name_table_mut()
-            .intern_raw(self.current_module, &[&mangled_name_str]);
+            .intern_raw(self.module.current_module, &[&mangled_name_str]);
 
         Some(crate::generic::ClassMethodMonomorphInstance {
             class_name: identity_inst.class_name,
@@ -1239,7 +1242,7 @@ impl Analyzer {
         );
         let mangled_name = self
             .name_table_mut()
-            .intern_raw(self.current_module, &[&mangled_name_str]);
+            .intern_raw(self.module.current_module, &[&mangled_name_str]);
 
         Some(crate::generic::StaticMethodMonomorphInstance {
             class_name: identity_inst.class_name,

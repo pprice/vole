@@ -76,15 +76,15 @@ impl Analyzer {
             _ => {}
         }
 
-        let module_id = self.current_module;
+        let module_id = self.module.current_module;
         let mut ctx = TypeResolutionContext {
             db: &self.ctx.db,
             interner,
             module_id,
-            type_params: self.type_param_stack.current(),
+            type_params: self.env.type_param_stack.current(),
             self_type: self_type_id,
-            imports: &self.parent_modules,
-            priority_module: self.type_priority_module,
+            imports: &self.env.parent_modules,
+            priority_module: self.env.type_priority_module,
         };
         resolve_type_to_id(ty, &mut ctx)
     }
@@ -111,7 +111,7 @@ impl Analyzer {
         let module_name = interner.resolve(module_sym);
         tracing::debug!(module_name, "qualified_type: looking up module in scope");
 
-        let module_var = self.scope.get(module_sym);
+        let module_var = self.env.scope.get(module_sym);
 
         let Some(var) = module_var else {
             // First segment not found in scope - this will be caught as undefined variable
@@ -201,15 +201,15 @@ impl Analyzer {
     }
 
     pub(super) fn analyze_error_decl(&mut self, decl: &ErrorDecl, interner: &Interner) {
-        let name_id = self
-            .name_table_mut()
-            .intern(self.current_module, &[decl.name], interner);
+        let name_id =
+            self.name_table_mut()
+                .intern(self.module.current_module, &[decl.name], interner);
 
         // Register in EntityRegistry first to get TypeDefId
         let entity_type_id = self.entity_registry_mut().register_type(
             name_id,
             TypeDefKind::ErrorType,
-            self.current_module,
+            self.module.current_module,
         );
 
         let error_info = ErrorTypeInfo {
@@ -230,18 +230,18 @@ impl Analyzer {
                 .intern_raw(builtin_module, &[field_name_str]);
             let full_field_name_id = self
                 .name_table_mut()
-                .intern_raw(self.current_module, &[type_name_str, field_name_str]);
+                .intern_raw(self.module.current_module, &[type_name_str, field_name_str]);
 
             // Resolve field type directly to TypeId
-            let module_id = self.current_module;
+            let module_id = self.module.current_module;
             let mut ctx = TypeResolutionContext {
                 db: &self.ctx.db,
                 interner,
                 module_id,
                 type_params: None,
                 self_type: None,
-                imports: &self.parent_modules,
-                priority_module: self.type_priority_module,
+                imports: &self.env.parent_modules,
+                priority_module: self.env.type_priority_module,
             };
             let field_type_id = resolve_type_to_id(&field.ty, &mut ctx);
 

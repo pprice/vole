@@ -18,7 +18,7 @@ impl Analyzer {
                 return Ok(ArenaTypeId::VOID);
             }
             AssignTarget::Variable(sym) => {
-                if let Some(var) = self.scope.get(*sym) {
+                if let Some(var) = self.env.scope.get(*sym) {
                     (var.ty, var.mutable, Some(var.declaration_span), true)
                 } else {
                     let name = interner.resolve(*sym);
@@ -209,7 +209,7 @@ impl Analyzer {
                 return Ok(ArenaTypeId::INVALID);
             }
             AssignTarget::Variable(sym) => {
-                if let Some(var) = self.scope.get(*sym) {
+                if let Some(var) = self.env.scope.get(*sym) {
                     let is_mutable = var.mutable;
                     let var_ty = var.ty;
                     let decl_span = var.declaration_span;

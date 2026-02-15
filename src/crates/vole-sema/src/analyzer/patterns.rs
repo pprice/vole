@@ -62,7 +62,7 @@ impl Analyzer {
                     Some(pattern_type_id)
                 } else {
                     // Regular identifier binding pattern
-                    self.scope.define(
+                    self.env.scope.define(
                         *name,
                         Variable {
                             ty: scrutinee_type_id,
@@ -94,12 +94,12 @@ impl Analyzer {
             PatternKind::Val { name } => {
                 let span = pattern.span;
                 // Val pattern compares against existing variable's value
-                let var_ty_id = self.scope.get(*name).map(|v| v.ty);
+                let var_ty_id = self.env.scope.get(*name).map(|v| v.ty);
                 if let Some(var_ty_id) = var_ty_id {
                     // Record capture if inside a lambda and variable is from outer scope
                     if self.in_lambda()
                         && !self.is_lambda_local(*name)
-                        && let Some(var) = self.scope.get(*name)
+                        && let Some(var) = self.env.scope.get(*name)
                     {
                         self.record_capture(*name, var.mutable);
                     }
@@ -495,7 +495,7 @@ impl Analyzer {
             });
             if let Some(field_type_id) = field_type_id {
                 // Bind the variable (binding may be different from field_name if renamed)
-                self.scope.define(
+                self.env.scope.define(
                     field_pat.binding,
                     Variable {
                         ty: field_type_id,

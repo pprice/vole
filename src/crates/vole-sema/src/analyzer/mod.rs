@@ -124,7 +124,7 @@ impl<'a> ResolverGuard<'a> {
 
 /// Information about a captured variable during lambda analysis
 #[derive(Debug, Clone)]
-struct CaptureInfo {
+pub(super) struct CaptureInfo {
     name: Symbol,
     is_mutable: bool, // Was the captured variable declared with `let mut`
     is_mutated: bool, // Does the lambda assign to this variable
@@ -291,10 +291,13 @@ impl AnalyzerBuilder {
         let ctx = Rc::new(AnalyzerContext::new(db, self.cache));
         let mut analyzer = Analyzer {
             ctx,
-            current_module,
-            current_file_path,
-            module_loader,
-            skip_tests: self.skip_tests,
+            module: ModuleContext {
+                current_module,
+                current_file_path,
+                module_loader,
+                skip_tests: self.skip_tests,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -349,96 +352,132 @@ impl AnalyzerContext {
     }
 }
 
+/// Type checking environment: scope, type overrides, and function context.
+#[derive(Default)]
+pub(super) struct TypeCheckEnv {
+    pub scope: Scope,
+    /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
+    pub type_overrides: FxHashMap<Symbol, ArenaTypeId>,
+    pub current_function_return: Option<ArenaTypeId>,
+    /// Current function's error type (if fallible)
+    pub current_function_error_type: Option<ArenaTypeId>,
+    /// Generator context: if inside a generator function, this holds the Iterator element type.
+    /// None means we're not in a generator (or not in a function at all).
+    pub current_generator_element_type: Option<ArenaTypeId>,
+    /// If we're inside a static method, this holds the method name (for error reporting).
+    /// None means we're not in a static method.
+    pub current_static_method: Option<String>,
+    /// Stack of type parameter scopes for nested generic contexts.
+    pub type_param_stack: TypeParamScopeStack,
+    /// Parent module IDs for hierarchical resolution (e.g., virtual test modules
+    /// that need to see parent module types). These are searched after the current
+    /// module but before the builtin module, providing scope inheritance for types.
+    pub parent_modules: Vec<ModuleId>,
+    /// Priority module for type resolution in tests blocks. When set, this module
+    /// is checked BEFORE current_module during type resolution, enabling types
+    /// defined in tests blocks to shadow parent module types of the same name.
+    pub type_priority_module: Option<ModuleId>,
+}
+
+/// Lambda/closure capture analysis state.
+#[derive(Default)]
+pub(super) struct LambdaState {
+    /// Stack of lambda scopes for capture analysis. Each entry is a FxHashMap
+    /// mapping captured variable names to their capture info.
+    pub captures: Vec<FxHashMap<Symbol, CaptureInfo>>,
+    /// Stack of sets tracking variables defined locally in each lambda
+    /// (parameters and let bindings inside the lambda body)
+    pub locals: Vec<HashSet<Symbol>>,
+    /// Stack of side effect flags for currently analyzed lambdas
+    pub side_effects: Vec<bool>,
+    /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
+    /// Maps Symbol -> (lambda_node_id, required_params)
+    pub variables: FxHashMap<Symbol, (NodeId, usize)>,
+    /// Lambda defaults for closure calls. Maps call site NodeId to lambda info.
+    pub defaults: FxHashMap<NodeId, LambdaDefaults>,
+    /// Lambda analysis results (captures and side effects).
+    /// Maps lambda expression NodeId -> LambdaAnalysis.
+    pub analysis: FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>,
+}
+
+/// Analysis results collected during type checking for codegen.
+#[derive(Default)]
+pub(super) struct AnalysisResults {
+    /// Resolved types for each expression node (for codegen)
+    /// Maps expression node IDs to their interned type handles for O(1) equality.
+    pub expr_types: FxHashMap<NodeId, ArenaTypeId>,
+    /// Type check results for `is` expressions and type patterns (for codegen)
+    /// Maps NodeId -> IsCheckResult to eliminate runtime type lookups
+    pub is_check_results: FxHashMap<NodeId, IsCheckResult>,
+    /// Resolved method calls for codegen
+    pub method_resolutions: MethodResolutions,
+    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
+    pub generic_calls: FxHashMap<NodeId, MonomorphKey>,
+    /// Mapping from method call expression NodeId to ClassMethodMonomorphKey (for generic class method calls)
+    pub class_method_calls: FxHashMap<NodeId, ClassMethodMonomorphKey>,
+    /// Mapping from static method call expression NodeId to StaticMethodMonomorphKey (for generic static method calls)
+    pub static_method_calls: FxHashMap<NodeId, StaticMethodMonomorphKey>,
+    /// Substituted return types for generic method calls.
+    /// When a method like `list.head()` is called on `List<i32>`, the generic return type `T`
+    /// is substituted to `i32`. This map stores the concrete type so codegen doesn't recompute.
+    pub substituted_return_types: FxHashMap<NodeId, ArenaTypeId>,
+    /// Declared variable types for let statements with explicit type annotations.
+    /// Maps init expression NodeId -> declared TypeId for codegen to use.
+    pub declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
+    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
+    /// Used by codegen to compile scoped type declarations (records, classes) within tests blocks.
+    pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
+}
+
+/// Function and global variable symbol tables.
+#[derive(Default)]
+pub(super) struct SymbolTables {
+    pub functions: FxHashMap<Symbol, FunctionType>,
+    /// Functions registered by string name (for prelude functions that cross interner boundaries)
+    pub functions_by_name: FxHashMap<String, FunctionType>,
+    /// Generic prelude functions by string name -> NameId (for cross-interner generic function lookup)
+    pub generic_prelude_functions: FxHashMap<String, NameId>,
+    pub globals: FxHashMap<Symbol, ArenaTypeId>,
+    /// Globals with constant initializers (for constant expression checking)
+    pub constant_globals: HashSet<Symbol>,
+}
+
+/// Module loading and file context state.
+#[derive(Default)]
+pub(super) struct ModuleContext {
+    /// Module loader for handling imports
+    pub module_loader: ModuleLoader,
+    /// Flag to prevent recursive prelude loading
+    pub loading_prelude: bool,
+    /// Current module being analyzed (for proper NameId registration)
+    pub current_module: ModuleId,
+    /// Current file path being analyzed (for relative imports).
+    /// This is set from the file path passed to Analyzer::new() and updated
+    /// when analyzing imported modules.
+    pub current_file_path: Option<PathBuf>,
+    /// When true, skip processing of `Decl::Tests` in all analysis passes.
+    /// Set by `vole run` to avoid sema/codegen cost for tests blocks in production.
+    pub skip_tests: bool,
+}
+
+/// Diagnostic errors and warnings collected during analysis.
+#[derive(Default)]
+pub(super) struct Diagnostics {
+    pub errors: Vec<TypeError>,
+    pub warnings: Vec<TypeWarning>,
+}
+
 pub struct Analyzer {
     // Shared state (single Rc clone for sub-analyzers)
     pub ctx: Rc<AnalyzerContext>,
 
-    // Per-analysis state
-    scope: Scope,
-    functions: FxHashMap<Symbol, FunctionType>,
-    /// Functions registered by string name (for prelude functions that cross interner boundaries)
-    functions_by_name: FxHashMap<String, FunctionType>,
-    /// Generic prelude functions by string name -> NameId (for cross-interner generic function lookup)
-    generic_prelude_functions: FxHashMap<String, NameId>,
-    globals: FxHashMap<Symbol, ArenaTypeId>,
-    /// Globals with constant initializers (for constant expression checking)
-    constant_globals: HashSet<Symbol>,
-    current_function_return: Option<ArenaTypeId>,
-    /// Current function's error type (if fallible)
-    current_function_error_type: Option<ArenaTypeId>,
-    /// Generator context: if inside a generator function, this holds the Iterator element type.
-    /// None means we're not in a generator (or not in a function at all).
-    current_generator_element_type: Option<ArenaTypeId>,
-    /// If we're inside a static method, this holds the method name (for error reporting).
-    /// None means we're not in a static method.
-    current_static_method: Option<String>,
-    errors: Vec<TypeError>,
-    warnings: Vec<TypeWarning>,
-    /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
-    type_overrides: FxHashMap<Symbol, ArenaTypeId>,
-    /// Stack of lambda scopes for capture analysis. Each entry is a FxHashMap
-    /// mapping captured variable names to their capture info.
-    lambda_captures: Vec<FxHashMap<Symbol, CaptureInfo>>,
-    /// Stack of sets tracking variables defined locally in each lambda
-    /// (parameters and let bindings inside the lambda body)
-    lambda_locals: Vec<HashSet<Symbol>>,
-    /// Stack of side effect flags for currently analyzed lambdas
-    lambda_side_effects: Vec<bool>,
-    /// Resolved types for each expression node (for codegen)
-    /// Maps expression node IDs to their interned type handles for O(1) equality.
-    expr_types: FxHashMap<NodeId, ArenaTypeId>,
-    /// Type check results for `is` expressions and type patterns (for codegen)
-    /// Maps NodeId -> IsCheckResult to eliminate runtime type lookups
-    is_check_results: FxHashMap<NodeId, IsCheckResult>,
-    /// Resolved method calls for codegen
-    pub method_resolutions: MethodResolutions,
-    /// Module loader for handling imports
-    module_loader: ModuleLoader,
-    /// Flag to prevent recursive prelude loading
-    loading_prelude: bool,
-    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
-    generic_calls: FxHashMap<NodeId, MonomorphKey>,
-    /// Mapping from method call expression NodeId to ClassMethodMonomorphKey (for generic class method calls)
-    class_method_calls: FxHashMap<NodeId, ClassMethodMonomorphKey>,
-    /// Mapping from static method call expression NodeId to StaticMethodMonomorphKey (for generic static method calls)
-    static_method_calls: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    /// Substituted return types for generic method calls.
-    /// When a method like `list.head()` is called on `List<i32>`, the generic return type `T`
-    /// is substituted to `i32`. This map stores the concrete type so codegen doesn't recompute.
-    substituted_return_types: FxHashMap<NodeId, ArenaTypeId>,
-    /// Lambda defaults for closure calls. Maps call site NodeId to lambda info.
-    lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
-    /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
-    /// Maps Symbol -> (lambda_node_id, required_params)
-    lambda_variables: FxHashMap<Symbol, (NodeId, usize)>,
-    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    /// Used by codegen to compile scoped type declarations (records, classes) within tests blocks.
-    tests_virtual_modules: FxHashMap<Span, ModuleId>,
-    /// Declared variable types for let statements with explicit type annotations.
-    /// Maps init expression NodeId -> declared TypeId for codegen to use.
-    declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
-    /// Lambda analysis results (captures and side effects).
-    /// Maps lambda expression NodeId -> LambdaAnalysis.
-    lambda_analysis: FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>,
-    /// Current module being analyzed (for proper NameId registration)
-    current_module: ModuleId,
-    /// Stack of type parameter scopes for nested generic contexts.
-    type_param_stack: TypeParamScopeStack,
-    /// Current file path being analyzed (for relative imports).
-    /// This is set from the file path passed to Analyzer::new() and updated
-    /// when analyzing imported modules.
-    current_file_path: Option<PathBuf>,
-    /// Parent module IDs for hierarchical resolution (e.g., virtual test modules
-    /// that need to see parent module types). These are searched after the current
-    /// module but before the builtin module, providing scope inheritance for types.
-    parent_modules: Vec<ModuleId>,
-    /// Priority module for type resolution in tests blocks. When set, this module
-    /// is checked BEFORE current_module during type resolution, enabling types
-    /// defined in tests blocks to shadow parent module types of the same name.
-    type_priority_module: Option<ModuleId>,
-    /// When true, skip processing of `Decl::Tests` in all analysis passes.
-    /// Set by `vole run` to avoid sema/codegen cost for tests blocks in production.
-    skip_tests: bool,
+    // Grouped per-analysis state
+    pub(super) env: TypeCheckEnv,
+    pub(super) lambda: LambdaState,
+    pub(super) results: AnalysisResults,
+    pub(super) symbols: SymbolTables,
+    pub(super) module: ModuleContext,
+    pub(super) diagnostics: Diagnostics,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -457,18 +496,18 @@ impl Analyzer {
     /// Set whether to skip processing of tests blocks.
     /// When true, `Decl::Tests` is ignored in all analysis passes.
     pub fn set_skip_tests(&mut self, skip: bool) {
-        self.skip_tests = skip;
+        self.module.skip_tests = skip;
     }
 
     /// Push a new child scope onto the scope stack.
     pub(crate) fn push_scope(&mut self) {
-        self.scope = Scope::with_parent(std::mem::take(&mut self.scope));
+        self.env.scope = Scope::with_parent(std::mem::take(&mut self.env.scope));
     }
 
     /// Pop the current scope, restoring the parent.
     pub(crate) fn pop_scope(&mut self) {
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
+        if let Some(parent) = std::mem::take(&mut self.env.scope).into_parent() {
+            self.env.scope = parent;
         }
     }
 
@@ -479,12 +518,12 @@ impl Analyzer {
 
     /// Get the resolved expression types as interned ArenaTypeId handles.
     pub fn expr_types(&self) -> &FxHashMap<NodeId, ArenaTypeId> {
-        &self.expr_types
+        &self.results.expr_types
     }
 
     /// Get the type check results for `is` expressions and type patterns.
     pub fn is_check_results(&self) -> &FxHashMap<NodeId, IsCheckResult> {
-        &self.is_check_results
+        &self.results.is_check_results
     }
 
     /// Get a resolver configured for the current module context.
@@ -495,9 +534,9 @@ impl Analyzer {
         ResolverGuard::new(
             &self.ctx.db,
             interner,
-            self.current_module,
-            &self.parent_modules,
-            self.type_priority_module,
+            self.module.current_module,
+            &self.env.parent_modules,
+            self.env.type_priority_module,
         )
     }
 
@@ -513,29 +552,31 @@ impl Analyzer {
 
     /// Take ownership of the expression types (consuming self)
     pub fn into_expr_types(self) -> FxHashMap<NodeId, ArenaTypeId> {
-        self.expr_types
+        self.results.expr_types
     }
 
     /// Take accumulated warnings, leaving the warnings list empty
     pub fn take_warnings(&mut self) -> Vec<TypeWarning> {
-        std::mem::take(&mut self.warnings)
+        std::mem::take(&mut self.diagnostics.warnings)
     }
 
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
         // Extract per-analysis fields before consuming ctx
-        let expr_types = self.expr_types;
-        let method_resolutions = self.method_resolutions.into_inner();
-        let generic_calls = self.generic_calls;
-        let class_method_calls = self.class_method_calls;
-        let static_method_calls = self.static_method_calls;
-        let substituted_return_types = self.substituted_return_types;
-        let lambda_defaults = self.lambda_defaults;
-        let tests_virtual_modules = self.tests_virtual_modules;
-        let is_check_results = self.is_check_results;
-        let declared_var_types = self.declared_var_types;
-        let lambda_analysis = self.lambda_analysis;
-        let current_module = self.current_module;
+        let results = self.results;
+        let expr_types = results.expr_types;
+        let method_resolutions = results.method_resolutions.into_inner();
+        let generic_calls = results.generic_calls;
+        let class_method_calls = results.class_method_calls;
+        let static_method_calls = results.static_method_calls;
+        let substituted_return_types = results.substituted_return_types;
+        let tests_virtual_modules = results.tests_virtual_modules;
+        let is_check_results = results.is_check_results;
+        let declared_var_types = results.declared_var_types;
+        let lambda = self.lambda;
+        let lambda_defaults = lambda.defaults;
+        let lambda_analysis = lambda.analysis;
+        let current_module = self.module.current_module;
 
         // Try to take ownership of the shared context to avoid cloning AST trees.
         // By this point all sub-analyzers should be dropped, so Rc strong count is 1.
@@ -589,13 +630,13 @@ impl Analyzer {
     fn record_expr_type_id(&mut self, expr: &Expr, type_id: ArenaTypeId) -> ArenaTypeId {
         // Pre-create RuntimeIterator(T) for Iterator<T> types so codegen can look them up
         self.ensure_runtime_iterator_for_iterator(type_id);
-        self.expr_types.insert(expr.id, type_id);
+        self.results.expr_types.insert(expr.id, type_id);
         type_id
     }
 
     /// Record the result of a type check (is expression or type pattern) for codegen.
     fn record_is_check_result(&mut self, node_id: NodeId, result: IsCheckResult) {
-        self.is_check_results.insert(node_id, result);
+        self.results.is_check_results.insert(node_id, result);
     }
 
     /// Get the display name for a type parameter.
@@ -705,12 +746,12 @@ impl Analyzer {
 
     /// Check if we're currently inside a lambda
     fn in_lambda(&self) -> bool {
-        !self.lambda_captures.is_empty()
+        !self.lambda.captures.is_empty()
     }
 
     /// Check if a symbol is a local variable in the current lambda
     fn is_lambda_local(&self, sym: Symbol) -> bool {
-        if let Some(locals) = self.lambda_locals.last() {
+        if let Some(locals) = self.lambda.locals.last() {
             locals.contains(&sym)
         } else {
             false
@@ -719,7 +760,7 @@ impl Analyzer {
 
     /// Add a local variable to the current lambda's locals set
     fn add_lambda_local(&mut self, sym: Symbol) {
-        if let Some(locals) = self.lambda_locals.last_mut() {
+        if let Some(locals) = self.lambda.locals.last_mut() {
             locals.insert(sym);
         }
     }
@@ -731,9 +772,9 @@ impl Analyzer {
     fn record_capture(&mut self, sym: Symbol, is_mutable: bool) {
         // Propagate capture from innermost to outermost lambda
         // Stop when we find a lambda where the variable is a local
-        for i in (0..self.lambda_captures.len()).rev() {
+        for i in (0..self.lambda.captures.len()).rev() {
             // Check if this variable is a local at this lambda level
-            if let Some(locals) = self.lambda_locals.get(i)
+            if let Some(locals) = self.lambda.locals.get(i)
                 && locals.contains(&sym)
             {
                 // Variable is defined at this level, no need to capture
@@ -741,7 +782,7 @@ impl Analyzer {
             }
 
             // Not a local at this level, so it must be captured
-            if let Some(captures) = self.lambda_captures.get_mut(i) {
+            if let Some(captures) = self.lambda.captures.get_mut(i) {
                 captures.entry(sym).or_insert(CaptureInfo {
                     name: sym,
                     is_mutable,
@@ -753,16 +794,16 @@ impl Analyzer {
 
     /// Mark a captured variable as mutated in all lambdas that capture it
     fn mark_capture_mutated(&mut self, sym: Symbol) {
-        for i in (0..self.lambda_captures.len()).rev() {
+        for i in (0..self.lambda.captures.len()).rev() {
             // Stop if variable is a local at this level
-            if let Some(locals) = self.lambda_locals.get(i)
+            if let Some(locals) = self.lambda.locals.get(i)
                 && locals.contains(&sym)
             {
                 break;
             }
 
             // Mark as mutated if captured at this level
-            if let Some(captures) = self.lambda_captures.get_mut(i)
+            if let Some(captures) = self.lambda.captures.get_mut(i)
                 && let Some(info) = captures.get_mut(&sym)
             {
                 info.is_mutated = true;
@@ -839,7 +880,7 @@ impl Analyzer {
 
     /// Mark the current lambda as having side effects
     fn mark_lambda_has_side_effects(&mut self) {
-        if let Some(flag) = self.lambda_side_effects.last_mut() {
+        if let Some(flag) = self.lambda.side_effects.last_mut() {
             *flag = true;
         }
     }
@@ -847,23 +888,23 @@ impl Analyzer {
     /// Get variable type as TypeId with flow-sensitive overrides
     fn get_variable_type_id(&self, sym: Symbol) -> Option<ArenaTypeId> {
         // Check overrides first (for narrowed types inside if-blocks)
-        if let Some(ty) = self.type_overrides.get(&sym) {
+        if let Some(ty) = self.env.type_overrides.get(&sym) {
             return Some(*ty);
         }
         // Then check scope
-        self.scope.get(sym).map(|v| v.ty)
+        self.env.scope.get(sym).map(|v| v.ty)
     }
 
     /// Get function type if the symbol refers to a top-level function.
     /// Returns None if the symbol is not a function name.
     fn get_function_type(&self, sym: Symbol, interner: &Interner) -> Option<FunctionType> {
         // Check by Symbol first (same interner)
-        if let Some(func_type) = self.functions.get(&sym) {
+        if let Some(func_type) = self.symbols.functions.get(&sym) {
             return Some(func_type.clone());
         }
         // Check by name for prelude functions (cross-interner lookup)
         let name = interner.resolve(sym);
-        self.functions_by_name.get(name).cloned()
+        self.symbols.functions_by_name.get(name).cloned()
     }
 
     #[tracing::instrument(skip(self, program, interner))]
@@ -892,7 +933,7 @@ impl Analyzer {
         // Sub-analyzers for imported modules (loading_prelude == true) share the parent's
         // entity registry via ctx, so clearing here would destroy monomorph instances
         // created by earlier tests blocks that have already been analyzed.
-        if !self.loading_prelude {
+        if !self.module.loading_prelude {
             self.entity_registry_mut().clear_monomorph_caches();
         }
 
@@ -935,10 +976,10 @@ impl Analyzer {
         // This iterates until no new MonomorphInstances are created
         self.analyze_monomorph_bodies(program, interner);
 
-        if self.errors.is_empty() {
+        if self.diagnostics.errors.is_empty() {
             Ok(())
         } else {
-            Err(std::mem::take(&mut self.errors))
+            Err(std::mem::take(&mut self.diagnostics.errors))
         }
     }
 
@@ -956,35 +997,35 @@ impl Analyzer {
         interner: &Interner,
         virtual_module_id: ModuleId,
     ) {
-        let parent_module = self.current_module;
+        let parent_module = self.module.current_module;
 
         // Register type shells under the virtual module for scope isolation
-        self.current_module = virtual_module_id;
+        self.module.current_module = virtual_module_id;
         self.register_all_type_shells(program, interner);
 
         // Add the virtual module to parent_modules so the resolver can find
         // types registered under the virtual module
-        self.parent_modules.push(virtual_module_id);
+        self.env.parent_modules.push(virtual_module_id);
 
         // Set the virtual module as the priority module for type resolution.
         // Types defined in the tests block shadow parent types of the same name.
-        self.type_priority_module = Some(virtual_module_id);
+        self.env.type_priority_module = Some(virtual_module_id);
 
         // Resolve type aliases (uses resolver which searches parent_modules)
         self.collect_type_aliases(program, interner);
 
         // Process module imports under the parent module so relative import paths
         // resolve against the actual file, not the virtual module
-        self.current_module = parent_module;
+        self.module.current_module = parent_module;
         self.process_module_imports(program, interner);
 
         // Collect type signatures under the virtual module (matches shells above)
-        self.current_module = virtual_module_id;
+        self.module.current_module = virtual_module_id;
         self.collect_type_signatures(program, interner);
 
         // Collect function signatures under the parent module so codegen can
         // find them via program_module() lookups
-        self.current_module = parent_module;
+        self.module.current_module = parent_module;
         self.collect_function_signatures(program, interner);
 
         // Process global lets (scoped lets in the tests block)
@@ -1007,7 +1048,7 @@ impl Analyzer {
                     self.check_function(func, interner)?;
                 }
                 Decl::Tests(tests_decl) => {
-                    if !self.skip_tests {
+                    if !self.module.skip_tests {
                         self.check_tests(tests_decl, interner)?;
                     }
                 }
@@ -1050,7 +1091,7 @@ impl Analyzer {
                             self.infer_implement_type_params(&impl_block.target_type, interner);
                         let has_type_param_scope = !inferred_scope.is_empty();
                         if has_type_param_scope {
-                            self.type_param_stack.push_scope(inferred_scope);
+                            self.env.type_param_stack.push_scope(inferred_scope);
                         }
 
                         // Resolve target type to TypeId for checking instance methods
@@ -1063,7 +1104,7 @@ impl Analyzer {
                         }
 
                         if has_type_param_scope {
-                            self.type_param_stack.pop();
+                            self.env.type_param_stack.pop();
                         }
                     }
 
@@ -1125,7 +1166,7 @@ impl Analyzer {
             | ExprKind::StringLiteral(_) => true,
 
             // Identifier: constant if it's an immutable global with a constant initializer
-            ExprKind::Identifier(sym) => self.constant_globals.contains(sym),
+            ExprKind::Identifier(sym) => self.symbols.constant_globals.contains(sym),
 
             // Unary operators on constants
             ExprKind::Unary(unary) => self.is_constant_expr(&unary.operand),
@@ -1173,42 +1214,12 @@ impl Default for Analyzer {
     fn default() -> Self {
         Self {
             ctx: Rc::new(AnalyzerContext::empty()),
-            scope: Scope::new(),
-            functions: FxHashMap::default(),
-            functions_by_name: FxHashMap::default(),
-            generic_prelude_functions: FxHashMap::default(),
-            globals: FxHashMap::default(),
-            constant_globals: HashSet::new(),
-            current_function_return: None,
-            current_function_error_type: None,
-            current_generator_element_type: None,
-            current_static_method: None,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            type_overrides: FxHashMap::default(),
-            lambda_captures: Vec::new(),
-            lambda_locals: Vec::new(),
-            lambda_side_effects: Vec::new(),
-            expr_types: FxHashMap::default(),
-            is_check_results: FxHashMap::default(),
-            method_resolutions: MethodResolutions::new(),
-            module_loader: ModuleLoader::new(),
-            loading_prelude: false,
-            generic_calls: FxHashMap::default(),
-            class_method_calls: FxHashMap::default(),
-            static_method_calls: FxHashMap::default(),
-            substituted_return_types: FxHashMap::default(),
-            lambda_defaults: FxHashMap::default(),
-            lambda_variables: FxHashMap::default(),
-            tests_virtual_modules: FxHashMap::default(),
-            declared_var_types: FxHashMap::default(),
-            lambda_analysis: FxHashMap::default(),
-            current_module: ModuleId::default(),
-            type_param_stack: TypeParamScopeStack::new(),
-            current_file_path: None,
-            parent_modules: Vec::new(),
-            type_priority_module: None,
-            skip_tests: false,
+            env: TypeCheckEnv::default(),
+            lambda: LambdaState::default(),
+            results: AnalysisResults::default(),
+            symbols: SymbolTables::default(),
+            module: ModuleContext::default(),
+            diagnostics: Diagnostics::default(),
         }
     }
 }

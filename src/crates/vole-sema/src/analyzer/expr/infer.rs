@@ -116,7 +116,7 @@ impl Analyzer {
             // Import - delegate to existing analyze_module
             ExprKind::Import(path) => self
                 .analyze_module(path, expr.span, interner)
-                .map_err(|_| self.errors.clone()),
+                .map_err(|_| self.diagnostics.errors.clone()),
 
             // Yield expression
             ExprKind::Yield(yield_expr) => self.check_yield_expr(yield_expr, interner),

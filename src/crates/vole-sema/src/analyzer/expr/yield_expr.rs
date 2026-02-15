@@ -9,7 +9,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Check if we're inside a function at all
-        if self.current_function_return.is_none() {
+        if self.env.current_function_return.is_none() {
             self.add_error(
                 SemanticError::YieldOutsideGenerator {
                     span: yield_expr.span.into(),
@@ -20,9 +20,10 @@ impl Analyzer {
         }
 
         // Check if we're inside a generator function (Iterator<T> return type)
-        let Some(element_type) = self.current_generator_element_type else {
+        let Some(element_type) = self.env.current_generator_element_type else {
             // Not a generator - report error with actual return type
             let return_type = self
+                .env
                 .current_function_return
                 .expect("yield only valid inside function");
             let found = self.type_display_id(return_type);

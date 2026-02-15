@@ -13,10 +13,10 @@ impl Analyzer {
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         if let ExprKind::Identifier(sym) = &call.callee.kind {
             // First check if it's a top-level function
-            let func_type = self.functions.get(sym).cloned().or_else(|| {
+            let func_type = self.symbols.functions.get(sym).cloned().or_else(|| {
                 // Check by name for prelude functions (cross-interner lookup)
                 let name = interner.resolve(*sym);
-                self.functions_by_name.get(name).cloned()
+                self.symbols.functions_by_name.get(name).cloned()
             });
             if let Some(func_type) = func_type {
                 // Check if this is actually a generic function (e.g. from prelude)
@@ -24,7 +24,7 @@ impl Analyzer {
                 let is_generic = {
                     let name_id =
                         self.name_table_mut()
-                            .intern(self.current_module, &[*sym], interner);
+                            .intern(self.module.current_module, &[*sym], interner);
                     let is_gen = self
                         .entity_registry()
                         .function_by_name(name_id)
@@ -46,9 +46,11 @@ impl Analyzer {
 
                     // Look up required_params from entity registry if available
                     let required_params = {
-                        let name_id =
-                            self.name_table_mut()
-                                .intern(self.current_module, &[*sym], interner);
+                        let name_id = self.name_table_mut().intern(
+                            self.module.current_module,
+                            &[*sym],
+                            interner,
+                        );
                         self.entity_registry()
                             .function_by_name(name_id)
                             .map(|fid| self.entity_registry().get_function(fid).required_params)
@@ -89,9 +91,11 @@ impl Analyzer {
 
                     // Only skip if there's a registered generic function with this name
                     if has_type_params {
-                        let name_id =
-                            self.name_table_mut()
-                                .intern(self.current_module, &[*sym], interner);
+                        let name_id = self.name_table_mut().intern(
+                            self.module.current_module,
+                            &[*sym],
+                            interner,
+                        );
                         self.entity_registry()
                             .function_by_name(name_id)
                             .is_some_and(|fid| {
@@ -120,7 +124,7 @@ impl Analyzer {
                             self.mark_lambda_has_side_effects();
                             // Record capture if the callee is from outer scope
                             if !self.is_lambda_local(*sym)
-                                && let Some(var) = self.scope.get(*sym)
+                                && let Some(var) = self.env.scope.get(*sym)
                             {
                                 self.record_capture(*sym, var.mutable);
                             }
@@ -128,10 +132,10 @@ impl Analyzer {
 
                         // Check if this is a lambda with default parameters
                         if let Some(&(lambda_node_id, required_params)) =
-                            self.lambda_variables.get(sym)
+                            self.lambda.variables.get(sym)
                         {
                             // Store lambda defaults info for codegen
-                            self.lambda_defaults.insert(
+                            self.lambda.defaults.insert(
                                 expr.id,
                                 LambdaDefaults {
                                     required_params,
@@ -167,7 +171,7 @@ impl Analyzer {
                             self.mark_lambda_has_side_effects();
                             // Record capture if the callee is from outer scope
                             if !self.is_lambda_local(*sym)
-                                && let Some(var) = self.scope.get(*sym)
+                                && let Some(var) = self.env.scope.get(*sym)
                             {
                                 self.record_capture(*sym, var.mutable);
                             }
@@ -189,9 +193,9 @@ impl Analyzer {
             // Also get full_name_id for the original function name (for imports with renaming)
             let (generic_info, generic_required_params, original_name_id) = {
                 // First try current module
-                let name_id = self
-                    .name_table_mut()
-                    .intern(self.current_module, &[*sym], interner);
+                let name_id =
+                    self.name_table_mut()
+                        .intern(self.module.current_module, &[*sym], interner);
                 let registry = self.entity_registry();
                 let func_id = registry.function_by_name(name_id);
                 let result = func_id.map(|fid| {
@@ -227,7 +231,7 @@ impl Analyzer {
                         // Try prelude generic functions (e.g., print, println)
                         let func_name = interner.resolve(*sym);
                         if let Some(&prelude_name_id) =
-                            self.generic_prelude_functions.get(func_name)
+                            self.symbols.generic_prelude_functions.get(func_name)
                         {
                             let registry = self.entity_registry();
                             registry
@@ -363,7 +367,7 @@ impl Analyzer {
                 }
 
                 // Record the call -> monomorph key mapping for codegen
-                self.generic_calls.insert(expr.id, key);
+                self.results.generic_calls.insert(expr.id, key);
 
                 return Ok(concrete_return_id);
             }

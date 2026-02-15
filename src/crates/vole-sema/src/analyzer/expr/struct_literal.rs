@@ -71,7 +71,7 @@ impl Analyzer {
             // Module-qualified type name (e.g., time.Duration)
             // Look up the module binding first
             let module_sym = path[0];
-            let module_var = self.scope.get(module_sym)?;
+            let module_var = self.env.scope.get(module_sym)?;
             let module_type_id = module_var.ty;
 
             // Check if it's a module type
@@ -440,7 +440,7 @@ impl Analyzer {
                 }
                 // Fall back to current type param scope - this handles cases like
                 // GenericContainer { _ptr: ... } inside GenericContainer<K,V>.new()
-                if let Some(scope) = self.type_param_stack.current() {
+                if let Some(scope) = self.env.type_param_stack.current() {
                     // Look up by matching the type param name in the current scope
                     let param_name = self.name_table().last_segment_str(param.name_id);
                     if let Some(param_name) = param_name {

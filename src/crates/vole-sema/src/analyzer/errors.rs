@@ -12,12 +12,14 @@ use super::Analyzer;
 impl Analyzer {
     /// Helper to add a type error
     pub(super) fn add_error(&mut self, error: SemanticError, span: Span) {
-        self.errors.push(TypeError::new(error, span));
+        self.diagnostics.errors.push(TypeError::new(error, span));
     }
 
     /// Helper to add a type warning
     pub(super) fn add_warning(&mut self, warning: SemanticWarning, span: Span) {
-        self.warnings.push(TypeWarning::new(warning, span));
+        self.diagnostics
+            .warnings
+            .push(TypeWarning::new(warning, span));
     }
 
     /// Display a type from TypeId.

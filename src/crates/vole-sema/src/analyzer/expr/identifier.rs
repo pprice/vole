@@ -23,7 +23,7 @@ impl Analyzer {
 
         // Check for 'self' usage in static method
         if name_str == "self"
-            && let Some(ref method_name) = self.current_static_method
+            && let Some(ref method_name) = self.env.current_static_method
         {
             self.add_error(
                 SemanticError::SelfInStaticMethod {
@@ -40,7 +40,7 @@ impl Analyzer {
             // Check if this is a capture (inside lambda, not a local)
             if self.in_lambda() && !self.is_lambda_local(sym) {
                 // Look up variable info to get mutability
-                if let Some(var) = self.scope.get(sym) {
+                if let Some(var) = self.env.scope.get(sym) {
                     self.record_capture(sym, var.mutable);
                 }
             }

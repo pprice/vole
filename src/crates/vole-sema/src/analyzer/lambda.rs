@@ -16,9 +16,9 @@ impl Analyzer {
         interner: &Interner,
     ) -> ArenaTypeId {
         // Push capture analysis stacks and side effects flag
-        self.lambda_captures.push(FxHashMap::default());
-        self.lambda_locals.push(HashSet::new());
-        self.lambda_side_effects.push(false);
+        self.lambda.captures.push(FxHashMap::default());
+        self.lambda.locals.push(HashSet::new());
+        self.lambda.side_effects.push(false);
 
         // Build type param scope for generic lambdas
         let builtin_mod = self.name_table_mut().builtin_module();
@@ -42,7 +42,7 @@ impl Analyzer {
 
         // Push type params to stack if any
         if !type_params.is_empty() {
-            self.type_param_stack.push(type_params.clone());
+            self.env.type_param_stack.push(type_params.clone());
         }
 
         // Validate default parameter ordering and calculate required_params
@@ -59,7 +59,7 @@ impl Analyzer {
 
         // Define parameters in scope and track as locals
         for (param, &ty_id) in lambda.params.iter().zip(param_type_ids.iter()) {
-            self.scope.define(
+            self.env.scope.define(
                 param.name,
                 Variable {
                     ty: ty_id,
@@ -134,14 +134,14 @@ impl Analyzer {
 
         // Pop type params if we pushed any
         if !type_params.is_empty() {
-            self.type_param_stack.pop();
+            self.env.type_param_stack.pop();
         }
 
         // Pop capture stacks, side effects flag, and store results in the side table
-        self.lambda_locals.pop();
-        let has_side_effects = self.lambda_side_effects.pop().unwrap_or(false);
+        self.lambda.locals.pop();
+        let has_side_effects = self.lambda.side_effects.pop().unwrap_or(false);
 
-        let capture_list = if let Some(captures) = self.lambda_captures.pop() {
+        let capture_list = if let Some(captures) = self.lambda.captures.pop() {
             captures
                 .into_values()
                 .map(|info| Capture {
@@ -153,7 +153,7 @@ impl Analyzer {
         } else {
             Vec::new()
         };
-        self.lambda_analysis.insert(
+        self.lambda.analysis.insert(
             node_id,
             crate::expression_data::LambdaAnalysis {
                 captures: capture_list,

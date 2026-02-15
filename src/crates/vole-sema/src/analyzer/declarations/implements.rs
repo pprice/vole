@@ -14,7 +14,7 @@ impl Analyzer {
         let inferred_scope = self.infer_implement_type_params(&impl_block.target_type, interner);
         let has_type_param_scope = !inferred_scope.is_empty();
         if has_type_param_scope {
-            self.type_param_stack.push_scope(inferred_scope);
+            self.env.type_param_stack.push_scope(inferred_scope);
         }
 
         // Extract trait name symbol from trait_type (if present)
@@ -204,14 +204,14 @@ impl Analyzer {
                         impl_block.span,
                     );
                     if has_type_param_scope {
-                        self.type_param_stack.pop();
+                        self.env.type_param_stack.pop();
                     }
                     return; // Skip processing the duplicate implement block
                 }
                 ImplAction::Skip => {
                     // Same implement block already processed - skip silently
                     if has_type_param_scope {
-                        self.type_param_stack.pop();
+                        self.env.type_param_stack.pop();
                     }
                     return;
                 }
@@ -297,9 +297,10 @@ impl Analyzer {
                         _ => "unknown".to_string(),
                     };
                     let method_name_str = interner.resolve(method.name);
-                    let full_method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(self.current_module, &[&type_name_str, method_name_str]);
+                    let full_method_name_id = self.name_table_mut().intern_raw(
+                        self.module.current_module,
+                        &[&type_name_str, method_name_str],
+                    );
 
                     // Intern the signature in the arena
                     let signature_id = func_type.clone().intern(&mut self.type_arena_mut());
@@ -363,9 +364,10 @@ impl Analyzer {
                         let method_name_id = self
                             .name_table_mut()
                             .intern_raw(builtin_mod, &[&method_name_str]);
-                        let full_method_name_id = self
-                            .name_table_mut()
-                            .intern_raw(self.current_module, &[&type_name_str, &method_name_str]);
+                        let full_method_name_id = self.name_table_mut().intern_raw(
+                            self.module.current_module,
+                            &[&type_name_str, &method_name_str],
+                        );
 
                         let params_id: Vec<ArenaTypeId> = method
                             .params
@@ -410,7 +412,7 @@ impl Analyzer {
                                 .name_table_mut()
                                 .intern_raw(builtin_mod, &[&method_name_str]);
                             let full_method_name_id = self.name_table_mut().intern_raw(
-                                self.current_module,
+                                self.module.current_module,
                                 &[&type_name_str, &method_name_str],
                             );
 
@@ -463,7 +465,7 @@ impl Analyzer {
 
         // Pop the inferred type param scope if we pushed one
         if has_type_param_scope {
-            self.type_param_stack.pop();
+            self.env.type_param_stack.pop();
         }
     }
 

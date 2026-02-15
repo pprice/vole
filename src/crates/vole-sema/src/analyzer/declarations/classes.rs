@@ -4,9 +4,9 @@ use super::*;
 
 impl Analyzer {
     pub(super) fn collect_class_signature(&mut self, class: &ClassDecl, interner: &Interner) {
-        let name_id = self
-            .name_table_mut()
-            .intern(self.current_module, &[class.name], interner);
+        let name_id =
+            self.name_table_mut()
+                .intern(self.module.current_module, &[class.name], interner);
 
         // Dispatch to appropriate handler based on whether class is generic
         if class.type_params.is_empty() {
@@ -196,7 +196,7 @@ impl Analyzer {
 
         // Resolve field types (with or without type params)
         let field_type_ids: Vec<ArenaTypeId> = if let Some(scope) = type_param_scope {
-            let module_id = self.current_module;
+            let module_id = self.module.current_module;
             let mut ctx =
                 TypeResolutionContext::with_type_params(&self.ctx.db, interner, module_id, scope);
             fields
@@ -231,7 +231,7 @@ impl Analyzer {
         for (i, field) in fields.iter().enumerate() {
             let field_name_str = interner.resolve(field.name);
             let full_field_name_id = self.name_table_mut().intern_raw(
-                self.current_module,
+                self.module.current_module,
                 &[interner.resolve(type_name), field_name_str],
             );
             self.entity_registry_mut().register_field(

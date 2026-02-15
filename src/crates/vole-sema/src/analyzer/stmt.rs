@@ -168,7 +168,9 @@ impl Analyzer {
 
                         // Store declared type for codegen (keyed by init expression id)
                         if let Some(decl_type_id) = declared_type_id {
-                            self.declared_var_types.insert(init_expr.id, decl_type_id);
+                            self.results
+                                .declared_var_types
+                                .insert(init_expr.id, decl_type_id);
                         }
 
                         // For recursive lambdas: if lambda has fully explicit types,
@@ -178,7 +180,7 @@ impl Analyzer {
                         let preregistered = if let ExprKind::Lambda(lambda) = &init_expr.kind {
                             if let Some(fn_type_id) = self.lambda_explicit_type_id(lambda, interner)
                             {
-                                self.scope.define(
+                                self.env.scope.define(
                                     let_stmt.name,
                                     Variable {
                                         ty: fn_type_id,
@@ -224,7 +226,7 @@ impl Analyzer {
 
                         // Only define if not already pre-registered for recursion
                         if !preregistered {
-                            self.scope.define(
+                            self.env.scope.define(
                                 let_stmt.name,
                                 Variable {
                                     ty: var_type_id,
@@ -240,12 +242,13 @@ impl Analyzer {
                         // Track lambda variables for default parameter support
                         if let ExprKind::Lambda(lambda) = &init_expr.kind {
                             let required_params = Self::lambda_required_params(lambda);
-                            self.lambda_variables
+                            self.lambda
+                                .variables
                                 .insert(let_stmt.name, (init_expr.id, required_params));
                         } else {
                             // Remove stale entry if this variable shadows a lambda
                             // from a different scope (e.g. same-named local in another function)
-                            self.lambda_variables.remove(&let_stmt.name);
+                            self.lambda.variables.remove(&let_stmt.name);
                         }
                     }
                     LetInit::TypeAlias(type_expr) => {
@@ -337,35 +340,35 @@ impl Analyzer {
                 let narrowing_info = self.extract_is_narrowing_info(&if_stmt.condition, interner);
 
                 // Save current overrides
-                let saved_overrides = self.type_overrides.clone();
+                let saved_overrides = self.env.type_overrides.clone();
 
                 // Then branch (with narrowing if applicable)
                 self.push_scope();
                 if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
-                    self.type_overrides.insert(*sym, *narrowed_type_id);
+                    self.env.type_overrides.insert(*sym, *narrowed_type_id);
                 }
                 let then_info = self.check_block(&if_stmt.then_branch, interner)?;
                 self.pop_scope();
 
                 // Restore overrides for else branch
-                self.type_overrides = saved_overrides.clone();
+                self.env.type_overrides = saved_overrides.clone();
 
                 // Check else branch if present
                 let (else_info, has_else) = if let Some(else_branch) = &if_stmt.else_branch {
-                    let parent = std::mem::take(&mut self.scope);
-                    self.scope = Scope::with_parent(parent);
+                    let parent = std::mem::take(&mut self.env.scope);
+                    self.env.scope = Scope::with_parent(parent);
 
                     // Apply else-branch narrowing: if x is T, else branch has x: (original - T)
                     if let Some((sym, tested_type_id, Some(original_type_id))) = &narrowing_info
                         && let Some(else_narrowed) =
                             self.compute_else_narrowed_type(*tested_type_id, *original_type_id)
                     {
-                        self.type_overrides.insert(*sym, else_narrowed);
+                        self.env.type_overrides.insert(*sym, else_narrowed);
                     }
 
                     let info = self.check_block(else_branch, interner)?;
-                    if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-                        self.scope = parent;
+                    if let Some(parent) = std::mem::take(&mut self.env.scope).into_parent() {
+                        self.env.scope = parent;
                     }
                     (info, true)
                 } else {
@@ -374,7 +377,7 @@ impl Analyzer {
                 };
 
                 // Restore original overrides after the entire if statement
-                self.type_overrides = saved_overrides;
+                self.env.type_overrides = saved_overrides;
 
                 // Aggregate return info from both branches:
                 // - definitely_returns only if BOTH branches return AND there is an else branch
@@ -418,7 +421,7 @@ impl Analyzer {
                 };
 
                 self.push_scope();
-                self.scope.define(
+                self.env.scope.define(
                     for_stmt.var_name,
                     Variable {
                         ty: elem_ty_id,
@@ -443,7 +446,7 @@ impl Analyzer {
             Stmt::Return(ret) => {
                 // Determine expected type for type checking (TypeId-based)
                 // Only use expected type if we're NOT in inference mode (current_function_return is set)
-                let expected_value_type_id = self.current_function_return.map(|expected| {
+                let expected_value_type_id = self.env.current_function_return.map(|expected| {
                     // If expected is fallible, extract success type for comparison
                     // A `return value` statement returns the success type, not the full fallible type
                     if let Some((success, _error)) = self.type_arena().unwrap_fallible(expected) {
@@ -530,7 +533,7 @@ impl Analyzer {
     ) {
         match &pattern.kind {
             PatternKind::Identifier { name } => {
-                self.scope.define(
+                self.env.scope.define(
                     *name,
                     Variable {
                         ty: ty_id,
@@ -639,7 +642,7 @@ impl Analyzer {
     /// Analyze a raise statement
     fn analyze_raise_stmt(&mut self, stmt: &RaiseStmt, interner: &Interner) -> ArenaTypeId {
         // Check we're in a fallible function
-        let Some(error_type) = self.current_function_error_type else {
+        let Some(error_type) = self.env.current_function_error_type else {
             self.add_error(
                 SemanticError::RaiseOutsideFallible {
                     span: stmt.span.into(),
@@ -833,7 +836,7 @@ impl Analyzer {
         };
 
         // Check that we're in a fallible function context
-        let Some(current_error_id) = self.current_function_error_type else {
+        let Some(current_error_id) = self.env.current_function_error_type else {
             self.add_error(
                 SemanticError::TryOutsideFallible {
                     span: inner_expr.span.into(),
@@ -942,7 +945,7 @@ impl Analyzer {
             if let Some((slot, _)) = found {
                 let field_type_id = generic_info.field_types[slot];
                 // Bind the field to the binding name
-                self.scope.define(
+                self.env.scope.define(
                     field_pattern.binding,
                     Variable {
                         ty: field_type_id,
@@ -1013,7 +1016,7 @@ impl Analyzer {
                     // This is a generic function - register it in the current module
                     // under the binding name so call analysis can find it
                     let binding_name_id = self.name_table_mut().intern(
-                        self.current_module,
+                        self.module.current_module,
                         &[field_pattern.binding],
                         interner,
                     );
@@ -1022,7 +1025,7 @@ impl Analyzer {
                     let new_func_id = self.entity_registry_mut().register_function_full(
                         binding_name_id,
                         *export_name_id, // Keep original name for codegen lookup
-                        self.current_module,
+                        self.module.current_module,
                         signature,
                         required_params,
                         param_defaults,
@@ -1036,7 +1039,7 @@ impl Analyzer {
                 self.maybe_register_type_binding(field_pattern.binding, *export_type_id, interner);
 
                 // Bind the export to the binding name
-                self.scope.define(
+                self.env.scope.define(
                     field_pattern.binding,
                     Variable {
                         ty: *export_type_id,
@@ -1114,7 +1117,7 @@ impl Analyzer {
         // First, intern the binding name in the current module's namespace
         let binding_name_id =
             self.name_table_mut()
-                .intern(self.current_module, &[binding_name], interner);
+                .intern(self.module.current_module, &[binding_name], interner);
 
         // Check if a type with this name already exists in the current module
         if self
@@ -1131,7 +1134,7 @@ impl Analyzer {
         let alias_type_def_id = self.entity_registry_mut().register_type(
             binding_name_id,
             TypeDefKind::Alias,
-            self.current_module,
+            self.module.current_module,
         );
 
         // Set the aliased type to the original class/interface type
