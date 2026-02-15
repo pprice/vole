@@ -445,7 +445,7 @@ pub struct ArraySource {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct MapSource {
-    /// Pointer to source iterator (could be ArrayIterator or another MapIterator)
+    /// Pointer to source iterator (could be an array iterator or another map iterator)
     pub source: *mut RcIterator,
     /// Transform closure
     pub transform: *const Closure,
@@ -780,25 +780,6 @@ pub extern "C" fn vole_iter_set_produces_owned(iter: *mut RcIterator) {
     }
 }
 
-// Legacy type aliases for backwards compatibility
-pub type ArrayIterator = UnifiedIterator;
-pub type MapIterator = UnifiedIterator;
-pub type FilterIterator = UnifiedIterator;
-pub type TakeIterator = UnifiedIterator;
-pub type SkipIterator = UnifiedIterator;
-pub type ChainIterator = UnifiedIterator;
-pub type FlattenIterator = UnifiedIterator;
-pub type FlatMapIterator = UnifiedIterator;
-pub type UniqueIterator = UnifiedIterator;
-pub type ChunksIterator = UnifiedIterator;
-pub type WindowsIterator = UnifiedIterator;
-pub type RepeatIterator = UnifiedIterator;
-pub type OnceIterator = UnifiedIterator;
-pub type EmptyIterator = UnifiedIterator;
-pub type FromFnIterator = UnifiedIterator;
-pub type RangeIterator = UnifiedIterator;
-pub type StringCharsIterator = UnifiedIterator;
-
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
 #[unsafe(no_mangle)]
@@ -1053,7 +1034,9 @@ fn consume_values_via_next(iter: *mut RcIterator, limit: Option<usize>) -> Vec<i
         out.push(value);
     }
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
     out
 }
 
@@ -1154,7 +1137,9 @@ fn try_new_core_nth(iter: *mut RcIterator, n: i64) -> Option<*mut u8> {
     if n < 0 {
         if !iter.is_null() {
             // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-            unsafe { RcIterator::dec_ref(iter); }
+            unsafe {
+                RcIterator::dec_ref(iter);
+            }
         }
         return Some(pack_optional_i64(None));
     }
@@ -1256,7 +1241,9 @@ pub extern "C" fn vole_array_iter_collect(iter: *mut RcIterator) -> *mut RcArray
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -1358,7 +1345,9 @@ pub extern "C" fn vole_map_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -1463,7 +1452,9 @@ pub extern "C" fn vole_filter_iter_collect(iter: *mut RcIterator) -> *mut RcArra
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -1521,7 +1512,9 @@ pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     count
 }
@@ -1558,7 +1551,9 @@ pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
 
         // Free the iterator chain
         // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-        unsafe { RcIterator::dec_ref(iter); }
+        unsafe {
+            RcIterator::dec_ref(iter);
+        }
 
         sum.to_bits() as i64
     } else {
@@ -1577,7 +1572,9 @@ pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
 
         // Free the iterator chain
         // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-        unsafe { RcIterator::dec_ref(iter); }
+        unsafe {
+            RcIterator::dec_ref(iter);
+        }
 
         sum
     }
@@ -1618,7 +1615,9 @@ pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Clo
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     // Free the callback closure (ownership transferred from codegen)
     unsafe { Closure::free(callback as *mut Closure) };
@@ -1681,7 +1680,9 @@ pub extern "C" fn vole_iter_reduce_tagged(
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     // Free the reducer closure (ownership transferred from codegen)
     unsafe { Closure::free(reducer as *mut Closure) };
@@ -1816,7 +1817,9 @@ pub extern "C" fn vole_take_iter_collect(iter: *mut RcIterator) -> *mut RcArray 
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -1906,7 +1909,9 @@ pub extern "C" fn vole_skip_iter_collect(iter: *mut RcIterator) -> *mut RcArray 
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -1935,7 +1940,9 @@ pub extern "C" fn vole_iter_find(iter: *mut RcIterator, predicate: *const Closur
         }
         if !iter.is_null() {
             // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-            unsafe { RcIterator::dec_ref(iter); }
+            unsafe {
+                RcIterator::dec_ref(iter);
+            }
         }
         return ptr;
     }
@@ -1960,7 +1967,9 @@ pub extern "C" fn vole_iter_find(iter: *mut RcIterator, predicate: *const Closur
         if passes != 0 {
             // Free the iterator chain
             // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-            unsafe { RcIterator::dec_ref(iter); }
+            unsafe {
+                RcIterator::dec_ref(iter);
+            }
 
             unsafe {
                 ptr::write(ptr, 0u8); // tag 0 = value present
@@ -1972,7 +1981,9 @@ pub extern "C" fn vole_iter_find(iter: *mut RcIterator, predicate: *const Closur
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     // No match found, return nil
     unsafe {
@@ -1991,7 +2002,9 @@ pub extern "C" fn vole_iter_any(iter: *mut RcIterator, predicate: *const Closure
     if iter.is_null() || predicate.is_null() {
         if !iter.is_null() {
             // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-            unsafe { RcIterator::dec_ref(iter); }
+            unsafe {
+                RcIterator::dec_ref(iter);
+            }
         }
         return 0; // false
     }
@@ -2015,14 +2028,18 @@ pub extern "C" fn vole_iter_any(iter: *mut RcIterator, predicate: *const Closure
         // If predicate returns non-zero (true), short-circuit
         if passes != 0 {
             // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-            unsafe { RcIterator::dec_ref(iter); }
+            unsafe {
+                RcIterator::dec_ref(iter);
+            }
             return 1; // true
         }
     }
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     0 // false - no element matched
 }
@@ -2035,7 +2052,9 @@ pub extern "C" fn vole_iter_all(iter: *mut RcIterator, predicate: *const Closure
     if iter.is_null() || predicate.is_null() {
         if !iter.is_null() {
             // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-            unsafe { RcIterator::dec_ref(iter); }
+            unsafe {
+                RcIterator::dec_ref(iter);
+            }
         }
         // Empty iterator -> all() returns true (vacuous truth)
         // Null predicate is an error condition, return true to be safe
@@ -2061,14 +2080,18 @@ pub extern "C" fn vole_iter_all(iter: *mut RcIterator, predicate: *const Closure
         // If predicate returns zero (false), short-circuit
         if passes == 0 {
             // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-            unsafe { RcIterator::dec_ref(iter); }
+            unsafe {
+                RcIterator::dec_ref(iter);
+            }
             return 0; // false
         }
     }
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     1 // true - all elements matched
 }
@@ -2151,7 +2174,9 @@ pub extern "C" fn vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray
 
     // Free the iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -2308,7 +2333,9 @@ pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArr
 
     // Free the flatten iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -2419,7 +2446,9 @@ pub extern "C" fn vole_flat_map_iter_collect(iter: *mut RcIterator) -> *mut RcAr
 
     // Free the flat_map iterator chain
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -2454,7 +2483,9 @@ pub extern "C" fn vole_reverse_iter(iter: *mut RcIterator) -> *mut RcIterator {
 
     // Free the source iterator
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     // Create new array with reversed values
     let result = RcArray::new();
@@ -2505,7 +2536,9 @@ pub extern "C" fn vole_sorted_iter(iter: *mut RcIterator) -> *mut RcIterator {
 
     // Free the source iterator
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     // Sort the values
     values.sort();
@@ -2632,11 +2665,15 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
         }
         // Free the source iterator
         // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-        unsafe { RcIterator::dec_ref(source); }
+        unsafe {
+            RcIterator::dec_ref(source);
+        }
     } else if !source.is_null() {
         // Free the source even if chunk_size <= 0
         // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-        unsafe { RcIterator::dec_ref(source); }
+        unsafe {
+            RcIterator::dec_ref(source);
+        }
     }
 
     // The chunks iterator yields sub-arrays, so its elem_tag should be
@@ -2737,7 +2774,9 @@ pub extern "C" fn vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArra
 
     // Free the iterator
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
@@ -2791,11 +2830,15 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
         }
         // Free the source iterator
         // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-        unsafe { RcIterator::dec_ref(source); }
+        unsafe {
+            RcIterator::dec_ref(source);
+        }
     } else if !source.is_null() {
         // Free the source even if window_size <= 0
         // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-        unsafe { RcIterator::dec_ref(source); }
+        unsafe {
+            RcIterator::dec_ref(source);
+        }
     }
 
     // The windows iterator yields sub-arrays, so its elem_tag should be
@@ -2896,7 +2939,9 @@ pub extern "C" fn vole_windows_iter_collect(iter: *mut RcIterator) -> *mut RcArr
 
     // Free the iterator
     // SAFETY: ptr was obtained from a valid RcIterator allocation or is null
-    unsafe { RcIterator::dec_ref(iter); }
+    unsafe {
+        RcIterator::dec_ref(iter);
+    }
 
     result
 }
