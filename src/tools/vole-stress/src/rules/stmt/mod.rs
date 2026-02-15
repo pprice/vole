@@ -13,6 +13,7 @@ mod bool_chain;
 mod bool_chain_edge;
 mod bool_negation;
 mod chained_literal_method;
+mod chained_string_methods;
 mod checked_arithmetic;
 mod closure_capture;
 mod closure_concat;
@@ -23,6 +24,7 @@ mod dead_code;
 mod edge_case_for_loop;
 mod edge_case_split;
 mod empty_array_iter;
+mod empty_iter_edge;
 mod empty_range;
 mod empty_string_concat;
 mod empty_string_iter_let;
@@ -65,6 +67,7 @@ mod match_iter;
 mod match_let;
 mod match_method;
 mod match_method_result;
+mod match_on_method;
 mod match_optional;
 mod match_sorted;
 mod match_sorted_length;
@@ -265,5 +268,9 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(filter_iter_tostring::FilterIterTostring),
         Box::new(widening_let::WideningLet),
         Box::new(empty_string_iter_let::EmptyStringIterLet),
+        // -- Additional let_bindings rules (batch 10) ---------------------------
+        Box::new(match_on_method::MatchOnMethod),
+        Box::new(empty_iter_edge::EmptyIterEdge),
+        Box::new(chained_string_methods::ChainedStringMethods),
     ]
 }
