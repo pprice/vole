@@ -247,7 +247,7 @@ fn warn_unknown_rules_expr(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rule::{Emit, ExprRule, Param, ParamValue, Params, Scope, StmtRule};
+    use crate::rule::{Emit, ExprRule, Param, ParamValue, Params, Scope, StmtRule, TypeInfo};
 
     // -- Helper rule implementations ----------------------------------------
 
@@ -291,7 +291,13 @@ mod tests {
             ]
         }
 
-        fn generate(&self, _scope: &Scope, _emit: &mut Emit, _params: &Params) -> Option<String> {
+        fn generate(
+            &self,
+            _scope: &Scope,
+            _emit: &mut Emit,
+            _params: &Params,
+            _expected_type: &TypeInfo,
+        ) -> Option<String> {
             None
         }
     }

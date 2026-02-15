@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 pub use crate::emit::Emit;
 pub use crate::scope::Scope;
+pub use crate::symbols::TypeInfo;
 
 // ---------------------------------------------------------------------------
 // Parameter value types
@@ -216,11 +217,18 @@ pub trait ExprRule: Send + Sync {
         true
     }
 
-    /// Generate an expression, returning its Vole source text.
+    /// Generate an expression of the given `expected_type`, returning its Vole
+    /// source text.
     ///
     /// Returns `None` if the rule cannot produce output in the current context
     /// (e.g., no variables of the required type are in scope).
-    fn generate(&self, scope: &Scope, emit: &mut Emit, params: &Params) -> Option<String>;
+    fn generate(
+        &self,
+        scope: &Scope,
+        emit: &mut Emit,
+        params: &Params,
+        expected_type: &TypeInfo,
+    ) -> Option<String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +321,7 @@ mod tests {
     // -- Trait object construction ------------------------------------------
 
     use crate::resolver::ResolvedParams;
-    use crate::symbols::SymbolTable;
+    use crate::symbols::{PrimitiveType, SymbolTable};
     use rand::SeedableRng;
 
     /// Create a minimal Scope for tests that don't inspect scope contents.
@@ -366,7 +374,13 @@ mod tests {
             vec![Param::count("n", 1)]
         }
 
-        fn generate(&self, _scope: &Scope, _emit: &mut Emit, _params: &Params) -> Option<String> {
+        fn generate(
+            &self,
+            _scope: &Scope,
+            _emit: &mut Emit,
+            _params: &Params,
+            _expected_type: &TypeInfo,
+        ) -> Option<String> {
             Some("42".to_string())
         }
     }
@@ -407,7 +421,8 @@ mod tests {
         let mut rng = test_rng();
         let resolved = ResolvedParams::new();
         let mut emit = test_emit(&mut rng, &resolved);
-        let result = rule.generate(&scope, &mut emit, &params);
+        let expected = TypeInfo::Primitive(PrimitiveType::I64);
+        let result = rule.generate(&scope, &mut emit, &params, &expected);
         assert_eq!(result.as_deref(), Some("42"));
     }
 
@@ -467,6 +482,7 @@ mod tests {
                 _scope: &Scope,
                 _emit: &mut Emit,
                 _params: &Params,
+                _expected_type: &TypeInfo,
             ) -> Option<String> {
                 None
             }
@@ -479,7 +495,11 @@ mod tests {
         let mut rng = test_rng();
         let resolved = ResolvedParams::new();
         let mut emit = test_emit(&mut rng, &resolved);
-        assert!(rule.generate(&scope, &mut emit, &params).is_none());
+        let expected = TypeInfo::Primitive(PrimitiveType::I64);
+        assert!(
+            rule.generate(&scope, &mut emit, &params, &expected)
+                .is_none()
+        );
     }
 
     // -- Send + Sync --------------------------------------------------------

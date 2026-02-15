@@ -498,7 +498,8 @@ impl Emit<'_> {
             // Try to generate (same raw-pointer technique as dispatch_stmt).
             let rule_ptr: *const dyn ExprRule = &**rule;
             let params_ptr: *const Params = params;
-            let result = unsafe { &*rule_ptr }.generate(scope, self, unsafe { &*params_ptr });
+            let result =
+                unsafe { &*rule_ptr }.generate(scope, self, unsafe { &*params_ptr }, expected_type);
 
             if let Some(text) = result {
                 return text;
@@ -889,7 +890,13 @@ mod tests {
         fn precondition(&self, _scope: &Scope, _params: &Params) -> bool {
             true
         }
-        fn generate(&self, _scope: &Scope, _emit: &mut Emit, _params: &Params) -> Option<String> {
+        fn generate(
+            &self,
+            _scope: &Scope,
+            _emit: &mut Emit,
+            _params: &Params,
+            _expected_type: &TypeInfo,
+        ) -> Option<String> {
             Some("true".to_string())
         }
     }
