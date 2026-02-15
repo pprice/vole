@@ -15,11 +15,12 @@ use crate::types::PrimitiveType;
 pub enum MemoryKind {
     /// No cleanup needed. Fits in one or more registers/stack slots.
     /// Examples: i64, f64, bool, unit/void, never, unions (tagged value),
-    /// tuples (stack-allocated), fixed arrays (stack-allocated), enums (integer tag).
+    /// tuples (stack-allocated), fixed arrays (stack-allocated), enums (integer tag),
+    /// structs (stack-allocated, per-field cleanup by codegen).
     Value,
 
     /// Reference-counted heap object. Needs rc_inc on copy and rc_dec on drop.
-    /// Examples: string, Array<T>, Map<K,V>, Set<T>, class/struct instances,
+    /// Examples: string, Array<T>, Map<K,V>, Set<T>, class instances,
     /// closures, iterators, error types.
     Rc,
 }
@@ -81,12 +82,15 @@ impl TypeArena {
             // Fallible(T, E) is like a union — tagged stack value.
             SemaType::Fallible { .. } => MemoryKind::Value,
 
+            // Structs are value types — stack-allocated with per-field cleanup
+            // handled by codegen. No RC header.
+            SemaType::Struct { .. } => MemoryKind::Value,
+
             // Heap-allocated, reference-counted types.
             SemaType::Array(_) => MemoryKind::Rc,
             SemaType::RuntimeIterator(_) => MemoryKind::Rc,
             SemaType::Function { .. } => MemoryKind::Rc,
             SemaType::Class { .. } => MemoryKind::Rc,
-            SemaType::Struct { .. } => MemoryKind::Rc,
             SemaType::Interface { .. } => MemoryKind::Rc,
             SemaType::Error { .. } => MemoryKind::Rc,
             SemaType::Module(_) => MemoryKind::Rc,
@@ -220,6 +224,13 @@ mod tests {
         assert_eq!(a.memory_kind(f), MemoryKind::Value);
     }
 
+    #[test]
+    fn struct_is_value() {
+        let mut a = arena();
+        let s = a.struct_type(TypeDefId::new(0), smallvec![]);
+        assert_eq!(a.memory_kind(s), MemoryKind::Value);
+    }
+
     // ── Rc types ────────────────────────────────────────────────────────
 
     #[test]
@@ -255,13 +266,6 @@ mod tests {
         let mut a = arena();
         let cls = a.class(TypeDefId::new(0), smallvec![]);
         assert_eq!(a.memory_kind(cls), MemoryKind::Rc);
-    }
-
-    #[test]
-    fn struct_is_rc() {
-        let mut a = arena();
-        let s = a.struct_type(TypeDefId::new(0), smallvec![]);
-        assert_eq!(a.memory_kind(s), MemoryKind::Rc);
     }
 
     #[test]
