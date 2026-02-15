@@ -132,34 +132,33 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
     fn emit_module_tests(&mut self, module: &ModuleSymbols) {
         // Test globals (read non-mutable ones)
         for symbol in module.globals() {
-            if let SymbolKind::Global(ref info) = symbol.kind {
-                if !info.is_mutable {
-                    self.emit_global_test(module, &symbol.name);
-                }
+            if let SymbolKind::Global(ref info) = symbol.kind
+                && !info.is_mutable
+            {
+                self.emit_global_test(module, &symbol.name);
             }
         }
 
         // Test functions (non-generic, non-diverging ones without interface params)
         for symbol in module.functions() {
-            if let SymbolKind::Function(ref info) = symbol.kind {
-                if info.type_params.is_empty()
-                    && !matches!(info.return_type, TypeInfo::Never)
-                    && !info
-                        .params
-                        .iter()
-                        .any(|p| p.param_type.contains_interface())
-                {
-                    self.emit_function_test(module, &symbol.name, info);
-                }
+            if let SymbolKind::Function(ref info) = symbol.kind
+                && info.type_params.is_empty()
+                && !matches!(info.return_type, TypeInfo::Never)
+                && !info
+                    .params
+                    .iter()
+                    .any(|p| p.param_type.contains_interface())
+            {
+                self.emit_function_test(module, &symbol.name, info);
             }
         }
 
         // Test classes (non-generic ones)
         for symbol in module.classes() {
-            if let SymbolKind::Class(ref info) = symbol.kind {
-                if info.type_params.is_empty() {
-                    self.emit_class_test(module, &symbol.name, info);
-                }
+            if let SymbolKind::Class(ref info) = symbol.kind
+                && info.type_params.is_empty()
+            {
+                self.emit_class_test(module, &symbol.name, info);
             }
         }
 
@@ -315,55 +314,54 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
 
         // Exercise globals (read non-mutable ones - mutable globals are not exported)
         for symbol in module.globals() {
-            if let SymbolKind::Global(ref info) = symbol.kind {
-                if !info.is_mutable {
-                    self.emit_line(&format!(
-                        "let _{}_val = {}.{}",
-                        symbol.name.to_lowercase(),
-                        module.name,
-                        symbol.name
-                    ));
-                }
+            if let SymbolKind::Global(ref info) = symbol.kind
+                && !info.is_mutable
+            {
+                self.emit_line(&format!(
+                    "let _{}_val = {}.{}",
+                    symbol.name.to_lowercase(),
+                    module.name,
+                    symbol.name
+                ));
             }
         }
 
         // Exercise functions (call non-generic, non-diverging ones without interface params)
         for symbol in module.functions() {
-            if let SymbolKind::Function(ref info) = symbol.kind {
-                if info.type_params.is_empty()
-                    && !matches!(info.return_type, TypeInfo::Never)
-                    && !info
-                        .params
-                        .iter()
-                        .any(|p| p.param_type.contains_interface())
-                {
-                    let args = self.generate_call_args(&info.params);
-                    match &info.return_type {
-                        TypeInfo::Iterator(elem_type) => {
-                            // Generator function - exercise with iterator methods
-                            let chain = self.generate_iterator_chain(elem_type);
-                            self.emit_line(&format!(
-                                "let _{}_result = {}.{}({}){}",
-                                symbol.name, module.name, symbol.name, args, chain
-                            ));
-                        }
-                        TypeInfo::Fallible { success, .. } => {
-                            // Fallible function - wrap in match to handle result
-                            let default_val = self.generate_value_for_type(success);
-                            self.emit_line(&format!(
+            if let SymbolKind::Function(ref info) = symbol.kind
+                && info.type_params.is_empty()
+                && !matches!(info.return_type, TypeInfo::Never)
+                && !info
+                    .params
+                    .iter()
+                    .any(|p| p.param_type.contains_interface())
+            {
+                let args = self.generate_call_args(&info.params);
+                match &info.return_type {
+                    TypeInfo::Iterator(elem_type) => {
+                        // Generator function - exercise with iterator methods
+                        let chain = self.generate_iterator_chain(elem_type);
+                        self.emit_line(&format!(
+                            "let _{}_result = {}.{}({}){}",
+                            symbol.name, module.name, symbol.name, args, chain
+                        ));
+                    }
+                    TypeInfo::Fallible { success, .. } => {
+                        // Fallible function - wrap in match to handle result
+                        let default_val = self.generate_value_for_type(success);
+                        self.emit_line(&format!(
                                 "let _{}_result = match {}.{}({}) {{ success x => x, error => {}, _ => {} }}",
                                 symbol.name, module.name, symbol.name, args, default_val, default_val
                             ));
-                        }
-                        TypeInfo::Void => {
-                            self.emit_line(&format!("{}.{}({})", module.name, symbol.name, args));
-                        }
-                        _ => {
-                            self.emit_line(&format!(
-                                "let _{}_result = {}.{}({})",
-                                symbol.name, module.name, symbol.name, args
-                            ));
-                        }
+                    }
+                    TypeInfo::Void => {
+                        self.emit_line(&format!("{}.{}({})", module.name, symbol.name, args));
+                    }
+                    _ => {
+                        self.emit_line(&format!(
+                            "let _{}_result = {}.{}({})",
+                            symbol.name, module.name, symbol.name, args
+                        ));
                     }
                 }
             }
@@ -371,17 +369,17 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
 
         // Exercise classes (construct non-generic ones)
         for symbol in module.classes() {
-            if let SymbolKind::Class(ref info) = symbol.kind {
-                if info.type_params.is_empty() {
-                    let fields = self.generate_field_values(&info.fields);
-                    self.emit_line(&format!(
-                        "let _{}_instance = {}.{} {{ {} }}",
-                        symbol.name.to_lowercase(),
-                        module.name,
-                        symbol.name,
-                        fields
-                    ));
-                }
+            if let SymbolKind::Class(ref info) = symbol.kind
+                && info.type_params.is_empty()
+            {
+                let fields = self.generate_field_values(&info.fields);
+                self.emit_line(&format!(
+                    "let _{}_instance = {}.{} {{ {} }}",
+                    symbol.name.to_lowercase(),
+                    module.name,
+                    symbol.name,
+                    fields
+                ));
             }
         }
 
@@ -596,27 +594,24 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             }
             TypeInfo::Class(mod_id, sym_id) => {
                 // For class types, construct an instance with module-qualified name
-                if let Some(module) = self.table.get_module(*mod_id) {
-                    if let Some(symbol) = module.get_symbol(*sym_id) {
-                        if let SymbolKind::Class(ref class_info) = symbol.kind {
-                            if class_info.type_params.is_empty() {
-                                let fields = self.generate_field_values(&class_info.fields);
-                                return format!("{}.{} {{ {} }}", module.name, symbol.name, fields);
-                            }
-                        }
-                    }
+                if let Some(module) = self.table.get_module(*mod_id)
+                    && let Some(symbol) = module.get_symbol(*sym_id)
+                    && let SymbolKind::Class(ref class_info) = symbol.kind
+                    && class_info.type_params.is_empty()
+                {
+                    let fields = self.generate_field_values(&class_info.fields);
+                    return format!("{}.{} {{ {} }}", module.name, symbol.name, fields);
                 }
                 "nil".to_string()
             }
             TypeInfo::Struct(mod_id, sym_id) => {
                 // For struct types, construct an instance with module-qualified name
-                if let Some(module) = self.table.get_module(*mod_id) {
-                    if let Some(symbol) = module.get_symbol(*sym_id) {
-                        if let SymbolKind::Struct(ref struct_info) = symbol.kind {
-                            let fields = self.generate_field_values(&struct_info.fields);
-                            return format!("{}.{} {{ {} }}", module.name, symbol.name, fields);
-                        }
-                    }
+                if let Some(module) = self.table.get_module(*mod_id)
+                    && let Some(symbol) = module.get_symbol(*sym_id)
+                    && let SymbolKind::Struct(ref struct_info) = symbol.kind
+                {
+                    let fields = self.generate_field_values(&struct_info.fields);
+                    return format!("{}.{} {{ {} }}", module.name, symbol.name, fields);
                 }
                 "nil".to_string()
             }

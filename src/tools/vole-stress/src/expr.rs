@@ -10,6 +10,22 @@ use crate::symbols::{
     SymbolTable, TypeInfo, TypeParam,
 };
 
+/// A variable whose type is a constrained type parameter:
+/// `(var_name, type_param_name, interface_constraints)`.
+pub type ConstrainedTypeParamVar = (String, String, Vec<(ModuleId, SymbolId)>);
+
+/// Parameters for recursive field-path collection in
+/// [`ExprGenerator::collect_field_paths`].
+pub struct FieldPathSearch<'a> {
+    pub table: &'a SymbolTable,
+    pub mod_id: ModuleId,
+    pub sym_id: SymbolId,
+    pub prefix: String,
+    pub target: &'a TypeInfo,
+    pub candidates: &'a mut Vec<String>,
+    pub depth: usize,
+}
+
 /// Configuration for expression generation.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -288,17 +304,17 @@ impl<'a> ExprContext<'a> {
     pub fn optional_vars_matching(&self, target: &TypeInfo) -> Vec<(String, TypeInfo)> {
         let mut vars = Vec::new();
         for (name, ty) in self.locals {
-            if let TypeInfo::Optional(inner) = ty {
-                if types_compatible(inner, target) {
-                    vars.push((name.clone(), *inner.clone()));
-                }
+            if let TypeInfo::Optional(inner) = ty
+                && types_compatible(inner, target)
+            {
+                vars.push((name.clone(), *inner.clone()));
             }
         }
         for param in self.params {
-            if let TypeInfo::Optional(inner) = &param.param_type {
-                if types_compatible(inner, target) {
-                    vars.push((param.name.clone(), *inner.clone()));
-                }
+            if let TypeInfo::Optional(inner) = &param.param_type
+                && types_compatible(inner, target)
+            {
+                vars.push((param.name.clone(), *inner.clone()));
             }
         }
         vars
@@ -310,17 +326,17 @@ impl<'a> ExprContext<'a> {
     pub fn optional_class_vars(&self) -> Vec<(String, ModuleId, SymbolId)> {
         let mut vars = Vec::new();
         for (name, ty) in self.locals {
-            if let TypeInfo::Optional(inner) = ty {
-                if let TypeInfo::Class(mod_id, sym_id) = inner.as_ref() {
-                    vars.push((name.clone(), *mod_id, *sym_id));
-                }
+            if let TypeInfo::Optional(inner) = ty
+                && let TypeInfo::Class(mod_id, sym_id) = inner.as_ref()
+            {
+                vars.push((name.clone(), *mod_id, *sym_id));
             }
         }
         for param in self.params {
-            if let TypeInfo::Optional(inner) = &param.param_type {
-                if let TypeInfo::Class(mod_id, sym_id) = inner.as_ref() {
-                    vars.push((param.name.clone(), *mod_id, *sym_id));
-                }
+            if let TypeInfo::Optional(inner) = &param.param_type
+                && let TypeInfo::Class(mod_id, sym_id) = inner.as_ref()
+            {
+                vars.push((param.name.clone(), *mod_id, *sym_id));
             }
         }
         vars
@@ -395,24 +411,21 @@ impl<'a> ExprContext<'a> {
         for (name, ty) in self.locals {
             if let TypeInfo::Class(mod_id, sym_id) = ty {
                 // Check if the class is non-generic
-                if let Some(sym) = self.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Class(ref info) = sym.kind {
-                        if info.type_params.is_empty() {
-                            vars.push((name.clone(), *mod_id, *sym_id));
-                        }
-                    }
+                if let Some(sym) = self.table.get_symbol(*mod_id, *sym_id)
+                    && let SymbolKind::Class(ref info) = sym.kind
+                    && info.type_params.is_empty()
+                {
+                    vars.push((name.clone(), *mod_id, *sym_id));
                 }
             }
         }
         for param in self.params {
-            if let TypeInfo::Class(mod_id, sym_id) = &param.param_type {
-                if let Some(sym) = self.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Class(ref info) = sym.kind {
-                        if info.type_params.is_empty() {
-                            vars.push((param.name.clone(), *mod_id, *sym_id));
-                        }
-                    }
-                }
+            if let TypeInfo::Class(mod_id, sym_id) = &param.param_type
+                && let Some(sym) = self.table.get_symbol(*mod_id, *sym_id)
+                && let SymbolKind::Class(ref info) = sym.kind
+                && info.type_params.is_empty()
+            {
+                vars.push((param.name.clone(), *mod_id, *sym_id));
             }
         }
         vars
@@ -461,29 +474,28 @@ impl<'a> ExprContext<'a> {
     /// Returns `(var_name, type_param_name, constraints)` tuples for variables
     /// whose type is a type parameter with at least one interface constraint.
     /// Only returns variables where the corresponding type param has constraints.
-    pub fn constrained_type_param_vars(&self) -> Vec<(String, String, Vec<(ModuleId, SymbolId)>)> {
+    pub fn constrained_type_param_vars(&self) -> Vec<ConstrainedTypeParamVar> {
         let mut vars = Vec::new();
 
         // Check parameters for type-param-typed variables
         for param in self.params {
             if let TypeInfo::TypeParam(ref tp_name) = param.param_type {
                 // Look up the type param in our type_params to get its constraints
-                if let Some(tp) = self.type_params.iter().find(|tp| &tp.name == tp_name) {
-                    if !tp.constraints.is_empty() {
-                        vars.push((param.name.clone(), tp_name.clone(), tp.constraints.clone()));
-                    }
+                if let Some(tp) = self.type_params.iter().find(|tp| &tp.name == tp_name)
+                    && !tp.constraints.is_empty()
+                {
+                    vars.push((param.name.clone(), tp_name.clone(), tp.constraints.clone()));
                 }
             }
         }
 
         // Check locals for type-param-typed variables
         for (name, ty) in self.locals {
-            if let TypeInfo::TypeParam(tp_name) = ty {
-                if let Some(tp) = self.type_params.iter().find(|tp| &tp.name == tp_name) {
-                    if !tp.constraints.is_empty() {
-                        vars.push((name.clone(), tp_name.clone(), tp.constraints.clone()));
-                    }
-                }
+            if let TypeInfo::TypeParam(tp_name) = ty
+                && let Some(tp) = self.type_params.iter().find(|tp| &tp.name == tp_name)
+                && !tp.constraints.is_empty()
+            {
+                vars.push((name.clone(), tp_name.clone(), tp.constraints.clone()));
             }
         }
 
@@ -582,19 +594,19 @@ pub fn get_interface_methods(
             continue; // Avoid infinite loops from cycles
         }
 
-        if let Some(symbol) = table.get_symbol(mid, sid) {
-            if let SymbolKind::Interface(ref info) = symbol.kind {
-                // Add this interface's own methods
-                for method in &info.methods {
-                    if seen_names.insert(method.name.clone()) {
-                        all_methods.push(method.clone());
-                    }
+        if let Some(symbol) = table.get_symbol(mid, sid)
+            && let SymbolKind::Interface(ref info) = symbol.kind
+        {
+            // Add this interface's own methods
+            for method in &info.methods {
+                if seen_names.insert(method.name.clone()) {
+                    all_methods.push(method.clone());
                 }
+            }
 
-                // Queue parent interfaces
-                for &(parent_mid, parent_sid) in &info.extends {
-                    stack.push((parent_mid, parent_sid));
-                }
+            // Queue parent interfaces
+            for &(parent_mid, parent_sid) in &info.extends {
+                stack.push((parent_mid, parent_sid));
             }
         }
     }
@@ -613,13 +625,13 @@ pub fn get_type_param_constraint_methods(
     let mut seen_names = std::collections::HashSet::new();
 
     for &(mod_id, iface_id) in constraints {
-        if let Some(symbol) = table.get_symbol(mod_id, iface_id) {
-            if let SymbolKind::Interface(ref iface_info) = symbol.kind {
-                let iface_methods = get_interface_methods(table, mod_id, iface_id);
-                for method in iface_methods {
-                    if seen_names.insert(method.name.clone()) {
-                        methods.push((iface_info.clone(), method));
-                    }
+        if let Some(symbol) = table.get_symbol(mod_id, iface_id)
+            && let SymbolKind::Interface(ref iface_info) = symbol.kind
+        {
+            let iface_methods = get_interface_methods(table, mod_id, iface_id);
+            for method in iface_methods {
+                if seen_names.insert(method.name.clone()) {
+                    methods.push((iface_info.clone(), method));
                 }
             }
         }
@@ -739,10 +751,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // emit `tupleVar[index]` instead of constructing a new value.
         if self.config.tuple_index_probability > 0.0
             && self.rng.gen_bool(self.config.tuple_index_probability)
+            && let Some(expr) = self.try_generate_tuple_index_for_type(ty, ctx)
         {
-            if let Some(expr) = self.try_generate_tuple_index_for_type(ty, ctx) {
-                return expr;
-            }
+            return expr;
         }
 
         match ty {
@@ -945,15 +956,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         // Find a non-generic class implementing this interface
         for class_sym in module.classes() {
-            if let SymbolKind::Class(ref class_info) = class_sym.kind {
-                if class_info.type_params.is_empty()
-                    && class_info
-                        .implements
-                        .iter()
-                        .any(|&(m, s)| m == iface_mod && s == iface_sym)
-                {
-                    return self.generate_class_construction(iface_mod, class_sym.id, ctx);
-                }
+            if let SymbolKind::Class(ref class_info) = class_sym.kind
+                && class_info.type_params.is_empty()
+                && class_info
+                    .implements
+                    .iter()
+                    .any(|&(m, s)| m == iface_mod && s == iface_sym)
+            {
+                return self.generate_class_construction(iface_mod, class_sym.id, ctx);
             }
         }
 
@@ -1089,27 +1099,16 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         for (name, ty) in ctx.locals {
             match ty {
-                TypeInfo::Class(mod_id, sym_id) => {
-                    self.collect_field_paths(
-                        ctx.table,
-                        *mod_id,
-                        *sym_id,
-                        name.clone(),
-                        &target,
-                        &mut candidates,
-                        0, // depth
-                    );
-                }
-                TypeInfo::Struct(mod_id, sym_id) => {
-                    self.collect_field_paths(
-                        ctx.table,
-                        *mod_id,
-                        *sym_id,
-                        name.clone(),
-                        &target,
-                        &mut candidates,
-                        0, // depth
-                    );
+                TypeInfo::Class(mod_id, sym_id) | TypeInfo::Struct(mod_id, sym_id) => {
+                    self.collect_field_paths(&mut FieldPathSearch {
+                        table: ctx.table,
+                        mod_id: *mod_id,
+                        sym_id: *sym_id,
+                        prefix: name.clone(),
+                        target: &target,
+                        candidates: &mut candidates,
+                        depth: 0,
+                    });
                 }
                 _ => {}
             }
@@ -1128,23 +1127,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// This enables nested field access like `obj.inner.field` where `inner`
     /// is a class-typed field. Depth is limited to prevent infinite recursion
     /// in case of any cyclic references (though planning should prevent these).
-    fn collect_field_paths(
-        &self,
-        table: &SymbolTable,
-        mod_id: ModuleId,
-        sym_id: SymbolId,
-        prefix: String,
-        target: &TypeInfo,
-        candidates: &mut Vec<String>,
-        depth: usize,
-    ) {
+    fn collect_field_paths(&self, search: &mut FieldPathSearch) {
         // Limit depth to prevent excessive nesting (and handle any cycles)
         const MAX_DEPTH: usize = 3;
-        if depth >= MAX_DEPTH {
+        if search.depth >= MAX_DEPTH {
             return;
         }
 
-        let Some(sym) = table.get_symbol(mod_id, sym_id) else {
+        let Some(sym) = search.table.get_symbol(search.mod_id, search.sym_id) else {
             return;
         };
 
@@ -1161,26 +1151,26 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         };
 
         for field in fields {
-            let field_path = format!("{}.{}", prefix, field.name);
+            let field_path = format!("{}.{}", search.prefix, field.name);
 
             // Check if this field matches the target type
-            if &field.field_type == target {
-                candidates.push(field_path.clone());
+            if &field.field_type == search.target {
+                search.candidates.push(field_path.clone());
             }
 
             // If this field is a class or struct type, recurse into it
             match &field.field_type {
                 TypeInfo::Class(nested_mod_id, nested_sym_id)
                 | TypeInfo::Struct(nested_mod_id, nested_sym_id) => {
-                    self.collect_field_paths(
-                        table,
-                        *nested_mod_id,
-                        *nested_sym_id,
-                        field_path,
-                        target,
-                        candidates,
-                        depth + 1,
-                    );
+                    self.collect_field_paths(&mut FieldPathSearch {
+                        table: search.table,
+                        mod_id: *nested_mod_id,
+                        sym_id: *nested_sym_id,
+                        prefix: field_path,
+                        target: search.target,
+                        candidates: search.candidates,
+                        depth: search.depth + 1,
+                    });
                 }
                 _ => {}
             }
@@ -1513,11 +1503,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         for _ in 0..operand_count {
             // ~30% chance: use .to_string() on a numeric/bool variable
-            if self.rng.gen_bool(0.3) {
-                if let Some(expr) = self.try_generate_to_string_call(ctx) {
-                    parts.push(expr);
-                    continue;
-                }
+            if self.rng.gen_bool(0.3)
+                && let Some(expr) = self.try_generate_to_string_call(ctx)
+            {
+                parts.push(expr);
+                continue;
             }
             // Use a simple string expression (variable or literal) to avoid
             // deep nesting of complex sub-expressions in concatenation.
@@ -1586,19 +1576,19 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let mut candidates: Vec<(String, String, TypeInfo)> = Vec::new();
 
         for (var_name, mod_id, sym_id) in &opt_class_vars {
-            if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
-                if let SymbolKind::Class(ref info) = sym.kind {
-                    // Skip generic classes
-                    if !info.type_params.is_empty() {
-                        continue;
-                    }
-                    for field in &info.fields {
-                        candidates.push((
-                            var_name.clone(),
-                            field.name.clone(),
-                            field.field_type.clone(),
-                        ));
-                    }
+            if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id)
+                && let SymbolKind::Class(ref info) = sym.kind
+            {
+                // Skip generic classes
+                if !info.type_params.is_empty() {
+                    continue;
+                }
+                for field in &info.fields {
+                    candidates.push((
+                        var_name.clone(),
+                        field.name.clone(),
+                        field.field_type.clone(),
+                    ));
                 }
             }
         }
@@ -2650,10 +2640,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         match ty {
             TypeInfo::Primitive(PrimitiveType::Bool) => {
                 // String bool method: contains/starts_with/ends_with
-                if self.rng.gen_bool(self.config.string_method_probability) {
-                    if let Some(expr) = self.try_generate_string_bool_method(ctx) {
-                        return expr;
-                    }
+                if self.rng.gen_bool(self.config.string_method_probability)
+                    && let Some(expr) = self.try_generate_string_bool_method(ctx)
+                {
+                    return expr;
                 }
                 self.literal_for_primitive(PrimitiveType::Bool)
             }
@@ -2763,96 +2753,96 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     ) -> String {
         // ~18% chance to generate a field access if a class-typed local
         // has a field of the target primitive type
-        if self.rng.gen_bool(0.18) {
-            if let Some(access) = self.try_generate_field_access(prim, ctx) {
-                return access;
-            }
+        if self.rng.gen_bool(0.18)
+            && let Some(access) = self.try_generate_field_access(prim, ctx)
+        {
+            return access;
         }
 
         // ~15% chance to generate array indexing: `arrVar[index]`
         // when an array-typed variable with matching element type is in scope
-        if self.rng.gen_bool(0.15) {
-            if let Some(expr) = self.try_generate_array_index(prim, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.15)
+            && let Some(expr) = self.try_generate_array_index(prim, ctx)
+        {
+            return expr;
         }
 
         // ~12% chance to generate fixed array indexing: `fixedArrVar[index]`
         // when a fixed-array-typed variable with matching element type is in scope
-        if self.rng.gen_bool(0.12) {
-            if let Some(expr) = self.try_generate_fixed_array_index(prim, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.12)
+            && let Some(expr) = self.try_generate_fixed_array_index(prim, ctx)
+        {
+            return expr;
         }
 
         // Chance to generate tuple indexing: `tupleVar[index]`
         // when a tuple-typed variable with a matching element type is in scope
         if self.config.tuple_index_probability > 0.0
             && self.rng.gen_bool(self.config.tuple_index_probability)
-        {
-            if let Some(expr) =
+            && let Some(expr) =
                 self.try_generate_tuple_index_for_type(&TypeInfo::Primitive(prim), ctx)
-            {
-                return expr;
-            }
+        {
+            return expr;
         }
 
         // ~15% chance to generate null coalescing: `optVar ?? defaultExpr`
         // when an optional-typed variable with matching inner type is in scope
-        if self.rng.gen_bool(0.15) {
-            if let Some(expr) =
+        if self.rng.gen_bool(0.15)
+            && let Some(expr) =
                 self.try_generate_null_coalesce(&TypeInfo::Primitive(prim), ctx, depth)
-            {
-                return expr;
-            }
+        {
+            return expr;
         }
 
         // ~10% chance to generate arr.length() for i64 expressions
-        if prim == PrimitiveType::I64 && self.rng.gen_bool(0.10) {
-            if let Some(expr) = self.try_generate_array_length(ctx) {
-                return expr;
-            }
+        if prim == PrimitiveType::I64
+            && self.rng.gen_bool(0.10)
+            && let Some(expr) = self.try_generate_array_length(ctx)
+        {
+            return expr;
         }
 
         // String method: str.length() for i64 expressions.
         // (No arguments, so vole-fmt never wraps the call across lines.)
-        if prim == PrimitiveType::I64 && self.rng.gen_bool(self.config.string_method_probability) {
-            if let Some(expr) = self.try_generate_string_length(ctx) {
-                return expr;
-            }
+        if prim == PrimitiveType::I64
+            && self.rng.gen_bool(self.config.string_method_probability)
+            && let Some(expr) = self.try_generate_string_length(ctx)
+        {
+            return expr;
         }
 
         // ~10% chance to generate arr.iter().count() for i64 expressions
-        if prim == PrimitiveType::I64 && self.rng.gen_bool(0.10) {
-            if let Some(expr) = self.try_generate_iter_count(ctx) {
-                return expr;
-            }
+        if prim == PrimitiveType::I64
+            && self.rng.gen_bool(0.10)
+            && let Some(expr) = self.try_generate_iter_count(ctx)
+        {
+            return expr;
         }
 
         // ~8% chance to generate arr.iter().reduce(0, (acc, x) => acc + x) for i64 expressions
-        if prim == PrimitiveType::I64 && self.rng.gen_bool(0.08) {
-            if let Some(expr) =
+        if prim == PrimitiveType::I64
+            && self.rng.gen_bool(0.08)
+            && let Some(expr) =
                 self.try_generate_iter_reduce(&TypeInfo::Primitive(PrimitiveType::I64), ctx)
-            {
-                return expr;
-            }
+        {
+            return expr;
         }
 
         // ~10% chance to generate arr.iter().sum() for i64/f64 expressions
-        if (prim == PrimitiveType::I64 || prim == PrimitiveType::F64) && self.rng.gen_bool(0.10) {
-            if let Some(expr) = self.try_generate_iter_sum(prim, ctx) {
-                return expr;
-            }
+        if (prim == PrimitiveType::I64 || prim == PrimitiveType::F64)
+            && self.rng.gen_bool(0.10)
+            && let Some(expr) = self.try_generate_iter_sum(prim, ctx)
+        {
+            return expr;
         }
 
         // ~15% chance to call an interface method on a type-param-typed variable
         // when the method's return type matches our target primitive type.
-        if self.rng.gen_bool(0.15) {
-            if let Some(expr) =
+        if self.rng.gen_bool(0.15)
+            && let Some(expr) =
                 self.try_generate_type_param_method_call(&TypeInfo::Primitive(prim), ctx)
-            {
-                return expr;
-            }
+        {
+            return expr;
         }
 
         let choice = self.rng.gen_range(0..12);
@@ -2901,10 +2891,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             PrimitiveType::Bool => {
                 // ~10% chance to generate arr.iter().any/all((x) => PRED)
                 // when an array with primitive elements is in scope
-                if self.rng.gen_bool(0.10) {
-                    if let Some(expr) = self.try_generate_iter_any_all(ctx) {
-                        return expr;
-                    }
+                if self.rng.gen_bool(0.10)
+                    && let Some(expr) = self.try_generate_iter_any_all(ctx)
+                {
+                    return expr;
                 }
                 match choice {
                     0..=2 => {
@@ -2949,30 +2939,29 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
             PrimitiveType::String => {
                 // ~15% chance: .to_string() on numeric/bool variable
-                if self.rng.gen_bool(0.15) {
-                    if let Some(expr) = self.try_generate_to_string_call(ctx) {
-                        return expr;
-                    }
+                if self.rng.gen_bool(0.15)
+                    && let Some(expr) = self.try_generate_to_string_call(ctx)
+                {
+                    return expr;
                 }
                 // String method: to_upper/to_lower/trim/replace/replace_all/substring
-                if self.rng.gen_bool(self.config.string_method_probability) {
-                    if let Some(expr) = self.try_generate_string_transform_method(ctx) {
-                        return expr;
-                    }
+                if self.rng.gen_bool(self.config.string_method_probability)
+                    && let Some(expr) = self.try_generate_string_transform_method(ctx)
+                {
+                    return expr;
                 }
                 // ~12% chance: interpolated string with a method call
-                if self.rng.gen_bool(0.12) {
-                    if let Some(expr) = self.try_generate_method_call_interpolation(ctx) {
-                        return expr;
-                    }
+                if self.rng.gen_bool(0.12)
+                    && let Some(expr) = self.try_generate_method_call_interpolation(ctx)
+                {
+                    return expr;
                 }
                 // ~10% chance: arr.iter().reduce("", ...) for string expressions
-                if self.rng.gen_bool(0.10) {
-                    if let Some(expr) = self
+                if self.rng.gen_bool(0.10)
+                    && let Some(expr) = self
                         .try_generate_iter_reduce(&TypeInfo::Primitive(PrimitiveType::String), ctx)
-                    {
-                        return expr;
-                    }
+                {
+                    return expr;
                 }
                 match choice {
                     0..=1 => {
@@ -3218,10 +3207,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     fn generate_bool_atom(&mut self, ctx: &ExprContext, depth: usize) -> String {
         // ~12% chance to use a string method or iterator predicate as a bool atom.
         // This creates feature interactions between compound bools and method dispatch.
-        if self.rng.gen_bool(0.12) {
-            if let Some(expr) = self.try_generate_method_bool_atom(ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.12)
+            && let Some(expr) = self.try_generate_method_bool_atom(ctx)
+        {
+            return expr;
         }
         match self.rng.gen_range(0..4_u32) {
             0..=1 => {
@@ -3373,23 +3362,23 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// Generate an optional expression.
     fn generate_optional(&mut self, inner: &TypeInfo, ctx: &ExprContext, depth: usize) -> String {
         // ~15% chance to generate arr.iter().first()/last()/nth() for optional expressions
-        if self.rng.gen_bool(0.15) {
-            if let Some(expr) = self.try_generate_iter_first_last_nth(inner, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.15)
+            && let Some(expr) = self.try_generate_iter_first_last_nth(inner, ctx)
+        {
+            return expr;
         }
 
         // ~20% chance to generate optional chaining (optVar?.field) when
         // an optional class-typed variable with a field matching inner is in scope.
         // The result of ?. is Optional(field_type).
-        if self.rng.gen_bool(0.20) {
-            if let Some((expr, result_ty)) = self.try_generate_optional_chaining(ctx) {
-                // result_ty is Optional(field_type); check if field_type matches inner
-                if let TypeInfo::Optional(ref chained_inner) = result_ty {
-                    if types_compatible(chained_inner, inner) {
-                        return expr;
-                    }
-                }
+        if self.rng.gen_bool(0.20)
+            && let Some((expr, result_ty)) = self.try_generate_optional_chaining(ctx)
+        {
+            // result_ty is Optional(field_type); check if field_type matches inner
+            if let TypeInfo::Optional(ref chained_inner) = result_ty
+                && types_compatible(chained_inner, inner)
+            {
+                return expr;
             }
         }
 
@@ -3412,67 +3401,69 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// Generate an array expression.
     fn generate_array(&mut self, elem: &TypeInfo, ctx: &ExprContext, depth: usize) -> String {
         // ~15% chance to generate str.split(",").collect() for [string] arrays
-        if *elem == TypeInfo::Primitive(PrimitiveType::String) && self.rng.gen_bool(0.15) {
-            if let Some(expr) = self.try_generate_string_split(ctx) {
-                return expr;
-            }
+        if *elem == TypeInfo::Primitive(PrimitiveType::String)
+            && self.rng.gen_bool(0.15)
+            && let Some(expr) = self.try_generate_string_split(ctx)
+        {
+            return expr;
         }
 
         // ~15% chance to generate str.chars().collect() for [i32] arrays
         // (.chars() returns character codepoints as i32)
-        if *elem == TypeInfo::Primitive(PrimitiveType::I32) && self.rng.gen_bool(0.15) {
-            if let Some(expr) = self.try_generate_string_chars_collect(ctx) {
-                return expr;
-            }
+        if *elem == TypeInfo::Primitive(PrimitiveType::I32)
+            && self.rng.gen_bool(0.15)
+            && let Some(expr) = self.try_generate_string_chars_collect(ctx)
+        {
+            return expr;
         }
 
         // ~15% chance to generate arr.iter().map((x) => expr).collect()
-        if self.rng.gen_bool(0.15) {
-            if let Some(expr) = self.try_generate_iter_map_collect(elem, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.15)
+            && let Some(expr) = self.try_generate_iter_map_collect(elem, ctx)
+        {
+            return expr;
         }
 
         // ~10% chance to generate arr.iter().filter((x) => pred).collect()
-        if self.rng.gen_bool(0.10) {
-            if let Some(expr) = self.try_generate_iter_filter_collect(elem, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.10)
+            && let Some(expr) = self.try_generate_iter_filter_collect(elem, ctx)
+        {
+            return expr;
         }
 
         // ~8% chance to generate arr.iter().skip(N).take(M).collect()
-        if self.rng.gen_bool(0.08) {
-            if let Some(expr) = self.try_generate_iter_skip_take_collect(elem, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.08)
+            && let Some(expr) = self.try_generate_iter_skip_take_collect(elem, ctx)
+        {
+            return expr;
         }
 
         // ~8% chance to generate arr.iter().sorted().collect() (i64/i32 only)
-        if self.rng.gen_bool(0.08) {
-            if let Some(expr) = self.try_generate_iter_sorted_collect(elem, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.08)
+            && let Some(expr) = self.try_generate_iter_sorted_collect(elem, ctx)
+        {
+            return expr;
         }
 
         // ~8% chance to generate arr1.iter().chain(arr2.iter()).collect() (i64/i32 only)
-        if self.rng.gen_bool(0.08) {
-            if let Some(expr) = self.try_generate_iter_chain_collect(elem, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.08)
+            && let Some(expr) = self.try_generate_iter_chain_collect(elem, ctx)
+        {
+            return expr;
         }
 
         // ~6% chance to generate arr.iter().unique().collect() (i64/i32 only)
-        if self.rng.gen_bool(0.06) {
-            if let Some(expr) = self.try_generate_iter_unique_collect(elem, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.06)
+            && let Some(expr) = self.try_generate_iter_unique_collect(elem, ctx)
+        {
+            return expr;
         }
 
         // ~8% chance to generate arr.iter().flat_map((x) => [...]).collect() (i64/i32 only)
-        if self.rng.gen_bool(0.08) {
-            if let Some(expr) = self.try_generate_iter_flat_map_collect(elem, ctx) {
-                return expr;
-            }
+        if self.rng.gen_bool(0.08)
+            && let Some(expr) = self.try_generate_iter_flat_map_collect(elem, ctx)
+        {
+            return expr;
         }
 
         // Minimum 2 elements: array index generation uses 0..=1 hardcoded indices,
@@ -4163,21 +4154,21 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                     3 => {
                         // `val` pattern: compare against an existing variable
                         // in scope of the same type (exercises the val-pattern codepath)
-                        if let Some(ctx) = ctx {
-                            if let Some(var) = ctx.find_matching_var(&TypeInfo::Primitive(*prim)) {
-                                return format!("val {}", var);
-                            }
+                        if let Some(ctx) = ctx
+                            && let Some(var) = ctx.find_matching_var(&TypeInfo::Primitive(*prim))
+                        {
+                            return format!("val {}", var);
                         }
                         // Fallback to literal
                         self.literal_for_primitive(*prim)
                     }
                     _ => {
                         // `val` pattern with guard: `val x if cond => ...`
-                        if let Some(ctx) = ctx {
-                            if let Some(var) = ctx.find_matching_var(&TypeInfo::Primitive(*prim)) {
-                                let cond = self.generate_guard_condition(Some(ctx), depth);
-                                return format!("val {} if {}", var, cond);
-                            }
+                        if let Some(ctx) = ctx
+                            && let Some(var) = ctx.find_matching_var(&TypeInfo::Primitive(*prim))
+                        {
+                            let cond = self.generate_guard_condition(Some(ctx), depth);
+                            return format!("val {} if {}", var, cond);
                         }
                         // Fallback to guarded wildcard
                         let cond = self.generate_guard_condition(ctx, depth);

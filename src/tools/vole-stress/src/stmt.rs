@@ -126,6 +126,7 @@ pub struct StmtConfig {
     /// - Closure creation inside match arms (multiple codegen paths per arm)
     /// - Variable capture scope interaction with match arm expressions
     /// - Function-typed match results used in higher-order contexts
+    ///
     /// Set to 0.0 to disable.
     pub match_closure_arm_probability: f64,
     /// Probability of generating a range-based iterator chain let-binding.
@@ -142,6 +143,7 @@ pub struct StmtConfig {
     /// - Field access on class/struct instances
     /// - Closure capture of the extracted field value
     /// - Higher-order usage (direct invocation or iterator chain)
+    ///
     /// Requires a class/struct-typed local with at least one primitive field.
     /// Set to 0.0 to disable.
     pub field_closure_let_probability: f64,
@@ -212,6 +214,7 @@ pub struct StmtConfig {
     /// - `let b = str.starts_with("x")` (→ bool)
     /// - `let s = str.trim()` (→ string)
     /// - `let s = str.to_upper()` (→ string)
+    ///
     /// Exercises string method dispatch codegen paths.
     /// Set to 0.0 to disable.
     pub string_method_probability: f64,
@@ -234,6 +237,7 @@ pub struct StmtConfig {
     /// - `let x = wrapping_add(a, b)` (wrapping on overflow)
     /// - `let x = saturating_add(a, b)` (clamp on overflow)
     /// - `let x = checked_add(a, b) ?? 0` (nil on overflow, unwrap with default)
+    ///
     /// Exercises intrinsic function codegen paths across integer types.
     /// Set to 0.0 to disable.
     pub checked_arithmetic_probability: f64,
@@ -500,10 +504,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Optionally generate an early return inside an if block for non-void functions
         if !matches!(effective_return_type, TypeInfo::Void)
             && self.rng.gen_bool(self.config.early_return_probability)
+            && let Some(early_return_stmt) = self.generate_early_return(ctx)
         {
-            if let Some(early_return_stmt) = self.generate_early_return(ctx) {
-                lines.push(early_return_stmt);
-            }
+            lines.push(early_return_stmt);
         }
 
         // Generate final return statement (always needed for non-void functions)
@@ -570,17 +573,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // In fallible functions, occasionally generate a raise statement
-        if ctx.is_fallible && self.rng.gen_bool(self.config.raise_probability) {
-            if let Some(stmt) = self.try_generate_raise_statement(ctx) {
-                return stmt;
-            }
+        if ctx.is_fallible
+            && self.rng.gen_bool(self.config.raise_probability)
+            && let Some(stmt) = self.try_generate_raise_statement(ctx)
+        {
+            return stmt;
         }
 
         // Occasionally generate a try expression calling a fallible function
-        if self.rng.gen_bool(self.config.try_probability) {
-            if let Some(stmt) = self.try_generate_try_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.try_probability)
+            && let Some(stmt) = self.try_generate_try_let(ctx)
+        {
+            return stmt;
         }
 
         // If mutable numeric locals are in scope, occasionally generate a compound assignment
@@ -621,51 +625,49 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~20% chance to call a function-typed parameter if one is in scope
-        if self.rng.gen_bool(0.20) {
-            if let Some(stmt) = self.try_generate_fn_param_call(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.20)
+            && let Some(stmt) = self.try_generate_fn_param_call(ctx)
+        {
+            return stmt;
         }
 
         // Occasionally generate a discard statement (_ = func()) to exercise the syntax
-        if self.rng.gen_bool(self.config.discard_probability) {
-            if let Some(stmt) = self.try_generate_discard_statement(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.discard_probability)
+            && let Some(stmt) = self.try_generate_discard_statement(ctx)
+        {
+            return stmt;
         }
 
         // Occasionally generate a standalone static method call
-        if self.rng.gen_bool(self.config.static_call_probability) {
-            if let Some(stmt) = self.try_generate_static_call_statement(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.static_call_probability)
+            && let Some(stmt) = self.try_generate_static_call_statement(ctx)
+        {
+            return stmt;
         }
 
         // Occasionally generate an instance method call on a class-typed local
-        if self.rng.gen_bool(self.config.method_call_probability) {
-            if let Some(stmt) = self.try_generate_method_call(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.method_call_probability)
+            && let Some(stmt) = self.try_generate_method_call(ctx)
+        {
+            return stmt;
         }
 
         // Occasionally generate a method call on an interface-typed variable (vtable dispatch)
         if self
             .rng
             .gen_bool(self.config.interface_dispatch_probability)
+            && let Some(stmt) = self.try_generate_interface_method_call(ctx)
         {
-            if let Some(stmt) = self.try_generate_interface_method_call(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // Occasionally call a free function that takes an interface-typed parameter
         if self
             .rng
             .gen_bool(self.config.iface_function_call_probability)
+            && let Some(stmt) = self.try_generate_iface_function_call(ctx)
         {
-            if let Some(stmt) = self.try_generate_iface_function_call(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         let choice: f64 = self.rng.gen_range(0.0..1.0);
@@ -704,27 +706,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~15% chance to generate a class-typed local for field access
-        if self.rng.gen_bool(0.15) {
-            if let Some(stmt) = self.try_generate_class_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.15)
+            && let Some(stmt) = self.try_generate_class_let(ctx)
+        {
+            return stmt;
         }
 
         // Chance to generate an interface-typed local via upcast (for vtable dispatch)
         if self
             .rng
             .gen_bool(self.config.interface_dispatch_probability)
+            && let Some(stmt) = self.try_generate_interface_let(ctx)
         {
-            if let Some(stmt) = self.try_generate_interface_let(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // ~10% chance to generate a struct-typed local for struct usage patterns
-        if self.rng.gen_bool(0.10) {
-            if let Some(stmt) = self.try_generate_struct_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.10)
+            && let Some(stmt) = self.try_generate_struct_let(ctx)
+        {
+            return stmt;
         }
 
         // ~12% chance to generate an array-typed local for array indexing
@@ -733,10 +734,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // Iterator map/filter on array variables in scope
-        if self.rng.gen_bool(self.config.iter_map_filter_probability) {
-            if let Some(stmt) = self.try_generate_iter_map_filter_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.iter_map_filter_probability)
+            && let Some(stmt) = self.try_generate_iter_map_filter_let(ctx)
+        {
+            return stmt;
         }
 
         // Empty array through iterator chain — boundary condition stress test.
@@ -752,45 +753,45 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // Wildcard-only match — degenerate match with only `_ => expr`.
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.generate_wildcard_only_match(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.generate_wildcard_only_match(ctx)
+        {
+            return stmt;
         }
 
         // Nested when expressions — when inside when arms.
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_nested_when_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_nested_when_let(ctx)
+        {
+            return stmt;
         }
 
         // Zero-take / max-skip — iterator chains that produce empty results.
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_empty_iter_edge(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_empty_iter_edge(ctx)
+        {
+            return stmt;
         }
 
         // Chained string method calls — str.to_upper().trim().length() etc.
-        if self.rng.gen_bool(0.04) {
-            if let Some(stmt) = self.try_generate_chained_string_methods(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.04)
+            && let Some(stmt) = self.try_generate_chained_string_methods(ctx)
+        {
+            return stmt;
         }
 
         // Match on array element — match arr[0] { ... }
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_match_array_elem(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_match_array_elem(ctx)
+        {
+            return stmt;
         }
 
         // Match on iterator terminal — match arr.iter().count() { ... }
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_match_iter_terminal(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_match_iter_terminal(ctx)
+        {
+            return stmt;
         }
 
         // Range-based iterator chain — exercises range iterators (different source
@@ -806,28 +807,27 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         if self
             .rng
             .gen_bool(self.config.generic_closure_interface_probability)
+            && let Some(stmt) = self.try_generate_generic_closure_interface_chain(ctx)
         {
-            if let Some(stmt) = self.try_generate_generic_closure_interface_chain(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // Match expression whose arms produce closures capturing surrounding scope.
         // Generates `let f = match var { N => (x) => x + captured, ... }` then
         // either invokes the closure or passes it to an iterator chain.
-        if self.rng.gen_bool(self.config.match_closure_arm_probability) {
-            if let Some(stmt) = self.try_generate_match_closure_arms(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.match_closure_arm_probability)
+            && let Some(stmt) = self.try_generate_match_closure_arms(ctx)
+        {
+            return stmt;
         }
 
         // Field-closure-let: extract a primitive field from a class/struct instance,
         // capture it in a closure, and either invoke the closure or pass it to
         // an iterator .map() chain.
-        if self.rng.gen_bool(self.config.field_closure_let_probability) {
-            if let Some(stmt) = self.try_generate_field_closure_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.field_closure_let_probability)
+            && let Some(stmt) = self.try_generate_field_closure_let(ctx)
+        {
+            return stmt;
         }
 
         // String split to array: "a,b,c".split(",").collect()
@@ -836,10 +836,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // String method call: str.length(), str.contains("x"), str.trim(), etc.
-        if self.rng.gen_bool(self.config.string_method_probability) {
-            if let Some(stmt) = self.try_generate_string_method_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.string_method_probability)
+            && let Some(stmt) = self.try_generate_string_method_let(ctx)
+        {
+            return stmt;
         }
 
         // Checked/wrapping/saturating arithmetic (requires lowlevel import)
@@ -866,195 +866,187 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         if self
             .rng
             .gen_bool(self.config.struct_destructure_probability)
+            && let Some(stmt) = self.try_generate_struct_destructure(ctx)
         {
-            if let Some(stmt) = self.try_generate_struct_destructure(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // Class destructuring: if we have a class-typed variable in scope,
         // destructure it into its fields (let { x, y } = classInstance)
-        if self.rng.gen_bool(self.config.class_destructure_probability) {
-            if let Some(stmt) = self.try_generate_class_destructure(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.class_destructure_probability)
+            && let Some(stmt) = self.try_generate_class_destructure(ctx)
+        {
+            return stmt;
         }
 
         // ~8% chance to generate a struct copy (let copy = structVar)
-        if self.rng.gen_bool(0.08) {
-            if let Some(stmt) = self.try_generate_struct_copy(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.08)
+            && let Some(stmt) = self.try_generate_struct_copy(ctx)
+        {
+            return stmt;
         }
 
         // Match expression let-binding: let x = match var { 1 => ..., _ => ... }
-        if self.rng.gen_bool(self.config.match_probability) {
-            if let Some(stmt) = self.try_generate_match_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.match_probability)
+            && let Some(stmt) = self.try_generate_match_let(ctx)
+        {
+            return stmt;
         }
 
         // String match expression let-binding: let x = match str { "a" => ..., _ => ... }
-        if self.rng.gen_bool(self.config.string_match_probability) {
-            if let Some(stmt) = self.try_generate_string_match_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.string_match_probability)
+            && let Some(stmt) = self.try_generate_string_match_let(ctx)
+        {
+            return stmt;
         }
 
         // Union match expression let-binding: let x = match union_var { Type1 => ..., ... }
-        if self.rng.gen_bool(self.config.union_match_probability) {
-            if let Some(stmt) = self.try_generate_union_match_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.union_match_probability)
+            && let Some(stmt) = self.try_generate_union_match_let(ctx)
+        {
+            return stmt;
         }
 
         // Sentinel union let-binding: let x: PrimType | Sentinel = ... then match/is-check
-        if self.rng.gen_bool(self.config.sentinel_union_probability) {
-            if let Some(stmt) = self.try_generate_sentinel_union_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.sentinel_union_probability)
+            && let Some(stmt) = self.try_generate_sentinel_union_let(ctx)
+        {
+            return stmt;
         }
 
         // Optional destructure match: let x: Type? = ... then match with destructuring
         if self
             .rng
             .gen_bool(self.config.optional_destructure_match_probability)
+            && let Some(stmt) = self.try_generate_optional_destructure_match(ctx)
         {
-            if let Some(stmt) = self.try_generate_optional_destructure_match(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // Sentinel closure capture: closure captures PrimType | Sentinel union variable
         if self
             .rng
             .gen_bool(self.config.sentinel_closure_capture_probability)
+            && let Some(stmt) = self.try_generate_sentinel_closure_capture(ctx)
         {
-            if let Some(stmt) = self.try_generate_sentinel_closure_capture(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // Closure capturing whole struct and accessing fields inside
         if self
             .rng
             .gen_bool(self.config.closure_struct_capture_probability)
+            && let Some(stmt) = self.try_generate_closure_struct_capture(ctx)
         {
-            if let Some(stmt) = self.try_generate_closure_struct_capture(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // Nested closure capture: closure captures and invokes another closure
         if self
             .rng
             .gen_bool(self.config.nested_closure_capture_probability)
+            && let Some(stmt) = self.try_generate_nested_closure_capture(ctx)
         {
-            if let Some(stmt) = self.try_generate_nested_closure_capture(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // String interpolation let-binding: let s = "prefix {var} suffix"
         if self
             .rng
             .gen_bool(self.config.string_interpolation_probability)
+            && let Some(stmt) = self.try_generate_string_interpolation_let(ctx)
         {
-            if let Some(stmt) = self.try_generate_string_interpolation_let(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // Match on method call result
         if self
             .rng
             .gen_bool(self.config.match_on_method_result_probability)
+            && let Some(stmt) = self.try_generate_match_on_method_result(ctx)
         {
-            if let Some(stmt) = self.try_generate_match_on_method_result(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // Iterator map using method call on class instance
-        if self.rng.gen_bool(self.config.iter_method_map_probability) {
-            if let Some(stmt) = self.try_generate_iter_method_map(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.iter_method_map_probability)
+            && let Some(stmt) = self.try_generate_iter_method_map(ctx)
+        {
+            return stmt;
         }
 
         // When expression let-binding: let x = when { cond => val, _ => val }
-        if self.rng.gen_bool(self.config.when_let_probability) {
-            if let Some(stmt) = self.try_generate_when_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.when_let_probability)
+            && let Some(stmt) = self.try_generate_when_let(ctx)
+        {
+            return stmt;
         }
 
         // Iterator predicate: let b = arr.iter().any((x) => x > 0)
-        if self.rng.gen_bool(self.config.iter_predicate_probability) {
-            if let Some(stmt) = self.try_generate_iter_predicate_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(self.config.iter_predicate_probability)
+            && let Some(stmt) = self.try_generate_iter_predicate_let(ctx)
+        {
+            return stmt;
         }
 
         // Iterator chunks/windows: let c = arr.iter().chunks(2).count()
         if self
             .rng
             .gen_bool(self.config.iter_chunks_windows_probability)
+            && let Some(stmt) = self.try_generate_iter_chunks_windows_let(ctx)
         {
-            if let Some(stmt) = self.try_generate_iter_chunks_windows_let(ctx) {
-                return stmt;
-            }
+            return stmt;
         }
 
         // ~8% chance to re-iterate: take an existing array local and chain
         // a new iterator operation on it. Exercises iterating over dynamically-
         // created arrays (e.g. results of collect()).
-        if self.rng.gen_bool(0.08) {
-            if let Some(stmt) = self.try_generate_reiterate_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.08)
+            && let Some(stmt) = self.try_generate_reiterate_let(ctx)
+        {
+            return stmt;
         }
 
         // ~5% chance: for_each as a standalone statement
-        if self.rng.gen_bool(0.05) {
-            if let Some(stmt) = self.try_generate_for_each_stmt(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.05)
+            && let Some(stmt) = self.try_generate_for_each_stmt(ctx)
+        {
+            return stmt;
         }
 
         // ~5% chance: nth with match on optional result
-        if self.rng.gen_bool(0.05) {
-            if let Some(stmt) = self.try_generate_nth_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.05)
+            && let Some(stmt) = self.try_generate_nth_let(ctx)
+        {
+            return stmt;
         }
 
         // ~5% chance: string iteration (str.iter().chain.terminal)
-        if self.rng.gen_bool(0.05) {
-            if let Some(stmt) = self.try_generate_string_iter_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.05)
+            && let Some(stmt) = self.try_generate_string_iter_let(ctx)
+        {
+            return stmt;
         }
 
         // ~4% chance: variable shadowing — re-declare existing variable with new value
-        if self.rng.gen_bool(0.04) {
-            if let Some(stmt) = self.try_generate_variable_shadow(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.04)
+            && let Some(stmt) = self.try_generate_variable_shadow(ctx)
+        {
+            return stmt;
         }
 
         // ~3% chance: assert statement with a tautological condition
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_assert_stmt(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_assert_stmt(ctx)
+        {
+            return stmt;
         }
 
         // ~3% chance: match on boolean value
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_bool_match_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_bool_match_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: dead-code assertion (if false { assert(false) })
@@ -1078,59 +1070,59 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: iterator terminal inside while-loop accumulator
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_iter_while_accum(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_iter_while_accum(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: for-in loop with match on iteration variable
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_for_in_match_accum(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_for_in_match_accum(ctx)
+        {
+            return stmt;
         }
 
         // ~3% chance: string concatenation with + operator
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_string_concat_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_string_concat_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: map-to-string-then-reduce (join pattern)
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_map_tostring_reduce(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_map_tostring_reduce(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: numeric .to_string() in string expression
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_to_string_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_to_string_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: struct field in string interpolation
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_struct_field_interpolation(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_struct_field_interpolation(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: when with iterator predicate condition
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_iter_predicate(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_iter_predicate(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: closure result in string concat
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_closure_result_concat(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_closure_result_concat(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: split result in for-in loop
@@ -1139,24 +1131,24 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: for-in loop pushing derived values to mutable array
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_for_push_collect(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_for_push_collect(ctx)
+        {
+            return stmt;
         }
 
         // ~3% chance: array literal with variable elements
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_array_from_vars(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_array_from_vars(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: multiple pushes onto a mutable array
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_multi_push(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_multi_push(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: method call on a literal value (string/numeric)
@@ -1165,38 +1157,38 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: nested when-in-when expression
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_nested_when(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_nested_when(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: match on method call result
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_on_method(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_on_method(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: struct construction with iterator field values
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_struct_with_iter_fields(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_struct_with_iter_fields(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: iterator terminal + method chain (e.g., arr.iter().count().to_string())
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_iter_terminal_chain(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_iter_terminal_chain(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: when with string method conditions
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_string_method_conds(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_string_method_conds(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: single-element array operations
@@ -1205,31 +1197,31 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: tautological comparison in when
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_tautological_when(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_tautological_when(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: empty string concatenation edge case
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_empty_string_concat(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_empty_string_concat(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: last element access via computed index
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_last_elem_access(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_last_elem_access(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: for-loop indexed by array length
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_for_length_indexed(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_for_length_indexed(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: while-loop string building
@@ -1238,45 +1230,45 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~3% chance: compound boolean from numeric comparisons
-        if self.rng.gen_bool(0.03) {
-            if let Some(stmt) = self.try_generate_compound_bool_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.03)
+            && let Some(stmt) = self.try_generate_compound_bool_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: boolean from length comparisons
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_length_comparison_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_length_comparison_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: string interpolation with iterator terminal
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_interpolation_with_iter(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_interpolation_with_iter(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: reassign from when expression
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_reassign_from_when(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_reassign_from_when(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: identity arithmetic edge case (x + 0, x * 1, etc.)
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_identity_arithmetic(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_identity_arithmetic(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: string equality edge case (s == s, "" == "", etc.)
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_string_equality_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_string_equality_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: modulo edge cases (N % 1 == 0, N % N == 0)
@@ -1290,45 +1282,45 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: for-loop with when-based accumulation
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_for_when_accumulate(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_for_when_accumulate(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: when with iterator terminals as arm values
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_iter_in_when_arms(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_iter_in_when_arms(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: multi-arm when (4+ arms)
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_multi_arm_when(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_multi_arm_when(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: match with computed arm values
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_with_computation(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_with_computation(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: string replace/replace_all
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_string_replace_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_string_replace_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: nested match expression
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_nested_match_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_nested_match_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: string length on literal edge cases
@@ -1337,10 +1329,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: range check boolean (x > lo && x < hi)
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_range_check_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_range_check_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: for-loop string build with match
@@ -1349,17 +1341,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: when with string concat arm values
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_with_string_concat_arms(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_with_string_concat_arms(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: boolean negation edge cases
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_bool_negation_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_bool_negation_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: chained methods on literal strings
@@ -1368,17 +1360,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: method call on when result
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_result_method(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_result_method(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: for-loop building string with when body
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_for_iter_when_string_body(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_for_iter_when_string_body(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: while false dead code
@@ -1387,38 +1379,38 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: division by power of 2
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_power_of_two_div(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_power_of_two_div(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: string predicate (contains/starts_with/ends_with)
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_string_predicate_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_string_predicate_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: string interpolation with complex expressions
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_interpolation_expr_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_interpolation_expr_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: match on string length
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_string_length(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_string_length(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: array length guard (safe indexing)
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_array_length_guard(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_array_length_guard(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: repeat literal array
@@ -1427,10 +1419,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: iter().reduce() on array
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_iter_reduce_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_iter_reduce_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: i32 near-boundary operations
@@ -1444,17 +1436,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: manual for-loop reduce pattern
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_for_reduce_pattern(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_for_reduce_pattern(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: when containing match expression
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_match_combo(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_match_combo(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: string split iteration
@@ -1463,31 +1455,31 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: nested when expression with string result
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_nested_when_string_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_nested_when_string_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: .to_string() on numeric values
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_numeric_to_string_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_numeric_to_string_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: .substring() on strings
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_substring_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_substring_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: match with to_string arm values
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_to_string_arms(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_to_string_arms(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: for loop with string interpolation concat
@@ -1496,52 +1488,52 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: boolean chain expression
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_bool_chain_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_bool_chain_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: comparison chain expression
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_comparison_chain_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_comparison_chain_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: when with string predicate (contains/starts_with)
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_with_contains(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_with_contains(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: match on array length
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_array_length(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_array_length(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: sorted collect on array
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_sorted_collect_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_sorted_collect_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: reverse collect on array
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_reverse_collect_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_reverse_collect_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: guarded division (when { b != 0 => a / b, _ => 0 })
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_zero_division_guard(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_zero_division_guard(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: single-character string operations
@@ -1565,17 +1557,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: iterator take/skip collect on parameter arrays
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_iter_take_skip_collect_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_iter_take_skip_collect_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: when expression with f64 variable conditions
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_f64_cond_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_f64_cond_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: for-range building string via i.to_string()
@@ -1584,31 +1576,31 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: match with when expression in arm values
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_when_arm_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_when_arm_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: sorted iteration with accumulation
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_sorted_iter_accum(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_sorted_iter_accum(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: filter-collect then iterate with to_string
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_filter_iter_tostring(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_filter_iter_tostring(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: when comparing lengths of array and string
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_length_compare(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_length_compare(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: character extraction via substring
@@ -1622,10 +1614,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: match on interpolated string length
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_interpolation_length(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_interpolation_length(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: range for-loop with when body accumulation
@@ -1634,17 +1626,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: when with to_string in arms
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_tostring_arms(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_tostring_arms(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: match on sorted array length
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_sorted_length(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_sorted_length(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: single-element range operations
@@ -1663,10 +1655,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: .to_string().length() chained method
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_tostring_length_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_tostring_length_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: chained boolean literal ops
@@ -1675,46 +1667,46 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // ~2% chance: safe array first-element access via length guard
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_array_length_zero_check(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_array_length_zero_check(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: when with string replace in arms
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_when_replace_result(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_when_replace_result(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: match with .to_string() in arms
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_match_tostring_arms(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_match_tostring_arms(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: manual min/max via when
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_manual_minmax_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_manual_minmax_let(ctx)
+        {
+            return stmt;
         }
 
         // ~2% chance: nested .to_string().length().to_string() chain
-        if self.rng.gen_bool(0.02) {
-            if let Some(stmt) = self.try_generate_nested_tostring_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.02)
+            && let Some(stmt) = self.try_generate_nested_tostring_let(ctx)
+        {
+            return stmt;
         }
 
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
-        if self.rng.gen_bool(0.10) {
-            if let Some(stmt) = self.try_generate_widening_let(ctx) {
-                return stmt;
-            }
+        if self.rng.gen_bool(0.10)
+            && let Some(stmt) = self.try_generate_widening_let(ctx)
+        {
+            return stmt;
         }
 
         let name = ctx.new_local_name();
@@ -1979,14 +1971,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Guard: closures that capture variables inside generic class methods hit a
         // compiler bug ("Captured variable not found"). Skip this pattern entirely
         // when we're generating a method body for a generic class.
-        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
-            if let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym) {
-                if let SymbolKind::Class(info) = &symbol.kind {
-                    if !info.type_params.is_empty() {
-                        return None;
-                    }
-                }
-            }
+        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id
+            && let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym)
+            && let SymbolKind::Class(info) = &symbol.kind
+            && !info.type_params.is_empty()
+        {
+            return None;
         }
 
         // Step 1: Find an i64-typed variable to use as the match scrutinee
@@ -2009,19 +1999,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // different from the scrutinee, to use inside the closure arms.
         let mut capture_candidates: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            match ty {
-                TypeInfo::Primitive(p @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
-                    capture_candidates.push((name.clone(), *p));
-                }
-                _ => {}
+            if let TypeInfo::Primitive(p @ (PrimitiveType::I64 | PrimitiveType::I32)) = ty {
+                capture_candidates.push((name.clone(), *p));
             }
         }
         for param in ctx.params.iter() {
-            match &param.param_type {
-                TypeInfo::Primitive(p @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
-                    capture_candidates.push((param.name.clone(), *p));
-                }
-                _ => {}
+            if let TypeInfo::Primitive(p @ (PrimitiveType::I64 | PrimitiveType::I32)) =
+                &param.param_type
+            {
+                capture_candidates.push((param.name.clone(), *p));
             }
         }
         if capture_candidates.is_empty() {
@@ -2221,14 +2207,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Guard: closures that capture variables inside generic class methods hit a
         // compiler bug ("Captured variable not found"). Skip this pattern entirely
         // when we're generating a method body for a generic class.
-        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
-            if let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym) {
-                if let SymbolKind::Class(info) = &symbol.kind {
-                    if !info.type_params.is_empty() {
-                        return None;
-                    }
-                }
-            }
+        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id
+            && let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym)
+            && let SymbolKind::Class(info) = &symbol.kind
+            && !info.type_params.is_empty()
+        {
+            return None;
         }
 
         let _module_id = ctx.module_id?;
@@ -2240,32 +2224,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         for (name, ty, _) in &ctx.locals {
             match ty {
                 TypeInfo::Class(mod_id, sym_id) => {
-                    if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
-                        if let SymbolKind::Class(ref info) = sym.kind {
-                            // Only non-generic classes (generic field types are unresolved)
-                            if info.type_params.is_empty() {
-                                for field in &info.fields {
-                                    if let TypeInfo::Primitive(p) = &field.field_type {
-                                        // Only types the closure body can handle
-                                        if matches!(
-                                            p,
-                                            PrimitiveType::I64
-                                                | PrimitiveType::I32
-                                                | PrimitiveType::F64
-                                                | PrimitiveType::String
-                                                | PrimitiveType::Bool
-                                        ) {
-                                            candidates.push((name.clone(), field.name.clone(), *p));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                TypeInfo::Struct(mod_id, sym_id) => {
-                    if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
-                        if let SymbolKind::Struct(ref info) = sym.kind {
+                    if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id)
+                        && let SymbolKind::Class(ref info) = sym.kind
+                    {
+                        // Only non-generic classes (generic field types are unresolved)
+                        if info.type_params.is_empty() {
                             for field in &info.fields {
                                 if let TypeInfo::Primitive(p) = &field.field_type {
                                     // Only types the closure body can handle
@@ -2279,6 +2242,27 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                                     ) {
                                         candidates.push((name.clone(), field.name.clone(), *p));
                                     }
+                                }
+                            }
+                        }
+                    }
+                }
+                TypeInfo::Struct(mod_id, sym_id) => {
+                    if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id)
+                        && let SymbolKind::Struct(ref info) = sym.kind
+                    {
+                        for field in &info.fields {
+                            if let TypeInfo::Primitive(p) = &field.field_type {
+                                // Only types the closure body can handle
+                                if matches!(
+                                    p,
+                                    PrimitiveType::I64
+                                        | PrimitiveType::I32
+                                        | PrimitiveType::F64
+                                        | PrimitiveType::String
+                                        | PrimitiveType::Bool
+                                ) {
+                                    candidates.push((name.clone(), field.name.clone(), *p));
                                 }
                             }
                         }
@@ -2675,17 +2659,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Find union-typed variables in scope (locals + params) with all-primitive variants
         let mut candidates: Vec<(String, Vec<TypeInfo>)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Union(variants) = ty {
-                if variants.iter().all(|v| matches!(v, TypeInfo::Primitive(_))) {
-                    candidates.push((name.clone(), variants.clone()));
-                }
+            if let TypeInfo::Union(variants) = ty
+                && variants.iter().all(|v| matches!(v, TypeInfo::Primitive(_)))
+            {
+                candidates.push((name.clone(), variants.clone()));
             }
         }
         for param in ctx.params.iter() {
-            if let TypeInfo::Union(variants) = &param.param_type {
-                if variants.iter().all(|v| matches!(v, TypeInfo::Primitive(_))) {
-                    candidates.push((param.name.clone(), variants.clone()));
-                }
+            if let TypeInfo::Union(variants) = &param.param_type
+                && variants.iter().all(|v| matches!(v, TypeInfo::Primitive(_)))
+            {
+                candidates.push((param.name.clone(), variants.clone()));
             }
         }
         if candidates.is_empty() {
@@ -2821,7 +2805,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         // Build the union type: PrimType | Sentinel [| Sentinel2]
         let sentinel_type_info = TypeInfo::Sentinel(module_id, sentinel_sym_id);
-        let mut union_members = vec![prim_type_info.clone(), sentinel_type_info.clone()];
+        let mut union_members = vec![prim_type_info.clone(), sentinel_type_info];
         let mut union_type_parts = vec![prim_type.as_str().to_string(), sentinel_name.clone()];
 
         if let Some((ref name2, sym_id2)) = second_sentinel {
@@ -2954,10 +2938,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let class_candidates: Vec<_> = module
             .classes()
             .filter_map(|sym| {
-                if let SymbolKind::Class(ref info) = sym.kind {
-                    if info.type_params.is_empty() && has_primitive_field(info) {
-                        return Some((sym.id, sym.name.clone(), info.fields.clone(), true));
-                    }
+                if let SymbolKind::Class(ref info) = sym.kind
+                    && info.type_params.is_empty()
+                    && has_primitive_field(info)
+                {
+                    return Some((sym.id, sym.name.clone(), info.fields.clone(), true));
                 }
                 None
             })
@@ -2967,10 +2952,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let struct_candidates: Vec<_> = module
             .structs()
             .filter_map(|sym| {
-                if let SymbolKind::Struct(ref info) = sym.kind {
-                    if info.fields.iter().any(|f| f.field_type.is_primitive()) {
-                        return Some((sym.id, sym.name.clone(), info.fields.clone(), false));
-                    }
+                if let SymbolKind::Struct(ref info) = sym.kind
+                    && info.fields.iter().any(|f| f.field_type.is_primitive())
+                {
+                    return Some((sym.id, sym.name.clone(), info.fields.clone(), false));
                 }
                 None
             })
@@ -3231,14 +3216,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// ```
     fn try_generate_closure_struct_capture(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Guard: skip in generic class method contexts (same issue as field_closure_let)
-        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
-            if let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym) {
-                if let SymbolKind::Class(info) = &symbol.kind {
-                    if !info.type_params.is_empty() {
-                        return None;
-                    }
-                }
-            }
+        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id
+            && let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym)
+            && let SymbolKind::Class(info) = &symbol.kind
+            && !info.type_params.is_empty()
+        {
+            return None;
         }
 
         let _module_id = ctx.module_id?;
@@ -3248,50 +3231,48 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let mut candidates: Vec<(String, Vec<(String, PrimitiveType)>)> = Vec::new();
 
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Struct(mod_id, sym_id) = ty {
-                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Struct(ref info) = sym.kind {
-                        let numeric_fields: Vec<(String, PrimitiveType)> = info
-                            .fields
-                            .iter()
-                            .filter_map(|f| {
-                                if let TypeInfo::Primitive(p) = &f.field_type {
-                                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32) {
-                                        return Some((f.name.clone(), *p));
-                                    }
-                                }
-                                None
-                            })
-                            .collect();
-                        if numeric_fields.len() >= 2 {
-                            candidates.push((name.clone(), numeric_fields));
+            if let TypeInfo::Struct(mod_id, sym_id) = ty
+                && let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id)
+                && let SymbolKind::Struct(ref info) = sym.kind
+            {
+                let numeric_fields: Vec<(String, PrimitiveType)> = info
+                    .fields
+                    .iter()
+                    .filter_map(|f| {
+                        if let TypeInfo::Primitive(p) = &f.field_type
+                            && matches!(p, PrimitiveType::I64 | PrimitiveType::I32)
+                        {
+                            return Some((f.name.clone(), *p));
                         }
-                    }
+                        None
+                    })
+                    .collect();
+                if numeric_fields.len() >= 2 {
+                    candidates.push((name.clone(), numeric_fields));
                 }
             }
         }
 
         // Also check params
         for p in ctx.params {
-            if let TypeInfo::Struct(mod_id, sym_id) = &p.param_type {
-                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Struct(ref info) = sym.kind {
-                        let numeric_fields: Vec<(String, PrimitiveType)> = info
-                            .fields
-                            .iter()
-                            .filter_map(|f| {
-                                if let TypeInfo::Primitive(pt) = &f.field_type {
-                                    if matches!(pt, PrimitiveType::I64 | PrimitiveType::I32) {
-                                        return Some((f.name.clone(), *pt));
-                                    }
-                                }
-                                None
-                            })
-                            .collect();
-                        if numeric_fields.len() >= 2 {
-                            candidates.push((p.name.clone(), numeric_fields));
+            if let TypeInfo::Struct(mod_id, sym_id) = &p.param_type
+                && let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id)
+                && let SymbolKind::Struct(ref info) = sym.kind
+            {
+                let numeric_fields: Vec<(String, PrimitiveType)> = info
+                    .fields
+                    .iter()
+                    .filter_map(|f| {
+                        if let TypeInfo::Primitive(pt) = &f.field_type
+                            && matches!(pt, PrimitiveType::I64 | PrimitiveType::I32)
+                        {
+                            return Some((f.name.clone(), *pt));
                         }
-                    }
+                        None
+                    })
+                    .collect();
+                if numeric_fields.len() >= 2 {
+                    candidates.push((p.name.clone(), numeric_fields));
                 }
             }
         }
@@ -3382,14 +3363,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Returns `None` if no suitable closure-typed local is in scope.
     fn try_generate_nested_closure_capture(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Guard: skip in generic class method contexts (capture bug)
-        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
-            if let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym) {
-                if let SymbolKind::Class(info) = &symbol.kind {
-                    if !info.type_params.is_empty() {
-                        return None;
-                    }
-                }
-            }
+        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id
+            && let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym)
+            && let SymbolKind::Class(info) = &symbol.kind
+            && !info.type_params.is_empty()
+        {
+            return None;
         }
 
         // Find closure-typed locals that take one i64 param and return i64
@@ -3399,16 +3378,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 param_types,
                 return_type,
             } = ty
+                && param_types.len() == 1
+                && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
+                && matches!(
+                    return_type.as_ref(),
+                    TypeInfo::Primitive(PrimitiveType::I64)
+                )
             {
-                if param_types.len() == 1
-                    && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
-                    && matches!(
-                        return_type.as_ref(),
-                        TypeInfo::Primitive(PrimitiveType::I64)
-                    )
-                {
-                    candidates.push(name.clone());
-                }
+                candidates.push(name.clone());
             }
         }
 
@@ -3418,16 +3395,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 param_types,
                 return_type,
             } = &p.param_type
+                && param_types.len() == 1
+                && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
+                && matches!(
+                    return_type.as_ref(),
+                    TypeInfo::Primitive(PrimitiveType::I64)
+                )
             {
-                if param_types.len() == 1
-                    && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
-                    && matches!(
-                        return_type.as_ref(),
-                        TypeInfo::Primitive(PrimitiveType::I64)
-                    )
-                {
-                    candidates.push(p.name.clone());
-                }
+                candidates.push(p.name.clone());
             }
         }
 
@@ -3483,31 +3458,31 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Collect variables suitable for interpolation (numeric, string, bool)
         let mut candidates: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Primitive(p) = ty {
-                if matches!(
+            if let TypeInfo::Primitive(p) = ty
+                && matches!(
                     p,
                     PrimitiveType::I64
                         | PrimitiveType::I32
                         | PrimitiveType::F64
                         | PrimitiveType::String
                         | PrimitiveType::Bool
-                ) {
-                    candidates.push((name.clone(), *p));
-                }
+                )
+            {
+                candidates.push((name.clone(), *p));
             }
         }
         for p in ctx.params {
-            if let TypeInfo::Primitive(pt) = &p.param_type {
-                if matches!(
+            if let TypeInfo::Primitive(pt) = &p.param_type
+                && matches!(
                     pt,
                     PrimitiveType::I64
                         | PrimitiveType::I32
                         | PrimitiveType::F64
                         | PrimitiveType::String
                         | PrimitiveType::Bool
-                ) {
-                    candidates.push((p.name.clone(), *pt));
-                }
+                )
+            {
+                candidates.push((p.name.clone(), *pt));
             }
         }
 
@@ -3528,9 +3503,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let separators = [", ", " | ", " + ", " and ", " / "];
 
         let mut parts: Vec<String> = Vec::new();
-        for i in 0..num_segments {
-            let (name, prim) = &candidates[i];
-
+        for (i, (name, prim)) in candidates.iter().enumerate().take(num_segments) {
             // Decide what expression to interpolate
             let expr = match self.rng.gen_range(0..6) {
                 0 => {
@@ -3662,13 +3635,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Find numeric arrays in scope (i64, i32, f64)
         let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Array(inner) = ty {
-                if let TypeInfo::Primitive(
+            if let TypeInfo::Array(inner) = ty
+                && let TypeInfo::Primitive(
                     p @ (PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64),
                 ) = inner.as_ref()
-                {
-                    array_vars.push((name.clone(), *p));
-                }
+            {
+                array_vars.push((name.clone(), *p));
             }
         }
         if array_vars.is_empty() {
@@ -3720,18 +3692,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Find arrays with primitive element types
         let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Array(inner) = ty {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    match p {
-                        PrimitiveType::I64
-                        | PrimitiveType::I32
-                        | PrimitiveType::F64
-                        | PrimitiveType::Bool
-                        | PrimitiveType::String => {
-                            array_vars.push((name.clone(), *p));
-                        }
-                        _ => {}
+            if let TypeInfo::Array(inner) = ty
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+            {
+                match p {
+                    PrimitiveType::I64
+                    | PrimitiveType::I32
+                    | PrimitiveType::F64
+                    | PrimitiveType::Bool
+                    | PrimitiveType::String => {
+                        array_vars.push((name.clone(), *p));
                     }
+                    _ => {}
                 }
             }
         }
@@ -3795,26 +3767,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     fn try_generate_for_each_stmt(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Array(inner) = ty {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    match p {
-                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
-                            array_vars.push((name.clone(), *p));
-                        }
-                        _ => {}
+            if let TypeInfo::Array(inner) = ty
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+            {
+                match p {
+                    PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
+                        array_vars.push((name.clone(), *p));
                     }
+                    _ => {}
                 }
             }
         }
         for param in ctx.params.iter() {
-            if let TypeInfo::Array(inner) = &param.param_type {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    match p {
-                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
-                            array_vars.push((param.name.clone(), *p));
-                        }
-                        _ => {}
+            if let TypeInfo::Array(inner) = &param.param_type
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+            {
+                match p {
+                    PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
+                        array_vars.push((param.name.clone(), *p));
                     }
+                    _ => {}
                 }
             }
         }
@@ -3867,32 +3839,32 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     fn try_generate_nth_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Array(inner) = ty {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    match p {
-                        PrimitiveType::I64
-                        | PrimitiveType::I32
-                        | PrimitiveType::String
-                        | PrimitiveType::Bool => {
-                            array_vars.push((name.clone(), *p));
-                        }
-                        _ => {}
+            if let TypeInfo::Array(inner) = ty
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+            {
+                match p {
+                    PrimitiveType::I64
+                    | PrimitiveType::I32
+                    | PrimitiveType::String
+                    | PrimitiveType::Bool => {
+                        array_vars.push((name.clone(), *p));
                     }
+                    _ => {}
                 }
             }
         }
         for param in ctx.params.iter() {
-            if let TypeInfo::Array(inner) = &param.param_type {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    match p {
-                        PrimitiveType::I64
-                        | PrimitiveType::I32
-                        | PrimitiveType::String
-                        | PrimitiveType::Bool => {
-                            array_vars.push((param.name.clone(), *p));
-                        }
-                        _ => {}
+            if let TypeInfo::Array(inner) = &param.param_type
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+            {
+                match p {
+                    PrimitiveType::I64
+                    | PrimitiveType::I32
+                    | PrimitiveType::String
+                    | PrimitiveType::Bool => {
+                        array_vars.push((param.name.clone(), *p));
                     }
+                    _ => {}
                 }
             }
         }
@@ -4097,11 +4069,6 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
     }
 
-    /// Try to generate a string method call let-binding.
-    ///
-    /// Finds a string-typed variable in scope and calls a random method on it:
-    /// - `.length()` → i64
-    /// - `.contains("literal")` → bool
     /// Try to generate a re-iteration let-binding.
     ///
     /// Finds an existing array-typed local variable and chains a new iterator
@@ -4111,10 +4078,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Find i64 array locals in scope
         let mut i64_array_vars: Vec<String> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Array(inner) = ty {
-                if matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) {
-                    i64_array_vars.push(name.clone());
-                }
+            if let TypeInfo::Array(inner) = ty
+                && matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+            {
+                i64_array_vars.push(name.clone());
             }
         }
         if i64_array_vars.is_empty() {
@@ -4169,11 +4136,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!("let {} = {}{}", result_name, arr_name, chain))
     }
 
-    /// - `.starts_with("literal")` → bool
-    /// - `.ends_with("literal")` → bool
-    /// - `.trim()` → string
-    /// - `.to_upper()` → string
-    /// - `.to_lower()` → string
+    /// Try to generate a string method call let-binding.
+    ///
+    /// Finds a string-typed variable in scope and calls a random method on it:
+    /// - `.length()` -> i64
+    /// - `.contains("literal")` -> bool
+    /// - `.starts_with("literal")` -> bool
+    /// - `.ends_with("literal")` -> bool
+    /// - `.trim()` -> string
+    /// - `.to_upper()` -> string
+    /// - `.to_lower()` -> string
     fn try_generate_string_method_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find a string-typed variable in scope
         let mut string_vars: Vec<String> = Vec::new();
@@ -4428,23 +4400,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Find class-typed locals with methods that return i64
         let mut candidates: Vec<(String, String, Vec<ParamInfo>)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Class(mod_id, sym_id) = ty {
-                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Class(ref info) = sym.kind {
-                        if info.type_params.is_empty() {
-                            for method in &info.methods {
-                                if matches!(
-                                    method.return_type,
-                                    TypeInfo::Primitive(PrimitiveType::I64)
-                                ) {
-                                    candidates.push((
-                                        name.clone(),
-                                        method.name.clone(),
-                                        method.params.clone(),
-                                    ));
-                                }
-                            }
-                        }
+            if let TypeInfo::Class(mod_id, sym_id) = ty
+                && let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id)
+                && let SymbolKind::Class(ref info) = sym.kind
+                && info.type_params.is_empty()
+            {
+                for method in &info.methods {
+                    if matches!(method.return_type, TypeInfo::Primitive(PrimitiveType::I64)) {
+                        candidates.push((name.clone(), method.name.clone(), method.params.clone()));
                     }
                 }
             }
@@ -4533,17 +4496,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Find i64 array variables in scope (locals + params)
         let mut array_candidates: Vec<String> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Array(elem) = ty {
-                if matches!(elem.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) {
-                    array_candidates.push(name.clone());
-                }
+            if let TypeInfo::Array(elem) = ty
+                && matches!(elem.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+            {
+                array_candidates.push(name.clone());
             }
         }
         for param in ctx.params.iter() {
-            if let TypeInfo::Array(elem) = &param.param_type {
-                if matches!(elem.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) {
-                    array_candidates.push(param.name.clone());
-                }
+            if let TypeInfo::Array(elem) = &param.param_type
+                && matches!(elem.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+            {
+                array_candidates.push(param.name.clone());
             }
         }
         if array_candidates.is_empty() {
@@ -4558,27 +4521,24 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         // Helper: scan a class type for suitable methods
         let mut scan_class = |name: &str, mod_id: ModuleId, sym_id: SymbolId| {
-            if let Some(sym) = ctx.table.get_symbol(mod_id, sym_id) {
-                if let SymbolKind::Class(ref info) = sym.kind {
-                    if info.type_params.is_empty() {
-                        for method in &info.methods {
-                            if !matches!(
-                                method.return_type,
-                                TypeInfo::Primitive(PrimitiveType::I64)
-                            ) {
-                                continue;
-                            }
-                            let has_i64 = method.params.iter().any(|p| {
-                                matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64))
-                            });
-                            if has_i64 && !method.params.is_empty() {
-                                method_candidates.push((
-                                    name.to_string(),
-                                    method.name.clone(),
-                                    method.params.clone(),
-                                ));
-                            }
-                        }
+            if let Some(sym) = ctx.table.get_symbol(mod_id, sym_id)
+                && let SymbolKind::Class(ref info) = sym.kind
+                && info.type_params.is_empty()
+            {
+                for method in &info.methods {
+                    if !matches!(method.return_type, TypeInfo::Primitive(PrimitiveType::I64)) {
+                        continue;
+                    }
+                    let has_i64 = method
+                        .params
+                        .iter()
+                        .any(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)));
+                    if has_i64 && !method.params.is_empty() {
+                        method_candidates.push((
+                            name.to_string(),
+                            method.name.clone(),
+                            method.params.clone(),
+                        ));
                     }
                 }
             }
@@ -4739,12 +4699,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             4 if !string_candidates.is_empty() => {
                 // assert(str.trim().length() >= 0)
                 let name = &string_candidates[self.rng.gen_range(0..string_candidates.len())];
-                let chain = match self.rng.gen_range(0..3u32) {
+
+                match self.rng.gen_range(0..3u32) {
                     0 => format!("{}.trim().length() >= 0", name),
                     1 => format!("{}.to_upper().length() == {}.length()", name, name),
                     _ => format!("{}.length() >= 0", name),
-                };
-                chain
+                }
             }
             5 if !array_candidates.is_empty() => {
                 // assert(arr.iter().all((x) => x == x))
@@ -4916,7 +4876,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             _ => ("\"a,b,c\"", "\",\""), // normal case for safety
         };
 
-        let terminal = match self.rng.gen_range(0..3u32) {
+        match self.rng.gen_range(0..3u32) {
             0 => {
                 ctx.add_local(
                     result_name.clone(),
@@ -4944,9 +4904,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 );
                 format!("let {} = {}.split({}).count()", result_name, input, delim)
             }
-        };
-
-        terminal
+        }
     }
 
     /// Generate a while-loop that runs an iterator terminal each iteration and
@@ -4958,10 +4916,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let prim_arrays: Vec<(String, PrimitiveType)> = array_vars
             .into_iter()
             .filter_map(|(name, elem_ty)| {
-                if let TypeInfo::Primitive(prim) = elem_ty {
-                    if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
-                        return Some((name, prim));
-                    }
+                if let TypeInfo::Primitive(prim) = elem_ty
+                    && matches!(prim, PrimitiveType::I64 | PrimitiveType::I32)
+                {
+                    return Some((name, prim));
                 }
                 None
             })
@@ -5034,7 +4992,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.protected_vars.push(counter_name.clone());
         ctx.protected_vars.push(guard_name.clone());
         ctx.protected_vars.push(acc_name.clone());
-        ctx.protected_vars.push(arr_name.clone());
+        ctx.protected_vars.push(arr_name);
 
         let indent = self.indent_str();
         let inner = format!("{}    ", indent);
@@ -5236,24 +5194,24 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .locals
             .iter()
             .filter_map(|(name, ty, _)| {
-                if let TypeInfo::Primitive(p) = ty {
-                    if matches!(
+                if let TypeInfo::Primitive(p) = ty
+                    && matches!(
                         p,
                         PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
-                    ) {
-                        return Some((name.clone(), *p));
-                    }
+                    )
+                {
+                    return Some((name.clone(), *p));
                 }
                 None
             })
             .chain(ctx.params.iter().filter_map(|p| {
-                if let TypeInfo::Primitive(pt) = &p.param_type {
-                    if matches!(
+                if let TypeInfo::Primitive(pt) = &p.param_type
+                    && matches!(
                         pt,
                         PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
-                    ) {
-                        return Some((p.name.clone(), *pt));
-                    }
+                    )
+                {
+                    return Some((p.name.clone(), *pt));
                 }
                 None
             }))
@@ -5345,23 +5303,22 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let mut candidates: Vec<(String, String, PrimitiveType)> = Vec::new();
 
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Struct(mod_id, sym_id) = ty {
-                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Struct(ref info) = sym.kind {
-                        for f in &info.fields {
-                            if let TypeInfo::Primitive(p) = &f.field_type {
-                                if matches!(
-                                    p,
-                                    PrimitiveType::I64
-                                        | PrimitiveType::I32
-                                        | PrimitiveType::F64
-                                        | PrimitiveType::String
-                                        | PrimitiveType::Bool
-                                ) {
-                                    candidates.push((name.clone(), f.name.clone(), *p));
-                                }
-                            }
-                        }
+            if let TypeInfo::Struct(mod_id, sym_id) = ty
+                && let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id)
+                && let SymbolKind::Struct(ref info) = sym.kind
+            {
+                for f in &info.fields {
+                    if let TypeInfo::Primitive(p) = &f.field_type
+                        && matches!(
+                            p,
+                            PrimitiveType::I64
+                                | PrimitiveType::I32
+                                | PrimitiveType::F64
+                                | PrimitiveType::String
+                                | PrimitiveType::Bool
+                        )
+                    {
+                        candidates.push((name.clone(), f.name.clone(), *p));
                     }
                 }
             }
@@ -5401,13 +5358,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let prim_arrays: Vec<(String, PrimitiveType)> = array_vars
             .into_iter()
             .filter_map(|(name, elem_ty)| {
-                if let TypeInfo::Primitive(prim) = elem_ty {
-                    if matches!(
+                if let TypeInfo::Primitive(prim) = elem_ty
+                    && matches!(
                         prim,
                         PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
-                    ) {
-                        return Some((name, prim));
-                    }
+                    )
+                {
+                    return Some((name, prim));
                 }
                 None
             })
@@ -6070,22 +6027,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .locals
             .iter()
             .filter_map(|(name, ty, _)| {
-                if let TypeInfo::Array(elem) = ty {
-                    if let TypeInfo::Primitive(prim) = elem.as_ref() {
-                        if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
-                            return Some((name.clone(), *prim));
-                        }
-                    }
+                if let TypeInfo::Array(elem) = ty
+                    && let TypeInfo::Primitive(prim) = elem.as_ref()
+                    && matches!(prim, PrimitiveType::I64 | PrimitiveType::I32)
+                {
+                    return Some((name.clone(), *prim));
                 }
                 None
             })
             .chain(ctx.params.iter().filter_map(|p| {
-                if let TypeInfo::Array(elem) = &p.param_type {
-                    if let TypeInfo::Primitive(prim) = elem.as_ref() {
-                        if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
-                            return Some((p.name.clone(), *prim));
-                        }
-                    }
+                if let TypeInfo::Array(elem) = &p.param_type
+                    && let TypeInfo::Primitive(prim) = elem.as_ref()
+                    && matches!(prim, PrimitiveType::I64 | PrimitiveType::I32)
+                {
+                    return Some((p.name.clone(), *prim));
                 }
                 None
             }))
@@ -6182,10 +6137,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let prim_arrays: Vec<(String, PrimitiveType)> = array_vars
             .into_iter()
             .filter_map(|(name, elem_ty)| {
-                if let TypeInfo::Primitive(prim) = elem_ty {
-                    if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
-                        return Some((name, prim));
-                    }
+                if let TypeInfo::Primitive(prim) = elem_ty
+                    && matches!(prim, PrimitiveType::I64 | PrimitiveType::I32)
+                {
+                    return Some((name, prim));
                 }
                 None
             })
@@ -6577,12 +6532,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .params
             .iter()
             .filter_map(|p| {
-                if let TypeInfo::Array(elem) = &p.param_type {
-                    if let TypeInfo::Primitive(prim) = elem.as_ref() {
-                        if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
-                            return Some((p.name.clone(), *prim));
-                        }
-                    }
+                if let TypeInfo::Array(elem) = &p.param_type
+                    && let TypeInfo::Primitive(prim) = elem.as_ref()
+                    && matches!(prim, PrimitiveType::I64 | PrimitiveType::I32)
+                {
+                    return Some((p.name.clone(), *prim));
                 }
                 None
             })
@@ -6815,10 +6769,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let prim_arrays: Vec<(String, PrimitiveType)> = array_vars
             .into_iter()
             .filter_map(|(name, elem_ty)| {
-                if let TypeInfo::Primitive(prim) = elem_ty {
-                    if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
-                        return Some((name, prim));
-                    }
+                if let TypeInfo::Primitive(prim) = elem_ty
+                    && matches!(prim, PrimitiveType::I64 | PrimitiveType::I32)
+                {
+                    return Some((name, prim));
                 }
                 None
             })
@@ -8137,10 +8091,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let num_arms = self.rng.gen_range(2..=3);
 
         let mut arms = Vec::new();
-        let mut used_values = std::collections::HashSet::new();
         for i in 0..num_arms {
             let val = i as i64;
-            used_values.insert(val);
             arms.push(format!(
                 "    {} => {}",
                 val,
@@ -8627,8 +8579,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             (lit.to_string(), len)
         };
 
-        let start = self.rng.gen_range(0..max_len.min(4) as i32);
-        let end = self.rng.gen_range(start..=max_len as i32);
+        let start = self.rng.gen_range(0..max_len.min(4));
+        let end = self.rng.gen_range(start..=max_len);
 
         ctx.add_local(
             name.clone(),
@@ -8776,9 +8728,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         // Join with && and ||
         let mut expr = parts[0].clone();
-        for i in 1..parts.len() {
+        for part in parts.iter().skip(1) {
             let op = if self.rng.gen_bool(0.6) { "&&" } else { "||" };
-            expr = format!("({} {} {})", expr, op, parts[i]);
+            expr = format!("({} {} {})", expr, op, part);
         }
 
         ctx.add_local(
@@ -11190,26 +11142,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // 20% chance of early return from inside a loop when the function
         // has a non-void return type.
         let return_type = ctx.return_type.clone();
-        if let Some(ref ret_ty) = return_type {
-            if !matches!(ret_ty, TypeInfo::Void) && self.rng.gen_bool(0.20) {
+        if let Some(ref ret_ty) = return_type
+            && !matches!(ret_ty, TypeInfo::Void)
+            && self.rng.gen_bool(0.20)
+        {
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let cond = expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0);
+
+            let return_expr = {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let cond =
-                    expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0);
+                expr_gen.generate(ret_ty, &expr_ctx, 0)
+            };
 
-                let return_expr = {
-                    let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                    expr_gen.generate(ret_ty, &expr_ctx, 0)
-                };
-
-                let indent = "    ".repeat(self.indent + 1);
-                return format!(
-                    "if {} {{\n{}return {}\n{}}}",
-                    cond,
-                    indent,
-                    return_expr,
-                    "    ".repeat(self.indent)
-                );
-            }
+            let indent = "    ".repeat(self.indent + 1);
+            return format!(
+                "if {} {{\n{}return {}\n{}}}",
+                cond,
+                indent,
+                return_expr,
+                "    ".repeat(self.indent)
+            );
         }
 
         let keyword = if self.rng.gen_bool(0.5) {
@@ -11357,10 +11309,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.locals
             .iter()
             .filter_map(|(name, ty, is_mut)| {
-                if *is_mut && !ctx.protected_vars.contains(name) {
-                    if let TypeInfo::Array(elem) = ty {
-                        return Some((name.clone(), *elem.clone()));
-                    }
+                if *is_mut
+                    && !ctx.protected_vars.contains(name)
+                    && let TypeInfo::Array(elem) = ty
+                {
+                    return Some((name.clone(), *elem.clone()));
                 }
                 None
             })
@@ -11383,7 +11336,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let expr_ctx = ctx.to_expr_context();
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let value = expr_gen.generate_simple(&elem_type, &expr_ctx);
+        let value = expr_gen.generate_simple(elem_type, &expr_ctx);
 
         format!("{}[{}] = {}", arr_name, index, value)
     }
@@ -11400,7 +11353,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let expr_ctx = ctx.to_expr_context();
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let value = expr_gen.generate_simple(&elem_type, &expr_ctx);
+        let value = expr_gen.generate_simple(elem_type, &expr_ctx);
 
         format!("{}.push({})", arr_name, value)
     }
@@ -11414,25 +11367,24 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.locals
             .iter()
             .filter_map(|(name, ty, is_mut)| {
-                if *is_mut && !ctx.protected_vars.contains(name) {
-                    if let TypeInfo::Array(elem) = ty {
-                        if let TypeInfo::Primitive(
-                            p @ (PrimitiveType::I8
-                            | PrimitiveType::I16
-                            | PrimitiveType::I32
-                            | PrimitiveType::I64
-                            | PrimitiveType::I128
-                            | PrimitiveType::U8
-                            | PrimitiveType::U16
-                            | PrimitiveType::U32
-                            | PrimitiveType::U64
-                            | PrimitiveType::F32
-                            | PrimitiveType::F64),
-                        ) = **elem
-                        {
-                            return Some((name.clone(), p));
-                        }
-                    }
+                if *is_mut
+                    && !ctx.protected_vars.contains(name)
+                    && let TypeInfo::Array(elem) = ty
+                    && let TypeInfo::Primitive(
+                        p @ (PrimitiveType::I8
+                        | PrimitiveType::I16
+                        | PrimitiveType::I32
+                        | PrimitiveType::I64
+                        | PrimitiveType::I128
+                        | PrimitiveType::U8
+                        | PrimitiveType::U16
+                        | PrimitiveType::U32
+                        | PrimitiveType::U64
+                        | PrimitiveType::F32
+                        | PrimitiveType::F64),
+                    ) = **elem
+                {
+                    return Some((name.clone(), p));
                 }
                 None
             })
@@ -11573,7 +11525,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             // Terminal is included in the chain; bypasses normal terminal selection.
             (
                 ".enumerate().count()".to_string(),
-                Some(("".to_string(), TypeInfo::Primitive(PrimitiveType::I64))),
+                Some((String::new(), TypeInfo::Primitive(PrimitiveType::I64))),
             )
         } else if chain_choice < 23 && is_numeric_elem {
             // .enumerate().filter((e) => e[1] > 0).map((e) => e[1]) — numeric only
@@ -11823,7 +11775,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 // String concatenation with separator
                 let sep = if self.rng.gen_bool(0.5) { "," } else { " " };
                 (
-                    format!("\"\""),
+                    "\"\"".to_string(),
                     format!("acc + el + \"{}\"", sep),
                     TypeInfo::Primitive(PrimitiveType::String),
                 )
@@ -11914,16 +11866,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     param_types,
                     return_type,
                 } = &p.param_type
+                    && param_types.len() == 1
+                    && let (TypeInfo::Primitive(pt), TypeInfo::Primitive(rt)) =
+                        (&param_types[0], return_type.as_ref())
+                    && pt == rt
+                    && matches!(pt, PrimitiveType::I64 | PrimitiveType::I32)
                 {
-                    if param_types.len() == 1 {
-                        if let (TypeInfo::Primitive(pt), TypeInfo::Primitive(rt)) =
-                            (&param_types[0], return_type.as_ref())
-                        {
-                            if pt == rt && matches!(pt, PrimitiveType::I64 | PrimitiveType::I32) {
-                                return Some((p.name.clone(), *pt));
-                            }
-                        }
-                    }
+                    return Some((p.name.clone(), *pt));
                 }
                 None
             })
@@ -12189,19 +12138,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let fallible_funcs: Vec<(String, FunctionInfo)> = module
             .functions()
             .filter_map(|sym| {
-                if let SymbolKind::Function(ref info) = sym.kind {
-                    if info.type_params.is_empty()
-                        && info.return_type.is_fallible()
-                        && current_name != Some(sym.name.as_str())
+                if let SymbolKind::Function(ref info) = sym.kind
+                    && info.type_params.is_empty()
+                    && info.return_type.is_fallible()
+                    && current_name != Some(sym.name.as_str())
+                {
+                    // Only call lower-indexed functions to prevent cycles
+                    if let Some(cur_id) = current_fn_sym_id
+                        && sym.id.0 >= cur_id.0
                     {
-                        // Only call lower-indexed functions to prevent cycles
-                        if let Some(cur_id) = current_fn_sym_id {
-                            if sym.id.0 >= cur_id.0 {
-                                return None;
-                            }
-                        }
-                        return Some((sym.name.clone(), info.clone()));
+                        return None;
                     }
+                    return Some((sym.name.clone(), info.clone()));
                 }
                 None
             })
@@ -12342,10 +12290,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                         && current_name != Some(sym.name.as_str())
                     {
                         // Only call lower-indexed functions to prevent cycles
-                        if let Some(cur_id) = current_fn_sym_id {
-                            if sym.id.0 >= cur_id.0 {
-                                return None;
-                            }
+                        if let Some(cur_id) = current_fn_sym_id
+                            && sym.id.0 >= cur_id.0
+                        {
+                            return None;
                         }
                         return Some((sym.name.clone(), info.clone()));
                     }
@@ -12628,26 +12576,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Find arrays with primitive element types
         let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if let TypeInfo::Array(inner) = ty {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    match p {
-                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
-                            array_vars.push((name.clone(), *p));
-                        }
-                        _ => {}
+            if let TypeInfo::Array(inner) = ty
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+            {
+                match p {
+                    PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
+                        array_vars.push((name.clone(), *p));
                     }
+                    _ => {}
                 }
             }
         }
         for param in ctx.params.iter() {
-            if let TypeInfo::Array(inner) = &param.param_type {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    match p {
-                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
-                            array_vars.push((param.name.clone(), *p));
-                        }
-                        _ => {}
+            if let TypeInfo::Array(inner) = &param.param_type
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+            {
+                match p {
+                    PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
+                        array_vars.push((param.name.clone(), *p));
                     }
+                    _ => {}
                 }
             }
         }
@@ -12728,12 +12676,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Find i64 array params (guaranteed non-empty)
         let mut array_vars: Vec<String> = Vec::new();
         for param in ctx.params.iter() {
-            if let TypeInfo::Array(inner) = &param.param_type {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32) {
-                        array_vars.push(param.name.clone());
-                    }
-                }
+            if let TypeInfo::Array(inner) = &param.param_type
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+                && matches!(p, PrimitiveType::I64 | PrimitiveType::I32)
+            {
+                array_vars.push(param.name.clone());
             }
         }
         if array_vars.is_empty() {
@@ -12855,12 +12802,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Local arrays could be from .collect() which may produce empty arrays.
         let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
         for param in ctx.params.iter() {
-            if let TypeInfo::Array(inner) = &param.param_type {
-                if let TypeInfo::Primitive(p) = inner.as_ref() {
-                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32) {
-                        array_vars.push((param.name.clone(), *p));
-                    }
-                }
+            if let TypeInfo::Array(inner) = &param.param_type
+                && let TypeInfo::Primitive(p) = inner.as_ref()
+                && matches!(p, PrimitiveType::I64 | PrimitiveType::I32)
+            {
+                array_vars.push((param.name.clone(), *p));
             }
         }
         if array_vars.is_empty() {
@@ -12892,7 +12838,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let arm_val2 = self.generate_match_arm_value(&result_type, &expr_ctx);
         let wildcard_val = self.generate_match_arm_value(&result_type, &expr_ctx);
 
-        let arms = vec![
+        let arms = [
             format!("{}{} => {}", indent, lit1, arm_val1),
             format!("{}{} => {}", indent, lit2, arm_val2),
             format!("{}_ => {}", indent, wildcard_val),
@@ -12974,14 +12920,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let map_body = self.generate_map_closure_body(elem_prim);
             (
                 format!(".map((x) => {}).collect()", map_body),
-                TypeInfo::Array(Box::new(elem_ty.clone())),
+                TypeInfo::Array(Box::new(elem_ty)),
             )
         } else if choice < 7 {
             // .filter().collect()
             let filter_body = self.generate_filter_closure_body(elem_prim);
             (
                 format!(".filter((x) => {}).collect()", filter_body),
-                TypeInfo::Array(Box::new(elem_ty.clone())),
+                TypeInfo::Array(Box::new(elem_ty)),
             )
         } else if choice < 9 {
             // .count()
@@ -13020,7 +12966,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let n = self.rng.gen_range(1..=3);
             (
                 format!(".take({}).collect()", n),
-                TypeInfo::Array(Box::new(elem_ty.clone())),
+                TypeInfo::Array(Box::new(elem_ty)),
             )
         } else if choice < 20 {
             // .map().filter().collect()
@@ -13031,7 +12977,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     ".map((x) => {}).filter((y) => {}).collect()",
                     map_body, filter_body
                 ),
-                TypeInfo::Array(Box::new(elem_ty.clone())),
+                TypeInfo::Array(Box::new(elem_ty)),
             )
         } else {
             // .enumerate().count()
@@ -13312,10 +13258,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let candidates: Vec<_> = module
             .classes()
             .filter_map(|sym| {
-                if let SymbolKind::Class(ref info) = sym.kind {
-                    if info.type_params.is_empty() && has_primitive_field(info) {
-                        return Some((sym.id, sym.name.clone(), info.clone()));
-                    }
+                if let SymbolKind::Class(ref info) = sym.kind
+                    && info.type_params.is_empty()
+                    && has_primitive_field(info)
+                {
+                    return Some((sym.id, sym.name.clone(), info.clone()));
                 }
                 None
             })
@@ -13388,10 +13335,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                         return None;
                     }
                     let sym = ctx.table.get_symbol(*mod_id, *sym_id)?;
-                    if let SymbolKind::Class(ref info) = sym.kind {
-                        if info.type_params.is_empty() && !info.methods.is_empty() {
-                            return Some((name.clone(), *mod_id, *sym_id, info.methods.clone()));
-                        }
+                    if let SymbolKind::Class(ref info) = sym.kind
+                        && info.type_params.is_empty()
+                        && !info.methods.is_empty()
+                    {
+                        return Some((name.clone(), *mod_id, *sym_id, info.methods.clone()));
                     }
                 }
                 None
@@ -13636,10 +13584,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     {
                         // When inside a free function body, only call functions
                         // with a lower symbol ID to prevent mutual recursion.
-                        if let Some(cur_id) = current_fn_sym_id {
-                            if s.id.0 >= cur_id.0 {
-                                return None;
-                            }
+                        if let Some(cur_id) = current_fn_sym_id
+                            && s.id.0 >= cur_id.0
+                        {
+                            return None;
                         }
 
                         // When inside a method body, skip functions whose
@@ -13753,21 +13701,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
             // Find a non-generic class implementing this interface
             for class_sym in module.classes() {
-                if let SymbolKind::Class(ref class_info) = class_sym.kind {
-                    if class_info.type_params.is_empty()
-                        && class_info
-                            .implements
-                            .iter()
-                            .any(|&(m, s)| m == module_id && s == iface_sym.id)
-                    {
-                        candidates.push((
-                            iface_sym.id,
-                            iface_sym.name.clone(),
-                            iface_info.clone(),
-                            class_sym.name.clone(),
-                            class_info.clone(),
-                        ));
-                    }
+                if let SymbolKind::Class(ref class_info) = class_sym.kind
+                    && class_info.type_params.is_empty()
+                    && class_info
+                        .implements
+                        .iter()
+                        .any(|&(m, s)| m == module_id && s == iface_sym.id)
+                {
+                    candidates.push((
+                        iface_sym.id,
+                        iface_sym.name.clone(),
+                        iface_info.clone(),
+                        class_sym.name.clone(),
+                        class_info.clone(),
+                    ));
                 }
             }
         }
@@ -14004,7 +13951,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let fields_to_destruct = if do_partial && primitive_fields.len() > 1 {
             // Partial: pick a random subset (at least 1 field)
             let count = self.rng.gen_range(1..primitive_fields.len());
-            let mut indices = primitive_fields.clone();
+            let mut indices = primitive_fields;
             // Shuffle and take first `count`
             for i in (1..indices.len()).rev() {
                 let j = self.rng.gen_range(0..=i);
@@ -14128,24 +14075,23 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         // Classes: non-generic with primitive fields and static methods
         for sym in module.classes() {
-            if let SymbolKind::Class(ref info) = sym.kind {
-                if info.type_params.is_empty()
-                    && has_primitive_field(info)
-                    && !info.static_methods.is_empty()
-                {
-                    // is_class = true
-                    candidates.push((sym.id, sym.name.clone(), info.static_methods.clone(), true));
-                }
+            if let SymbolKind::Class(ref info) = sym.kind
+                && info.type_params.is_empty()
+                && has_primitive_field(info)
+                && !info.static_methods.is_empty()
+            {
+                // is_class = true
+                candidates.push((sym.id, sym.name.clone(), info.static_methods.clone(), true));
             }
         }
 
         // Structs with static methods
         for sym in module.structs() {
-            if let SymbolKind::Struct(ref info) = sym.kind {
-                if !info.static_methods.is_empty() {
-                    // is_class = false
-                    candidates.push((sym.id, sym.name.clone(), info.static_methods.clone(), false));
-                }
+            if let SymbolKind::Struct(ref info) = sym.kind
+                && !info.static_methods.is_empty()
+            {
+                // is_class = false
+                candidates.push((sym.id, sym.name.clone(), info.static_methods.clone(), false));
             }
         }
 

@@ -343,16 +343,15 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             std::collections::HashSet<SymbolId>,
         > = std::collections::HashMap::new();
         for sym in module.implement_blocks() {
-            if let SymbolKind::ImplementBlock(ref info) = sym.kind {
-                if let Some((iface_mod, iface_sym)) = info.interface {
-                    if iface_mod == module_id {
-                        let (_, class_sym) = info.target_type;
-                        impl_block_map
-                            .entry(class_sym)
-                            .or_default()
-                            .insert(iface_sym);
-                    }
-                }
+            if let SymbolKind::ImplementBlock(ref info) = sym.kind
+                && let Some((iface_mod, iface_sym)) = info.interface
+                && iface_mod == module_id
+            {
+                let (_, class_sym) = info.target_type;
+                impl_block_map
+                    .entry(class_sym)
+                    .or_default()
+                    .insert(iface_sym);
             }
         }
 
@@ -556,23 +555,22 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             }
             TypeInfo::Class(mod_id, sym_id) => {
                 // For class types, construct an instance
-                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Class(ref class_info) = symbol.kind {
-                        if class_info.type_params.is_empty() {
-                            let fields = self.generate_class_field_values(&class_info.fields);
-                            return format!("{} {{ {} }}", symbol.name, fields);
-                        }
-                    }
+                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id)
+                    && let SymbolKind::Class(ref class_info) = symbol.kind
+                    && class_info.type_params.is_empty()
+                {
+                    let fields = self.generate_class_field_values(&class_info.fields);
+                    return format!("{} {{ {} }}", symbol.name, fields);
                 }
                 "nil".to_string()
             }
             TypeInfo::Struct(mod_id, sym_id) => {
                 // For struct types, construct an instance
-                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Struct(ref struct_info) = symbol.kind {
-                        let fields = self.generate_struct_field_values(&struct_info.fields);
-                        return format!("{} {{ {} }}", symbol.name, fields);
-                    }
+                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id)
+                    && let SymbolKind::Struct(ref struct_info) = symbol.kind
+                {
+                    let fields = self.generate_struct_field_values(&struct_info.fields);
+                    return format!("{} {{ {} }}", symbol.name, fields);
                 }
                 "nil".to_string()
             }
@@ -664,16 +662,15 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         };
 
         for sym in module.classes() {
-            if let SymbolKind::Class(ref info) = sym.kind {
-                if info.type_params.is_empty()
-                    && info
-                        .implements
-                        .iter()
-                        .any(|&(m, s)| m == iface_mod && s == iface_sym)
-                {
-                    let fields = self.generate_class_field_values(&info.fields);
-                    return format!("{} {{ {} }}", sym.name, fields);
-                }
+            if let SymbolKind::Class(ref info) = sym.kind
+                && info.type_params.is_empty()
+                && info
+                    .implements
+                    .iter()
+                    .any(|&(m, s)| m == iface_mod && s == iface_sym)
+            {
+                let fields = self.generate_class_field_values(&info.fields);
+                return format!("{} {{ {} }}", sym.name, fields);
             }
         }
         "nil".to_string()
@@ -751,19 +748,19 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         // Non-generic functions (generic functions cannot be imported yet)
         for symbol in module.functions() {
-            if let SymbolKind::Function(ref info) = symbol.kind {
-                if info.type_params.is_empty() {
-                    names.push(symbol.name.clone());
-                }
+            if let SymbolKind::Function(ref info) = symbol.kind
+                && info.type_params.is_empty()
+            {
+                names.push(symbol.name.clone());
             }
         }
 
         // Non-generic classes
         for symbol in module.classes() {
-            if let SymbolKind::Class(ref info) = symbol.kind {
-                if info.type_params.is_empty() {
-                    names.push(symbol.name.clone());
-                }
+            if let SymbolKind::Class(ref info) = symbol.kind
+                && info.type_params.is_empty()
+            {
+                names.push(symbol.name.clone());
             }
         }
 
@@ -1598,21 +1595,18 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             TypeInfo::Optional(inner) => {
                 // Generate a typed value rather than nil so the literal carries
                 // type information when nested inside containers like [T?].
-                drop(expr_gen);
                 self.literal_for_type(inner)
             }
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Union(variants) => {
                 // For union types, generate a literal for the first variant
                 if let Some(first) = variants.first() {
-                    drop(expr_gen);
                     self.literal_for_type(first)
                 } else {
                     "nil".to_string()
                 }
             }
             TypeInfo::Array(elem) => {
-                drop(expr_gen);
                 // Minimum 2 elements: method bodies index arrays at 0..=1,
                 // so arrays must always have at least 2 elements to prevent OOB panics.
                 let elem_val1 = self.literal_for_type(elem);
@@ -1620,12 +1614,10 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 format!("[{}, {}]", elem_val1, elem_val2)
             }
             TypeInfo::Tuple(elems) => {
-                drop(expr_gen);
                 let values: Vec<String> = elems.iter().map(|t| self.literal_for_type(t)).collect();
                 format!("[{}]", values.join(", "))
             }
             TypeInfo::FixedArray(elem, size) => {
-                drop(expr_gen);
                 let elem_val = self.literal_for_type(elem);
                 format!("[{}; {}]", elem_val, size)
             }
@@ -1645,20 +1637,17 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             TypeInfo::Optional(inner) => {
                 // Generate a typed constant rather than nil so the literal carries
                 // type information when nested inside containers like [T?].
-                drop(expr_gen);
                 self.constant_literal_for_type(inner)
             }
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Union(variants) => {
                 if let Some(first) = variants.first() {
-                    drop(expr_gen);
                     self.constant_literal_for_type(first)
                 } else {
                     "nil".to_string()
                 }
             }
             TypeInfo::Array(elem) => {
-                drop(expr_gen);
                 // Minimum 2 elements: method bodies index arrays at 0..=1,
                 // so arrays must always have at least 2 elements to prevent OOB panics.
                 let elem_val1 = self.constant_literal_for_type(elem);
@@ -1666,7 +1655,6 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 format!("[{}, {}]", elem_val1, elem_val2)
             }
             TypeInfo::FixedArray(elem, size) => {
-                drop(expr_gen);
                 let elem_val = self.constant_literal_for_type(elem);
                 format!("[{}; {}]", elem_val, size)
             }

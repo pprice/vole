@@ -940,13 +940,12 @@ fn collect_implemented_interfaces(
     module
         .interfaces()
         .filter_map(|s| {
-            if let SymbolKind::Interface(ref info) = s.kind {
-                if info.type_params.is_empty()
-                    && !info.methods.is_empty()
-                    && implemented.contains(&s.id)
-                {
-                    return Some((s.id, s.name.clone()));
-                }
+            if let SymbolKind::Interface(ref info) = s.kind
+                && info.type_params.is_empty()
+                && !info.methods.is_empty()
+                && implemented.contains(&s.id)
+            {
+                return Some((s.id, s.name.clone()));
             }
             None
         })
@@ -1368,18 +1367,18 @@ fn collect_all_interface_methods(
             continue; // Avoid infinite loops from cycles
         }
 
-        if let Some(symbol) = table.get_symbol(mid, sid) {
-            if let SymbolKind::Interface(ref info) = symbol.kind {
-                // Add this interface's own methods
-                for method in &info.methods {
-                    if seen_names.insert(method.name.clone()) {
-                        all_methods.push(method.clone());
-                    }
+        if let Some(symbol) = table.get_symbol(mid, sid)
+            && let SymbolKind::Interface(ref info) = symbol.kind
+        {
+            // Add this interface's own methods
+            for method in &info.methods {
+                if seen_names.insert(method.name.clone()) {
+                    all_methods.push(method.clone());
                 }
-                // Push parent interfaces onto the stack
-                for &(parent_mid, parent_sid) in &info.extends {
-                    stack.push((parent_mid, parent_sid));
-                }
+            }
+            // Push parent interfaces onto the stack
+            for &(parent_mid, parent_sid) in &info.extends {
+                stack.push((parent_mid, parent_sid));
             }
         }
     }
@@ -1669,10 +1668,10 @@ fn plan_interface_params<R: Rng>(
             .map(|m| {
                 m.functions()
                     .filter_map(|s| {
-                        if let SymbolKind::Function(ref info) = s.kind {
-                            if info.type_params.is_empty() {
-                                return Some(s.id);
-                            }
+                        if let SymbolKind::Function(ref info) = s.kind
+                            && info.type_params.is_empty()
+                        {
+                            return Some(s.id);
                         }
                         None
                     })
