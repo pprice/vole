@@ -118,6 +118,72 @@ pub extern "C" fn vole_coroutine_free(coro: *mut VoleCoroutine) {
 }
 
 // =============================================================================
+// Generator FFI helpers (coroutine-backed iterators)
+// =============================================================================
+
+/// Create a new coroutine-backed generator iterator.
+///
+/// `body_fn` is a JIT-compiled function with signature:
+///   `extern "C" fn(closure_ptr: *const u8, yielder_ptr: *const u8) -> ()`
+///
+/// `closure_ptr` is the captured environment or null for non-capturing generators.
+/// `elem_tag` is the runtime type tag for yielded elements.
+///
+/// Returns a new `RcIterator` with kind `Coroutine`.
+#[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn vole_generator_new(
+    body_fn: *const u8,
+    closure_ptr: *const u8,
+    elem_tag: u64,
+) -> *mut crate::iterator::RcIterator {
+    use crate::iterator::{CoroutineSource, IteratorKind, IteratorSource, RcIterator};
+
+    // Safety: body_fn and closure_ptr come from JIT-generated code and are always valid.
+    let func: extern "C" fn(*const u8, *const u8) = unsafe { std::mem::transmute(body_fn) };
+    let closure = closure_ptr as usize; // capture as usize for Send safety
+
+    let coro = VoleCoroutine::new(move |yielder, _input| {
+        let yielder_ptr = yielder as *const corosensei::Yielder<i64, i64> as *const u8;
+        func(closure as *const u8, yielder_ptr);
+    });
+
+    let coro_ptr = Box::into_raw(Box::new(coro));
+
+    let iter = RcIterator::new_with_tag(
+        IteratorKind::Coroutine,
+        IteratorSource {
+            coroutine: CoroutineSource {
+                coroutine: coro_ptr,
+                closure: closure_ptr,
+            },
+        },
+        elem_tag,
+    );
+
+    // Coroutine iterators produce owned values.
+    if !iter.is_null() {
+        unsafe {
+            (*iter).produces_owned = true;
+        }
+    }
+
+    iter
+}
+
+/// Yield a value from inside a generator coroutine.
+///
+/// `yielder_ptr` is the `corosensei::Yielder` passed to the generator body.
+/// `value` is the `i64` value to yield.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_generator_yield(yielder_ptr: *const u8, value: i64) {
+    unsafe {
+        let yielder = &*(yielder_ptr as *const corosensei::Yielder<i64, i64>);
+        yielder.suspend(value);
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -174,5 +240,141 @@ mod tests {
         // Stays finished
         assert_eq!(coro.resume(0), None);
         assert!(coro.is_finished());
+    }
+
+    // =========================================================================
+    // Generator FFI tests
+    // =========================================================================
+
+    /// Test body function: yields 1, 2, 3 via vole_generator_yield, then returns.
+    extern "C" fn generator_body_123(_closure_ptr: *const u8, yielder_ptr: *const u8) {
+        vole_generator_yield(yielder_ptr, 1);
+        vole_generator_yield(yielder_ptr, 2);
+        vole_generator_yield(yielder_ptr, 3);
+    }
+
+    #[test]
+    fn generator_new_yields_sequence_through_iterator_dispatch() {
+        use crate::iterator::vole_array_iter_next;
+        use crate::value::rc_dec;
+
+        let body_fn = generator_body_123 as extern "C" fn(*const u8, *const u8) as *const u8;
+        let iter = vole_generator_new(body_fn, std::ptr::null(), 0);
+        assert!(!iter.is_null());
+
+        let mut value: i64 = 0;
+
+        // First yield: 1
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 1);
+        assert_eq!(value, 1);
+
+        // Second yield: 2
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 1);
+        assert_eq!(value, 2);
+
+        // Third yield: 3
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 1);
+        assert_eq!(value, 3);
+
+        // Exhausted: done
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 0);
+
+        // Repeated call after exhaustion still returns done
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 0);
+
+        // Clean up
+        rc_dec(iter as *mut u8);
+    }
+
+    #[test]
+    fn generator_partial_consume_then_drop() {
+        use crate::iterator::{
+            CoroutineSource, IteratorKind, IteratorSource, RcIterator, vole_array_iter_next,
+        };
+        use crate::value::rc_dec;
+
+        // Build a coroutine-backed iterator directly with a Rust closure body
+        // (not extern "C") so that corosensei can force-unwind the stack on drop.
+        // This tests the iterator drop machinery for partially-consumed generators.
+        let coro = VoleCoroutine::new(|yielder, _input| {
+            yielder.suspend(10);
+            yielder.suspend(20);
+            yielder.suspend(30);
+        });
+        let coro_ptr = Box::into_raw(Box::new(coro));
+
+        let iter = RcIterator::new(
+            IteratorKind::Coroutine,
+            IteratorSource {
+                coroutine: CoroutineSource {
+                    coroutine: coro_ptr,
+                    closure: std::ptr::null(),
+                },
+            },
+        );
+        assert!(!iter.is_null());
+
+        let mut value: i64 = 0;
+
+        // Consume only the first value
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 1);
+        assert_eq!(value, 10);
+
+        // Drop the iterator while the coroutine still has pending yields.
+        // This must not crash or leak. The Rust closure body supports unwinding.
+        rc_dec(iter as *mut u8);
+    }
+
+    #[test]
+    fn generator_null_closure_ptr() {
+        use crate::iterator::vole_array_iter_next;
+        use crate::value::rc_dec;
+
+        // Verify that a null closure pointer works correctly (non-capturing generator).
+        let body_fn = generator_body_123 as extern "C" fn(*const u8, *const u8) as *const u8;
+        let iter = vole_generator_new(body_fn, std::ptr::null(), 0);
+        assert!(!iter.is_null());
+
+        // Verify the iterator was created with the Coroutine kind
+        unsafe {
+            let kind = (*iter).iter.kind;
+            assert_eq!(kind, crate::iterator::IteratorKind::Coroutine);
+        }
+
+        // Verify produces_owned is set
+        unsafe {
+            assert!((*iter).produces_owned);
+        }
+
+        // Verify the closure field in the source is null
+        unsafe {
+            assert!((*iter).iter.source.coroutine.closure.is_null());
+        }
+
+        let mut value: i64 = 0;
+
+        // Consume all values to ensure the null closure doesn't cause issues
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 1);
+        assert_eq!(value, 1);
+
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 1);
+        assert_eq!(value, 2);
+
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 1);
+        assert_eq!(value, 3);
+
+        let has = vole_array_iter_next(iter, &mut value);
+        assert_eq!(has, 0);
+
+        rc_dec(iter as *mut u8);
     }
 }

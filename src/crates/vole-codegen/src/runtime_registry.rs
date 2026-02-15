@@ -215,6 +215,10 @@ runtime_keys! {
     // ── Interface ────────────────────────────────────────────────────
     InterfaceIter          => "vole_interface_iter"          : (Ptr) -> Ptr,
 
+    // ── Generator coroutines ────────────────────────────────────────────
+    GeneratorNew           => "vole_generator_new"           : (Ptr, Ptr, I64) -> Ptr,
+    GeneratorYield         => "vole_generator_yield"         : (Ptr, I64) -> Void,
+
     // ── Reference counting ───────────────────────────────────────────
     RcInc                  => "rc_inc"                       : (Ptr) -> Void,
     RcDec                  => "rc_dec"                       : (Ptr) -> Void,
@@ -647,6 +651,14 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_sb_finish",
         ptr: vole_runtime::string_builder::vole_sb_finish as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_generator_new",
+        ptr: vole_runtime::coroutine::vole_generator_new as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_generator_yield",
+        ptr: vole_runtime::coroutine::vole_generator_yield as *const u8,
     },
     LinkableRuntimeSymbol {
         c_name: "vole_instance_new",

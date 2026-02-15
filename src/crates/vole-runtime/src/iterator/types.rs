@@ -287,6 +287,8 @@ pub struct StringCodepointsSource {
 pub struct CoroutineSource {
     /// Pointer to a heap-allocated VoleCoroutine (owned by the iterator)
     pub coroutine: *mut crate::coroutine::VoleCoroutine,
+    /// Closure pointer captured by the generator body. rc_dec'd on drop if non-null.
+    pub closure: *const u8,
 }
 
 /// Unified iterator structure

@@ -241,6 +241,10 @@ macro_rules! drop_iter_source {
         if !coro.is_null() {
             drop(Box::from_raw(coro));
         }
+        let closure = $iter_ref.source.coroutine.closure;
+        if !closure.is_null() {
+            rc_dec(closure as *mut u8);
+        }
     };
 }
 
