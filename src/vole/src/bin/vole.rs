@@ -64,6 +64,9 @@ fn main() -> ExitCode {
         tracing::debug!("tracing initialized");
     }
 
+    // SAFETY: This runs single-threaded at program startup in main(), before any
+    // threads are spawned. env::set_var is unsafe because concurrent access to
+    // environment variables is not synchronized, but that cannot happen here.
     unsafe {
         std::env::set_var("RUST_BACKTRACE", "1");
     }

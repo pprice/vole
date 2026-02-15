@@ -334,6 +334,10 @@ pub fn compile_and_run(analyzed: &AnalyzedProgram, opts: &RunOptions) -> Result<
     };
 
     let _span = tracing::info_span!("execute").entered();
+    // SAFETY: `fn_ptr` is obtained from `JitContext::get_function_ptr("main")`, which
+    // returns a pointer to JIT-compiled code with the extern "C" fn() calling convention.
+    // The codegen backend guarantees the "main" entry point takes no arguments and returns
+    // void, matching the target signature.
     let main: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
 
     // Use jmp_buf for panic recovery — safely handles runtime panics
