@@ -288,10 +288,12 @@ fn test_compound_assignment_not_generated_without_mutable_numeric() {
 fn test_array_let_generation() {
     let table = SymbolTable::new();
     let config = StmtConfig {
-        // Disable range/iterator patterns so array lets produce array literals.
+        // Disable non-literal array-producing generators so array lets
+        // produce array literals (via generate_array_let).
         range_iter_probability: 0.0,
         empty_array_iter_probability: 0.0,
         iter_map_filter_probability: 0.0,
+        string_split_probability: 0.0,
         ..StmtConfig::default()
     };
 

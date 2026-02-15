@@ -14,6 +14,7 @@ mod strings;
 mod tests;
 
 use rand::Rng;
+use rand::seq::SliceRandom;
 
 use crate::expr::{ExprConfig, ExprContext, ExprGenerator, get_chainable_methods};
 use crate::symbols::{
@@ -468,6 +469,69 @@ fn has_primitive_field(info: &ClassInfo) -> bool {
     info.fields.iter().any(|f| f.field_type.is_primitive())
 }
 
+/// Result of a let-dispatch generator call.
+///
+/// Unifies infallible generators (returning `String`) and fallible generators
+/// (returning `Option<String>`) so that the dispatch macro can handle both
+/// uniformly.
+enum LetResult {
+    Hit(String),
+    Miss,
+}
+
+impl From<String> for LetResult {
+    fn from(s: String) -> Self {
+        LetResult::Hit(s)
+    }
+}
+
+impl From<Option<String>> for LetResult {
+    fn from(opt: Option<String>) -> Self {
+        match opt {
+            Some(s) => LetResult::Hit(s),
+            None => LetResult::Miss,
+        }
+    }
+}
+
+/// Dispatch table for let-statement generation.
+///
+/// Shuffles entry order to avoid positional bias, then tries each entry once:
+/// check the optional guard, roll against the probability, and call the
+/// generator.  The first entry that fires *and* produces a value wins.
+///
+/// Each entry is `{ prob: <f64-expr>, call: <expr -> impl Into<LetResult>> }`
+/// with an optional `guard: <bool-expr>,` before `call:`.
+macro_rules! let_dispatch {
+    ($self:expr, $ctx:expr, [
+        $( { prob: $prob:expr, $( guard: $guard:expr, )? call: $call:expr } ),* $(,)?
+    ]) => {{
+        // Build index vec without recursive counting.
+        let mut _order: Vec<usize> = Vec::new();
+        { let mut _n = 0usize; $( let _ = $prob; _order.push(_n); _n += 1; )* }
+        _order.shuffle(&mut *$self.rng);
+
+        for _i in _order {
+            let mut _idx = 0usize;
+            $(
+                if _i == _idx {
+                    // Evaluate optional guard (defaults to true).
+                    let _guarded = true;
+                    $( let _guarded = $guard; )?
+                    if _guarded && $self.rng.gen_bool($prob) {
+                        let _result: LetResult = ($call).into();
+                        if let LetResult::Hit(s) = _result {
+                            return s;
+                        }
+                    }
+                }
+                _idx += 1;
+            )*
+            let _ = _idx;
+        }
+    }};
+}
+
 /// Statement generator.
 pub struct StmtGenerator<'a, R> {
     rng: &'a mut R,
@@ -708,1019 +772,474 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     }
 
     /// Generate a let statement.
+    ///
+    /// Uses a shuffled dispatch table to avoid positional ordering bias.
+    /// Each entry pairs a probability with a generator; the first entry that
+    /// fires and produces a value wins. Falls back to a simple primitive
+    /// let-binding when no dispatch entry fires.
     fn generate_let_statement(&mut self, ctx: &mut StmtContext) -> String {
-        // Occasionally generate a lambda let-binding to exercise closures
-        if self
-            .rng
-            .gen_bool(self.config.expr_config.lambda_probability)
-        {
-            return self.generate_lambda_let(ctx);
-        }
-
-        // ~15% chance to generate a class-typed local for field access
-        if self.rng.gen_bool(0.15)
-            && let Some(stmt) = self.try_generate_class_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Chance to generate an interface-typed local via upcast (for vtable dispatch)
-        if self
-            .rng
-            .gen_bool(self.config.interface_dispatch_probability)
-            && let Some(stmt) = self.try_generate_interface_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~10% chance to generate a struct-typed local for struct usage patterns
-        if self.rng.gen_bool(0.10)
-            && let Some(stmt) = self.try_generate_struct_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~12% chance to generate an array-typed local for array indexing
-        if self.rng.gen_bool(0.12) {
-            return self.generate_array_let(ctx);
-        }
-
-        // Iterator map/filter on array variables in scope
-        if self.rng.gen_bool(self.config.iter_map_filter_probability)
-            && let Some(stmt) = self.try_generate_iter_map_filter_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Empty array through iterator chain — boundary condition stress test.
-        // Creates `let arr: [T] = []` then chains .iter().op().terminal().
-        if self.rng.gen_bool(self.config.empty_array_iter_probability) {
-            return self.generate_empty_array_iter_let(ctx);
-        }
-
-        // Empty string iteration — boundary condition stress test.
-        // Creates `let s = ""` then chains .iter().op().terminal().
-        if self.rng.gen_bool(self.config.empty_array_iter_probability) {
-            return self.generate_empty_string_iter_let(ctx);
-        }
-
-        // Wildcard-only match — degenerate match with only `_ => expr`.
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.generate_wildcard_only_match(ctx)
-        {
-            return stmt;
-        }
-
-        // Nested when expressions — when inside when arms.
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_nested_when_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Zero-take / max-skip — iterator chains that produce empty results.
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_empty_iter_edge(ctx)
-        {
-            return stmt;
-        }
-
-        // Chained string method calls — str.to_upper().trim().length() etc.
-        if self.rng.gen_bool(0.04)
-            && let Some(stmt) = self.try_generate_chained_string_methods(ctx)
-        {
-            return stmt;
-        }
-
-        // Match on array element — match arr[0] { ... }
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_match_array_elem(ctx)
-        {
-            return stmt;
-        }
-
-        // Match on iterator terminal — match arr.iter().count() { ... }
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_match_iter_terminal(ctx)
-        {
-            return stmt;
-        }
-
-        // Range-based iterator chain — exercises range iterators (different source
-        // than array iterators). Generates `(start..end).iter().chain().terminal()`.
-        if self.rng.gen_bool(self.config.range_iter_probability) {
-            return self.generate_range_iter_let(ctx);
-        }
-
-        // Generic closure + interface dispatch in iterator chains.
-        // When inside a generic function with a constrained type param, a closure param,
-        // and an array in scope, generate a chain like:
-        // `items.iter().map(transform).filter((n: i64) => n > criterion.threshold()).collect()`
-        if self
-            .rng
-            .gen_bool(self.config.generic_closure_interface_probability)
-            && let Some(stmt) = self.try_generate_generic_closure_interface_chain(ctx)
-        {
-            return stmt;
-        }
-
-        // Match expression whose arms produce closures capturing surrounding scope.
-        // Generates `let f = match var { N => (x) => x + captured, ... }` then
-        // either invokes the closure or passes it to an iterator chain.
-        if self.rng.gen_bool(self.config.match_closure_arm_probability)
-            && let Some(stmt) = self.try_generate_match_closure_arms(ctx)
-        {
-            return stmt;
-        }
-
-        // Field-closure-let: extract a primitive field from a class/struct instance,
-        // capture it in a closure, and either invoke the closure or pass it to
-        // an iterator .map() chain.
-        if self.rng.gen_bool(self.config.field_closure_let_probability)
-            && let Some(stmt) = self.try_generate_field_closure_let(ctx)
-        {
-            return stmt;
-        }
-
-        // String split to array: "a,b,c".split(",").collect()
-        if self.rng.gen_bool(self.config.string_split_probability) {
-            return self.generate_string_split_let(ctx);
-        }
-
-        // String method call: str.length(), str.contains("x"), str.trim(), etc.
-        if self.rng.gen_bool(self.config.string_method_probability)
-            && let Some(stmt) = self.try_generate_string_method_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Checked/wrapping/saturating arithmetic (requires lowlevel import)
-        if ctx.has_lowlevel_import
-            && self
-                .rng
-                .gen_bool(self.config.checked_arithmetic_probability)
-        {
-            return self.generate_checked_arithmetic_let(ctx);
-        }
-
-        // Tuple let-binding with destructuring
-        if self.rng.gen_bool(self.config.tuple_probability) {
-            return self.generate_tuple_let(ctx);
-        }
-
-        // Fixed-size array let-binding with destructuring
-        if self.rng.gen_bool(self.config.fixed_array_probability) {
-            return self.generate_fixed_array_let(ctx);
-        }
-
-        // Struct destructuring: if we have a struct-typed variable in scope,
-        // destructure it into its fields
-        if self
-            .rng
-            .gen_bool(self.config.struct_destructure_probability)
-            && let Some(stmt) = self.try_generate_struct_destructure(ctx)
-        {
-            return stmt;
-        }
-
-        // Class destructuring: if we have a class-typed variable in scope,
-        // destructure it into its fields (let { x, y } = classInstance)
-        if self.rng.gen_bool(self.config.class_destructure_probability)
-            && let Some(stmt) = self.try_generate_class_destructure(ctx)
-        {
-            return stmt;
-        }
-
-        // ~8% chance to generate a struct copy (let copy = structVar)
-        if self.rng.gen_bool(0.08)
-            && let Some(stmt) = self.try_generate_struct_copy(ctx)
-        {
-            return stmt;
-        }
-
-        // Match expression let-binding: let x = match var { 1 => ..., _ => ... }
-        if self.rng.gen_bool(self.config.match_probability)
-            && let Some(stmt) = self.try_generate_match_let(ctx)
-        {
-            return stmt;
-        }
-
-        // String match expression let-binding: let x = match str { "a" => ..., _ => ... }
-        if self.rng.gen_bool(self.config.string_match_probability)
-            && let Some(stmt) = self.try_generate_string_match_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Union match expression let-binding: let x = match union_var { Type1 => ..., ... }
-        if self.rng.gen_bool(self.config.union_match_probability)
-            && let Some(stmt) = self.try_generate_union_match_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Sentinel union let-binding: let x: PrimType | Sentinel = ... then match/is-check
-        if self.rng.gen_bool(self.config.sentinel_union_probability)
-            && let Some(stmt) = self.try_generate_sentinel_union_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Optional destructure match: let x: Type? = ... then match with destructuring
-        if self
-            .rng
-            .gen_bool(self.config.optional_destructure_match_probability)
-            && let Some(stmt) = self.try_generate_optional_destructure_match(ctx)
-        {
-            return stmt;
-        }
-
-        // Sentinel closure capture: closure captures PrimType | Sentinel union variable
-        if self
-            .rng
-            .gen_bool(self.config.sentinel_closure_capture_probability)
-            && let Some(stmt) = self.try_generate_sentinel_closure_capture(ctx)
-        {
-            return stmt;
-        }
-
-        // Closure capturing whole struct and accessing fields inside
-        if self
-            .rng
-            .gen_bool(self.config.closure_struct_capture_probability)
-            && let Some(stmt) = self.try_generate_closure_struct_capture(ctx)
-        {
-            return stmt;
-        }
-
-        // Nested closure capture: closure captures and invokes another closure
-        if self
-            .rng
-            .gen_bool(self.config.nested_closure_capture_probability)
-            && let Some(stmt) = self.try_generate_nested_closure_capture(ctx)
-        {
-            return stmt;
-        }
-
-        // String interpolation let-binding: let s = "prefix {var} suffix"
-        if self
-            .rng
-            .gen_bool(self.config.string_interpolation_probability)
-            && let Some(stmt) = self.try_generate_string_interpolation_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Match on method call result
-        if self
-            .rng
-            .gen_bool(self.config.match_on_method_result_probability)
-            && let Some(stmt) = self.try_generate_match_on_method_result(ctx)
-        {
-            return stmt;
-        }
-
-        // Iterator map using method call on class instance
-        if self.rng.gen_bool(self.config.iter_method_map_probability)
-            && let Some(stmt) = self.try_generate_iter_method_map(ctx)
-        {
-            return stmt;
-        }
-
-        // When expression let-binding: let x = when { cond => val, _ => val }
-        if self.rng.gen_bool(self.config.when_let_probability)
-            && let Some(stmt) = self.try_generate_when_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Iterator predicate: let b = arr.iter().any((x) => x > 0)
-        if self.rng.gen_bool(self.config.iter_predicate_probability)
-            && let Some(stmt) = self.try_generate_iter_predicate_let(ctx)
-        {
-            return stmt;
-        }
-
-        // Iterator chunks/windows: let c = arr.iter().chunks(2).count()
-        if self
-            .rng
-            .gen_bool(self.config.iter_chunks_windows_probability)
-            && let Some(stmt) = self.try_generate_iter_chunks_windows_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~8% chance to re-iterate: take an existing array local and chain
-        // a new iterator operation on it. Exercises iterating over dynamically-
-        // created arrays (e.g. results of collect()).
-        if self.rng.gen_bool(0.08)
-            && let Some(stmt) = self.try_generate_reiterate_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~5% chance: for_each as a standalone statement
-        if self.rng.gen_bool(0.05)
-            && let Some(stmt) = self.try_generate_for_each_stmt(ctx)
-        {
-            return stmt;
-        }
-
-        // ~5% chance: nth with match on optional result
-        if self.rng.gen_bool(0.05)
-            && let Some(stmt) = self.try_generate_nth_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~5% chance: string iteration (str.iter().chain.terminal)
-        if self.rng.gen_bool(0.05)
-            && let Some(stmt) = self.try_generate_string_iter_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~4% chance: variable shadowing — re-declare existing variable with new value
-        if self.rng.gen_bool(0.04)
-            && let Some(stmt) = self.try_generate_variable_shadow(ctx)
-        {
-            return stmt;
-        }
-
-        // ~3% chance: assert statement with a tautological condition
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_assert_stmt(ctx)
-        {
-            return stmt;
-        }
-
-        // ~3% chance: match on boolean value
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_bool_match_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: dead-code assertion (if false { assert(false) })
-        if self.rng.gen_bool(0.02) {
-            return self.generate_dead_code_assert();
-        }
-
-        // ~2% chance: zero/single-iteration for loop
-        if self.rng.gen_bool(0.02) {
-            return self.generate_edge_case_for_loop(ctx, 2);
-        }
-
-        // ~2% chance: empty array iterator operation
-        if self.rng.gen_bool(0.02) {
-            return self.generate_empty_array_iter(ctx);
-        }
-
-        // ~2% chance: edge-case string split
-        if self.rng.gen_bool(0.02) {
-            return self.generate_edge_case_split(ctx);
-        }
-
-        // ~2% chance: iterator terminal inside while-loop accumulator
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_iter_while_accum(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: for-in loop with match on iteration variable
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_for_in_match_accum(ctx)
-        {
-            return stmt;
-        }
-
-        // ~3% chance: string concatenation with + operator
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_string_concat_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: map-to-string-then-reduce (join pattern)
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_map_tostring_reduce(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: numeric .to_string() in string expression
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_to_string_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: struct field in string interpolation
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_struct_field_interpolation(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: when with iterator predicate condition
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_iter_predicate(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: closure result in string concat
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_closure_result_concat(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: split result in for-in loop
-        if self.rng.gen_bool(0.02) {
-            return self.generate_split_for_loop(ctx);
-        }
-
-        // ~2% chance: for-in loop pushing derived values to mutable array
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_for_push_collect(ctx)
-        {
-            return stmt;
-        }
-
-        // ~3% chance: array literal with variable elements
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_array_from_vars(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: multiple pushes onto a mutable array
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_multi_push(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: method call on a literal value (string/numeric)
-        if self.rng.gen_bool(0.02) {
-            return self.generate_literal_method_call(ctx);
-        }
-
-        // ~2% chance: nested when-in-when expression
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_nested_when(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: match on method call result
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_on_method(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: struct construction with iterator field values
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_struct_with_iter_fields(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: iterator terminal + method chain (e.g., arr.iter().count().to_string())
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_iter_terminal_chain(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: when with string method conditions
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_string_method_conds(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: single-element array operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_single_elem_array_ops(ctx);
-        }
-
-        // ~2% chance: tautological comparison in when
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_tautological_when(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: empty string concatenation edge case
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_empty_string_concat(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: last element access via computed index
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_last_elem_access(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: for-loop indexed by array length
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_for_length_indexed(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: while-loop string building
-        if self.rng.gen_bool(0.02) {
-            return self.generate_while_string_build(ctx);
-        }
-
-        // ~3% chance: compound boolean from numeric comparisons
-        if self.rng.gen_bool(0.03)
-            && let Some(stmt) = self.try_generate_compound_bool_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: boolean from length comparisons
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_length_comparison_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: string interpolation with iterator terminal
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_interpolation_with_iter(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: reassign from when expression
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_reassign_from_when(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: identity arithmetic edge case (x + 0, x * 1, etc.)
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_identity_arithmetic(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: string equality edge case (s == s, "" == "", etc.)
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_string_equality_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: modulo edge cases (N % 1 == 0, N % N == 0)
-        if self.rng.gen_bool(0.02) {
-            return self.generate_modulo_edge_case(ctx);
-        }
-
-        // ~2% chance: uniform array operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_array_uniform_ops(ctx);
-        }
-
-        // ~2% chance: for-loop with when-based accumulation
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_for_when_accumulate(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: when with iterator terminals as arm values
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_iter_in_when_arms(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: multi-arm when (4+ arms)
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_multi_arm_when(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: match with computed arm values
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_with_computation(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: string replace/replace_all
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_string_replace_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: nested match expression
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_nested_match_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: string length on literal edge cases
-        if self.rng.gen_bool(0.02) {
-            return self.generate_string_length_edge_cases(ctx);
-        }
-
-        // ~2% chance: range check boolean (x > lo && x < hi)
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_range_check_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: for-loop string build with match
-        if self.rng.gen_bool(0.02) {
-            return self.generate_for_string_build_with_match(ctx);
-        }
-
-        // ~2% chance: when with string concat arm values
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_with_string_concat_arms(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: boolean negation edge cases
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_bool_negation_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: chained methods on literal strings
-        if self.rng.gen_bool(0.02) {
-            return self.generate_chained_literal_method(ctx);
-        }
-
-        // ~2% chance: method call on when result
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_result_method(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: for-loop building string with when body
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_for_iter_when_string_body(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: while false dead code
-        if self.rng.gen_bool(0.02) {
-            return self.generate_while_false_deadcode(ctx);
-        }
-
-        // ~2% chance: division by power of 2
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_power_of_two_div(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: string predicate (contains/starts_with/ends_with)
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_string_predicate_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: string interpolation with complex expressions
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_interpolation_expr_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: match on string length
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_string_length(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: array length guard (safe indexing)
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_array_length_guard(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: repeat literal array
-        if self.rng.gen_bool(0.02) {
-            return self.generate_repeat_literal_let(ctx);
-        }
-
-        // ~2% chance: iter().reduce() on array
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_iter_reduce_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: i32 near-boundary operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_i32_boundary_safe(ctx);
-        }
-
-        // ~2% chance: empty string operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_empty_string_ops(ctx);
-        }
-
-        // ~2% chance: manual for-loop reduce pattern
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_for_reduce_pattern(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: when containing match expression
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_match_combo(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: string split iteration
-        if self.rng.gen_bool(0.02) {
-            return self.generate_string_split_for(ctx);
-        }
-
-        // ~2% chance: nested when expression with string result
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_nested_when_string_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: .to_string() on numeric values
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_numeric_to_string_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: .substring() on strings
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_substring_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: match with to_string arm values
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_to_string_arms(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: for loop with string interpolation concat
-        if self.rng.gen_bool(0.02) {
-            return self.generate_for_interpolation_concat(ctx);
-        }
-
-        // ~2% chance: boolean chain expression
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_bool_chain_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: comparison chain expression
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_comparison_chain_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: when with string predicate (contains/starts_with)
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_with_contains(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: match on array length
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_array_length(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: sorted collect on array
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_sorted_collect_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: reverse collect on array
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_reverse_collect_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: guarded division (when { b != 0 => a / b, _ => 0 })
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_zero_division_guard(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: single-character string operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_single_char_string_ops(ctx);
-        }
-
-        // ~2% chance: f64 literal arithmetic operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_f64_literal_ops_let(ctx);
-        }
-
-        // ~2% chance: f64 equality/comparison edge cases
-        if self.rng.gen_bool(0.02) {
-            return self.generate_f64_comparison_edge_let(ctx);
-        }
-
-        // ~2% chance: string with repeated characters operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_repeated_string_ops(ctx);
-        }
-
-        // ~2% chance: iterator take/skip collect on parameter arrays
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_iter_take_skip_collect_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: when expression with f64 variable conditions
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_f64_cond_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: for-range building string via i.to_string()
-        if self.rng.gen_bool(0.02) {
-            return self.generate_for_range_tostring_build(ctx);
-        }
-
-        // ~2% chance: match with when expression in arm values
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_when_arm_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: sorted iteration with accumulation
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_sorted_iter_accum(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: filter-collect then iterate with to_string
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_filter_iter_tostring(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: when comparing lengths of array and string
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_length_compare(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: character extraction via substring
-        if self.rng.gen_bool(0.02) {
-            return self.generate_string_char_at_let(ctx);
-        }
-
-        // ~2% chance: range-based iterator with map and collect
-        if self.rng.gen_bool(0.02) {
-            return self.generate_range_iter_map_collect(ctx);
-        }
-
-        // ~2% chance: match on interpolated string length
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_interpolation_length(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: range for-loop with when body accumulation
-        if self.rng.gen_bool(0.02) {
-            return self.generate_for_range_when_accum(ctx);
-        }
-
-        // ~2% chance: when with to_string in arms
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_tostring_arms(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: match on sorted array length
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_sorted_length(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: single-element range operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_single_elem_range_let(ctx);
-        }
-
-        // ~2% chance: whitespace-heavy string operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_whitespace_string_ops(ctx);
-        }
-
-        // ~2% chance: empty range (N..N) operations
-        if self.rng.gen_bool(0.02) {
-            return self.generate_empty_range_let(ctx);
-        }
-
-        // ~2% chance: .to_string().length() chained method
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_tostring_length_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: chained boolean literal ops
-        if self.rng.gen_bool(0.02) {
-            return self.generate_bool_chain_edge_let(ctx);
-        }
-
-        // ~2% chance: safe array first-element access via length guard
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_array_length_zero_check(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: when with string replace in arms
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_when_replace_result(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: match with .to_string() in arms
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_match_tostring_arms(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: manual min/max via when
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_manual_minmax_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~2% chance: nested .to_string().length().to_string() chain
-        if self.rng.gen_bool(0.02)
-            && let Some(stmt) = self.try_generate_nested_tostring_let(ctx)
-        {
-            return stmt;
-        }
-
-        // ~10% chance to generate a widening let statement
-        // (assign narrower type expression to wider type variable)
-        if self.rng.gen_bool(0.10)
-            && let Some(stmt) = self.try_generate_widening_let(ctx)
-        {
-            return stmt;
-        }
-
+        let config = self.config.clone();
+
+        let_dispatch!(self, ctx, [
+            // Lambda let-binding (closure exercise)
+            { prob: config.expr_config.lambda_probability,
+              call: self.generate_lambda_let(ctx) },
+            // Class-typed local for field access
+            { prob: 0.15,
+              call: self.try_generate_class_let(ctx) },
+            // Interface-typed local via upcast (vtable dispatch)
+            { prob: config.interface_dispatch_probability,
+              call: self.try_generate_interface_let(ctx) },
+            // Struct-typed local
+            { prob: 0.10,
+              call: self.try_generate_struct_let(ctx) },
+            // Array-typed local
+            { prob: 0.12,
+              call: self.generate_array_let(ctx) },
+            // Iterator map/filter on array variables
+            { prob: config.iter_map_filter_probability,
+              call: self.try_generate_iter_map_filter_let(ctx) },
+            // Empty array through iterator chain
+            { prob: config.empty_array_iter_probability,
+              call: self.generate_empty_array_iter_let(ctx) },
+            // Empty string iteration
+            { prob: config.empty_array_iter_probability,
+              call: self.generate_empty_string_iter_let(ctx) },
+            // Wildcard-only match
+            { prob: 0.03,
+              call: self.generate_wildcard_only_match(ctx) },
+            // Nested when expressions
+            { prob: 0.03,
+              call: self.try_generate_nested_when_let(ctx) },
+            // Zero-take / max-skip empty iterator
+            { prob: 0.03,
+              call: self.try_generate_empty_iter_edge(ctx) },
+            // Chained string method calls
+            { prob: 0.04,
+              call: self.try_generate_chained_string_methods(ctx) },
+            // Match on array element
+            { prob: 0.03,
+              call: self.try_generate_match_array_elem(ctx) },
+            // Match on iterator terminal
+            { prob: 0.03,
+              call: self.try_generate_match_iter_terminal(ctx) },
+            // Range-based iterator chain
+            { prob: config.range_iter_probability,
+              call: self.generate_range_iter_let(ctx) },
+            // Generic closure + interface dispatch in iterator chains
+            { prob: config.generic_closure_interface_probability,
+              call: self.try_generate_generic_closure_interface_chain(ctx) },
+            // Match with closure arms
+            { prob: config.match_closure_arm_probability,
+              call: self.try_generate_match_closure_arms(ctx) },
+            // Field-closure-let (extract field, capture in closure)
+            { prob: config.field_closure_let_probability,
+              call: self.try_generate_field_closure_let(ctx) },
+            // String split to array
+            { prob: config.string_split_probability,
+              call: self.generate_string_split_let(ctx) },
+            // String method call
+            { prob: config.string_method_probability,
+              call: self.try_generate_string_method_let(ctx) },
+            // Checked/wrapping/saturating arithmetic (requires lowlevel import)
+            { prob: config.checked_arithmetic_probability,
+              guard: ctx.has_lowlevel_import,
+              call: self.generate_checked_arithmetic_let(ctx) },
+            // Tuple let-binding with destructuring
+            { prob: config.tuple_probability,
+              call: self.generate_tuple_let(ctx) },
+            // Fixed-size array let-binding with destructuring
+            { prob: config.fixed_array_probability,
+              call: self.generate_fixed_array_let(ctx) },
+            // Struct destructuring
+            { prob: config.struct_destructure_probability,
+              call: self.try_generate_struct_destructure(ctx) },
+            // Class destructuring
+            { prob: config.class_destructure_probability,
+              call: self.try_generate_class_destructure(ctx) },
+            // Struct copy
+            { prob: 0.08,
+              call: self.try_generate_struct_copy(ctx) },
+            // Match expression let-binding
+            { prob: config.match_probability,
+              call: self.try_generate_match_let(ctx) },
+            // String match expression let-binding
+            { prob: config.string_match_probability,
+              call: self.try_generate_string_match_let(ctx) },
+            // Union match expression let-binding
+            { prob: config.union_match_probability,
+              call: self.try_generate_union_match_let(ctx) },
+            // Sentinel union let-binding
+            { prob: config.sentinel_union_probability,
+              call: self.try_generate_sentinel_union_let(ctx) },
+            // Optional destructure match
+            { prob: config.optional_destructure_match_probability,
+              call: self.try_generate_optional_destructure_match(ctx) },
+            // Sentinel closure capture
+            { prob: config.sentinel_closure_capture_probability,
+              call: self.try_generate_sentinel_closure_capture(ctx) },
+            // Closure capturing whole struct
+            { prob: config.closure_struct_capture_probability,
+              call: self.try_generate_closure_struct_capture(ctx) },
+            // Nested closure capture
+            { prob: config.nested_closure_capture_probability,
+              call: self.try_generate_nested_closure_capture(ctx) },
+            // String interpolation let-binding
+            { prob: config.string_interpolation_probability,
+              call: self.try_generate_string_interpolation_let(ctx) },
+            // Match on method call result
+            { prob: config.match_on_method_result_probability,
+              call: self.try_generate_match_on_method_result(ctx) },
+            // Iterator map using method call on class instance
+            { prob: config.iter_method_map_probability,
+              call: self.try_generate_iter_method_map(ctx) },
+            // When expression let-binding
+            { prob: config.when_let_probability,
+              call: self.try_generate_when_let(ctx) },
+            // Iterator predicate
+            { prob: config.iter_predicate_probability,
+              call: self.try_generate_iter_predicate_let(ctx) },
+            // Iterator chunks/windows
+            { prob: config.iter_chunks_windows_probability,
+              call: self.try_generate_iter_chunks_windows_let(ctx) },
+            // Re-iterate existing array local
+            { prob: 0.08,
+              call: self.try_generate_reiterate_let(ctx) },
+            // for_each as standalone statement
+            { prob: 0.05,
+              call: self.try_generate_for_each_stmt(ctx) },
+            // nth with match on optional result
+            { prob: 0.05,
+              call: self.try_generate_nth_let(ctx) },
+            // String iteration
+            { prob: 0.05,
+              call: self.try_generate_string_iter_let(ctx) },
+            // Variable shadowing
+            { prob: 0.04,
+              call: self.try_generate_variable_shadow(ctx) },
+            // Assert statement with tautological condition
+            { prob: 0.03,
+              call: self.try_generate_assert_stmt(ctx) },
+            // Match on boolean value
+            { prob: 0.03,
+              call: self.try_generate_bool_match_let(ctx) },
+            // Dead-code assertion
+            { prob: 0.02,
+              call: self.generate_dead_code_assert() },
+            // Zero/single-iteration for loop
+            { prob: 0.02,
+              call: self.generate_edge_case_for_loop(ctx, 2) },
+            // Empty array iterator operation
+            { prob: 0.02,
+              call: self.generate_empty_array_iter(ctx) },
+            // Edge-case string split
+            { prob: 0.02,
+              call: self.generate_edge_case_split(ctx) },
+            // Iterator terminal inside while-loop accumulator
+            { prob: 0.02,
+              call: self.try_generate_iter_while_accum(ctx) },
+            // For-in loop with match on iteration variable
+            { prob: 0.02,
+              call: self.try_generate_for_in_match_accum(ctx) },
+            // String concatenation with + operator
+            { prob: 0.03,
+              call: self.try_generate_string_concat_let(ctx) },
+            // Map-to-string-then-reduce (join pattern)
+            { prob: 0.02,
+              call: self.try_generate_map_tostring_reduce(ctx) },
+            // Numeric .to_string() in string expression
+            { prob: 0.02,
+              call: self.try_generate_to_string_let(ctx) },
+            // Struct field in string interpolation
+            { prob: 0.02,
+              call: self.try_generate_struct_field_interpolation(ctx) },
+            // When with iterator predicate condition
+            { prob: 0.02,
+              call: self.try_generate_when_iter_predicate(ctx) },
+            // Closure result in string concat
+            { prob: 0.02,
+              call: self.try_generate_closure_result_concat(ctx) },
+            // Split result in for-in loop
+            { prob: 0.02,
+              call: self.generate_split_for_loop(ctx) },
+            // For-in loop pushing derived values to mutable array
+            { prob: 0.02,
+              call: self.try_generate_for_push_collect(ctx) },
+            // Array literal with variable elements
+            { prob: 0.03,
+              call: self.try_generate_array_from_vars(ctx) },
+            // Multiple pushes onto a mutable array
+            { prob: 0.02,
+              call: self.try_generate_multi_push(ctx) },
+            // Method call on a literal value
+            { prob: 0.02,
+              call: self.generate_literal_method_call(ctx) },
+            // Nested when-in-when expression
+            { prob: 0.02,
+              call: self.try_generate_nested_when(ctx) },
+            // Match on method call result (small variant)
+            { prob: 0.02,
+              call: self.try_generate_match_on_method(ctx) },
+            // Struct construction with iterator field values
+            { prob: 0.02,
+              call: self.try_generate_struct_with_iter_fields(ctx) },
+            // Iterator terminal + method chain
+            { prob: 0.02,
+              call: self.try_generate_iter_terminal_chain(ctx) },
+            // When with string method conditions
+            { prob: 0.02,
+              call: self.try_generate_when_string_method_conds(ctx) },
+            // Single-element array operations
+            { prob: 0.02,
+              call: self.generate_single_elem_array_ops(ctx) },
+            // Tautological comparison in when
+            { prob: 0.02,
+              call: self.try_generate_tautological_when(ctx) },
+            // Empty string concatenation edge case
+            { prob: 0.02,
+              call: self.try_generate_empty_string_concat(ctx) },
+            // Last element access via computed index
+            { prob: 0.02,
+              call: self.try_generate_last_elem_access(ctx) },
+            // For-loop indexed by array length
+            { prob: 0.02,
+              call: self.try_generate_for_length_indexed(ctx) },
+            // While-loop string building
+            { prob: 0.02,
+              call: self.generate_while_string_build(ctx) },
+            // Compound boolean from numeric comparisons
+            { prob: 0.03,
+              call: self.try_generate_compound_bool_let(ctx) },
+            // Boolean from length comparisons
+            { prob: 0.02,
+              call: self.try_generate_length_comparison_let(ctx) },
+            // String interpolation with iterator terminal
+            { prob: 0.02,
+              call: self.try_generate_interpolation_with_iter(ctx) },
+            // Reassign from when expression
+            { prob: 0.02,
+              call: self.try_generate_reassign_from_when(ctx) },
+            // Identity arithmetic edge case
+            { prob: 0.02,
+              call: self.try_generate_identity_arithmetic(ctx) },
+            // String equality edge case
+            { prob: 0.02,
+              call: self.try_generate_string_equality_let(ctx) },
+            // Modulo edge cases
+            { prob: 0.02,
+              call: self.generate_modulo_edge_case(ctx) },
+            // Uniform array operations
+            { prob: 0.02,
+              call: self.generate_array_uniform_ops(ctx) },
+            // For-loop with when-based accumulation
+            { prob: 0.02,
+              call: self.try_generate_for_when_accumulate(ctx) },
+            // When with iterator terminals as arm values
+            { prob: 0.02,
+              call: self.try_generate_iter_in_when_arms(ctx) },
+            // Multi-arm when (4+ arms)
+            { prob: 0.02,
+              call: self.try_generate_multi_arm_when(ctx) },
+            // Match with computed arm values
+            { prob: 0.02,
+              call: self.try_generate_match_with_computation(ctx) },
+            // String replace/replace_all
+            { prob: 0.02,
+              call: self.try_generate_string_replace_let(ctx) },
+            // Nested match expression
+            { prob: 0.02,
+              call: self.try_generate_nested_match_let(ctx) },
+            // String length on literal edge cases
+            { prob: 0.02,
+              call: self.generate_string_length_edge_cases(ctx) },
+            // Range check boolean
+            { prob: 0.02,
+              call: self.try_generate_range_check_let(ctx) },
+            // For-loop string build with match
+            { prob: 0.02,
+              call: self.generate_for_string_build_with_match(ctx) },
+            // When with string concat arm values
+            { prob: 0.02,
+              call: self.try_generate_when_with_string_concat_arms(ctx) },
+            // Boolean negation edge cases
+            { prob: 0.02,
+              call: self.try_generate_bool_negation_let(ctx) },
+            // Chained methods on literal strings
+            { prob: 0.02,
+              call: self.generate_chained_literal_method(ctx) },
+            // Method call on when result
+            { prob: 0.02,
+              call: self.try_generate_when_result_method(ctx) },
+            // For-loop building string with when body
+            { prob: 0.02,
+              call: self.try_generate_for_iter_when_string_body(ctx) },
+            // While false dead code
+            { prob: 0.02,
+              call: self.generate_while_false_deadcode(ctx) },
+            // Division by power of 2
+            { prob: 0.02,
+              call: self.try_generate_power_of_two_div(ctx) },
+            // String predicate (contains/starts_with/ends_with)
+            { prob: 0.02,
+              call: self.try_generate_string_predicate_let(ctx) },
+            // String interpolation with complex expressions
+            { prob: 0.02,
+              call: self.try_generate_interpolation_expr_let(ctx) },
+            // Match on string length
+            { prob: 0.02,
+              call: self.try_generate_match_string_length(ctx) },
+            // Array length guard (safe indexing)
+            { prob: 0.02,
+              call: self.try_generate_array_length_guard(ctx) },
+            // Repeat literal array
+            { prob: 0.02,
+              call: self.generate_repeat_literal_let(ctx) },
+            // iter().reduce() on array
+            { prob: 0.02,
+              call: self.try_generate_iter_reduce_let(ctx) },
+            // i32 near-boundary operations
+            { prob: 0.02,
+              call: self.generate_i32_boundary_safe(ctx) },
+            // Empty string operations
+            { prob: 0.02,
+              call: self.generate_empty_string_ops(ctx) },
+            // Manual for-loop reduce pattern
+            { prob: 0.02,
+              call: self.try_generate_for_reduce_pattern(ctx) },
+            // When containing match expression
+            { prob: 0.02,
+              call: self.try_generate_when_match_combo(ctx) },
+            // String split iteration
+            { prob: 0.02,
+              call: self.generate_string_split_for(ctx) },
+            // Nested when with string result
+            { prob: 0.02,
+              call: self.try_generate_nested_when_string_let(ctx) },
+            // .to_string() on numeric values
+            { prob: 0.02,
+              call: self.try_generate_numeric_to_string_let(ctx) },
+            // .substring() on strings
+            { prob: 0.02,
+              call: self.try_generate_substring_let(ctx) },
+            // Match with to_string arm values
+            { prob: 0.02,
+              call: self.try_generate_match_to_string_arms(ctx) },
+            // For loop with string interpolation concat
+            { prob: 0.02,
+              call: self.generate_for_interpolation_concat(ctx) },
+            // Boolean chain expression
+            { prob: 0.02,
+              call: self.try_generate_bool_chain_let(ctx) },
+            // Comparison chain expression
+            { prob: 0.02,
+              call: self.try_generate_comparison_chain_let(ctx) },
+            // When with string predicate (contains/starts_with)
+            { prob: 0.02,
+              call: self.try_generate_when_with_contains(ctx) },
+            // Match on array length
+            { prob: 0.02,
+              call: self.try_generate_match_array_length(ctx) },
+            // Sorted collect on array
+            { prob: 0.02,
+              call: self.try_generate_sorted_collect_let(ctx) },
+            // Reverse collect on array
+            { prob: 0.02,
+              call: self.try_generate_reverse_collect_let(ctx) },
+            // Guarded division
+            { prob: 0.02,
+              call: self.try_generate_zero_division_guard(ctx) },
+            // Single-character string operations
+            { prob: 0.02,
+              call: self.generate_single_char_string_ops(ctx) },
+            // f64 literal arithmetic operations
+            { prob: 0.02,
+              call: self.generate_f64_literal_ops_let(ctx) },
+            // f64 equality/comparison edge cases
+            { prob: 0.02,
+              call: self.generate_f64_comparison_edge_let(ctx) },
+            // String with repeated characters operations
+            { prob: 0.02,
+              call: self.generate_repeated_string_ops(ctx) },
+            // Iterator take/skip collect on parameter arrays
+            { prob: 0.02,
+              call: self.try_generate_iter_take_skip_collect_let(ctx) },
+            // When with f64 variable conditions
+            { prob: 0.02,
+              call: self.try_generate_when_f64_cond_let(ctx) },
+            // For-range building string via i.to_string()
+            { prob: 0.02,
+              call: self.generate_for_range_tostring_build(ctx) },
+            // Match with when expression in arm values
+            { prob: 0.02,
+              call: self.try_generate_match_when_arm_let(ctx) },
+            // Sorted iteration with accumulation
+            { prob: 0.02,
+              call: self.try_generate_sorted_iter_accum(ctx) },
+            // Filter-collect then iterate with to_string
+            { prob: 0.02,
+              call: self.try_generate_filter_iter_tostring(ctx) },
+            // When comparing lengths of array and string
+            { prob: 0.02,
+              call: self.try_generate_when_length_compare(ctx) },
+            // Character extraction via substring
+            { prob: 0.02,
+              call: self.generate_string_char_at_let(ctx) },
+            // Range-based iterator with map and collect
+            { prob: 0.02,
+              call: self.generate_range_iter_map_collect(ctx) },
+            // Match on interpolated string length
+            { prob: 0.02,
+              call: self.try_generate_match_interpolation_length(ctx) },
+            // Range for-loop with when body accumulation
+            { prob: 0.02,
+              call: self.generate_for_range_when_accum(ctx) },
+            // When with to_string in arms
+            { prob: 0.02,
+              call: self.try_generate_when_tostring_arms(ctx) },
+            // Match on sorted array length
+            { prob: 0.02,
+              call: self.try_generate_match_sorted_length(ctx) },
+            // Single-element range operations
+            { prob: 0.02,
+              call: self.generate_single_elem_range_let(ctx) },
+            // Whitespace-heavy string operations
+            { prob: 0.02,
+              call: self.generate_whitespace_string_ops(ctx) },
+            // Empty range (N..N) operations
+            { prob: 0.02,
+              call: self.generate_empty_range_let(ctx) },
+            // .to_string().length() chained method
+            { prob: 0.02,
+              call: self.try_generate_tostring_length_let(ctx) },
+            // Chained boolean literal ops
+            { prob: 0.02,
+              call: self.generate_bool_chain_edge_let(ctx) },
+            // Safe array first-element access via length guard
+            { prob: 0.02,
+              call: self.try_generate_array_length_zero_check(ctx) },
+            // When with string replace in arms
+            { prob: 0.02,
+              call: self.try_generate_when_replace_result(ctx) },
+            // Match with .to_string() in arms
+            { prob: 0.02,
+              call: self.try_generate_match_tostring_arms(ctx) },
+            // Manual min/max via when
+            { prob: 0.02,
+              call: self.try_generate_manual_minmax_let(ctx) },
+            // Nested .to_string().length().to_string() chain
+            { prob: 0.02,
+              call: self.try_generate_nested_tostring_let(ctx) },
+            // Widening let statement
+            { prob: 0.10,
+              call: self.try_generate_widening_let(ctx) },
+        ]);
+
+        // Fallback: simple primitive let-binding
+        self.generate_primitive_let(ctx)
+    }
+
+    /// Fallback: generate a simple primitive let-binding.
+    fn generate_primitive_let(&mut self, ctx: &mut StmtContext) -> String {
         let name = ctx.new_local_name();
         let is_mutable = self.rng.gen_bool(0.3);
         let ty = self.random_primitive_type();
