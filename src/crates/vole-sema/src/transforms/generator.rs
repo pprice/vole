@@ -89,7 +89,7 @@ impl<'a> GeneratorTransformer<'a> {
 
     /// Generate a unique NodeId for generated AST nodes
     pub(super) fn next_id(&mut self) -> NodeId {
-        let id = NodeId(self.next_node_id);
+        let id = NodeId::new(self.next_node_id);
         self.next_node_id += 1;
         id
     }

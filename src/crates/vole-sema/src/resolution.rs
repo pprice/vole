@@ -302,7 +302,7 @@ mod tests {
     fn method_resolutions_storage() {
         let mut arena = TypeArena::new();
         let mut resolutions = MethodResolutions::new();
-        let node_id = NodeId(42);
+        let node_id = NodeId::new_for_test(42);
         let method_name_id = test_method_name_id();
 
         let ft = FunctionType::void(&arena);
@@ -320,6 +320,6 @@ mod tests {
         );
 
         assert!(resolutions.get(node_id).is_some());
-        assert!(resolutions.get(NodeId(999)).is_none());
+        assert!(resolutions.get(NodeId::new_for_test(999)).is_none());
     }
 }

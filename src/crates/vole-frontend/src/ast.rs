@@ -35,7 +35,25 @@ impl Symbol {
 
 /// Unique identifier for AST nodes (expressions, statements, declarations)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct NodeId(pub u32);
+pub struct NodeId(u32);
+
+impl NodeId {
+    /// Create a NodeId from a raw index. Only the parser and code generators should use this.
+    pub fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    /// Return the underlying index.
+    pub fn index(self) -> u32 {
+        self.0
+    }
+
+    /// Create a NodeId with an arbitrary index in test code.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_for_test(index: u32) -> Self {
+        Self(index)
+    }
+}
 
 impl std::fmt::Display for NodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
