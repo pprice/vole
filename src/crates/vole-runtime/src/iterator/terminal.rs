@@ -17,6 +17,7 @@ use super::{iter_produces_owned, vole_array_iter_next};
 /// Returns the count as i64
 /// Frees the iterator after counting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
     if iter.is_null() {
         return 0;
@@ -55,6 +56,7 @@ pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
 /// Returns the sum as i64 (raw bits).
 /// Frees the iterator after summing.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
     use crate::value::RuntimeTypeId;
 
@@ -112,6 +114,7 @@ pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
 /// The callback is a closure that takes one i64 argument and returns nothing
 /// Frees the iterator after iteration.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Closure) {
     if iter.is_null() || callback.is_null() {
         return;
@@ -158,6 +161,7 @@ pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Clo
 /// Returns the final accumulated value.
 /// Frees the iterator after reduction.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_reduce_tagged(
     iter: *mut RcIterator,
     init: i64,
@@ -223,6 +227,7 @@ pub extern "C" fn vole_iter_reduce_tagged(
 /// Returns the final accumulated value
 /// Frees the iterator after reduction.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_reduce(
     iter: *mut RcIterator,
     init: i64,

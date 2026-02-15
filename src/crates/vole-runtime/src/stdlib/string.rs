@@ -237,6 +237,7 @@ fn char_index_to_byte_index(s: &str, char_idx: usize) -> Option<usize> {
 
 /// Get the length of a string in characters (not bytes!)
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_len(s: *const RcString) -> i64 {
     if s.is_null() {
         return 0;
@@ -246,6 +247,7 @@ pub extern "C" fn str_len(s: *const RcString) -> i64 {
 
 /// Get the length of a string in bytes (not characters!)
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_byte_len(s: *const RcString) -> i64 {
     if s.is_null() {
         return 0;
@@ -255,6 +257,7 @@ pub extern "C" fn str_byte_len(s: *const RcString) -> i64 {
 
 /// Check if two strings are equal
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_equals(a: *const RcString, b: *const RcString) -> i8 {
     if a.is_null() && b.is_null() {
         return 1;
@@ -272,6 +275,7 @@ pub extern "C" fn str_equals(a: *const RcString, b: *const RcString) -> i8 {
 /// Compare two strings lexicographically
 /// Returns -1 if a < b, 0 if a == b, 1 if a > b
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_compare(a: *const RcString, b: *const RcString) -> i32 {
     let a_str = if a.is_null() {
         ""
@@ -288,6 +292,7 @@ pub extern "C" fn str_compare(a: *const RcString, b: *const RcString) -> i32 {
 
 /// Compute FNV-1a hash of a string
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_hash(s: *const RcString) -> i64 {
     if s.is_null() {
         return 0;
@@ -297,6 +302,7 @@ pub extern "C" fn str_hash(s: *const RcString) -> i64 {
 
 /// Check if a string contains a substring
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_contains(s: *const RcString, needle: *const RcString) -> i8 {
     if s.is_null() || needle.is_null() {
         return 0;
@@ -310,6 +316,7 @@ pub extern "C" fn str_contains(s: *const RcString, needle: *const RcString) -> i
 
 /// Check if a string starts with a prefix
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_starts_with(s: *const RcString, prefix: *const RcString) -> i8 {
     if s.is_null() || prefix.is_null() {
         return 0;
@@ -323,6 +330,7 @@ pub extern "C" fn str_starts_with(s: *const RcString, prefix: *const RcString) -
 
 /// Check if a string ends with a suffix
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_ends_with(s: *const RcString, suffix: *const RcString) -> i8 {
     if s.is_null() || suffix.is_null() {
         return 0;
@@ -338,6 +346,7 @@ pub extern "C" fn str_ends_with(s: *const RcString, suffix: *const RcString) -> 
 /// Returns -1 if not found
 /// IMPORTANT: Returns CHARACTER index, not byte index!
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_index_of(s: *const RcString, needle: *const RcString) -> i32 {
     if s.is_null() || needle.is_null() {
         return -1;
@@ -354,6 +363,7 @@ pub extern "C" fn str_index_of(s: *const RcString, needle: *const RcString) -> i
 
 /// Convert a string to lowercase
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_to_lower(s: *const RcString) -> *const RcString {
     if s.is_null() {
         return RcString::new("");
@@ -366,6 +376,7 @@ pub extern "C" fn str_to_lower(s: *const RcString) -> *const RcString {
 
 /// Convert a string to uppercase
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_to_upper(s: *const RcString) -> *const RcString {
     if s.is_null() {
         return RcString::new("");
@@ -378,6 +389,7 @@ pub extern "C" fn str_to_upper(s: *const RcString) -> *const RcString {
 
 /// Trim whitespace from both ends of a string
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_trim(s: *const RcString) -> *const RcString {
     if s.is_null() {
         return RcString::new("");
@@ -390,6 +402,7 @@ pub extern "C" fn str_trim(s: *const RcString) -> *const RcString {
 
 /// Trim whitespace from the start of a string
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_trim_start(s: *const RcString) -> *const RcString {
     if s.is_null() {
         return RcString::new("");
@@ -402,6 +415,7 @@ pub extern "C" fn str_trim_start(s: *const RcString) -> *const RcString {
 
 /// Trim whitespace from the end of a string
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_trim_end(s: *const RcString) -> *const RcString {
     if s.is_null() {
         return RcString::new("");
@@ -416,6 +430,7 @@ pub extern "C" fn str_trim_end(s: *const RcString) -> *const RcString {
 /// start: starting character index (0-based)
 /// end: ending character index (exclusive), or -1 for end of string
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_substring(s: *const RcString, start: i32, end: i32) -> *const RcString {
     if s.is_null() {
         return RcString::new("");
@@ -451,6 +466,7 @@ pub extern "C" fn str_substring(s: *const RcString, start: i32, end: i32) -> *co
 
 /// Replace the first occurrence of old with new
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_replace(
     s: *const RcString,
     old: *const RcString,
@@ -472,6 +488,7 @@ pub extern "C" fn str_replace(
 
 /// Replace all occurrences of old with new
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_replace_all(
     s: *const RcString,
     old: *const RcString,
@@ -493,6 +510,7 @@ pub extern "C" fn str_replace_all(
 /// Get the character (unicode codepoint) at a given index
 /// Returns -1 if index is out of bounds
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn str_char_at(s: *const RcString, index: i32) -> i32 {
     if s.is_null() || index < 0 {
         return -1;

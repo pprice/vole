@@ -205,6 +205,7 @@ pub fn force_unlock_type_registry() {
 ///   `field_count` is 0.
 /// - This is called once per class definition before any instance allocation.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_register_instance_type(
     type_id: u32,
     field_count: u32,

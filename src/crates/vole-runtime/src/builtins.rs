@@ -253,6 +253,7 @@ print_fns!(bool, i8, |v| {
 /// Null pointers are treated as empty strings (nil-propagation): `nil + "x"`
 /// produces `"x"`, and `nil + nil` produces `""`.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString {
     unsafe {
         let bytes_a: &[u8] = if a.is_null() { &[] } else { (*a).data() };
@@ -264,6 +265,7 @@ pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> 
 /// Convert an i64 array to string representation
 /// Shows first 5 elements, then "..." for truncation
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_array_i64_to_string(ptr: *const RcArray) -> *mut RcString {
     if ptr.is_null() {
         return RcString::new("[]");
@@ -313,6 +315,7 @@ pub extern "C" fn vole_print_char(c: u8) {
 /// Panic with a message - prints to stderr and exits with code 1.
 /// If a test jmp_buf is set (unit tests or capture mode), uses longjmp to escape.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_panic(
     msg: *const RcString,
     file: *const u8,
@@ -404,6 +407,7 @@ pub extern "C" fn vole_array_with_capacity(capacity: usize) -> *mut RcArray {
 
 /// Push a tagged value onto the array. The JIT guarantees `arr` is a valid array pointer.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
     unsafe {
         RcArray::push(arr, TaggedValue { tag, value });
@@ -413,6 +417,7 @@ pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
 /// Get the type tag of an array element. Returns 0 for null arrays.
 /// Panics with a Vole error on out-of-bounds index (user-facing bounds check).
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
     if arr.is_null() {
         return 0;
@@ -427,6 +432,7 @@ pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
 /// Get the value of an array element. Returns 0 for null arrays.
 /// Panics with a Vole error on out-of-bounds index (user-facing bounds check).
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64 {
     if arr.is_null() {
         return 0;
@@ -441,6 +447,7 @@ pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64
 /// Set an array element by index. No-ops for null arrays.
 /// Panics with a Vole error on out-of-bounds index (user-facing bounds check).
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64) {
     if arr.is_null() {
         return;
@@ -456,6 +463,7 @@ pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, valu
 
 /// Get the length of an array. Returns 0 for null arrays (nil-propagation).
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_array_len(arr: *const RcArray) -> usize {
     if arr.is_null() {
         return 0;

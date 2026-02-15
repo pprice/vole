@@ -271,6 +271,7 @@ macro_rules! generate_next_dispatch {
         /// Returns 1 and stores value in out_value if available
         /// Returns 0 if iterator exhausted (Done)
         #[unsafe(no_mangle)]
+        #[expect(clippy::not_unsafe_ptr_arg_deref)]
         pub extern "C" fn vole_array_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
             if iter.is_null() {
                 return 0;
@@ -310,6 +311,7 @@ macro_rules! generate_produces_owned {
         /// Check if an iterator chain produces "owned" values (from map/string_chars/etc.)
         /// vs "borrowed" values (from array source with only filter/take/skip in between).
         /// This determines whether collect needs to rc_inc values before storing.
+        #[expect(clippy::not_unsafe_ptr_arg_deref)]
         pub fn iter_produces_owned(iter: *mut RcIterator) -> bool {
             if iter.is_null() {
                 return false;
@@ -355,6 +357,7 @@ macro_rules! iter_next_fn {
     ) => {
         $(#[$attr])*
         #[unsafe(no_mangle)]
+        #[expect(clippy::not_unsafe_ptr_arg_deref)]
         pub extern "C" fn $name(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
             if iter.is_null() {
                 return 0;
@@ -379,6 +382,7 @@ macro_rules! iter_next_fn {
     ) => {
         $(#[$attr])*
         #[unsafe(no_mangle)]
+        #[expect(clippy::not_unsafe_ptr_arg_deref)]
         pub extern "C" fn $name(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
             if iter.is_null() {
                 return 0;

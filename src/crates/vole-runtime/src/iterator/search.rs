@@ -16,6 +16,7 @@ use super::vole_array_iter_next;
 /// Layout: [tag:1][pad:7][payload:8] where tag 0 = value present (I64), tag 1 = nil
 /// Frees the iterator after finding (or exhausting).
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_find(iter: *mut RcIterator, predicate: *const Closure) -> *mut u8 {
     let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
     let ptr = unsafe { alloc(layout) };
@@ -89,6 +90,7 @@ pub extern "C" fn vole_iter_find(iter: *mut RcIterator, predicate: *const Closur
 /// Short-circuits on first true.
 /// Frees the iterator after checking.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_any(iter: *mut RcIterator, predicate: *const Closure) -> i8 {
     if iter.is_null() || predicate.is_null() {
         if !iter.is_null() {
@@ -139,6 +141,7 @@ pub extern "C" fn vole_iter_any(iter: *mut RcIterator, predicate: *const Closure
 /// Short-circuits on first false.
 /// Frees the iterator after checking.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_all(iter: *mut RcIterator, predicate: *const Closure) -> i8 {
     if iter.is_null() || predicate.is_null() {
         if !iter.is_null() {

@@ -58,6 +58,7 @@ impl RcIterator {
     /// Set the element type tag on this iterator (non-recursive).
     /// Each iterator in the chain stores its OWN element type tag.
     /// The tag represents the type of values this iterator produces.
+    #[expect(clippy::not_unsafe_ptr_arg_deref)]
     pub fn set_elem_tag(ptr: *mut Self, tag: u64) {
         if ptr.is_null() {
             return;
@@ -80,6 +81,7 @@ pub extern "C" fn vole_iter_set_elem_tag(iter: *mut RcIterator, tag: u64) {
 /// # Safety
 /// `iter` must be null or a valid pointer to an initialized `RcIterator`.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_set_produces_owned(iter: *mut RcIterator) {
     if !iter.is_null() {
         unsafe {

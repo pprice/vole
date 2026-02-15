@@ -179,6 +179,7 @@ pub fn module() -> NativeModule {
 /// Read a file to string.
 /// Returns ReadStringResult { error, value }.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_read_string(path_ptr: *const RcString) -> ReadStringResult {
     if path_ptr.is_null() {
         return ReadStringResult { code: 1, value: 0 };
@@ -205,6 +206,7 @@ pub extern "C" fn fs_read_string(path_ptr: *const RcString) -> ReadStringResult 
 /// Write string to file (create/truncate).
 /// Returns WriteResult { error }.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_write_string(
     path_ptr: *const RcString,
     content_ptr: *const RcString,
@@ -231,6 +233,7 @@ pub extern "C" fn fs_write_string(
 /// Append string to file.
 /// Returns WriteResult { error }.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_append_string(
     path_ptr: *const RcString,
     content_ptr: *const RcString,
@@ -266,6 +269,7 @@ pub extern "C" fn fs_append_string(
 /// List directory contents.
 /// Returns ListResult { error, value }.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_list(path_ptr: *const RcString) -> ListResult {
     use crate::array::RcArray;
     use crate::value::{RuntimeTypeId, TaggedValue};
@@ -309,6 +313,7 @@ pub extern "C" fn fs_list(path_ptr: *const RcString) -> ListResult {
 /// Create a directory (and parents).
 /// Returns WriteResult { error }.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_mkdir(path_ptr: *const RcString) -> WriteResult {
     if path_ptr.is_null() {
         return WriteResult { code: 1 };
@@ -326,6 +331,7 @@ pub extern "C" fn fs_mkdir(path_ptr: *const RcString) -> WriteResult {
 
 /// Check if path exists.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_exists(path_ptr: *const RcString) -> bool {
     if path_ptr.is_null() {
         return false;
@@ -336,6 +342,7 @@ pub extern "C" fn fs_exists(path_ptr: *const RcString) -> bool {
 
 /// Check if path is a directory.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_is_dir(path_ptr: *const RcString) -> bool {
     if path_ptr.is_null() {
         return false;
@@ -346,6 +353,7 @@ pub extern "C" fn fs_is_dir(path_ptr: *const RcString) -> bool {
 
 /// Check if path is a file.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_is_file(path_ptr: *const RcString) -> bool {
     if path_ptr.is_null() {
         return false;
@@ -357,6 +365,7 @@ pub extern "C" fn fs_is_file(path_ptr: *const RcString) -> bool {
 /// Remove a file.
 /// Returns WriteResult { error }.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_remove_file(path_ptr: *const RcString) -> WriteResult {
     if path_ptr.is_null() {
         return WriteResult { code: 1 };
@@ -375,6 +384,7 @@ pub extern "C" fn fs_remove_file(path_ptr: *const RcString) -> WriteResult {
 /// Remove an empty directory.
 /// Returns WriteResult { error }.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn fs_remove_dir(path_ptr: *const RcString) -> WriteResult {
     if path_ptr.is_null() {
         return WriteResult { code: 1 };

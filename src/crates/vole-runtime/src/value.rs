@@ -92,6 +92,7 @@ pub extern "C" fn rc_inc(ptr: *mut u8) {
 /// # Safety
 /// `ptr` must be null or point to a valid allocation starting with an `RcHeader`.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn rc_dec(ptr: *mut u8) {
     if ptr.is_null() {
         return;
@@ -284,6 +285,7 @@ impl TaggedValue {
 ///
 /// # Safety
 /// `ptr` must point to a valid union heap buffer allocated by `vole_heap_alloc(16)`.
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub fn union_heap_cleanup(ptr: *mut u8) {
     if ptr.is_null() {
         return;

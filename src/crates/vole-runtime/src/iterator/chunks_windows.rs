@@ -15,6 +15,7 @@ use super::vole_array_iter_next;
 /// The last chunk may be smaller than the specified size.
 /// Returns pointer to heap-allocated iterator
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> *mut RcIterator {
     use crate::value::TaggedValue;
 
@@ -132,6 +133,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 
@@ -180,6 +182,7 @@ pub extern "C" fn vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArra
 /// Yields nothing if there are fewer elements than window_size.
 /// Returns pointer to heap-allocated iterator
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -> *mut RcIterator {
     use crate::value::TaggedValue;
 
@@ -297,6 +300,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_windows_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 

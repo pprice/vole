@@ -31,6 +31,7 @@ pub extern "C" fn vole_sb_new() -> *mut StringBuilder {
 
 /// Push a string onto the builder. Null pointers are safely ignored.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_sb_push_string(sb: *mut StringBuilder, s: *const RcString) {
     if sb.is_null() || s.is_null() {
         return;
@@ -46,6 +47,7 @@ pub extern "C" fn vole_sb_push_string(sb: *mut StringBuilder, s: *const RcString
 /// Finish building, consuming the StringBuilder and returning a new RcString.
 /// The caller owns the returned RcString (refcount=1).
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_sb_finish(sb: *mut StringBuilder) -> *mut RcString {
     if sb.is_null() {
         return RcString::new("");

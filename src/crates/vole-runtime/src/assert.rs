@@ -89,6 +89,7 @@ pub unsafe fn call_setjmp(buf: *mut JmpBuf) -> i32 {
 ///   or is null.
 /// - `line` is the 1-based line number from the source.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_assert_fail(file: *const u8, file_len: usize, line: u32) {
     let file_str = unsafe {
         if file.is_null() || file_len == 0 {

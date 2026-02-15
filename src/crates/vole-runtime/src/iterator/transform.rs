@@ -73,6 +73,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_map_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 
@@ -180,6 +181,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_filter_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 
@@ -268,6 +270,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_take_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 
@@ -360,6 +363,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_skip_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 

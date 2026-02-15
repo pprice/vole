@@ -44,6 +44,7 @@ pub fn module() -> NativeModule {
 
 /// Compute SHA256 hash of a string, returning hex-encoded result
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn crypto_sha256(input: *const RcString) -> *const RcString {
     if input.is_null() {
         return RcString::new("");
@@ -67,6 +68,7 @@ pub extern "C" fn crypto_sha256(input: *const RcString) -> *const RcString {
 
 /// Compute SHA256 hash of a string, returning array of byte values
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn crypto_sha256_bytes(input: *const RcString) -> *mut RcArray {
     // SHA256 always produces 32 bytes
     let arr = RcArray::with_capacity(32);

@@ -196,6 +196,7 @@ pub(super) fn try_new_core_nth(iter: *mut RcIterator, n: i64) -> Option<*mut u8>
 /// parameter is not available in the interface signature.
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     if iter.is_null() {
         return vole_iter_collect_tagged(iter, 0);
@@ -226,6 +227,7 @@ pub extern "C" fn vole_iter_collect_tagged(iter: *mut RcIterator, elem_tag: u64)
 /// Collect all remaining iterator values into a new array.
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_array_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 

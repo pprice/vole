@@ -220,6 +220,7 @@ unsafe extern "C" fn string_drop(ptr: *mut u8) {
 /// `data` must point to `len` bytes of valid UTF-8. The JIT emits this for
 /// string literals (pointing into the code segment) and runtime concatenations.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_string_new(data: *const u8, len: usize) -> *mut RcString {
     let s = unsafe {
         let slice = slice::from_raw_parts(data, len);
@@ -244,6 +245,7 @@ pub extern "C" fn vole_string_dec(ptr: *mut RcString) {
 /// Get the character count of a string (O(1), cached at construction).
 /// Returns 0 for null pointers (nil-propagation).
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_string_len(ptr: *const RcString) -> usize {
     if ptr.is_null() {
         return 0;
@@ -265,6 +267,7 @@ pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
 /// Compare two strings for equality. Returns 1 if equal, 0 otherwise.
 /// Two null pointers are considered equal; a null and non-null are unequal.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_string_eq(a: *const RcString, b: *const RcString) -> i8 {
     if a.is_null() && b.is_null() {
         return 1;

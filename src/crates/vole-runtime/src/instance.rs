@@ -242,6 +242,7 @@ pub extern "C" fn vole_instance_dec(ptr: *mut RcInstance) {
 ///   from static type-checking, so this is not bounds-checked in release.
 ///   A debug_assert in `RcInstance::get_field` catches bugs during development.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> u64 {
     if ptr.is_null() {
         return 0;
@@ -258,6 +259,7 @@ pub extern "C" fn vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> 
 /// - `slot` is within bounds (< field_count). Not bounds-checked in release;
 ///   the JIT guarantees correctness from static type information.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value: u64) {
     if ptr.is_null() {
         return;

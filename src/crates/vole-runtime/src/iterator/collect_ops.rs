@@ -13,6 +13,7 @@ use crate::array::RcArray;
 /// This is an eager operation that consumes the entire source iterator.
 /// Frees the source iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_reverse_iter(iter: *mut RcIterator) -> *mut RcIterator {
     use crate::value::TaggedValue;
 
@@ -66,6 +67,7 @@ pub extern "C" fn vole_reverse_iter(iter: *mut RcIterator) -> *mut RcIterator {
 /// Sorts i64 values in ascending order.
 /// Frees the source iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_sorted_iter(iter: *mut RcIterator) -> *mut RcIterator {
     use crate::value::TaggedValue;
 

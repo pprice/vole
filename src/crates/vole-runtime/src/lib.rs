@@ -8,9 +8,8 @@
 //! - Reference counting ensures objects remain valid for their lifetime
 //! - The type system prevents null or dangling pointers from reaching runtime functions
 //!
-//! We allow `clippy::not_unsafe_ptr_arg_deref` crate-wide since marking every FFI function
+//! We allow `clippy::not_unsafe_ptr_arg_deref` per-function since marking every FFI function
 //! as `unsafe` would add noise without improving safety (callers are generated code, not Rust).
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
 pub mod alloc_track;
 pub mod array;
 pub mod assert;

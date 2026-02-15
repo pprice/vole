@@ -57,6 +57,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 
@@ -101,6 +102,7 @@ pub extern "C" fn vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray
 /// Create a new flatten iterator wrapping any source iterator that yields arrays
 /// Returns pointer to heap-allocated iterator
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator {
     // Determine the inner element tag for the flattened output.
     // When the source is a Chunks or Windows iterator, use inner_elem_tag
@@ -181,6 +183,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 
@@ -329,6 +332,7 @@ iter_next_fn!(
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_flat_map_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
 

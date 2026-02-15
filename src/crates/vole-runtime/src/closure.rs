@@ -328,6 +328,7 @@ unsafe extern "C" fn closure_drop(ptr: *mut u8) {
 /// `func_ptr` must be a valid function pointer or null (for partially
 /// constructed closures that will have their func_ptr set later).
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_closure_alloc(func_ptr: *const u8, num_captures: usize) -> *mut Closure {
     // SAFETY: Called from JIT code which ensures func_ptr validity
     unsafe { Closure::alloc(func_ptr, num_captures) }
@@ -338,6 +339,7 @@ pub extern "C" fn vole_closure_alloc(func_ptr: *const u8, num_captures: usize) -
 /// # Safety
 /// The JIT guarantees `closure` is valid and `index` < num_captures.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_closure_get_capture(closure: *const Closure, index: usize) -> *mut u8 {
     // SAFETY: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::get_capture(closure, index) }
@@ -349,6 +351,7 @@ pub extern "C" fn vole_closure_get_capture(closure: *const Closure, index: usize
 /// The JIT guarantees `closure` is valid, `index` < num_captures, and
 /// `ptr` is a valid heap allocation or null.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_closure_set_capture(closure: *mut Closure, index: usize, ptr: *mut u8) {
     // SAFETY: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::set_capture(closure, index, ptr) }
@@ -360,6 +363,7 @@ pub extern "C" fn vole_closure_set_capture(closure: *mut Closure, index: usize, 
 /// # Safety
 /// The JIT guarantees `closure` is valid and `index` < num_captures.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_closure_set_capture_kind(closure: *mut Closure, index: usize, kind: u8) {
     // SAFETY: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::set_capture_kind(closure, index, kind) }
@@ -372,6 +376,7 @@ pub extern "C" fn vole_closure_set_capture_kind(closure: *mut Closure, index: us
 /// # Safety
 /// The JIT guarantees `closure` is valid and `index` < num_captures.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_closure_set_capture_size(closure: *mut Closure, index: usize, size: u32) {
     // SAFETY: Called from JIT code which ensures pointer validity and index bounds
     unsafe { Closure::set_capture_size(closure, index, size) }
@@ -382,6 +387,7 @@ pub extern "C" fn vole_closure_set_capture_size(closure: *mut Closure, index: us
 /// # Safety
 /// The JIT guarantees `closure` is a valid, non-null closure pointer.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_closure_get_func(closure: *const Closure) -> *const u8 {
     // SAFETY: Called from JIT code which ensures pointer validity
     unsafe { Closure::get_func(closure) }
@@ -394,6 +400,7 @@ pub extern "C" fn vole_closure_get_func(closure: *const Closure) -> *const u8 {
 /// `closure` must be null or a valid closure pointer. Null is handled by
 /// `Closure::free` -> `rc_dec`.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_closure_free(closure: *mut Closure) {
     // SAFETY: Called from JIT code which ensures pointer validity
     unsafe { Closure::free(closure) }
@@ -423,6 +430,7 @@ pub extern "C" fn vole_heap_alloc(size: usize) -> *mut u8 {
 /// `ptr` must have been allocated by `vole_heap_alloc` with the same `size`,
 /// or be null.
 #[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_heap_free(ptr: *mut u8, size: usize) {
     use std::alloc::{Layout, dealloc};
     if ptr.is_null() || size == 0 {
