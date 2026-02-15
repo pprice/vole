@@ -26,6 +26,9 @@ use crate::value::{RcHeader, RuntimeTypeId, rc_dec};
 /// Capture kind constants
 pub const CAPTURE_KIND_VALUE: u8 = 0;
 pub const CAPTURE_KIND_RC: u8 = 1;
+/// Interface capture: the heap slot holds a fat pointer [data_ptr, vtable_ptr].
+/// On drop, load data_ptr from offset 0 and rc_dec it (the underlying class instance).
+pub const CAPTURE_KIND_INTERFACE: u8 = 2;
 
 /// Runtime representation of a closure
 ///
@@ -284,6 +287,16 @@ unsafe extern "C" fn closure_drop(ptr: *mut u8) {
                 let rc_ptr = *(capture_ptr as *const *mut u8);
                 if !rc_ptr.is_null() {
                     rc_dec(rc_ptr);
+                }
+            } else if kind == CAPTURE_KIND_INTERFACE {
+                // The capture slot holds a fat pointer [data_ptr, vtable_ptr].
+                // The data_ptr at offset 0 points to the RC-managed object.
+                let fat_ptr = *(capture_ptr as *const *mut u8);
+                if !fat_ptr.is_null() {
+                    let data_ptr = *(fat_ptr as *const *mut u8);
+                    if !data_ptr.is_null() {
+                        rc_dec(data_ptr);
+                    }
                 }
             }
             // Free the heap-allocated capture slot using the stored size.

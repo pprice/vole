@@ -165,6 +165,9 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
     /// RC scope stack for drop flag tracking and cleanup emission
     pub rc_scopes: RcScopeStack,
+    /// Yielder pointer variable for generator body functions.
+    /// When set, `ExprKind::Yield` compiles to `vole_generator_yield(yielder, value)`.
+    pub yielder_var: Option<Variable>,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -203,6 +206,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // Initialize with global module bindings from top-level destructuring imports
             module_bindings: env.global_module_bindings.clone(),
             rc_scopes: RcScopeStack::new(),
+            yielder_var: None,
             codegen_ctx,
             env,
         }
@@ -229,6 +233,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Set type parameter substitutions for monomorphized generics.
     pub fn with_substitutions(mut self, subs: Option<&'a FxHashMap<NameId, TypeId>>) -> Self {
         self.substitutions = subs;
+        self
+    }
+
+    /// Set the yielder variable for generator body compilation.
+    pub fn with_yielder(mut self, yielder_var: Variable) -> Self {
+        self.yielder_var = Some(yielder_var);
         self
     }
 

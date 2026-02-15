@@ -21,7 +21,8 @@ use crate::runtime::{
     write_to_stderr_capture,
 };
 use crate::sema::{ModuleCache, TypeError, TypeWarning, optimize_all};
-use crate::transforms;
+// AST generator transform is disabled -- generators use coroutine-based codegen.
+// use crate::transforms;
 
 // Re-export AnalyzedProgram from codegen
 pub use crate::codegen::AnalyzedProgram;
@@ -240,13 +241,14 @@ pub fn compile_source(
         (program, interner)
     };
 
-    // Transform phase (generators to state machines)
+    // Transform phase (generators)
+    // Note: The AST generator-to-state-machine transform is disabled.
+    // Generators are now compiled directly to coroutine-backed iterators in codegen.
+    // Yield type validation is handled by sema (check_yield_expr).
     {
         let _span = tracing::info_span!("transform").entered();
-        let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
-        if !transform_errors.is_empty() {
-            return Err(PipelineError::Transform(transform_errors));
-        }
+        let _ = &mut program; // Preserve span for tracing
+        let _ = &mut interner;
     }
 
     // Sema phase (type checking)

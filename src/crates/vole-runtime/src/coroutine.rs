@@ -50,6 +50,25 @@ impl VoleCoroutine {
     }
 }
 
+impl Drop for VoleCoroutine {
+    fn drop(&mut self) {
+        // Skip `force_unwind` for suspended coroutines. Our generator bodies are
+        // JIT-compiled and have no DWARF unwind tables, so the standard
+        // `force_unwind` (which calls `resume_unwind`) would abort. Instead we
+        // use `force_reset` which simply marks the coroutine as done so its
+        // stack is deallocated without attempting to unwind through JIT frames.
+        //
+        // Safety: JIT generator bodies only have primitive/copy values on their
+        // stacks — no Rust objects that require Drop — so skipping unwinding is
+        // safe.
+        if !self.inner.done() {
+            unsafe {
+                self.inner.force_reset();
+            }
+        }
+    }
+}
+
 // =============================================================================
 // FFI functions
 // =============================================================================
@@ -68,7 +87,9 @@ pub extern "C" fn vole_coroutine_new(
     closure_ptr: *const u8,
 ) -> *mut VoleCoroutine {
     // Safety: func_ptr and closure_ptr come from JIT-generated code and are always valid.
-    let func: extern "C" fn(*const u8, *const u8) = unsafe { std::mem::transmute(func_ptr) };
+    // Use `C-unwind` ABI because the body function may call vole_generator_yield
+    // which performs a stack switch via corosensei::suspend().
+    let func: extern "C-unwind" fn(*const u8, *const u8) = unsafe { std::mem::transmute(func_ptr) };
     let closure = closure_ptr as usize; // capture as usize for Send safety
 
     let coro = VoleCoroutine::new(move |yielder, _input| {
@@ -140,7 +161,10 @@ pub extern "C" fn vole_generator_new(
     use crate::iterator::{CoroutineSource, IteratorKind, IteratorSource, RcIterator};
 
     // Safety: body_fn and closure_ptr come from JIT-generated code and are always valid.
-    let func: extern "C" fn(*const u8, *const u8) = unsafe { std::mem::transmute(body_fn) };
+    // Use `C-unwind` ABI because the body function calls vole_generator_yield which
+    // performs a stack switch via corosensei::suspend(). The DWARF unwinder may
+    // interpret this as unwinding, so the function pointer must allow it.
+    let func: extern "C-unwind" fn(*const u8, *const u8) = unsafe { std::mem::transmute(body_fn) };
     let closure = closure_ptr as usize; // capture as usize for Send safety
 
     let coro = VoleCoroutine::new(move |yielder, _input| {
@@ -175,8 +199,12 @@ pub extern "C" fn vole_generator_new(
 ///
 /// `yielder_ptr` is the `corosensei::Yielder` passed to the generator body.
 /// `value` is the `i64` value to yield.
+///
+/// Uses `C-unwind` because `suspend()` performs a stack switch via corosensei,
+/// which the DWARF unwinder may interpret as unwinding. `extern "C"` would
+/// abort on such "unwinds"; `C-unwind` lets them pass through safely.
 #[unsafe(no_mangle)]
-pub extern "C" fn vole_generator_yield(yielder_ptr: *const u8, value: i64) {
+pub extern "C-unwind" fn vole_generator_yield(yielder_ptr: *const u8, value: i64) {
     unsafe {
         let yielder = &*(yielder_ptr as *const corosensei::Yielder<i64, i64>);
         yielder.suspend(value);

@@ -521,8 +521,11 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let is_declared_interface = arena.is_interface(declared_type_id);
             let is_final_interface = arena.is_interface(final_type_id);
+            // RuntimeIterator is an internal concrete type that implements Iterator
+            // dispatch directly via runtime_iterator_method; skip interface boxing.
+            let is_runtime_iterator = arena.is_runtime_iterator(final_type_id);
 
-            if is_declared_interface && !is_final_interface {
+            if is_declared_interface && !is_final_interface && !is_runtime_iterator {
                 let arena = self.arena();
                 let cranelift_ty = type_id_to_cranelift(final_type_id, arena, self.ptr_type());
                 let boxed = self.box_interface_value(

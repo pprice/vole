@@ -191,9 +191,13 @@ impl Analyzer {
                     .update_function_return_type(func_id, inferred_return_type);
             }
         } else {
-            // Check for missing return statement when return type is explicit and non-void
+            // Check for missing return statement when return type is explicit and non-void.
+            // Generator functions (those with current_generator_element_type set) don't need
+            // explicit return statements -- they produce values via yield and implicitly
+            // return Done when the body completes.
             let is_void = func_type.return_type_id.is_void();
-            if !is_void && !body_info.definitely_returns {
+            let is_generator = self.env.current_generator_element_type.is_some();
+            if !is_void && !is_generator && !body_info.definitely_returns {
                 let func_name = interner.resolve(func.name).to_string();
                 let expected = self.type_display_id(func_type.return_type_id);
                 let hint = self.compute_missing_return_hint(

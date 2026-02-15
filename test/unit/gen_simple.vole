@@ -1,0 +1,15 @@
+// Simplest generator test - no params
+func gen_literal() -> Iterator<i64> {
+    yield 10
+}
+
+tests {
+    test "generator yields literal" {
+        let it = gen_literal()
+        let r1 = it.next()
+        assert(r1 is i64)
+        if r1 is i64 {
+            assert(r1 == 10)
+        }
+    }
+}
