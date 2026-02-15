@@ -38,6 +38,11 @@ mod symbols {
     pub const FILE_ERROR: char = '\u{25CC}'; // ◌
 }
 
+/// Default terminal width when detection is unavailable.
+const TERMINAL_WIDTH_FALLBACK: usize = 80;
+/// Minimum usable width for the progress line (prevents degenerate layouts).
+const MIN_USABLE_WIDTH: usize = 20;
+
 /// Dot-based progress display for non-verbose test output.
 ///
 /// Prints symbols as tests complete:
@@ -62,14 +67,12 @@ struct ProgressLine {
 impl ProgressLine {
     /// Create a new progress line with terminal width detection.
     fn new(colors: TermColors) -> Self {
-        // Get terminal width, defaulting to 80 if unavailable
         let term_width = terminal_size::terminal_size()
             .map(|(w, _)| w.0 as usize)
-            .unwrap_or(80);
+            .unwrap_or(TERMINAL_WIDTH_FALLBACK);
 
         // Reserve space for " [current/total]" suffix (about 15 chars for safety)
-        // Minimum usable width is 20
-        let usable_width = term_width.saturating_sub(15).max(20);
+        let usable_width = term_width.saturating_sub(15).max(MIN_USABLE_WIDTH);
 
         Self {
             dots_on_line: 0,
