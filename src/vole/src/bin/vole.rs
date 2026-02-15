@@ -110,17 +110,8 @@ fn main() -> ExitCode {
             inspect_type,
             files,
             no_tests,
-            imports,
             all,
-        } => inspect_files(
-            &files,
-            inspect_type,
-            no_tests,
-            imports.as_deref(),
-            cli.release,
-            all,
-            cli.color,
-        ),
+        } => inspect_files(&files, inspect_type, no_tests, cli.release, all, cli.color),
         Commands::Version => print_version(),
         #[cfg(feature = "bench")]
         Commands::Bench(args) => match args.command {

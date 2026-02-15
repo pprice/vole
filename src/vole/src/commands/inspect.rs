@@ -14,7 +14,6 @@ pub fn inspect_files(
     patterns: &[String],
     inspect_type: InspectType,
     no_tests: bool,
-    _imports: Option<&str>,
     release: bool,
     show_all: bool,
     color_mode: ColorMode,

@@ -100,10 +100,6 @@ pub enum Commands {
         #[arg(long)]
         no_tests: bool,
 
-        /// Include imports: "project" or "all" (not yet implemented)
-        #[arg(long)]
-        imports: Option<String>,
-
         /// Show all functions including prelude (for mir)
         #[arg(long)]
         all: bool,
