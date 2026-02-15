@@ -33,6 +33,7 @@ mod f64_comparison_edge;
 mod f64_literal_ops;
 mod field_closure;
 mod filter_iter_tostring;
+mod for_each_stmt;
 mod for_in_match_accum;
 mod for_interpolation_concat;
 mod for_iter_when_string_body;
@@ -48,7 +49,10 @@ mod identity_arithmetic;
 mod interpolation_concat;
 mod interpolation_expr;
 mod interpolation_with_iter;
+mod iter_chunks_windows;
 mod iter_in_when_arms;
+mod iter_map_filter_let;
+mod iter_predicate_let;
 mod iter_reduce_let;
 mod iter_take_skip_collect;
 mod iter_terminal_chain;
@@ -83,6 +87,7 @@ mod nested_match;
 mod nested_tostring;
 mod nested_when;
 mod nested_when_string;
+mod nth_let;
 mod numeric_to_string;
 mod power_of_two_div;
 mod range_check;
@@ -90,6 +95,7 @@ mod range_iter_map_collect;
 mod range_tostring;
 mod range_when_accum;
 mod reassign_from_when;
+mod reiterate_let;
 mod repeat_literal;
 mod repeated_string_ops;
 mod reverse_collect;
@@ -104,6 +110,7 @@ mod string_build_match;
 mod string_char_at;
 mod string_concat;
 mod string_equality;
+mod string_iter_let;
 mod string_length_edge;
 mod string_predicate;
 mod string_replace;
@@ -272,5 +279,13 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(match_on_method::MatchOnMethod),
         Box::new(empty_iter_edge::EmptyIterEdge),
         Box::new(chained_string_methods::ChainedStringMethods),
+        // -- Iterator rules from iterators.rs (batch 11) --------------------------
+        Box::new(iter_predicate_let::IterPredicateLet),
+        Box::new(iter_chunks_windows::IterChunksWindows),
+        Box::new(for_each_stmt::ForEachStmt),
+        Box::new(nth_let::NthLet),
+        Box::new(string_iter_let::StringIterLet),
+        Box::new(reiterate_let::ReiterateLet),
+        Box::new(iter_map_filter_let::IterMapFilterLet),
     ]
 }
