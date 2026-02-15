@@ -5,11 +5,17 @@
 //! its implementation file and adding one line here.
 
 mod checked_arithmetic;
+mod closure_capture;
+mod closure_concat;
+mod field_closure;
+mod generic_closure_chain;
 mod i32_boundary;
 mod interpolation_concat;
 mod modulo_edge;
+mod nested_closure;
 mod range_tostring;
 mod range_when_accum;
+mod sentinel_closure;
 mod string_build_match;
 mod string_char_at;
 mod string_split;
@@ -36,5 +42,12 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(checked_arithmetic::CheckedArithmetic),
         Box::new(modulo_edge::ModuloEdge),
         Box::new(i32_boundary::I32Boundary),
+        // -- Closure rules ------------------------------------------------------
+        Box::new(closure_concat::ClosureConcat),
+        Box::new(closure_capture::ClosureCapture),
+        Box::new(nested_closure::NestedClosure),
+        Box::new(sentinel_closure::SentinelClosure),
+        Box::new(field_closure::FieldClosure),
+        Box::new(generic_closure_chain::GenericClosureChain),
     ]
 }

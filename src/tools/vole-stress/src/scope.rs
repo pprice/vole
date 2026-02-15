@@ -252,6 +252,66 @@ impl Scope<'_> {
 }
 
 // ---------------------------------------------------------------------------
+// Context queries
+// ---------------------------------------------------------------------------
+
+#[allow(dead_code)]
+impl Scope<'_> {
+    /// Whether we are generating a method body for a generic class.
+    ///
+    /// Closures that capture variables inside generic class methods hit a
+    /// compiler bug ("Captured variable not found"), so closure-related rules
+    /// should return `None` when this is `true`.
+    pub fn is_in_generic_class_method(&self) -> bool {
+        use crate::symbols::SymbolKind;
+
+        if let Some((cls_mod, cls_sym)) = self.current_class_sym_id
+            && let Some(symbol) = self.table.get_symbol(cls_mod, cls_sym)
+            && let SymbolKind::Class(info) = &symbol.kind
+            && !info.type_params.is_empty()
+        {
+            return true;
+        }
+        false
+    }
+
+    /// Get all array-typed variables in scope with their element type.
+    ///
+    /// Returns `(name, element_type)` pairs for variables of type `[T]`.
+    pub fn array_vars(&self) -> Vec<(String, TypeInfo)> {
+        let mut vars = Vec::new();
+        for (name, ty, _) in &self.locals {
+            if let TypeInfo::Array(elem) = ty {
+                vars.push((name.clone(), *elem.clone()));
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Array(elem) = &param.param_type {
+                vars.push((param.name.clone(), *elem.clone()));
+            }
+        }
+        vars
+    }
+
+    /// Get all variables whose type is a constrained type parameter.
+    ///
+    /// Returns `(var_name, type_param_name, interface_constraints)` triples.
+    pub fn constrained_type_param_vars(&self) -> Vec<(String, String, Vec<(ModuleId, SymbolId)>)> {
+        let mut vars = Vec::new();
+        for param in self.params {
+            if let TypeInfo::TypeParam(tp_name) = &param.param_type {
+                for tp in &self.type_params {
+                    if &tp.name == tp_name && !tp.constraints.is_empty() {
+                        vars.push((param.name.clone(), tp_name.clone(), tp.constraints.clone()));
+                    }
+                }
+            }
+        }
+        vars
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Depth tracking
 // ---------------------------------------------------------------------------
 
