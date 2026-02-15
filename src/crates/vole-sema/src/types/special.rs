@@ -28,6 +28,7 @@
 // themselves remain in the main Type enum for pattern matching convenience.
 
 use vole_frontend::Span;
+use vole_identity::NameId;
 
 /// Analysis error - represents a type that couldn't be determined.
 ///
@@ -163,7 +164,7 @@ impl std::fmt::Display for AnalysisError {
 /// Placeholders are used during type inference and generic instantiation:
 ///
 /// - `Inference` - Type to be inferred (e.g., `let x = []` - element type unknown)
-/// - `TypeParam(name)` - Generic type parameter (e.g., `T` in `Box<T>`)
+/// - `TypeParam(NameId)` - Generic type parameter (e.g., `T` in `Box<T>`)
 /// - `SelfType` - `Self` in interface method signatures
 ///
 /// Placeholders are resolved during type checking or monomorphization.
@@ -171,8 +172,8 @@ impl std::fmt::Display for AnalysisError {
 pub enum PlaceholderKind {
     /// Generic type inference placeholder (e.g., empty array element type)
     Inference,
-    /// Type parameter (e.g., T in Box<T>) - carries the parameter name for debugging
-    TypeParam(String),
+    /// Type parameter (e.g., T in Box<T>) - carries the interned name for identity
+    TypeParam(NameId),
     /// Self type in interface signatures - resolved when interface is implemented
     SelfType,
 }
@@ -181,7 +182,7 @@ impl std::fmt::Display for PlaceholderKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PlaceholderKind::Inference => write!(f, "?"),
-            PlaceholderKind::TypeParam(name) => write!(f, "{}", name),
+            PlaceholderKind::TypeParam(name_id) => write!(f, "{:?}", name_id),
             PlaceholderKind::SelfType => write!(f, "Self"),
         }
     }
@@ -275,7 +276,10 @@ mod tests {
     #[test]
     fn test_placeholder_display() {
         assert_eq!(format!("{}", PlaceholderKind::Inference), "?");
-        assert_eq!(format!("{}", PlaceholderKind::TypeParam("T".into())), "T");
+        assert_eq!(
+            format!("{}", PlaceholderKind::TypeParam(NameId::new_for_test(42))),
+            "NameId(42)"
+        );
         assert_eq!(format!("{}", PlaceholderKind::SelfType), "Self");
     }
 }
