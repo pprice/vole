@@ -1,4 +1,5 @@
 // src/lib.rs
+#[cfg(feature = "bench")]
 pub mod bench;
 pub mod cli;
 pub use vole_codegen as codegen;

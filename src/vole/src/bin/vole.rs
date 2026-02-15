@@ -21,7 +21,10 @@ impl FormatTime for NoTimestamp {
     }
 }
 
-use vole::cli::{BenchCommands, Cli, Commands};
+#[cfg(feature = "bench")]
+use vole::cli::BenchCommands;
+use vole::cli::{Cli, Commands};
+#[cfg(feature = "bench")]
 use vole::commands::bench::{run_bench, run_compare};
 use vole::commands::check::check_files;
 use vole::commands::fmt::{FmtOptions, format_files};
@@ -122,6 +125,7 @@ fn main() -> ExitCode {
             all,
         ),
         Commands::Version => print_version(),
+        #[cfg(feature = "bench")]
         Commands::Bench(args) => match args.command {
             BenchCommands::Run {
                 paths,

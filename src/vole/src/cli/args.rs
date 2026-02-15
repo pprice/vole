@@ -1,6 +1,8 @@
 // src/cli/args.rs
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+#[cfg(feature = "bench")]
+use clap::Args;
+use clap::{Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -109,6 +111,7 @@ pub enum Commands {
     /// Show version information
     Version,
     /// Benchmark commands
+    #[cfg(feature = "bench")]
     Bench(BenchArgs),
     /// Format Vole source files
     #[command(visible_alias = "f")]
@@ -131,6 +134,7 @@ pub enum Commands {
     External(Vec<OsString>),
 }
 
+#[cfg(feature = "bench")]
 #[derive(Args)]
 pub struct BenchArgs {
     /// Run even on debug builds
@@ -141,6 +145,7 @@ pub struct BenchArgs {
     pub command: BenchCommands,
 }
 
+#[cfg(feature = "bench")]
 #[derive(Subcommand)]
 pub enum BenchCommands {
     /// Run benchmarks with timing statistics

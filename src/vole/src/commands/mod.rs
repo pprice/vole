@@ -1,4 +1,5 @@
 // src/commands/mod.rs
+#[cfg(feature = "bench")]
 pub mod bench;
 pub mod check;
 pub mod common;
