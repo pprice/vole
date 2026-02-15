@@ -1365,15 +1365,19 @@ impl Cg<'_, '_, '_> {
         right: Value,
     ) -> CodegenResult<Value> {
         let arena = self.arena();
-        Ok(if arena.is_string(type_id) {
-            self.call_runtime(RuntimeKey::StringEq, &[left, right])?
+        if arena.is_string(type_id) {
+            Ok(self.call_runtime(RuntimeKey::StringEq, &[left, right])?)
         } else if arena.is_float(type_id) {
-            self.builder.ins().fcmp(FloatCC::Equal, left, right)
+            Ok(self.builder.ins().fcmp(FloatCC::Equal, left, right))
         } else if type_id.is_integer() || type_id.is_bool() {
-            self.builder.ins().icmp(IntCC::Equal, left, right)
+            Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
         } else {
-            panic!("compile_equality_check: unexpected type {type_id:?} for equality comparison")
-        })
+            Err(CodegenError::type_mismatch(
+                "equality comparison",
+                "string, float, integer, or bool",
+                format!("{type_id:?}"),
+            ))
+        }
     }
 
     /// Compile a null coalesce expression (??)

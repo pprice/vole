@@ -3,6 +3,7 @@ use rustc_hash::FxHashMap;
 use super::impls::TypeDeclInfo;
 use super::{Compiler, SelfParam};
 use crate::FunctionKey;
+use crate::errors::CodegenResult;
 use crate::types::{MethodInfo, TypeMetadata, method_name_id_with_interner};
 use vole_frontend::ast::{ClassDecl, InterfaceDecl, SentinelDecl, StaticsBlock, StructDecl};
 use vole_frontend::{Decl, Interner, Program, Symbol};
@@ -106,14 +107,22 @@ impl Compiler<'_> {
     }
 
     /// Finalize a class type: fill in field types and declare methods
-    pub(super) fn finalize_class(&mut self, class: &ClassDecl, program: &Program) {
-        self.finalize_type(class, Some(program));
+    pub(super) fn finalize_class(
+        &mut self,
+        class: &ClassDecl,
+        program: &Program,
+    ) -> CodegenResult<()> {
+        self.finalize_type(class, Some(program))
     }
 
     /// Core implementation for finalizing a type (class or struct).
     /// - For classes: includes runtime type registration and interface handling
     /// - For structs: simpler path without runtime registration
-    fn finalize_type<T: TypeDeclInfo>(&mut self, type_decl: &T, program: Option<&Program>) {
+    fn finalize_type<T: TypeDeclInfo>(
+        &mut self,
+        type_decl: &T,
+        program: Option<&Program>,
+    ) -> CodegenResult<()> {
         let module_id = self.program_module();
         let type_kind = type_decl.type_kind();
         let is_class = type_decl.is_class();
@@ -157,7 +166,7 @@ impl Compiler<'_> {
 
         // Register instance methods
         let mut method_infos =
-            self.register_type_instance_methods(type_decl, type_def_id, type_kind);
+            self.register_type_instance_methods(type_decl, type_def_id, type_kind)?;
 
         // Handle interface default methods (classes only, requires program)
         if is_class && let Some(prog) = program {
@@ -167,12 +176,12 @@ impl Compiler<'_> {
                 module_id,
                 prog,
                 &mut method_infos,
-            );
+            )?;
         }
 
         // Register static methods from statics block
         if let Some(statics) = type_decl.statics() {
-            self.register_static_methods(statics, type_decl.name());
+            self.register_static_methods(statics, type_decl.name())?;
         }
 
         // Reuse the vole_type_id from pre_register
@@ -200,6 +209,7 @@ impl Compiler<'_> {
                 method_infos,
             },
         );
+        Ok(())
     }
 
     /// Build field slots map and optionally field type tags for runtime cleanup.
@@ -265,11 +275,11 @@ impl Compiler<'_> {
         type_decl: &T,
         type_def_id: TypeDefId,
         type_kind: &str,
-    ) -> FxHashMap<NameId, MethodInfo> {
+    ) -> CodegenResult<FxHashMap<NameId, MethodInfo>> {
         let mut method_infos = FxHashMap::default();
 
         for method in type_decl.methods() {
-            let method_name_id = self.method_name_id(method.name);
+            let method_name_id = self.method_name_id(method.name)?;
             let method_id = self
                 .analyzed
                 .entity_registry()
@@ -294,7 +304,7 @@ impl Compiler<'_> {
             self.register_method_func_key(type_def_id, method_name_id, func_key);
         }
 
-        method_infos
+        Ok(method_infos)
     }
 
     /// Register interface default methods on implementing class.
@@ -305,7 +315,7 @@ impl Compiler<'_> {
         module_id: ModuleId,
         program: &Program,
         method_infos: &mut FxHashMap<NameId, MethodInfo>,
-    ) {
+    ) -> CodegenResult<()> {
         // Collect method names that the type directly defines
         let direct_methods: std::collections::HashSet<_> =
             type_decl.methods().iter().map(|m| m.name).collect();
@@ -335,7 +345,7 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let method_name_id = self.query().method_name_id(method.name);
+                        let method_name_id = self.method_name_id(method.name)?;
                         let semantic_method_id = self
                             .analyzed
                             .entity_registry()
@@ -364,6 +374,7 @@ impl Compiler<'_> {
                 }
             }
         }
+        Ok(())
     }
 
     /// Pre-register a struct type (just the name and type_id)
@@ -482,13 +493,17 @@ impl Compiler<'_> {
     }
 
     /// Finalize a struct type: fill in field slots and register instance methods.
-    pub(super) fn finalize_struct(&mut self, struct_decl: &StructDecl) {
+    pub(super) fn finalize_struct(&mut self, struct_decl: &StructDecl) -> CodegenResult<()> {
         // Structs don't implement interfaces, so no program needed
-        self.finalize_type(struct_decl, None);
+        self.finalize_type(struct_decl, None)
     }
 
     /// Register static methods from a statics block for a type
-    fn register_static_methods(&mut self, statics: &StaticsBlock, type_name: Symbol) {
+    fn register_static_methods(
+        &mut self,
+        statics: &StaticsBlock,
+        type_name: Symbol,
+    ) -> CodegenResult<()> {
         // Get the TypeDefId for this type from entity_registry
         let query = self.query();
         let module_id = self.program_module();
@@ -503,7 +518,7 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let method_name_id = self.method_name_id(method.name);
+            let method_name_id = self.method_name_id(method.name)?;
 
             // Get MethodId and build signature from pre-resolved types
             let method_id = self
@@ -522,6 +537,7 @@ impl Compiler<'_> {
 
             self.register_method_func_key(type_def_id, method_name_id, func_key);
         }
+        Ok(())
     }
 
     /// Register and finalize a module class (uses module interner)

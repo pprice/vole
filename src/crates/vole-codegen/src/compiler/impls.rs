@@ -800,15 +800,17 @@ impl Compiler<'_> {
         let type_def_id = impl_type_id.and_then(|id| self.query().try_type_def_id(id.name_id()));
 
         for method in &impl_block.methods {
-            let method_key = type_def_id.and_then(|type_def_id| {
+            let method_key = if let Some(type_def_id) = type_def_id {
                 // Use type's NameId for stable lookup across analyzer instances
                 let type_name_id = self.query().get_type(type_def_id).name_id;
-                let method_id = self.method_name_id(method.name);
+                let method_id = self.method_name_id(method.name)?;
                 self.state
                     .method_func_keys
                     .get(&(type_name_id, method_id))
                     .map(|&func_key| MethodInfo { func_key })
-            });
+            } else {
+                None
+            };
             self.compile_implement_method(method, self_type_id, method_key)?;
         }
 
@@ -1141,7 +1143,7 @@ impl Compiler<'_> {
         let type_def_id = self
             .impl_type_id_from_type_id(self_type_id)
             .and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
-        let method_name_id = self.method_name_id(method.name);
+        let method_name_id = self.method_name_id(method.name)?;
 
         let semantic_method_id = type_def_id
             .and_then(|tdef_id| {
@@ -1254,7 +1256,7 @@ impl Compiler<'_> {
         let type_name_str = self.query().resolve_symbol(type_name).to_string();
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
 
-        let method_name_id = self.method_name_id(method.name);
+        let method_name_id = self.method_name_id(method.name)?;
         let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
             CodegenError::not_found(
                 "method info",
@@ -1358,7 +1360,7 @@ impl Compiler<'_> {
         let type_name_str = self.query().resolve_symbol(type_name).to_string();
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
 
-        let method_name_id = self.method_name_id(method.name);
+        let method_name_id = self.method_name_id(method.name)?;
         let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
             CodegenError::not_found(
                 "default method info",
@@ -1469,7 +1471,7 @@ impl Compiler<'_> {
             };
 
             // Look up MethodId from entity_registry for pre-computed signature
-            let method_name_id = self.method_name_id(method.name);
+            let method_name_id = self.method_name_id(method.name)?;
             let semantic_method_id = self
                 .analyzed
                 .entity_registry()

@@ -29,15 +29,12 @@ use vole_sema::type_arena::TypeId;
 
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
-    fn method_name_id(&self, name: Symbol) -> NameId {
+    fn method_name_id(&self, name: Symbol) -> CodegenResult<NameId> {
         let name_table = self.name_table();
         let namer = NamerLookup::new(name_table, self.interner());
-        namer.method(name).unwrap_or_else(|| {
-            panic!(
-                "method name_id not found for '{}'",
-                self.interner().resolve(name)
-            )
-        })
+        namer
+            .method(name)
+            .ok_or_else(|| CodegenError::not_found("method name_id", self.interner().resolve(name)))
     }
 
     #[tracing::instrument(skip(self, mc), fields(method = %self.interner().resolve(mc.method)))]
@@ -138,7 +135,7 @@ impl Cg<'_, '_, '_> {
             return self.runtime_iterator_method(&obj, mc, method_name_str, elem_type_id, expr_id);
         }
 
-        let method_name_id = self.method_name_id(mc.method);
+        let method_name_id = self.method_name_id(mc.method)?;
 
         // Resolution was already looked up earlier (before builtin_method call)
         tracing::debug!(

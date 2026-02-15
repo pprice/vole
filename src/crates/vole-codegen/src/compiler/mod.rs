@@ -56,7 +56,7 @@ use cranelift::prelude::types as clif_types;
 use cranelift_module::FuncId;
 
 use crate::context::ModuleExportBinding;
-use crate::errors::CodegenResult;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenState;
 
 use crate::AnalyzedProgram;
@@ -164,9 +164,11 @@ impl<'a> Compiler<'a> {
             .expect("INTERNAL: 'self' keyword not interned")
     }
 
-    /// Look up a method NameId by Symbol (panics if not found)
-    fn method_name_id(&self, name: Symbol) -> NameId {
-        self.query().method_name_id(name)
+    /// Look up a method NameId by Symbol
+    fn method_name_id(&self, name: Symbol) -> CodegenResult<NameId> {
+        self.query()
+            .try_method_name_id(name)
+            .ok_or_else(|| CodegenError::not_found("method name_id", self.resolve_symbol(name)))
     }
 
     /// Get ImplTypeId from a TypeId

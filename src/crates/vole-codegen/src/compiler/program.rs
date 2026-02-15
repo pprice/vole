@@ -208,7 +208,7 @@ impl Compiler<'_> {
     }
 
     /// First pass: declare all functions and tests, collect globals, finalize type metadata.
-    fn declare_program_declarations(&mut self, program: &Program) {
+    fn declare_program_declarations(&mut self, program: &Program) -> CodegenResult<()> {
         let mut test_count = 0usize;
         for decl in &program.declarations {
             match decl {
@@ -252,7 +252,7 @@ impl Compiler<'_> {
                     }
                 }
                 Decl::Class(class) => {
-                    self.finalize_class(class, program);
+                    self.finalize_class(class, program)?;
                 }
                 Decl::Interface(_) => {
                     // Interface declarations don't generate code directly
@@ -261,7 +261,7 @@ impl Compiler<'_> {
                     self.register_implement_block(impl_block);
                 }
                 Decl::Struct(s) => {
-                    self.finalize_struct(s);
+                    self.finalize_struct(s)?;
                 }
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 1
@@ -274,6 +274,7 @@ impl Compiler<'_> {
                 }
             }
         }
+        Ok(())
     }
 
     /// Second pass: compile function bodies and tests.
@@ -373,7 +374,7 @@ impl Compiler<'_> {
         }
 
         // First pass: declare all functions and tests, collect globals, finalize type metadata
-        self.declare_program_declarations(program);
+        self.declare_program_declarations(program)?;
 
         // Declare monomorphized function instances before second pass
         self.declare_all_monomorphized_instances()?;
