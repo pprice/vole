@@ -14,6 +14,7 @@ mod lambda;
 mod method_resolution;
 mod ops;
 mod rc_cleanup;
+mod rc_ops;
 mod rc_state;
 mod runtime_registry;
 mod stmt;
