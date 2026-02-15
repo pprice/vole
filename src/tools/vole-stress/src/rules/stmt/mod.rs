@@ -71,11 +71,13 @@ mod literal_method;
 mod manual_minmax;
 mod map_tostring_reduce;
 mod match_array;
+mod match_array_elem;
 mod match_array_length;
 mod match_closure;
 mod match_computation;
 mod match_interpolation_length;
 mod match_iter;
+mod match_iter_terminal;
 mod match_let;
 mod match_method;
 mod match_method_result;
@@ -94,6 +96,7 @@ mod nested_closure;
 mod nested_match;
 mod nested_tostring;
 mod nested_when;
+mod nested_when_let;
 mod nested_when_string;
 mod nth_let;
 mod numeric_to_string;
@@ -307,5 +310,9 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(break_continue::BreakContinue),
         Box::new(fn_param_call::FnParamCall),
         Box::new(bool_match_let::BoolMatchLet),
+        // -- Match/when expression rules (batch 14) --------------------------------
+        Box::new(match_iter_terminal::MatchIterTerminal),
+        Box::new(match_array_elem::MatchArrayElem),
+        Box::new(nested_when_let::NestedWhenLet),
     ]
 }
