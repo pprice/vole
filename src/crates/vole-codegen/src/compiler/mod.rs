@@ -236,6 +236,10 @@ impl<'a> Compiler<'a> {
         if ptr.is_null() || len == 0 {
             String::new()
         } else {
+            // SAFETY: `source_file_ptr()` returns a pointer and length derived from a Rust
+            // `String` (set via `JitContext::set_source_file`). The bytes are guaranteed to be
+            // valid UTF-8 because they originated from a `String`. The pointer remains valid
+            // because the `JitContext` (and its `source_file` field) outlives this call.
             unsafe {
                 std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, len)).to_string()
             }

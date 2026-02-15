@@ -25,8 +25,11 @@ pub struct CompiledModules {
     compiled_module_paths: FxHashSet<String>,
 }
 
-// Safety: Function pointers are valid for the lifetime of the CompiledModules
-// and can be safely shared across threads (they point to immutable code)
+// SAFETY: CompiledModules contains `*const u8` function pointers (not Send/Sync by default).
+// These pointers point into JIT-compiled machine code owned by the `jit_contexts` Vec.
+// The code is immutable once finalized and the pointers remain valid for the lifetime of
+// CompiledModules (the JitContexts are never dropped while CompiledModules exists).
+// No interior mutability or thread-local state is involved, so sharing across threads is safe.
 unsafe impl Send for CompiledModules {}
 unsafe impl Sync for CompiledModules {}
 
@@ -480,6 +483,9 @@ mod tests {
 
         // Get and call the function
         let fn_ptr = jit.get_function_ptr("answer").unwrap();
+        // SAFETY: `fn_ptr` was obtained from `get_function_ptr` after `finalize()`, so it points
+        // to valid JIT-compiled machine code. The function was declared with no parameters and an
+        // i64 return, matching the `extern "C" fn() -> i64` signature we transmute to.
         let answer: extern "C" fn() -> i64 = unsafe { std::mem::transmute(fn_ptr) };
         assert_eq!(answer(), 42);
     }
@@ -513,6 +519,9 @@ mod tests {
         jit.finalize().expect("INTERNAL: JIT finalization failed");
 
         let fn_ptr = jit.get_function_ptr("add").unwrap();
+        // SAFETY: `fn_ptr` was obtained from `get_function_ptr` after `finalize()`, so it points
+        // to valid JIT-compiled machine code. The function was declared with two i64 parameters
+        // and an i64 return, matching the `extern "C" fn(i64, i64) -> i64` signature.
         let add: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr) };
         assert_eq!(add(10, 32), 42);
         assert_eq!(add(-5, 5), 0);
