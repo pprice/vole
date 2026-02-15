@@ -459,10 +459,13 @@ pub extern "C" fn vole_array_filled(count: i64, tag: u64, value: u64) -> *mut Rc
 /// `src` must point to a valid union heap buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
 unsafe fn clone_union_heap_buffer(src: *const u8) -> *mut u8 {
     unsafe {
-        let layout = Layout::from_size_align_unchecked(16, 8);
-        let dst = std::alloc::alloc(layout);
+        const UNION_HEAP_LAYOUT: Layout = match Layout::from_size_align(16, 8) {
+            Ok(l) => l,
+            Err(_) => panic!("union heap layout"),
+        };
+        let dst = std::alloc::alloc(UNION_HEAP_LAYOUT);
         if dst.is_null() {
-            std::alloc::handle_alloc_error(layout);
+            std::alloc::handle_alloc_error(UNION_HEAP_LAYOUT);
         }
         std::ptr::copy_nonoverlapping(src, dst, 16);
         let is_rc = *dst.add(1);

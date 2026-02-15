@@ -32,6 +32,11 @@ impl RcHeader {
 
     #[inline]
     pub fn inc(&self) {
+        // Relaxed is correct here for the same reason Arc::clone uses Relaxed:
+        // we already hold a live reference, so the count cannot reach zero while
+        // we increment. The existing reference guarantees visibility of the
+        // object's data. The critical ordering is on dec, which uses AcqRel to
+        // ensure all modifications are visible before the final drop.
         self.ref_count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -52,6 +57,9 @@ pub extern "C" fn rc_inc(ptr: *mut u8) {
     }
     unsafe {
         let header = &*(ptr as *const RcHeader);
+        // Relaxed is fine for the pinned check: RC_PINNED is a permanent
+        // sentinel that never transitions to or from any other value, so no
+        // synchronization is needed to observe it correctly.
         if header.ref_count.load(Ordering::Relaxed) == RC_PINNED {
             return;
         }
@@ -71,6 +79,7 @@ pub extern "C" fn rc_dec(ptr: *mut u8) {
     }
     unsafe {
         let header = &*(ptr as *const RcHeader);
+        // Relaxed is fine for the pinned check: see comment in rc_inc.
         if header.ref_count.load(Ordering::Relaxed) == RC_PINNED {
             return;
         }
@@ -214,8 +223,12 @@ pub fn union_heap_cleanup(ptr: *mut u8) {
             rc_dec(payload as *mut u8);
         }
         // Free the 16-byte heap buffer
-        let layout = std::alloc::Layout::from_size_align_unchecked(16, 8);
-        std::alloc::dealloc(ptr, layout);
+        const UNION_HEAP_LAYOUT: std::alloc::Layout =
+            match std::alloc::Layout::from_size_align(16, 8) {
+                Ok(l) => l,
+                Err(_) => panic!("union heap layout"),
+            };
+        std::alloc::dealloc(ptr, UNION_HEAP_LAYOUT);
     }
 }
 
