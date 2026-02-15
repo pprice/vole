@@ -5,24 +5,13 @@
 //! expressions. It is the glue between the rule system (trait objects) and the
 //! generated Vole source text.
 
-use std::collections::HashMap;
-
 use rand::seq::SliceRandom;
 use rand::{Rng, RngCore};
 
+use crate::resolver::ResolvedParams;
 use crate::rule::{ExprRule, Params, StmtRule};
 use crate::scope::Scope;
 use crate::symbols::{PrimitiveType, TypeInfo};
-
-// ---------------------------------------------------------------------------
-// ResolvedParams
-// ---------------------------------------------------------------------------
-
-/// Map from rule name to its resolved parameter bag.
-///
-/// Built by the profile resolver at startup. Until that ticket lands
-/// (vol-e2qj), this is a simple type alias.
-pub type ResolvedParams = HashMap<String, Params>;
 
 // ---------------------------------------------------------------------------
 // Emit
@@ -446,7 +435,7 @@ mod tests {
     }
 
     fn no_params() -> ResolvedParams {
-        HashMap::new()
+        ResolvedParams::new()
     }
 
     // -- Construction -------------------------------------------------------
@@ -617,9 +606,9 @@ mod tests {
     #[test]
     fn params_for_existing_rule() {
         let mut rng = test_rng();
-        let mut resolved = HashMap::new();
+        let mut resolved = ResolvedParams::new();
         resolved.insert(
-            "my_rule".to_string(),
+            "my_rule",
             Params::from_iter([("fire_rate", ParamValue::Probability(0.8))]),
         );
         let stmts: Vec<Box<dyn StmtRule>> = vec![];

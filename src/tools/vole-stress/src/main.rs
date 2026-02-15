@@ -7,6 +7,7 @@ mod manifest;
 mod names;
 mod planner;
 mod profile;
+mod resolver;
 mod rule;
 mod rules;
 mod scope;

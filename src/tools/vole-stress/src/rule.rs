@@ -154,6 +154,19 @@ impl Params {
     pub fn contains(&self, key: &str) -> bool {
         self.values.contains_key(key)
     }
+
+    /// Insert or overwrite a parameter value.
+    ///
+    /// Used by the profile resolver to overlay TOML overrides on top of
+    /// rule-declared defaults.
+    pub fn insert(&mut self, key: &'static str, value: ParamValue) {
+        self.values.insert(key, value);
+    }
+
+    /// Return an iterator over `(name, value)` pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&&'static str, &ParamValue)> {
+        self.values.iter()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +312,7 @@ mod tests {
 
     // -- Trait object construction ------------------------------------------
 
-    use crate::emit::ResolvedParams;
+    use crate::resolver::ResolvedParams;
     use crate::symbols::SymbolTable;
     use rand::SeedableRng;
 
