@@ -44,15 +44,17 @@ pub(crate) fn compile_string_literal(
     // Build complete RcString struct as bytes:
     //   RcHeader { ref_count: u32, type_id: u32, drop_fn: Option<fn> }  = 16 bytes
     //   len: usize                                                       =  8 bytes
+    //   char_count: usize                                                =  8 bytes
     //   hash: u64                                                        =  8 bytes
     //   data: [u8; s.len()]                                              =  N bytes
-    let mut data = Vec::with_capacity(32 + s.len());
+    let mut data = Vec::with_capacity(40 + s.len());
     // RcHeader
     data.extend_from_slice(&RC_PINNED.to_ne_bytes()); // ref_count = pinned (no-op inc/dec)
     data.extend_from_slice(&TYPE_STRING.to_ne_bytes()); // type_id
     data.extend_from_slice(&0u64.to_ne_bytes()); // drop_fn = null (no cleanup needed)
     // RcString fields
-    data.extend_from_slice(&s.len().to_ne_bytes()); // len
+    data.extend_from_slice(&s.len().to_ne_bytes()); // len (byte length)
+    data.extend_from_slice(&s.chars().count().to_ne_bytes()); // char_count
     data.extend_from_slice(&fnv1a_hash(s.as_bytes()).to_ne_bytes()); // hash
     data.extend_from_slice(s.as_bytes()); // inline string data
 

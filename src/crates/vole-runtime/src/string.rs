@@ -54,6 +54,7 @@ pub fn fnv1a_hash(bytes: &[u8]) -> u64 {
 pub struct RcString {
     pub header: RcHeader,
     pub len: usize,
+    pub char_count: usize,
     pub hash: u64,
     // Data follows inline
 }
@@ -62,6 +63,7 @@ impl RcString {
     /// Allocate a new RcString from a string slice
     pub fn new(s: &str) -> *mut Self {
         let len = s.len();
+        let char_count = s.chars().count();
         let hash = Self::compute_hash(s.as_bytes());
 
         // Calculate layout: header + data
@@ -79,6 +81,7 @@ impl RcString {
                 RcHeader::with_drop_fn(TYPE_STRING, string_drop),
             );
             ptr::write(&mut (*ptr).len, len);
+            ptr::write(&mut (*ptr).char_count, char_count);
             ptr::write(&mut (*ptr).hash, hash);
 
             // Copy string data
@@ -126,6 +129,12 @@ impl RcString {
     pub fn from_two_parts(a: &[u8], b: &[u8]) -> *mut Self {
         let total_len = a.len() + b.len();
 
+        // Count characters from both UTF-8 byte slices.
+        let char_count = unsafe {
+            str::from_utf8_unchecked(a).chars().count()
+                + str::from_utf8_unchecked(b).chars().count()
+        };
+
         // Hash both parts sequentially to produce the same result as hashing
         // the concatenated bytes.
         let mut hasher = Fnv1aHasher::new();
@@ -146,6 +155,7 @@ impl RcString {
                 RcHeader::with_drop_fn(TYPE_STRING, string_drop),
             );
             ptr::write(&mut (*ptr).len, total_len);
+            ptr::write(&mut (*ptr).char_count, char_count);
             ptr::write(&mut (*ptr).hash, hash);
 
             let data_ptr = (ptr as *mut u8).add(size_of::<RcString>());
@@ -218,8 +228,8 @@ pub extern "C" fn vole_string_len(ptr: *const RcString) -> usize {
     if ptr.is_null() {
         return 0;
     }
-    // Return character count, not byte count (UTF-8 aware)
-    unsafe { (*ptr).as_str().chars().count() }
+    // Return cached character count (O(1), computed at construction time)
+    unsafe { (*ptr).char_count }
 }
 
 #[unsafe(no_mangle)]

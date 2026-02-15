@@ -3175,7 +3175,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     fn emit_inline_string_len(&mut self, str_ptr: Value) -> Value {
         let ptr_type = self.ptr_type();
         let zero_i64 = self.builder.ins().iconst(types::I64, 0);
-        let one_i64 = self.builder.ins().iconst(types::I64, 1);
         let null_ptr = self.builder.ins().iconst(ptr_type, 0);
         let is_null = self.builder.ins().icmp(IntCC::Equal, str_ptr, null_ptr);
 
@@ -3190,67 +3189,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.switch_to_block(null_block);
         self.builder.ins().jump(merge_block, &[zero_i64.into()]);
 
+        // Load cached char_count directly (O(1) instead of O(n) UTF-8 loop)
         self.builder.switch_to_block(nonnull_block);
-        let len_offset = std::mem::offset_of!(vole_runtime::string::RcString, len) as i32;
-        let byte_len_raw = self
-            .builder
-            .ins()
-            .load(ptr_type, MemFlags::new(), str_ptr, len_offset);
-        let byte_len_i64 = if ptr_type == types::I64 {
-            byte_len_raw
+        let char_count_offset =
+            std::mem::offset_of!(vole_runtime::string::RcString, char_count) as i32;
+        let raw_count =
+            self.builder
+                .ins()
+                .load(ptr_type, MemFlags::new(), str_ptr, char_count_offset);
+        let count_i64 = if ptr_type == types::I64 {
+            raw_count
         } else {
-            self.builder.ins().uextend(types::I64, byte_len_raw)
+            self.builder.ins().uextend(types::I64, raw_count)
         };
-
-        let data_offset = size_of::<vole_runtime::string::RcString>() as i64;
-        let data_ptr = self.builder.ins().iadd_imm(str_ptr, data_offset);
-
-        let loop_block = self.builder.create_block();
-        let body_block = self.builder.create_block();
-        let exit_block = self.builder.create_block();
-        self.builder.append_block_param(loop_block, types::I64); // idx
-        self.builder.append_block_param(loop_block, types::I64); // chars
-        self.builder.append_block_param(exit_block, types::I64); // result
-
-        self.builder
-            .ins()
-            .jump(loop_block, &[zero_i64.into(), zero_i64.into()]);
-
-        self.builder.switch_to_block(loop_block);
-        let idx = self.builder.block_params(loop_block)[0];
-        let chars = self.builder.block_params(loop_block)[1];
-        let done = self
-            .builder
-            .ins()
-            .icmp(IntCC::UnsignedGreaterThanOrEqual, idx, byte_len_i64);
-        self.builder
-            .ins()
-            .brif(done, exit_block, &[chars.into()], body_block, &[]);
-
-        self.builder.switch_to_block(body_block);
-        let idx_ptr = if ptr_type == types::I64 {
-            idx
-        } else {
-            self.builder.ins().ireduce(ptr_type, idx)
-        };
-        let byte_ptr = self.builder.ins().iadd(data_ptr, idx_ptr);
-        let byte = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), byte_ptr, 0);
-        let byte_u64 = self.builder.ins().uextend(types::I64, byte);
-        let top_bits = self.builder.ins().band_imm(byte_u64, 0xC0);
-        let is_cont = self.builder.ins().icmp_imm(IntCC::Equal, top_bits, 0x80);
-        let chars_inc = self.builder.ins().iadd(chars, one_i64);
-        let next_chars = self.builder.ins().select(is_cont, chars, chars_inc);
-        let next_idx = self.builder.ins().iadd(idx, one_i64);
-        self.builder
-            .ins()
-            .jump(loop_block, &[next_idx.into(), next_chars.into()]);
-
-        self.builder.switch_to_block(exit_block);
-        let result = self.builder.block_params(exit_block)[0];
-        self.builder.ins().jump(merge_block, &[result.into()]);
+        self.builder.ins().jump(merge_block, &[count_i64.into()]);
 
         self.builder.switch_to_block(merge_block);
         self.builder.block_params(merge_block)[0]
