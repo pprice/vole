@@ -294,6 +294,9 @@ fn execute_tests_with_tracking(
             None => continue,
         };
 
+        // SAFETY: `func_ptr` is obtained from `JitContext::get_function_ptr_by_id`, which
+        // returns a pointer to JIT-compiled code with the expected `extern "C" fn() -> i64`
+        // calling convention. All Vole test functions are compiled with this signature.
         let test_fn: extern "C" fn() -> i64 = unsafe { std::mem::transmute(func_ptr) };
 
         set_current_test(&test.name);
@@ -308,6 +311,16 @@ fn execute_tests_with_tracking(
         let mut jmp_buf: JmpBuf = JmpBuf::zeroed();
         set_test_jmp_buf(&mut jmp_buf);
 
+        // SAFETY: We use `catch_unwind` with `AssertUnwindSafe` to catch panics from JIT'd
+        // test code. `AssertUnwindSafe` is acceptable because we do not rely on any borrowed
+        // state remaining consistent after a panic — the only purpose is to prevent the
+        // process from aborting so we can continue running the remaining tests.
+        //
+        // The `call_setjmp`/`recover_from_signal` contract: `set_test_jmp_buf` registers
+        // `jmp_buf` with the signal handler. If a signal (e.g. SIGSEGV from a stack
+        // overflow) fires during `test_fn()`, the handler longjmps back here with a
+        // nonzero return, and `recover_from_signal` resets the signal handler state so
+        // subsequent tests can run safely.
         let _ = catch_unwind(AssertUnwindSafe(|| unsafe {
             if call_setjmp(&mut jmp_buf) == 0 {
                 test_fn();

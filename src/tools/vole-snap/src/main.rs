@@ -46,6 +46,9 @@ enum Commands {
 }
 
 fn main() -> ExitCode {
+    // SAFETY: `set_var` is unsafe because it is not thread-safe. This call runs at
+    // the very start of `main`, before any threads are spawned, so there is no
+    // concurrent access to the environment.
     unsafe {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
