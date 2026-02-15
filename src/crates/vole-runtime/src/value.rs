@@ -48,6 +48,9 @@ impl RcHeader {
 
 /// Increment the reference count of an RC-managed object.
 ///
+/// Uses raw pointer access throughout to avoid creating intermediate shared
+/// references that could trigger aliasing UB under strict Stacked Borrows.
+///
 /// # Safety
 /// `ptr` must be null or point to a valid allocation starting with an `RcHeader`.
 #[unsafe(no_mangle)]
@@ -56,19 +59,22 @@ pub extern "C" fn rc_inc(ptr: *mut u8) {
         return;
     }
     unsafe {
-        let header = &*(ptr as *const RcHeader);
+        let header = ptr as *const RcHeader;
         // Relaxed is fine for the pinned check: RC_PINNED is a permanent
         // sentinel that never transitions to or from any other value, so no
         // synchronization is needed to observe it correctly.
-        if header.ref_count.load(Ordering::Relaxed) == RC_PINNED {
+        if (*header).ref_count.load(Ordering::Relaxed) == RC_PINNED {
             return;
         }
-        header.inc();
+        (*header).inc();
     }
 }
 
 /// Decrement the reference count of an RC-managed object.
 /// If the count reaches zero, calls the `drop_fn` if one was set.
+///
+/// Uses raw pointer access throughout to avoid creating intermediate shared
+/// references that could trigger aliasing UB under strict Stacked Borrows.
 ///
 /// # Safety
 /// `ptr` must be null or point to a valid allocation starting with an `RcHeader`.
@@ -78,15 +84,17 @@ pub extern "C" fn rc_dec(ptr: *mut u8) {
         return;
     }
     unsafe {
-        let header = &*(ptr as *const RcHeader);
+        let header = ptr as *const RcHeader;
         // Relaxed is fine for the pinned check: see comment in rc_inc.
-        if header.ref_count.load(Ordering::Relaxed) == RC_PINNED {
+        if (*header).ref_count.load(Ordering::Relaxed) == RC_PINNED {
             return;
         }
-        let prev = header.dec();
+        let prev = (*header).dec();
         if prev == 1 {
-            // Refcount was 1, now 0 — time to drop
-            let drop_fn = (*ptr.cast::<RcHeader>()).drop_fn;
+            // Refcount was 1, now 0 — time to drop.
+            // Read drop_fn through raw pointer (not through a shared reference)
+            // since dec() may have logically transferred ownership.
+            let drop_fn = (*header).drop_fn;
             if let Some(f) = drop_fn {
                 f(ptr);
             }
