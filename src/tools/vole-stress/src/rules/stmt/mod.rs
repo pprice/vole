@@ -4,9 +4,12 @@
 //! truth for which statement rules exist.  Adding a new rule means creating
 //! its implementation file and adding one line here.
 
+mod array_compound_assign;
 mod array_from_vars;
+mod array_index_assign;
 mod array_length_guard;
 mod array_length_zero_check;
+mod array_push;
 mod array_uniform_ops;
 mod assert_stmt;
 mod bool_chain;
@@ -19,6 +22,7 @@ mod closure_capture;
 mod closure_concat;
 mod closure_result_concat;
 mod comparison_chain;
+mod compound_assignment;
 mod compound_bool;
 mod dead_code;
 mod edge_case_for_loop;
@@ -95,6 +99,7 @@ mod range_iter_map_collect;
 mod range_tostring;
 mod range_when_accum;
 mod reassign_from_when;
+mod reassignment;
 mod reiterate_let;
 mod repeat_literal;
 mod repeated_string_ops;
@@ -287,5 +292,11 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(string_iter_let::StringIterLet),
         Box::new(reiterate_let::ReiterateLet),
         Box::new(iter_map_filter_let::IterMapFilterLet),
+        // -- Mutation rules from stmt/mod.rs (batch 12) ---------------------------
+        Box::new(compound_assignment::CompoundAssignment),
+        Box::new(reassignment::Reassignment),
+        Box::new(array_push::ArrayPush),
+        Box::new(array_index_assign::ArrayIndexAssign),
+        Box::new(array_compound_assign::ArrayCompoundAssign),
     ]
 }

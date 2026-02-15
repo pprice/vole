@@ -140,10 +140,64 @@ impl Emit<'_> {
 }
 
 // ---------------------------------------------------------------------------
-// Literal generation (private)
+// Literal generation
 // ---------------------------------------------------------------------------
 
 impl Emit<'_> {
+    /// Generate a non-zero literal for a numeric primitive type.
+    ///
+    /// Useful for generating safe divisors (avoiding division-by-zero).
+    /// Falls back to [`literal`](Emit::literal) for non-numeric types.
+    pub fn nonzero_literal(&mut self, prim: PrimitiveType) -> String {
+        match prim {
+            PrimitiveType::I8 => {
+                let val: i8 = self.rng.gen_range(1..=127);
+                format!("{}_i8", val)
+            }
+            PrimitiveType::I16 => {
+                let val: i16 = self.rng.gen_range(1..=1000);
+                format!("{}_i16", val)
+            }
+            PrimitiveType::I32 => {
+                let val: i32 = self.rng.gen_range(1..=100);
+                format!("{}_i32", val)
+            }
+            PrimitiveType::I64 => {
+                let val: i64 = self.rng.gen_range(1..=1000);
+                format!("{}_i64", val)
+            }
+            PrimitiveType::I128 => {
+                let val: i64 = self.rng.gen_range(1..=10000);
+                format!("{}_i128", val)
+            }
+            PrimitiveType::U8 => {
+                let val: u8 = self.rng.gen_range(1..=255);
+                format!("{}_u8", val)
+            }
+            PrimitiveType::U16 => {
+                let val: u16 = self.rng.gen_range(1..=1000);
+                format!("{}_u16", val)
+            }
+            PrimitiveType::U32 => {
+                let val: u32 = self.rng.gen_range(1..=1000);
+                format!("{}_u32", val)
+            }
+            PrimitiveType::U64 => {
+                let val: u64 = self.rng.gen_range(1..=10000);
+                format!("{}_u64", val)
+            }
+            PrimitiveType::F32 => {
+                let val: f32 = self.rng.gen_range(1.0_f32..100.0_f32);
+                format!("{:.2}_f32", val)
+            }
+            PrimitiveType::F64 => {
+                let val: f64 = self.rng.gen_range(1.0..100.0);
+                format!("{:.2}_f64", val)
+            }
+            _ => self.literal_for_primitive(prim),
+        }
+    }
+
     /// Generate a literal for a primitive type.
     fn literal_for_primitive(&mut self, prim: PrimitiveType) -> String {
         match prim {
