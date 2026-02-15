@@ -27,6 +27,9 @@ use vole_sema::ModuleCache;
 /// Default glob pattern for RC-specific test files.
 const DEFAULT_GLOB: &str = "test/unit/codegen/rc_*.vole";
 
+/// Width of the separator line in the leak summary output.
+const SUMMARY_SEPARATOR_WIDTH: usize = 72;
+
 #[derive(Parser)]
 #[command(name = "vole-leak")]
 #[command(version = "0.1.0")]
@@ -213,7 +216,9 @@ fn compile_with_cached_modules(
     options: JitOptions,
     file_path: &str,
 ) -> (JitContext, Result<(), String>, Vec<TestInfo>) {
-    let modules = compiled_modules.as_ref().unwrap();
+    let modules = compiled_modules
+        .as_ref()
+        .expect("can_use_cache guarantees compiled_modules is Some");
     let mut jit = JitContext::with_modules_and_options(modules, options);
     let mut compiler = Compiler::new(&mut jit, analyzed);
     compiler.set_source_file(file_path);
@@ -258,12 +263,14 @@ fn compile_fresh(
         match compile_result {
             Ok(()) => {
                 let module_paths: Vec<String> = analyzed.module_programs.keys().cloned().collect();
-                match CompiledModules::new(modules_jit, module_paths) {
-                    Ok(modules) => *compiled_modules = Some(modules),
-                    Err(_) => {}
+                if let Ok(modules) = CompiledModules::new(modules_jit, module_paths) {
+                    *compiled_modules = Some(modules);
+                } else {
+                    eprintln!("warning: failed to cache compiled modules for {file_path}");
                 }
             }
-            Err(_) => {
+            Err(e) => {
+                eprintln!("warning: module cache compilation failed for {file_path}: {e}");
                 std::mem::forget(modules_jit);
             }
         }
@@ -349,7 +356,7 @@ fn print_summary(results: &LeakResults, file_count: usize) {
     }
 
     println!("\nLeak summary:");
-    println!("{:-<72}", "");
+    println!("{:-<SUMMARY_SEPARATOR_WIDTH$}", "");
 
     let mut current_file: Option<&Path> = None;
 
@@ -372,7 +379,7 @@ fn print_summary(results: &LeakResults, file_count: usize) {
         );
     }
 
-    println!("\n{:-<72}", "");
+    println!("\n{:-<SUMMARY_SEPARATOR_WIDTH$}", "");
     println!(
         "{} leaking test{} ({} tests across {} files)",
         results.leaks.len(),
