@@ -6,8 +6,18 @@ use crate::errors::ParserError;
 impl<'src> Parser<'src> {
     /// Parse an expression with Pratt parsing
     pub(crate) fn expression(&mut self, min_prec: u8) -> Result<Expr, ParseError> {
-        let mut left = self.unary()?;
+        let left = self.unary()?;
+        self.expression_from(left, min_prec)
+    }
 
+    /// Pratt parsing loop: given an already-parsed `left` operand, parse
+    /// binary operators, assignment, compound assignment, null-coalescing,
+    /// type tests (`is`), and range operators at precedences above `min_prec`.
+    pub(crate) fn expression_from(
+        &mut self,
+        mut left: Expr,
+        min_prec: u8,
+    ) -> Result<Expr, ParseError> {
         while self.current.ty.precedence() > min_prec {
             let op_ty = self.current.ty;
             let op = match op_ty {

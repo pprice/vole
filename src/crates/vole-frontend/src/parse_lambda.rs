@@ -6,7 +6,6 @@
 use super::ast::*;
 use super::parser::{ParseError, Parser};
 use super::token::{Span, Token, TokenType};
-use crate::errors::ParserError;
 
 impl<'src> Parser<'src> {
     /// Parse a lambda expression: (params) => body
@@ -182,149 +181,24 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Continue parsing an expression after we've already parsed the prefix/left side
-    /// This is used when we've parsed an identifier and need to continue with binary ops, calls, etc.
+    /// Continue parsing an expression after we've already parsed the prefix/left side.
+    /// This is used when we've parsed an identifier and need to continue with
+    /// postfix ops (calls, indexing, field access) then binary operators.
     pub(super) fn continue_expression(
         &mut self,
         left: Expr,
         min_prec: u8,
     ) -> Result<Expr, ParseError> {
-        // First handle call/index (postfix)
-        let mut expr = self.continue_call(left)?;
-
-        // Then handle binary operators
-        while self.current.ty.precedence() > min_prec {
-            let op_ty = self.current.ty;
-            let op = match op_ty {
-                TokenType::Plus => BinaryOp::Add,
-                TokenType::Minus => BinaryOp::Sub,
-                TokenType::Star => BinaryOp::Mul,
-                TokenType::Slash => BinaryOp::Div,
-                TokenType::Percent => BinaryOp::Mod,
-                TokenType::EqEq => BinaryOp::Eq,
-                TokenType::BangEq => BinaryOp::Ne,
-                TokenType::Lt => BinaryOp::Lt,
-                TokenType::Gt => BinaryOp::Gt,
-                TokenType::LtEq => BinaryOp::Le,
-                TokenType::GtEq => BinaryOp::Ge,
-                TokenType::AmpAmp => BinaryOp::And,
-                TokenType::PipePipe => BinaryOp::Or,
-                TokenType::Ampersand => BinaryOp::BitAnd,
-                TokenType::Pipe => BinaryOp::BitOr,
-                TokenType::Caret => BinaryOp::BitXor,
-                TokenType::LessLess => BinaryOp::Shl,
-                TokenType::GreaterGreater => BinaryOp::Shr,
-                TokenType::Eq => {
-                    // Assignment
-                    self.advance();
-                    let value = self.expression(0)?;
-                    let span = expr.span.merge(value.span);
-
-                    let target = match expr.kind {
-                        ExprKind::Identifier(sym) => {
-                            if self.interner.resolve(sym) == "_" {
-                                AssignTarget::Discard
-                            } else {
-                                AssignTarget::Variable(sym)
-                            }
-                        }
-                        ExprKind::FieldAccess(fa) => AssignTarget::Field {
-                            object: Box::new(fa.object),
-                            field: fa.field,
-                            field_span: fa.field_span,
-                        },
-                        ExprKind::Index(idx) => AssignTarget::Index {
-                            object: Box::new(idx.object),
-                            index: Box::new(idx.index),
-                        },
-                        _ => {
-                            return Err(ParseError::new(
-                                ParserError::UnexpectedToken {
-                                    token: "invalid assignment target".to_string(),
-                                    span: expr.span.into(),
-                                },
-                                expr.span,
-                            ));
-                        }
-                    };
-
-                    return Ok(Expr {
-                        id: self.next_id(),
-                        kind: ExprKind::Assign(Box::new(AssignExpr { target, value })),
-                        span,
-                    });
-                }
-                TokenType::QuestionQuestion => {
-                    // Null coalescing
-                    self.advance();
-                    let default = self.expression(1)?;
-                    let span = expr.span.merge(default.span);
-                    return Ok(Expr {
-                        id: self.next_id(),
-                        kind: ExprKind::NullCoalesce(Box::new(NullCoalesceExpr {
-                            value: expr,
-                            default,
-                        })),
-                        span,
-                    });
-                }
-                TokenType::KwIs => {
-                    // Type test
-                    self.advance();
-                    let type_span_start = self.current.span;
-                    let type_expr = self.parse_type()?;
-                    let type_span = type_span_start.merge(self.previous.span);
-                    let span = expr.span.merge(type_span);
-                    return Ok(Expr {
-                        id: self.next_id(),
-                        kind: ExprKind::Is(Box::new(IsExpr {
-                            value: expr,
-                            type_expr,
-                            type_span,
-                        })),
-                        span,
-                    });
-                }
-                _ => break,
-            };
-
-            let prec = op_ty.precedence();
-            self.advance();
-            let right = self.expression(prec)?;
-            let span = expr.span.merge(right.span);
-
-            expr = Expr {
-                id: self.next_id(),
-                kind: ExprKind::Binary(Box::new(BinaryExpr {
-                    left: expr,
-                    op,
-                    right,
-                })),
-                span,
-            };
-        }
-
-        // Check for range operators
-        if self.check(TokenType::DotDot) || self.check(TokenType::DotDotEqual) {
-            let inclusive = self.check(TokenType::DotDotEqual);
-            self.advance();
-            let right = self.expression(0)?;
-            let span = expr.span.merge(right.span);
-            return Ok(Expr {
-                id: self.next_id(),
-                kind: ExprKind::Range(Box::new(RangeExpr {
-                    start: expr,
-                    end: right,
-                    inclusive,
-                })),
-                span,
-            });
-        }
-
-        Ok(expr)
+        // First handle call/index/field-access (postfix), then delegate to
+        // the shared Pratt binary-operator loop in expression_from().
+        let expr = self.continue_call(left)?;
+        self.expression_from(expr, min_prec)
     }
 
-    /// Continue parsing calls, indexes, field access, and method calls after we have the base expression
+    /// Continue parsing calls, indexes, field access, and method calls after
+    /// we have the base expression.  This is the simplified postfix loop used
+    /// when we already consumed the leading identifier inside a parenthesised
+    /// expression and cannot re-enter `call()` (which starts from `primary()`).
     fn continue_call(&mut self, mut expr: Expr) -> Result<Expr, ParseError> {
         loop {
             // Allow method chains to span multiple lines
