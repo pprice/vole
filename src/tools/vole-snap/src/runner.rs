@@ -179,108 +179,17 @@ impl Write for SharedBuffer {
     }
 }
 
-/// Run a single test
-pub fn run_test(test_path: &Path, use_color: bool) -> TestResult {
-    let cmd = match extract_command(test_path) {
-        Some(c) => c,
-        None => return TestResult::Fail("Cannot determine command from path".to_string()),
-    };
-
-    // Read source
-    let source = match fs::read_to_string(test_path) {
-        Ok(s) => s,
-        Err(e) => return TestResult::Fail(format!("Could not read file: {}", e)),
-    };
-
-    let file_path = test_path.to_string_lossy().to_string();
-
-    // Run command with captured output
-    let stdout_buf = SharedBuffer::new();
-    let stderr_buf = SharedBuffer::new();
-
-    match cmd {
-        "run" => {
-            let _ = run_captured(
-                &source,
-                &file_path,
-                stdout_buf.clone(),
-                stderr_buf.clone(),
-                ColorMode::Never,
-            );
-        }
-        "check" => {
-            let _ = check_captured(&source, &file_path, stderr_buf.clone(), ColorMode::Never);
-        }
-        "inspect" => {
-            let subcmd = extract_subcommand(test_path);
-            match subcmd {
-                Some("ast") => {
-                    let _ = inspect_ast_captured(
-                        &source,
-                        &file_path,
-                        stdout_buf.clone(),
-                        stderr_buf.clone(),
-                        ColorMode::Never,
-                    );
-                }
-                Some(other) => {
-                    return TestResult::Fail(format!("Unknown inspect subcommand: {}", other));
-                }
-                None => {
-                    return TestResult::Fail(
-                        "inspect command requires subcommand (ast)".to_string(),
-                    );
-                }
-            }
-        }
-        _ => return TestResult::Fail(format!("Unknown command: {}", cmd)),
-    }
-
-    // Normalize and trim output
-    let stdout_bytes = stdout_buf.into_bytes();
-    let stderr_bytes = stderr_buf.into_bytes();
-    let stdout = String::from_utf8_lossy(&stdout_bytes);
-    let stderr = String::from_utf8_lossy(&stderr_bytes);
-    let stdout = normalize_paths(&stdout, test_path);
-    let stderr = normalize_paths(&stderr, test_path);
-    let stdout = trim_trailing(&stdout);
-    let stderr = trim_trailing(&stderr);
-
-    // Load snapshot
-    let snap_path = format!("{}.snap", test_path.display());
-    let snap_content = match fs::read_to_string(&snap_path) {
-        Ok(s) => s,
-        Err(_) => return TestResult::New,
-    };
-
-    let snap = Snapshot::parse(&snap_content);
-
-    // Compare
-    let diff_fn = if use_color {
-        unified_diff_colored
-    } else {
-        unified_diff
-    };
-    let stdout_diff = diff_fn(&snap.stdout, stdout, "stdout");
-    let stderr_diff = diff_fn(&snap.stderr, stderr, "stderr");
-
-    if stdout_diff.is_none() && stderr_diff.is_none() {
-        return TestResult::Pass;
-    }
-
-    let mut output = String::new();
-    if let Some(d) = stdout_diff {
-        output.push_str(&d);
-    }
-    if let Some(d) = stderr_diff {
-        output.push_str(&d);
-    }
-
-    TestResult::Fail(output)
+/// Captured output from executing a test file.
+struct CapturedOutput {
+    stdout: String,
+    stderr: String,
 }
 
-/// Bless a single test (create/update snapshot)
-pub fn bless_test(test_path: &Path) -> Result<bool, String> {
+/// Execute a test file and return its normalized captured output.
+///
+/// Handles command extraction, source reading, command dispatch, and path
+/// normalization -- the common work shared by both `run_test` and `bless_test`.
+fn execute_test(test_path: &Path) -> Result<CapturedOutput, String> {
     let cmd = extract_command(test_path)
         .ok_or_else(|| "Cannot determine command from path".to_string())?;
 
@@ -331,7 +240,57 @@ pub fn bless_test(test_path: &Path) -> Result<bool, String> {
     let stdout = normalize_paths(&stdout, test_path);
     let stderr = normalize_paths(&stderr, test_path);
 
-    let snap_content = Snapshot::format(&stdout, &stderr);
+    Ok(CapturedOutput { stdout, stderr })
+}
+
+/// Run a single test
+pub fn run_test(test_path: &Path, use_color: bool) -> TestResult {
+    let output = match execute_test(test_path) {
+        Ok(o) => o,
+        Err(e) => return TestResult::Fail(e),
+    };
+
+    let stdout = trim_trailing(&output.stdout);
+    let stderr = trim_trailing(&output.stderr);
+
+    // Load snapshot
+    let snap_path = format!("{}.snap", test_path.display());
+    let snap_content = match fs::read_to_string(&snap_path) {
+        Ok(s) => s,
+        Err(_) => return TestResult::New,
+    };
+
+    let snap = Snapshot::parse(&snap_content);
+
+    // Compare
+    let diff_fn = if use_color {
+        unified_diff_colored
+    } else {
+        unified_diff
+    };
+    let stdout_diff = diff_fn(&snap.stdout, stdout, "stdout");
+    let stderr_diff = diff_fn(&snap.stderr, stderr, "stderr");
+
+    if stdout_diff.is_none() && stderr_diff.is_none() {
+        return TestResult::Pass;
+    }
+
+    let mut diff_output = String::new();
+    if let Some(d) = stdout_diff {
+        diff_output.push_str(&d);
+    }
+    if let Some(d) = stderr_diff {
+        diff_output.push_str(&d);
+    }
+
+    TestResult::Fail(diff_output)
+}
+
+/// Bless a single test (create/update snapshot)
+pub fn bless_test(test_path: &Path) -> Result<bool, String> {
+    let output = execute_test(test_path)?;
+
+    let snap_content = Snapshot::format(&output.stdout, &output.stderr);
     let snap_path = format!("{}.snap", test_path.display());
 
     let existed = Path::new(&snap_path).exists();
