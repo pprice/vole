@@ -100,6 +100,8 @@ macro_rules! for_all_iterator_kinds {
             StringCodepoints = 22, source: string_codepoints, next: vole_string_codepoints_iter_next, owned: [true];
             // Coroutine-backed iterator - yields values from a VoleCoroutine
             Coroutine = 23, source: coroutine, next: vole_coroutine_iter_next, owned: [true];
+            // Channel iterator - yields values from an RcChannel until closed+empty
+            Channel = 24, source: channel, next: vole_channel_iter_next, owned: [true];
         }
     };
 }
@@ -244,6 +246,12 @@ macro_rules! drop_iter_source {
         let closure = $iter_ref.source.coroutine.closure;
         if !closure.is_null() {
             rc_dec(closure as *mut u8);
+        }
+    };
+    (Channel, $iter_ref:expr) => {
+        let channel = $iter_ref.source.channel.channel;
+        if !channel.is_null() {
+            rc_dec(channel as *mut u8);
         }
     };
 }

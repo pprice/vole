@@ -36,6 +36,7 @@ pub union IteratorSource {
     pub string_lines: StringLinesSource,
     pub string_codepoints: StringCodepointsSource,
     pub coroutine: CoroutineSource,
+    pub channel: ChannelSource,
 }
 
 /// Source data for array iteration
@@ -289,6 +290,14 @@ pub struct CoroutineSource {
     pub coroutine: *mut crate::coroutine::VoleCoroutine,
     /// Closure pointer captured by the generator body. rc_dec'd on drop if non-null.
     pub closure: *const u8,
+}
+
+/// Source data for channel iteration (yields values from an RcChannel until closed)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ChannelSource {
+    /// Pointer to the channel (rc_inc'd on iterator creation, rc_dec'd on drop)
+    pub channel: *mut crate::channel::RcChannel,
 }
 
 /// Unified iterator structure

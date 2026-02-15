@@ -390,3 +390,42 @@ iter_next_fn!(
         }
     }
 );
+
+// =============================================================================
+// ChannelIterator - iterator that reads values from a channel until closed+empty
+// =============================================================================
+
+iter_next_fn!(
+    /// Get next value from a channel iterator.
+    /// Returns 1 and stores value if available, 0 when channel is closed and empty.
+    vole_channel_iter_next, Channel, channel, |src, _iter, out| {
+        if src.channel.is_null() {
+            return 0;
+        }
+        let mut buf = [0i64; 2]; // [tag, value]
+        let tag = crate::channel::vole_channel_recv(src.channel, buf.as_mut_ptr());
+        if tag == -1 {
+            // Channel closed and empty -- iteration done.
+            return 0;
+        }
+        unsafe { *out = buf[1] }; // The raw value.
+        1
+    }
+);
+
+/// Create a channel iterator.
+///
+/// Increments the channel's reference count so the iterator keeps it alive.
+/// Returns a pointer to a heap-allocated `RcIterator` with kind `Channel`.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_channel_iter(channel: *mut crate::channel::RcChannel) -> *mut RcIterator {
+    if !channel.is_null() {
+        crate::value::rc_inc(channel as *mut u8);
+    }
+    RcIterator::new(
+        IteratorKind::Channel,
+        IteratorSource {
+            channel: ChannelSource { channel },
+        },
+    )
+}

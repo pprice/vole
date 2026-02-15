@@ -1,0 +1,102 @@
+// stdlib/task.vole
+// Task and channel primitives for concurrency.
+//
+// Channels are the fundamental communication primitive between tasks.
+// Use Channel.buffered(n) for buffered channels or Channel.new()
+// for unbuffered (rendezvous) channels.
+//
+// Example usage:
+//   let task = import "std:task"
+//   let ch = task.Channel.buffered(10)
+//   ch.send(42)
+//   let val = ch.receive()
+//   ch.close()
+//
+// Or with destructuring:
+//   let { Channel } = import "std:task"
+//   let ch = Channel.buffered(10)
+//
+// Iteration over a closed channel:
+//   ch.close()
+//   for v in ch.iter() {
+//       println(v)
+//   }
+
+// Native bindings to std:task module
+external("std:task") {
+    func "channel_new" as _channel_new(capacity: i64) -> handle
+    func "channel_send" as _channel_send(ch: handle, value: i64) -> i64
+    func "channel_recv" as _channel_recv(ch: handle) -> i64
+    func "channel_close" as _channel_close(ch: handle)
+    func "channel_is_closed" as _channel_is_closed(ch: handle) -> i64
+}
+
+// =============================================================================
+// Channel - communication channel between tasks
+// =============================================================================
+
+class Channel {
+    _ptr: handle,
+
+    statics {
+        // Create an unbuffered (rendezvous) channel.
+        func new() -> Channel {
+            return Channel { _ptr: _channel_new(0) }
+        }
+
+        // Create a buffered channel with the given capacity.
+        func buffered(capacity: i64) -> Channel {
+            return Channel { _ptr: _channel_new(capacity) }
+        }
+    }
+
+    // Send a value on the channel.
+    // Returns true on success, false if the channel is closed.
+    func send(value: i64) -> bool {
+        return _channel_send(self._ptr, value) == 0
+    }
+
+    // Receive a value from the channel.
+    // Returns the value, or 0 if the channel is closed and empty.
+    // Use is_closed() to distinguish "received 0" from "channel closed".
+    func receive() -> i64 {
+        return _channel_recv(self._ptr)
+    }
+
+    // Close the channel. Wakes all waiting tasks.
+    // Double-close is a no-op.
+    func close() {
+        _channel_close(self._ptr)
+    }
+
+    // Check if the channel is closed.
+    func is_closed() -> bool {
+        return _channel_is_closed(self._ptr) == 1
+    }
+
+    // Return an iterator that drains the channel.
+    // Yields values until the channel is closed and empty.
+    func iter() -> Iterator<i64> {
+        return ChannelIterator { _ptr: self._ptr }
+    }
+}
+
+// =============================================================================
+// ChannelIterator - drains a channel via the Iterator interface
+// =============================================================================
+
+class ChannelIterator implements Iterator<i64> {
+    _ptr: handle,
+}
+
+implement Iterator<i64> for ChannelIterator {
+    func next() -> i64 | Done {
+        let v = _channel_recv(self._ptr)
+        // Phase 1 limitation: recv returns 0 both for "received literal 0"
+        // and "channel closed+empty". We disambiguate by checking is_closed.
+        if v == 0 && _channel_is_closed(self._ptr) == 1 {
+            return Done {}
+        }
+        return v
+    }
+}

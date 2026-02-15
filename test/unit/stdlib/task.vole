@@ -1,0 +1,100 @@
+let { Channel } = import "std:task"
+
+tests {
+    test "buffered channel send and receive" {
+        let ch = Channel.buffered(4)
+        assert(ch.send(42))
+        assert(ch.send(99))
+        assert(ch.receive() == 42)
+        assert(ch.receive() == 99)
+    }
+
+    test "buffered channel FIFO order" {
+        let ch = Channel.buffered(8)
+        ch.send(1)
+        ch.send(2)
+        ch.send(3)
+        ch.send(4)
+        ch.send(5)
+        assert(ch.receive() == 1)
+        assert(ch.receive() == 2)
+        assert(ch.receive() == 3)
+        assert(ch.receive() == 4)
+        assert(ch.receive() == 5)
+    }
+
+    test "channel close" {
+        let ch = Channel.buffered(4)
+        assert(!ch.is_closed())
+        ch.close()
+        assert(ch.is_closed())
+    }
+
+    test "send on closed returns false" {
+        let ch = Channel.buffered(4)
+        ch.close()
+        assert(!ch.send(42))
+    }
+
+    test "recv drains before returning 0 on close" {
+        let ch = Channel.buffered(4)
+        ch.send(10)
+        ch.send(20)
+        ch.close()
+        // Should still receive buffered values.
+        assert(ch.receive() == 10)
+        assert(ch.receive() == 20)
+        // Now empty + closed.
+        assert(ch.receive() == 0)
+    }
+
+    test "double close is no-op" {
+        let ch = Channel.buffered(4)
+        ch.close()
+        ch.close()
+        assert(ch.is_closed())
+    }
+
+    test "channel new creates unbuffered" {
+        let ch = Channel.new()
+        assert(!ch.is_closed())
+        ch.close()
+        assert(ch.is_closed())
+    }
+
+    test "channel iter drains buffered values" {
+        let ch = Channel.buffered(4)
+        ch.send(10)
+        ch.send(20)
+        ch.send(30)
+        ch.close()
+        let mut sum = 0
+        for v in ch.iter() {
+            sum = sum + v
+        }
+        assert(sum == 60)
+    }
+
+    test "channel iter on empty closed channel yields nothing" {
+        let ch = Channel.buffered(4)
+        ch.close()
+        let mut count = 0
+        for v in ch.iter() {
+            count = count + 1
+        }
+        assert(count == 0)
+    }
+
+    test "channel iter collect" {
+        let ch = Channel.buffered(4)
+        ch.send(1)
+        ch.send(2)
+        ch.send(3)
+        ch.close()
+        let arr = ch.iter().collect()
+        assert(arr.length() == 3)
+        assert(arr[0] == 1)
+        assert(arr[1] == 2)
+        assert(arr[2] == 3)
+    }
+}

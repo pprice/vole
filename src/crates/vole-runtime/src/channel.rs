@@ -222,15 +222,16 @@ fn channel_recv_impl(
     // For unbuffered: check if a sender is waiting with a value.
     if capacity == 0
         && let Some(waiter) = inner.waiting_senders.pop_front()
-            && let Some(tv) = waiter.value {
-                *out_tag = tv.tag as i64;
-                *out_value = tv.value as i64;
-                // Wake the sender.
-                scheduler::with_scheduler(|sched| {
-                    sched.unblock(scheduler::TaskId::from_raw(waiter.task_id));
-                });
-                return tv.tag as i64;
-            }
+        && let Some(tv) = waiter.value
+    {
+        *out_tag = tv.tag as i64;
+        *out_value = tv.value as i64;
+        // Wake the sender.
+        scheduler::with_scheduler(|sched| {
+            sched.unblock(scheduler::TaskId::from_raw(waiter.task_id));
+        });
+        return tv.tag as i64;
+    }
 
     // Buffer empty: if closed, signal done.
     if inner.closed {
