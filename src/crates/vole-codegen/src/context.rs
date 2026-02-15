@@ -26,6 +26,25 @@ use super::rc_cleanup::RcScopeStack;
 use super::rc_state::RcState;
 use super::types::{CodegenCtx, CompileEnv, CompiledValue, TypeMetadataMap};
 
+/// Dereference a raw `*const Expr` pointer from the AST.
+///
+/// All such pointers originate from `EntityRegistry` or `Program` AST nodes,
+/// both owned by `AnalyzedProgram`. Because `AnalyzedProgram` outlives the
+/// entire compilation session and its data is never moved or modified, the
+/// pointer remains valid for the duration of compilation.
+///
+/// This is a free function (rather than a method on `Cg`) so the returned
+/// reference does not borrow `self`, which would conflict with the `&mut self`
+/// needed by expression-compilation methods.
+#[inline]
+pub(crate) fn deref_expr_ptr(ptr: *const Expr) -> &'static Expr {
+    // SAFETY: All callers obtain these pointers from AnalyzedProgram's
+    // EntityRegistry or Program AST, which outlive the Cg instance and
+    // persist for the entire compilation session. The data is never
+    // moved or modified.
+    unsafe { &*ptr }
+}
+
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
     /// Stack of loop exit blocks for break statements

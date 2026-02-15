@@ -19,7 +19,7 @@ use vole_identity::{ModuleId, NameId};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::TypeId;
 
-use super::context::Cg;
+use super::context::{Cg, deref_expr_ptr};
 use super::types::{
     CompiledValue, is_wide_fallible, native_type_to_cranelift, type_id_to_cranelift,
 };
@@ -942,10 +942,7 @@ impl Cg<'_, '_, '_> {
             .take(expected_param_count - start_index)
         {
             if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
-                // SAFETY: The pointer points to data in EntityRegistry which is owned by
-                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
-                // The data is not moved or modified, so the pointer remains valid.
-                let default_expr: &Expr = unsafe { &**default_ptr };
+                let default_expr = deref_expr_ptr(*default_ptr);
                 let compiled = self.expr(default_expr)?;
 
                 // Narrow/extend integer types or promote/demote floats if needed
@@ -1221,9 +1218,7 @@ impl Cg<'_, '_, '_> {
                         "missing default expression for parameter in lambda call",
                     ));
                 };
-                // SAFETY: The pointer points to data in Program AST which is owned by
-                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
-                let default_expr = unsafe { &**default_ptr };
+                let default_expr = deref_expr_ptr(*default_ptr);
                 let compiled = self.expr_with_expected_type(default_expr, param_type_id)?;
                 if compiled.is_owned() {
                     rc_temp_args.push(compiled);

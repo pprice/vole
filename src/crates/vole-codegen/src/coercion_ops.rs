@@ -16,7 +16,7 @@ use vole_sema::type_arena::TypeId;
 use crate::errors::CodegenResult;
 use crate::union_layout;
 
-use super::context::Cg;
+use super::context::{Cg, deref_expr_ptr};
 use super::types::CompiledValue;
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
@@ -279,10 +279,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         for (i, &param_type_id) in expected_type_ids.iter().enumerate() {
             let param_idx = start_index + i;
             if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
-                // SAFETY: The pointer points to data in EntityRegistry which is owned by
-                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
-                // The data is not moved or modified, so the pointer remains valid.
-                let default_expr: &Expr = unsafe { &**default_ptr };
+                let default_expr = deref_expr_ptr(*default_ptr);
                 let compiled = self.expr_with_expected_type(default_expr, param_type_id)?;
 
                 // Track owned RC values for cleanup after the call

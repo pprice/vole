@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 
 use super::helpers::{convert_to_i64_for_storage, split_i128_for_storage, store_field_value};
 use crate::RuntimeKey;
-use crate::context::Cg;
+use crate::context::{Cg, deref_expr_ptr};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 use crate::union_layout;
@@ -240,10 +240,7 @@ impl Cg<'_, '_, '_> {
                 CodegenError::not_found("field", format!("{} in {}", field_name, path_str))
             })?;
 
-            // SAFETY: The pointer points to an Expr in the original AST (either main Program
-            // or a module Program), both owned by AnalyzedProgram. Since AnalyzedProgram
-            // outlives this entire compilation, the pointer remains valid.
-            let default_expr: &Expr = unsafe { &*default_expr_ptr };
+            let default_expr = deref_expr_ptr(default_expr_ptr);
             let field_type_id = field_types.get(&field_name).copied();
 
             // Compile the default expression
@@ -675,8 +672,7 @@ impl Cg<'_, '_, '_> {
 
             let offset = self.struct_field_byte_offset(result_type_id, field_slot);
 
-            // SAFETY: See collect_field_default_ptrs documentation
-            let default_expr: &Expr = unsafe { &*default_expr_ptr };
+            let default_expr = deref_expr_ptr(default_expr_ptr);
             let value = if let Some(&field_type_id) = field_types.get(&field_name) {
                 self.expr_with_expected_type(default_expr, field_type_id)?
             } else {
