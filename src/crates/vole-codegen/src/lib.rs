@@ -8,6 +8,7 @@ mod context;
 pub mod errors;
 mod expr;
 mod function_registry;
+mod intrinsic_compiler;
 mod intrinsics;
 pub mod jit;
 mod lambda;
