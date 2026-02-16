@@ -1,6 +1,38 @@
-let { Channel } = import "std:task"
+let { Task, Channel } = import "std:task"
 
 tests {
+    test "run and join returns closure result" {
+        let t = Task.run(() -> i64 => { return 42 })
+        assert(t.join() == 42)
+    }
+
+    test "join returns captured value" {
+        let x = 10
+        let t = Task.run(() -> i64 => { return x + 5 })
+        assert(t.join() == 15)
+    }
+
+    test "multiple tasks run and join" {
+        let t1 = Task.run(() -> i64 => { return 1 })
+        let t2 = Task.run(() -> i64 => { return 2 })
+        let t3 = Task.run(() -> i64 => { return 3 })
+        assert(t1.join() + t2.join() + t3.join() == 6)
+    }
+
+    test "is_done after join" {
+        let t = Task.run(() -> i64 => { return 99 })
+        let result = t.join()
+        assert(t.is_done())
+        assert(result == 99)
+    }
+
+    test "cancel before run prevents execution" {
+        let t = Task.run(() -> i64 => { return 77 })
+        t.cancel()
+        assert(t.is_done())
+    }
+
+
     test "buffered channel send and receive" {
         let ch = Channel.buffered(4)
         assert(ch.send(42))

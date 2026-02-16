@@ -1,12 +1,14 @@
 //! Native task/channel functions for std:task module.
 //!
-//! Provides channel primitives exposed to Vole via `external("std:task")`.
-//! Channel handles are opaque i64 pointers passed through the FFI boundary,
-//! following the same pattern as `std:buffer`.
+//! Provides task and channel primitives exposed to Vole via `external("std:task")`.
+//! Task and channel handles are opaque i64 pointers passed through the FFI
+//! boundary, following the same pattern as `std:buffer`.
 
 use crate::channel::{self, RcChannel};
+use crate::closure::Closure;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
-use crate::value::RuntimeTypeId;
+use crate::task::{self, RcTask};
+use crate::value::{RuntimeTypeId, rc_inc};
 
 /// Create the std:task native module
 pub fn module() -> NativeModule {
@@ -77,6 +79,46 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // task_run: (closure: i64) -> i64 (opaque RcTask pointer)
+    m.register(
+        "task_run",
+        task_run_wrapper as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // task_join: (task: i64) -> i64 (result value)
+    m.register(
+        "task_join",
+        task_join_wrapper as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // task_cancel: (task: i64) -> void
+    m.register(
+        "task_cancel",
+        task_cancel_wrapper as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::Nil,
+        },
+    );
+
+    // task_is_done: (task: i64) -> i64 (1/0)
+    m.register(
+        "task_is_done",
+        task_is_done_wrapper as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
     m
 }
 
@@ -138,6 +180,59 @@ extern "C" fn channel_iter_wrapper(ch: i64) -> i64 {
 }
 
 // =============================================================================
+// Task wrapper functions
+// =============================================================================
+
+/// Spawn a new task from a Vole closure. Returns opaque RcTask handle as i64.
+///
+/// Extracts the function pointer from the closure, rc_inc's the closure
+/// (the task now owns a reference), and spawns it on the scheduler. The
+/// closure reference is stored on the RcTask so it will be rc_dec'd when
+/// the task handle is dropped.
+#[unsafe(no_mangle)]
+extern "C" fn task_run_wrapper(closure_ptr: i64) -> i64 {
+    let closure = closure_ptr as *mut Closure;
+    if closure.is_null() {
+        return 0;
+    }
+
+    // Extract the function pointer from the Vole closure.
+    let func_ptr = unsafe { Closure::get_func(closure) };
+
+    // RC-inc the closure: the task now owns a reference.
+    rc_inc(closure as *mut u8);
+
+    // Spawn the task with the closure's function and closure pointer.
+    let task_handle = task::vole_rctask_run(func_ptr, closure as *const u8);
+
+    // Store the closure pointer on the task so it gets rc_dec'd on drop.
+    RcTask::set_closure(task_handle, closure as *const u8);
+
+    task_handle as i64
+}
+
+/// Join a task: block until it completes, return its result.
+#[unsafe(no_mangle)]
+extern "C" fn task_join_wrapper(task_handle: i64) -> i64 {
+    let task_ptr = task_handle as *mut RcTask;
+    task::vole_rctask_join(task_ptr)
+}
+
+/// Cancel a task.
+#[unsafe(no_mangle)]
+extern "C" fn task_cancel_wrapper(task_handle: i64) {
+    let task_ptr = task_handle as *mut RcTask;
+    task::vole_rctask_cancel(task_ptr);
+}
+
+/// Check if a task is done. Returns 1 if done, 0 otherwise.
+#[unsafe(no_mangle)]
+extern "C" fn task_is_done_wrapper(task_handle: i64) -> i64 {
+    let task_ptr = task_handle as *const RcTask;
+    task::vole_rctask_is_done(task_ptr)
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -155,6 +250,10 @@ mod tests {
         assert!(m.get("channel_close").is_some());
         assert!(m.get("channel_is_closed").is_some());
         assert!(m.get("channel_iter").is_some());
+        assert!(m.get("task_run").is_some());
+        assert!(m.get("task_join").is_some());
+        assert!(m.get("task_cancel").is_some());
+        assert!(m.get("task_is_done").is_some());
     }
 
     #[test]
@@ -207,6 +306,42 @@ mod tests {
     fn channel_iter_signature() {
         let m = module();
         let f = m.get("channel_iter").unwrap();
+        assert_eq!(f.signature.params.len(), 1);
+        assert_eq!(f.signature.params[0], NativeType::I64);
+        assert_eq!(f.signature.return_type, NativeType::I64);
+    }
+
+    #[test]
+    fn task_run_signature() {
+        let m = module();
+        let f = m.get("task_run").unwrap();
+        assert_eq!(f.signature.params.len(), 1);
+        assert_eq!(f.signature.params[0], NativeType::I64);
+        assert_eq!(f.signature.return_type, NativeType::I64);
+    }
+
+    #[test]
+    fn task_join_signature() {
+        let m = module();
+        let f = m.get("task_join").unwrap();
+        assert_eq!(f.signature.params.len(), 1);
+        assert_eq!(f.signature.params[0], NativeType::I64);
+        assert_eq!(f.signature.return_type, NativeType::I64);
+    }
+
+    #[test]
+    fn task_cancel_signature() {
+        let m = module();
+        let f = m.get("task_cancel").unwrap();
+        assert_eq!(f.signature.params.len(), 1);
+        assert_eq!(f.signature.params[0], NativeType::I64);
+        assert_eq!(f.signature.return_type, NativeType::Nil);
+    }
+
+    #[test]
+    fn task_is_done_signature() {
+        let m = module();
+        let f = m.get("task_is_done").unwrap();
         assert_eq!(f.signature.params.len(), 1);
         assert_eq!(f.signature.params[0], NativeType::I64);
         assert_eq!(f.signature.return_type, NativeType::I64);

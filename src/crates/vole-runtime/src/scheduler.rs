@@ -3,12 +3,20 @@
 //! All tasks run on a single OS thread, interleaving at explicit yield points
 //! (Task.yield(), channel ops, join). Uses `VoleCoroutine` for stack switching.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 use rustc_hash::FxHashMap;
 
 use crate::coroutine::VoleCoroutine;
+
+// Thread-local transfer slot for task return values. The coroutine body
+// stores the return value here before exiting, and step_task reads it
+// after the coroutine completes. This avoids re-entering with_scheduler
+// from within a coroutine (which would cause a RefCell double-borrow).
+thread_local! {
+    static TASK_RESULT: Cell<i64> = const { Cell::new(0) };
+}
 
 // =============================================================================
 // Types
@@ -119,13 +127,18 @@ impl Scheduler {
         // Safety: body_fn and closure_ptr come from JIT-generated code.
         // Use C-unwind ABI because the body may call vole_generator_yield
         // or other functions that perform stack switches via corosensei.
-        let func: extern "C-unwind" fn(*const u8, *const u8) =
+        // The Vole function returns i64 in RAX -- we capture it and store
+        // it as the task's result via set_current_result.
+        let func: extern "C-unwind" fn(*const u8, *const u8) -> i64 =
             unsafe { std::mem::transmute(body_fn) };
         let closure = closure_ptr as usize;
 
         let coro = VoleCoroutine::new(move |yielder, _input| {
             let yielder_ptr = yielder as *const corosensei::Yielder<i64, i64> as *const u8;
-            func(closure as *const u8, yielder_ptr);
+            let result = func(closure as *const u8, yielder_ptr);
+            // Store the task's return value in the thread-local transfer slot.
+            // step_task reads it after the coroutine completes.
+            TASK_RESULT.with(|cell| cell.set(result));
         });
 
         let task = Task {
@@ -278,53 +291,86 @@ impl Scheduler {
                 }
             };
 
-            // Cancellation check before resume (Section 1.2, point 1).
-            if let Some(task) = self.tasks.get(&task_id)
-                && task.state == TaskState::Cancelled
-            {
-                continue;
+            self.step_task(task_id);
+        }
+    }
+
+    /// Run the scheduler loop until a specific task reaches a terminal state.
+    ///
+    /// Used for main-thread join: the main thread is not a scheduler task,
+    /// so it drives the scheduler loop directly until the target completes.
+    pub fn run_until_done(&mut self, target: TaskId) {
+        loop {
+            // Check if target is done.
+            if self.is_done(target) {
+                return;
             }
 
-            // Resume the task's coroutine.
-            self.current = Some(task_id);
-            if let Some(task) = self.tasks.get_mut(&task_id) {
-                task.state = TaskState::Running;
-            }
-
-            let resume_result = {
-                let task = self.tasks.get_mut(&task_id).expect("task not found");
-                task.coroutine.resume(0)
+            let task_id = match self.run_queue.pop_front() {
+                Some(id) => id,
+                None => {
+                    if self.has_blocked_tasks() {
+                        self.panic_deadlock();
+                    }
+                    return; // All tasks done (target must be done too).
+                }
             };
 
-            match resume_result {
-                Some(_signal) => {
-                    // Task yielded. Check cancellation (Section 1.2, point 2).
-                    if let Some(task) = self.tasks.get_mut(&task_id) {
-                        if task.state == TaskState::Cancelled {
-                            // Already cancelled during execution.
-                        } else if task.state == TaskState::Running {
-                            // Voluntary yield: re-queue.
-                            task.state = TaskState::Pending;
-                            self.run_queue.push_back(task_id);
-                        }
-                        // If Blocked, it was set by block_current during resume.
+            self.step_task(task_id);
+        }
+    }
+
+    /// Execute one step for a single task: resume its coroutine, handle
+    /// yield/completion, update scheduler state.
+    fn step_task(&mut self, task_id: TaskId) {
+        // Cancellation check before resume (Section 1.2, point 1).
+        if let Some(task) = self.tasks.get(&task_id)
+            && task.state == TaskState::Cancelled
+        {
+            return;
+        }
+
+        // Resume the task's coroutine.
+        self.current = Some(task_id);
+        if let Some(task) = self.tasks.get_mut(&task_id) {
+            task.state = TaskState::Running;
+        }
+
+        let resume_result = {
+            let task = self.tasks.get_mut(&task_id).expect("task not found");
+            task.coroutine.resume(0)
+        };
+
+        match resume_result {
+            Some(_signal) => {
+                // Task yielded. Check cancellation (Section 1.2, point 2).
+                if let Some(task) = self.tasks.get_mut(&task_id) {
+                    if task.state == TaskState::Cancelled {
+                        // Already cancelled during execution.
+                    } else if task.state == TaskState::Running {
+                        // Voluntary yield: re-queue.
+                        task.state = TaskState::Pending;
+                        self.run_queue.push_back(task_id);
                     }
+                    // If Blocked, it was set by block_current during resume.
                 }
-                None => {
-                    // Task completed.
-                    if let Some(task) = self.tasks.get_mut(&task_id) {
-                        task.state = TaskState::Completed;
-                        // Wake join waiters.
-                        let waiters: Vec<TaskId> = task.join_waiters.drain(..).collect();
-                        for waiter_id in waiters {
-                            self.unblock(waiter_id);
-                        }
+            }
+            None => {
+                // Task completed. Read the return value from the transfer slot.
+                let result = TASK_RESULT.with(|cell| cell.get());
+                if let Some(task) = self.tasks.get_mut(&task_id) {
+                    task.state = TaskState::Completed;
+                    task.result = Some(result);
+                    // Wake join waiters.
+                    let waiters: Vec<TaskId> = task.join_waiters.drain(..).collect();
+                    for waiter_id in waiters {
+                        self.unblock(waiter_id);
                     }
                 }
             }
-
-            self.current = None;
         }
+
+        self.current = None;
     }
 
     /// Returns the currently running task's ID.
@@ -344,12 +390,22 @@ impl Scheduler {
         self.tasks.get(&task_id).and_then(|t| t.result)
     }
 
-    /// Set the result value of the current task.
-    pub fn set_current_result(&mut self, value: i64) {
-        if let Some(task_id) = self.current
-            && let Some(task) = self.tasks.get_mut(&task_id)
-        {
-            task.result = Some(value);
+    /// Get the result of a completed/cancelled task with join semantics.
+    ///
+    /// Panics if the task was cancelled or panicked (matching `join()` behavior).
+    /// Returns the result value for normally completed tasks.
+    pub fn join_result(&self, task_id: TaskId) -> i64 {
+        if let Some(task) = self.tasks.get(&task_id) {
+            if task.panicked {
+                let msg = task.panic_message.as_deref().unwrap_or("unknown");
+                panic!("joined task panicked: {msg}");
+            }
+            if task.state == TaskState::Cancelled {
+                panic!("joined task was cancelled");
+            }
+            task.result.unwrap_or(0)
+        } else {
+            0
         }
     }
 

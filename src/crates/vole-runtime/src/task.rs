@@ -9,7 +9,7 @@ use std::cell::Cell;
 
 use crate::alloc_track;
 use crate::scheduler::{self, TaskId};
-use crate::value::{RcHeader, RuntimeTypeId};
+use crate::value::{RcHeader, RuntimeTypeId, rc_dec};
 
 // =============================================================================
 // Types
@@ -29,6 +29,9 @@ pub struct RcTask {
     pub result: Cell<i64>,
     /// Whether the task has completed.
     pub completed: Cell<bool>,
+    /// Optional closure pointer (RC-managed). Stored here so we can rc_dec
+    /// it when the task handle is dropped, preventing closure leaks.
+    pub closure_ptr: Cell<*const u8>,
 }
 
 // =============================================================================
@@ -53,17 +56,29 @@ impl RcTask {
             (*task).task_id = Cell::new(task_id.as_raw());
             (*task).result = Cell::new(0);
             (*task).completed = Cell::new(false);
+            (*task).closure_ptr = Cell::new(std::ptr::null());
         }
 
         alloc_track::track_alloc(RuntimeTypeId::Task as u32);
         task
+    }
+
+    /// Set the closure pointer (RC-managed) that this task owns.
+    ///
+    /// The task will rc_dec this pointer when it is dropped.
+    #[expect(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn set_closure(task: *mut Self, closure: *const u8) {
+        unsafe {
+            (*task).closure_ptr.set(closure);
+        }
     }
 }
 
 /// Drop function for `RcTask`.
 ///
 /// Called when the reference count reaches zero. Cancels the underlying
-/// scheduler task if it is still running, then frees the allocation.
+/// scheduler task if it is still running, rc_dec's the closure if present,
+/// then frees the allocation.
 extern "C" fn task_drop(ptr: *mut u8) {
     let task = ptr as *mut RcTask;
 
@@ -76,6 +91,12 @@ extern "C" fn task_drop(ptr: *mut u8) {
                 sched.cancel(tid);
             }
         });
+    }
+
+    // RC-dec the closure if the task owns a reference.
+    let closure = unsafe { (*task).closure_ptr.get() };
+    if !closure.is_null() {
+        rc_dec(closure as *mut u8);
     }
 
     // Free the allocation.
@@ -102,6 +123,10 @@ pub extern "C" fn vole_rctask_run(body_fn: *const u8, closure_ptr: *const u8) ->
 
 /// Join: block until the task completes, return its result.
 ///
+/// If called from the main thread (no current task), drives the scheduler
+/// inline until the target completes. If called from within a task, blocks
+/// the calling task until the target reaches a terminal state.
+///
 /// If the task already completed, returns immediately.
 /// If the task panicked, propagates the panic.
 /// If the task was cancelled, panics with "joined task was cancelled".
@@ -115,7 +140,16 @@ pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> i64 {
     let task_id = unsafe { (*task_ptr).task_id.get() };
     let tid = TaskId::from_raw(task_id);
 
-    let result = scheduler::with_scheduler(|sched| sched.join(tid));
+    let result = scheduler::with_scheduler(|sched| {
+        if sched.current_task().is_some() {
+            // Called from within a task: use cooperative join (blocks caller).
+            sched.join(tid)
+        } else {
+            // Called from main thread: drive the scheduler until target is done.
+            sched.run_until_done(tid);
+            sched.join_result(tid)
+        }
+    });
 
     // Mark the handle as completed and cache the result.
     unsafe {

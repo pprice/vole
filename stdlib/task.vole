@@ -1,26 +1,26 @@
 // stdlib/task.vole
 // Task and channel primitives for concurrency.
 //
-// Channels are the fundamental communication primitive between tasks.
+// Tasks are spawned with Task.run(() => { ... }) and return a handle.
+// Use .join() to wait for a task to complete and get its result.
+// Use .cancel() to request cooperative cancellation.
+//
+// Channels are the communication primitive between tasks.
 // Use Channel.buffered(n) for buffered channels or Channel.new()
 // for unbuffered (rendezvous) channels.
 //
 // Example usage:
 //   let task = import "std:task"
+//
+//   // Spawn and join a task
+//   let t = task.Task.run(() -> i64 => { return 42 })
+//   assert(t.join() == 42)
+//
+//   // Channel communication
 //   let ch = task.Channel.buffered(10)
 //   ch.send(42)
 //   let val = ch.receive()
 //   ch.close()
-//
-// Or with destructuring:
-//   let { Channel } = import "std:task"
-//   let ch = Channel.buffered(10)
-//
-// Iteration over a closed channel:
-//   ch.close()
-//   for v in ch.iter() {
-//       println(v)
-//   }
 
 // Native bindings to std:task module
 external("std:task") {
@@ -29,6 +29,43 @@ external("std:task") {
     func "channel_recv" as _channel_recv(ch: handle) -> i64
     func "channel_close" as _channel_close(ch: handle)
     func "channel_is_closed" as _channel_is_closed(ch: handle) -> i64
+    func "task_run" as _task_run(closure: handle) -> handle
+    func "task_join" as _task_join(task: handle) -> i64
+    func "task_cancel" as _task_cancel(task: handle)
+    func "task_is_done" as _task_is_done(task: handle) -> i64
+}
+
+// =============================================================================
+// Task - spawned green thread handle
+// =============================================================================
+
+class Task {
+    _handle: handle,
+
+    statics {
+        // Spawn a task from a closure. The closure runs on the M:1 scheduler.
+        // Returns a Task handle for join/cancel operations.
+        func run(body: () -> i64) -> Task {
+            return Task { _handle: _task_run(body) }
+        }
+    }
+
+    // Block until the task completes and return its result.
+    // Panics if the task was cancelled or panicked.
+    func join() -> i64 {
+        return _task_join(self._handle)
+    }
+
+    // Request cooperative cancellation of the task.
+    // If the task is already completed, this is a no-op.
+    func cancel() {
+        _task_cancel(self._handle)
+    }
+
+    // Check if the task has completed (or was cancelled).
+    func is_done() -> bool {
+        return _task_is_done(self._handle) == 1
+    }
 }
 
 // =============================================================================
