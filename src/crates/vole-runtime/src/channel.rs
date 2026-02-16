@@ -560,7 +560,7 @@ mod tests {
 
     #[test]
     fn buffered_send_recv_fifo() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ch = RcChannel::new(4);
 
         unsafe {
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn send_on_closed_returns_neg1() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ch = RcChannel::new(4);
 
         unsafe {
@@ -618,7 +618,7 @@ mod tests {
 
     #[test]
     fn recv_on_closed_empty_returns_neg1() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ch = RcChannel::new(4);
 
         unsafe {
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn recv_drains_before_neg1_on_close() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ch = RcChannel::new(4);
 
         unsafe {
@@ -673,7 +673,7 @@ mod tests {
 
     #[test]
     fn double_close_is_noop() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ch = RcChannel::new(4);
 
         unsafe {
@@ -688,7 +688,7 @@ mod tests {
 
     #[test]
     fn channel_is_closed_ffi() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ch = RcChannel::new(4);
 
         assert_eq!(vole_channel_is_closed(ch), 0);
@@ -700,20 +700,26 @@ mod tests {
 
     #[test]
     fn alloc_tracking_balanced() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         alloc_track::enable_tracking();
-        let snap = alloc_track::snapshot();
+        let before = alloc_track::count(RuntimeTypeId::Channel as u32);
 
         let ch = RcChannel::new(4);
-        assert_eq!(alloc_track::delta(snap), 1);
+        assert_eq!(
+            alloc_track::count(RuntimeTypeId::Channel as u32) - before,
+            1
+        );
 
         rc_dec(ch as *mut u8);
-        assert_eq!(alloc_track::delta(snap), 0);
+        assert_eq!(
+            alloc_track::count(RuntimeTypeId::Channel as u32) - before,
+            0
+        );
     }
 
     #[test]
     fn drop_cleanup_decs_buffered_values() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ch = RcChannel::new(4);
 
         unsafe {
@@ -751,7 +757,7 @@ mod tests {
 
     #[test]
     fn ffi_new_returns_valid_channel() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let ch = vole_channel_new(8);
         assert!(!ch.is_null());
 

@@ -368,7 +368,11 @@ impl Default for Context {
 mod tests {
     use super::*;
     use std::alloc::{Layout, alloc, dealloc};
+    use std::sync::Mutex;
     use std::sync::atomic::AtomicBool;
+
+    // Tests that use the shared DROP_CALLED flag must not run in parallel.
+    static DROP_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn rc_header_inc_dec() {
@@ -447,6 +451,7 @@ mod tests {
 
     #[test]
     fn rc_dec_calls_drop_fn_at_zero() {
+        let _guard = DROP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         DROP_CALLED.store(false, Ordering::SeqCst);
 
         // We need a custom drop_fn that also deallocates, since rc_dec
@@ -505,6 +510,7 @@ mod tests {
 
     #[test]
     fn rc_dec_is_noop_for_pinned() {
+        let _guard = DROP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         DROP_CALLED.store(false, Ordering::SeqCst);
         unsafe {
             let ptr = alloc_pinned_header(Some(dummy_drop));
@@ -518,6 +524,7 @@ mod tests {
 
     #[test]
     fn rc_inc_dec_repeated_on_pinned() {
+        let _guard = DROP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         DROP_CALLED.store(false, Ordering::SeqCst);
         unsafe {
             let ptr = alloc_pinned_header(Some(dummy_drop));

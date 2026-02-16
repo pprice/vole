@@ -225,13 +225,13 @@ mod tests {
 
     #[test]
     fn rctask_creation_and_drop() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         alloc_track::enable_tracking();
 
         // Drain any leftover scheduler tasks from previous tests on this thread.
         scheduler::with_scheduler(|sched| sched.run());
 
-        let snap = alloc_track::snapshot();
+        let before = alloc_track::count(RuntimeTypeId::Task as u32);
 
         let tid = scheduler::with_scheduler(|sched| {
             extern "C" fn body(_c: *const u8, _y: *const u8) {}
@@ -246,7 +246,7 @@ mod tests {
 
         // Drop via rc_dec.
         rc_dec(task as *mut u8);
-        assert_eq!(alloc_track::delta(snap), 0);
+        assert_eq!(alloc_track::count(RuntimeTypeId::Task as u32) - before, 0);
     }
 
     #[test]
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn vole_rctask_run_returns_handle() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         alloc_track::enable_tracking();
 
         // Drain any leftover scheduler tasks.
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn vole_rctask_cancel_handle() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // Drain any leftover scheduler tasks.
         scheduler::with_scheduler(|sched| sched.run());
@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn vole_rctask_is_done_before_and_after_run() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
         // Drain any leftover scheduler tasks.
         scheduler::with_scheduler(|sched| sched.run());
@@ -338,13 +338,13 @@ mod tests {
 
     #[test]
     fn alloc_tracking_balanced() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         alloc_track::enable_tracking();
 
         // Drain any leftover scheduler tasks.
         scheduler::with_scheduler(|sched| sched.run());
 
-        let snap = alloc_track::snapshot();
+        let before = alloc_track::count(RuntimeTypeId::Task as u32);
 
         extern "C" fn body(_c: *const u8, _y: *const u8) {}
 
@@ -352,7 +352,7 @@ mod tests {
             .map(|_| vole_rctask_run(body as *const u8, std::ptr::null()))
             .collect();
 
-        assert_eq!(alloc_track::delta(snap), 5);
+        assert_eq!(alloc_track::count(RuntimeTypeId::Task as u32) - before, 5);
 
         scheduler::with_scheduler(|sched| sched.run());
 
@@ -360,6 +360,6 @@ mod tests {
             rc_dec(task as *mut u8);
         }
 
-        assert_eq!(alloc_track::delta(snap), 0);
+        assert_eq!(alloc_track::count(RuntimeTypeId::Task as u32) - before, 0);
     }
 }
