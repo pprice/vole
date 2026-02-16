@@ -1,0 +1,74 @@
+// RC coverage for std:task generic paths with non-i64 payloads.
+// These tests are intended to run under leak checking.
+
+let { Task, Channel } = import "std:task"
+
+class Packet {
+    payload: string,
+}
+
+implement Transferable for Packet {
+    func transfer() -> Packet {
+        return Packet { payload: self.payload }
+    }
+}
+
+tests "task/channel generics RC" {
+    test "channel<string> buffered round trip" {
+        let ch = Channel.buffered<string>(4)
+        _ = ch.send("a")
+        _ = ch.send("b")
+        ch.close()
+        assert(ch.receive() == "a")
+        assert(ch.receive() == "b")
+    }
+
+    test "task<string> join returns RC value" {
+        let t = Task.run(() -> string => {
+            return "joined"
+        })
+        assert(t.join() == "joined")
+    }
+
+    test "task.all with string closures" {
+        let fns: [() -> string] = [
+            () -> string => { return "x" },
+            () -> string => { return "y" },
+            () -> string => { return "z" },
+        ]
+        let out = Task.all(fns)
+        assert(out.length() == 3)
+        assert(out[0] == "x")
+        assert(out[1] == "y")
+        assert(out[2] == "z")
+    }
+
+    test "task.parallel with string RC payloads" {
+        let out = Task.parallel<string>(
+            ["left", "right"],
+            (s: string) -> string => { return s + ":" + s },
+        )
+        assert(out.length() == 2)
+        assert(out[0] == "left:left")
+        assert(out[1] == "right:right")
+    }
+
+    test "channel<transferable class> round trip" {
+        let ch = Channel.buffered<Packet>(2)
+        _ = ch.send(Packet { payload: "blob" })
+        ch.close()
+        let p = ch.receive()
+        assert(p.payload == "blob")
+    }
+
+    test "task.stream emits strings" {
+        let s = Task.stream((emit: (string) -> void) => {
+            emit("one")
+            emit("two")
+        })
+        let out = s.collect()
+        assert(out.length() == 2)
+        assert(out[0] == "one")
+        assert(out[1] == "two")
+    }
+}

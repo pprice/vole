@@ -1,0 +1,150 @@
+let { Task, Channel } = import "std:task"
+
+struct Job {
+    id: i64,
+    name: string,
+}
+
+class Token {
+    label: string,
+}
+
+implement Transferable for Token {
+    func transfer() -> Token {
+        return Token { label: self.label }
+    }
+}
+
+tests {
+    test "channel<string> buffered send and receive" {
+        let ch = Channel.buffered<string>(4)
+        _ = ch.send("alpha")
+        _ = ch.send("beta")
+        ch.close()
+        assert(ch.receive() == "alpha")
+        assert(ch.receive() == "beta")
+    }
+
+    test "channel<string> unbuffered send and receive" {
+        let ch = Channel.new<string>()
+        let producer = Task.run(() -> i64 => {
+            _ = ch.send("pong")
+            ch.close()
+            return 0
+        })
+
+        let value = ch.receive()
+        assert(value == "pong")
+        _ = producer.join()
+    }
+
+    test "channel<string> iterator drains values" {
+        let ch = Channel.buffered<string>(4)
+        _ = ch.send("x")
+        _ = ch.send("y")
+        _ = ch.send("z")
+        ch.close()
+        let result = ch.iter().collect()
+        assert(result.length() == 3)
+        assert(result[0] == "x")
+        assert(result[1] == "y")
+        assert(result[2] == "z")
+    }
+
+    test "channel<bool> round trip" {
+        let ch = Channel.buffered<bool>(2)
+        _ = ch.send(true)
+        _ = ch.send(false)
+        ch.close()
+        assert(ch.receive())
+        assert(!ch.receive())
+    }
+
+    test "channel<f64> round trip" {
+        let ch = Channel.buffered<f64>(2)
+        _ = ch.send(1.25)
+        _ = ch.send(3.5)
+        ch.close()
+        assert(ch.receive() == 1.25)
+        assert(ch.receive() == 3.5)
+    }
+
+    test "channel<struct> round trip" {
+        let ch = Channel.buffered<Job>(2)
+        _ = ch.send(Job { id: 7, name: "build" })
+        ch.close()
+        let job = ch.receive()
+        assert(job.id == 7)
+        assert(job.name == "build")
+    }
+
+    test "channel<transferable class> round trip" {
+        let ch = Channel.buffered<Token>(2)
+        _ = ch.send(Token { label: "session" })
+        ch.close()
+        let token = ch.receive()
+        assert(token.label == "session")
+    }
+
+    test "channel<string> keeps order with multiple values in flight" {
+        let ch = Channel.buffered<string>(8)
+        _ = ch.send("one")
+        _ = ch.send("two")
+        _ = ch.send("three")
+        ch.close()
+        assert(ch.receive() == "one")
+        assert(ch.receive() == "two")
+        assert(ch.receive() == "three")
+    }
+
+    test "task<string> run and join" {
+        let t = Task.run(() -> string => {
+            return "hello"
+        })
+        assert(t.join() == "hello")
+    }
+
+    test "task.all with string closures" {
+        let fns: [() -> string] = [
+            () -> string => { return "a" },
+            () -> string => { return "b" },
+            () -> string => { return "c" },
+        ]
+        let out = Task.all(fns)
+        assert(out.length() == 3)
+        assert(out[0] == "a")
+        assert(out[1] == "b")
+        assert(out[2] == "c")
+    }
+
+    test "task<bool> run and join" {
+        let t = Task.run(() -> bool => {
+            return true
+        })
+        assert(t.join())
+    }
+
+    test "task.stream with string values" {
+        let s = Task.stream((emit: (string) -> void) => {
+            emit("one")
+            emit("two")
+            emit("three")
+        })
+        let out = s.collect()
+        assert(out.length() == 3)
+        assert(out[0] == "one")
+        assert(out[1] == "two")
+        assert(out[2] == "three")
+    }
+
+    test "task.parallel static helper with strings" {
+        let out = Task.parallel<string>(
+            ["ax", "by", "cz"],
+            (s: string) -> string => { return s + "!" },
+        )
+        assert(out.length() == 3)
+        assert(out[0] == "ax!")
+        assert(out[1] == "by!")
+        assert(out[2] == "cz!")
+    }
+}

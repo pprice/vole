@@ -1,9 +1,8 @@
 // Integration test: Mock HTTP server simulation.
 //
 // Simulates an HTTP server that spawns handler tasks per request.
-// Phase 1 channels carry i64, so requests are encoded as i64 values
-// (path IDs) and responses as i64 values (status codes or computed
-// results). Tests cover: per-request task spawning, concurrent
+// Requests/responses are i64 values (path IDs/status-like values).
+// Tests cover: per-request task spawning, concurrent
 // request handling, stateful server with actor counter, and
 // pipeline request-response.
 
@@ -17,18 +16,23 @@ tests {
         // Server: reads one request, spawns handler, closes response channel.
         let server = Task.run(() -> i64 => {
             let mut handled = 0
-            let mut req = req_ch.receive()
-            while req != 0 || !req_ch.is_closed() {
-                // Spawn a handler task per request (like a real HTTP server).
-                let request_id = req
-                let handler = Task.run(() -> i64 => {
-                    // Simulate processing: return request_id * 100 as "response".
-                    resp_ch.send(request_id * 100)
-                    return 0
-                })
-                _ = handler.join()
-                handled = handled + 1
-                req = req_ch.receive()
+            while true {
+                let req_val = req_ch.try_receive()
+                if req_val is Done { break }
+                if req_val is i64 {
+                    // Spawn a handler task per request (like a real HTTP server).
+                    let handler_input = Channel.buffered<i64>(1)
+                    handler_input.send(req_val)
+                    handler_input.close()
+                    let handler = Task.run(() -> i64 => {
+                        let request_id = handler_input.receive()
+                        // Simulate processing: return request_id * 100 as "response".
+                        resp_ch.send(request_id * 100)
+                        return 0
+                    })
+                    _ = handler.join()
+                    handled = handled + 1
+                }
             }
             resp_ch.close()
             return handled
@@ -53,17 +57,22 @@ tests {
         // Server: reads requests, spawns one task per request.
         let server = Task.run(() -> i64 => {
             let mut handled = 0
-            let mut req = req_ch.receive()
-            while req != 0 || !req_ch.is_closed() {
-                let request_id = req
-                let handler = Task.run(() -> i64 => {
-                    // Response = request_id + 1000
-                    resp_ch.send(request_id + 1000)
-                    return 0
-                })
-                _ = handler.join()
-                handled = handled + 1
-                req = req_ch.receive()
+            while true {
+                let req_val = req_ch.try_receive()
+                if req_val is Done { break }
+                if req_val is i64 {
+                    let handler_input = Channel.buffered<i64>(1)
+                    handler_input.send(req_val)
+                    handler_input.close()
+                    let handler = Task.run(() -> i64 => {
+                        let request_id = handler_input.receive()
+                        // Response = request_id + 1000
+                        resp_ch.send(request_id + 1000)
+                        return 0
+                    })
+                    _ = handler.join()
+                    handled = handled + 1
+                }
             }
             resp_ch.close()
             return handled
@@ -80,11 +89,13 @@ tests {
         // Collect all responses.
         let mut total = 0
         let mut count = 0
-        let mut v = resp_ch.receive()
-        while v != 0 || !resp_ch.is_closed() {
-            total = total + v
-            count = count + 1
-            v = resp_ch.receive()
+        while true {
+            let r = resp_ch.try_receive()
+            if r is Done { break }
+            if r is i64 {
+                total = total + r
+                count = count + 1
+            }
         }
 
         let handled = server.join()
@@ -106,13 +117,15 @@ tests {
         // Server: reads requests, increments counter, responds with ack.
         let server = Task.run(() -> i64 => {
             let mut handled = 0
-            let mut req = req_ch.receive()
-            while req != 0 || !req_ch.is_closed() {
-                counter.send(1)
-                // Acknowledge: send request_id back as confirmation.
-                resp_ch.send(req)
-                handled = handled + 1
-                req = req_ch.receive()
+            while true {
+                let req_val = req_ch.try_receive()
+                if req_val is Done { break }
+                if req_val is i64 {
+                    counter.send(1)
+                    // Acknowledge: send request_id back as confirmation.
+                    resp_ch.send(req_val)
+                    handled = handled + 1
+                }
             }
             resp_ch.close()
             return handled
@@ -127,11 +140,13 @@ tests {
         // Drain responses.
         let mut resp_sum = 0
         let mut resp_count = 0
-        let mut v = resp_ch.receive()
-        while v != 0 || !resp_ch.is_closed() {
-            resp_sum = resp_sum + v
-            resp_count = resp_count + 1
-            v = resp_ch.receive()
+        while true {
+            let r = resp_ch.try_receive()
+            if r is Done { break }
+            if r is i64 {
+                resp_sum = resp_sum + r
+                resp_count = resp_count + 1
+            }
         }
 
         let handled = server.join()
@@ -154,11 +169,13 @@ tests {
         // Acceptor: reads requests, forwards to processing pipeline.
         let acceptor = Task.run(() -> i64 => {
             let mut count = 0
-            let mut req = req_ch.receive()
-            while req != 0 || !req_ch.is_closed() {
-                process_ch.send(req)
-                count = count + 1
-                req = req_ch.receive()
+            while true {
+                let req_val = req_ch.try_receive()
+                if req_val is Done { break }
+                if req_val is i64 {
+                    process_ch.send(req_val)
+                    count = count + 1
+                }
             }
             process_ch.close()
             return count
@@ -167,11 +184,13 @@ tests {
         // Processor: transforms requests (squares them) and sends to responder.
         let processor = Task.run(() -> i64 => {
             let mut count = 0
-            let mut v = process_ch.receive()
-            while v != 0 || !process_ch.is_closed() {
-                resp_ch.send(v * v)
-                count = count + 1
-                v = process_ch.receive()
+            while true {
+                let r = process_ch.try_receive()
+                if r is Done { break }
+                if r is i64 {
+                    resp_ch.send(r * r)
+                    count = count + 1
+                }
             }
             resp_ch.close()
             return count
@@ -188,11 +207,13 @@ tests {
         // Collect responses.
         let mut total = 0
         let mut count = 0
-        let mut v = resp_ch.receive()
-        while v != 0 || !resp_ch.is_closed() {
-            total = total + v
-            count = count + 1
-            v = resp_ch.receive()
+        while true {
+            let r = resp_ch.try_receive()
+            if r is Done { break }
+            if r is i64 {
+                total = total + r
+                count = count + 1
+            }
         }
 
         let accepted = acceptor.join()
@@ -231,11 +252,13 @@ tests {
         // Collect responses.
         let mut total = 0
         let mut count = 0
-        let mut v = resp_ch.receive()
-        while v != 0 || !resp_ch.is_closed() {
-            total = total + v
-            count = count + 1
-            v = resp_ch.receive()
+        while true {
+            let r = resp_ch.try_receive()
+            if r is Done { break }
+            if r is i64 {
+                total = total + r
+                count = count + 1
+            }
         }
 
         let batch_size = server.join()
@@ -279,11 +302,13 @@ tests {
         // Drain responses.
         let mut total = 0
         let mut count = 0
-        let mut v = resp_ch.receive()
-        while v != 0 || !resp_ch.is_closed() {
-            total = total + v
-            count = count + 1
-            v = resp_ch.receive()
+        while true {
+            let r = resp_ch.try_receive()
+            if r is Done { break }
+            if r is i64 {
+                total = total + r
+                count = count + 1
+            }
         }
 
         let handled = server.join()

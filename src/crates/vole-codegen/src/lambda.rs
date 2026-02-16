@@ -299,6 +299,17 @@ impl Cg<'_, '_, '_> {
         closure_ptr: Value,
     ) -> CodegenResult<(Value, TypeId, bool)> {
         let is_self_capture = Some(capture.name) == self.self_capture;
+        let resolve_symbol_text = |sym: Symbol| -> Option<&str> {
+            let idx = sym.index() as usize;
+            if idx < self.interner().len() {
+                return Some(self.interner().resolve(sym));
+            }
+            if idx < self.analyzed().interner.len() {
+                return Some(self.analyzed().interner.resolve(sym));
+            }
+            None
+        };
+        let capture_name = resolve_symbol_text(capture.name).map(str::to_string);
 
         if is_self_capture {
             // Self-capture: use the closure pointer we just created
@@ -309,14 +320,53 @@ impl Cg<'_, '_, '_> {
         } else if let Some((var, ty)) = self.vars.get(&capture.name) {
             // Normal capture: load from local variable
             Ok((self.builder.use_var(*var), *ty, false))
+        } else if let Some(capture_name) = capture_name.as_deref()
+            && let Some((var, ty)) = self.vars.iter().find_map(|(sym, (var, ty))| {
+                resolve_symbol_text(*sym)
+                    .filter(|name| *name == capture_name)
+                    .map(|_| (*var, *ty))
+            })
+        {
+            // Fallback for cross-interner symbol-id mismatches: match by symbol name.
+            Ok((self.builder.use_var(var), ty, false))
         } else if let Some(binding) = self.get_capture(&capture.name).copied() {
             // Transitive capture: load from parent closure's captures
             let captured = self.load_capture(&binding)?;
             Ok((captured.value, captured.type_id, false))
+        } else if let Some(capture_name) = capture_name.as_deref()
+            && let Some(binding) = self.captures.as_ref().and_then(|captures| {
+                captures.bindings.iter().find_map(|(sym, binding)| {
+                    resolve_symbol_text(*sym)
+                        .filter(|name| *name == capture_name)
+                        .map(|_| *binding)
+                })
+            })
+        {
+            // Same fallback for transitive captures when Symbol IDs differ by interner.
+            let captured = self.load_capture(&binding)?;
+            Ok((captured.value, captured.type_id, false))
         } else {
+            let format_sym = |sym: Symbol| {
+                resolve_symbol_text(sym)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{sym:?}"))
+            };
+            let available_vars: Vec<String> =
+                self.vars.keys().map(|sym| format_sym(*sym)).collect();
+            let parent_captures: Vec<String> = self
+                .captures
+                .as_ref()
+                .map(|caps| caps.bindings.keys().map(|sym| format_sym(*sym)).collect())
+                .unwrap_or_default();
             Err(CodegenError::not_found(
                 "captured variable",
-                format!("{:?}", capture.name),
+                format!(
+                    "{}; vars={:?}; parent_captures={:?}; self_capture={:?}",
+                    capture_name.unwrap_or_else(|| format!("{:?}", capture.name)),
+                    available_vars,
+                    parent_captures,
+                    self.self_capture.map(format_sym)
+                ),
             ))
         }
     }

@@ -255,16 +255,23 @@ tests {
         assert(!ch.send(42))
     }
 
-    test "recv drains before returning 0 on close" {
+    test "try_receive drains then returns Done on close" {
         let ch = Channel.buffered<i64>(4)
         ch.send(10)
         ch.send(20)
         ch.close()
-        // Should still receive buffered values.
-        assert(ch.receive() == 10)
-        assert(ch.receive() == 20)
-        // Now empty + closed.
-        assert(ch.receive() == 0)
+        let first = ch.try_receive()
+        let second = ch.try_receive()
+        let done = ch.try_receive()
+        assert(first is i64)
+        assert(second is i64)
+        if first is i64 {
+            assert(first == 10)
+        }
+        if second is i64 {
+            assert(second == 20)
+        }
+        assert(done is Done)
     }
 
     test "double close is no-op" {

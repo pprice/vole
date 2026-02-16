@@ -29,7 +29,7 @@ external("std:task") {
     func "channel_recv" as _channel_recv(ch: handle) -> RecvResult
     func "channel_close" as _channel_close(ch: handle)
     func "channel_is_closed" as _channel_is_closed(ch: handle) -> i64
-    func "task_run" as _task_run(closure: handle) -> handle
+    func "task_run" as _task_run<T>(closure: () -> T) -> handle
     func "task_join" as _task_join(task: handle) -> JoinResult
     func "task_cancel" as _task_cancel(task: handle)
     func "task_is_done" as _task_is_done(task: handle) -> i64
@@ -69,14 +69,14 @@ struct SelectResult {
 // Task - spawned green thread handle
 // =============================================================================
 
-class Task {
+class Task<T: Sendable> {
     _handle: handle,
 
     statics {
         // Spawn a task from a closure. The closure runs on the M:1 scheduler.
         // Returns a Task handle for join/cancel operations.
-        func run(body: () -> i64) -> Task {
-            return Task { _handle: _task_run(body) }
+        func run(body: () -> T) -> Task<T> {
+            return Task<T> { _handle: _task_run(body) }
         }
 
         // Create a streaming iterator backed by a producer task.
@@ -90,16 +90,16 @@ class Task {
         //       emit(3)
         //   })
         //   for v in s { println(v) }
-        func stream(producer: ((i64) -> void) -> void) -> Iterator<i64> {
-            let ch = Channel.buffered<i64>(1)
-            let task = Task.run(() -> i64 => {
-                producer((value: i64) => {
+        func stream(producer: ((T) -> void) -> void) -> Iterator<T> {
+            let ch = Channel<T> { _ptr: _channel_new(1) }
+            let task = Task.run<i64>(() -> i64 => {
+                producer((value: T) => {
                     _ = ch.send(value)
                 })
                 ch.close()
                 return 0
             })
-            return StreamIterator { _ch: ch._ptr, _task: task._handle }
+            return StreamIterator<T> { _ch: ch._ptr, _task: task._handle }
         }
 
         // Create a stateful actor backed by a task and channel.
@@ -115,8 +115,8 @@ class Task {
         //   let final_count = counter.close_and_join()
         //   assert(final_count == 2)
         func state(initial: i64, handler: (i64, i64) -> i64) -> StateActor {
-            let ch = Channel.buffered<i64>(8)
-            let task = Task.run(() -> i64 => {
+            let ch = Channel<i64> { _ptr: _channel_new(8) }
+            let task = Task.run<i64>(() -> i64 => {
                 let mut current = initial
                 let mut r = _channel_recv(ch._ptr)
                 while r.tag != -1 {
@@ -173,9 +173,9 @@ class Task {
 
         // Fan-out: spawn one task per closure and collect all results.
         // Results are returned in the same order as the input closures.
-        func all(fns: [() -> i64]) -> [i64] {
+        func all(fns: [() -> T]) -> [T] {
             // Spawn all tasks first.
-            let tasks: [Task] = []
+            let tasks: [Task<T>] = []
             let mut i = 0
             while i < fns.length() {
                 tasks.push(Task.run(fns[i]))
@@ -183,7 +183,7 @@ class Task {
             }
 
             // Join all tasks and collect results in order.
-            let results: [i64] = []
+            let results: [T] = []
             let mut j = 0
             while j < tasks.length() {
                 results.push(tasks[j].join())
@@ -191,15 +191,27 @@ class Task {
             }
             return results
         }
+
+        // Transform all items and collect results.
+        func parallel(items: [T], transform: (T) -> T) -> [T] {
+            let fns: [() -> T] = []
+            let mut i = 0
+            while i < items.length() {
+                let item = items[i]
+                fns.push(() -> T => { return transform(item) })
+                i = i + 1
+            }
+            return Task.all(fns)
+        }
+
     }
 
     // Block until the task completes and return its result.
     // Panics if the task was cancelled or panicked.
     // NOTE: codegen intercepts this method and emits inline tag extraction.
     // The body below is a fallback that is never called at runtime.
-    func join() -> i64 {
-        let r = _task_join(self._handle)
-        return r.value
+    func join() -> T {
+        return panic("Task.join should be codegen-intercepted")
     }
 
     // Request cooperative cancellation of the task.
@@ -293,18 +305,15 @@ implement Iterator<T> for ChannelIterator<T> {
 // StreamIterator - drains a Task.stream's channel, keeping the task alive
 // =============================================================================
 
-class StreamIterator implements Iterator<i64> {
+class StreamIterator<T: Sendable> implements Iterator<T> {
     _ch: handle,
     _task: handle,
 }
 
-implement Iterator<i64> for StreamIterator {
-    func next() -> i64 | Done {
-        let r = _channel_recv(self._ch)
-        if r.tag == -1 {
-            return Done {}
-        }
-        return r.value
+implement Iterator<T> for StreamIterator<T> {
+    func next() -> T | Done {
+        let ch = Channel<T> { _ptr: self._ch }
+        return ch.try_receive()
     }
 }
 
@@ -343,14 +352,6 @@ class StateActor {
 //   })
 //   // results contains [10, 20, 30, 40] in some order
 func parallel(items: [i64], max: i64, transform: (i64) -> i64) -> [i64] {
-    // Use Task.all to apply transform to each item concurrently.
-    // Task.all spawns up to items.length() tasks and collects results.
-    let fns: [() -> i64] = []
-    let mut i = 0
-    while i < items.length() {
-        let item = items[i]
-        fns.push(() -> i64 => { return transform(item) })
-        i = i + 1
-    }
-    return Task.all(fns)
+    _ = max
+    return Task.parallel<i64>(items, transform)
 }

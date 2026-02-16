@@ -137,7 +137,7 @@ impl Cg<'_, '_, '_> {
                 ("Channel", "try_receive") => {
                     return self.channel_try_recv_call(&obj, mc.method, expr_id);
                 }
-                ("Task", "join") => return self.task_join_call(&obj),
+                ("Task", "join") => return self.task_join_call(&obj, expr_id),
                 _ => {}
             }
         }
@@ -1109,6 +1109,16 @@ impl Cg<'_, '_, '_> {
         self.try_substitute_type(elem_type_id)
     }
 
+    /// Extract Task<T>'s concrete result type, defaulting to i64 when unavailable.
+    fn task_result_type_id(&self, task_type_id: TypeId) -> TypeId {
+        let result_type_id = self
+            .arena()
+            .unwrap_class(task_type_id)
+            .and_then(|(_, type_args)| type_args.first().copied())
+            .unwrap_or(TypeId::I64);
+        self.try_substitute_type(result_type_id)
+    }
+
     /// Handle Channel.send(value) — emit the correct RuntimeTypeId tag via codegen.
     ///
     /// Instead of relying on a hardcoded tag in the Vole source, the codegen computes
@@ -1206,7 +1216,7 @@ impl Cg<'_, '_, '_> {
         // In some monomorphized module contexts, expr-level type lookup can fall back
         // to void. Recover by reading the method signature and applying substitutions.
         let return_type_id = if inferred_return_type != TypeId::VOID {
-            inferred_return_type
+            self.substitute_type(inferred_return_type)
         } else {
             let method_name_id = self.method_name_id(method_sym)?;
             let class_type_def_id = self
@@ -1234,7 +1244,7 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| {
                     CodegenError::not_found("method return type", "Channel.try_receive")
                 })?;
-            self.try_substitute_type(abstract_return_type)
+            self.substitute_type(abstract_return_type)
         };
 
         // Look up channel_recv wrapper.
@@ -1302,9 +1312,16 @@ impl Cg<'_, '_, '_> {
     /// The `task_join` wrapper returns a `JoinResult { tag, value }` struct via
     /// register pair (RAX + RDX). We extract the value field and return it as a
     /// typed CompiledValue.
-    fn task_join_call(&mut self, task_obj: &CompiledValue) -> CodegenResult<CompiledValue> {
-        // The return type (currently always i64 since Task is not generic yet)
-        let result_type_id = TypeId::I64;
+    fn task_join_call(
+        &mut self,
+        task_obj: &CompiledValue,
+        expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        let result_type_id = self
+            .get_substituted_return_type(&expr_id)
+            .or_else(|| self.get_expr_type(&expr_id))
+            .map(|ty| self.substitute_type(ty))
+            .unwrap_or_else(|| self.task_result_type_id(task_obj.type_id));
 
         // Look up the task_join wrapper
         let native_func = self
@@ -1359,10 +1376,17 @@ impl Cg<'_, '_, '_> {
             .get_external_binding(*method_id)
             .ok_or_else(|| CodegenError::not_found("external binding for Iterator", method_name))?;
 
-        // Get the substituted return type from sema
+        // In monomorphized module contexts, substituted_return_type can be absent.
+        // Fall back to expression type before failing.
         let return_type_id = self
             .get_substituted_return_type(&expr_id)
-            .expect("INTERNAL: iterator method: missing substituted_return_type from sema");
+            .or_else(|| self.get_expr_type(&expr_id))
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "iterator method return type",
+                    format!("{method_name} (expr_id={expr_id:?})"),
+                )
+            })?;
 
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values

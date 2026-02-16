@@ -1,8 +1,9 @@
 // Integration test: HTTP client-server simulation.
 //
 // Simulates a 10MB POST body sent via a buffered(4) channel.
-// Phase 1 channels carry i64, so each "chunk" is an i64 value
-// encoding the chunk index. The pattern tests backpressure
+// Uses i64 chunk markers and exercises backpressure,
+// correct data flow, and scheduler fairness.
+// The pattern tests backpressure
 // (bounded buffer), correct data flow (ordered chunks), and
 // scheduler fairness (2560 iterations with cooperative yield
 // on channel blocking).
@@ -22,8 +23,7 @@ tests {
         let client = Task.run(() -> i64 => {
             let mut sent = 0
             while sent < CHUNK_COUNT {
-                // Use (sent + 1) to avoid 0 (channel-closed sentinel).
-                body_ch.send(sent + 1)
+                body_ch.send(sent)
                 sent = sent + 1
             }
             body_ch.close()
@@ -33,14 +33,15 @@ tests {
         // Server task: accumulates all chunks, verifies order and total.
         let server = Task.run(() -> i64 => {
             let mut total_chunks = 0
-            let mut expected = 1
-            // Manual iter loop (avoids vu-axa7 .iter() capture bug).
-            let mut v = body_ch.receive()
-            while v != 0 || !body_ch.is_closed() {
-                assert(v == expected)
-                expected = expected + 1
-                total_chunks = total_chunks + 1
-                v = body_ch.receive()
+            let mut expected = 0
+            while true {
+                let r = body_ch.try_receive()
+                if r is Done { break }
+                if r is i64 {
+                    assert(r == expected)
+                    expected = expected + 1
+                    total_chunks = total_chunks + 1
+                }
             }
             return total_chunks
         })
@@ -71,10 +72,12 @@ tests {
         // Consumer: sums all squares
         let consumer = Task.run(() -> i64 => {
             let mut sum = 0
-            let mut v = ch.receive()
-            while v != 0 || !ch.is_closed() {
-                sum = sum + v
-                v = ch.receive()
+            while true {
+                let r = ch.try_receive()
+                if r is Done { break }
+                if r is i64 {
+                    sum = sum + r
+                }
             }
             return sum
         })
@@ -105,11 +108,13 @@ tests {
         // Transformer: doubles each value
         let transformer = Task.run(() -> i64 => {
             let mut count = 0
-            let mut v = raw_ch.receive()
-            while v != 0 || !raw_ch.is_closed() {
-                processed_ch.send(v * 2)
-                count = count + 1
-                v = raw_ch.receive()
+            while true {
+                let r = raw_ch.try_receive()
+                if r is Done { break }
+                if r is i64 {
+                    processed_ch.send(r * 2)
+                    count = count + 1
+                }
             }
             processed_ch.close()
             return count
@@ -118,10 +123,12 @@ tests {
         // Consumer: sums the transformed values
         let consumer = Task.run(() -> i64 => {
             let mut sum = 0
-            let mut v = processed_ch.receive()
-            while v != 0 || !processed_ch.is_closed() {
-                sum = sum + v
-                v = processed_ch.receive()
+            while true {
+                let r = processed_ch.try_receive()
+                if r is Done { break }
+                if r is i64 {
+                    sum = sum + r
+                }
             }
             return sum
         })
@@ -154,11 +161,13 @@ tests {
         // Worker 1: processes items from work channel
         let worker1 = Task.run(() -> i64 => {
             let mut count = 0
-            let mut item = work_ch.receive()
-            while item != 0 || !work_ch.is_closed() {
-                result_ch.send(item * 10)
-                count = count + 1
-                item = work_ch.receive()
+            while true {
+                let r = work_ch.try_receive()
+                if r is Done { break }
+                if r is i64 {
+                    result_ch.send(r * 10)
+                    count = count + 1
+                }
             }
             return count
         })
@@ -166,11 +175,13 @@ tests {
         // Worker 2: also processes items from work channel
         let worker2 = Task.run(() -> i64 => {
             let mut count = 0
-            let mut item = work_ch.receive()
-            while item != 0 || !work_ch.is_closed() {
-                result_ch.send(item * 10)
-                count = count + 1
-                item = work_ch.receive()
+            while true {
+                let r = work_ch.try_receive()
+                if r is Done { break }
+                if r is i64 {
+                    result_ch.send(r * 10)
+                    count = count + 1
+                }
             }
             return count
         })
@@ -186,10 +197,12 @@ tests {
 
         // Sum all results from the result channel
         let mut total = 0
-        let mut v = result_ch.receive()
-        while v != 0 || !result_ch.is_closed() {
-            total = total + v
-            v = result_ch.receive()
+        while true {
+            let r = result_ch.try_receive()
+            if r is Done { break }
+            if r is i64 {
+                total = total + r
+            }
         }
         // Sum of 10*1 + 10*2 + ... + 10*20 = 10 * (20*21/2) = 2100
         assert(total == 2100)

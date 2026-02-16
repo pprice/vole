@@ -22,7 +22,7 @@ impl Cg<'_, '_, '_> {
         elements: &[Expr],
         expr: &Expr,
     ) -> CodegenResult<CompiledValue> {
-        self.array_literal_with_union_hint(elements, expr, None)
+        self.array_literal_with_union_hint(elements, expr, None, None)
     }
 
     pub(crate) fn expr_with_expected_type(
@@ -34,8 +34,17 @@ impl Cg<'_, '_, '_> {
             .arena()
             .unwrap_array(expected_type_id)
             .filter(|&elem_type_id| self.arena().is_union(elem_type_id));
+        let expected_array_type = self
+            .arena()
+            .unwrap_array(expected_type_id)
+            .map(|_| expected_type_id);
         if let ExprKind::ArrayLiteral(elements) = &expr.kind {
-            let compiled = self.array_literal_with_union_hint(elements, expr, forced_union_elem)?;
+            let compiled = self.array_literal_with_union_hint(
+                elements,
+                expr,
+                forced_union_elem,
+                expected_array_type,
+            )?;
             Ok(self.mark_rc_owned(compiled))
         } else {
             self.expr(expr)
@@ -47,6 +56,7 @@ impl Cg<'_, '_, '_> {
         elements: &[Expr],
         expr: &Expr,
         forced_union_elem: Option<TypeId>,
+        expected_array_type: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
         // Check the inferred type from semantic analysis (module-aware)
         let inferred_type_id = self.get_expr_type(&expr.id);
@@ -64,7 +74,11 @@ impl Cg<'_, '_, '_> {
         let array_push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
         let inferred_elem_type =
             inferred_type_id.and_then(|array_type_id| self.arena().unwrap_array(array_type_id));
-        let expected_elem_type = forced_union_elem.or(inferred_elem_type);
+        let expected_elem_type_from_array =
+            expected_array_type.and_then(|array_type_id| self.arena().unwrap_array(array_type_id));
+        let expected_elem_type = forced_union_elem
+            .or(inferred_elem_type)
+            .or(expected_elem_type_from_array);
 
         for elem in elements {
             let compiled = if let Some(elem_type_id) = expected_elem_type {
@@ -110,7 +124,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Use type from ExpressionData - sema always records array/tuple types
-        let array_type_id = inferred_type_id.unwrap_or_else(|| {
+        let array_type_id = inferred_type_id.or(expected_array_type).unwrap_or_else(|| {
             unreachable!(
                 "array literal at line {} has no type from sema",
                 expr.span.line
