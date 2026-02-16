@@ -743,7 +743,7 @@ impl Compiler<'_> {
 
             // Try to find the static method in a class from the main program
             if let Some(class) = class_asts.get(&instance.class_name)
-                && let Some(ref statics) = class.statics
+                && let Some(statics) = class.statics
             {
                 let method = statics
                     .methods

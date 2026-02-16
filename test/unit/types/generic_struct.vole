@@ -178,3 +178,227 @@ tests "generic struct field expressions" {
         }
     }
 }
+
+// Generic struct with instance methods
+struct Container<T> {
+    item: T,
+
+    func get() -> T {
+        return self.item
+    }
+
+    func is_same(other: T) -> bool {
+        return self.item == other
+    }
+}
+
+// Generic struct with statics
+struct Wrapper<T> {
+    inner: T,
+
+    statics {
+        func of(v: T) -> Wrapper<T> {
+            return Wrapper { inner: v }
+        }
+    }
+
+    func unwrap() -> T {
+        return self.inner
+    }
+}
+
+// Generic struct with two type params and methods
+struct KeyVal<K, V> {
+    k: K,
+    v: V,
+
+    func get_key() -> K => self.k
+
+    func get_val() -> V => self.v
+}
+
+tests "generic struct instance methods" {
+    test "instance method returning T with i64" {
+        let c = Container { item: 42 }
+        assert(c.get() == 42)
+    }
+
+    test "instance method returning T with string" {
+        let c = Container { item: "hello" }
+        assert(c.get() == "hello")
+    }
+
+    test "instance method with T parameter" {
+        let c = Container { item: 10 }
+        assert(c.is_same(10))
+        assert(!c.is_same(20))
+    }
+
+    test "instance method with string T parameter" {
+        let c = Container { item: "abc" }
+        assert(c.is_same("abc"))
+        assert(!c.is_same("xyz"))
+    }
+
+    test "method on multi-param generic struct" {
+        let kv = KeyVal { k: "name", v: 42 }
+        assert(kv.get_key() == "name")
+        assert(kv.get_val() == 42)
+    }
+
+    test "method on multi-param generic struct reversed types" {
+        let kv = KeyVal { k: 100, v: "hundred" }
+        assert(kv.get_key() == 100)
+        assert(kv.get_val() == "hundred")
+    }
+
+    test "multiple monomorphized method instances coexist" {
+        let ci = Container { item: 1 }
+        let cs = Container { item: "x" }
+        let cb = Container { item: true }
+        assert(ci.get() == 1)
+        assert(cs.get() == "x")
+        assert(cb.get() == true)
+    }
+}
+
+tests "generic struct static methods" {
+    test "static factory method with i64" {
+        let w = Wrapper.of(42)
+        assert(w.inner == 42)
+    }
+
+    test "static factory method with string" {
+        let w = Wrapper.of("hello")
+        assert(w.inner == "hello")
+    }
+
+    test "static factory then instance method" {
+        let w = Wrapper.of(99)
+        assert(w.unwrap() == 99)
+    }
+
+    test "chained static and instance method" {
+        assert(Wrapper.of("chain").unwrap() == "chain")
+    }
+
+    test "multiple static instantiations coexist" {
+        let wi = Wrapper.of(1)
+        let ws = Wrapper.of("a")
+        let wb = Wrapper.of(true)
+        assert(wi.unwrap() == 1)
+        assert(ws.unwrap() == "a")
+        assert(wb.unwrap() == true)
+    }
+}
+
+// Free functions taking and returning generic structs
+func make_box(v: i64) -> Box<i64> {
+    return Box { value: v }
+}
+
+func make_str_box(s: string) -> Box<string> {
+    return Box { value: s }
+}
+
+func unbox_i64(b: Box<i64>) -> i64 {
+    return b.value
+}
+
+func unbox_str(b: Box<string>) -> string {
+    return b.value
+}
+
+func swap_pair(p: Pair<i64>) -> Pair<i64> {
+    return Pair { first: p.second, second: p.first }
+}
+
+tests "generic struct as function param and return" {
+    test "return generic struct from function" {
+        let b = make_box(42)
+        assert(b.value == 42)
+    }
+
+    test "return generic struct with string from function" {
+        let b = make_str_box("hello")
+        assert(b.value == "hello")
+    }
+
+    test "pass generic struct to function" {
+        let b = Box<i64> { value: 99 }
+        assert(unbox_i64(b) == 99)
+    }
+
+    test "pass generic struct with string to function" {
+        let b = Box<string> { value: "world" }
+        assert(unbox_str(b) == "world")
+    }
+
+    test "roundtrip generic struct through function" {
+        let original = Pair { first: 10, second: 20 }
+        let swapped = swap_pair(original)
+        assert(swapped.first == 20)
+        assert(swapped.second == 10)
+    }
+
+    test "multiple generic struct types as function return" {
+        let bi = make_box(1)
+        let bs = make_str_box("a")
+        assert(bi.value == 1)
+        assert(bs.value == "a")
+    }
+}
+
+tests "generic struct in arrays" {
+    test "array of Box<i64>" {
+        let boxes = [Box { value: 1 }, Box { value: 2 }, Box { value: 3 }]
+        assert(boxes.length() == 3)
+        assert(boxes[0].value == 1)
+        assert(boxes[1].value == 2)
+        assert(boxes[2].value == 3)
+    }
+
+    test "array of Box<string>" {
+        let boxes = [Box { value: "a" }, Box { value: "b" }]
+        assert(boxes.length() == 2)
+        assert(boxes[0].value == "a")
+        assert(boxes[1].value == "b")
+    }
+
+    test "array of Pair<i64>" {
+        let pairs = [Pair { first: 1, second: 2 }, Pair { first: 3, second: 4 }]
+        assert(pairs[0].first == 1)
+        assert(pairs[0].second == 2)
+        assert(pairs[1].first == 3)
+        assert(pairs[1].second == 4)
+    }
+
+    test "iterate over array of generic structs" {
+        let boxes = [Box { value: 10 }, Box { value: 20 }, Box { value: 30 }]
+        let mut sum = 0
+        for b in boxes {
+            sum = sum + b.value
+        }
+        assert(sum == 60)
+    }
+
+    test "map over array of generic structs" {
+        let boxes = [Box { value: 1 }, Box { value: 2 }, Box { value: 3 }]
+        let values = boxes.iter().map((b) => b.value).collect()
+        assert(values[0] == 1)
+        assert(values[1] == 2)
+        assert(values[2] == 3)
+    }
+
+    test "filter array of generic structs" {
+        let pairs = [
+            Pair { first: 1, second: 10 },
+            Pair { first: 2, second: 20 },
+            Pair { first: 3, second: 30 },
+        ]
+        let big = pairs.iter().filter((p) => p.first > 1).collect()
+        assert(big.length() == 2)
+        assert(big[0].first == 2)
+        assert(big[1].first == 3)
+    }
+}

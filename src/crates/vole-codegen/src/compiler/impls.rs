@@ -141,6 +141,10 @@ impl Compiler<'_> {
         struct_decl: &StructDecl,
         program: &vole_frontend::Program,
     ) -> CodegenResult<()> {
+        // Skip generic structs - they're compiled via monomorphized instances
+        if struct_decl.has_type_params() {
+            return Ok(());
+        }
         let module_id = self.program_module();
         self.compile_type_methods(TypeMethodsData::from_decl(struct_decl), program, module_id)
     }

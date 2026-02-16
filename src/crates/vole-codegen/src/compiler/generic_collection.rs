@@ -2,37 +2,63 @@ use rustc_hash::FxHashMap;
 
 use super::Compiler;
 
-use vole_frontend::ast::InterfaceMethod;
+use vole_frontend::ast::{InterfaceMethod, StaticsBlock};
 use vole_frontend::{Decl, FuncDecl, Program, TypeExprKind};
 use vole_identity::{ModuleId, NameId};
 
+/// A lightweight view into the methods and statics of a generic type declaration
+/// (class or struct). Used during monomorphization to find method ASTs.
+pub(super) struct GenericTypeMethodsAst<'a> {
+    pub(super) methods: &'a [FuncDecl],
+    pub(super) statics: Option<&'a StaticsBlock>,
+}
+
 impl Compiler<'_> {
-    /// Build maps of generic class NameIds to their AST declarations.
+    /// Build maps of generic type NameIds to their method/statics ASTs.
+    /// Covers both classes and structs with type parameters.
     /// Used by both class method and static method monomorphization.
-    /// Recursively walks into tests blocks to find generic classes declared there.
+    /// Recursively walks into tests blocks to find generic types declared there.
     pub(super) fn build_generic_type_asts<'a>(
         &self,
         program: &'a Program,
-    ) -> FxHashMap<NameId, &'a vole_frontend::ast::ClassDecl> {
+    ) -> FxHashMap<NameId, GenericTypeMethodsAst<'a>> {
         let mut result = FxHashMap::default();
         let program_module = self.program_module();
-        self.collect_generic_class_asts(&program.declarations, program_module, &mut result);
+        self.collect_generic_type_asts(&program.declarations, program_module, &mut result);
         result
     }
 
-    /// Recursively collect generic class ASTs from declarations, including tests blocks.
-    fn collect_generic_class_asts<'a>(
+    /// Recursively collect generic type ASTs from declarations, including tests blocks.
+    fn collect_generic_type_asts<'a>(
         &self,
         decls: &'a [Decl],
         module_id: ModuleId,
-        result: &mut FxHashMap<NameId, &'a vole_frontend::ast::ClassDecl>,
+        result: &mut FxHashMap<NameId, GenericTypeMethodsAst<'a>>,
     ) {
         for decl in decls {
             match decl {
                 Decl::Class(class) if !class.type_params.is_empty() => {
                     let query = self.query();
                     if let Some(name_id) = query.try_name_id(module_id, &[class.name]) {
-                        result.insert(name_id, class);
+                        result.insert(
+                            name_id,
+                            GenericTypeMethodsAst {
+                                methods: &class.methods,
+                                statics: class.statics.as_ref(),
+                            },
+                        );
+                    }
+                }
+                Decl::Struct(s) if !s.type_params.is_empty() => {
+                    let query = self.query();
+                    if let Some(name_id) = query.try_name_id(module_id, &[s.name]) {
+                        result.insert(
+                            name_id,
+                            GenericTypeMethodsAst {
+                                methods: &s.methods,
+                                statics: s.statics.as_ref(),
+                            },
+                        );
                     }
                 }
                 Decl::Tests(tests_decl) => {
@@ -41,7 +67,7 @@ impl Compiler<'_> {
                         .query()
                         .tests_virtual_module(tests_decl.span)
                         .unwrap_or(module_id);
-                    self.collect_generic_class_asts(&tests_decl.decls, vm_id, result);
+                    self.collect_generic_type_asts(&tests_decl.decls, vm_id, result);
                 }
                 _ => {}
             }
@@ -117,9 +143,9 @@ impl Compiler<'_> {
         None
     }
 
-    /// Find a method in a generic class defined in a loaded module (e.g. prelude).
-    /// Searches module_programs for the class's module and looks for the method in
-    /// the generic class declaration found there.
+    /// Find an instance method in a generic class or struct defined in a loaded module.
+    /// Searches module_programs for the type's module and looks for the method in
+    /// the generic type declaration found there.
     pub(super) fn find_class_method_in_modules(
         &self,
         class_name_id: NameId,
@@ -136,31 +162,42 @@ impl Compiler<'_> {
         // Look up the module program and its interner
         let (module_program, module_interner) = self.analyzed.module_programs.get(&module_path)?;
 
-        // Search for the generic class in this module's declarations
+        // Search for the generic class or struct in this module's declarations
         for decl in &module_program.declarations {
-            if let Decl::Class(class) = decl
-                && !class.type_params.is_empty()
-            {
-                // Use module interner for name resolution (Symbol is per-interner)
-                let query = self.query();
-                if let Some(name_id) =
-                    query.try_name_id_with_interner(module_id, &[class.name], module_interner)
-                    && name_id == class_name_id
-                {
-                    // Found the class - look for the method using module interner
-                    return class
-                        .methods
-                        .iter()
-                        .find(|m| module_interner.resolve(m.name) == method_name_str);
+            match decl {
+                Decl::Class(class) if !class.type_params.is_empty() => {
+                    let query = self.query();
+                    if let Some(name_id) =
+                        query.try_name_id_with_interner(module_id, &[class.name], module_interner)
+                        && name_id == class_name_id
+                    {
+                        return class
+                            .methods
+                            .iter()
+                            .find(|m| module_interner.resolve(m.name) == method_name_str);
+                    }
                 }
+                Decl::Struct(s) if !s.type_params.is_empty() => {
+                    let query = self.query();
+                    if let Some(name_id) =
+                        query.try_name_id_with_interner(module_id, &[s.name], module_interner)
+                        && name_id == class_name_id
+                    {
+                        return s
+                            .methods
+                            .iter()
+                            .find(|m| module_interner.resolve(m.name) == method_name_str);
+                    }
+                }
+                _ => {}
             }
         }
         None
     }
 
-    /// Find a static method in a generic class defined in a loaded module (e.g. prelude).
-    /// Searches module_programs for the class's module and looks for the static method
-    /// in the generic class declaration found there.
+    /// Find a static method in a generic class or struct defined in a loaded module.
+    /// Searches module_programs for the type's module and looks for the static method
+    /// in the generic type declaration found there.
     pub(super) fn find_static_method_in_modules(
         &self,
         class_name_id: NameId,
@@ -176,22 +213,36 @@ impl Compiler<'_> {
         let (module_program, module_interner) = self.analyzed.module_programs.get(&module_path)?;
 
         for decl in &module_program.declarations {
-            if let Decl::Class(class) = decl
-                && !class.type_params.is_empty()
-            {
-                // Use module interner for name resolution (Symbol is per-interner)
-                if let Some(name_id) = self.query().try_name_id_with_interner(
-                    module_id,
-                    &[class.name],
-                    module_interner,
-                ) && name_id == class_name_id
-                    && let Some(ref statics) = class.statics
-                {
-                    return statics
-                        .methods
-                        .iter()
-                        .find(|m| module_interner.resolve(m.name) == method_name_str);
+            match decl {
+                Decl::Class(class) if !class.type_params.is_empty() => {
+                    if let Some(name_id) = self.query().try_name_id_with_interner(
+                        module_id,
+                        &[class.name],
+                        module_interner,
+                    ) && name_id == class_name_id
+                        && let Some(ref statics) = class.statics
+                    {
+                        return statics
+                            .methods
+                            .iter()
+                            .find(|m| module_interner.resolve(m.name) == method_name_str);
+                    }
                 }
+                Decl::Struct(s) if !s.type_params.is_empty() => {
+                    if let Some(name_id) = self.query().try_name_id_with_interner(
+                        module_id,
+                        &[s.name],
+                        module_interner,
+                    ) && name_id == class_name_id
+                        && let Some(ref statics) = s.statics
+                    {
+                        return statics
+                            .methods
+                            .iter()
+                            .find(|m| module_interner.resolve(m.name) == method_name_str);
+                    }
+                }
+                _ => {}
             }
         }
         None
