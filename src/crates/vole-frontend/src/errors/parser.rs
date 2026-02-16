@@ -208,4 +208,14 @@ pub enum ParserError {
         #[label("not valid Vole syntax")]
         span: SourceSpan,
     },
+
+    #[error("duplicate default arm in external where mapping")]
+    #[diagnostic(
+        code(E1037),
+        help("only one `default => \"...\"` arm is allowed in a where mapping block")
+    )]
+    DuplicateWhereDefaultArm {
+        #[label("duplicate default arm")]
+        span: SourceSpan,
+    },
 }

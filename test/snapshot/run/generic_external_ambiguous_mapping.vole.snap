@@ -1,0 +1,4 @@
+[stdout]
+
+[stderr]
+compilation error: generic external mapping not found: choose: ambiguous where mapping; multiple exact arms match concrete substitutions: i64 => "array_len", string => "string_len"

@@ -128,23 +128,6 @@ impl Cg<'_, '_, '_> {
             return self.array_push_call(&obj, mc);
         }
 
-        // Handle std:task Channel/Task method interceptions — emit RuntimeTypeId
-        // tags and struct-return unboxing directly in codegen, replacing
-        // Vole-level stubs. This must be declaration-identity based (not name
-        // based), otherwise user-defined classes named Task/Channel can crash.
-        if self.is_std_task_class_instance(obj.type_id, "Channel") {
-            match method_name_str {
-                "send" => return self.channel_send_call(&obj, mc),
-                "receive" => return self.channel_recv_call(&obj),
-                "try_receive" => return self.channel_try_recv_call(&obj, mc.method, expr_id),
-                _ => {}
-            }
-        } else if self.is_std_task_class_instance(obj.type_id, "Task")
-            && method_name_str == "join"
-        {
-            return self.task_join_call(&obj, expr_id);
-        }
-
         // Handle RuntimeIterator methods - these call external functions directly
         // without interface boxing or vtable dispatch
         let runtime_iter_elem = self.arena().unwrap_runtime_iterator(obj.type_id);
@@ -278,6 +261,44 @@ impl Cg<'_, '_, '_> {
                 let return_type_id = resolved.concrete_return_hint().unwrap_or_else(|| {
                     self.maybe_convert_iterator_return_type(resolved.return_type_id())
                 });
+
+                // Generic external methods with where-mappings are dispatched through
+                // the generic intrinsic resolver (exact arm first, default arm fallback).
+                if let Some(type_def_id) = resolved.type_def_id()
+                    && let Some(generic_ext_info) = self
+                        .analyzed()
+                        .implement_registry()
+                        .get_generic_external_method(type_def_id, resolved.method_name_id())
+                {
+                    let empty_substitutions = rustc_hash::FxHashMap::default();
+                    let substitutions = self.substitutions.unwrap_or(&empty_substitutions);
+                    let key = self.resolve_intrinsic_key_for_monomorph(
+                        method_name_str,
+                        &generic_ext_info.type_mappings,
+                        substitutions,
+                    )?;
+                    let ext_module_path = self
+                        .name_table()
+                        .last_segment_str(generic_ext_info.module_path)
+                        .unwrap_or_default();
+                    let concrete_param_type_ids: Option<Vec<TypeId>> = param_type_ids
+                        .as_ref()
+                        .map(|ids| ids.iter().map(|&ty| self.try_substitute_type(ty)).collect());
+
+                    // Clean up args from the initial compilation before generic intrinsic
+                    // dispatch recompiles with expected type context.
+                    self.consume_rc_args(&mut rc_temps)?;
+                    let mut obj = obj;
+                    self.consume_rc_value(&mut obj)?;
+                    return self.call_generic_external_intrinsic_args(
+                        &ext_module_path,
+                        &key,
+                        &mc.args,
+                        return_type_id,
+                        concrete_param_type_ids.as_deref(),
+                    );
+                }
+
                 let result = self.call_external_id(external_info, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call completes.
                 // In chained calls like s.trim().to_upper(), the intermediate
@@ -830,28 +851,41 @@ impl Cg<'_, '_, '_> {
             let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
                 (
                     inst.original_name,
+                    inst.func_type.params_id.to_vec(),
                     inst.func_type.return_type_id,
                     inst.substitutions.clone(),
                 )
             });
 
-            if let Some((original_name, mono_return_type_id, substitutions)) = instance_data
+            if let Some((original_name, mono_param_type_ids, mono_return_type_id, substitutions)) =
+                instance_data
                 && let Some(callee_name) = self.name_table().last_segment_str(original_name)
                 && let Some(generic_ext_info) = self
                     .analyzed()
                     .implement_registry()
                     .get_generic_external(&callee_name)
-                && let Some(key) = self.find_intrinsic_key_for_monomorph(
+            {
+                let key = self.resolve_intrinsic_key_for_monomorph(
+                    &callee_name,
                     &generic_ext_info.type_mappings,
                     &substitutions,
-                )
-            {
+                )?;
                 let ext_module_path = self
                     .name_table()
                     .last_segment_str(generic_ext_info.module_path)
                     .unwrap_or_default();
 
                 let return_type_id = self.substitute_type(mono_return_type_id);
+                let concrete_param_type_ids: Vec<TypeId> = mono_param_type_ids
+                    .iter()
+                    .map(|&ty| {
+                        self.arena().expect_substitute(
+                            ty,
+                            &substitutions,
+                            "module generic intrinsic args",
+                        )
+                    })
+                    .collect();
 
                 // Clean up rc_temps from initial arg compilation
                 // (generic intrinsic recompiles args internally)
@@ -861,6 +895,7 @@ impl Cg<'_, '_, '_> {
                     &key,
                     &mc.args,
                     return_type_id,
+                    Some(&concrete_param_type_ids),
                 );
             }
         }
@@ -1093,296 +1128,6 @@ impl Cg<'_, '_, '_> {
             types::I64,
             void_type_id,
         ))
-    }
-
-    /// Resolve a type from std:task by short name, if that module is loaded.
-    fn std_task_type_def_id(&self, short_name: &str) -> Option<TypeDefId> {
-        let module_id = self.query().module_id_if_known("std:task")?;
-        self.query().resolve_type_def_by_str(module_id, short_name)
-    }
-
-    /// Whether a class instance type is exactly std:task::<short_name>.
-    fn is_std_task_class_instance(&self, class_type_id: TypeId, short_name: &str) -> bool {
-        let Some((type_def_id, _)) = self.arena().unwrap_class(class_type_id) else {
-            return false;
-        };
-        self.std_task_type_def_id(short_name) == Some(type_def_id)
-    }
-
-    /// Whether a TypeDefId is exactly std:task::<short_name>.
-    fn is_std_task_type_def(&self, type_def_id: TypeDefId, short_name: &str) -> bool {
-        self.std_task_type_def_id(short_name) == Some(type_def_id)
-    }
-
-    /// Extract the first type argument from a generic class (e.g. Channel<T>, Task<T>,
-    /// StateActor<T>), applying any active monomorphization substitutions.
-    /// Defaults to i64 when the class has no type arguments.
-    fn class_first_type_arg(&self, class_type_id: TypeId) -> TypeId {
-        let raw = self
-            .arena()
-            .unwrap_class(class_type_id)
-            .and_then(|(_, type_args)| type_args.first().copied())
-            .unwrap_or(TypeId::I64);
-        self.try_substitute_type(raw)
-    }
-
-    /// Emit `vole_task_set_spawn_tag(tag)` before `Task.run(closure)` so the
-    /// scheduler knows the closure's return-value ABI (f64 in XMM0 vs i64 in RAX).
-    ///
-    /// Returns `Ok(Some(..))` only if this is NOT a `Task.run` call (never handles
-    /// the call itself — always returns `Ok(None)` for `Task.run` so the normal
-    /// monomorphized call path handles it). The side-effect is the emitted tag-set
-    /// call that executes before the actual `_task_run` native call.
-    fn try_task_run_intercept(
-        &mut self,
-        type_def_id: TypeDefId,
-        mc: &MethodCallExpr,
-        _expr_id: NodeId,
-    ) -> CodegenResult<Option<CompiledValue>> {
-        // Check if this is std:task::Task.run
-        if !self.is_std_task_type_def(type_def_id, "Task") {
-            return Ok(None);
-        }
-        let method_name = self.interner().resolve(mc.method);
-        if method_name != "run" {
-            return Ok(None);
-        }
-        if mc.args.is_empty() {
-            return Ok(None);
-        }
-
-        // Peek at the first argument's type to determine the closure's return type.
-        // We need the type WITHOUT compiling the argument (compilation happens later
-        // in the normal call path).
-        let closure_expr = &mc.args[0];
-        let return_type_id = self
-            .get_expr_type(&closure_expr.id)
-            .and_then(|func_type_id| {
-                self.arena()
-                    .unwrap_function(func_type_id)
-                    .map(|(_, ret, _)| self.try_substitute_type(ret))
-            })
-            .unwrap_or(TypeId::I64);
-
-        // Compute the RuntimeTypeId tag for the return type.
-        let tag = {
-            let arena = self.arena();
-            array_element_tag_id(return_type_id, arena)
-        };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
-
-        // Emit: vole_task_set_spawn_tag(tag)
-        self.call_runtime_void(RuntimeKey::TaskSetSpawnTag, &[tag_val])?;
-
-        // Return None so the normal monomorphized call path handles the actual call.
-        Ok(None)
-    }
-
-    /// Handle Channel.send(value) — emit the correct RuntimeTypeId tag via codegen.
-    ///
-    /// Instead of relying on a hardcoded tag in the Vole source, the codegen computes
-    /// the tag from the concrete Channel<T> element type and calls the
-    /// `channel_send` wrapper directly.
-    fn channel_send_call(
-        &mut self,
-        ch_obj: &CompiledValue,
-        mc: &MethodCallExpr,
-    ) -> CodegenResult<CompiledValue> {
-        if mc.args.len() != 1 {
-            return Err(CodegenError::arg_count("Channel.send", 1, mc.args.len()));
-        }
-
-        // Compute the RuntimeTypeId tag for Channel<T>'s concrete element type.
-        let elem_type_id = self.class_first_type_arg(ch_obj.type_id);
-        // Compile with expected type context and run normal coercion so generic
-        // Channel<T> calls behave like regular method calls (especially union T).
-        let value = self.expr_with_expected_type(&mc.args[0], elem_type_id)?;
-        let value = self.coerce_to_type(value, elem_type_id)?;
-        let tag = {
-            let arena = self.arena();
-            array_element_tag_id(elem_type_id, arena)
-        };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
-
-        // Convert the value to i64 bits for storage
-        let value_bits = convert_to_i64_for_storage(self.builder, &value);
-
-        // Look up the channel_send wrapper in the native registry
-        let native_func = self
-            .native_registry()
-            .lookup("std:task", "channel_send")
-            .ok_or_else(|| CodegenError::not_found("native function", "std:task::channel_send"))?;
-
-        // Extract _ptr field (slot 0) from Channel class instance via runtime getter
-        let ch_handle = self.get_field_cached(ch_obj.value, 0)?;
-
-        // Call channel_send_wrapper(ch_handle, tag, value_bits) -> i64
-        let call_inst = self.call_native_indirect(native_func, &[ch_handle, tag_val, value_bits]);
-        let results = self.builder.inst_results(call_inst);
-        let send_result = results[0];
-
-        // Return (send_result == 0) as bool — true on success, false if closed
-        let zero = self.builder.ins().iconst(types::I64, 0);
-        let is_ok = self.builder.ins().icmp(IntCC::Equal, send_result, zero);
-        Ok(CompiledValue::new(is_ok, types::I8, TypeId::BOOL))
-    }
-
-    /// Call a native FFI function that returns a `{ tag, value }` struct, extract
-    /// the value (slot 1), and convert it to the concrete element type `T` derived
-    /// from the class's first type argument.
-    ///
-    /// Shared by `channel_recv_call` and `task_join_call` — both follow the same
-    /// pattern: look up an FFI wrapper by module+name, pass slot-0 of the class
-    /// instance as the handle, and reinterpret the second return register as `T`.
-    fn call_tagged_ffi(
-        &mut self,
-        obj: &CompiledValue,
-        ffi_module: &str,
-        ffi_name: &str,
-    ) -> CodegenResult<CompiledValue> {
-        let elem_type_id = self.class_first_type_arg(obj.type_id);
-
-        let native_func = self
-            .native_registry()
-            .lookup(ffi_module, ffi_name)
-            .ok_or_else(|| {
-                CodegenError::not_found("native function", format!("{ffi_module}::{ffi_name}"))
-            })?;
-
-        let handle = self.get_field_cached(obj.value, 0)?;
-
-        let call_inst = self.call_native_indirect(native_func, &[handle]);
-        let results = self.builder.inst_results(call_inst).to_vec();
-
-        // results[0] = tag (i64, discarded), results[1] = value (i64 bits)
-        let raw_value = results[1];
-        Ok(self.convert_field_value(raw_value, elem_type_id))
-    }
-
-    /// Handle Channel.receive() — call recv wrapper and extract the typed value.
-    fn channel_recv_call(&mut self, ch_obj: &CompiledValue) -> CodegenResult<CompiledValue> {
-        self.call_tagged_ffi(ch_obj, "std:task", "channel_recv")
-    }
-
-    /// Handle Channel.try_receive() — call recv wrapper and return `T | Done`.
-    ///
-    /// `channel_recv` returns `{ tag, value }` where `tag == -1` means the channel
-    /// is closed and empty. We map that to `Done`; otherwise we convert `value` to
-    /// `T` and wrap it in the method's concrete union return type.
-    fn channel_try_recv_call(
-        &mut self,
-        ch_obj: &CompiledValue,
-        method_sym: Symbol,
-        expr_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
-        let elem_type_id = self.class_first_type_arg(ch_obj.type_id);
-
-        let inferred_return_type = self
-            .get_substituted_return_type(&expr_id)
-            .or_else(|| self.get_expr_type(&expr_id))
-            .unwrap_or(TypeId::VOID);
-
-        // In some monomorphized module contexts, expr-level type lookup can fall back
-        // to void. Recover by reading the method signature and applying substitutions.
-        let return_type_id = if inferred_return_type != TypeId::VOID {
-            self.substitute_type(inferred_return_type)
-        } else {
-            let method_name_id = self.method_name_id(method_sym)?;
-            let class_type_def_id = self
-                .arena()
-                .unwrap_class(ch_obj.type_id)
-                .map(|(type_def_id, _)| type_def_id)
-                .ok_or_else(|| {
-                    CodegenError::type_mismatch("Channel.try_receive", "class", "non-class")
-                })?;
-
-            let registry = self.analyzed().entity_registry();
-            let abstract_return_type = registry
-                .find_method_binding(class_type_def_id, method_name_id)
-                .map(|binding| binding.func_type.return_type_id)
-                .or_else(|| {
-                    registry
-                        .find_method_on_type(class_type_def_id, method_name_id)
-                        .and_then(|mid| {
-                            let method = registry.get_method(mid);
-                            self.arena()
-                                .unwrap_function(method.signature_id)
-                                .map(|(_, ret, _)| ret)
-                        })
-                })
-                .ok_or_else(|| {
-                    CodegenError::not_found("method return type", "Channel.try_receive")
-                })?;
-            self.substitute_type(abstract_return_type)
-        };
-
-        // Look up channel_recv wrapper.
-        let native_func = self
-            .native_registry()
-            .lookup("std:task", "channel_recv")
-            .ok_or_else(|| CodegenError::not_found("native function", "std:task::channel_recv"))?;
-
-        // Extract _ptr field (slot 0) from Channel class instance via runtime getter.
-        let ch_handle = self.get_field_cached(ch_obj.value, 0)?;
-
-        // Call channel_recv_wrapper(ch_handle) -> RecvResult { tag, value }.
-        let call_inst = self.call_native_indirect(native_func, &[ch_handle]);
-        let results = self.builder.inst_results(call_inst).to_vec();
-        let tag = results[0];
-        let raw_value = results[1];
-
-        // tag == -1 => Done, otherwise => value of type T.
-        let minus_one = self.builder.ins().iconst(types::I64, -1);
-        let is_done = self.builder.ins().icmp(IntCC::Equal, tag, minus_one);
-        let cond = self.builder.ins().uextend(types::I32, is_done);
-
-        let done_block = self.builder.create_block();
-        let value_block = self.builder.create_block();
-        let merge_block = self.builder.create_block();
-        self.builder
-            .append_block_param(merge_block, self.ptr_type());
-
-        self.builder
-            .ins()
-            .brif(cond, done_block, &[], value_block, &[]);
-
-        self.builder.switch_to_block(done_block);
-        let done_value = CompiledValue::new(
-            self.builder.ins().iconst(types::I8, 0),
-            types::I8,
-            TypeId::DONE,
-        );
-        let done_union = self.construct_union_id(done_value, return_type_id)?;
-        self.builder
-            .ins()
-            .jump(merge_block, &[done_union.value.into()]);
-        self.builder.seal_block(done_block);
-
-        self.builder.switch_to_block(value_block);
-        let typed_value = self.convert_field_value(raw_value, elem_type_id);
-        let value_union = self.construct_union_id(typed_value, return_type_id)?;
-        self.builder
-            .ins()
-            .jump(merge_block, &[value_union.value.into()]);
-        self.builder.seal_block(value_block);
-
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
-        let union_ptr = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::new(
-            union_ptr,
-            self.ptr_type(),
-            return_type_id,
-        ))
-    }
-
-    /// Handle Task.join() — call join wrapper and extract the typed value.
-    fn task_join_call(
-        &mut self,
-        task_obj: &CompiledValue,
-        _expr_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
-        self.call_tagged_ffi(task_obj, "std:task", "task_join")
     }
 
     /// Resolve an Iterator interface method: find the external binding and
@@ -1892,12 +1637,6 @@ impl Cg<'_, '_, '_> {
 
         // Check for Array.filled<T> intrinsic (compiled as ArrayFilled runtime call)
         if let Some(result) = self.try_array_filled_intrinsic(type_def_id, mc, expr_id)? {
-            return Ok(result);
-        }
-
-        // Check for Task.run(closure) — intercept to pass the return type tag
-        // so the scheduler knows the closure's return ABI (f64 vs i64).
-        if let Some(result) = self.try_task_run_intercept(type_def_id, mc, expr_id)? {
             return Ok(result);
         }
 

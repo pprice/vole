@@ -4,7 +4,7 @@ use crate::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 use crate::types::{FunctionType, PrimitiveType};
 use rustc_hash::FxHashMap;
 use vole_frontend::Symbol;
-use vole_identity::NameId;
+use vole_identity::{NameId, TypeDefId};
 
 /// Identifier for primitive types
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -128,9 +128,18 @@ pub struct ExternalMethodInfo {
 /// Type-to-intrinsic mapping for generic external functions.
 /// Used during codegen to dispatch to the correct intrinsic based on concrete type.
 #[derive(Debug, Clone)]
+pub enum TypeMappingKind {
+    /// Match only a specific concrete type.
+    Exact(TypeId),
+    /// Fallback when no exact type arm matches.
+    Default,
+}
+
+/// A where-mapping arm resolved by sema.
+#[derive(Debug, Clone)]
 pub struct TypeMappingEntry {
-    /// The concrete type that this mapping applies to
-    pub type_id: TypeId,
+    /// Which kind of arm this is (exact or default).
+    pub kind: TypeMappingKind,
     /// The intrinsic key to use when the function is called with this type
     pub intrinsic_key: String,
 }
@@ -144,6 +153,13 @@ pub struct GenericExternalInfo {
     pub module_path: NameId,
     /// Type-to-intrinsic mappings from the where block
     pub type_mappings: Vec<TypeMappingEntry>,
+}
+
+/// Key for generic external method mapping info.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct GenericExternalMethodKey {
+    pub type_def_id: TypeDefId,
+    pub method_name: NameId,
 }
 
 /// Implementation of a method
@@ -211,6 +227,8 @@ pub struct ImplementRegistry {
     external_func_info: FxHashMap<String, ExternalMethodInfo>,
     /// Generic external function info with type mappings (from where blocks)
     generic_external_info: FxHashMap<String, GenericExternalInfo>,
+    /// Generic external method info with type mappings (from where blocks)
+    generic_external_method_info: FxHashMap<GenericExternalMethodKey, GenericExternalInfo>,
 }
 
 impl ImplementRegistry {
@@ -236,6 +254,35 @@ impl ImplementRegistry {
     /// Look up generic external function info by name
     pub fn get_generic_external(&self, name: &str) -> Option<&GenericExternalInfo> {
         self.generic_external_info.get(name)
+    }
+
+    /// Register generic external method info with type mappings.
+    pub fn register_generic_external_method(
+        &mut self,
+        type_def_id: TypeDefId,
+        method_name: NameId,
+        info: GenericExternalInfo,
+    ) {
+        self.generic_external_method_info.insert(
+            GenericExternalMethodKey {
+                type_def_id,
+                method_name,
+            },
+            info,
+        );
+    }
+
+    /// Look up generic external method info by defining type and method name.
+    pub fn get_generic_external_method(
+        &self,
+        type_def_id: TypeDefId,
+        method_name: NameId,
+    ) -> Option<&GenericExternalInfo> {
+        self.generic_external_method_info
+            .get(&GenericExternalMethodKey {
+                type_def_id,
+                method_name,
+            })
     }
 
     /// Register a method for a type
@@ -276,6 +323,9 @@ impl ImplementRegistry {
         for (name, info) in &other.generic_external_info {
             self.generic_external_info
                 .insert(name.clone(), info.clone());
+        }
+        for (key, info) in &other.generic_external_method_info {
+            self.generic_external_method_info.insert(*key, info.clone());
         }
     }
 }

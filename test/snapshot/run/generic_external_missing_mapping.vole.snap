@@ -1,0 +1,4 @@
+[stdout]
+
+[stderr]
+compilation error: generic external mapping not found: only_f64: no where mapping arm for concrete type(s): i64

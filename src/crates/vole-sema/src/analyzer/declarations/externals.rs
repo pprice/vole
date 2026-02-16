@@ -205,15 +205,52 @@ impl Analyzer {
         mappings: &[TypeMapping],
         interner: &Interner,
     ) -> Vec<TypeMappingEntry> {
-        mappings
-            .iter()
-            .map(|mapping| {
-                let type_id = self.resolve_type_id(&mapping.type_expr, interner);
-                TypeMappingEntry {
-                    type_id,
-                    intrinsic_key: mapping.intrinsic_key.clone(),
+        let mut resolved = Vec::with_capacity(mappings.len());
+        let mut seen_exact: FxHashMap<ArenaTypeId, Span> = FxHashMap::default();
+        let mut default_span: Option<Span> = None;
+
+        for mapping in mappings {
+            match &mapping.arm {
+                TypeMappingArm::Exact(type_expr) => {
+                    let type_id = self.resolve_type_id(type_expr, interner);
+                    if let Some(first_span) = seen_exact.insert(type_id, mapping.span) {
+                        let ty_display = self.type_arena().display_basic(type_id);
+                        self.add_error(
+                            SemanticError::DuplicateGenericExternalTypeMapping {
+                                ty: ty_display,
+                                span: mapping.span.into(),
+                                first: first_span.into(),
+                            },
+                            mapping.span,
+                        );
+                        continue;
+                    }
+
+                    resolved.push(TypeMappingEntry {
+                        kind: crate::implement_registry::TypeMappingKind::Exact(type_id),
+                        intrinsic_key: mapping.intrinsic_key.clone(),
+                    });
                 }
-            })
-            .collect()
+                TypeMappingArm::Default => {
+                    if let Some(first_span) = default_span {
+                        self.add_error(
+                            SemanticError::DuplicateGenericExternalDefaultMapping {
+                                span: mapping.span.into(),
+                                first: first_span.into(),
+                            },
+                            mapping.span,
+                        );
+                        continue;
+                    }
+                    default_span = Some(mapping.span);
+                    resolved.push(TypeMappingEntry {
+                        kind: crate::implement_registry::TypeMappingKind::Default,
+                        intrinsic_key: mapping.intrinsic_key.clone(),
+                    });
+                }
+            }
+        }
+
+        resolved
     }
 }

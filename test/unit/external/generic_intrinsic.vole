@@ -18,6 +18,21 @@ external("vole:compiler_intrinsic") {
     }
 }
 
+// Test exact-vs-default precedence: for f64, exact arm must win over default.
+external("vole:compiler_intrinsic") {
+    func sqrt_with_default<T>(x: T) -> T where {
+        default => "f64_abs"
+        f64 => "f64_sqrt"
+    }
+}
+
+// Test fallback-only mapping with an intrinsic that is valid for all [T] arrays.
+external("vole:compiler_intrinsic") {
+    func generic_array_len<T>(values: [T]) -> i64 where {
+        default => "array_len"
+    }
+}
+
 tests "generic external functions with where block" {
     test "sqrt<f64> dispatches to f64_sqrt intrinsic" {
         let x: f64 = 4.0
@@ -56,5 +71,22 @@ tests "generic external functions with where block" {
         let x: f64 = 25.0
         let result = sqrt_with_commas(x)
         assert(result == 5.0)
+    }
+
+    test "exact arm is preferred over default arm" {
+        let x: f64 = 9.0
+        let result = sqrt_with_default(x)
+        // Exact f64 => f64_sqrt should win over default f64_abs.
+        assert(result == 3.0)
+    }
+
+    test "default arm fallback works for generic array len on i64" {
+        let values: [i64] = [1, 2, 3, 4]
+        assert(generic_array_len(values) == 4)
+    }
+
+    test "default arm fallback works for generic array len on string" {
+        let values: [string] = ["a", "bb"]
+        assert(generic_array_len(values) == 2)
     }
 }

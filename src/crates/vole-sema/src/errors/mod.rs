@@ -713,6 +713,28 @@ pub enum SemanticError {
         #[label("import creates a cycle")]
         span: SourceSpan,
     },
+
+    #[error("duplicate concrete type mapping for generic external '{ty}'")]
+    #[diagnostic(
+        code(E2107),
+        help("each concrete type can appear at most once in a where mapping block")
+    )]
+    DuplicateGenericExternalTypeMapping {
+        ty: String,
+        #[label("duplicate mapping for '{ty}'")]
+        span: SourceSpan,
+        #[label("first mapping for '{ty}' is here")]
+        first: SourceSpan,
+    },
+
+    #[error("duplicate default mapping for generic external")]
+    #[diagnostic(code(E2108), help("use a single `default => \"...\"` fallback arm"))]
+    DuplicateGenericExternalDefaultMapping {
+        #[label("duplicate default mapping")]
+        span: SourceSpan,
+        #[label("first default mapping is here")]
+        first: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

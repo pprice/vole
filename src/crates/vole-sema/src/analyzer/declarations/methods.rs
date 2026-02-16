@@ -401,6 +401,12 @@ impl Analyzer {
             .clone()
             .unwrap_or_else(|| method_name_str.to_string());
         let builtin_mod = self.name_table_mut().builtin_module();
+        let module_path_id = self
+            .name_table_mut()
+            .intern_raw(builtin_mod, &[module_path]);
+        let native_name_id = self
+            .name_table_mut()
+            .intern_raw(builtin_mod, &[&native_name_str]);
 
         self.entity_registry_mut().register_method_with_binding(
             entity_type_id,
@@ -409,13 +415,22 @@ impl Analyzer {
             signature_id,
             false, // external methods don't have defaults
             Some(ExternalMethodInfo {
-                module_path: self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[module_path]),
-                native_name: self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[&native_name_str]),
+                module_path: module_path_id,
+                native_name: native_name_id,
             }),
         );
+
+        if let Some(ref mappings) = func.type_mappings {
+            let type_mappings = self.resolve_type_mappings(mappings, interner);
+            self.implement_registry_mut()
+                .register_generic_external_method(
+                    entity_type_id,
+                    method_name_id,
+                    GenericExternalInfo {
+                        module_path: module_path_id,
+                        type_mappings,
+                    },
+                );
+        }
     }
 }

@@ -234,9 +234,18 @@ pub struct StaticsBlock {
 /// Example: `f32 => "f32_sqrt"` maps f32 to the "f32_sqrt" intrinsic.
 #[derive(Debug, Clone)]
 pub struct TypeMapping {
-    pub type_expr: TypeExpr,
+    pub arm: TypeMappingArm,
     pub intrinsic_key: String,
     pub span: Span,
+}
+
+/// A where-mapping arm for generic external intrinsics.
+#[derive(Debug, Clone)]
+pub enum TypeMappingArm {
+    /// Exact type mapping: `f64 => "f64_sqrt"`.
+    Exact(TypeExpr),
+    /// Fallback mapping: `default => "fallback_key"`.
+    Default,
 }
 
 /// External function declaration
@@ -1131,7 +1140,7 @@ mod tests {
     fn external_func_native_name() {
         let ef = ExternalFunc {
             native_name: Some("string_length".to_string()),
-            vole_name: Symbol::new_for_test(1),
+            vole_name: Symbol::synthetic(1),
             type_params: vec![],
             params: vec![],
             return_type: None,
@@ -1145,7 +1154,7 @@ mod tests {
     fn external_func_default_name() {
         let ef = ExternalFunc {
             native_name: None,
-            vole_name: Symbol::new_for_test(1),
+            vole_name: Symbol::synthetic(1),
             type_params: vec![],
             params: vec![],
             return_type: None,

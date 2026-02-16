@@ -1,0 +1,11 @@
+// Generic external mapping should error when multiple exact arms match substitutions.
+external("vole:compiler_intrinsic") {
+    func choose<T, U>(left: T, right: U) -> i64 where {
+        i64 => "array_len"
+        string => "string_len"
+    }
+}
+
+func main() {
+    let _ = choose(1, "x")
+}

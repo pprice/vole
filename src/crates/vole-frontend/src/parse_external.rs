@@ -135,12 +135,13 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Parse an optional `where { TypeExpr => "intrinsic_key", ... }` block.
+    /// Parse an optional `where { TypeExpr => "intrinsic_key", default => "intrinsic_key", ... }` block.
     /// Returns None if no where block is present.
     /// Syntax:
     ///   where {
     ///     f32 => "f32_sqrt"
     ///     f64 => "f64_sqrt"
+    ///     default => "generic_sqrt"
     ///   }
     /// Commas between mappings are optional.
     fn parse_where_type_mappings(&mut self) -> Result<Option<Vec<TypeMapping>>, ParseError> {
@@ -156,12 +157,25 @@ impl<'src> Parser<'src> {
         self.skip_newlines();
 
         let mut mappings = Vec::new();
+        let mut default_seen = false;
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             let mapping_start = self.current.span;
 
-            // Parse the type expression
-            let type_expr = self.parse_type()?;
+            let arm = if self.match_token(TokenType::KwDefault) {
+                if default_seen {
+                    return Err(ParseError::new(
+                        ParserError::DuplicateWhereDefaultArm {
+                            span: self.previous.span.into(),
+                        },
+                        self.previous.span,
+                    ));
+                }
+                default_seen = true;
+                TypeMappingArm::Default
+            } else {
+                TypeMappingArm::Exact(self.parse_type()?)
+            };
 
             // Expect '=>' for the mapping
             self.consume(
@@ -187,7 +201,7 @@ impl<'src> Parser<'src> {
 
             let mapping_span = mapping_start.merge(self.previous.span);
             mappings.push(TypeMapping {
-                type_expr,
+                arm,
                 intrinsic_key,
                 span: mapping_span,
             });

@@ -39,6 +39,24 @@ external("std:task") {
     func "task_select3" as _task_select3(ch1: handle, ch2: handle, ch3: handle, timeout_nanos: i64) -> i64
 }
 
+external("vole:compiler_intrinsic") {
+    func _channel_send_t<T: Sendable>(ch: handle, value: T) -> bool where {
+        default => "task_channel_send"
+    }
+    func _channel_receive_t<T: Sendable>(ch: handle) -> T where {
+        default => "task_channel_recv"
+    }
+    func _channel_try_receive_t<T: Sendable>(ch: handle) -> T | Done where {
+        default => "task_channel_try_recv"
+    }
+    func _task_join_t<T: Sendable>(task: handle) -> T where {
+        default => "task_join"
+    }
+    func _task_run_t<T: Sendable>(closure: () -> T) -> handle where {
+        default => "task_run"
+    }
+}
+
 // =============================================================================
 // FFI result structs
 // =============================================================================
@@ -79,7 +97,7 @@ class Task<T: Sendable> {
         // Spawn a task from a closure. The closure runs on the M:1 scheduler.
         // Returns a Task handle for join/cancel operations.
         func run(body: () -> T) -> Task<T> {
-            return Task<T> { _handle: _task_run(body) }
+            return Task<T> { _handle: _task_run_t(body) }
         }
 
         // Create a streaming iterator backed by a producer task.
@@ -97,7 +115,7 @@ class Task<T: Sendable> {
             let ch = Channel<T> { _ptr: _channel_new(1) }
             let task = Task.run<i64>(() -> i64 => {
                 producer((value: T) => {
-                    _ = ch.send(value)
+                    _ = _channel_send_t(ch._ptr, value)
                 })
                 ch.close()
                 return 0
@@ -147,16 +165,16 @@ class Task<T: Sendable> {
         func select2(ch1: Channel<T>, ch2: Channel<T>, timeout: Duration) -> SelectResult<T> {
             let idx = _task_select2(ch1._ptr, ch2._ptr, timeout.as_nanos())
             if idx == 0 {
-                return SelectResult<T> { channel_index: 0, value: ch1.receive(), timed_out: false }
+                return SelectResult<T> { channel_index: 0, value: _channel_receive_t(ch1._ptr), timed_out: false }
             }
             if idx == 1 {
-                return SelectResult<T> { channel_index: 1, value: ch2.receive(), timed_out: false }
+                return SelectResult<T> { channel_index: 1, value: _channel_receive_t(ch2._ptr), timed_out: false }
             }
             // Timeout: construct a dummy value via a temp closed channel.
             // The value is undefined; callers must check timed_out first.
             let tmp = Channel<T> { _ptr: _channel_new(0) }
             _channel_close(tmp._ptr)
-            return SelectResult<T> { channel_index: -1, value: tmp.receive(), timed_out: true }
+            return SelectResult<T> { channel_index: -1, value: _channel_receive_t(tmp._ptr), timed_out: true }
         }
 
         // Wait on three channels simultaneously, returning when the first
@@ -168,19 +186,19 @@ class Task<T: Sendable> {
         func select3(ch1: Channel<T>, ch2: Channel<T>, ch3: Channel<T>, timeout: Duration) -> SelectResult<T> {
             let idx = _task_select3(ch1._ptr, ch2._ptr, ch3._ptr, timeout.as_nanos())
             if idx == 0 {
-                return SelectResult<T> { channel_index: 0, value: ch1.receive(), timed_out: false }
+                return SelectResult<T> { channel_index: 0, value: _channel_receive_t(ch1._ptr), timed_out: false }
             }
             if idx == 1 {
-                return SelectResult<T> { channel_index: 1, value: ch2.receive(), timed_out: false }
+                return SelectResult<T> { channel_index: 1, value: _channel_receive_t(ch2._ptr), timed_out: false }
             }
             if idx == 2 {
-                return SelectResult<T> { channel_index: 2, value: ch3.receive(), timed_out: false }
+                return SelectResult<T> { channel_index: 2, value: _channel_receive_t(ch3._ptr), timed_out: false }
             }
             // Timeout: construct a dummy value via a temp closed channel.
             // The value is undefined; callers must check timed_out first.
             let tmp = Channel<T> { _ptr: _channel_new(0) }
             _channel_close(tmp._ptr)
-            return SelectResult<T> { channel_index: -1, value: tmp.receive(), timed_out: true }
+            return SelectResult<T> { channel_index: -1, value: _channel_receive_t(tmp._ptr), timed_out: true }
         }
 
         // Fan-out: spawn one task per closure and collect all results.
@@ -198,7 +216,7 @@ class Task<T: Sendable> {
             let results: [T] = []
             let mut j = 0
             while j < tasks.length() {
-                results.push(tasks[j].join())
+                results.push(_task_join_t(tasks[j]._handle))
                 j = j + 1
             }
             return results
@@ -220,10 +238,8 @@ class Task<T: Sendable> {
 
     // Block until the task completes and return its result.
     // Panics if the task was cancelled or panicked.
-    // NOTE: codegen intercepts this method and emits inline tag extraction.
-    // The body below is a fallback that is never called at runtime.
     func join() -> T {
-        return panic("Task.join should be codegen-intercepted")
+        return _task_join_t(self._handle)
     }
 
     // Request cooperative cancellation of the task.
@@ -259,24 +275,19 @@ class Channel<T: Sendable> {
 
     // Send a value on the channel.
     // Returns true on success, false if the channel is closed.
-    // NOTE: codegen intercepts this method and emits the correct RuntimeTypeId
-    // tag based on the element type.
     func send(value: T) -> bool {
-        return panic("Channel.send should be codegen-intercepted")
+        return _channel_send_t(self._ptr, value)
     }
 
     // Receive a value from the channel.
-    // NOTE: codegen intercepts this method and extracts the typed value
-    // from the RecvResult struct return.
     func receive() -> T {
-        return panic("Channel.receive should be codegen-intercepted")
+        return _channel_receive_t(self._ptr)
     }
 
     // Try to receive one value from the channel.
     // Returns `Done` when the channel is closed and empty.
-    // NOTE: codegen intercepts this method and builds `T | Done` directly.
     func try_receive() -> T | Done {
-        return Done {}
+        return _channel_try_receive_t(self._ptr)
     }
 
     // Close the channel. Wakes all waiting tasks.
@@ -307,8 +318,7 @@ class ChannelIterator<T: Sendable> implements Iterator<T> {
 
 implement Iterator<T> for ChannelIterator<T> {
     func next() -> T | Done {
-        let ch = Channel<T> { _ptr: self._ptr }
-        return ch.try_receive()
+        return _channel_try_receive_t(self._ptr)
     }
 }
 
@@ -323,8 +333,7 @@ class StreamIterator<T: Sendable> implements Iterator<T> {
 
 implement Iterator<T> for StreamIterator<T> {
     func next() -> T | Done {
-        let ch = Channel<T> { _ptr: self._ch }
-        return ch.try_receive()
+        return _channel_try_receive_t(self._ch)
     }
 }
 
@@ -339,15 +348,13 @@ class StateActor<T: Sendable> {
     // Send a message to the actor.
     // The actor's handler will be called with (current_state, msg).
     func send(msg: T) {
-        let ch = Channel<T> { _ptr: self._ch }
-        _ = ch.send(msg)
+        _ = _channel_send_t(self._ch, msg)
     }
 
     // Close the channel and wait for the actor task to finish.
     // Returns the actor's final state.
     func close_and_join() -> T {
         _channel_close(self._ch)
-        let task = Task<T> { _handle: self._task }
-        return task.join()
+        return _task_join_t(self._task)
     }
 }

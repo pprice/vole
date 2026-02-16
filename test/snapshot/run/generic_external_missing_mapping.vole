@@ -1,0 +1,10 @@
+// Generic external mapping without default should fail for uncovered concrete types.
+external("vole:compiler_intrinsic") {
+    func only_f64<T>(x: T) -> T where {
+        f64 => "f64_sqrt"
+    }
+}
+
+func main() {
+    let _ = only_f64(9)
+}

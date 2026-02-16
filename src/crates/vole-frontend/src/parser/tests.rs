@@ -1420,3 +1420,50 @@ func main() {}
     assert!(matches!(&program.declarations[0], Decl::Sentinel(_)));
     assert!(matches!(&program.declarations[1], Decl::Function(_)));
 }
+
+#[test]
+fn parse_external_where_default_mapping_arm() {
+    let source = r#"
+external("vole:compiler_intrinsic") {
+    func conv<T>(value: T) -> T where {
+        f64 => "f64_conv"
+        default => "generic_conv"
+    }
+}
+"#;
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse where default arm");
+    assert_eq!(program.declarations.len(), 1);
+
+    let Decl::External(external) = &program.declarations[0] else {
+        panic!("expected external declaration");
+    };
+    assert_eq!(external.functions.len(), 1);
+    let func = &external.functions[0];
+    let mappings = func.type_mappings.as_ref().expect("where mappings");
+    assert_eq!(mappings.len(), 2);
+    assert!(matches!(mappings[0].arm, TypeMappingArm::Exact(_)));
+    assert!(matches!(mappings[1].arm, TypeMappingArm::Default));
+}
+
+#[test]
+fn parse_external_where_rejects_duplicate_default_mapping_arms() {
+    let source = r#"
+external("vole:compiler_intrinsic") {
+    func conv<T>(value: T) -> T where {
+        default => "first"
+        default => "second"
+    }
+}
+"#;
+    let mut parser = Parser::new(source);
+    let result = parser.parse_program();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(
+        err.error,
+        ParserError::DuplicateWhereDefaultArm { .. }
+    ));
+}

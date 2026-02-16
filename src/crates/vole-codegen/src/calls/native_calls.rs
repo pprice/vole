@@ -10,6 +10,7 @@ use vole_frontend::ast::CallExpr;
 use vole_frontend::{Expr, NodeId, Symbol};
 use vole_identity::ModuleId;
 use vole_runtime::native_registry::{NativeFunction, NativeType};
+use vole_sema::implement_registry::{TypeMappingEntry, TypeMappingKind};
 use vole_sema::type_arena::TypeId;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -266,23 +267,94 @@ impl Cg<'_, '_, '_> {
         Ok(self.native_call_result(call_inst, native_func, type_id))
     }
 
-    /// Find the intrinsic key for a generic external function call based on type mappings.
-    /// Looks at the monomorphization substitutions and finds a matching type in the mappings.
-    pub(crate) fn find_intrinsic_key_for_monomorph(
+    /// Resolve the intrinsic key for a generic external function call.
+    ///
+    /// Resolution order:
+    /// 1. exact type arm (`Type => "key"`)
+    /// 2. fallback arm (`default => "key"`)
+    pub(crate) fn resolve_intrinsic_key_for_monomorph(
         &self,
-        type_mappings: &[vole_sema::implement_registry::TypeMappingEntry],
+        callee_name: &str,
+        type_mappings: &[TypeMappingEntry],
         substitutions: &rustc_hash::FxHashMap<vole_identity::NameId, TypeId>,
-    ) -> Option<String> {
-        // Check each mapping to see if it matches any of the substituted types
+    ) -> CodegenResult<String> {
+        let substitution_types: std::collections::HashSet<TypeId> =
+            substitutions.values().copied().collect();
+        let mut default_key = None;
+        let mut exact_matches: Vec<(TypeId, &str)> = Vec::new();
+
         for mapping in type_mappings {
-            // For each type param substitution, check if it matches this mapping's type
-            for &concrete_type in substitutions.values() {
-                if concrete_type == mapping.type_id {
-                    return Some(mapping.intrinsic_key.clone());
+            match mapping.kind {
+                TypeMappingKind::Exact(type_id) => {
+                    if substitution_types.contains(&type_id) {
+                        exact_matches.push((type_id, mapping.intrinsic_key.as_str()));
+                    }
+                }
+                TypeMappingKind::Default => {
+                    default_key = Some(mapping.intrinsic_key.as_str());
                 }
             }
         }
-        None
+
+        if exact_matches.len() == 1 {
+            return Ok(exact_matches[0].1.to_string());
+        }
+
+        if exact_matches.len() > 1 {
+            let mut matches_display: Vec<String> = exact_matches
+                .iter()
+                .map(|(ty, key)| format!("{} => \"{}\"", self.arena().display_basic(*ty), key))
+                .collect();
+            matches_display.sort();
+            matches_display.dedup();
+            return Err(CodegenError::not_found(
+                "generic external mapping",
+                format!(
+                    "{callee_name}: ambiguous where mapping; multiple exact arms match concrete substitutions: {}",
+                    matches_display.join(", ")
+                ),
+            ));
+        }
+
+        if let Some(key) = default_key {
+            return Ok(key.to_string());
+        }
+
+        let mut concrete_types: Vec<String> = substitutions
+            .values()
+            .copied()
+            .map(|ty| self.arena().display_basic(ty))
+            .collect();
+        concrete_types.sort();
+        concrete_types.dedup();
+
+        Err(CodegenError::not_found(
+            "generic external mapping",
+            format!(
+                "{callee_name}: no where mapping arm for concrete type(s): {}",
+                concrete_types.join(", ")
+            ),
+        ))
+    }
+
+    fn compile_intrinsic_args_with_expected_types(
+        &mut self,
+        args_exprs: &[Expr],
+        expected_param_type_ids: Option<&[TypeId]>,
+    ) -> CodegenResult<Vec<CompiledValue>> {
+        let mut args = Vec::with_capacity(args_exprs.len());
+        for (index, arg_expr) in args_exprs.iter().enumerate() {
+            let compiled = if let Some(param_type_ids) = expected_param_type_ids
+                && let Some(&param_type_id) = param_type_ids.get(index)
+            {
+                let compiled = self.expr_with_expected_type(arg_expr, param_type_id)?;
+                self.coerce_to_type(compiled, param_type_id)?
+            } else {
+                self.expr(arg_expr)?
+            };
+            args.push(compiled);
+        }
+        Ok(args)
     }
 
     /// Call a generic external function as a compiler intrinsic.
@@ -293,12 +365,14 @@ impl Cg<'_, '_, '_> {
         intrinsic_key: &str,
         call: &CallExpr,
         return_type_id: TypeId,
+        expected_param_type_ids: Option<&[TypeId]>,
     ) -> CodegenResult<CompiledValue> {
         self.call_generic_external_intrinsic_args(
             module_path,
             intrinsic_key,
             &call.args,
             return_type_id,
+            expected_param_type_ids,
         )
     }
 
@@ -310,14 +384,15 @@ impl Cg<'_, '_, '_> {
         intrinsic_key: &str,
         args_exprs: &[Expr],
         return_type_id: TypeId,
+        expected_param_type_ids: Option<&[TypeId]>,
     ) -> CodegenResult<CompiledValue> {
         // Check if this is a compiler intrinsic module
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
-            // Compile arguments (for intrinsics that take args)
-            let args = self.compile_call_args(args_exprs)?;
-            return self.call_compiler_intrinsic_key_with_line(
+            let typed_args = self
+                .compile_intrinsic_args_with_expected_types(args_exprs, expected_param_type_ids)?;
+            return self.call_compiler_intrinsic_key_typed_with_line(
                 crate::IntrinsicKey::from(intrinsic_key),
-                &args,
+                &typed_args,
                 return_type_id,
                 0,
             );
@@ -347,12 +422,14 @@ impl Cg<'_, '_, '_> {
         let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
             (
                 inst.original_name,
+                inst.func_type.params_id.to_vec(),
                 inst.func_type.return_type_id,
                 inst.substitutions.clone(),
             )
         });
 
-        let Some((original_name, return_type_id, substitutions)) = instance_data else {
+        let Some((original_name, param_type_ids, return_type_id, substitutions)) = instance_data
+        else {
             return Ok(None);
         };
 
@@ -368,11 +445,11 @@ impl Cg<'_, '_, '_> {
             return Ok(None);
         };
 
-        let Some(key) =
-            self.find_intrinsic_key_for_monomorph(&generic_ext_info.type_mappings, &substitutions)
-        else {
-            return Ok(None);
-        };
+        let key = self.resolve_intrinsic_key_for_monomorph(
+            &callee_name,
+            &generic_ext_info.type_mappings,
+            &substitutions,
+        )?;
 
         let module_path = self
             .name_table()
@@ -380,9 +457,25 @@ impl Cg<'_, '_, '_> {
             .unwrap_or_default();
 
         let return_type_id = self.substitute_type(return_type_id);
+        let concrete_param_type_ids: Vec<TypeId> = param_type_ids
+            .iter()
+            .map(|&ty| {
+                self.arena().expect_substitute(
+                    ty,
+                    &substitutions,
+                    "generic external intrinsic args",
+                )
+            })
+            .collect();
 
-        self.call_generic_external_intrinsic(&module_path, &key, call, return_type_id)
-            .map(Some)
+        self.call_generic_external_intrinsic(
+            &module_path,
+            &key,
+            call,
+            return_type_id,
+            Some(&concrete_param_type_ids),
+        )
+        .map(Some)
     }
 
     /// Try to call a value as a functional interface.
@@ -503,18 +596,37 @@ impl Cg<'_, '_, '_> {
             .analyzed()
             .implement_registry()
             .get_generic_external(callee_name)
-            && let Some(key) = self
-                .find_intrinsic_key_for_monomorph(&generic_ext_info.type_mappings, &substitutions)
         {
+            let key = self.resolve_intrinsic_key_for_monomorph(
+                callee_name,
+                &generic_ext_info.type_mappings,
+                &substitutions,
+            )?;
             let module_path = self
                 .name_table()
                 .last_segment_str(generic_ext_info.module_path)
                 .unwrap_or_default();
 
             let return_type_id = self.substitute_type(return_type_id);
+            let concrete_param_type_ids: Vec<TypeId> = param_types_raw
+                .iter()
+                .map(|&ty| {
+                    self.arena().expect_substitute(
+                        ty,
+                        &substitutions,
+                        "generic external intrinsic args",
+                    )
+                })
+                .collect();
 
             return self
-                .call_generic_external_intrinsic(&module_path, &key, call, return_type_id)
+                .call_generic_external_intrinsic(
+                    &module_path,
+                    &key,
+                    call,
+                    return_type_id,
+                    Some(&concrete_param_type_ids),
+                )
                 .map(Some);
         }
 

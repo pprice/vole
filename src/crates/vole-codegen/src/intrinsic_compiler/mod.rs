@@ -22,9 +22,12 @@ use vole_sema::type_arena::TypeId;
 use crate::RuntimeKey;
 use crate::callable_registry::{CallableKey, ResolvedCallable, resolve_callable_with_preference};
 use crate::errors::{CodegenError, CodegenResult};
+use crate::structs::convert_to_i64_for_storage;
 
 use super::context::{Cg, resolve_external_names};
-use super::types::{CompiledValue, native_type_to_cranelift, type_id_to_cranelift};
+use super::types::{
+    CompiledValue, array_element_tag_id, native_type_to_cranelift, type_id_to_cranelift,
+};
 
 /// Get signed integer min/max bounds for a given bit width.
 fn signed_min_max(bits: u32) -> (i64, i64) {
@@ -146,6 +149,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         return_type_id: TypeId,
         call_line: u32,
     ) -> CodegenResult<CompiledValue> {
+        let typed_args: Vec<CompiledValue> = args
+            .iter()
+            .map(|&value| {
+                let ty = self.builder.func.dfg.value_type(value);
+                CompiledValue::new(value, ty, TypeId::VOID)
+            })
+            .collect();
+        self.call_compiler_intrinsic_key_typed_with_line(
+            intrinsic_key,
+            &typed_args,
+            return_type_id,
+            call_line,
+        )
+    }
+
+    /// Call a compiler intrinsic with typed arguments.
+    pub fn call_compiler_intrinsic_key_typed_with_line(
+        &mut self,
+        intrinsic_key: crate::IntrinsicKey,
+        typed_args: &[CompiledValue],
+        return_type_id: TypeId,
+        call_line: u32,
+    ) -> CodegenResult<CompiledValue> {
+        let args: Vec<Value> = typed_args.iter().map(|arg| arg.value).collect();
         let resolved = resolve_callable_with_preference(
             CallableKey::Intrinsic(intrinsic_key),
             self.callable_backend_preference,
@@ -155,20 +182,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         })?;
 
         match resolved {
-            ResolvedCallable::InlineIntrinsic(intrinsic_key) => {
-                self.compile_inline_intrinsic(&intrinsic_key, args, return_type_id, call_line)
-            }
+            ResolvedCallable::InlineIntrinsic(intrinsic_key) => self.compile_inline_intrinsic(
+                &intrinsic_key,
+                &args,
+                typed_args,
+                return_type_id,
+                call_line,
+            ),
             ResolvedCallable::Runtime(runtime) => {
                 if matches!(runtime, RuntimeKey::Panic) {
-                    self.emit_runtime_panic(args, call_line)?;
+                    self.emit_runtime_panic(&args, call_line)?;
                     return Ok(self.void_value());
                 }
 
                 if return_type_id.is_void() {
-                    self.call_runtime_void(runtime, args)?;
+                    self.call_runtime_void(runtime, &args)?;
                     Ok(self.void_value())
                 } else {
-                    let value = self.call_runtime(runtime, args)?;
+                    let value = self.call_runtime(runtime, &args)?;
                     let ty = type_id_to_cranelift(return_type_id, self.arena(), self.ptr_type());
                     Ok(CompiledValue::new(value, ty, return_type_id))
                 }
@@ -180,12 +211,33 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         intrinsic_key: &crate::IntrinsicKey,
         args: &[Value],
+        typed_args: &[CompiledValue],
         return_type_id: TypeId,
         call_line: u32,
     ) -> CodegenResult<CompiledValue> {
         use crate::intrinsics::{FloatConstant, IntrinsicHandler, UnaryFloatOp};
 
         let intrinsic_name = intrinsic_key.as_str();
+
+        match intrinsic_name {
+            "task_channel_send" => {
+                return self.emit_task_channel_send_intrinsic(typed_args);
+            }
+            "task_channel_recv" => {
+                return self.emit_task_channel_recv_intrinsic(typed_args, return_type_id);
+            }
+            "task_channel_try_recv" => {
+                return self.emit_task_channel_try_recv_intrinsic(typed_args, return_type_id);
+            }
+            "task_join" => {
+                return self.emit_task_join_intrinsic(typed_args, return_type_id);
+            }
+            "task_run" => {
+                return self.emit_task_run_intrinsic(typed_args);
+            }
+            _ => {}
+        }
+
         let handler = self
             .intrinsics_registry()
             .lookup(intrinsic_key)
@@ -392,6 +444,191 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 Ok(self.i64_value(len_val))
             }
         }
+    }
+
+    fn call_std_task_tagged_native(
+        &mut self,
+        native_name: &str,
+        handle: Value,
+    ) -> CodegenResult<(Value, Value)> {
+        let native_func = self
+            .native_registry()
+            .lookup("std:task", native_name)
+            .ok_or_else(|| {
+                CodegenError::not_found("native function", format!("std:task::{native_name}"))
+            })?;
+        let call_inst = self.call_native_indirect(native_func, &[handle]);
+        let results = self.builder.inst_results(call_inst).to_vec();
+        if results.len() < 2 {
+            return Err(CodegenError::internal_with_context(
+                "std:task tagged intrinsic result",
+                format!("expected 2 fields from std:task::{native_name}"),
+            ));
+        }
+        Ok((results[0], results[1]))
+    }
+
+    fn emit_task_channel_send_intrinsic(
+        &mut self,
+        typed_args: &[CompiledValue],
+    ) -> CodegenResult<CompiledValue> {
+        if typed_args.len() < 2 {
+            return Err(CodegenError::arg_count(
+                "task_channel_send",
+                2,
+                typed_args.len(),
+            ));
+        }
+        let ch_handle = typed_args[0].value;
+        let payload = typed_args[1];
+        let tag = {
+            let arena = self.arena();
+            array_element_tag_id(payload.type_id, arena)
+        };
+        let tag_val = self.builder.ins().iconst(types::I64, tag);
+        // Function-call semantics may clean up temporary RC args after return;
+        // hand channel_send its own retained reference up front.
+        //
+        // Some fallback intrinsic call paths may not carry concrete TypeIds
+        // (void/type-param placeholders). Only emit rc_inc when the type is
+        // concrete enough for RC classification.
+        let can_classify_rc = payload.type_id != TypeId::VOID
+            && self.arena().unwrap_type_param(payload.type_id).is_none();
+        if can_classify_rc && self.rc_state(payload.type_id).needs_cleanup() {
+            self.emit_rc_inc_for_type(payload.value, payload.type_id)?;
+        }
+        let payload_bits = convert_to_i64_for_storage(self.builder, &payload);
+
+        let native_func = self
+            .native_registry()
+            .lookup("std:task", "channel_send")
+            .ok_or_else(|| CodegenError::not_found("native function", "std:task::channel_send"))?;
+        let call_inst = self.call_native_indirect(native_func, &[ch_handle, tag_val, payload_bits]);
+        let send_result = self.builder.inst_results(call_inst)[0];
+        let is_ok = self.builder.ins().icmp_imm(IntCC::Equal, send_result, 0);
+        Ok(CompiledValue::new(is_ok, types::I8, TypeId::BOOL))
+    }
+
+    fn emit_task_channel_recv_intrinsic(
+        &mut self,
+        typed_args: &[CompiledValue],
+        return_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        if typed_args.is_empty() {
+            return Err(CodegenError::arg_count("task_channel_recv", 1, 0));
+        }
+        let (_tag, raw_value) =
+            self.call_std_task_tagged_native("channel_recv", typed_args[0].value)?;
+        Ok(self.convert_field_value(raw_value, return_type_id))
+    }
+
+    fn emit_task_channel_try_recv_intrinsic(
+        &mut self,
+        typed_args: &[CompiledValue],
+        return_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        if typed_args.is_empty() {
+            return Err(CodegenError::arg_count("task_channel_try_recv", 1, 0));
+        }
+
+        let elem_type_id = self
+            .arena()
+            .unwrap_union(return_type_id)
+            .and_then(|variants| variants.iter().copied().find(|&ty| ty != TypeId::DONE))
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
+                    "task_channel_try_recv return type",
+                    "union containing Done",
+                    self.arena().display_basic(return_type_id),
+                )
+            })?;
+
+        let (tag, raw_value) =
+            self.call_std_task_tagged_native("channel_recv", typed_args[0].value)?;
+        let minus_one = self.builder.ins().iconst(types::I64, -1);
+        let is_done = self.builder.ins().icmp(IntCC::Equal, tag, minus_one);
+        let cond = self.builder.ins().uextend(types::I32, is_done);
+
+        let done_block = self.builder.create_block();
+        let value_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder
+            .append_block_param(merge_block, self.ptr_type());
+
+        self.builder
+            .ins()
+            .brif(cond, done_block, &[], value_block, &[]);
+
+        self.builder.switch_to_block(done_block);
+        let done_value = CompiledValue::new(
+            self.builder.ins().iconst(types::I8, 0),
+            types::I8,
+            TypeId::DONE,
+        );
+        let done_union = self.construct_union_id(done_value, return_type_id)?;
+        self.builder
+            .ins()
+            .jump(merge_block, &[done_union.value.into()]);
+        self.builder.seal_block(done_block);
+
+        self.builder.switch_to_block(value_block);
+        let typed_value = self.convert_field_value(raw_value, elem_type_id);
+        let value_union = self.construct_union_id(typed_value, return_type_id)?;
+        self.builder
+            .ins()
+            .jump(merge_block, &[value_union.value.into()]);
+        self.builder.seal_block(value_block);
+
+        self.builder.switch_to_block(merge_block);
+        self.builder.seal_block(merge_block);
+        let union_ptr = self.builder.block_params(merge_block)[0];
+        Ok(CompiledValue::new(
+            union_ptr,
+            self.ptr_type(),
+            return_type_id,
+        ))
+    }
+
+    fn emit_task_join_intrinsic(
+        &mut self,
+        typed_args: &[CompiledValue],
+        return_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        if typed_args.is_empty() {
+            return Err(CodegenError::arg_count("task_join", 1, 0));
+        }
+        let (_tag, raw_value) =
+            self.call_std_task_tagged_native("task_join", typed_args[0].value)?;
+        Ok(self.convert_field_value(raw_value, return_type_id))
+    }
+
+    fn emit_task_run_intrinsic(
+        &mut self,
+        typed_args: &[CompiledValue],
+    ) -> CodegenResult<CompiledValue> {
+        if typed_args.is_empty() {
+            return Err(CodegenError::arg_count("task_run", 1, 0));
+        }
+        let closure = typed_args[0];
+        let closure_return_type = self
+            .arena()
+            .unwrap_function(closure.type_id)
+            .map(|(_, ret, _)| self.try_substitute_type(ret))
+            .unwrap_or(TypeId::I64);
+        let tag = {
+            let arena = self.arena();
+            array_element_tag_id(closure_return_type, arena)
+        };
+        let tag_val = self.builder.ins().iconst(types::I64, tag);
+        self.call_runtime_void(RuntimeKey::TaskSetSpawnTag, &[tag_val])?;
+
+        let native_func = self
+            .native_registry()
+            .lookup("std:task", "task_run")
+            .ok_or_else(|| CodegenError::not_found("native function", "std:task::task_run"))?;
+        let call_inst = self.call_native_indirect(native_func, &[closure.value]);
+        let handle = self.builder.inst_results(call_inst)[0];
+        Ok(CompiledValue::new(handle, self.ptr_type(), TypeId::HANDLE))
     }
 
     fn emit_runtime_panic(&mut self, args: &[Value], call_line: u32) -> CodegenResult<()> {

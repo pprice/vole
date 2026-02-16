@@ -157,8 +157,7 @@ impl Cg<'_, '_, '_> {
                 // Compile args and dispatch through intrinsic handler
                 let mut args = Vec::new();
                 for arg in &call.args {
-                    let compiled = self.expr(arg)?;
-                    args.push(compiled.value);
+                    args.push(self.expr(arg)?);
                 }
                 let native_name_str = self
                     .name_table()
@@ -167,7 +166,7 @@ impl Cg<'_, '_, '_> {
                 let return_type_id = self
                     .get_expr_type(&call_expr_id)
                     .expect("INTERNAL: compiler intrinsic call: missing sema return type");
-                return self.call_compiler_intrinsic_key_with_line(
+                return self.call_compiler_intrinsic_key_typed_with_line(
                     crate::IntrinsicKey::from(native_name_str.as_str()),
                     &args,
                     return_type_id,
