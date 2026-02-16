@@ -25,8 +25,10 @@ pub struct RcTask {
     pub header: RcHeader,
     /// The scheduler task ID.
     pub task_id: Cell<u64>,
-    /// Join result (all Phase 1 values fit i64, per vol-08mi).
-    pub result: Cell<i64>,
+    /// Join result type tag (RuntimeTypeId as u64).
+    pub result_tag: Cell<u64>,
+    /// Join result value.
+    pub result_value: Cell<u64>,
     /// Whether the task has completed.
     pub completed: Cell<bool>,
     /// Optional closure pointer (RC-managed). Stored here so we can rc_dec
@@ -54,7 +56,8 @@ impl RcTask {
                 RcHeader::with_drop_fn(RuntimeTypeId::Task as u32, task_drop),
             );
             (*task).task_id = Cell::new(task_id.as_raw());
-            (*task).result = Cell::new(0);
+            (*task).result_tag = Cell::new(RuntimeTypeId::I64 as u64);
+            (*task).result_value = Cell::new(0);
             (*task).completed = Cell::new(false);
             (*task).closure_ptr = Cell::new(std::ptr::null());
         }
@@ -130,6 +133,9 @@ pub extern "C" fn vole_rctask_run(body_fn: *const u8, closure_ptr: *const u8) ->
 /// If the task already completed, returns immediately.
 /// If the task panicked, propagates the panic.
 /// If the task was cancelled, panics with "joined task was cancelled".
+///
+/// Returns the raw i64 value for FFI compatibility. The full TaggedValue
+/// (tag + value) is cached on the RcTask handle for future use.
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> i64 {
@@ -140,7 +146,7 @@ pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> i64 {
     let task_id = unsafe { (*task_ptr).task_id.get() };
     let tid = TaskId::from_raw(task_id);
 
-    let result = scheduler::with_scheduler(|sched| {
+    let tv = scheduler::with_scheduler(|sched| {
         if sched.current_task().is_some() {
             // Called from within a task: use cooperative join (blocks caller).
             sched.join(tid)
@@ -151,13 +157,14 @@ pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> i64 {
         }
     });
 
-    // Mark the handle as completed and cache the result.
+    // Mark the handle as completed and cache the tagged result.
     unsafe {
         (*task_ptr).completed.set(true);
-        (*task_ptr).result.set(result);
+        (*task_ptr).result_tag.set(tv.tag);
+        (*task_ptr).result_value.set(tv.value);
     }
 
-    result
+    tv.value as i64
 }
 
 /// Cancel a task.

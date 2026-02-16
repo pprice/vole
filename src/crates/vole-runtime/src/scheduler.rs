@@ -10,13 +10,17 @@ use std::time::Instant;
 use rustc_hash::FxHashMap;
 
 use crate::coroutine::VoleCoroutine;
+use crate::value::{RuntimeTypeId, TaggedValue};
 
-// Thread-local transfer slot for task return values. The coroutine body
-// stores the return value here before exiting, and step_task reads it
-// after the coroutine completes. This avoids re-entering with_scheduler
-// from within a coroutine (which would cause a RefCell double-borrow).
+// Thread-local transfer slots for task return values. The coroutine body
+// stores the return tag+value here before exiting, and step_task reads them
+// after the coroutine completes. Two cells are used because TaggedValue
+// contains two u64 fields, and Cell requires Copy (which TaggedValue has).
+// This avoids re-entering with_scheduler from within a coroutine (which
+// would cause a RefCell double-borrow).
 thread_local! {
-    static TASK_RESULT: Cell<i64> = const { Cell::new(0) };
+    static TASK_RESULT_TAG: Cell<u64> = const { Cell::new(0) };
+    static TASK_RESULT_VALUE: Cell<u64> = const { Cell::new(0) };
 }
 
 // Thread-local pointer to the current task's yielder. Set by `step_task`
@@ -119,8 +123,8 @@ pub struct Task {
     /// Boxed to prevent HashMap resizing from moving the coroutine struct
     /// while it's being resumed (corosensei writes back to &mut self on yield).
     pub coroutine: Box<VoleCoroutine>,
-    /// Result value (set when task completes). Stored as i64 (tagged pointer or value).
-    pub result: Option<i64>,
+    /// Result value (set when task completes). Carries type tag alongside the value.
+    pub result: Option<TaggedValue>,
     /// Tasks waiting for this task to complete (for join).
     pub join_waiters: Vec<TaskId>,
     /// Why this task is blocked (for deadlock diagnostics).
@@ -140,7 +144,7 @@ pub struct Task {
     /// receiver after being unblocked. Using a per-task slot (instead of
     /// a global thread-local) prevents value corruption when multiple
     /// sender-receiver handoffs interleave.
-    pub transfer_value: Option<crate::value::TaggedValue>,
+    pub transfer_value: Option<TaggedValue>,
 }
 
 // =============================================================================
@@ -229,9 +233,13 @@ impl Scheduler {
             let result = func(closure as *const u8, yielder_ptr);
             // Clear the yielder before exiting.
             CURRENT_YIELDER.with(|cell| cell.set(std::ptr::null()));
-            // Store the task's return value in the thread-local transfer slot.
-            // step_task reads it after the coroutine completes.
-            TASK_RESULT.with(|cell| cell.set(result));
+            // Store the task's return value in the thread-local transfer slots.
+            // step_task reads them after the coroutine completes.
+            // Tag as I64 for backward compatibility: the coroutine body
+            // returns a raw i64, and the type tag will be upgraded when
+            // codegen emits tagged returns (ticket vu-kkdw).
+            TASK_RESULT_TAG.with(|cell| cell.set(RuntimeTypeId::I64 as u64));
+            TASK_RESULT_VALUE.with(|cell| cell.set(result as u64));
         });
 
         let task = Task {
@@ -288,13 +296,15 @@ impl Scheduler {
 
     /// Join: block the current task until `target` completes or is cancelled.
     ///
-    /// Returns the target's result value, or panics if the target was
-    /// cancelled or panicked (see Semantics Contract Section 1.3).
-    pub fn join(&mut self, target: TaskId) -> i64 {
+    /// Returns the target's result as a `TaggedValue`, or panics if the target
+    /// was cancelled or panicked (see Semantics Contract Section 1.3).
+    pub fn join(&mut self, target: TaskId) -> TaggedValue {
         // Self-join detection (Section 4.3).
         if self.current == Some(target) {
             panic!("deadlock: task attempted to join itself");
         }
+
+        let default = TaggedValue::from_i64(0);
 
         // Check if target is already in a terminal state.
         if let Some(task) = self.tasks.get(&target) {
@@ -304,7 +314,7 @@ impl Scheduler {
                         let msg = task.panic_message.as_deref().unwrap_or("unknown");
                         panic!("joined task panicked: {msg}");
                     }
-                    return task.result.unwrap_or(0);
+                    return task.result.unwrap_or(default);
                 }
                 TaskState::Cancelled => {
                     panic!("joined task was cancelled");
@@ -332,9 +342,9 @@ impl Scheduler {
             if task.state == TaskState::Cancelled {
                 panic!("joined task was cancelled");
             }
-            task.result.unwrap_or(0)
+            task.result.unwrap_or(default)
         } else {
-            0
+            default
         }
     }
 
@@ -487,11 +497,12 @@ impl Scheduler {
                 }
             }
             None => {
-                // Task completed. Read the return value from the transfer slot.
-                let result = TASK_RESULT.with(|cell| cell.get());
+                // Task completed. Read the return value from the transfer slots.
+                let tag = TASK_RESULT_TAG.with(|cell| cell.get());
+                let value = TASK_RESULT_VALUE.with(|cell| cell.get());
                 if let Some(task) = self.tasks.get_mut(&task_id) {
                     task.state = TaskState::Completed;
-                    task.result = Some(result);
+                    task.result = Some(TaggedValue { tag, value });
                     // Wake join waiters.
                     let waiters: Vec<TaskId> = task.join_waiters.drain(..).collect();
                     for waiter_id in waiters {
@@ -517,15 +528,16 @@ impl Scheduler {
     }
 
     /// Get the result of a completed task.
-    pub fn task_result(&self, task_id: TaskId) -> Option<i64> {
+    pub fn task_result(&self, task_id: TaskId) -> Option<TaggedValue> {
         self.tasks.get(&task_id).and_then(|t| t.result)
     }
 
     /// Get the result of a completed/cancelled task with join semantics.
     ///
     /// Panics if the task was cancelled or panicked (matching `join()` behavior).
-    /// Returns the result value for normally completed tasks.
-    pub fn join_result(&self, task_id: TaskId) -> i64 {
+    /// Returns the result as a `TaggedValue` for normally completed tasks.
+    pub fn join_result(&self, task_id: TaskId) -> TaggedValue {
+        let default = TaggedValue::from_i64(0);
         if let Some(task) = self.tasks.get(&task_id) {
             if task.panicked {
                 let msg = task.panic_message.as_deref().unwrap_or("unknown");
@@ -534,9 +546,9 @@ impl Scheduler {
             if task.state == TaskState::Cancelled {
                 panic!("joined task was cancelled");
             }
-            task.result.unwrap_or(0)
+            task.result.unwrap_or(default)
         } else {
-            0
+            default
         }
     }
 
@@ -614,7 +626,7 @@ impl Scheduler {
 
     /// Store a transfer value on a specific task (used by channel send
     /// when handing a value directly to a blocked receiver).
-    pub fn set_transfer_value(&mut self, task_id: TaskId, tv: crate::value::TaggedValue) {
+    pub fn set_transfer_value(&mut self, task_id: TaskId, tv: TaggedValue) {
         if let Some(task) = self.tasks.get_mut(&task_id) {
             task.transfer_value = Some(tv);
         }
@@ -622,7 +634,7 @@ impl Scheduler {
 
     /// Take the transfer value from the current task (used by channel
     /// recv after being unblocked by a sender).
-    pub fn take_current_transfer_value(&mut self) -> Option<crate::value::TaggedValue> {
+    pub fn take_current_transfer_value(&mut self) -> Option<TaggedValue> {
         let task_id = self.current?;
         self.tasks
             .get_mut(&task_id)
@@ -759,9 +771,12 @@ pub extern "C" fn vole_task_unblock(task_id: i64) {
 }
 
 /// Join: block until a task completes, return its result.
+///
+/// Returns the raw i64 value for FFI compatibility. The type tag is
+/// available internally via `Scheduler::join()` which returns `TaggedValue`.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_task_join(task_id: i64) -> i64 {
-    with_scheduler(|sched| sched.join(TaskId(task_id as u64)))
+    with_scheduler(|sched| sched.join(TaskId(task_id as u64)).value as i64)
 }
 
 /// Cancel a task.
