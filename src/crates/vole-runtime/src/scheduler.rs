@@ -532,6 +532,15 @@ impl Scheduler {
         self.tasks.get(&task_id).and_then(|t| t.result)
     }
 
+    /// Take the result of a completed task, clearing it from the scheduler.
+    ///
+    /// Returns `Some(TaggedValue)` if the task had a result, `None` otherwise.
+    /// After this call, the scheduler no longer holds a reference to the
+    /// result value. The caller is responsible for any RC cleanup.
+    pub fn take_task_result(&mut self, task_id: TaskId) -> Option<TaggedValue> {
+        self.tasks.get_mut(&task_id).and_then(|t| t.result.take())
+    }
+
     /// Get the result of a completed/cancelled task with join semantics.
     ///
     /// Panics if the task was cancelled or panicked (matching `join()` behavior).
