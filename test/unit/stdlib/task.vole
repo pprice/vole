@@ -1,4 +1,4 @@
-let { Task, Channel } = import "std:task"
+let { Task, Channel, parallel } = import "std:task"
 
 tests {
     test "run and join returns closure result" {
@@ -178,6 +178,46 @@ tests {
         max_actor.send(1)
         let result = max_actor.close_and_join()
         assert(result == 9)
+    }
+
+    test "parallel map doubles values" {
+        let results = parallel([1, 2, 3, 4, 5], 2, (x: i64) -> i64 => { return x * 2 })
+        assert(results.length() == 5)
+        let mut sum = 0
+        for v in results.iter() {
+            sum = sum + v
+        }
+        assert(sum == 30)
+    }
+
+    test "parallel with single worker" {
+        let results = parallel([10, 20, 30], 1, (x: i64) -> i64 => { return x + 1 })
+        assert(results.length() == 3)
+        let mut sum = 0
+        for v in results.iter() {
+            sum = sum + v
+        }
+        assert(sum == 63)
+    }
+
+    test "parallel with more workers than items" {
+        let results = parallel([5, 10], 8, (x: i64) -> i64 => { return x * 10 })
+        assert(results.length() == 2)
+        let mut sum = 0
+        for v in results.iter() {
+            sum = sum + v
+        }
+        assert(sum == 150)
+    }
+
+    test "parallel identity transform" {
+        let results = parallel([7, 14, 21], 3, (x: i64) -> i64 => { return x })
+        assert(results.length() == 3)
+        let mut sum = 0
+        for v in results.iter() {
+            sum = sum + v
+        }
+        assert(sum == 42)
     }
 
     test "buffered channel send and receive" {

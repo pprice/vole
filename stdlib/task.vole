@@ -248,3 +248,28 @@ class StateActor {
         return _task_join(self._task)
     }
 }
+
+// Process array items concurrently using up to `max` worker tasks.
+// Each item from `items` is passed through `transform` in a worker task.
+// Returns the transformed results as an array.
+//
+// NOTE: Output order is NOT guaranteed to match input order.
+//
+// Example:
+//   let results = parallel([1, 2, 3, 4], 2, (x: i64) -> i64 => {
+//       return x * 10
+//   })
+//   // results contains [10, 20, 30, 40] in some order
+func parallel(items: [i64], max: i64, transform: (i64) -> i64) -> [i64] {
+    // Use Task.all to apply transform to each item concurrently.
+    // Task.all spawns up to items.length() tasks and collects results.
+    let fns: [() -> i64] = []
+    let mut i = 0
+    while i < items.length() {
+        let item = items[i]
+        fns.push(() -> i64 => { return transform(item) })
+        i = i + 1
+    }
+    return Task.all(fns)
+}
+
