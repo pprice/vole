@@ -135,6 +135,12 @@ pub struct Task {
     /// Set by the wakeup source (channel send or timer) before unblocking
     /// a select-waiting task. Read by the `task_select` FFI after resume.
     pub wakeup_source: Option<WakeupSource>,
+    /// Per-task transfer slot for channel receive. Set by a sender when
+    /// handing a value directly to a blocked receiver, consumed by the
+    /// receiver after being unblocked. Using a per-task slot (instead of
+    /// a global thread-local) prevents value corruption when multiple
+    /// sender-receiver handoffs interleave.
+    pub transfer_value: Option<crate::value::TaggedValue>,
 }
 
 // =============================================================================
@@ -239,6 +245,7 @@ impl Scheduler {
             panic_message: None,
             yielder_ptr: std::ptr::null(),
             wakeup_source: None,
+            transfer_value: None,
         };
 
         self.tasks.insert(id, task);
@@ -603,6 +610,23 @@ impl Scheduler {
         self.tasks
             .get_mut(&task_id)
             .and_then(|t| t.wakeup_source.take())
+    }
+
+    /// Store a transfer value on a specific task (used by channel send
+    /// when handing a value directly to a blocked receiver).
+    pub fn set_transfer_value(&mut self, task_id: TaskId, tv: crate::value::TaggedValue) {
+        if let Some(task) = self.tasks.get_mut(&task_id) {
+            task.transfer_value = Some(tv);
+        }
+    }
+
+    /// Take the transfer value from the current task (used by channel
+    /// recv after being unblocked by a sender).
+    pub fn take_current_transfer_value(&mut self) -> Option<crate::value::TaggedValue> {
+        let task_id = self.current?;
+        self.tasks
+            .get_mut(&task_id)
+            .and_then(|t| t.transfer_value.take())
     }
 
     /// Check whether there are any pending timers.

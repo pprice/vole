@@ -1,0 +1,197 @@
+// Integration test: HTTP client-server simulation.
+//
+// Simulates a 10MB POST body sent via a buffered(4) channel.
+// Phase 1 channels carry i64, so each "chunk" is an i64 value
+// encoding the chunk index. The pattern tests backpressure
+// (bounded buffer), correct data flow (ordered chunks), and
+// scheduler fairness (2560 iterations with cooperative yield
+// on channel blocking).
+
+let { Task, Channel } = import "std:task"
+
+tests {
+    test "client sends 2560 chunks through buffered(4) channel" {
+        let CHUNK_SIZE = 4096
+        let TOTAL_SIZE = 10485760 // 10 MB
+        let CHUNK_COUNT = TOTAL_SIZE / CHUNK_SIZE // 2560
+
+        // Buffered channel: at most 4 chunks in flight.
+        let body_ch = Channel.buffered(4)
+
+        // Client task: sends 2560 chunk markers.
+        let client = Task.run(() -> i64 => {
+            let mut sent = 0
+            while sent < CHUNK_COUNT {
+                // Use (sent + 1) to avoid 0 (channel-closed sentinel).
+                body_ch.send(sent + 1)
+                sent = sent + 1
+            }
+            body_ch.close()
+            return sent
+        })
+
+        // Server task: accumulates all chunks, verifies order and total.
+        let server = Task.run(() -> i64 => {
+            let mut total_chunks = 0
+            let mut expected = 1
+            // Manual iter loop (avoids vu-axa7 .iter() capture bug).
+            let mut v = body_ch.receive()
+            while v != 0 || !body_ch.is_closed() {
+                assert(v == expected)
+                expected = expected + 1
+                total_chunks = total_chunks + 1
+                v = body_ch.receive()
+            }
+            return total_chunks
+        })
+
+        // Wait for both to complete.
+        let chunks_sent = client.join()
+        let chunks_received = server.join()
+
+        assert(chunks_sent == CHUNK_COUNT)
+        assert(chunks_received == CHUNK_COUNT)
+        assert(chunks_sent == 2560)
+    }
+
+    test "producer-consumer with computed values" {
+        let ch = Channel.buffered(4)
+
+        // Producer: computes squares 1..100
+        let producer = Task.run(() -> i64 => {
+            let mut i = 1
+            while i <= 100 {
+                ch.send(i * i)
+                i = i + 1
+            }
+            ch.close()
+            return 100
+        })
+
+        // Consumer: sums all squares
+        let consumer = Task.run(() -> i64 => {
+            let mut sum = 0
+            let mut v = ch.receive()
+            while v != 0 || !ch.is_closed() {
+                sum = sum + v
+                v = ch.receive()
+            }
+            return sum
+        })
+
+        let count = producer.join()
+        let total = consumer.join()
+
+        assert(count == 100)
+        // Sum of squares 1^2 + 2^2 + ... + 100^2 = 100*101*201/6 = 338350
+        assert(total == 338350)
+    }
+
+    test "pipeline: producer -> transformer -> consumer" {
+        let raw_ch = Channel.buffered(4)
+        let processed_ch = Channel.buffered(4)
+
+        // Producer: sends raw values 1..50
+        let producer = Task.run(() -> i64 => {
+            let mut i = 1
+            while i <= 50 {
+                raw_ch.send(i)
+                i = i + 1
+            }
+            raw_ch.close()
+            return 50
+        })
+
+        // Transformer: doubles each value
+        let transformer = Task.run(() -> i64 => {
+            let mut count = 0
+            let mut v = raw_ch.receive()
+            while v != 0 || !raw_ch.is_closed() {
+                processed_ch.send(v * 2)
+                count = count + 1
+                v = raw_ch.receive()
+            }
+            processed_ch.close()
+            return count
+        })
+
+        // Consumer: sums the transformed values
+        let consumer = Task.run(() -> i64 => {
+            let mut sum = 0
+            let mut v = processed_ch.receive()
+            while v != 0 || !processed_ch.is_closed() {
+                sum = sum + v
+                v = processed_ch.receive()
+            }
+            return sum
+        })
+
+        let produced = producer.join()
+        let transformed = transformer.join()
+        let total = consumer.join()
+
+        assert(produced == 50)
+        assert(transformed == 50)
+        // Sum of 2*1 + 2*2 + ... + 2*50 = 2 * (50*51/2) = 2550
+        assert(total == 2550)
+    }
+
+    test "fan-out fan-in: multiple workers process items" {
+        let work_ch = Channel.buffered(8)
+        let result_ch = Channel.buffered(20)
+
+        // Dispatcher: sends 20 work items
+        let dispatcher = Task.run(() -> i64 => {
+            let mut i = 1
+            while i <= 20 {
+                work_ch.send(i)
+                i = i + 1
+            }
+            work_ch.close()
+            return 20
+        })
+
+        // Worker 1: processes items from work channel
+        let worker1 = Task.run(() -> i64 => {
+            let mut count = 0
+            let mut item = work_ch.receive()
+            while item != 0 || !work_ch.is_closed() {
+                result_ch.send(item * 10)
+                count = count + 1
+                item = work_ch.receive()
+            }
+            return count
+        })
+
+        // Worker 2: also processes items from work channel
+        let worker2 = Task.run(() -> i64 => {
+            let mut count = 0
+            let mut item = work_ch.receive()
+            while item != 0 || !work_ch.is_closed() {
+                result_ch.send(item * 10)
+                count = count + 1
+                item = work_ch.receive()
+            }
+            return count
+        })
+
+        // Wait for dispatcher and workers to finish
+        _ = dispatcher.join()
+        let w1 = worker1.join()
+        let w2 = worker2.join()
+        result_ch.close()
+
+        // Total items processed by both workers should be 20
+        assert(w1 + w2 == 20)
+
+        // Sum all results from the result channel
+        let mut total = 0
+        let mut v = result_ch.receive()
+        while v != 0 || !result_ch.is_closed() {
+            total = total + v
+            v = result_ch.receive()
+        }
+        // Sum of 10*1 + 10*2 + ... + 10*20 = 10 * (20*21/2) = 2100
+        assert(total == 2100)
+    }
+}

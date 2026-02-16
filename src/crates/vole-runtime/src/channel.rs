@@ -146,10 +146,11 @@ fn buffered_send(inner: &mut ChannelInner, capacity: usize, tv: TaggedValue) -> 
 
     // If a receiver is waiting, hand the value directly (fast path).
     if let Some(waiter) = inner.waiting_receivers.pop_front() {
-        // Store value in a thread-local for the receiver to pick up.
-        set_transfer_value(tv);
+        // Store value on the receiver's per-task transfer slot.
+        let receiver_id = scheduler::TaskId::from_raw(waiter.task_id);
         scheduler::with_scheduler(|sched| {
-            sched.unblock(scheduler::TaskId::from_raw(waiter.task_id));
+            sched.set_transfer_value(receiver_id, tv);
+            sched.unblock(receiver_id);
         });
         return 0;
     }
@@ -193,9 +194,10 @@ fn unbuffered_send(inner: &mut ChannelInner, tv: TaggedValue) -> i64 {
 
     // If a receiver is waiting, hand value directly.
     if let Some(waiter) = inner.waiting_receivers.pop_front() {
-        set_transfer_value(tv);
+        let receiver_id = scheduler::TaskId::from_raw(waiter.task_id);
         scheduler::with_scheduler(|sched| {
-            sched.unblock(scheduler::TaskId::from_raw(waiter.task_id));
+            sched.set_transfer_value(receiver_id, tv);
+            sched.unblock(receiver_id);
         });
         return 0;
     }
@@ -278,8 +280,8 @@ fn channel_recv_impl(
         scheduler::yield_current_coroutine();
     }
 
-    // After being woken, the value was placed in the transfer slot.
-    let tv = take_transfer_value();
+    // After being woken, the value was placed in the current task's transfer slot.
+    let tv = scheduler::with_scheduler(|sched| sched.take_current_transfer_value());
     if let Some(tv) = tv {
         *out_tag = tv.tag as i64;
         *out_value = tv.value as i64;
@@ -401,29 +403,6 @@ pub fn channel_remove_select_waiter(ch: *mut RcChannel, task_id: u64) {
         let inner = &mut *(*ch).inner;
         inner.select_waiters.retain(|w| w.task_id != task_id);
     }
-}
-
-// =============================================================================
-// Transfer slot (thread-local)
-// =============================================================================
-
-use std::cell::RefCell;
-
-thread_local! {
-    /// Transfer slot for passing a value from sender to receiver when the
-    /// receiver was blocked. Set by the sender, consumed by the receiver
-    /// after being woken.
-    static TRANSFER_VALUE: RefCell<Option<TaggedValue>> = const { RefCell::new(None) };
-}
-
-fn set_transfer_value(tv: TaggedValue) {
-    TRANSFER_VALUE.with(|cell| {
-        *cell.borrow_mut() = Some(tv);
-    });
-}
-
-fn take_transfer_value() -> Option<TaggedValue> {
-    TRANSFER_VALUE.with(|cell| cell.borrow_mut().take())
 }
 
 // =============================================================================
