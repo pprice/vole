@@ -128,18 +128,21 @@ impl Cg<'_, '_, '_> {
             return self.array_push_call(&obj, mc);
         }
 
-        // Handle Channel/Task method interceptions — emit RuntimeTypeId tags
-        // and struct-return unboxing directly in codegen, replacing Vole-level stubs.
-        if let Some(class_name) = self.class_name_str(obj.type_id) {
-            match (class_name.as_str(), method_name_str) {
-                ("Channel", "send") => return self.channel_send_call(&obj, mc),
-                ("Channel", "receive") => return self.channel_recv_call(&obj),
-                ("Channel", "try_receive") => {
-                    return self.channel_try_recv_call(&obj, mc.method, expr_id);
-                }
-                ("Task", "join") => return self.task_join_call(&obj, expr_id),
+        // Handle std:task Channel/Task method interceptions — emit RuntimeTypeId
+        // tags and struct-return unboxing directly in codegen, replacing
+        // Vole-level stubs. This must be declaration-identity based (not name
+        // based), otherwise user-defined classes named Task/Channel can crash.
+        if self.is_std_task_class_instance(obj.type_id, "Channel") {
+            match method_name_str {
+                "send" => return self.channel_send_call(&obj, mc),
+                "receive" => return self.channel_recv_call(&obj),
+                "try_receive" => return self.channel_try_recv_call(&obj, mc.method, expr_id),
                 _ => {}
             }
+        } else if self.is_std_task_class_instance(obj.type_id, "Task")
+            && method_name_str == "join"
+        {
+            return self.task_join_call(&obj, expr_id);
         }
 
         // Handle RuntimeIterator methods - these call external functions directly
@@ -1092,11 +1095,23 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
-    /// Get the class name string for a type, if it is a class type.
-    fn class_name_str(&self, type_id: TypeId) -> Option<String> {
-        let (type_def_id, _) = self.arena().unwrap_class(type_id)?;
-        let name_id = self.query().type_name_id(type_def_id);
-        self.name_table().last_segment_str(name_id)
+    /// Resolve a type from std:task by short name, if that module is loaded.
+    fn std_task_type_def_id(&self, short_name: &str) -> Option<TypeDefId> {
+        let module_id = self.query().module_id_if_known("std:task")?;
+        self.query().resolve_type_def_by_str(module_id, short_name)
+    }
+
+    /// Whether a class instance type is exactly std:task::<short_name>.
+    fn is_std_task_class_instance(&self, class_type_id: TypeId, short_name: &str) -> bool {
+        let Some((type_def_id, _)) = self.arena().unwrap_class(class_type_id) else {
+            return false;
+        };
+        self.std_task_type_def_id(short_name) == Some(type_def_id)
+    }
+
+    /// Whether a TypeDefId is exactly std:task::<short_name>.
+    fn is_std_task_type_def(&self, type_def_id: TypeDefId, short_name: &str) -> bool {
+        self.std_task_type_def_id(short_name) == Some(type_def_id)
     }
 
     /// Extract the first type argument from a generic class (e.g. Channel<T>, Task<T>,
@@ -1124,10 +1139,8 @@ impl Cg<'_, '_, '_> {
         mc: &MethodCallExpr,
         _expr_id: NodeId,
     ) -> CodegenResult<Option<CompiledValue>> {
-        // Check if this is Task.run
-        let type_name_id = self.query().type_name_id(type_def_id);
-        let type_name = self.name_table().last_segment_str(type_name_id);
-        if type_name.as_deref() != Some("Task") {
+        // Check if this is std:task::Task.run
+        if !self.is_std_task_type_def(type_def_id, "Task") {
             return Ok(None);
         }
         let method_name = self.interner().resolve(mc.method);
@@ -1179,11 +1192,12 @@ impl Cg<'_, '_, '_> {
             return Err(CodegenError::arg_count("Channel.send", 1, mc.args.len()));
         }
 
-        // Compile the value argument
-        let value = self.expr(&mc.args[0])?;
-
         // Compute the RuntimeTypeId tag for Channel<T>'s concrete element type.
         let elem_type_id = self.class_first_type_arg(ch_obj.type_id);
+        // Compile with expected type context and run normal coercion so generic
+        // Channel<T> calls behave like regular method calls (especially union T).
+        let value = self.expr_with_expected_type(&mc.args[0], elem_type_id)?;
+        let value = self.coerce_to_type(value, elem_type_id)?;
         let tag = {
             let arena = self.arena();
             array_element_tag_id(elem_type_id, arena)

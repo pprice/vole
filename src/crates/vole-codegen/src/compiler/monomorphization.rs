@@ -453,6 +453,36 @@ impl Compiler<'_> {
             .any(|ty| self.type_depends_on_program_definitions(ty))
     }
 
+    /// Class methods implemented via hardcoded codegen interception and therefore
+    /// never emitted as callable monomorphized functions.
+    fn is_codegen_intercepted_std_task_method(
+        &self,
+        instance: &ClassMethodMonomorphInstance,
+    ) -> bool {
+        let module_id = self.analyzed.name_table().module_of(instance.class_name);
+        let module_path = self.analyzed.name_table().module_path(module_id).to_string();
+        if module_path != "std:task" {
+            return false;
+        }
+        let class_name = self
+            .analyzed
+            .name_table()
+            .last_segment_str(instance.class_name)
+            .unwrap_or_default();
+        let method_name = self
+            .analyzed
+            .name_table()
+            .last_segment_str(instance.method_name)
+            .unwrap_or_default();
+        matches!(
+            (class_name.as_str(), method_name.as_str()),
+            ("Channel", "send")
+                | ("Channel", "receive")
+                | ("Channel", "try_receive")
+                | ("Task", "join")
+        )
+    }
+
     /// Declare all monomorphized class method instances
     pub(super) fn declare_class_method_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Collect instances to avoid borrow issues
@@ -475,6 +505,12 @@ impl Compiler<'_> {
 
             // Skip abstract monomorph templates (e.g., T -> TypeParam(T)).
             if self.is_abstract_class_method_monomorph(&instance) {
+                continue;
+            }
+
+            // These methods are lowered directly in codegen and must not be
+            // emitted from their fallback Vole bodies.
+            if self.is_codegen_intercepted_std_task_method(&instance) {
                 continue;
             }
 
@@ -517,6 +553,11 @@ impl Compiler<'_> {
 
             // Skip abstract monomorph templates (e.g., T -> TypeParam(T)).
             if self.is_abstract_class_method_monomorph(&instance) {
+                continue;
+            }
+
+            // Lowered directly in codegen.
+            if self.is_codegen_intercepted_std_task_method(&instance) {
                 continue;
             }
 
@@ -894,6 +935,9 @@ impl Compiler<'_> {
             if instance.external_info.is_some()
                 || self.is_abstract_class_method_monomorph(&instance)
             {
+                continue;
+            }
+            if self.is_codegen_intercepted_std_task_method(&instance) {
                 continue;
             }
 

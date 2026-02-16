@@ -1,4 +1,5 @@
 let { Task, Channel, SelectResult } = import "std:task"
+let { Duration } = import "std:time"
 
 tests {
     test "run and join returns closure result" {
@@ -24,6 +25,22 @@ tests {
         let result = t.join()
         assert(t.is_done())
         assert(result == 99)
+    }
+
+    test "join is idempotent for i64 result" {
+        let t = Task.run(() -> i64 => { return 42 })
+        let first = t.join()
+        let second = t.join()
+        assert(first == 42)
+        assert(second == 42)
+    }
+
+    test "join is idempotent for string result" {
+        let t = Task.run(() -> string => { return "done" })
+        let first = t.join()
+        let second = t.join()
+        assert(first == "done")
+        assert(second == "done")
     }
 
     test "cancel before run prevents execution" {
@@ -489,7 +506,7 @@ tests {
         let ch1 = Channel.buffered<i64>(4)
         let ch2 = Channel.buffered<i64>(4)
         ch2.send(42)
-        let result = Task.select2(ch1, ch2, 0)
+        let result = Task.select2(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 1)
         assert(result.value == 42)
@@ -500,7 +517,7 @@ tests {
         let ch2 = Channel.buffered<i64>(4)
         ch1.send(10)
         ch2.send(20)
-        let result = Task.select2(ch1, ch2, 0)
+        let result = Task.select2(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 0)
         assert(result.value == 10)
@@ -513,7 +530,7 @@ tests {
             ch2.send(99)
             return 0
         })
-        let result = Task.select2(ch1, ch2, 0)
+        let result = Task.select2(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 1)
         assert(result.value == 99)
@@ -524,7 +541,7 @@ tests {
         let ch1 = Channel.buffered<i64>(4)
         let ch2 = Channel.buffered<i64>(4)
         ch1.close()
-        let result = Task.select2(ch1, ch2, 0)
+        let result = Task.select2(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         // Closed channel is "ready" (recv returns 0)
         assert(result.channel_index == 0)
@@ -535,7 +552,7 @@ tests {
         let ch2 = Channel.buffered<i64>(4)
         let ch3 = Channel.buffered<i64>(4)
         ch3.send(77)
-        let result = Task.select3(ch1, ch2, ch3, 0)
+        let result = Task.select3(ch1, ch2, ch3, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 2)
         assert(result.value == 77)
@@ -548,7 +565,7 @@ tests {
         ch1.send(1)
         ch2.send(2)
         ch3.send(3)
-        let result = Task.select3(ch1, ch2, ch3, 0)
+        let result = Task.select3(ch1, ch2, ch3, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 0)
         assert(result.value == 1)
@@ -562,7 +579,7 @@ tests {
             ch1.send(42)
             return 0
         })
-        let result = Task.select2(ch1, ch2, 0)
+        let result = Task.select2(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 0)
         assert(result.value == 42)
@@ -576,7 +593,7 @@ tests {
         // Since no task is producing data, this should time out.
         // From within a task, this will block and then timeout.
         let t = Task.run(() -> i64 => {
-            let result = Task.select2(ch1, ch2, 1)
+            let result = Task.select2(ch1, ch2, Duration.nanos(1))
             if result.timed_out { return 1 }
             return 0
         })
@@ -591,12 +608,12 @@ tests {
         ch2.send(20)
 
         // First select: ch1 wins (lowest index)
-        let r1 = Task.select2(ch1, ch2, 0)
+        let r1 = Task.select2(ch1, ch2, Duration.zero())
         assert(r1.channel_index == 0)
         assert(r1.value == 10)
 
         // Second select: only ch2 has data now
-        let r2 = Task.select2(ch1, ch2, 0)
+        let r2 = Task.select2(ch1, ch2, Duration.zero())
         assert(r2.channel_index == 1)
         assert(r2.value == 20)
     }
@@ -609,7 +626,7 @@ tests {
         let ch1 = Channel.buffered<string>(4)
         let ch2 = Channel.buffered<string>(4)
         ch2.send("hello")
-        let result = Task.select2<string>(ch1, ch2, 0)
+        let result = Task.select2<string>(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 1)
         assert(result.value == "hello")
@@ -620,7 +637,7 @@ tests {
         let ch2 = Channel.buffered<string>(4)
         ch1.send("first")
         ch2.send("second")
-        let result = Task.select2<string>(ch1, ch2, 0)
+        let result = Task.select2<string>(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 0)
         assert(result.value == "first")
@@ -630,7 +647,7 @@ tests {
         let ch1 = Channel.buffered<bool>(4)
         let ch2 = Channel.buffered<bool>(4)
         ch1.send(true)
-        let result = Task.select2<bool>(ch1, ch2, 0)
+        let result = Task.select2<bool>(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 0)
         assert(result.value == true)
@@ -640,7 +657,7 @@ tests {
         let ch1 = Channel.buffered<f64>(4)
         let ch2 = Channel.buffered<f64>(4)
         ch2.send(3.14)
-        let result = Task.select2<f64>(ch1, ch2, 0)
+        let result = Task.select2<f64>(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 1)
         assert(result.value == 3.14)
@@ -651,7 +668,7 @@ tests {
         let ch2 = Channel.buffered<string>(4)
         let ch3 = Channel.buffered<string>(4)
         ch3.send("third")
-        let result = Task.select3<string>(ch1, ch2, ch3, 0)
+        let result = Task.select3<string>(ch1, ch2, ch3, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 2)
         assert(result.value == "third")
@@ -664,7 +681,7 @@ tests {
         ch1.send(1.1)
         ch2.send(2.2)
         ch3.send(3.3)
-        let result = Task.select3<f64>(ch1, ch2, ch3, 0)
+        let result = Task.select3<f64>(ch1, ch2, ch3, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 0)
         assert(result.value == 1.1)
@@ -676,11 +693,11 @@ tests {
         ch1.send("alpha")
         ch2.send("beta")
 
-        let r1 = Task.select2<string>(ch1, ch2, 0)
+        let r1 = Task.select2<string>(ch1, ch2, Duration.zero())
         assert(r1.channel_index == 0)
         assert(r1.value == "alpha")
 
-        let r2 = Task.select2<string>(ch1, ch2, 0)
+        let r2 = Task.select2<string>(ch1, ch2, Duration.zero())
         assert(r2.channel_index == 1)
         assert(r2.value == "beta")
     }
@@ -692,7 +709,7 @@ tests {
             ch2.send("from task")
             return 0
         })
-        let result = Task.select2<string>(ch1, ch2, 0)
+        let result = Task.select2<string>(ch1, ch2, Duration.zero())
         assert(!result.timed_out)
         assert(result.channel_index == 1)
         assert(result.value == "from task")
@@ -703,7 +720,7 @@ tests {
         let ch1 = Channel.buffered<string>(4)
         let ch2 = Channel.buffered<string>(4)
         let t = Task.run(() -> i64 => {
-            let result = Task.select2<string>(ch1, ch2, 1)
+            let result = Task.select2<string>(ch1, ch2, Duration.nanos(1))
             if result.timed_out { return 1 }
             return 0
         })
@@ -715,7 +732,7 @@ tests {
         let ch1 = Channel.buffered<bool>(4)
         let ch2 = Channel.buffered<bool>(4)
         let t = Task.run(() -> i64 => {
-            let result = Task.select2<bool>(ch1, ch2, 1)
+            let result = Task.select2<bool>(ch1, ch2, Duration.nanos(1))
             if result.timed_out { return 1 }
             return 0
         })
@@ -727,7 +744,7 @@ tests {
         let ch1 = Channel.buffered<f64>(4)
         let ch2 = Channel.buffered<f64>(4)
         let t = Task.run(() -> i64 => {
-            let result = Task.select2<f64>(ch1, ch2, 1)
+            let result = Task.select2<f64>(ch1, ch2, Duration.nanos(1))
             if result.timed_out { return 1 }
             return 0
         })

@@ -22,6 +22,8 @@
 //   let val = ch.receive()
 //   ch.close()
 
+let { Duration } = import "std:time"
+
 // Native bindings to std:task module
 external("std:task") {
     func "channel_new" as _channel_new(capacity: i64) -> handle
@@ -130,7 +132,7 @@ class Task<T: Sendable> {
         // Wait on two channels simultaneously, returning when the first
         // channel becomes ready or the timeout expires.
         //
-        // `timeout_nanos` is the maximum wait in nanoseconds (0 = no timeout).
+        // `timeout` is the maximum wait duration (`Duration.zero()` = no timeout).
         // Returns a SelectResult<T> with:
         //   - channel_index: 0 or 1 (which channel has data)
         //   - value: the received value from that channel
@@ -139,11 +141,11 @@ class Task<T: Sendable> {
         // When timed_out is true, value is undefined and must not be read.
         //
         // Example:
-        //   let result = Task.select2(ch1, ch2, 0)
+        //   let result = Task.select2(ch1, ch2, Duration.zero())
         //   if result.timed_out { println("timeout") }
         //   else if result.channel_index == 0 { handle(result.value) }
-        func select2(ch1: Channel<T>, ch2: Channel<T>, timeout_nanos: i64) -> SelectResult<T> {
-            let idx = _task_select2(ch1._ptr, ch2._ptr, timeout_nanos)
+        func select2(ch1: Channel<T>, ch2: Channel<T>, timeout: Duration) -> SelectResult<T> {
+            let idx = _task_select2(ch1._ptr, ch2._ptr, timeout.as_nanos())
             if idx == 0 {
                 return SelectResult<T> { channel_index: 0, value: ch1.receive(), timed_out: false }
             }
@@ -160,11 +162,11 @@ class Task<T: Sendable> {
         // Wait on three channels simultaneously, returning when the first
         // channel becomes ready or the timeout expires.
         //
-        // `timeout_nanos` is the maximum wait in nanoseconds (0 = no timeout).
+        // `timeout` is the maximum wait duration (`Duration.zero()` = no timeout).
         // Returns a SelectResult<T> with channel_index 0, 1, or 2.
         // When timed_out is true, value is undefined and must not be read.
-        func select3(ch1: Channel<T>, ch2: Channel<T>, ch3: Channel<T>, timeout_nanos: i64) -> SelectResult<T> {
-            let idx = _task_select3(ch1._ptr, ch2._ptr, ch3._ptr, timeout_nanos)
+        func select3(ch1: Channel<T>, ch2: Channel<T>, ch3: Channel<T>, timeout: Duration) -> SelectResult<T> {
+            let idx = _task_select3(ch1._ptr, ch2._ptr, ch3._ptr, timeout.as_nanos())
             if idx == 0 {
                 return SelectResult<T> { channel_index: 0, value: ch1.receive(), timed_out: false }
             }
@@ -260,8 +262,7 @@ class Channel<T: Sendable> {
     // NOTE: codegen intercepts this method and emits the correct RuntimeTypeId
     // tag based on the element type.
     func send(value: T) -> bool {
-        _ = value
-        return false
+        return panic("Channel.send should be codegen-intercepted")
     }
 
     // Receive a value from the channel.
@@ -350,4 +351,3 @@ class StateActor<T: Sendable> {
         return task.join()
     }
 }
-

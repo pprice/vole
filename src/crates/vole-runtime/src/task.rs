@@ -9,7 +9,7 @@ use std::cell::Cell;
 
 use crate::alloc_track;
 use crate::scheduler::{self, TaskId};
-use crate::value::{RcHeader, RuntimeTypeId, TaggedValue, rc_dec, tag_needs_rc};
+use crate::value::{RcHeader, RuntimeTypeId, TaggedValue, rc_dec, rc_inc, tag_needs_rc};
 
 // =============================================================================
 // Types
@@ -102,10 +102,9 @@ extern "C" fn task_drop(ptr: *mut u8) {
         rc_dec(closure as *mut u8);
     }
 
-    // Take and RC-dec the result value from the scheduler if it's an RC
-    // type. This handles the case where a task completed but was never
-    // joined — the result would otherwise leak. If join() already
-    // consumed the result via take_task_result, this returns None.
+    // Take and RC-dec the scheduler-owned result value if it's an RC type.
+    // This handles completed tasks that were never joined, and releases the
+    // scheduler's owning reference after all join calls are done.
     let tid = TaskId::from_raw(task_id);
     scheduler::with_scheduler(|sched| {
         if let Some(tv) = sched.take_task_result(tid)
@@ -169,21 +168,19 @@ pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> TaggedValue {
     let tv = scheduler::with_scheduler(|sched| {
         if sched.current_task().is_some() {
             // Called from within a task: use cooperative join (blocks caller).
-            let result = sched.join(tid);
-            // Consume the result from the scheduler so task_drop won't
-            // double-dec it. The caller takes ownership.
-            sched.take_task_result(tid);
-            result
+            sched.join(tid)
         } else {
             // Called from main thread: drive the scheduler until target is done.
             sched.run_until_done(tid);
-            let result = sched.join_result(tid);
-            // Consume the result from the scheduler so task_drop won't
-            // double-dec it. The caller takes ownership.
-            sched.take_task_result(tid);
-            result
+            sched.join_result(tid)
         }
     });
+
+    // Scheduler retains ownership of the stored result until task_drop.
+    // For RC payloads, each join call returns an additional owned reference.
+    if tv.value != 0 && tag_needs_rc(tv.tag) {
+        rc_inc(tv.value as *mut u8);
+    }
 
     // Mark the handle as completed.
     unsafe {

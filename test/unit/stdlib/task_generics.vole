@@ -86,6 +86,25 @@ tests {
         assert(token.label == "session")
     }
 
+    test "channel<i64|string> send and receive round trip" {
+        let ch = Channel.buffered<i64 | string>(2)
+        _ = ch.send(41)
+        _ = ch.send("x")
+        ch.close()
+
+        let first = ch.receive()
+        assert(first is i64)
+        if first is i64 {
+            assert(first == 41)
+        }
+
+        let second = ch.receive()
+        assert(second is string)
+        if second is string {
+            assert(second == "x")
+        }
+    }
+
     test "channel<string> keeps order with multiple values in flight" {
         let ch = Channel.buffered<string>(8)
         _ = ch.send("one")

@@ -20,9 +20,10 @@ pub(crate) fn get_type_def_id_from_type_id(
 ) -> Option<TypeDefId> {
     use vole_sema::type_arena::SemaType;
 
-    // For Class, Record, and Interface, extract TypeDefId directly
+    // For Class, Struct, and Interface, extract TypeDefId directly
     match arena.get(type_id) {
         SemaType::Class { type_def_id, .. } => Some(*type_def_id),
+        SemaType::Struct { type_def_id, .. } => Some(*type_def_id),
         SemaType::Interface { type_def_id, .. } => Some(*type_def_id),
         SemaType::Primitive(prim) => {
             let name_table = analyzed.name_table();

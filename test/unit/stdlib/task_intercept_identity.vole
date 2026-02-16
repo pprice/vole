@@ -1,0 +1,43 @@
+class Channel {
+    value: i64,
+
+    func send(v: i64) -> bool {
+        return v == self.value
+    }
+
+    func receive() -> i64 {
+        return self.value
+    }
+
+    func try_receive() -> i64 | Done {
+        return self.value
+    }
+}
+
+class Task {
+    value: i64,
+
+    func join() -> i64 {
+        return self.value
+    }
+}
+
+tests {
+    test "user defined Channel methods are not std:task-intercepted" {
+        let ch = Channel { value: 7 }
+        assert(ch.send(7))
+        assert(!ch.send(8))
+        assert(ch.receive() == 7)
+
+        let r = ch.try_receive()
+        assert(r is i64)
+        if r is i64 {
+            assert(r == 7)
+        }
+    }
+
+    test "user defined Task.join is not std:task-intercepted" {
+        let t = Task { value: 9 }
+        assert(t.join() == 9)
+    }
+}

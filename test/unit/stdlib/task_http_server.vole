@@ -7,6 +7,7 @@
 // pipeline request-response.
 
 let { Task, Channel } = import "std:task"
+let { Duration } = import "std:time"
 
 tests {
     test "server handles single request" {
@@ -280,7 +281,7 @@ tests {
             let mut remaining = 5
 
             while remaining > 0 {
-                let r = Task.select2(req_ch1, req_ch2, 0)
+                let r = Task.select2(req_ch1, req_ch2, Duration.zero())
                 if !r.timed_out {
                     // select2 already receives the value into r.value.
                     resp_ch.send(r.channel_index * 1000 + r.value)

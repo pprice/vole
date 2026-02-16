@@ -3,6 +3,7 @@
 // parallel, and Channel interoperate correctly.
 
 let { Task, Channel, SelectResult } = import "std:task"
+let { Duration } = import "std:time"
 
 tests {
     // =========================================================================
@@ -114,7 +115,7 @@ tests {
         ch1.send(1)
         ch2.send(2)
         ch3.send(3)
-        let r = Task.select3(ch1, ch2, ch3, 0)
+        let r = Task.select3(ch1, ch2, ch3, Duration.zero())
         assert(!r.timed_out)
         assert(r.channel_index == 0)
         assert(r.value == 1)
@@ -143,17 +144,17 @@ tests {
 
         // Select picks ch1 first (lowest index, has data), then ch1 again,
         // then ch2 (only ch2 has data left).
-        let r1 = Task.select2(ch1, ch2, 0)
+        let r1 = Task.select2(ch1, ch2, Duration.zero())
         assert(!r1.timed_out)
         assert(r1.channel_index == 0)
         assert(r1.value == 100)
 
-        let r2 = Task.select2(ch1, ch2, 0)
+        let r2 = Task.select2(ch1, ch2, Duration.zero())
         assert(!r2.timed_out)
         assert(r2.channel_index == 0)
         assert(r2.value == 200)
 
-        let r3 = Task.select2(ch1, ch2, 0)
+        let r3 = Task.select2(ch1, ch2, Duration.zero())
         assert(!r3.timed_out)
         assert(r3.channel_index == 1)
         assert(r3.value == 300)
