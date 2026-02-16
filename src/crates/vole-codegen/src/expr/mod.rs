@@ -154,9 +154,9 @@ impl Cg<'_, '_, '_> {
             let ty = self.builder.func.dfg.value_type(val);
 
             // Check for narrowed type from semantic analysis.
-            // In monomorphized generic bodies, sema-provided expr types can be stale.
-            // Only narrow when the requested type is actually compatible with one of
-            // this union's concrete variants after substitution.
+            // In monomorphized generic bodies we substitute both the union and the
+            // narrowed type, then verify the narrowed type is an actual variant of
+            // the resolved union before extracting the payload.
             if let Some(raw_narrowed_type_id) = self.get_expr_type(&expr.id) {
                 let resolved_union_type_id = self.try_substitute_type(*type_id);
                 let narrowed_type_id = self.try_substitute_type(raw_narrowed_type_id);
@@ -184,24 +184,16 @@ impl Cg<'_, '_, '_> {
                                 })
                         });
                     if let Some(narrowed_variant) = narrowed_variant {
-                        // In monomorphized generic bodies sema can report stale primitive
-                        // narrowings (commonly i64). Keep narrowing for nominal variants,
-                        // but skip primitive extraction and return the full union value.
-                        if self.substitutions.is_none() || !narrowed_variant.is_primitive() {
-                            // Union layout: [tag:1][padding:7][payload]
-                            let payload_ty = type_id_to_cranelift(
-                                narrowed_variant,
-                                self.arena(),
-                                self.ptr_type(),
-                            );
-                            let payload =
-                                self.load_union_payload(val, resolved_union_type_id, payload_ty);
-                            let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
-                            // The extracted payload is borrowed from the union variable —
-                            // callers must rc_inc if they take ownership.
-                            self.mark_borrowed_if_rc(&mut cv);
-                            return Ok(cv);
-                        }
+                        // Union layout: [tag:1][padding:7][payload]
+                        let payload_ty =
+                            type_id_to_cranelift(narrowed_variant, self.arena(), self.ptr_type());
+                        let payload =
+                            self.load_union_payload(val, resolved_union_type_id, payload_ty);
+                        let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
+                        // The extracted payload is borrowed from the union variable —
+                        // callers must rc_inc if they take ownership.
+                        self.mark_borrowed_if_rc(&mut cv);
+                        return Ok(cv);
                     }
                 }
             }
