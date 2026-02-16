@@ -1,0 +1,21 @@
+class Handle {
+    value: i64
+}
+
+implement Transferable for Handle {
+    func transfer() -> Handle {
+        return Handle { value: self.value }
+    }
+}
+
+func send_value<T: Sendable>(value: T) -> T {
+    return value
+}
+
+tests {
+    test "transferable class satisfies sendable" {
+        let h = Handle { value: 99 }
+        let result = send_value(h)
+        assert(result.value == 99)
+    }
+}

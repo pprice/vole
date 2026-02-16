@@ -215,9 +215,36 @@ runtime_keys! {
     // ── Interface ────────────────────────────────────────────────────
     InterfaceIter          => "vole_interface_iter"          : (Ptr) -> Ptr,
 
+    // ── Generator coroutines ────────────────────────────────────────────
+    GeneratorNew           => "vole_generator_new"           : (Ptr, Ptr, I64) -> Ptr,
+    GeneratorYield         => "vole_generator_yield"         : (Ptr, I64) -> Void,
+
     // ── Reference counting ───────────────────────────────────────────
     RcInc                  => "rc_inc"                       : (Ptr) -> Void,
     RcDec                  => "rc_dec"                       : (Ptr) -> Void,
+
+    // ── Task scheduler ─────────────────────────────────────────────────
+    TaskSpawn              => "vole_task_spawn"              : (Ptr, Ptr) -> I64,
+    TaskYield              => "vole_task_yield"              : () -> Void,
+    TaskBlock              => "vole_task_block"              : () -> I64,
+    TaskUnblock            => "vole_task_unblock"            : (I64) -> Void,
+    TaskJoin               => "vole_task_join"               : (I64) -> I64,
+    TaskCancel             => "vole_task_cancel"             : (I64) -> Void,
+    TaskIsDone             => "vole_task_is_done"            : (I64) -> I64,
+    SchedulerRun           => "vole_scheduler_run"           : () -> Void,
+
+    // ── Task handles (RcTask) ───────────────────────────────────────────
+    RcTaskRun              => "vole_rctask_run"              : (Ptr, Ptr) -> Ptr,
+    RcTaskJoin             => "vole_rctask_join"             : (Ptr) -> I64,
+    RcTaskCancel           => "vole_rctask_cancel"           : (Ptr) -> Void,
+    RcTaskIsDone           => "vole_rctask_is_done"          : (Ptr) -> I64,
+
+    // ── Channels ──────────────────────────────────────────────────────
+    ChannelNew             => "vole_channel_new"             : (I64) -> Ptr,
+    ChannelSend            => "vole_channel_send"            : (Ptr, I64, I64) -> I64,
+    ChannelRecv            => "vole_channel_recv"            : (Ptr, Ptr) -> I64,
+    ChannelClose           => "vole_channel_close"           : (Ptr) -> Void,
+    ChannelIsClosed        => "vole_channel_is_closed"       : (Ptr) -> I8,
 }
 
 pub fn all_symbols() -> &'static [RuntimeSymbol] {
@@ -649,6 +676,14 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
         ptr: vole_runtime::string_builder::vole_sb_finish as *const u8,
     },
     LinkableRuntimeSymbol {
+        c_name: "vole_generator_new",
+        ptr: vole_runtime::coroutine::vole_generator_new as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_generator_yield",
+        ptr: vole_runtime::coroutine::vole_generator_yield as *const u8,
+    },
+    LinkableRuntimeSymbol {
         c_name: "vole_instance_new",
         ptr: vole_runtime::instance::vole_instance_new as *const u8,
     },
@@ -667,6 +702,77 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_instance_set_field",
         ptr: vole_runtime::instance::vole_instance_set_field as *const u8,
+    },
+    // ── Task scheduler ─────────────────────────────────────────────────
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_spawn",
+        ptr: vole_runtime::scheduler::vole_task_spawn as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_yield",
+        ptr: vole_runtime::scheduler::vole_task_yield as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_block",
+        ptr: vole_runtime::scheduler::vole_task_block as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_unblock",
+        ptr: vole_runtime::scheduler::vole_task_unblock as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_join",
+        ptr: vole_runtime::scheduler::vole_task_join as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_cancel",
+        ptr: vole_runtime::scheduler::vole_task_cancel as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_is_done",
+        ptr: vole_runtime::scheduler::vole_task_is_done as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_scheduler_run",
+        ptr: vole_runtime::scheduler::vole_scheduler_run as *const u8,
+    },
+    // ── Task handles (RcTask) ───────────────────────────────────────────
+    LinkableRuntimeSymbol {
+        c_name: "vole_rctask_run",
+        ptr: vole_runtime::task::vole_rctask_run as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_rctask_join",
+        ptr: vole_runtime::task::vole_rctask_join as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_rctask_cancel",
+        ptr: vole_runtime::task::vole_rctask_cancel as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_rctask_is_done",
+        ptr: vole_runtime::task::vole_rctask_is_done as *const u8,
+    },
+    // ── Channels ──────────────────────────────────────────────────────
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_new",
+        ptr: vole_runtime::channel::vole_channel_new as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_send",
+        ptr: vole_runtime::channel::vole_channel_send as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_recv",
+        ptr: vole_runtime::channel::vole_channel_recv as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_close",
+        ptr: vole_runtime::channel::vole_channel_close as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_channel_is_closed",
+        ptr: vole_runtime::channel::vole_channel_is_closed as *const u8,
     },
 ];
 

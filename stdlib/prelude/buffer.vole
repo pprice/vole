@@ -1,0 +1,82 @@
+// stdlib/prelude/buffer.vole
+// Buffer class: a growable byte buffer backed by native RcBuffer.
+// Wraps the std:buffer native module via external bindings.
+
+let { Equatable } = import "./traits"
+
+// Native bindings to std:buffer module
+external("std:buffer") {
+    func "new" as _buffer_new() -> handle
+    func "with_capacity" as _buffer_with_capacity(cap: i64) -> handle
+    func "from_string" as _buffer_from_string(s: string) -> handle
+    func "len" as _buffer_len(buf: handle) -> i64
+    func "capacity" as _buffer_capacity(buf: handle) -> i64
+    func "append_byte" as _buffer_append_byte(buf: handle, byte: i64)
+    func "append" as _buffer_append(dest: handle, src: handle)
+    func "get" as _buffer_get(buf: handle, index: i64) -> i64
+    func "set" as _buffer_set(buf: handle, index: i64, value: i64)
+    func "slice" as _buffer_slice(buf: handle, start: i64, end: i64) -> handle
+    func "to_string" as _buffer_to_string(buf: handle) -> string
+    func "clear" as _buffer_clear(buf: handle)
+    func "equals" as _buffer_equals(a: handle, b: handle) -> i64
+}
+
+class Buffer {
+    _ptr: handle,
+
+    statics {
+        func new() -> Buffer {
+            return Buffer { _ptr: _buffer_new() }
+        }
+
+        func with_capacity(cap: i64) -> Buffer {
+            return Buffer { _ptr: _buffer_with_capacity(cap) }
+        }
+
+        func from_string(s: string) -> Buffer {
+            return Buffer { _ptr: _buffer_from_string(s) }
+        }
+    }
+
+    func length() -> i64 {
+        return _buffer_len(self._ptr)
+    }
+
+    func capacity() -> i64 {
+        return _buffer_capacity(self._ptr)
+    }
+
+    func append_byte(byte: i64) {
+        _buffer_append_byte(self._ptr, byte)
+    }
+
+    func append(other: Buffer) {
+        _buffer_append(self._ptr, other._ptr)
+    }
+
+    func get(index: i64) -> i64 {
+        return _buffer_get(self._ptr, index)
+    }
+
+    func set(index: i64, value: i64) {
+        _buffer_set(self._ptr, index, value)
+    }
+
+    func slice(start: i64, end: i64) -> Buffer {
+        return Buffer { _ptr: _buffer_slice(self._ptr, start, end) }
+    }
+
+    func to_string_raw() -> string {
+        return _buffer_to_string(self._ptr)
+    }
+
+    func clear() {
+        _buffer_clear(self._ptr)
+    }
+}
+
+implement Equatable for Buffer {
+    func equals(other: Self) -> bool {
+        return _buffer_equals(self._ptr, other._ptr) == 1
+    }
+}

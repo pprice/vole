@@ -1,0 +1,332 @@
+// stdlib/task.vole
+// Task and channel primitives for concurrency.
+//
+// Tasks are spawned with Task.run(() => { ... }) and return a handle.
+// Use .join() to wait for a task to complete and get its result.
+// Use .cancel() to request cooperative cancellation.
+//
+// Channels are the communication primitive between tasks.
+// Use Channel.buffered(n) for buffered channels or Channel.new()
+// for unbuffered (rendezvous) channels.
+//
+// Example usage:
+//   let task = import "std:task"
+//
+//   // Spawn and join a task
+//   let t = task.Task.run(() -> i64 => { return 42 })
+//   assert(t.join() == 42)
+//
+//   // Channel communication
+//   let ch = task.Channel.buffered(10)
+//   ch.send(42)
+//   let val = ch.receive()
+//   ch.close()
+
+// Native bindings to std:task module
+external("std:task") {
+    func "channel_new" as _channel_new(capacity: i64) -> handle
+    func "channel_send" as _channel_send(ch: handle, value: i64) -> i64
+    func "channel_recv" as _channel_recv(ch: handle) -> i64
+    func "channel_close" as _channel_close(ch: handle)
+    func "channel_is_closed" as _channel_is_closed(ch: handle) -> i64
+    func "task_run" as _task_run(closure: handle) -> handle
+    func "task_join" as _task_join(task: handle) -> i64
+    func "task_cancel" as _task_cancel(task: handle)
+    func "task_is_done" as _task_is_done(task: handle) -> i64
+    func "task_select2" as _task_select2(ch1: handle, ch2: handle, timeout_nanos: i64) -> i64
+    func "task_select3" as _task_select3(ch1: handle, ch2: handle, ch3: handle, timeout_nanos: i64) -> i64
+}
+
+// =============================================================================
+// SelectResult - return type for Task.select
+// =============================================================================
+
+// Result of a Task.select operation. Check `timed_out` first, then
+// dispatch on `channel_index` to determine which channel produced the value.
+struct SelectResult {
+    channel_index: i64,
+    value: i64,
+    timed_out: bool,
+}
+
+// =============================================================================
+// Task - spawned green thread handle
+// =============================================================================
+
+class Task {
+    _handle: handle,
+
+    statics {
+        // Spawn a task from a closure. The closure runs on the M:1 scheduler.
+        // Returns a Task handle for join/cancel operations.
+        func run(body: () -> i64) -> Task {
+            return Task { _handle: _task_run(body) }
+        }
+
+        // Create a streaming iterator backed by a producer task.
+        // The producer receives an `emit` callback to send values.
+        // The returned iterator yields values until the producer finishes.
+        //
+        // Example:
+        //   let s = Task.stream((emit: (i64) -> void) => {
+        //       emit(1)
+        //       emit(2)
+        //       emit(3)
+        //   })
+        //   for v in s { println(v) }
+        func stream(producer: ((i64) -> void) -> void) -> Iterator<i64> {
+            let ch = Channel.buffered(1)
+            let task = Task.run(() -> i64 => {
+                producer((value: i64) => {
+                    _ = ch.send(value)
+                })
+                ch.close()
+                return 0
+            })
+            return StreamIterator { _ch: ch._ptr, _task: task._handle }
+        }
+
+        // Create a stateful actor backed by a task and channel.
+        // The actor owns mutable state, receives i64 messages through a
+        // channel, and applies the handler to update the state.
+        //
+        // Example:
+        //   let counter = Task.state(0, (count: i64, msg: i64) -> i64 => {
+        //       return count + msg
+        //   })
+        //   counter.send(1)
+        //   counter.send(1)
+        //   let final_count = counter.close_and_join()
+        //   assert(final_count == 2)
+        func state(initial: i64, handler: (i64, i64) -> i64) -> StateActor {
+            let ch = Channel.buffered(8)
+            let task = Task.run(() -> i64 => {
+                let mut current = initial
+                let mut v = ch.receive()
+                while v != 0 || !ch.is_closed() {
+                    current = handler(current, v)
+                    v = ch.receive()
+                }
+                return current
+            })
+            return StateActor { _ch: ch._ptr, _task: task._handle }
+        }
+
+        // Wait on two channels simultaneously, returning when the first
+        // channel becomes ready or the timeout expires.
+        //
+        // `timeout_nanos` is the maximum wait in nanoseconds (0 = no timeout).
+        // Returns a SelectResult with:
+        //   - channel_index: 0 or 1 (which channel has data)
+        //   - value: the received value from that channel
+        //   - timed_out: true if the timeout expired before any channel was ready
+        //
+        // Example:
+        //   let result = Task.select2(ch1, ch2, 0)
+        //   if result.timed_out { println("timeout") }
+        //   else if result.channel_index == 0 { handle(result.value) }
+        func select2(ch1: Channel, ch2: Channel, timeout_nanos: i64) -> SelectResult {
+            let idx = _task_select2(ch1._ptr, ch2._ptr, timeout_nanos)
+            if idx == -1 {
+                return SelectResult { channel_index: -1, value: 0, timed_out: true }
+            }
+            let value = when {
+                idx == 0 => ch1.receive(),
+                _ => ch2.receive(),
+            }
+            return SelectResult { channel_index: idx, value: value, timed_out: false }
+        }
+
+        // Wait on three channels simultaneously, returning when the first
+        // channel becomes ready or the timeout expires.
+        //
+        // `timeout_nanos` is the maximum wait in nanoseconds (0 = no timeout).
+        // Returns a SelectResult with channel_index 0, 1, or 2.
+        func select3(ch1: Channel, ch2: Channel, ch3: Channel, timeout_nanos: i64) -> SelectResult {
+            let idx = _task_select3(ch1._ptr, ch2._ptr, ch3._ptr, timeout_nanos)
+            if idx == -1 {
+                return SelectResult { channel_index: -1, value: 0, timed_out: true }
+            }
+            let value = when {
+                idx == 0 => ch1.receive(),
+                idx == 1 => ch2.receive(),
+                _ => ch3.receive(),
+            }
+            return SelectResult { channel_index: idx, value: value, timed_out: false }
+        }
+
+        // Fan-out: spawn one task per closure and collect all results.
+        // Results are returned in the same order as the input closures.
+        func all(fns: [() -> i64]) -> [i64] {
+            // Spawn all tasks first.
+            let tasks: [Task] = []
+            let mut i = 0
+            while i < fns.length() {
+                tasks.push(Task.run(fns[i]))
+                i = i + 1
+            }
+
+            // Join all tasks and collect results in order.
+            let results: [i64] = []
+            let mut j = 0
+            while j < tasks.length() {
+                results.push(tasks[j].join())
+                j = j + 1
+            }
+            return results
+        }
+    }
+
+    // Block until the task completes and return its result.
+    // Panics if the task was cancelled or panicked.
+    func join() -> i64 {
+        return _task_join(self._handle)
+    }
+
+    // Request cooperative cancellation of the task.
+    // If the task is already completed, this is a no-op.
+    func cancel() {
+        _task_cancel(self._handle)
+    }
+
+    // Check if the task has completed (or was cancelled).
+    func is_done() -> bool {
+        return _task_is_done(self._handle) == 1
+    }
+}
+
+// =============================================================================
+// Channel - communication channel between tasks
+// =============================================================================
+
+class Channel {
+    _ptr: handle,
+
+    statics {
+        // Create an unbuffered (rendezvous) channel.
+        func new() -> Channel {
+            return Channel { _ptr: _channel_new(0) }
+        }
+
+        // Create a buffered channel with the given capacity.
+        func buffered(capacity: i64) -> Channel {
+            return Channel { _ptr: _channel_new(capacity) }
+        }
+    }
+
+    // Send a value on the channel.
+    // Returns true on success, false if the channel is closed.
+    func send(value: i64) -> bool {
+        return _channel_send(self._ptr, value) == 0
+    }
+
+    // Receive a value from the channel.
+    // Returns the value, or 0 if the channel is closed and empty.
+    // Use is_closed() to distinguish "received 0" from "channel closed".
+    func receive() -> i64 {
+        return _channel_recv(self._ptr)
+    }
+
+    // Close the channel. Wakes all waiting tasks.
+    // Double-close is a no-op.
+    func close() {
+        _channel_close(self._ptr)
+    }
+
+    // Check if the channel is closed.
+    func is_closed() -> bool {
+        return _channel_is_closed(self._ptr) == 1
+    }
+
+    // Return an iterator that drains the channel.
+    // Yields values until the channel is closed and empty.
+    func iter() -> Iterator<i64> {
+        return ChannelIterator { _ptr: self._ptr }
+    }
+}
+
+// =============================================================================
+// ChannelIterator - drains a channel via the Iterator interface
+// =============================================================================
+
+class ChannelIterator implements Iterator<i64> {
+    _ptr: handle,
+}
+
+implement Iterator<i64> for ChannelIterator {
+    func next() -> i64 | Done {
+        let v = _channel_recv(self._ptr)
+        // Phase 1 limitation: recv returns 0 both for "received literal 0"
+        // and "channel closed+empty". We disambiguate by checking is_closed.
+        if v == 0 && _channel_is_closed(self._ptr) == 1 {
+            return Done {}
+        }
+        return v
+    }
+}
+
+// =============================================================================
+// StreamIterator - drains a Task.stream's channel, keeping the task alive
+// =============================================================================
+
+class StreamIterator implements Iterator<i64> {
+    _ch: handle,
+    _task: handle,
+}
+
+implement Iterator<i64> for StreamIterator {
+    func next() -> i64 | Done {
+        let v = _channel_recv(self._ch)
+        if v == 0 && _channel_is_closed(self._ch) == 1 {
+            return Done {}
+        }
+        return v
+    }
+}
+
+// =============================================================================
+// StateActor - stateful actor backed by a task and channel
+// =============================================================================
+
+class StateActor {
+    _ch: handle,
+    _task: handle,
+
+    // Send a message to the actor.
+    // The actor's handler will be called with (current_state, msg).
+    func send(msg: i64) {
+        _ = _channel_send(self._ch, msg)
+    }
+
+    // Close the channel and wait for the actor task to finish.
+    // Returns the actor's final state.
+    func close_and_join() -> i64 {
+        _channel_close(self._ch)
+        return _task_join(self._task)
+    }
+}
+
+// Process array items concurrently using up to `max` worker tasks.
+// Each item from `items` is passed through `transform` in a worker task.
+// Returns the transformed results as an array.
+//
+// NOTE: Output order is NOT guaranteed to match input order.
+//
+// Example:
+//   let results = parallel([1, 2, 3, 4], 2, (x: i64) -> i64 => {
+//       return x * 10
+//   })
+//   // results contains [10, 20, 30, 40] in some order
+func parallel(items: [i64], max: i64, transform: (i64) -> i64) -> [i64] {
+    // Use Task.all to apply transform to each item concurrently.
+    // Task.all spawns up to items.length() tasks and collects results.
+    let fns: [() -> i64] = []
+    let mut i = 0
+    while i < items.length() {
+        let item = items[i]
+        fns.push(() -> i64 => { return transform(item) })
+        i = i + 1
+    }
+    return Task.all(fns)
+}
+

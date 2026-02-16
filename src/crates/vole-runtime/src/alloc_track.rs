@@ -9,7 +9,7 @@
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 /// Number of type slots. Must be greater than the highest RuntimeTypeId variant.
-const NUM_TYPE_SLOTS: usize = 13;
+const NUM_TYPE_SLOTS: usize = 14;
 
 /// Per-type allocation counters, indexed by RuntimeTypeId discriminant.
 static TYPE_COUNTERS: [AtomicI64; NUM_TYPE_SLOTS] = {
@@ -83,6 +83,14 @@ pub fn type_name(type_id: u32) -> &'static str {
         .unwrap_or("Unknown")
 }
 
+/// Return the current count for a specific type ID.
+pub fn count(type_id: u32) -> i64 {
+    TYPE_COUNTERS
+        .get(type_id as usize)
+        .map(|c| c.load(Ordering::Relaxed))
+        .unwrap_or(0)
+}
+
 /// Reset all counters to zero.
 pub fn reset() {
     TOTAL.store(0, Ordering::Relaxed);
@@ -108,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_disabled_mode_does_not_count() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Temporarily disable to test the disabled path.
         let was_enabled = ENABLED.load(Ordering::Relaxed);
         ENABLED.store(false, Ordering::Relaxed);
@@ -124,14 +132,14 @@ mod tests {
 
     #[test]
     fn test_enable_tracking() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         enable_tracking();
         assert!(ENABLED.load(Ordering::Relaxed));
     }
 
     #[test]
     fn test_track_alloc_increments_type_counter() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         enable_tracking();
         let before = type_count(RuntimeTypeId::Iterator as u32);
 
@@ -148,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_track_dealloc_decrements_type_counter() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         enable_tracking();
         let before = type_count(RuntimeTypeId::Rng as u32);
 
@@ -165,7 +173,7 @@ mod tests {
 
     #[test]
     fn test_snapshot_and_delta_on_type_counter() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         enable_tracking();
         let before = type_count(RuntimeTypeId::Closure as u32);
 
@@ -182,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_report_includes_tracked_types() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         enable_tracking();
         let before = type_count(RuntimeTypeId::Iterator as u32);
 
@@ -204,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_reset_zeros_type_counters() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         enable_tracking();
 
         track_alloc(RuntimeTypeId::Rng as u32);
@@ -218,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_negative_on_double_free() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         enable_tracking();
         let before = type_count(RuntimeTypeId::Iterator as u32);
 
@@ -233,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_all_type_ids_tracked() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         enable_tracking();
 
         let types = [

@@ -167,11 +167,18 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Parse a type constraint: Interface, Interface + Interface, Type1 | Type2, or { fields/methods }
+    /// Parse a type constraint: Interface, Interface + Interface, Type1 | Type2, { fields/methods }, or Sendable
     fn parse_type_constraint(&mut self) -> Result<TypeConstraint, ParseError> {
         // Use parse_base_type instead of parse_type to avoid consuming '+' as type combination.
         // For constraints, '+' means multiple interface requirements, not type combination.
         let first = self.parse_base_type()?;
+
+        // Check for built-in Sendable constraint
+        if let TypeExprKind::Named(sym) = &first.kind
+            && self.interner.resolve(*sym) == "Sendable"
+        {
+            return Ok(TypeConstraint::Sendable);
+        }
 
         // Check for union constraint: T: i32 | i64
         if self.check(TokenType::Pipe) {

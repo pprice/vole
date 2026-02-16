@@ -1,0 +1,17 @@
+func send_thing<T: Sendable>(value: T) -> T {
+    return value
+}
+
+tests {
+    test "sendable type param passes constraint" {
+        assert(send_thing(42) == 42)
+    }
+
+    test "sendable type param with string" {
+        assert(send_thing("hello") == "hello")
+    }
+
+    test "sendable type param with bool" {
+        assert(send_thing(true) == true)
+    }
+}

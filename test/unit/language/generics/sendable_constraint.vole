@@ -1,0 +1,29 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+func send_value<T: Sendable>(value: T) -> T {
+    return value
+}
+
+tests {
+    test "primitive is sendable" {
+        assert(send_value(42) == 42)
+    }
+
+    test "string is sendable" {
+        assert(send_value("hello") == "hello")
+    }
+
+    test "struct with sendable fields is sendable" {
+        let p = Point { x: 1, y: 2 }
+        let result = send_value(p)
+        assert(result.x == 1)
+        assert(result.y == 2)
+    }
+
+    test "bool is sendable" {
+        assert(send_value(true) == true)
+    }
+}

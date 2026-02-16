@@ -137,12 +137,17 @@ pub enum RuntimeTypeId {
     Closure = 6,
     Instance = 7,
     Rng = 8,
+    Buffer = 9,
+    /// RC-managed task handle for green threads.
+    Task = 10,
     Iterator = 11,
     /// Heap-allocated union buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
     /// Not RC-managed itself (no RcHeader), but may contain an RC payload.
     /// When cleaned up: if `is_rc` byte (offset 1) is non-zero, `rc_dec` the payload
     /// at offset 8, then free the 16-byte buffer.
     UnionHeap = 12,
+    /// RC-managed channel for inter-task communication.
+    Channel = 13,
 }
 
 impl RuntimeTypeId {
@@ -157,8 +162,11 @@ impl RuntimeTypeId {
             6 => Some(Self::Closure),
             7 => Some(Self::Instance),
             8 => Some(Self::Rng),
+            9 => Some(Self::Buffer),
+            10 => Some(Self::Task),
             11 => Some(Self::Iterator),
             12 => Some(Self::UnionHeap),
+            13 => Some(Self::Channel),
             _ => None,
         }
     }
@@ -174,8 +182,11 @@ impl RuntimeTypeId {
             Self::Closure => "Closure",
             Self::Instance => "Instance",
             Self::Rng => "Rng",
+            Self::Buffer => "Buffer",
+            Self::Task => "Task",
             Self::Iterator => "Iterator",
             Self::UnionHeap => "UnionHeap",
+            Self::Channel => "Channel",
         }
     }
 }
@@ -193,7 +204,17 @@ pub fn tag_needs_rc(tag: u64) -> bool {
     use RuntimeTypeId as T;
     matches!(
         RuntimeTypeId::from_u32(tag as u32),
-        Some(T::String | T::Array | T::Closure | T::Instance | T::Rng | T::Iterator)
+        Some(
+            T::String
+                | T::Array
+                | T::Closure
+                | T::Instance
+                | T::Rng
+                | T::Buffer
+                | T::Task
+                | T::Iterator
+                | T::Channel,
+        )
     )
 }
 
@@ -347,7 +368,11 @@ impl Default for Context {
 mod tests {
     use super::*;
     use std::alloc::{Layout, alloc, dealloc};
+    use std::sync::Mutex;
     use std::sync::atomic::AtomicBool;
+
+    // Tests that use the shared DROP_CALLED flag must not run in parallel.
+    static DROP_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn rc_header_inc_dec() {
@@ -426,6 +451,7 @@ mod tests {
 
     #[test]
     fn rc_dec_calls_drop_fn_at_zero() {
+        let _guard = DROP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         DROP_CALLED.store(false, Ordering::SeqCst);
 
         // We need a custom drop_fn that also deallocates, since rc_dec
@@ -484,6 +510,7 @@ mod tests {
 
     #[test]
     fn rc_dec_is_noop_for_pinned() {
+        let _guard = DROP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         DROP_CALLED.store(false, Ordering::SeqCst);
         unsafe {
             let ptr = alloc_pinned_header(Some(dummy_drop));
@@ -497,6 +524,7 @@ mod tests {
 
     #[test]
     fn rc_inc_dec_repeated_on_pinned() {
+        let _guard = DROP_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         DROP_CALLED.store(false, Ordering::SeqCst);
         unsafe {
             let ptr = alloc_pinned_header(Some(dummy_drop));

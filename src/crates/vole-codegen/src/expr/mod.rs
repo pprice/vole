@@ -18,6 +18,7 @@ use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
+use vole_frontend::ast::YieldExpr;
 use vole_frontend::{Expr, ExprKind, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::entity_defs::TypeDefKind;
@@ -111,12 +112,7 @@ impl Cg<'_, '_, '_> {
                     type_id,
                 ))
             }
-            ExprKind::Yield(_) => {
-                // Yield should be caught in semantic analysis
-                Err(CodegenError::unsupported(
-                    "yield expression outside generator context",
-                ))
-            }
+            ExprKind::Yield(yield_expr) => self.compile_yield(yield_expr),
             ExprKind::Block(block_expr) => self.block_expr(block_expr),
             ExprKind::If(if_expr) => self.if_expr(if_expr, expr.id),
             ExprKind::When(when_expr) => self.when_expr(when_expr, expr.id),
@@ -483,5 +479,36 @@ impl Cg<'_, '_, '_> {
         // must be rc_dec'd when it goes out of scope or is consumed as an arg.
         let cv = CompiledValue::new(closure_ptr, self.ptr_type(), func_type_id);
         Ok(self.mark_rc_owned(cv))
+    }
+
+    // =========================================================================
+    // Generator yield
+    // =========================================================================
+
+    /// Compile a yield expression inside a generator body.
+    ///
+    /// Calls `vole_generator_yield(yielder_ptr, value)` to suspend the coroutine,
+    /// passing the yielded value to the iterator consumer.
+    fn compile_yield(&mut self, yield_expr: &YieldExpr) -> CodegenResult<CompiledValue> {
+        let yielder_var = self.yielder_var.ok_or_else(|| {
+            CodegenError::unsupported("yield expression outside generator context")
+        })?;
+
+        // Compile the value to yield
+        let value = self.expr(&yield_expr.value)?;
+
+        // Load the yielder pointer
+        let yielder_ptr = self.builder.use_var(yielder_var);
+
+        // Call vole_generator_yield(yielder_ptr, value)
+        self.call_runtime_void(RuntimeKey::GeneratorYield, &[yielder_ptr, value.value])?;
+
+        // Yield is a statement-like expression; return a void/zero value.
+        // The type doesn't matter since yield is used in statement position.
+        Ok(CompiledValue::new(
+            self.builder.ins().iconst(types::I64, 0),
+            types::I64,
+            self.arena().primitives.i64,
+        ))
     }
 }

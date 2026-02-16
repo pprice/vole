@@ -521,8 +521,11 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let is_declared_interface = arena.is_interface(declared_type_id);
             let is_final_interface = arena.is_interface(final_type_id);
+            // RuntimeIterator is an internal concrete type that implements Iterator
+            // dispatch directly via runtime_iterator_method; skip interface boxing.
+            let is_runtime_iterator = arena.is_runtime_iterator(final_type_id);
 
-            if is_declared_interface && !is_final_interface {
+            if is_declared_interface && !is_final_interface && !is_runtime_iterator {
                 let arena = self.arena();
                 let cranelift_ty = type_id_to_cranelift(final_type_id, arena, self.ptr_type());
                 let boxed = self.box_interface_value(
@@ -936,7 +939,14 @@ impl Cg<'_, '_, '_> {
         // wrap in an RcIterator via vole_interface_iter so the native loop dispatch works.
         if is_interface_iter {
             let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter.value])?;
-            iter = self.compiled(wrapped, iter.type_id);
+            // vole_interface_iter rc_inc'd the data_ptr inside the boxed interface,
+            // so the iterator now owns its own reference. Release the caller's
+            // reference to the boxed interface data_ptr to avoid leaking it.
+            self.consume_rc_value(&mut iter)?;
+            // Track the RcIterator pointer as Owned so it gets rc_dec'd after the
+            // loop. Use elem_type_id (a non-interface type) so consume_rc_value
+            // emits a plain rc_dec on the pointer, not an interface data_ptr extract.
+            iter = CompiledValue::owned(wrapped, types::I64, elem_type_id);
         }
 
         // Create a stack slot for the out_value parameter

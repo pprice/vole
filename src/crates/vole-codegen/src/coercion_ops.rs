@@ -151,6 +151,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             is_value_union,
             is_target_unknown,
             is_value_unknown,
+            is_value_runtime_iterator,
         ) = {
             let arena = self.arena();
             (
@@ -160,9 +161,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 arena.is_union(resolved_value_type_id),
                 arena.is_unknown(resolved_target_type_id),
                 arena.is_unknown(resolved_value_type_id),
+                arena.is_runtime_iterator(resolved_value_type_id),
             )
         };
-        if is_target_interface && !is_value_interface {
+        // RuntimeIterator is a concrete type that implements Iterator dispatch
+        // directly via runtime_iterator_method; skip interface boxing.
+        if is_target_interface && !is_value_interface && !is_value_runtime_iterator {
             self.box_interface_value(resolved_value, resolved_target_type_id)
         } else if is_target_union && !is_value_union {
             self.construct_union_id(resolved_value, resolved_target_type_id)

@@ -303,6 +303,9 @@ pub enum TypeConstraint {
     UnionId(Vec<ArenaTypeId>),
     /// Structural constraint: T: { name: string, func get() -> i32 }
     Structural(InternedStructural),
+    /// Built-in Sendable constraint: T: Sendable
+    /// Checked by walking the type tree, not by interface satisfaction.
+    Sendable,
 }
 
 /// Tracks type parameters currently in scope during type checking.

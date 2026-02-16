@@ -9,6 +9,7 @@ mod context;
 pub mod errors;
 mod expr;
 mod function_registry;
+mod generator;
 mod intrinsic_compiler;
 mod intrinsics;
 pub mod jit;

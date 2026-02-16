@@ -73,6 +73,7 @@ fn print_type_constraint<'a>(
         TypeConstraint::Structural { fields, methods } => {
             print_structural_members(arena, fields, methods, interner)
         }
+        TypeConstraint::Sendable => arena.text("Sendable"),
     }
 }
 

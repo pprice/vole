@@ -13,8 +13,11 @@
 pub mod alloc_track;
 pub mod array;
 pub mod assert;
+pub mod buffer;
 pub mod builtins;
+pub mod channel;
 pub mod closure;
+pub mod coroutine;
 pub mod instance;
 pub mod iterator;
 pub(crate) mod iterator_abi;
@@ -22,10 +25,12 @@ pub(crate) mod iterator_core;
 #[cfg(test)]
 mod iterator_parity;
 pub mod native_registry;
+pub mod scheduler;
 pub mod signal;
 pub mod stdlib;
 pub mod string;
 pub mod string_builder;
+pub mod task;
 pub mod type_registry;
 pub mod value;
 

@@ -1,11 +1,11 @@
-//! AST transformations applied between parsing and semantic analysis.
+//! AST query utilities for generator detection.
 //!
-//! These transforms operate on the raw AST before type checking,
-//! allowing high-level language features to be desugared into
-//! simpler constructs.
+//! The AST-level generator-to-state-machine transform has been removed.
+//! Generators are now compiled directly to coroutine-backed iterators
+//! in vole-codegen. This module retains the expression walker and
+//! `contains_yield` detection used by codegen.
 
 mod expr_walker;
 pub mod generator;
-mod rewrite_refs;
 
-pub use generator::transform_generators;
+pub use generator::contains_yield;

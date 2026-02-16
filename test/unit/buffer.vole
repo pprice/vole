@@ -1,0 +1,214 @@
+// Test Buffer class - a growable byte buffer backed by native RcBuffer
+
+tests {
+    // Static constructors
+    test "Buffer.new creates empty buffer" {
+        let buf = Buffer.new()
+        assert(buf.length() == 0)
+        assert(buf.capacity() == 0)
+    }
+
+    test "Buffer.with_capacity creates buffer with capacity" {
+        let buf = Buffer.with_capacity(16)
+        assert(buf.length() == 0)
+        assert(buf.capacity() >= 16)
+    }
+
+    test "Buffer.from_string creates buffer from string bytes" {
+        let buf = Buffer.from_string("hello")
+        assert(buf.length() == 5)
+    }
+
+    // append_byte
+    test "append_byte adds single byte" {
+        let buf = Buffer.new()
+        buf.append_byte(65)  // 'A'
+        assert(buf.length() == 1)
+        assert(buf.get(0) == 65)
+    }
+
+    test "append_byte multiple bytes" {
+        let buf = Buffer.new()
+        buf.append_byte(72)   // 'H'
+        buf.append_byte(105)  // 'i'
+        assert(buf.length() == 2)
+        assert(buf.get(0) == 72)
+        assert(buf.get(1) == 105)
+    }
+
+    test "append_byte masks to low 8 bits" {
+        let buf = Buffer.new()
+        buf.append_byte(256 + 65)  // should store 65 ('A')
+        assert(buf.get(0) == 65)
+    }
+
+    // append (buffer to buffer)
+    test "append another buffer" {
+        let a = Buffer.from_string("hello")
+        let b = Buffer.from_string(" world")
+        a.append(b)
+        assert(a.length() == 11)
+        assert(a.to_string_raw() == "hello world")
+    }
+
+    test "append empty buffer" {
+        let a = Buffer.from_string("hello")
+        let b = Buffer.new()
+        a.append(b)
+        assert(a.length() == 5)
+        assert(a.to_string_raw() == "hello")
+    }
+
+    // get
+    test "get returns byte at index" {
+        let buf = Buffer.from_string("ABC")
+        assert(buf.get(0) == 65)  // 'A'
+        assert(buf.get(1) == 66)  // 'B'
+        assert(buf.get(2) == 67)  // 'C'
+    }
+
+    test "get returns -1 for out of bounds" {
+        let buf = Buffer.from_string("hi")
+        assert(buf.get(2) == -1)
+        assert(buf.get(-1) == -1)
+    }
+
+    // set
+    test "set modifies byte at index" {
+        let buf = Buffer.from_string("abc")
+        buf.set(0, 65)  // 'A'
+        assert(buf.get(0) == 65)
+        assert(buf.to_string_raw() == "Abc")
+    }
+
+    test "set masks value to low 8 bits" {
+        let buf = Buffer.from_string("a")
+        buf.set(0, 256 + 66)  // should store 66 ('B')
+        assert(buf.get(0) == 66)
+    }
+
+    // slice
+    test "slice extracts sub-buffer" {
+        let buf = Buffer.from_string("hello world")
+        let sub = buf.slice(0, 5)
+        assert(sub.length() == 5)
+        assert(sub.to_string_raw() == "hello")
+    }
+
+    test "slice from middle" {
+        let buf = Buffer.from_string("hello world")
+        let sub = buf.slice(6, 11)
+        assert(sub.length() == 5)
+        assert(sub.to_string_raw() == "world")
+    }
+
+    test "slice with negative end means to end" {
+        let buf = Buffer.from_string("hello world")
+        let sub = buf.slice(6, -1)
+        assert(sub.to_string_raw() == "world")
+    }
+
+    test "slice empty range returns empty buffer" {
+        let buf = Buffer.from_string("hello")
+        let sub = buf.slice(3, 3)
+        assert(sub.length() == 0)
+    }
+
+    // to_string_raw
+    test "to_string_raw converts buffer to string" {
+        let buf = Buffer.from_string("hello")
+        assert(buf.to_string_raw() == "hello")
+    }
+
+    test "to_string_raw on empty buffer" {
+        let buf = Buffer.new()
+        assert(buf.to_string_raw() == "")
+    }
+
+    test "to_string_raw on manually built buffer" {
+        let buf = Buffer.new()
+        buf.append_byte(86)   // 'V'
+        buf.append_byte(111)  // 'o'
+        buf.append_byte(108)  // 'l'
+        buf.append_byte(101)  // 'e'
+        assert(buf.to_string_raw() == "Vole")
+    }
+
+    // clear
+    test "clear empties the buffer" {
+        let buf = Buffer.from_string("hello")
+        assert(buf.length() == 5)
+        buf.clear()
+        assert(buf.length() == 0)
+    }
+
+    test "clear preserves capacity" {
+        let buf = Buffer.from_string("hello")
+        let cap_before = buf.capacity()
+        buf.clear()
+        assert(buf.capacity() == cap_before)
+    }
+
+    test "append after clear works" {
+        let buf = Buffer.from_string("hello")
+        buf.clear()
+        buf.append_byte(65)
+        assert(buf.length() == 1)
+        assert(buf.get(0) == 65)
+    }
+
+    // Equatable
+    test "buffer equals same content" {
+        let a = Buffer.from_string("hello")
+        let b = Buffer.from_string("hello")
+        assert(a.equals(b))
+    }
+
+    test "buffer equals different content" {
+        let a = Buffer.from_string("hello")
+        let b = Buffer.from_string("world")
+        assert(!a.equals(b))
+    }
+
+    test "buffer equals empty buffers" {
+        let a = Buffer.new()
+        let b = Buffer.new()
+        assert(a.equals(b))
+    }
+
+    test "buffer equals different lengths" {
+        let a = Buffer.from_string("hi")
+        let b = Buffer.from_string("hello")
+        assert(!a.equals(b))
+    }
+
+    // capacity
+    test "capacity grows when appending" {
+        let buf = Buffer.new()
+        assert(buf.capacity() == 0)
+        buf.append_byte(1)
+        assert(buf.capacity() > 0)
+    }
+
+    test "with_capacity reserves space" {
+        let buf = Buffer.with_capacity(100)
+        assert(buf.capacity() >= 100)
+        assert(buf.length() == 0)
+    }
+
+    // roundtrip
+    test "string to buffer to string roundtrip" {
+        let original = "The quick brown fox"
+        let buf = Buffer.from_string(original)
+        let result = buf.to_string_raw()
+        assert(result == original)
+    }
+
+    test "byte-by-byte construction matches from_string" {
+        let from_str = Buffer.from_string("AB")
+        let manual = Buffer.new()
+        manual.append_byte(65)  // 'A'
+        manual.append_byte(66)  // 'B'
+        assert(from_str.equals(manual))
+    }
+}

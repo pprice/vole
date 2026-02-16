@@ -208,7 +208,13 @@ impl Compiler<'_> {
                         continue;
                     }
                     // Declare function using helper (skips if not registered)
-                    self.declare_main_function(func.name);
+                    let func_key = self.declare_main_function(func.name);
+                    // If this is a generator, override the return type to
+                    // RuntimeIterator(T) so callers compiled before the
+                    // generator itself use the correct (non-interface) type.
+                    if let Some(func_key) = func_key {
+                        self.override_generator_return_type(func, func_key);
+                    }
                 }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
@@ -265,6 +271,44 @@ impl Compiler<'_> {
             }
         }
         Ok(())
+    }
+
+    /// If `func` is a generator (body contains `yield`, returns `Iterator<T>`),
+    /// override its declared return type to `RuntimeIterator(T)`.
+    ///
+    /// Called during pass 1 so that any function compiled in pass 2 that calls
+    /// this generator sees the correct (non-interface) return type.
+    fn override_generator_return_type(&mut self, func: &FuncDecl, func_key: FunctionKey) {
+        use crate::generator::body_contains_yield;
+
+        let return_type_id = match self.func_registry.return_type(func_key) {
+            Some(rt) => rt,
+            None => return,
+        };
+
+        // Check if the return type is Iterator<T> and extract the element type
+        let arena = self.arena();
+        let name_table = self.analyzed.name_table();
+        let elem_type_id = match arena.unwrap_interface(return_type_id) {
+            Some((type_def_id, type_args))
+                if name_table.well_known.is_iterator_type_def(type_def_id) =>
+            {
+                match type_args.first().copied() {
+                    Some(e) => e,
+                    None => return,
+                }
+            }
+            _ => return,
+        };
+
+        if !body_contains_yield(&func.body) {
+            return;
+        }
+
+        if let Some(runtime_iter_type_id) = arena.lookup_runtime_iterator(elem_type_id) {
+            self.func_registry
+                .set_return_type(func_key, runtime_iter_type_id);
+        }
     }
 
     /// Second pass: compile function bodies and tests.
@@ -624,7 +668,15 @@ impl Compiler<'_> {
                     .expect("INTERNAL: module function: name_id not registered");
 
                     let display_name = self.query().display_name(name_id);
-                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
+                    let func_key = self.declare_function_by_name_id(
+                        name_id,
+                        &display_name,
+                        DeclareMode::Import,
+                    );
+                    // Override generator return types for imported module functions
+                    if let Some(func_key) = func_key {
+                        self.override_generator_return_type(func, func_key);
+                    }
                 }
             }
 
@@ -713,6 +765,34 @@ impl Compiler<'_> {
                 func_def.signature.return_type_id,
             )
         };
+
+        // Check if this is a generator function (returns Iterator<T> and body contains yield)
+        let source_file_ptr = self.source_file_ptr();
+        let env = compile_env!(
+            self,
+            module_interner,
+            module_global_inits,
+            source_file_ptr,
+            module_id
+        );
+        if let Some(elem_type_id) =
+            crate::generator::extract_iterator_element_type(return_type_id, &env)
+            && crate::generator::body_contains_yield(&func.body)
+        {
+            let gen_params = crate::generator::GeneratorParams {
+                func,
+                jit_func_id,
+                wrapper_func_key: func_key,
+                param_type_ids: &param_type_ids,
+                elem_type_id,
+                module_id: Some(module_id),
+            };
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            crate::generator::compile_generator_function(&gen_params, &mut codegen_ctx, &env)?;
+            self.jit.clear();
+            return Ok(());
+        }
+
         let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
 
@@ -733,9 +813,6 @@ impl Compiler<'_> {
 
         // Get function return type id from pre-resolved signature
         let return_type_id = Some(return_type_id).filter(|id| !id.is_void());
-
-        // Get source file pointer
-        let source_file_ptr = self.source_file_ptr();
 
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -790,6 +867,27 @@ impl Compiler<'_> {
             )
         };
 
+        // Check if this is a generator function (returns Iterator<T> and body contains yield)
+        let source_file_ptr = self.source_file_ptr();
+        let env = compile_env!(self, source_file_ptr);
+        if let Some(elem_type_id) =
+            crate::generator::extract_iterator_element_type(return_type_id, &env)
+            && crate::generator::body_contains_yield(&func.body)
+        {
+            let gen_params = crate::generator::GeneratorParams {
+                func,
+                jit_func_id,
+                wrapper_func_key: func_key,
+                param_type_ids: &param_type_ids,
+                elem_type_id,
+                module_id: None,
+            };
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            crate::generator::compile_generator_function(&gen_params, &mut codegen_ctx, &env)?;
+            self.jit.clear();
+            return Ok(());
+        }
+
         // Create function signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
@@ -808,9 +906,6 @@ impl Compiler<'_> {
                 })
                 .collect()
         };
-
-        // Get source file pointer before borrowing ctx.func
-        let source_file_ptr = self.source_file_ptr();
 
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();

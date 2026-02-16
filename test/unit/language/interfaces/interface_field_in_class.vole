@@ -49,7 +49,7 @@ implement Animal for Cat {
 
 // Generator that captures an interface-typed parameter
 func make_sounds(animal: Animal) -> Iterator<string> {
-    let i = 0
+    let mut i = 0
     while i < 3 {
         yield animal.speak()
         i = i + 1
