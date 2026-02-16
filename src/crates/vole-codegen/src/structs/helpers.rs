@@ -5,7 +5,8 @@ use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
-use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
+use vole_identity::{NameId, TypeDefId};
+use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId, TypeIdVec};
 use vole_sema::{EntityRegistry, PrimitiveType};
 
 /// Get field slot and type for a field access (Cg API - uses TypeCtx internally).
@@ -59,7 +60,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
 
     // Build combined substitution map: type params -> type args, plus monomorphization context
     // This allows a single pass through the type tree instead of two.
-    let mut combined_subs: FxHashMap<vole_identity::NameId, TypeId> = type_def
+    let mut combined_subs: FxHashMap<NameId, TypeId> = type_def
         .type_params
         .iter()
         .zip(type_args.iter())
@@ -316,13 +317,17 @@ pub(crate) fn struct_flat_slot_count(
     arena: &TypeArena,
     entities: &EntityRegistry,
 ) -> Option<usize> {
-    let (type_def_id, _) = arena.unwrap_struct(type_id)?;
+    let (type_def_id, type_args) = arena.unwrap_struct(type_id)?;
     let type_def = entities.get_type(type_def_id);
     let generic_info = type_def.generic_info.as_ref()?;
 
+    // Build substitution map for generic structs (type param NameId -> concrete TypeId)
+    let subs = build_type_arg_subs(type_def_id, type_args, entities);
+
     let mut total = 0usize;
     for field_type in &generic_info.field_types {
-        total += field_flat_slots(*field_type, arena, entities);
+        let concrete_type = substitute_field_type(*field_type, &subs, arena);
+        total += field_flat_slots(concrete_type, arena, entities);
     }
     Some(total)
 }
@@ -351,7 +356,7 @@ pub(crate) fn struct_field_byte_offset(
     arena: &TypeArena,
     entities: &EntityRegistry,
 ) -> Option<i32> {
-    let (type_def_id, _) = arena.unwrap_struct(type_id)?;
+    let (type_def_id, type_args) = arena.unwrap_struct(type_id)?;
     let type_def = entities.get_type(type_def_id);
     let generic_info = type_def.generic_info.as_ref()?;
 
@@ -359,9 +364,13 @@ pub(crate) fn struct_field_byte_offset(
         return None;
     }
 
+    // Build substitution map for generic structs
+    let subs = build_type_arg_subs(type_def_id, type_args, entities);
+
     let mut offset = 0i32;
     for field_type in generic_info.field_types.iter().take(slot) {
-        let slots = field_flat_slots(*field_type, arena, entities);
+        let concrete_type = substitute_field_type(*field_type, &subs, arena);
+        let slots = field_flat_slots(concrete_type, arena, entities);
         offset += (slots as i32) * 8;
     }
     Some(offset)
@@ -374,4 +383,37 @@ pub(crate) fn struct_total_byte_size(
     entities: &EntityRegistry,
 ) -> Option<u32> {
     struct_flat_slot_count(type_id, arena, entities).map(|n| (n as u32) * 8)
+}
+
+/// Build a substitution map from a generic struct's type_params and type_args.
+/// Returns an empty map for non-generic structs.
+fn build_type_arg_subs(
+    type_def_id: TypeDefId,
+    type_args: &TypeIdVec,
+    entities: &EntityRegistry,
+) -> FxHashMap<NameId, TypeId> {
+    if type_args.is_empty() {
+        return FxHashMap::default();
+    }
+    let type_params = entities.type_params(type_def_id);
+    type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(&param, &arg)| (param, arg))
+        .collect()
+}
+
+/// Resolve a field type through type argument substitutions.
+/// For non-generic structs (empty subs), returns the original type.
+fn substitute_field_type(
+    field_type: TypeId,
+    subs: &FxHashMap<NameId, TypeId>,
+    arena: &TypeArena,
+) -> TypeId {
+    if subs.is_empty() {
+        return field_type;
+    }
+    arena
+        .lookup_substitute(field_type, subs)
+        .unwrap_or(field_type)
 }

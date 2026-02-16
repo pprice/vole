@@ -1,12 +1,13 @@
 use super::super::*;
 use crate::entity_defs::GenericTypeInfo;
+use crate::generic::TypeParamInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use crate::type_arena::TypeIdVec;
 use crate::types::StructFieldId;
 use rustc_hash::FxHashMap;
 use vole_frontend::Symbol;
 use vole_frontend::ast::ExprKind;
-use vole_identity::TypeDefId;
+use vole_identity::{NameId, TypeDefId};
 
 impl Analyzer {
     /// Check if a shorthand field value refers to an undefined variable.
@@ -119,6 +120,14 @@ impl Analyzer {
                             &generic_info,
                             interner,
                         ),
+                        TypeDefKind::Struct | TypeDefKind::Sentinel => self
+                            .check_generic_struct_literal(
+                                expr,
+                                struct_lit,
+                                type_id,
+                                &generic_info,
+                                interner,
+                            ),
                         _ => Ok(self.ty_invalid_id()),
                     };
                 }
@@ -463,5 +472,261 @@ impl Analyzer {
         Ok(self
             .type_arena_mut()
             .class(type_def_id, type_args_id.to_vec()))
+    }
+
+    /// Check a struct literal for a generic struct, inferring type parameters from field values.
+    /// Unlike classes, structs are value types with no RC headers, vtables, or interface dispatch.
+    fn check_generic_struct_literal(
+        &mut self,
+        expr: &Expr,
+        struct_lit: &StructLiteralExpr,
+        type_def_id: TypeDefId,
+        generic_info: &GenericTypeInfo,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let type_name = Self::format_struct_literal_path(&struct_lit.path, interner);
+
+        // Type-check all field values to get their actual types
+        let field_value_type_ids = self.check_generic_literal_field_values(struct_lit, interner)?;
+
+        // Resolve type arguments: explicit type args take priority over inference
+        let inferred_id = if !struct_lit.type_args.is_empty() {
+            self.resolve_explicit_type_args(
+                &struct_lit.type_args,
+                &generic_info.type_params,
+                expr.span,
+                interner,
+            )
+        } else {
+            self.infer_type_args_from_fields(generic_info, &field_value_type_ids)
+        };
+
+        // Check type parameter constraints
+        self.check_type_param_constraints_id(
+            &generic_info.type_params,
+            &inferred_id,
+            expr.span,
+            interner,
+        );
+
+        // Substitute inferred types into field types to get concrete field types
+        let concrete_field_type_ids = self.substitute_field_types(generic_info, &inferred_id);
+
+        // Check that all required fields are present
+        self.check_required_fields(&type_name, generic_info, struct_lit, expr.span, interner);
+
+        // Check each provided field against the concrete (substituted) type
+        self.check_field_types_against_concrete(
+            &type_name,
+            generic_info,
+            &field_value_type_ids,
+            &concrete_field_type_ids,
+            struct_lit,
+            interner,
+        );
+
+        // Build ordered type_args from inferred/explicit substitutions
+        let type_args_id = self.build_type_args(generic_info, &inferred_id);
+
+        // Pre-compute substituted field types so codegen can use lookup_substitute
+        self.precompute_field_substitutions(type_def_id, &type_args_id);
+
+        Ok(self
+            .type_arena_mut()
+            .struct_type(type_def_id, type_args_id.to_vec()))
+    }
+
+    /// Type-check all field values in a struct literal, returning a map of field name to type.
+    fn check_generic_literal_field_values(
+        &mut self,
+        struct_lit: &StructLiteralExpr,
+        interner: &Interner,
+    ) -> Result<FxHashMap<String, ArenaTypeId>, Vec<TypeError>> {
+        let mut field_value_type_ids: FxHashMap<String, ArenaTypeId> = FxHashMap::default();
+        for field_init in &struct_lit.fields {
+            if self.check_shorthand_undefined(field_init, interner) {
+                field_value_type_ids.insert(
+                    interner.resolve(field_init.name).to_string(),
+                    ArenaTypeId::INVALID,
+                );
+                continue;
+            }
+            let field_ty_id = self.check_expr(&field_init.value, interner)?;
+            field_value_type_ids.insert(interner.resolve(field_init.name).to_string(), field_ty_id);
+        }
+        Ok(field_value_type_ids)
+    }
+
+    /// Resolve explicit type arguments (e.g., `Pair<string>`) to a substitution map.
+    fn resolve_explicit_type_args(
+        &mut self,
+        type_args: &[TypeExpr],
+        type_params: &[TypeParamInfo],
+        span: Span,
+        interner: &Interner,
+    ) -> FxHashMap<NameId, ArenaTypeId> {
+        if type_args.len() != type_params.len() {
+            self.add_error(
+                SemanticError::WrongArgumentCount {
+                    expected: type_params.len(),
+                    found: type_args.len(),
+                    span: span.into(),
+                },
+                span,
+            );
+        }
+        let mut explicit_map = FxHashMap::default();
+        for (param, type_expr) in type_params.iter().zip(type_args.iter()) {
+            let resolved_id = self.resolve_type_id(type_expr, interner);
+            explicit_map.insert(param.name_id, resolved_id);
+        }
+        explicit_map
+    }
+
+    /// Infer type arguments from field value types.
+    fn infer_type_args_from_fields(
+        &self,
+        generic_info: &GenericTypeInfo,
+        field_value_type_ids: &FxHashMap<String, ArenaTypeId>,
+    ) -> FxHashMap<NameId, ArenaTypeId> {
+        let mut expected_type_ids = Vec::new();
+        let mut actual_type_ids = Vec::new();
+
+        for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
+            if let Some(field_name_str) = self.name_table().last_segment_str(*field_name_id)
+                && let Some(&actual_ty_id) = field_value_type_ids.get(&field_name_str)
+            {
+                expected_type_ids.push(generic_info.field_types[i]);
+                actual_type_ids.push(actual_ty_id);
+            }
+        }
+
+        self.infer_type_params_id(
+            &generic_info.type_params,
+            &expected_type_ids,
+            &actual_type_ids,
+        )
+    }
+
+    /// Substitute inferred types into generic field types to get concrete types.
+    fn substitute_field_types(
+        &self,
+        generic_info: &GenericTypeInfo,
+        inferred: &FxHashMap<NameId, ArenaTypeId>,
+    ) -> Vec<ArenaTypeId> {
+        let subs: FxHashMap<_, _> = inferred.iter().map(|(&k, &v)| (k, v)).collect();
+        let mut arena = self.type_arena_mut();
+        generic_info
+            .field_types
+            .iter()
+            .map(|&t| arena.substitute(t, &subs))
+            .collect()
+    }
+
+    /// Check that all required fields (those without defaults) are provided.
+    fn check_required_fields(
+        &mut self,
+        type_name: &str,
+        generic_info: &GenericTypeInfo,
+        struct_lit: &StructLiteralExpr,
+        span: Span,
+        interner: &Interner,
+    ) {
+        let provided_fields: HashSet<String> = struct_lit
+            .fields
+            .iter()
+            .map(|f| interner.resolve(f.name).to_string())
+            .collect();
+
+        for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
+            let has_default = generic_info
+                .field_has_default
+                .get(i)
+                .copied()
+                .unwrap_or(false);
+            if has_default {
+                continue;
+            }
+
+            let field_name_str = self
+                .name_table()
+                .last_segment_str(*field_name_id)
+                .unwrap_or_default();
+            if !provided_fields.contains(&field_name_str) {
+                self.add_error(
+                    SemanticError::MissingField {
+                        ty: type_name.to_string(),
+                        field: field_name_str,
+                        span: span.into(),
+                    },
+                    span,
+                );
+            }
+        }
+    }
+
+    /// Check each provided field value against the concrete (substituted) field type.
+    fn check_field_types_against_concrete(
+        &mut self,
+        type_name: &str,
+        generic_info: &GenericTypeInfo,
+        field_value_type_ids: &FxHashMap<String, ArenaTypeId>,
+        concrete_field_type_ids: &[ArenaTypeId],
+        struct_lit: &StructLiteralExpr,
+        interner: &Interner,
+    ) {
+        for field_init in &struct_lit.fields {
+            let field_init_name_str = interner.resolve(field_init.name);
+            let field_idx =
+                generic_info.field_index_by_name(field_init_name_str, &self.name_table());
+            if let Some(idx) = field_idx {
+                let actual_ty_id = *field_value_type_ids
+                    .get(field_init_name_str)
+                    .expect("field was validated in type check phase");
+                let expected_ty_id = concrete_field_type_ids[idx];
+                if !self.types_compatible_id(actual_ty_id, expected_ty_id, interner) {
+                    self.add_type_mismatch_id(expected_ty_id, actual_ty_id, field_init.value.span);
+                }
+            } else {
+                self.add_error(
+                    SemanticError::UnknownField {
+                        ty: type_name.to_string(),
+                        field: field_init_name_str.to_string(),
+                        span: field_init.span.into(),
+                    },
+                    field_init.span,
+                );
+            }
+        }
+    }
+
+    /// Build the ordered type_args vector from inferred/explicit substitutions.
+    fn build_type_args(
+        &self,
+        generic_info: &GenericTypeInfo,
+        inferred: &FxHashMap<NameId, ArenaTypeId>,
+    ) -> TypeIdVec {
+        generic_info
+            .type_params
+            .iter()
+            .map(|param| {
+                if let Some(&ty_id) = inferred.get(&param.name_id) {
+                    return ty_id;
+                }
+                if let Some(scope) = self.env.type_param_stack.current() {
+                    let param_name = self.name_table().last_segment_str(param.name_id);
+                    if let Some(param_name) = param_name {
+                        for scope_param in scope.params() {
+                            let scope_param_name =
+                                self.name_table().last_segment_str(scope_param.name_id);
+                            if scope_param_name.as_deref() == Some(&param_name) {
+                                return self.type_arena_mut().type_param(scope_param.name_id);
+                            }
+                        }
+                    }
+                }
+                ArenaTypeId::INVALID
+            })
+            .collect()
     }
 }

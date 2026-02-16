@@ -78,6 +78,17 @@ impl TypeArena {
                 self.class(type_def_id, new_args)
             }
 
+            SemaType::Struct {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&a| self.substitute(a, subs))
+                    .collect();
+                self.struct_type(type_def_id, new_args)
+            }
+
             SemaType::Interface {
                 type_def_id,
                 type_args,
@@ -133,7 +144,6 @@ impl TypeArena {
             | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
-            | SemaType::Struct { .. }
             | SemaType::Module(_)
             | SemaType::Placeholder(_) => ty,
         }
@@ -247,6 +257,25 @@ impl TypeArena {
                 self.intern_map.get(&result_ty).copied()
             }
 
+            SemaType::Struct {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: Option<TypeIdVec> = type_args
+                    .iter()
+                    .map(|&a| self.lookup_substitute(a, subs))
+                    .collect();
+                let new_args = new_args?;
+                if new_args == *type_args {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Struct {
+                    type_def_id: *type_def_id,
+                    type_args: new_args,
+                };
+                self.intern_map.get(&result_ty).copied()
+            }
+
             SemaType::Interface {
                 type_def_id,
                 type_args,
@@ -344,7 +373,6 @@ impl TypeArena {
             | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
-            | SemaType::Struct { .. }
             | SemaType::Module(_)
             | SemaType::Placeholder(_) => Some(ty),
         }
@@ -430,6 +458,17 @@ impl TypeArena {
                 self.class(type_def_id, new_args)
             }
 
+            SemaType::Struct {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&a| self.substitute_self(a, self_type))
+                    .collect();
+                self.struct_type(type_def_id, new_args)
+            }
+
             SemaType::Interface {
                 type_def_id,
                 type_args,
@@ -469,7 +508,6 @@ impl TypeArena {
             | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
-            | SemaType::Struct { .. }
             | SemaType::Module(_)
             | SemaType::Placeholder(PlaceholderKind::Inference)
             | SemaType::Placeholder(PlaceholderKind::TypeParam(_))
@@ -529,6 +567,17 @@ impl TypeArena {
                     .map(|&a| self.substitute_inference(a, concrete))
                     .collect();
                 self.class(type_def_id, new_args)
+            }
+
+            SemaType::Struct {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&a| self.substitute_inference(a, concrete))
+                    .collect();
+                self.struct_type(type_def_id, new_args)
             }
 
             SemaType::Interface {

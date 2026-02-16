@@ -1,0 +1,180 @@
+// Generic struct type checking tests
+
+// Basic single type parameter struct
+struct Box<T> {
+    value: T
+}
+
+// Two type parameters with same type
+struct Pair<T> {
+    first: T,
+    second: T,
+}
+
+// Multiple distinct type parameters
+struct Entry<K, V> {
+    key: K,
+    value: V,
+}
+
+// Nested generic struct
+struct Outer<T> {
+    inner: Box<T>,
+}
+
+tests "generic struct basics" {
+    test "infer T=i64 from field value" {
+        let b = Box { value: 42 }
+        assert(b.value == 42)
+    }
+
+    test "infer T=string from field value" {
+        let b = Box { value: "hello" }
+        assert(b.value == "hello")
+    }
+
+    test "infer T=bool from field value" {
+        let b = Box { value: true }
+        assert(b.value == true)
+    }
+
+    test "infer T=f64 from field value" {
+        let b = Box { value: 3.14 }
+        assert(b.value == 3.14)
+    }
+}
+
+tests "generic struct pair" {
+    test "pair of i64" {
+        let p = Pair { first: 1, second: 2 }
+        assert(p.first == 1)
+        assert(p.second == 2)
+    }
+
+    test "pair of strings" {
+        let p = Pair { first: "a", second: "b" }
+        assert(p.first == "a")
+        assert(p.second == "b")
+    }
+
+    test "pair of booleans" {
+        let p = Pair { first: true, second: false }
+        assert(p.first == true)
+        assert(p.second == false)
+    }
+}
+
+tests "generic struct multiple type params" {
+    test "entry with string key and i64 value" {
+        let e = Entry { key: "name", value: 42 }
+        assert(e.key == "name")
+        assert(e.value == 42)
+    }
+
+    test "entry with i64 key and string value" {
+        let e = Entry { key: 1, value: "one" }
+        assert(e.key == 1)
+        assert(e.value == "one")
+    }
+
+    test "entry with i64 key and bool value" {
+        let e = Entry { key: 0, value: false }
+        assert(e.key == 0)
+        assert(e.value == false)
+    }
+
+    test "entry with f64 key and string value" {
+        let e = Entry { key: 3.14, value: "pi" }
+        assert(e.key == 3.14)
+        assert(e.value == "pi")
+    }
+}
+
+tests "generic struct explicit type args" {
+    test "explicit type arg i64" {
+        let b = Box<i64> { value: 42 }
+        assert(b.value == 42)
+    }
+
+    test "explicit type arg string" {
+        let b = Box<string> { value: "hello" }
+        assert(b.value == "hello")
+    }
+
+    test "explicit type args on pair" {
+        let p = Pair<string> { first: "a", second: "b" }
+        assert(p.first == "a")
+        assert(p.second == "b")
+    }
+
+    test "explicit type args on entry" {
+        let e = Entry<string, i64> { key: "age", value: 30 }
+        assert(e.key == "age")
+        assert(e.value == 30)
+    }
+}
+
+tests "generic struct copy semantics" {
+    test "generic struct is value type - copies" {
+        let a = Box { value: 10 }
+        let b = a
+        assert(a.value == 10)
+        assert(b.value == 10)
+    }
+
+    test "pair copy semantics" {
+        let p1 = Pair { first: 1, second: 2 }
+        let p2 = p1
+        assert(p1.first == 1)
+        assert(p2.first == 1)
+    }
+
+    test "entry copy semantics" {
+        let e1 = Entry { key: "a", value: 1 }
+        let e2 = e1
+        assert(e1.key == "a")
+        assert(e2.value == 1)
+    }
+}
+
+tests "nested generic structs" {
+    test "nested generic struct i64" {
+        let o = Outer { inner: Box { value: 42 } }
+        assert(o.inner.value == 42)
+    }
+
+    test "nested generic struct string" {
+        let o = Outer { inner: Box { value: "nested" } }
+        assert(o.inner.value == "nested")
+    }
+}
+
+tests "generic struct field expressions" {
+    test "field with arithmetic expression" {
+        let b = Box { value: 3 * 14 }
+        assert(b.value == 42)
+    }
+
+    test "field with string concatenation" {
+        let b = Box { value: "he" + "llo" }
+        assert(b.value == "hello")
+    }
+
+    test "multiple instances with different type params" {
+        let int_box = Box { value: 1 }
+        let str_box = Box { value: "a" }
+        let bool_box = Box { value: true }
+        assert(int_box.value == 1)
+        assert(str_box.value == "a")
+        assert(bool_box.value == true)
+    }
+
+    test "entry used in conditional" {
+        let e = Entry { key: "enabled", value: true }
+        if e.value {
+            assert(e.key == "enabled")
+        } else {
+            assert(false)
+        }
+    }
+}

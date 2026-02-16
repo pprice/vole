@@ -341,6 +341,13 @@ fn resolve_generic_type_to_id(
                             precompute_field_substitutions(ctx, underlying_def_id, &type_args_id);
                             result
                         }
+                        TypeDefKind::Struct | TypeDefKind::Sentinel => {
+                            let result = ctx
+                                .type_arena_mut()
+                                .struct_type(underlying_def_id, type_args_id.clone());
+                            precompute_field_substitutions(ctx, underlying_def_id, &type_args_id);
+                            result
+                        }
                         TypeDefKind::Interface => {
                             let result = ctx
                                 .type_arena_mut()
@@ -369,6 +376,13 @@ fn resolve_generic_type_to_id(
                 precompute_field_substitutions(ctx, type_def_id, &type_args_id);
                 result
             }
+            TypeDefKind::Struct | TypeDefKind::Sentinel => {
+                let result = ctx
+                    .type_arena_mut()
+                    .struct_type(type_def_id, type_args_id.clone());
+                precompute_field_substitutions(ctx, type_def_id, &type_args_id);
+                result
+            }
             TypeDefKind::Interface => {
                 let result = ctx
                     .type_arena_mut()
@@ -381,10 +395,7 @@ fn resolve_generic_type_to_id(
                 // Already handled above
                 ctx.type_arena_mut().invalid()
             }
-            TypeDefKind::Struct
-            | TypeDefKind::Sentinel
-            | TypeDefKind::ErrorType
-            | TypeDefKind::Primitive => {
+            TypeDefKind::ErrorType | TypeDefKind::Primitive => {
                 // These types don't support type parameters
                 ctx.type_arena_mut().invalid()
             }
