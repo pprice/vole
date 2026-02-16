@@ -1,0 +1,243 @@
+// Test interface functionality
+
+interface Named {
+    name: string
+}
+
+class Person {
+    name: string,
+    age: i64,
+}
+
+interface Hashable {
+    func hash() -> i64
+}
+
+class User implements Hashable {
+    id: i64,
+
+    func hash() -> i64 {
+        return self.id
+    }
+}
+
+// Multiple interface implementation
+interface Serializable {
+    func toJson() -> string
+}
+
+class Entity implements Hashable, Serializable {
+    id: i64,
+    name: string,
+
+    func hash() -> i64 {
+        return self.id
+    }
+
+    func toJson() -> string {
+        return self.name
+    }
+}
+
+interface Describable {
+    func describe() -> string
+}
+
+// Implement for existing class
+implement Describable for Person {
+    func describe() -> string {
+        return self.name
+    }
+}
+
+tests "interfaces" {
+    test "class with matching field satisfies interface structurally" {
+        let p = Person { name: "Alice", age: 30 }
+        assert(p.name == "Alice")
+    }
+
+    test "explicit implements with method" {
+        let u = User { id: 42 }
+        assert(u.hash() == 42)
+    }
+
+    test "multiple interface implementation" {
+        let e = Entity { id: 123, name: "entity123" }
+        assert(e.hash() == 123)
+        assert(e.toJson() == "entity123")
+    }
+}
+
+tests "interface values" {
+    test "interface-typed variable dispatches to impl" {
+        let h: Hashable = User { id: 7 }
+        assert(h.hash() == 7)
+    }
+
+    test "implement block methods work through interface value" {
+        let d: Describable = Person { name: "Dana", age: 22 }
+        assert(d.describe() == "Dana")
+    }
+}
+
+tests "implement blocks" {
+    test "implement block adds method to type" {
+        let p = Person { name: "Bob", age: 25 }
+        assert(p.describe() == "Bob")
+    }
+}
+
+// Functional interface - single abstract method, no fields
+interface Predicate {
+    func check(value: i64) -> bool
+}
+
+tests "functional interfaces" {
+    test "lambda can be assigned to functional interface" {
+        let isEven: Predicate = (x: i64) => x % 2 == 0
+        assert(isEven.check(4) == true)
+        assert(isEven.check(3) == false)
+    }
+}
+
+// Test interface extends
+interface Base {
+    func base_method() -> i64
+}
+
+interface Extended extends Base {
+    func extended_method() -> i64
+}
+
+class ExtendedImpl implements Extended {
+    value: i64,
+
+    func base_method() -> i64 {
+        return self.value
+    }
+
+    func extended_method() -> i64 {
+        return self.value * 2
+    }
+}
+
+tests "interface extends" {
+    test "class implements extended interface with both methods" {
+        let e = ExtendedImpl { value: 10 }
+        assert(e.base_method() == 10)
+        assert(e.extended_method() == 20)
+    }
+
+    test "parent interface uses vtable dispatch" {
+        let b: Base = ExtendedImpl { value: 11 }
+        assert(b.base_method() == 11)
+    }
+}
+
+// Test that implement blocks can satisfy interface requirements
+interface Printable {
+    func print_value() -> string
+}
+
+class Counter {
+    count: i64
+}
+
+// Satisfy Printable via implement block (not inline method)
+implement Printable for Counter {
+    func print_value() -> string {
+        return "counter"
+    }
+}
+
+// Record that declares implements but satisfies via implement block
+interface Incrementable {
+    func increment() -> i64
+}
+
+class Score implements Incrementable {
+    value: i64
+}
+
+implement Incrementable for Score {
+    func increment() -> i64 {
+        return self.value + 1
+    }
+}
+
+tests "implement blocks satisfy interfaces" {
+    test "implement block method can be called" {
+        let c = Counter { count: 5 }
+        assert(c.print_value() == "counter")
+    }
+
+    test "implements declaration satisfied by implement block" {
+        let s = Score { value: 10 }
+        assert(s.increment() == 11)
+    }
+}
+
+// Expression-bodied methods
+interface Doubler {
+    func double() -> i64
+}
+
+class Amount implements Doubler {
+    value: i64,
+
+    // Expression-bodied inline method
+    func double() -> i64 => self.value * 2
+}
+
+interface Tripler {
+    func triple() -> i64
+}
+
+class Quantity {
+    n: i64
+}
+
+// Expression-bodied implement block method
+implement Tripler for Quantity {
+    func triple() -> i64 => self.n * 3
+}
+
+tests "expression-bodied interface methods" {
+    test "inline expression-bodied method" {
+        let a = Amount { value: 21 }
+        assert(a.double() == 42)
+    }
+
+    test "implement block expression-bodied method" {
+        let q = Quantity { n: 14 }
+        assert(q.triple() == 42)
+    }
+
+    test "expression-bodied through interface value" {
+        let d: Doubler = Amount { value: 25 }
+        assert(d.double() == 50)
+    }
+}
+
+// Test built-in methods
+tests "built-in interface methods" {
+    test "array.length returns correct size" {
+        let arr = [1, 2, 3, 4, 5]
+        assert(arr.length() == 5)
+    }
+
+    test "string.length returns correct size" {
+        let s = "hello"
+        assert(s.length() == 5)
+    }
+
+    test "empty array length" {
+        let arr: [i64] = []
+        assert(arr.length() == 0)
+    }
+
+    test "empty string length" {
+        let s = ""
+        assert(s.length() == 0)
+    }
+}

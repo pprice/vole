@@ -1058,7 +1058,9 @@ impl Cg<'_, '_, '_> {
         // the loop body still clean up the iterator and source string.
         self.push_rc_scope();
         if string_val.is_owned() && self.rc_state(string_val.type_id).needs_cleanup() {
-            let tracked_string = self.builder.declare_var(self.cranelift_type(string_val.type_id));
+            let tracked_string = self
+                .builder
+                .declare_var(self.cranelift_type(string_val.type_id));
             self.builder.def_var(tracked_string, string_val.value);
             let drop_flag = self.register_rc_local(tracked_string, string_val.type_id);
             crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);

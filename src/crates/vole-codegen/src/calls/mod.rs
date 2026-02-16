@@ -621,7 +621,8 @@ impl Cg<'_, '_, '_> {
 
         if self.arena().is_function(callee.type_id) {
             // Note: Indirect calls don't support default params lookup (use callee.id as placeholder)
-            let result = self.call_closure_value(callee.value, callee.type_id, call, call.callee.id)?;
+            let result =
+                self.call_closure_value(callee.value, callee.type_id, call, call.callee.id)?;
             self.consume_rc_value(&mut callee)?;
             return Ok(result);
         }

@@ -14,9 +14,9 @@
 // - deep_offsets() -> Option<&[i32]>
 // - union_variants() -> Option<&[(u8, bool)]>
 
+use rustc_hash::FxHashMap;
 use vole_sema::entity_registry::EntityRegistry;
 use vole_sema::type_arena::{SemaType, TypeArena, TypeId};
-use rustc_hash::FxHashMap;
 
 /// Reference counting state for a type.
 ///
@@ -233,7 +233,9 @@ fn compute_composite_rc_offsets(
     if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id) {
         let type_def = registry.get_type(type_def_id);
         let generic_info = type_def.generic_info.as_ref()?;
-        let field_types: Vec<TypeId> = if !type_args.is_empty() && !generic_info.type_params.is_empty() {
+        let field_types: Vec<TypeId> = if !type_args.is_empty()
+            && !generic_info.type_params.is_empty()
+        {
             let subs: FxHashMap<_, _> = generic_info
                 .type_params
                 .iter()

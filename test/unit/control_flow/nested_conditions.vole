@@ -1,0 +1,131 @@
+// Nested condition tests
+
+tests "nested conditions" {
+    test "nested if-else" {
+        let x = 15
+        let mut result = ""
+        if x > 10 {
+            if x > 20 {
+                result = "big"
+            } else {
+                result = "medium"
+            }
+        } else {
+            result = "small"
+        }
+        assert(result == "medium")
+    }
+
+    test "deeply nested if" {
+        let a = 5
+        let mut result = 0
+        if a > 0 {
+            if a > 3 {
+                if a > 4 {
+                    result = 3
+                } else {
+                    result = 2
+                }
+            } else {
+                result = 1
+            }
+        }
+        assert(result == 3)
+    }
+
+    test "if with && conditions" {
+        let x = 5
+        let y = 10
+        let mut result = false
+        if x > 0 && y > 0 {
+            result = true
+        }
+        assert(result == true)
+    }
+
+    test "if with && short-circuit" {
+        let x = -1
+        let y = 10
+        let mut result = false
+        if x > 0 && y > 0 {
+            result = true
+        }
+        assert(result == false)
+    }
+
+    test "if with || conditions" {
+        let x = -1
+        let y = 10
+        let mut result = false
+        if x > 0 || y > 0 {
+            result = true
+        }
+        assert(result == true)
+    }
+
+    test "if with || both false" {
+        let x = -1
+        let y = -2
+        let mut result = false
+        if x > 0 || y > 0 {
+            result = true
+        }
+        assert(result == false)
+    }
+
+    test "if-else chain first match" {
+        let score = 95
+        let mut grade = ""
+        if score >= 90 {
+            grade = "A"
+        } else if score >= 80 {
+            grade = "B"
+        } else if score >= 70 {
+            grade = "C"
+        } else {
+            grade = "F"
+        }
+        assert(grade == "A")
+    }
+
+    test "if-else chain middle match" {
+        let score = 85
+        let mut grade = ""
+        if score >= 90 {
+            grade = "A"
+        } else if score >= 80 {
+            grade = "B"
+        } else if score >= 70 {
+            grade = "C"
+        } else {
+            grade = "F"
+        }
+        assert(grade == "B")
+    }
+
+    test "if-else chain else match" {
+        let score = 50
+        let mut grade = ""
+        if score >= 90 {
+            grade = "A"
+        } else if score >= 80 {
+            grade = "B"
+        } else if score >= 70 {
+            grade = "C"
+        } else {
+            grade = "F"
+        }
+        assert(grade == "F")
+    }
+
+    test "combined && and || in condition" {
+        let a = 5
+        let b = 10
+        let c = -1
+        let mut result = false
+        if (a > 0 && b > 0) || c > 0 {
+            result = true
+        }
+        assert(result == true)
+    }
+}

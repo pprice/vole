@@ -752,7 +752,11 @@ impl Cg<'_, '_, '_> {
                 return Ok(self.copy_union_ptr_to_local(result_value, return_type_id));
             }
 
-            Ok(CompiledValue::new(result_value, expected_ty, return_type_id))
+            Ok(CompiledValue::new(
+                result_value,
+                expected_ty,
+                return_type_id,
+            ))
         }
     }
 

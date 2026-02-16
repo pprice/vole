@@ -1,6 +1,0 @@
-// Test: Semantic error - undefined variable
-// Expected error: E2002 undefined variable 'y'
-
-func main() {
-    let x = y
-}

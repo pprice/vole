@@ -1,0 +1,69 @@
+// Basic closure tests
+
+func apply(f: (i64) -> i64, x: i64) -> i64 {
+    return f(x)
+}
+
+func make_adder(n: i64) -> (i64) -> i64 {
+    return (x: i64) => x + n
+}
+
+func make_counter() -> () -> i64 {
+    let mut count = 0
+    return () => {
+        count = count + 1
+        return count
+    }
+}
+
+func make_nested() -> () -> () -> i64 {
+    let outer = 10
+    return () => {
+        let inner = 20
+        return () => outer + inner
+    }
+}
+
+tests "closure basics" {
+    test "closure captures local variable" {
+        let x = 42
+        let f = () => x
+        assert(f() == 42)
+    }
+
+    test "closure captures and uses local in expression" {
+        let base = 10
+        let add_base = (n: i64) => n + base
+        assert(add_base(5) == 15)
+        assert(add_base(0) == 10)
+    }
+
+    test "closure as function argument" {
+        let double = (x: i64) => x * 2
+        assert(apply(double, 5) == 10)
+        assert(apply(double, 0) == 0)
+    }
+
+    test "lambda passed directly as argument" {
+        assert(apply((x: i64) => x + 1, 9) == 10)
+    }
+
+    test "closure returning a value" {
+        let add5 = make_adder(5)
+        assert(add5(10) == 15)
+        assert(add5(0) == 5)
+    }
+
+    test "closure over mutable variable" {
+        let counter = make_counter()
+        assert(counter() == 1)
+        assert(counter() == 2)
+        assert(counter() == 3)
+    }
+
+    test "nested closure" {
+        let outer_fn = make_nested()
+        let inner_fn = outer_fn()
+        assert(inner_fn() == 30)
+    }
+}

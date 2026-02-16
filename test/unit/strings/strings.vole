@@ -1,0 +1,92 @@
+// String tests
+
+tests "strings" {
+    test "literal" {
+        let s = "hello"
+        assert(s == "hello")
+    }
+
+    test "length" {
+        let s = "hello"
+        assert(s.length() == 5)
+    }
+
+    test "empty string" {
+        let s = ""
+        assert(s.length() == 0)
+    }
+
+    test "concatenation" {
+        let a = "hello"
+        let b = " world"
+        assert(a + b == "hello world")
+    }
+
+    test "concat with i64" {
+        let msg = "value: " + 42
+        assert(msg == "value: 42")
+    }
+
+    test "concat with i32" {
+        let n: i32 = 123
+        let msg = "number: " + n
+        assert(msg == "number: 123")
+    }
+
+    test "concat with bool" {
+        let msg = "result: " + true
+        assert(msg == "result: true")
+    }
+
+    test "concat with f64" {
+        let msg = "pi: " + 3.14
+        assert(msg == "pi: 3.14")
+    }
+
+    test "equality" {
+        assert("hello" == "hello")
+        assert("hello" != "world")
+    }
+}
+
+tests "string additional" {
+    test "chained concatenation" {
+        let result = "a" + "b" + "c"
+        assert(result == "abc")
+    }
+
+    test "concatenation with empty string" {
+        let s = "hello"
+        assert(s + "" == "hello")
+        assert("" + s == "hello")
+    }
+
+    test "empty string equality" {
+        assert("" == "")
+        assert("" != "x")
+    }
+
+    test "long string concatenation" {
+        let a = "hello "
+        let b = "beautiful "
+        let c = "world"
+        let result = a + b + c
+        assert(result == "hello beautiful world")
+    }
+
+    test "string length after concatenation" {
+        let s = "abc" + "def"
+        assert(s.length() == 6)
+    }
+
+    test "single character string" {
+        let s = "x"
+        assert(s.length() == 1)
+        assert(s == "x")
+    }
+
+    test "inequality of different length strings" {
+        assert("ab" != "abc")
+        assert("abc" != "ab")
+    }
+}

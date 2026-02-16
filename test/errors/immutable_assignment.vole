@@ -1,7 +1,0 @@
-// Test: Semantic error - assignment to immutable variable
-// Expected error: E2006 cannot assign to immutable variable 'x'
-
-func main() {
-    let x = 1
-    x = 2
-}

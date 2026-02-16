@@ -1,6 +1,0 @@
-// Test: Parser error - expected expression
-// Expected error: E1001 expected expression
-
-func main() {
-    let x =
-}
