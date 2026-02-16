@@ -659,9 +659,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get a function ID by key
     pub fn func_id(&self, key: FunctionKey) -> CodegenResult<FuncId> {
+        let display = self.funcs_ref().display(key);
         self.funcs_ref()
             .func_id(key)
-            .ok_or_else(|| CodegenError::not_found("function id", ""))
+            .ok_or_else(|| CodegenError::not_found("function id", format!("{key:?} ({display})")))
     }
 
     /// Get a function reference for calling

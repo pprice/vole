@@ -6,7 +6,7 @@
 // Use .cancel() to request cooperative cancellation.
 //
 // Channels are the communication primitive between tasks.
-// Use Channel.buffered(n) for buffered channels or Channel.new()
+// Use Channel.buffered<T>(n) for buffered channels or Channel.new<T>()
 // for unbuffered (rendezvous) channels.
 //
 // Example usage:
@@ -17,7 +17,7 @@
 //   assert(t.join() == 42)
 //
 //   // Channel communication
-//   let ch = task.Channel.buffered(10)
+//   let ch = task.Channel.buffered<i64>(10)
 //   ch.send(42)
 //   let val = ch.receive()
 //   ch.close()
@@ -91,7 +91,7 @@ class Task {
         //   })
         //   for v in s { println(v) }
         func stream(producer: ((i64) -> void) -> void) -> Iterator<i64> {
-            let ch = Channel.buffered(1)
+            let ch = Channel.buffered<i64>(1)
             let task = Task.run(() -> i64 => {
                 producer((value: i64) => {
                     _ = ch.send(value)
@@ -115,7 +115,7 @@ class Task {
         //   let final_count = counter.close_and_join()
         //   assert(final_count == 2)
         func state(initial: i64, handler: (i64, i64) -> i64) -> StateActor {
-            let ch = Channel.buffered(8)
+            let ch = Channel.buffered<i64>(8)
             let task = Task.run(() -> i64 => {
                 let mut current = initial
                 let mut r = _channel_recv(ch._ptr)
@@ -141,7 +141,7 @@ class Task {
         //   let result = Task.select2(ch1, ch2, 0)
         //   if result.timed_out { println("timeout") }
         //   else if result.channel_index == 0 { handle(result.value) }
-        func select2(ch1: Channel, ch2: Channel, timeout_nanos: i64) -> SelectResult {
+        func select2(ch1: Channel<i64>, ch2: Channel<i64>, timeout_nanos: i64) -> SelectResult {
             let idx = _task_select2(ch1._ptr, ch2._ptr, timeout_nanos)
             if idx == -1 {
                 return SelectResult { channel_index: -1, value: 0, timed_out: true }
@@ -158,7 +158,7 @@ class Task {
         //
         // `timeout_nanos` is the maximum wait in nanoseconds (0 = no timeout).
         // Returns a SelectResult with channel_index 0, 1, or 2.
-        func select3(ch1: Channel, ch2: Channel, ch3: Channel, timeout_nanos: i64) -> SelectResult {
+        func select3(ch1: Channel<i64>, ch2: Channel<i64>, ch3: Channel<i64>, timeout_nanos: i64) -> SelectResult {
             let idx = _task_select3(ch1._ptr, ch2._ptr, ch3._ptr, timeout_nanos)
             if idx == -1 {
                 return SelectResult { channel_index: -1, value: 0, timed_out: true }
@@ -218,37 +218,42 @@ class Task {
 // Channel - communication channel between tasks
 // =============================================================================
 
-class Channel {
+class Channel<T: Sendable> {
     _ptr: handle,
 
     statics {
         // Create an unbuffered (rendezvous) channel.
-        func new() -> Channel {
-            return Channel { _ptr: _channel_new(0) }
+        func new() -> Channel<T> {
+            return Channel<T> { _ptr: _channel_new(0) }
         }
 
         // Create a buffered channel with the given capacity.
-        func buffered(capacity: i64) -> Channel {
-            return Channel { _ptr: _channel_new(capacity) }
+        func buffered(capacity: i64) -> Channel<T> {
+            return Channel<T> { _ptr: _channel_new(capacity) }
         }
     }
 
     // Send a value on the channel.
     // Returns true on success, false if the channel is closed.
     // NOTE: codegen intercepts this method and emits the correct RuntimeTypeId
-    // tag based on the element type. The body below is a fallback.
-    func send(value: i64) -> bool {
-        return _channel_send(self._ptr, 2, value) == 0
+    // tag based on the element type.
+    func send(value: T) -> bool {
+        _ = value
+        return false
     }
 
     // Receive a value from the channel.
-    // Returns the value, or 0 if the channel is closed and empty.
-    // Use is_closed() to distinguish "received 0" from "channel closed".
     // NOTE: codegen intercepts this method and extracts the typed value
-    // from the RecvResult struct return. The body below is a fallback.
-    func receive() -> i64 {
-        let r = _channel_recv(self._ptr)
-        return r.value
+    // from the RecvResult struct return.
+    func receive() -> T {
+        return panic("Channel.receive should be codegen-intercepted")
+    }
+
+    // Try to receive one value from the channel.
+    // Returns `Done` when the channel is closed and empty.
+    // NOTE: codegen intercepts this method and builds `T | Done` directly.
+    func try_receive() -> T | Done {
+        return Done {}
     }
 
     // Close the channel. Wakes all waiting tasks.
@@ -264,8 +269,8 @@ class Channel {
 
     // Return an iterator that drains the channel.
     // Yields values until the channel is closed and empty.
-    func iter() -> Iterator<i64> {
-        return ChannelIterator { _ptr: self._ptr }
+    func iter() -> Iterator<T> {
+        return ChannelIterator<T> { _ptr: self._ptr }
     }
 }
 
@@ -273,17 +278,14 @@ class Channel {
 // ChannelIterator - drains a channel via the Iterator interface
 // =============================================================================
 
-class ChannelIterator implements Iterator<i64> {
+class ChannelIterator<T: Sendable> implements Iterator<T> {
     _ptr: handle,
 }
 
-implement Iterator<i64> for ChannelIterator {
-    func next() -> i64 | Done {
-        let r = _channel_recv(self._ptr)
-        if r.tag == -1 {
-            return Done {}
-        }
-        return r.value
+implement Iterator<T> for ChannelIterator<T> {
+    func next() -> T | Done {
+        let ch = Channel<T> { _ptr: self._ptr }
+        return ch.try_receive()
     }
 }
 
@@ -352,4 +354,3 @@ func parallel(items: [i64], max: i64, transform: (i64) -> i64) -> [i64] {
     }
     return Task.all(fns)
 }
-

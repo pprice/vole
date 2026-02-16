@@ -134,6 +134,9 @@ impl Cg<'_, '_, '_> {
             match (class_name.as_str(), method_name_str) {
                 ("Channel", "send") => return self.channel_send_call(&obj, mc),
                 ("Channel", "receive") => return self.channel_recv_call(&obj),
+                ("Channel", "try_receive") => {
+                    return self.channel_try_recv_call(&obj, mc.method, expr_id);
+                }
                 ("Task", "join") => return self.task_join_call(&obj),
                 _ => {}
             }
@@ -1096,11 +1099,21 @@ impl Cg<'_, '_, '_> {
         self.name_table().last_segment_str(name_id)
     }
 
+    /// Extract Channel<T>'s concrete element type, defaulting to i64 when unavailable.
+    fn channel_element_type_id(&self, ch_type_id: TypeId) -> TypeId {
+        let elem_type_id = self
+            .arena()
+            .unwrap_class(ch_type_id)
+            .and_then(|(_, type_args)| type_args.first().copied())
+            .unwrap_or(TypeId::I64);
+        self.try_substitute_type(elem_type_id)
+    }
+
     /// Handle Channel.send(value) — emit the correct RuntimeTypeId tag via codegen.
     ///
     /// Instead of relying on a hardcoded tag in the Vole source, the codegen computes
-    /// the tag from the element type (currently always i64 since Channel is not generic
-    /// yet) and calls the `channel_send` wrapper directly.
+    /// the tag from the concrete Channel<T> element type and calls the
+    /// `channel_send` wrapper directly.
     fn channel_send_call(
         &mut self,
         ch_obj: &CompiledValue,
@@ -1113,9 +1126,8 @@ impl Cg<'_, '_, '_> {
         // Compile the value argument
         let value = self.expr(&mc.args[0])?;
 
-        // Compute the RuntimeTypeId tag for the element type.
-        // Channel is not yet generic, so the element type is always i64.
-        let elem_type_id = TypeId::I64;
+        // Compute the RuntimeTypeId tag for Channel<T>'s concrete element type.
+        let elem_type_id = self.channel_element_type_id(ch_obj.type_id);
         let tag = {
             let arena = self.arena();
             array_element_tag_id(elem_type_id, arena)
@@ -1151,8 +1163,7 @@ impl Cg<'_, '_, '_> {
     /// register pair (RAX + RDX). We extract the value field and return it as a
     /// typed CompiledValue.
     fn channel_recv_call(&mut self, ch_obj: &CompiledValue) -> CodegenResult<CompiledValue> {
-        // The element type (currently always i64 since Channel is not generic yet)
-        let elem_type_id = TypeId::I64;
+        let elem_type_id = self.channel_element_type_id(ch_obj.type_id);
 
         // Look up the channel_recv wrapper
         let native_func = self
@@ -1172,6 +1183,118 @@ impl Cg<'_, '_, '_> {
         // We discard the tag and return the value as the element type
         let raw_value = results[1];
         Ok(self.convert_field_value(raw_value, elem_type_id))
+    }
+
+    /// Handle Channel.try_receive() — call recv wrapper and return `T | Done`.
+    ///
+    /// `channel_recv` returns `{ tag, value }` where `tag == -1` means the channel
+    /// is closed and empty. We map that to `Done`; otherwise we convert `value` to
+    /// `T` and wrap it in the method's concrete union return type.
+    fn channel_try_recv_call(
+        &mut self,
+        ch_obj: &CompiledValue,
+        method_sym: Symbol,
+        expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        let elem_type_id = self.channel_element_type_id(ch_obj.type_id);
+
+        let inferred_return_type = self
+            .get_substituted_return_type(&expr_id)
+            .or_else(|| self.get_expr_type(&expr_id))
+            .unwrap_or(TypeId::VOID);
+
+        // In some monomorphized module contexts, expr-level type lookup can fall back
+        // to void. Recover by reading the method signature and applying substitutions.
+        let return_type_id = if inferred_return_type != TypeId::VOID {
+            inferred_return_type
+        } else {
+            let method_name_id = self.method_name_id(method_sym)?;
+            let class_type_def_id = self
+                .arena()
+                .unwrap_class(ch_obj.type_id)
+                .map(|(type_def_id, _)| type_def_id)
+                .ok_or_else(|| {
+                    CodegenError::type_mismatch("Channel.try_receive", "class", "non-class")
+                })?;
+
+            let registry = self.analyzed().entity_registry();
+            let abstract_return_type = registry
+                .find_method_binding(class_type_def_id, method_name_id)
+                .map(|binding| binding.func_type.return_type_id)
+                .or_else(|| {
+                    registry
+                        .find_method_on_type(class_type_def_id, method_name_id)
+                        .and_then(|mid| {
+                            let method = registry.get_method(mid);
+                            self.arena()
+                                .unwrap_function(method.signature_id)
+                                .map(|(_, ret, _)| ret)
+                        })
+                })
+                .ok_or_else(|| {
+                    CodegenError::not_found("method return type", "Channel.try_receive")
+                })?;
+            self.try_substitute_type(abstract_return_type)
+        };
+
+        // Look up channel_recv wrapper.
+        let native_func = self
+            .native_registry()
+            .lookup("std:task", "channel_recv")
+            .ok_or_else(|| CodegenError::not_found("native function", "std:task::channel_recv"))?;
+
+        // Extract _ptr field (slot 0) from Channel class instance via runtime getter.
+        let ch_handle = self.get_field_cached(ch_obj.value, 0)?;
+
+        // Call channel_recv_wrapper(ch_handle) -> RecvResult { tag, value }.
+        let call_inst = self.call_native_indirect(native_func, &[ch_handle]);
+        let results = self.builder.inst_results(call_inst).to_vec();
+        let tag = results[0];
+        let raw_value = results[1];
+
+        // tag == -1 => Done, otherwise => value of type T.
+        let minus_one = self.builder.ins().iconst(types::I64, -1);
+        let is_done = self.builder.ins().icmp(IntCC::Equal, tag, minus_one);
+        let cond = self.builder.ins().uextend(types::I32, is_done);
+
+        let done_block = self.builder.create_block();
+        let value_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder
+            .append_block_param(merge_block, self.ptr_type());
+
+        self.builder
+            .ins()
+            .brif(cond, done_block, &[], value_block, &[]);
+
+        self.builder.switch_to_block(done_block);
+        let done_value = CompiledValue::new(
+            self.builder.ins().iconst(types::I8, 0),
+            types::I8,
+            TypeId::DONE,
+        );
+        let done_union = self.construct_union_id(done_value, return_type_id)?;
+        self.builder
+            .ins()
+            .jump(merge_block, &[done_union.value.into()]);
+        self.builder.seal_block(done_block);
+
+        self.builder.switch_to_block(value_block);
+        let typed_value = self.convert_field_value(raw_value, elem_type_id);
+        let value_union = self.construct_union_id(typed_value, return_type_id)?;
+        self.builder
+            .ins()
+            .jump(merge_block, &[value_union.value.into()]);
+        self.builder.seal_block(value_block);
+
+        self.builder.switch_to_block(merge_block);
+        self.builder.seal_block(merge_block);
+        let union_ptr = self.builder.block_params(merge_block)[0];
+        Ok(CompiledValue::new(
+            union_ptr,
+            self.ptr_type(),
+            return_type_id,
+        ))
     }
 
     /// Handle Task.join() — call join wrapper and extract the value field.

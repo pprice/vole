@@ -506,9 +506,11 @@ impl Compiler<'_> {
         // Pass 1: Declare all functions and finalize types across all modules
         self.declare_module_types_and_functions(&module_paths);
 
-        // Pass 1.5: Declare and compile monomorphized generic function instances
+        // Pass 1.5: Declare and compile monomorphized generic instances used by modules.
         self.declare_monomorphized_instances(true)?;
         self.compile_module_monomorphized_instances()?;
+        self.compile_module_class_method_monomorphized_instances()?;
+        self.compile_module_static_method_monomorphized_instances()?;
 
         // Pass 2: Compile all function bodies (cross-module calls now resolved)
         for module_path in &module_paths {

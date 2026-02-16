@@ -16,7 +16,7 @@ tests {
         let CHUNK_COUNT = TOTAL_SIZE / CHUNK_SIZE // 2560
 
         // Buffered channel: at most 4 chunks in flight.
-        let body_ch = Channel.buffered(4)
+        let body_ch = Channel.buffered<i64>(4)
 
         // Client task: sends 2560 chunk markers.
         let client = Task.run(() -> i64 => {
@@ -55,7 +55,7 @@ tests {
     }
 
     test "producer-consumer with computed values" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
 
         // Producer: computes squares 1..100
         let producer = Task.run(() -> i64 => {
@@ -88,8 +88,8 @@ tests {
     }
 
     test "pipeline: producer -> transformer -> consumer" {
-        let raw_ch = Channel.buffered(4)
-        let processed_ch = Channel.buffered(4)
+        let raw_ch = Channel.buffered<i64>(4)
+        let processed_ch = Channel.buffered<i64>(4)
 
         // Producer: sends raw values 1..50
         let producer = Task.run(() -> i64 => {
@@ -137,8 +137,8 @@ tests {
     }
 
     test "fan-out fan-in: multiple workers process items" {
-        let work_ch = Channel.buffered(8)
-        let result_ch = Channel.buffered(20)
+        let work_ch = Channel.buffered<i64>(8)
+        let result_ch = Channel.buffered<i64>(20)
 
         // Dispatcher: sends 20 work items
         let dispatcher = Task.run(() -> i64 => {

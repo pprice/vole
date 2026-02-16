@@ -75,7 +75,7 @@ tests {
     }
 
     test "task produces channel value consumed by main" {
-        let ch = Channel.buffered(2)
+        let ch = Channel.buffered<i64>(2)
         let t = Task.run(() -> i64 => {
             ch.send(42)
             return 0
@@ -108,9 +108,9 @@ tests {
     }
 
     test "select3 with all channels ready picks lowest" {
-        let ch1 = Channel.buffered(2)
-        let ch2 = Channel.buffered(2)
-        let ch3 = Channel.buffered(2)
+        let ch1 = Channel.buffered<i64>(2)
+        let ch2 = Channel.buffered<i64>(2)
+        let ch3 = Channel.buffered<i64>(2)
         ch1.send(1)
         ch2.send(2)
         ch3.send(3)
@@ -123,8 +123,8 @@ tests {
     }
 
     test "channel producer + select consumer" {
-        let ch1 = Channel.buffered(4)
-        let ch2 = Channel.buffered(4)
+        let ch1 = Channel.buffered<i64>(4)
+        let ch2 = Channel.buffered<i64>(4)
 
         // Pre-buffer data in both channels (no close, so select works cleanly)
         let p1 = Task.run(() -> i64 => {

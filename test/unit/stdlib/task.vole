@@ -221,7 +221,7 @@ tests {
     }
 
     test "buffered channel send and receive" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         assert(ch.send(42))
         assert(ch.send(99))
         assert(ch.receive() == 42)
@@ -229,7 +229,7 @@ tests {
     }
 
     test "buffered channel FIFO order" {
-        let ch = Channel.buffered(8)
+        let ch = Channel.buffered<i64>(8)
         ch.send(1)
         ch.send(2)
         ch.send(3)
@@ -243,20 +243,20 @@ tests {
     }
 
     test "channel close" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         assert(!ch.is_closed())
         ch.close()
         assert(ch.is_closed())
     }
 
     test "send on closed returns false" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         ch.close()
         assert(!ch.send(42))
     }
 
     test "recv drains before returning 0 on close" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         ch.send(10)
         ch.send(20)
         ch.close()
@@ -268,21 +268,21 @@ tests {
     }
 
     test "double close is no-op" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         ch.close()
         ch.close()
         assert(ch.is_closed())
     }
 
     test "channel new creates unbuffered" {
-        let ch = Channel.new()
+        let ch = Channel.new<i64>()
         assert(!ch.is_closed())
         ch.close()
         assert(ch.is_closed())
     }
 
     test "channel iter drains buffered values" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         ch.send(10)
         ch.send(20)
         ch.send(30)
@@ -295,7 +295,7 @@ tests {
     }
 
     test "channel iter on empty closed channel yields nothing" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         ch.close()
         let mut count = 0
         for v in ch.iter() {
@@ -305,7 +305,7 @@ tests {
     }
 
     test "channel iter collect" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         ch.send(1)
         ch.send(2)
         ch.send(3)
@@ -323,7 +323,7 @@ tests {
     // =========================================================================
 
     test "channel iter correctly receives literal zero" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         ch.send(0)
         ch.send(1)
         ch.send(0)
@@ -336,7 +336,7 @@ tests {
     }
 
     test "channel iter with only zeros" {
-        let ch = Channel.buffered(4)
+        let ch = Channel.buffered<i64>(4)
         ch.send(0)
         ch.send(0)
         ch.send(0)
@@ -402,8 +402,8 @@ tests {
     // =========================================================================
 
     test "select2 returns first available buffered channel" {
-        let ch1 = Channel.buffered(4)
-        let ch2 = Channel.buffered(4)
+        let ch1 = Channel.buffered<i64>(4)
+        let ch2 = Channel.buffered<i64>(4)
         ch2.send(42)
         let result = Task.select2(ch1, ch2, 0)
         assert(!result.timed_out)
@@ -412,8 +412,8 @@ tests {
     }
 
     test "select2 lowest index wins when both ready" {
-        let ch1 = Channel.buffered(4)
-        let ch2 = Channel.buffered(4)
+        let ch1 = Channel.buffered<i64>(4)
+        let ch2 = Channel.buffered<i64>(4)
         ch1.send(10)
         ch2.send(20)
         let result = Task.select2(ch1, ch2, 0)
@@ -423,8 +423,8 @@ tests {
     }
 
     test "select2 with task producing value" {
-        let ch1 = Channel.buffered(1)
-        let ch2 = Channel.buffered(1)
+        let ch1 = Channel.buffered<i64>(1)
+        let ch2 = Channel.buffered<i64>(1)
         let t = Task.run(() -> i64 => {
             ch2.send(99)
             return 0
@@ -437,8 +437,8 @@ tests {
     }
 
     test "select2 with closed channel" {
-        let ch1 = Channel.buffered(4)
-        let ch2 = Channel.buffered(4)
+        let ch1 = Channel.buffered<i64>(4)
+        let ch2 = Channel.buffered<i64>(4)
         ch1.close()
         let result = Task.select2(ch1, ch2, 0)
         assert(!result.timed_out)
@@ -447,9 +447,9 @@ tests {
     }
 
     test "select3 returns correct index" {
-        let ch1 = Channel.buffered(4)
-        let ch2 = Channel.buffered(4)
-        let ch3 = Channel.buffered(4)
+        let ch1 = Channel.buffered<i64>(4)
+        let ch2 = Channel.buffered<i64>(4)
+        let ch3 = Channel.buffered<i64>(4)
         ch3.send(77)
         let result = Task.select3(ch1, ch2, ch3, 0)
         assert(!result.timed_out)
@@ -458,9 +458,9 @@ tests {
     }
 
     test "select3 lowest index wins" {
-        let ch1 = Channel.buffered(4)
-        let ch2 = Channel.buffered(4)
-        let ch3 = Channel.buffered(4)
+        let ch1 = Channel.buffered<i64>(4)
+        let ch2 = Channel.buffered<i64>(4)
+        let ch3 = Channel.buffered<i64>(4)
         ch1.send(1)
         ch2.send(2)
         ch3.send(3)
@@ -471,8 +471,8 @@ tests {
     }
 
     test "select2 blocks until data arrives" {
-        let ch1 = Channel.buffered(1)
-        let ch2 = Channel.buffered(1)
+        let ch1 = Channel.buffered<i64>(1)
+        let ch2 = Channel.buffered<i64>(1)
         // Spawn a task that sends to ch1 after some work
         let t = Task.run(() -> i64 => {
             ch1.send(42)
@@ -486,8 +486,8 @@ tests {
     }
 
     test "select2 with timeout returns timed_out" {
-        let ch1 = Channel.buffered(4)
-        let ch2 = Channel.buffered(4)
+        let ch1 = Channel.buffered<i64>(4)
+        let ch2 = Channel.buffered<i64>(4)
         // Use a very short timeout (1 nanosecond)
         // Since no task is producing data, this should time out.
         // From within a task, this will block and then timeout.
@@ -501,8 +501,8 @@ tests {
     }
 
     test "select2 multiple rounds" {
-        let ch1 = Channel.buffered(4)
-        let ch2 = Channel.buffered(4)
+        let ch1 = Channel.buffered<i64>(4)
+        let ch2 = Channel.buffered<i64>(4)
         ch1.send(10)
         ch2.send(20)
 

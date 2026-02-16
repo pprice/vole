@@ -11,8 +11,8 @@ let { Task, Channel } = import "std:task"
 
 tests {
     test "server handles single request" {
-        let req_ch = Channel.buffered(1)
-        let resp_ch = Channel.buffered(1)
+        let req_ch = Channel.buffered<i64>(1)
+        let resp_ch = Channel.buffered<i64>(1)
 
         // Server: reads one request, spawns handler, closes response channel.
         let server = Task.run(() -> i64 => {
@@ -47,8 +47,8 @@ tests {
     }
 
     test "server handles 5 concurrent requests" {
-        let req_ch = Channel.buffered(8)
-        let resp_ch = Channel.buffered(8)
+        let req_ch = Channel.buffered<i64>(8)
+        let resp_ch = Channel.buffered<i64>(8)
 
         // Server: reads requests, spawns one task per request.
         let server = Task.run(() -> i64 => {
@@ -95,8 +95,8 @@ tests {
     }
 
     test "stateful server counts requests with actor" {
-        let req_ch = Channel.buffered(4)
-        let resp_ch = Channel.buffered(4)
+        let req_ch = Channel.buffered<i64>(4)
+        let resp_ch = Channel.buffered<i64>(4)
 
         // Counter actor: increments for each message, returns final count.
         let counter = Task.state(0, (count: i64, msg: i64) -> i64 => {
@@ -147,9 +147,9 @@ tests {
     test "server pipeline: request -> process -> respond" {
         // req_ch large enough for all 8 items so main thread never blocks
         // (main thread cannot block on send; it's not a scheduler task).
-        let req_ch = Channel.buffered(8)
-        let process_ch = Channel.buffered(4)
-        let resp_ch = Channel.buffered(4)
+        let req_ch = Channel.buffered<i64>(8)
+        let process_ch = Channel.buffered<i64>(4)
+        let resp_ch = Channel.buffered<i64>(4)
 
         // Acceptor: reads requests, forwards to processing pipeline.
         let acceptor = Task.run(() -> i64 => {
@@ -207,7 +207,7 @@ tests {
     test "server with Task.all for batch processing" {
         // Simulate a server that receives a batch of requests and
         // processes them all concurrently using Task.all.
-        let resp_ch = Channel.buffered(10)
+        let resp_ch = Channel.buffered<i64>(10)
 
         let server = Task.run(() -> i64 => {
             let fns: [() -> i64] = [
@@ -245,9 +245,9 @@ tests {
     }
 
     test "server select: multiplex two request channels" {
-        let req_ch1 = Channel.buffered(4)
-        let req_ch2 = Channel.buffered(4)
-        let resp_ch = Channel.buffered(8)
+        let req_ch1 = Channel.buffered<i64>(4)
+        let req_ch2 = Channel.buffered<i64>(4)
+        let resp_ch = Channel.buffered<i64>(8)
 
         // Server: select across two request channels.
         let server = Task.run(() -> i64 => {
