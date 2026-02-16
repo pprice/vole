@@ -13,7 +13,7 @@ Variables in Vole are immutable by default. Use `let` for bindings and `let mut`
 | `let { x, y } = point` | Destructuring |
 
 **Rules:**
-- Immutable by default - prefer `let` over `let mut`
+- Immutable by default -- prefer `let` over `let mut`
 - No shadowing in the same scope
 - Must be initialized at declaration
 - Type can be inferred or explicit
@@ -32,7 +32,7 @@ let pi = 3.14159
 
 Once bound, the value cannot change:
 
-```vole
+```vole,ignore
 let x = 10
 x = 20  // Error: cannot assign to immutable variable
 ```
@@ -47,10 +47,14 @@ Immutability is the default because it:
 When you need to change a value, use `let mut`:
 
 ```vole
-let mut counter = 0
-counter = counter + 1
-counter = counter + 1
-println(counter)  // 2
+tests {
+    test "mutable bindings" {
+        let mut counter = 0
+        counter = counter + 1
+        counter = counter + 1
+        assert(counter == 2)
+    }
+}
 ```
 
 Common use cases for mutable variables:
@@ -59,11 +63,35 @@ Common use cases for mutable variables:
 - State that changes over time
 
 ```vole
-let mut sum = 0
-for i in 1..=10 {
-    sum = sum + i
+tests {
+    test "accumulator" {
+        let mut sum = 0
+        for i in 1..=10 {
+            sum = sum + i
+        }
+        assert(sum == 55)
+    }
 }
-println(sum)  // 55
+```
+
+### Compound Assignment
+
+Mutable variables support compound assignment operators:
+
+```vole
+tests {
+    test "compound assignment" {
+        let mut x = 10
+        x += 5
+        assert(x == 15)
+        x -= 3
+        assert(x == 12)
+        x *= 2
+        assert(x == 24)
+        x /= 4
+        assert(x == 6)
+    }
+}
 ```
 
 ### Type Inference
@@ -71,11 +99,11 @@ println(sum)  // 55
 Vole infers types from the assigned value:
 
 ```vole
-let x = 42          // i32 (integer default)
+let x = 42          // i64 (integer default)
 let y = 3.14        // f64 (float default)
 let name = "Alice"  // string
 let flag = true     // bool
-let items = [1, 2]  // [i32]
+let items = [1, 2]  // [i64]
 ```
 
 ### Explicit Type Annotations
@@ -83,7 +111,7 @@ let items = [1, 2]  // [i32]
 Specify types when you need a non-default type or want clarity:
 
 ```vole
-let x: i64 = 42           // i64 instead of i32
+let x: i32 = 42           // i32 instead of i64
 let y: f32 = 3.14         // f32 instead of f64
 let empty: [string] = []  // Required for empty arrays
 ```
@@ -91,83 +119,147 @@ let empty: [string] = []  // Required for empty arrays
 Type annotations go after the variable name, before the `=`:
 
 ```vole
-let name: string = get_name()
+let name: string = "hello"
 let mut count: i32 = 0
 ```
 
 ### Destructuring
 
-Extract fields from records and classes:
+Extract fields from classes and structs:
 
 ```vole
-record Point { x: i32, y: i32 }
+class Point {
+    x: i32,
+    y: i32,
+}
 
-let point = Point { x: 10, y: 20 }
-let { x, y } = point
-println(x)  // 10
-println(y)  // 20
+tests {
+    test "basic destructuring" {
+        let point = Point { x: 10, y: 20 }
+        let { x, y } = point
+        assert(x == 10)
+        assert(y == 20)
+    }
+
+    test "destructuring with rename" {
+        let point = Point { x: 10, y: 20 }
+        let { x: a, y: b } = point
+        assert(a == 10)
+        assert(b == 20)
+    }
+
+    test "partial destructuring" {
+        let point = Point { x: 10, y: 20 }
+        let { x } = point
+        assert(x == 10)
+    }
+
+    test "mutable destructuring" {
+        let point = Point { x: 1, y: 2 }
+        let mut { x, y } = point
+        x = 99
+        assert(x == 99)
+        assert(y == 2)
+    }
+}
 ```
 
-Rename while destructuring:
+Array/tuple destructuring:
 
 ```vole
-let { x: a, y: b } = point
-println(a)  // 10
+tests {
+    test "array destructuring" {
+        let [a, b] = [10, "twenty"]
+        assert(a == 10)
+        assert(b == "twenty")
+
+        // With wildcard
+        let [x, _, z] = [42, "ignored", 99]
+        assert(x == 42)
+        assert(z == 99)
+    }
+}
 ```
 
-Partial destructuring (only some fields):
+Destructuring imports:
 
 ```vole
-let { x } = point
-println(x)  // 10
+let { sqrt, PI } = import "std:math"
+
+tests {
+    test "destructured import" {
+        assert(PI > 3.14)
+        assert(sqrt(4.0) == 2.0)
+    }
+}
 ```
 
 ### Scoping
 
-Variables are scoped to the block they're declared in:
+Variables are scoped to the block they're declared in. Blocks are created by control flow constructs like `if`, `for`, and function bodies:
 
 ```vole
-let x = 1
-{
-    let y = 2
-    println(x)  // 1 - x is accessible
-    println(y)  // 2
+func compute() -> i64 {
+    let inner = 42
+    return inner
 }
-println(x)  // 1
-println(y)  // Error: y is not defined
+
+tests {
+    test "scoping" {
+        let x = 1
+        let mut y = 0
+        if true {
+            let inner = 2
+            y = x + inner
+        }
+        assert(x == 1)
+        assert(y == 3)
+        // inner is not accessible here
+    }
+}
 ```
 
 ### No Same-Scope Shadowing
 
 Unlike some languages, Vole does not allow redeclaring a variable in the same scope:
 
-```vole
+```vole,ignore
 let x = 1
 let x = 2  // Error: 'x' is already defined in this scope
 ```
 
-Use a nested scope if you need a new variable with the same name:
+Use a different block (such as an `if` or function) if you need a new variable with the same name:
 
 ```vole
-let x = 1
-{
-    let x = 2      // OK - different scope
-    println(x)     // 2
+tests {
+    test "nested scope shadowing" {
+        let x = 1
+        let mut result = 0
+        if true {
+            let x = 2      // OK - different scope
+            result = x
+        }
+        assert(result == 2)
+        assert(x == 1)
+    }
 }
-println(x)         // 1
 ```
 
 Or use mutation if the value needs to change:
 
 ```vole
-let mut x = 1
-x = 2              // OK - same variable, new value
-println(x)         // 2
+tests {
+    test "mutation instead of shadowing" {
+        let mut x = 1
+        x = 2
+        assert(x == 2)
+    }
+}
 ```
 
 ### Module-Level Variables
 
-Variables can be declared at the top level:
+Variables can be declared at the top level of a file. Top-level `let` and `let mut` are module-scoped:
 
 ```vole
 let VERSION = "1.0.0"
@@ -177,10 +269,13 @@ func handle_request() {
     request_count = request_count + 1
 }
 
-func main() {
-    println(VERSION)
-    handle_request()
-    println(request_count)  // 1
+tests {
+    test "module-level variables" {
+        handle_request()
+        handle_request()
+        assert(request_count == 2)
+        assert(VERSION == "1.0.0")
+    }
 }
 ```
 
@@ -188,7 +283,7 @@ func main() {
 
 **Reassigning immutable variable:**
 
-```vole
+```vole,ignore
 let x = 1
 x = 2  // Error: cannot assign to immutable variable
 ```
@@ -197,7 +292,7 @@ Fix: Use `let mut` if you need mutation.
 
 **Redeclaring in same scope:**
 
-```vole
+```vole,ignore
 let x = 1
 let x = 2  // Error: 'x' is already defined
 ```
@@ -206,7 +301,7 @@ Fix: Use a different name, nested scope, or mutation.
 
 **Using before declaration:**
 
-```vole
+```vole,ignore
 println(x)  // Error: 'x' is not defined
 let x = 1
 ```
@@ -215,7 +310,7 @@ Fix: Declare variables before use.
 
 **Missing initialization:**
 
-```vole
+```vole,ignore
 let x: i32  // Error: variable must be initialized
 ```
 

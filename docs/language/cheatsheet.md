@@ -5,18 +5,24 @@ Single-page syntax reference.
 ## Variables
 
 ```vole
-let x = 42              // Immutable, inferred type
-let x: i64 = 42         // Immutable, explicit type
-let mut x = 0           // Mutable
-x = 10                  // Reassign mutable
-let { a, b } = point    // Destructuring
+tests {
+    test "variables" {
+        let x = 42              // Immutable, inferred type
+        let y: i64 = 42         // Immutable, explicit type
+        let mut z = 0           // Mutable
+        z = 10                  // Reassign mutable
+        assert(x == 42)
+        assert(y == 42)
+        assert(z == 10)
+    }
+}
 ```
 
 ## Types
 
-```vole
+```vole,ignore
 // Primitives
-i8  i16  i32  i64  i128 // Signed integers (i32 default)
+i8  i16  i32  i64  i128 // Signed integers (i64 default)
 u8  u16  u32  u64       // Unsigned integers
 f32  f64                // Floats (f64 default)
 bool                    // true, false
@@ -25,7 +31,7 @@ nil                     // Absence of value
 Done                    // Iterator termination sentinel
 
 // Numeric literals
-42                      // Decimal integer (i32)
+42                      // Decimal integer (i64)
 0xFF                    // Hex integer
 0b1010                  // Binary integer
 3.14                    // Float (f64)
@@ -37,84 +43,108 @@ Done                    // Iterator termination sentinel
 // Compound
 [T]                     // Array: [1, 2, 3]
 T?                      // Optional: string?
-A | B                   // Union: i32 | string
-(A, B) -> R             // Function: (i32) -> bool
+A | B                   // Union: i64 | string
+(A, B) -> R             // Function: (i64) -> bool
 Iterator<T>             // Iterator: produces values of type T
-type                    // Type as value: let t: type = i32
+type                    // Type as value: let t: type = i64
 ```
 
 ## Strings
 
 ```vole
-// String interpolation
-let name = "Alice"
-let age = 30
-let msg = "Hello, {name}! You are {age} years old."
+tests {
+    test "strings" {
+        let name = "Alice"
+        let age = 30
+        let msg = "Hello, {name}! You are {age} years old."
+        assert(msg == "Hello, Alice! You are 30 years old.")
 
-// Any expression works
-let sum = "2 + 2 = {2 + 2}"
-let len = "Length: {items.length}"
+        let sum = "2 + 2 = {2 + 2}"
+        assert(sum == "2 + 2 = 4")
 
-// Raw strings (no interpolation, no escapes)
-let path = @"C:\Users\name"      // Literal backslashes
+        // Raw strings (no interpolation, no escapes)
+        let path = @"C:\Users\name"
+        assert(path.length() == 13)
+    }
+}
 ```
 
 ## Functions
 
 ```vole
-func add(a: i32, b: i32) -> i32 {
+func add(a: i64, b: i64) -> i64 {
     return a + b
 }
 
-func greet(name: string) {      // Nil return
+func greet(name: string) {
     println("Hi " + name)
 }
 
-// Lambdas
-let f = (x: i64) => x * 2           // Expression
-let g = (x: i64) => { return x * 2 }    // Block body
-let h: (i32) -> i32 = (x) => x      // Typed, inferred params
+tests {
+    test "functions" {
+        assert(add(2, 3) == 5)
+
+        // Lambdas
+        let f = (x: i64) => x * 2
+        let g = (x: i64) => { return x * 2 }
+        assert(f(5) == 10)
+        assert(g(5) == 10)
+    }
+}
 ```
 
 ## Control Flow
 
 ```vole
-// Conditionals
-if x > 0 { } else if x < 0 { } else { }
-let y = if x > 0 { "pos" } else { "neg" }
+tests {
+    test "if else" {
+        let x = 5
+        let mut result = ""
+        if x > 0 {
+            result = "pos"
+        } else {
+            result = "neg"
+        }
+        assert(result == "pos")
+    }
 
-// Loops
-while condition { }
-for item in array { }
-for i in 0..10 { }              // 0-9 (exclusive)
-for i in 0..=10 { }             // 0-10 (inclusive)
-break                           // Exit loop
-continue                        // Next iteration
+    test "when expression" {
+        let x = 5
+        let label = when {
+            x > 0 => "pos"
+            _ => "neg"
+        }
+        assert(label == "pos")
+    }
 
-// Match - literals, types, wildcards
+    test "loops" {
+        let mut sum = 0
+        for i in 0..5 {
+            sum = sum + i
+        }
+        assert(sum == 10)
+    }
+}
+```
+
+Match supports literals, types, destructuring, and guards:
+
+```vole,ignore
 match x {
     1 => "one"                      // Literal
     "hello" => "greeting"           // String
     true => "yes"                   // Boolean
-    i32 => "number"                 // Type
+    i64 => "number"                 // Type
     string => "text"                // Type
-    Point { x, y } => x + y         // Destructure
-    _ if x > 10 => "big"            // Guard
+    Point { x, y } => x + y        // Destructure
+    _ if x > 10 => "big"           // Guard
     _ => "default"                  // Wildcard (must be last)
 }
-
-// When - conditional expressions (no subject)
-let grade = when {
-    score >= 90 => "A"
-    score >= 80 => "B"
-    _ => "C"
-}
-let abs = when { x < 0 => -x, _ => x }  // Terse form
 ```
 
 ## Operators
 
-```vole
+```vole,ignore
 // Arithmetic
 +  -  *  /  %
 
@@ -132,31 +162,35 @@ let abs = when { x < 0 => -x, _ => x }  // Terse form
 
 // Type
 x is T                  // Type check
-type_of(x)              // Get type
-
-// Optional
 x ?? default            // Null coalescing
 x?.field                // Optional chaining
 ```
 
-## Classes & Records
+## Classes
 
 ```vole
-class Point {                   // Mutable
-    x: i32
-    y: i32
-    func move(dx: i32) { self.x = self.x + dx }
+class Point {
+    x: i64,
+    y: i64,
+
+    func move_x(dx: i64) {
+        self.x = self.x + dx
+    }
+
+    func sum() -> i64 {
+        return self.x + self.y
+    }
 }
 
-record Point {                  // Immutable
-    x: i32
-    y: i32
-    func sum() -> i32 { return self.x + self.y }
+tests {
+    test "class usage" {
+        let p = Point { x: 10, y: 20 }
+        assert(p.x == 10)
+        assert(p.sum() == 30)
+        p.move_x(5)
+        assert(p.x == 15)
+    }
 }
-
-let p = Point { x: 10, y: 20 }
-p.x                             // Field access
-p.move(5)                       // Method call
 ```
 
 ## Interfaces
@@ -166,33 +200,45 @@ interface Named {
     func name() -> string
 }
 
-interface Greeter extends Named {
-    func greet() { println("Hi " + self.name()) }  // Default
+class Person implements Named {
+    n: string,
+
+    func name() -> string {
+        return self.n
+    }
 }
 
-record Person implements Named {
-    n: string
-    func name() -> string { return self.n }
-}
-
-// Standalone implementation
-implement Named for Point {
-    func name() -> string { return "Point" }
+tests {
+    test "interface" {
+        let p = Person { n: "Alice" }
+        assert(p.name() == "Alice")
+    }
 }
 ```
 
 ## Generics
 
 ```vole
-func identity<T>(x: T) -> T { return x }
-
-record Box<T> {
-    value: T
-    func unwrap() -> T { return self.value }
+func identity<T>(x: T) -> T {
+    return x
 }
 
-// Union constraints
-func double<T: i32 | f64>(x: T) -> T { return x + x }
+class Box<T> {
+    value: T,
+
+    func unwrap() -> T {
+        return self.value
+    }
+}
+
+tests {
+    test "generics" {
+        assert(identity(42) == 42)
+        assert(identity("hello") == "hello")
+        let b = Box { value: 99 }
+        assert(b.unwrap() == 99)
+    }
+}
 ```
 
 ## Error Handling
@@ -201,25 +247,33 @@ func double<T: i32 | f64>(x: T) -> T { return x + x }
 error NotFound {}
 error Invalid { message: string }
 
-func find(id: i32) -> fallible(Item, NotFound) {
-    if id < 0 { raise NotFound {} }
-    return items[id]
+func find(id: i64) -> fallible(i64, NotFound) {
+    if id < 0 {
+        raise NotFound {}
+    }
+    return id * 10
 }
 
-// Match with success/error patterns
-let item = match find(42) {
-    x => x,                              // implicit success pattern
-    error NotFound => default_item,      // error pattern (keyword required)
-    error Invalid { message } => handle(message)
-}
+tests {
+    test "error handling" {
+        let item = match find(42) {
+            x => x
+            error NotFound => -1
+        }
+        assert(item == 420)
 
-// Explicit success keyword (optional)
-match fallible_expr {
-    success x => x + 1,
-    error e => handle(e)
+        let missing = match find(-1) {
+            x => x
+            error NotFound => -1
+        }
+        assert(missing == -1)
+    }
 }
+```
 
-// Try propagation (in fallible functions only)
+Try propagation (in fallible functions only):
+
+```vole,ignore
 func process() -> fallible(i64, NotFound) {
     let x = try find(42)    // unwraps on success, propagates on error
     return x * 2
@@ -230,46 +284,45 @@ func process() -> fallible(i64, NotFound) {
 
 Arrays provide `.iter()` to get an iterator. Iterators are lazy and support chaining.
 
-### Creating Iterators
-```vole
-let arr = [1, 2, 3, 4, 5]
-let iter = arr.iter()
-```
-
-### Iterator Methods
-
 **Transformers (lazy, return iterators):**
-- `.map(fn)` - Transform each element: `arr.iter().map((x) => x * 2)`
-- `.filter(fn)` - Keep if predicate true: `arr.iter().filter((x) => x > 2)`
-- `.take(n)` - First n elements: `arr.iter().take(3)`
-- `.skip(n)` - Skip first n: `arr.iter().skip(2)`
+- `.map(fn)` -- transform each element
+- `.filter(fn)` -- keep if predicate true
+- `.take(n)` -- first n elements
+- `.skip(n)` -- skip first n
+- `.chain(iter)` -- concatenate two iterators
+- `.enumerate()` -- yield (index, value) pairs
+- `.zip(iter)` -- combine two iterators into pairs
+- `.flatten()` -- flatten nested iterators
+- `.flat_map(fn)` -- map then flatten
+- `.chunks(n)` -- non-overlapping chunks
+- `.windows(n)` -- sliding windows
+- `.reverse()` -- reverse order
+- `.sorted()` -- sort elements
+- `.unique()` -- remove consecutive duplicates
 
 **Consumers (eager, materialize results):**
-- `.collect()` - Materialize to array: `arr.iter().collect()`
-- `.count()` - Count elements: `arr.iter().count()`
-- `.sum()` - Sum numeric elements: `arr.iter().sum()`
-- `.reduce(init, fn)` - Fold to single value: `arr.iter().reduce(0, (acc, x) => acc + x)`
-- `.for_each(fn)` - Execute side effects: `arr.iter().for_each((x) => print(x))`
+- `.collect()` -- to array
+- `.count()` -- count elements
+- `.sum()` -- sum numeric elements
+- `.reduce(init, fn)` -- fold to single value
+- `.for_each(fn)` -- execute side effects
+- `.find(fn)` -- first match (or nil)
+- `.first()` -- first element (or nil)
+- `.last()` -- last element (or nil)
+- `.any(fn)` -- true if any matches
+- `.all(fn)` -- true if all match
 
-### Chaining
 ```vole
-let result = [1, 2, 3, 4, 5]
-    .iter()
-    .filter((x) => x % 2 == 0)
-    .map((x) => x * 10)
-    .take(2)
-    .collect()
-// result == [20, 40]
-```
-
-### Iterator Protocol
-
-Iterators use `next() -> T | Done`:
-```vole
-let iter = [1, 2].iter()
-match iter.next() {
-    Done => print("empty")
-    i64 as value => print(value)
+tests {
+    test "iterator chaining" {
+        let result = [1, 2, 3, 4, 5].iter()
+            .filter((x) => x % 2 == 0)
+            .map((x) => x * 10)
+            .collect()
+        assert(result.length() == 2)
+        assert(result[0] == 20)
+        assert(result[1] == 40)
+    }
 }
 ```
 
@@ -286,40 +339,27 @@ func counter(max: i64) -> Iterator<i64> {
     }
 }
 
-// Usage
-let iter = counter(3)
-// iter.next() -> 0, 1, 2, Done
+tests {
+    test "generator" {
+        let result = counter(3).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 0)
+        assert(result[1] == 1)
+        assert(result[2] == 2)
+    }
+}
 ```
-
-**Note:** Generators are transformed to state machines at compile time.
 
 ## Testing
 
 ```vole
-test "name" {
-    assert(condition)
-}
-
-tests "group" {
-    test "a" { }
-    test "b" { }
-}
-```
-
-## External Blocks (Native FFI)
-
-```vole
-// Inside implement block - add native methods to types
-implement string {
-    external("std:string") {
-        func "string_length" as length() -> i64
-        func "string_contains" as contains(needle: string) -> bool
+tests "group name" {
+    test "a" {
+        assert(1 + 1 == 2)
     }
-}
 
-// Usage
-"hello".length()        // 5
-"hello".contains("ell") // true
+    test "b" => assert(true)
+}
 ```
 
 ## Modules
@@ -327,18 +367,32 @@ implement string {
 ```vole
 let math = import "std:math"
 
-math.sqrt(16.0)     // 4.0
-math.sin(math.PI)   // ~0.0
-math.pow(2.0, 10.0) // 1024.0
+tests {
+    test "modules" {
+        assert(math.sqrt(16.0) == 4.0)
+        assert(math.PI > 3.14)
+    }
+}
+```
+
+Destructured imports:
+
+```vole
+tests {
+    test "destructured" {
+        let { sqrt, PI } = import "std:math"
+        assert(sqrt(4.0) == 2.0)
+        assert(PI > 3.14)
+    }
+}
 ```
 
 ## Built-in Functions
 
-```vole
+```vole,ignore
 print(x)        // Print without newline
 println(x)      // Print with newline
 assert(cond)    // Assert condition
-type_of(x)      // Get type of value
 ```
 
 ## CLI
@@ -347,12 +401,11 @@ type_of(x)      // Get type of value
 vole run file.vole          # Run program
 vole check file.vole        # Type-check only
 vole test dir/              # Run tests
-vole fmt file.vole          # Format code (WIP)
 ```
 
 ## Program Structure
 
-```vole
+```vole,ignore
 // Statements are separated by newlines (no semicolons)
 let x = 1
 let y = 2
@@ -361,7 +414,7 @@ let y = 2
 let VERSION = "1.0"
 func helper() { }
 class Foo { }
-record Bar { }
+struct Bar { x: i64 }
 interface Baz { }
 error Qux { }
 tests { }

@@ -25,14 +25,14 @@ vole run hello.vole
 | [Types](types.md) | Type system: primitives, arrays, optionals, unions |
 | [Variables](variables.md) | let/let mut, scoping, destructuring |
 | [Functions](functions.md) | Functions, lambdas, closures, higher-order |
-| [Control Flow](control-flow.md) | if/else, while, for, match, break/continue |
+| [Control Flow](control-flow.md) | if/else, while, for, match, when, break/continue |
 | [Operators](operators.md) | Arithmetic, comparison, logical, bitwise, type ops |
 
 ### Data Structures
 
 | Doc | Description |
 |-----|-------------|
-| [Classes & Records](classes-records.md) | Mutable classes, immutable records, methods |
+| [Classes & Records](classes-records.md) | Mutable classes, structs, methods, statics |
 | [Interfaces](interfaces.md) | Contracts, structural typing, default methods |
 | [Generics](generics.md) | Type parameters, constraints |
 
@@ -41,16 +41,16 @@ vole run hello.vole
 | Doc | Description |
 |-----|-------------|
 | [Error Handling](error-handling.md) | Typed errors, fallible functions, match patterns |
-| [Iterators](iterators.md) | Lazy sequences: map, filter, reduce, collect |
-| [Modules](modules.md) | Standard library imports (std:math) |
+| [Iterators](iterators.md) | Lazy sequences: map, filter, reduce, generators |
+| [Modules](modules.md) | Import system, standard library, destructured imports |
 | [Testing](testing.md) | Test blocks, assertions, test organization |
 
 ## Example
 
 ```vole
-record Person {
-    name: string
-    age: i32
+class Person {
+    name: string,
+    age: i64,
 
     func greet() -> string {
         return "Hi, I'm {self.name}!"
@@ -60,10 +60,10 @@ record Person {
 func main() {
     let people = [
         Person { name: "Alice", age: 30 },
-        Person { name: "Bob", age: 25 }
+        Person { name: "Bob", age: 25 },
     ]
 
-    let greetings = people
+    let greetings = people.iter()
         .filter((p) => p.age >= 18)
         .map((p) => p.greet())
         .collect()
@@ -81,15 +81,19 @@ func main() {
 | Core types (i8-i128, u8-u64, f32/f64, bool, string) | Implemented |
 | Arrays, optionals, unions | Implemented |
 | Functions, lambdas, closures | Implemented |
-| Classes, records, interfaces | Implemented |
+| Currying / returned lambdas | Implemented |
+| Classes, structs, interfaces | Implemented |
 | Generics (union constraints) | Implemented |
 | Error handling (fallible, try, match patterns) | Implemented |
 | External blocks (native FFI) | Implemented |
 | Iterators (map, filter, reduce, etc.) | Implemented |
+| Generators (yield, infinite sequences) | Implemented |
+| Functional interface calls | Implemented |
+| Raw strings (@"...") | Implemented |
 | Testing (test blocks, assert) | Implemented |
-| Returned closures (currying) | WIP |
 | Modules / imports | Implemented |
-| Standard library (std:math) | Implemented |
-| Coroutines / generators | Not yet |
+| Destructured imports | Implemented |
+| Standard library (std:math, std:time, etc.) | Implemented |
+| Async tasks and channels (std:task) | Implemented |
 | Type aliases | Not yet |
 | Structural generic constraints | Not yet |

@@ -51,6 +51,57 @@ let y = 3.14      // f64
 let z: i32 = 42   // i32 (explicit annotation)
 ```
 
+### Typed Literal Suffixes
+
+You can use type suffixes on numeric literals to specify their type directly:
+
+```vole
+tests {
+    test "literal suffixes" {
+        let a = 42_u8
+        let b = 1000_i16
+        let c = 100_u32
+        let d = 42_i64
+        let e = 3.14_f32
+        let f = 1.5e3_f64
+        assert(a == 42)
+        assert(b == 1000)
+        assert(c == 100000 / 1000)
+        assert(d == 42)
+        assert(e > 3.0)
+        assert(f > 1499.0)
+    }
+}
+```
+
+### Numeric Literal Formats
+
+Vole supports several numeric literal formats:
+
+```vole
+tests {
+    test "numeric literal formats" {
+        // Hex literals
+        assert(0xFF == 255)
+        assert(0xDEAD == 57005)
+
+        // Binary literals
+        assert(0b1010 == 10)
+        assert(0b11111111 == 255)
+
+        // Underscore separators for readability
+        assert(1_000_000 == 1000000)
+        assert(0xFF_FF == 65535)
+        assert(0b1111_0000 == 240)
+
+        // Scientific notation (produces f64)
+        assert(1e2 == 100.0)
+        assert(1.5e2 == 150.0)
+        assert(1e-1 == 0.1)
+    }
+}
+```
+
 ### Numeric Operations
 
 **Arithmetic:**
@@ -75,6 +126,23 @@ let z: i32 = 42   // i32 (explicit annotation)
 **Unary:**
 - `-` negation
 
+**Compound assignment:**
+- `+=`, `-=`, `*=`, `/=`
+
+```vole
+tests {
+    test "compound assignment" {
+        let mut a: i32 = 10
+        a += 5
+        assert(a == 15)
+        a *= 2
+        assert(a == 30)
+        a /= 3
+        assert(a == 10)
+    }
+}
+```
+
 ### Type Promotion
 
 When a smaller integer type is combined with a literal, the result promotes to `i64`:
@@ -85,6 +153,24 @@ let y = x + 1                 // y is i64, value is 2147483648 (no overflow!)
 
 let a: u8 = 255
 let b = a + 1                 // b is i64, value is 256 (no overflow!)
+```
+
+Small integer types (`i8`, `i16`, `u8`, `u16`) promote to `i32` when used in arithmetic with each other:
+
+```vole
+tests {
+    test "small integer promotion" {
+        let a: i8 = 10
+        let b: i8 = 20
+        let c = a + b  // c is i32
+        assert(c == 30)
+
+        let x: u16 = 30000
+        let y: u16 = 30000
+        let z = x + y  // z is i32
+        assert(z == 60000)
+    }
+}
 ```
 
 ### Same-Type Operations Wrap
@@ -103,7 +189,7 @@ let b: u8 = a + 1             // b is u8, value is 0 (wrapped!)
 
 Integer division by zero panics:
 
-```vole
+```vole,ignore
 let x = 10
 let y = 0
 let z = x / y  // panic: division by zero at file.vole:3
@@ -119,7 +205,7 @@ let z = x / y  // z is inf
 
 Signed division overflow (MIN / -1) panics:
 
-```vole
+```vole,ignore
 let x: i32 = -2147483648      // i32 min value
 let y: i32 = -1
 let z = x / y  // panic: integer overflow in division at file.vole:3
@@ -127,16 +213,26 @@ let z = x / y  // panic: integer overflow in division at file.vole:3
 
 ### Explicit Arithmetic Methods
 
+These functions are available from `"std:lowlevel"` and provide explicit overflow control.
+
 #### Wrapping Methods
 
 Wrap on overflow (two's complement behavior):
 
 ```vole
-let x: i32 = 2147483647
-let y = wrapping_add(x, 1)    // -2147483648
+let { wrapping_add, wrapping_sub } = import "std:lowlevel"
 
-let a: u8 = 0
-let b = wrapping_sub(a, 1)    // 255
+tests {
+    test "wrapping arithmetic" {
+        let x: i32 = 2147483647
+        let one: i32 = 1
+        assert(wrapping_add(x, one) == -2147483648)
+
+        let a: u8 = 0
+        let b: u8 = 1
+        assert(wrapping_sub(a, b) == 255)
+    }
+}
 ```
 
 Available: `wrapping_add`, `wrapping_sub`, `wrapping_mul`, `wrapping_neg`
@@ -146,11 +242,19 @@ Available: `wrapping_add`, `wrapping_sub`, `wrapping_mul`, `wrapping_neg`
 Clamp to min/max on overflow:
 
 ```vole
-let x: i32 = 2147483647
-let y = saturating_add(x, 1)  // 2147483647 (clamped to max)
+let { saturating_add, saturating_sub } = import "std:lowlevel"
 
-let a: u8 = 0
-let b = saturating_sub(a, 1)  // 0 (clamped to min)
+tests {
+    test "saturating arithmetic" {
+        let x: i32 = 2147483647
+        let one: i32 = 1
+        assert(saturating_add(x, one) == 2147483647)
+
+        let a: u8 = 0
+        let b: u8 = 1
+        assert(saturating_sub(a, b) == 0)
+    }
+}
 ```
 
 Available: `saturating_add`, `saturating_sub`, `saturating_mul`
@@ -160,14 +264,25 @@ Available: `saturating_add`, `saturating_sub`, `saturating_mul`
 Return `nil` on overflow:
 
 ```vole
-let x: i32 = 2147483647
-let y: i32? = checked_add(x, 1)  // nil
+let { checked_add, checked_div } = import "std:lowlevel"
 
-let a: i32 = 100
-let b: i32? = checked_add(a, 1)  // 101
+tests {
+    test "checked arithmetic" {
+        let x: i32 = 2147483647
+        let one: i32 = 1
+        let result = checked_add(x, one)
+        assert(result is nil)
 
-// Handle the result
-let result = checked_add(x, 1) ?? 0  // use 0 as fallback
+        let a: i32 = 100
+        let b = checked_add(a, one)
+        assert(b is i32)
+        assert((b ?? 0) == 101)
+
+        // Handle the result with null coalescing
+        let safe = checked_add(x, one) ?? 0
+        assert(safe == 0)
+    }
+}
 ```
 
 Available: `checked_add`, `checked_sub`, `checked_mul`, `checked_div`
@@ -182,7 +297,50 @@ All numeric types implement:
 - **Default**: `default_value()` returns 0
 - **Bounded** (integers): `min_value()`, `max_value()`
 
-Floats also implement **FloatConstants**: `nan()`, `infinity()`, `neg_infinity()`, `epsilon()`
+```vole
+tests {
+    test "numeric trait methods" {
+        let a: i64 = 42
+        let b: i64 = 42
+        assert(a.equals(b))
+
+        let x: i64 = 5
+        let y: i64 = 10
+        assert(x.compare(y) < 0)
+
+        let h1 = 42.hash()
+        let h2 = 42.hash()
+        assert(h1 == h2)
+    }
+}
+```
+
+### Float Constants
+
+Floats implement **FloatConstants**: `nan()`, `infinity()`, `neg_infinity()`, `epsilon()`
+
+```vole
+tests {
+    test "float constants" {
+        let inf = f64.infinity()
+        assert(inf > 1000000000000.0)
+        assert(inf + 1.0 == inf)
+
+        let neg_inf = f64.neg_infinity()
+        assert(neg_inf < -1000000000000.0)
+
+        let eps = f64.epsilon()
+        assert(eps > 0.0)
+        assert(1.0 + eps != 1.0)
+
+        // NaN is the only value not equal to itself
+        let n = f64.nan()
+        assert(n != n)
+    }
+}
+```
+
+`f32` has the same constants available via `f32.nan()`, `f32.infinity()`, etc.
 
 ---
 
@@ -193,17 +351,21 @@ The `bool` type has two values: `true` and `false`.
 ### Logical Operations
 
 ```vole
-// AND - both must be true
-assert(true && true)
-assert(!(true && false))
+tests {
+    test "logical operations" {
+        // AND - both must be true
+        assert(true && true)
+        assert(!(true && false))
 
-// OR - at least one must be true
-assert(true || false)
-assert(!(false || false))
+        // OR - at least one must be true
+        assert(true || false)
+        assert(!(false || false))
 
-// NOT - inverts the value
-assert(!false)
-assert(!!true)
+        // NOT - inverts the value
+        assert(!false)
+        assert(!!true)
+    }
+}
 ```
 
 ### Short-Circuit Evaluation
@@ -243,15 +405,85 @@ let empty = ""
 let multiline = "line one\nline two"
 ```
 
+### String Interpolation
+
+Strings support inline interpolation with `{expression}` syntax:
+
+```vole
+tests {
+    test "string interpolation" {
+        let name = "world"
+        let s = "hello, {name}"
+        assert(s == "hello, world")
+
+        let a = 2
+        let b = 3
+        assert("sum is {a + b}" == "sum is 5")
+
+        let arr = [1, 2, 3]
+        assert("first: {arr[0]}, length: {arr.length()}" == "first: 1, length: 3")
+    }
+}
+```
+
+Raw strings (prefixed with `@`) disable interpolation and escape sequences:
+
+```vole
+tests {
+    test "raw strings" {
+        let s = @"{not interpolated}"
+        assert(s.length() == 18)
+
+        let path = @"path\to\file"
+        assert(path.length() == 12)
+    }
+}
+```
+
+### Escape Sequences
+
+Regular strings support the following escape sequences:
+
+| Escape | Character |
+|--------|-----------|
+| `\n` | Newline |
+| `\t` | Tab |
+| `\r` | Carriage return |
+| `\\` | Backslash |
+| `\"` | Double quote |
+| `\{` | Literal `{` |
+| `\}` | Literal `}` |
+| `{{` | Literal `{` (brace escape) |
+| `}}` | Literal `}` (brace escape) |
+
+```vole
+tests {
+    test "escape sequences" {
+        let s = "line1\nline2"
+        assert(s.length() == 11)
+
+        let tab = "a\tb"
+        assert(tab.length() == 3)
+
+        let quoted = "she said \"hi\""
+        assert(quoted.contains("hi"))
+    }
+}
+```
+
 ### String Concatenation
 
 Strings can be concatenated with `+`. The right operand can be any type that implements `Stringable`:
 
 ```vole
-let msg = "value: " + 42         // "value: 42"
-let msg = "result: " + true      // "result: true"
-let msg = "pi: " + 3.14          // "pi: 3.14"
-let msg = "hello" + " world"     // "hello world"
+tests {
+    test "string concatenation" {
+        assert("value: " + 42 == "value: 42")
+        assert("result: " + true == "result: true")
+        assert("pi: " + 3.14 == "pi: 3.14")
+        assert("hello" + " world" == "hello world")
+    }
+}
 ```
 
 ### String Methods
@@ -268,27 +500,47 @@ let msg = "hello" + " world"     // "hello world"
 | `trim()` | `() -> string` | Trim whitespace both sides |
 | `trim_start()` | `() -> string` | Trim leading whitespace |
 | `trim_end()` | `() -> string` | Trim trailing whitespace |
-| `index_of()` | `(needle: string) -> i32` | Find index (-1 if not found) |
-| `substring()` | `(start: i32, end: i32) -> string` | Extract substring |
+| `index_of_raw()` | `(needle: string) -> i32` | Find byte index (-1 if not found) |
+| `substring()` | `(start: i32, end: i32) -> string` | Extract substring (-1 for end of string) |
 | `replace()` | `(old: string, new: string) -> string` | Replace first occurrence |
 | `replace_all()` | `(old: string, new: string) -> string` | Replace all occurrences |
 | `split()` | `(delimiter: string) -> Iterator<string>` | Split into iterator |
 | `lines()` | `() -> Iterator<string>` | Split by newlines |
 | `chars()` | `() -> Iterator<i32>` | Iterate codepoints |
+| `char_at_raw()` | `(index: i32) -> i32` | Get codepoint at byte index (-1 if out of bounds) |
 
 ### String Examples
 
 ```vole
-let s = "  Hello, World!  "
+tests {
+    test "string methods" {
+        let s = "  Hello, World!  "
+        assert(s.trim() == "Hello, World!")
+        assert(s.length() == 17)
+        assert(s.contains("World"))
+        assert(s.starts_with("  H"))
 
-assert(s.trim() == "Hello, World!")
-assert(s.length() == 17)
-assert(s.contains("World"))
-assert(s.starts_with("  H"))
-assert(s.to_lower().trim() == "hello, world!")
+        let result = "hello".to_upper()
+        assert(result == "HELLO")
 
-let parts = "a,b,c".split(",").collect()
-assert(parts.length() == 3)
+        assert("WORLD".to_lower() == "world")
+
+        let parts = "a,b,c".split(",").collect()
+        assert(parts.length() == 3)
+        assert(parts[0] == "a")
+    }
+
+    test "string replace" {
+        assert("hello hello".replace("hello", "hi") == "hi hello")
+        assert("hello hello hello".replace_all("hello", "hi") == "hi hi hi")
+    }
+
+    test "string substring" {
+        let s = "hello world"
+        assert(s.substring(0, 5) == "hello")
+        assert(s.substring(6, -1) == "world")
+    }
+}
 ```
 
 ### String Traits
@@ -320,17 +572,22 @@ let z: string? = nil    // contains nil
 Provides a default value when optional is nil:
 
 ```vole
-let x: i32? = nil
-let result = x ?? 99           // result = 99
+tests {
+    test "null coalescing" {
+        let x: i32? = nil
+        assert((x ?? 99) == 99)
 
-let y: i32? = 42
-let result = y ?? 99           // result = 42
+        let y: i32? = 42
+        assert((y ?? 99) == 42)
 
-// Chaining
-let a: i32? = nil
-let b: i32? = nil
-let c: i32? = 42
-let result = a ?? b ?? c ?? 0  // result = 42
+        // Chaining
+        let a: i32? = nil
+        let b: i32? = nil
+        let c: i32? = 42
+        let result = a ?? b ?? c ?? 0
+        assert(result == 42)
+    }
+}
 ```
 
 ### Optional Chaining (`?.`)
@@ -338,16 +595,28 @@ let result = a ?? b ?? c ?? 0  // result = 42
 Safely accesses fields on optional values:
 
 ```vole
-record Person {
+class Person {
     name: string,
     age: i32,
 }
 
-let p: Person? = Person { name: "Alice", age: 30 }
-let name = p?.name              // name is string?, value "Alice"
+tests {
+    test "optional chaining" {
+        let p: Person? = Person { name: "Alice", age: 30 }
+        let name = p?.name  // name is string?, value "Alice"
+        assert((name ?? "") == "Alice")
 
-let q: Person? = nil
-let age = q?.age                // age is i32?, value nil
+        let q: Person? = nil
+        let age = q?.age  // age is i32?, value nil
+        assert(age is nil)
+    }
+
+    test "optional chaining with null coalescing" {
+        let p: Person? = nil
+        let name = p?.name ?? "Unknown"
+        assert(name == "Unknown")
+    }
+}
 ```
 
 ### Type Narrowing (`is`)
@@ -355,11 +624,25 @@ let age = q?.age                // age is i32?, value nil
 Tests if an optional contains a value:
 
 ```vole
-let x: i32? = 42
-assert(x is i32)    // true - contains i32, not nil
+tests {
+    test "type narrowing with is" {
+        let x: i32? = 42
+        assert(x is i32)
 
-let y: i32? = nil
-assert(y is nil)    // true - contains nil
+        let y: i32? = nil
+        assert(y is nil)
+    }
+
+    test "narrowing in if" {
+        let x: i64 | string = 5
+        if x is i64 {
+            let y = x + 1
+            assert(y == 6)
+        } else {
+            assert(false)
+        }
+    }
+}
 ```
 
 ---
@@ -381,8 +664,12 @@ func greet(name: string) -> void {
 Iterator termination sentinel. Iterators return `T | Done`:
 
 ```vole
-let iter = [1, 2, 3].iter()
-// iter.next() returns i32 | Done
+tests {
+    test "done type" {
+        let result: i32 | Done = Done {}
+        assert(result is Done)
+    }
+}
 ```
 
 ### Range
@@ -390,8 +677,14 @@ let iter = [1, 2, 3].iter()
 Created with range literals:
 
 ```vole
-for i in 0..10 {
-    println(i)
+tests {
+    test "range" {
+        let mut sum = 0
+        for i in 0..5 {
+            sum += i
+        }
+        assert(sum == 10)
+    }
 }
 ```
 
@@ -401,4 +694,4 @@ for i in 0..10 {
 
 - [Types](types.md) - Full type system documentation
 - [Operators](operators.md) - All operators
-- [Traits](traits.md) - Trait system
+- [Interfaces](interfaces.md) - Interface system

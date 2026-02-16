@@ -1,216 +1,670 @@
-# Classes and Records
+# Classes and Structs
 
-Vole provides two ways to define structured data types: classes (mutable) and records (immutable by default).
+Vole provides two ways to define structured data types: **classes** (reference types, mutable) and **structs** (value types, copy semantics).
 
 ## Quick Reference
 
 | Syntax | Description |
 |--------|-------------|
-| `class Name { fields }` | Mutable class |
-| `record Name { fields }` | Immutable record |
+| `class Name { fields }` | Mutable reference type |
+| `struct Name { fields }` | Immutable value type (copy semantics) |
 | `Name { field: value }` | Instantiation |
-| `self` | Reference to current instance |
+| `Name { field }` | Shorthand when variable matches field name |
+| `self` | Reference to current instance in methods |
 | `instance.field` | Field access |
 | `instance.method()` | Method call |
+| `field: Type = default` | Field with default value |
+| `statics { }` | Block for static methods |
 
-## In Depth
+## Classes
 
-### Classes
-
-Classes define mutable data structures with fields and methods:
+Classes define mutable reference types with fields and methods:
 
 ```vole
 class Point {
-    x: i32
-    y: i32
+    x: i64,
+    y: i64,
 }
 ```
 
 Create instances with struct literal syntax:
 
 ```vole
-let p = Point { x: 10, y: 20 }
-println(p.x)  // 10
-println(p.y)  // 20
+class Point {
+    x: i64,
+    y: i64,
+}
+
+tests { test "create point" {
+    let p = Point { x: 10, y: 20 }
+    assert(p.x == 10)
+    assert(p.y == 20)
+} }
 ```
 
 ### Mutable Fields
 
-Class fields can be modified:
+Class fields can be modified directly:
 
 ```vole
 class Counter {
-    value: i32
+    value: i64,
 }
 
-let c = Counter { value: 0 }
-c.value = c.value + 1
-println(c.value)  // 1
+tests { test "mutate field" {
+    let c = Counter { value: 0 }
+    c.value = c.value + 1
+    assert(c.value == 1)
+} }
+```
+
+### Reference Semantics
+
+Classes use reference semantics. Assigning a class instance to another variable creates an alias, not a copy:
+
+```vole
+class Point {
+    x: i64,
+    y: i64,
+}
+
+tests { test "reference semantics" {
+    let p1 = Point { x: 10, y: 20 }
+    let p2 = p1
+    p1.x = 99
+    assert(p2.x == 99)
+} }
 ```
 
 ### Methods
 
-Define methods inside the class body:
+Define methods inside the class body using `self` to reference the current instance:
 
 ```vole
 class Point {
-    x: i32
-    y: i32
+    x: i64,
+    y: i64,
 
-    func move_by(dx: i32, dy: i32) {
-        self.x = self.x + dx
-        self.y = self.y + dy
+    func sum() -> i64 {
+        return self.x + self.y
     }
 
-    func distance_squared() -> i32 {
-        return self.x * self.x + self.y * self.y
+    func product() -> i64 => self.x * self.y
+}
+
+tests { test "methods" {
+    let p = Point { x: 3, y: 4 }
+    assert(p.sum() == 7)
+    assert(p.product() == 12)
+} }
+```
+
+### Expression-Bodied Methods
+
+Methods can use the `=>` syntax for concise single-expression bodies:
+
+```vole
+class Point {
+    x: i64,
+    y: i64,
+
+    func sum() -> i64 => self.x + self.y
+
+    func doubled() => Point { x: self.x * 2, y: self.y * 2 }
+}
+
+tests { test "expression-bodied" {
+    let p = Point { x: 5, y: 7 }
+    assert(p.sum() == 12)
+    let d = p.doubled()
+    assert(d.x == 10)
+    assert(d.y == 14)
+} }
+```
+
+### Mutating Methods
+
+Methods can mutate the instance through `self`:
+
+```vole
+class Counter {
+    value: i64,
+
+    func get() -> i64 {
+        return self.value
+    }
+
+    func increment() -> i64 {
+        self.value = self.value + 1
+        return self.value
     }
 }
 
-let p = Point { x: 3, y: 4 }
-println(p.distance_squared())  // 25
-p.move_by(1, 1)
-println(p.x)  // 4
+tests { test "mutating methods" {
+    let c = Counter { value: 0 }
+    assert(c.increment() == 1)
+    assert(c.increment() == 2)
+    assert(c.get() == 2)
+} }
 ```
 
-### The self Keyword
+### Static Methods
 
-Inside methods, `self` refers to the current instance:
+Static methods are defined inside a `statics { }` block and called on the type itself:
+
+```vole
+class Point {
+    x: i64,
+    y: i64,
+
+    statics {
+        func origin() -> Point {
+            return Point { x: 0, y: 0 }
+        }
+
+        func create(x: i64, y: i64) -> Point {
+            return Point { x: x, y: y }
+        }
+    }
+}
+
+tests { test "static methods" {
+    let p = Point.origin()
+    assert(p.x == 0)
+    assert(p.y == 0)
+
+    let p2 = Point.create(10, 20)
+    assert(p2.x == 10)
+    assert(p2.y == 20)
+} }
+```
+
+Static methods can call other static methods:
 
 ```vole
 class Rectangle {
-    width: i32
-    height: i32
+    x: i64,
+    y: i64,
+    width: i64,
+    height: i64,
 
-    func area() -> i32 {
-        return self.width * self.height
-    }
+    statics {
+        func at_origin(width: i64, height: i64) -> Rectangle {
+            return Rectangle { x: 0, y: 0, width: width, height: height }
+        }
 
-    func scale(factor: i32) {
-        self.width = self.width * factor
-        self.height = self.height * factor
+        func square(size: i64) -> Rectangle {
+            return Rectangle.at_origin(size, size)
+        }
     }
 }
+
+tests { test "static calling static" {
+    let r = Rectangle.square(10)
+    assert(r.width == 10)
+    assert(r.height == 10)
+} }
 ```
 
-### Records
+### Implement Blocks
 
-Records are similar to classes but emphasize immutability:
+Methods can be added to classes (or structs) using `implement` blocks, allowing you to define methods outside the class body:
 
 ```vole
-record Person {
-    name: string
-    age: i32
+class Counter {
+    value: i64
 }
 
-let alice = Person { name: "Alice", age: 30 }
-println(alice.name)  // "Alice"
+implement Counter {
+    func get(self: Counter) -> i64 => self.value
+    func increment(self: Counter, amount: i64) -> i64 => self.value + amount
+}
+
+tests { test "implement block" {
+    let c = Counter { value: 42 }
+    assert(c.get() == 42)
+    assert(c.increment(8) == 50)
+} }
 ```
 
-### Record Methods
+### Implementing Interfaces
 
-Records can have methods:
+Classes can implement interfaces directly in their declaration:
 
 ```vole
-record Rectangle {
-    width: i32
-    height: i32
+interface Clonable {
+    func clone() -> Self
+}
 
-    func area() -> i32 {
-        return self.width * self.height
-    }
+class Position implements Clonable {
+    x: i32,
+    y: i32,
 
-    func perimeter() -> i32 {
-        return 2 * (self.width + self.height)
+    func clone() -> Self {
+        return Position { x: self.x, y: self.y }
     }
 }
 
-let r = Rectangle { width: 10, height: 5 }
-println(r.area())       // 50
-println(r.perimeter())  // 30
+tests { test "implements interface" {
+    let p = Position { x: 10, y: 20 }
+    let p2 = p.clone()
+    assert(p2.x == 10)
+    assert(p2.y == 20)
+} }
 ```
 
-### Classes vs Records
+Multiple interfaces can be implemented:
 
-| Feature | Class | Record |
+```vole
+interface Addable {
+    func add(other: Self) -> Self
+}
+
+interface Subtractable {
+    func sub(other: Self) -> Self
+}
+
+class Number implements Addable, Subtractable {
+    value: i32,
+
+    func add(other: Self) -> Self {
+        return Number { value: self.value + other.value }
+    }
+
+    func sub(other: Self) -> Self {
+        return Number { value: self.value - other.value }
+    }
+}
+
+tests { test "multiple interfaces" {
+    let a = Number { value: 10 }
+    let b = Number { value: 3 }
+    assert(a.add(b).value == 13)
+    assert(a.sub(b).value == 7)
+} }
+```
+
+## Structs
+
+Structs define value types with copy semantics. They are immutable by default.
+
+```vole
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+tests { test "struct basics" {
+    let p = Point { x: 10, y: 20 }
+    assert(p.x == 10)
+    assert(p.y == 20)
+} }
+```
+
+### Copy Semantics
+
+Unlike classes, structs are copied on assignment:
+
+```vole
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+tests { test "copy semantics" {
+    let a = Point { x: 1, y: 2 }
+    let b = a
+    assert(b.x == 1)
+    assert(b.y == 2)
+    assert(a.x == 1)
+} }
+```
+
+### Struct Methods
+
+Structs can have methods just like classes:
+
+```vole
+struct Point {
+    x: i64,
+    y: i64,
+
+    func sum() -> i64 {
+        return self.x + self.y
+    }
+
+    func product() -> i64 => self.x * self.y
+
+    func doubled() -> Point {
+        return Point { x: self.x * 2, y: self.y * 2 }
+    }
+
+    func add(other: Point) -> Point {
+        return Point { x: self.x + other.x, y: self.y + other.y }
+    }
+}
+
+tests { test "struct methods" {
+    let p = Point { x: 3, y: 7 }
+    assert(p.sum() == 10)
+    assert(p.product() == 21)
+
+    let d = p.doubled()
+    assert(d.x == 6)
+    assert(d.y == 14)
+
+    let p2 = Point { x: 10, y: 20 }
+    let p3 = p.add(p2)
+    assert(p3.x == 13)
+    assert(p3.y == 27)
+} }
+```
+
+### Struct Static Methods
+
+Structs can also have static methods:
+
+```vole
+struct Duration {
+    nanos: i64,
+
+    statics {
+        func seconds(n: i64) -> Duration {
+            return Duration { nanos: n * 1000000000 }
+        }
+
+        func zero() -> Duration {
+            return Duration { nanos: 0 }
+        }
+    }
+
+    func as_ms() -> i64 {
+        return self.nanos / 1000000
+    }
+}
+
+tests { test "struct statics" {
+    let d = Duration.seconds(5)
+    assert(d.as_ms() == 5000)
+    assert(Duration.zero().nanos == 0)
+} }
+```
+
+### Struct Equality
+
+Structs support equality comparison with `==` and `!=`:
+
+```vole
+struct Point { x: i64, y: i64 }
+
+tests { test "struct equality" {
+    let p1 = Point { x: 10, y: 20 }
+    let p2 = Point { x: 10, y: 20 }
+    let p3 = Point { x: 10, y: 30 }
+    assert(p1 == p2)
+    assert(p1 != p3)
+} }
+```
+
+## Classes vs Structs
+
+| Feature | Class | Struct |
 |---------|-------|--------|
-| Field mutation | Yes | No (by default) |
+| Semantics | Reference (alias on assignment) | Value (copy on assignment) |
+| Field mutation | Yes | No |
 | Methods | Yes | Yes |
-| Use case | Mutable state | Data containers |
+| Static methods | Yes | Yes |
+| Equality (`==`) | By reference | By value |
+| Use case | Mutable state, shared objects | Data containers, value objects |
 
-Choose records for:
-- Data that shouldn't change
-- Value objects
-- Configuration
-- API responses
+Choose structs for:
+- Data that should not change
+- Value objects (points, colors, dimensions)
+- Configuration data
+- Function return types that carry multiple values
 
 Choose classes for:
-- Objects with changing state
-- Stateful components
-- Game entities
+- Objects with changing state (counters, accumulators)
+- Shared mutable objects (bank accounts, game entities)
+- Builder patterns
 
-### Nested Types
+## Common Features
 
-Classes and records can be nested:
+The following features work with both classes and structs.
+
+### Field Default Values
+
+Fields can have default values, making them optional at instantiation:
 
 ```vole
-record Address {
-    street: string
-    city: string
+class Config {
+    debug: bool = false,
+    timeout: i64 = 30,
+    name: string = "default",
 }
 
-record Person {
-    name: string
-    address: Address
-}
+tests { test "field defaults" {
+    let cfg = Config {}
+    assert(cfg.debug == false)
+    assert(cfg.timeout == 30)
+    assert(cfg.name == "default")
 
-let person = Person {
-    name: "Alice",
-    address: Address {
-        street: "123 Main St",
-        city: "Springfield"
-    }
-}
-
-println(person.address.city)  // "Springfield"
+    let custom = Config { debug: true, timeout: 60 }
+    assert(custom.debug == true)
+    assert(custom.timeout == 60)
+    assert(custom.name == "default")
+} }
 ```
 
-### Field Initialization
-
-All fields must be initialized when creating an instance:
+You can mix required and default fields:
 
 ```vole
 class Point {
-    x: i32
-    y: i32
+    x: i64,
+    y: i64,
+    z: i64 = 0,
 }
 
-let p = Point { x: 10, y: 20 }  // OK
-let q = Point { x: 10 }          // Error: missing field 'y'
+tests { test "mixed required and default" {
+    let p = Point { x: 1, y: 2 }
+    assert(p.z == 0)
+
+    let p2 = Point { x: 1, y: 2, z: 3 }
+    assert(p2.z == 3)
+} }
 ```
 
-### Methods Returning Self
+### Field Init Shorthand
 
-Methods can return the instance for chaining:
+When a variable has the same name as a field, you can use the shorthand syntax:
 
 ```vole
-class Builder {
-    value: i32
+class Point {
+    x: i32,
+    y: i32,
 
-    func add(n: i32) -> Builder {
-        self.value = self.value + n
-        return self
-    }
-
-    func multiply(n: i32) -> Builder {
-        self.value = self.value * n
-        return self
+    func sum() -> i32 {
+        return self.x + self.y
     }
 }
 
-let b = Builder { value: 0 }
-b.add(5).multiply(2).add(3)
-println(b.value)  // 13
+tests { test "init shorthand" {
+    let x: i32 = 10
+    let y: i32 = 20
+    let p = Point { x, y }
+    assert(p.x == 10)
+    assert(p.y == 20)
+    assert(p.sum() == 30)
+} }
+```
+
+You can mix shorthand and explicit forms:
+
+```vole
+class Point {
+    x: i32,
+    y: i32,
+}
+
+tests { test "mixed shorthand" {
+    let x: i32 = 10
+    let p = Point { x, y: 30 }
+    assert(p.x == 10)
+    assert(p.y == 30)
+} }
+```
+
+### Nested Types
+
+Types can contain fields of other struct or class types:
+
+```vole
+struct Point { x: i64, y: i64 }
+struct Rectangle { top_left: Point, bottom_right: Point }
+
+tests { test "nested types" {
+    let rect = Rectangle {
+        top_left: Point { x: 0, y: 0 },
+        bottom_right: Point { x: 10, y: 5 },
+    }
+    assert(rect.top_left.x == 0)
+    assert(rect.bottom_right.x == 10)
+
+    let width = rect.bottom_right.x - rect.top_left.x
+    assert(width == 10)
+} }
+```
+
+### Destructuring
+
+Struct instances can be destructured to extract fields:
+
+```vole
+struct Point { x: i64, y: i64 }
+
+tests { test "destructuring" {
+    let p = Point { x: 10, y: 20 }
+
+    let { x, y } = p
+    assert(x == 10)
+    assert(y == 20)
+} }
+```
+
+You can rename fields during destructuring:
+
+```vole
+struct Point { x: i64, y: i64 }
+
+tests { test "destructuring with rename" {
+    let p = Point { x: 10, y: 20 }
+    let { x: a, y: b } = p
+    assert(a == 10)
+    assert(b == 20)
+} }
+```
+
+Partial destructuring extracts only some fields:
+
+```vole
+struct Color { r: i64, g: i64, b: i64 }
+
+tests { test "partial destructuring" {
+    let c = Color { r: 255, g: 128, b: 0 }
+    let { r } = c
+    assert(r == 255)
+} }
+```
+
+### Diverse Field Types
+
+Structs and classes support fields of any type including strings, booleans, floats, and arrays:
+
+```vole
+struct Config {
+    name: string,
+    count: i64,
+    enabled: bool,
+    rate: f64,
+}
+
+tests { test "diverse field types" {
+    let c = Config { name: "app", count: 5, enabled: true, rate: 0.75 }
+    assert(c.name == "app")
+    assert(c.count == 5)
+    assert(c.enabled == true)
+    assert(c.rate == 0.75)
+} }
+```
+
+### Forward References
+
+Types can reference other types that are defined later in the file:
+
+```vole
+class Parent {
+    child: Child,
+
+    func getChildValue() -> i32 {
+        return self.child.value
+    }
+}
+
+class Child {
+    value: i32
+}
+
+tests { test "forward references" {
+    let child = Child { value: 42 }
+    let parent = Parent { child: child }
+    assert(parent.getChildValue() == 42)
+} }
+```
+
+### Optional Fields
+
+Fields can be nullable using the `?` suffix on the type:
+
+```vole
+class NodeA {
+    next: NodeB?,
+    data: i32
+}
+
+class NodeB {
+    prev: NodeA?,
+    data: string
+}
+
+tests { test "nullable fields" {
+    let a = NodeA { next: nil, data: 100 }
+    let b = NodeB { prev: a, data: "hello" }
+    assert(b.prev?.data == 100)
+} }
+```
+
+### Method Chaining
+
+Methods that return instances of the same type support chaining:
+
+```vole
+interface Chainable {
+    func chain() -> Self
+}
+
+class Builder implements Chainable {
+    count: i32,
+
+    func chain() -> Self {
+        return Builder { count: self.count + 1 }
+    }
+}
+
+tests { test "method chaining" {
+    let b = Builder { count: 0 }
+    let b2 = b.chain().chain().chain()
+    assert(b2.count == 3)
+} }
 ```
 
 ### Common Patterns
@@ -218,46 +672,52 @@ println(b.value)  // 13
 **Factory function:**
 
 ```vole
-record Point {
-    x: i32
-    y: i32
+struct Point {
+    x: i64,
+    y: i64,
 }
 
 func origin() -> Point {
     return Point { x: 0, y: 0 }
 }
+
+tests { test "factory" {
+    let p = origin()
+    assert(p.x == 0)
+    assert(p.y == 0)
+} }
 ```
 
 **Builder pattern:**
 
 ```vole
-class Config {
-    debug: bool
-    verbose: bool
-    max_retries: i32
-}
+class BankAccount {
+    balance: i64,
+    transaction_count: i64,
 
-func default_config() -> Config {
-    return Config {
-        debug: false,
-        verbose: false,
-        max_retries: 3
+    statics {
+        func empty() -> BankAccount {
+            return BankAccount { balance: 0, transaction_count: 0 }
+        }
+
+        func with_initial_deposit(amount: i64) -> BankAccount {
+            return BankAccount { balance: amount, transaction_count: 1 }
+        }
+    }
+
+    func deposit(amount: i64) {
+        self.balance = self.balance + amount
+        self.transaction_count = self.transaction_count + 1
+    }
+
+    func get_balance() -> i64 {
+        return self.balance
     }
 }
-```
 
-**Data container:**
-
-```vole
-record Response {
-    status: i32
-    body: string
-}
-
-func make_response(status: i32, body: string) -> Response {
-    return Response {
-        status: status,
-        body: body
-    }
-}
+tests { test "builder pattern" {
+    let acc = BankAccount.with_initial_deposit(100)
+    acc.deposit(50)
+    assert(acc.get_balance() == 150)
+} }
 ```

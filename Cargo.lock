@@ -1724,6 +1724,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vole-doccheck"
+version = "0.1.0"
+dependencies = [
+ "glob",
+]
+
+[[package]]
 name = "vole-fmt"
 version = "0.1.0"
 dependencies = [

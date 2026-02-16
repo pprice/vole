@@ -39,6 +39,10 @@ mem-all:
 fmt:
     cargo fmt
 
+# Validate code blocks in documentation
+doc-check:
+    cargo run -p vole-doccheck {{cargo_profile}} -- docs/language/
+
 # Run clippy lints
 clippy:
     cargo clippy -- -D warnings

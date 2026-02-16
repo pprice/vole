@@ -6,58 +6,67 @@ Vole provides arithmetic, comparison, logical, bitwise, and type operators.
 
 ### Arithmetic
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `+` | Addition | `5 + 3` -> `8` |
-| `-` | Subtraction | `5 - 3` -> `2` |
-| `*` | Multiplication | `5 * 3` -> `15` |
-| `/` | Division | `7 / 2` -> `3` (integer) |
-| `%` | Modulo | `7 % 3` -> `1` |
-| `-` | Negation (unary) | `-5` |
+```vole,ignore
++      // Addition
+-      // Subtraction
+*      // Multiplication
+/      // Division
+%      // Modulo (remainder)
+-x     // Negation (unary)
+```
 
 ### Comparison
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `==` | Equal | `5 == 5` -> `true` |
-| `!=` | Not equal | `5 != 3` -> `true` |
-| `<` | Less than | `3 < 5` -> `true` |
-| `>` | Greater than | `5 > 3` -> `true` |
-| `<=` | Less or equal | `3 <= 3` -> `true` |
-| `>=` | Greater or equal | `5 >= 5` -> `true` |
+```vole,ignore
+==     // Equal
+!=     // Not equal
+<      // Less than
+>      // Greater than
+<=     // Less or equal
+>=     // Greater or equal
+```
 
 ### Logical
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `&&` | Logical AND | `true && false` -> `false` |
-| `\|\|` | Logical OR | `true \|\| false` -> `true` |
-| `!` | Logical NOT | `!true` -> `false` |
+```vole,ignore
+&&     // Logical AND (short-circuit)
+||     // Logical OR (short-circuit)
+!      // Logical NOT
+```
 
 ### Bitwise
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `&` | Bitwise AND | `5 & 3` -> `1` |
-| `\|` | Bitwise OR | `5 \| 3` -> `7` |
-| `^` | Bitwise XOR | `5 ^ 3` -> `6` |
-| `~` | Bitwise NOT | `~5` -> `-6` |
-| `<<` | Left shift | `1 << 3` -> `8` |
-| `>>` | Right shift | `8 >> 2` -> `2` |
+```vole,ignore
+&      // Bitwise AND
+|      // Bitwise OR
+^      // Bitwise XOR
+~      // Bitwise NOT
+<<     // Left shift
+>>     // Right shift
+```
+
+### Compound Assignment
+
+```vole,ignore
++=     // Add and assign
+-=     // Subtract and assign
+*=     // Multiply and assign
+/=     // Divide and assign
+%=     // Modulo and assign
+```
 
 ### Type Operators
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `is` | Type check | `x is i32` |
-| `==` | Type equality | `i32 == i32` -> `true` |
+```vole,ignore
+is     // Type check (e.g. x is i64)
+```
 
 ### Optional Operators
 
-| Operator | Description | Example |
-|----------|-------------|---------|
-| `??` | Null coalescing | `x ?? default` |
-| `?.` | Optional chaining | `obj?.field` |
+```vole,ignore
+??     // Null coalescing
+?.     // Optional chaining
+```
 
 ## In Depth
 
@@ -66,35 +75,81 @@ Vole provides arithmetic, comparison, logical, bitwise, and type operators.
 Basic math operations:
 
 ```vole
-let a = 10
-let b = 3
+tests {
+    test "arithmetic" {
+        let a = 10
+        let b = 3
 
-println(a + b)   // 13
-println(a - b)   // 7
-println(a * b)   // 30
-println(a / b)   // 3 (integer division)
-println(a % b)   // 1 (remainder)
+        assert(a + b == 13)
+        assert(a - b == 7)
+        assert(a * b == 30)
+        assert(a / b == 3)
+        assert(a % b == 1)
+    }
+}
 ```
 
 Unary negation:
 
 ```vole
-let x = 5
-let neg = -x     // -5
+tests {
+    test "negation" {
+        let x = 5
+        assert(-x == -5)
+        assert(-(-x) == 5)
+        assert(--5 == 5)
+    }
+}
 ```
 
 ### Integer vs Float Division
 
-Integer division truncates:
+Integer division truncates toward zero:
 
 ```vole
-let result = 7 / 2  // 3, not 3.5
+tests {
+    test "integer division truncates" {
+        assert(7 / 2 == 3)
+        assert(-7 / 2 == -3)
+    }
+}
 ```
 
 For decimal results, use floats:
 
 ```vole
-let result = 7.0 / 2.0  // 3.5
+tests {
+    test "float division" {
+        let result = 7.0 / 2.0
+        assert(result == 3.5)
+    }
+}
+```
+
+Integer modulo uses remainder semantics (sign follows dividend):
+
+```vole
+tests {
+    test "modulo semantics" {
+        assert(10 % 3 == 1)
+        assert(-7 % 2 == -1)
+        assert(7 % 2 == 1)
+    }
+}
+```
+
+### Operator Precedence
+
+Multiplication and division bind tighter than addition and subtraction:
+
+```vole
+tests {
+    test "precedence" {
+        assert(2 + 3 * 4 == 14)
+        assert((2 + 3) * 4 == 20)
+        assert(10 - 2 * 3 == 4)
+    }
+}
 ```
 
 ### Comparison Operators
@@ -102,61 +157,113 @@ let result = 7.0 / 2.0  // 3.5
 Compare values of the same type:
 
 ```vole
-let x = 5
-let y = 10
-
-println(x == y)  // false
-println(x != y)  // true
-println(x < y)   // true
-println(x > y)   // false
-println(x <= y)  // true
-println(x >= y)  // false
+tests {
+    test "comparisons" {
+        assert(5 == 5)
+        assert(5 != 3)
+        assert(3 < 5)
+        assert(5 > 3)
+        assert(3 <= 3)
+        assert(5 >= 5)
+    }
+}
 ```
 
-String comparison:
+String equality:
 
 ```vole
-let a = "apple"
-let b = "banana"
+tests {
+    test "string equality" {
+        let a = "apple"
+        assert(a == "apple")
+        assert(a != "banana")
+    }
+}
+```
 
-println(a == "apple")  // true
-println(a < b)         // true (lexicographic)
+Semantic equality works across numeric types:
+
+```vole
+tests {
+    test "cross-type equality" {
+        let a: i32 = 42
+        let b: i64 = 42
+        assert(a == b)
+
+        let c: i32 = 42
+        let d: f64 = 42.0
+        assert(c == d)
+    }
+}
 ```
 
 ### Logical Operators
 
-Boolean logic:
+Boolean logic with `&&`, `||`, and `!`:
 
 ```vole
-let a = true
-let b = false
+tests {
+    test "logical operators" {
+        assert(true && true)
+        assert(!(true && false))
+        assert(!(false && true))
+        assert(!(false && false))
 
-println(a && b)  // false (AND)
-println(a || b)  // true (OR)
-println(!a)      // false (NOT)
-```
+        assert(true || true)
+        assert(true || false)
+        assert(false || true)
+        assert(!(false || false))
 
-Short-circuit evaluation:
-
-```vole
-// b() is not called if a() returns false
-if a() && b() { }
-
-// b() is not called if a() returns true
-if a() || b() { }
-```
-
-Common patterns:
-
-```vole
-// Guard clause
-if x != nil && x.valid {
-    process(x)
+        assert(!false)
+        assert(!!true)
+    }
 }
+```
 
-// Default condition
-if debug || verbose {
-    log(message)
+Short-circuit evaluation -- the right operand is not evaluated if the result is already determined:
+
+```vole
+tests {
+    test "short-circuit AND" {
+        let result = false && true
+        assert(result == false)
+    }
+
+    test "short-circuit OR" {
+        let result = true || false
+        assert(result == true)
+    }
+}
+```
+
+Common patterns with logical operators in conditions:
+
+```vole
+tests {
+    test "logical in conditions" {
+        let x = 5
+        let y = 10
+        let mut result = false
+        if x > 0 && y > 0 {
+            result = true
+        }
+        assert(result == true)
+
+        let mut either = false
+        if x > 100 || y > 0 {
+            either = true
+        }
+        assert(either == true)
+
+        let a = 5
+        let b = 10
+        let c = -1
+        let mut combined = false
+        if (a > 0 && b > 0) || c > 0 {
+            combined = true
+        }
+        assert(combined == true)
+    }
 }
 ```
 
@@ -165,38 +272,133 @@ if debug || verbose {
 Operate on individual bits:
 
 ```vole
-let a = 0b1010  // 10
-let b = 0b1100  // 12
+tests {
+    test "bitwise operators" {
+        // AND
+        assert((12 & 10) == 8)
 
-println(a & b)   // 8 (0b1000) - AND
-println(a | b)   // 14 (0b1110) - OR
-println(a ^ b)   // 6 (0b0110) - XOR
-println(~a)      // inverts all bits
+        // OR
+        assert((12 | 10) == 14)
+
+        // XOR
+        assert((12 ^ 10) == 6)
+
+        // XOR with same value gives zero
+        assert((255 ^ 255) == 0)
+    }
+}
 ```
 
 Shift operators:
 
 ```vole
-let x = 1
-println(x << 3)  // 8 (multiply by 2^3)
-println(8 >> 2)  // 2 (divide by 2^2)
+tests {
+    test "shift operators" {
+        assert((1 << 0) == 1)
+        assert((1 << 1) == 2)
+        assert((1 << 4) == 16)
+        assert((16 >> 1) == 8)
+        assert((16 >> 4) == 1)
+    }
+}
 ```
 
-Common uses:
+Bitwise NOT:
 
 ```vole
-// Check if bit is set
-let flags = 0b1010
-let has_flag = (flags & 0b0010) != 0  // true (bit 1 is set)
+tests {
+    test "bitwise NOT" {
+        let y = 42
+        assert((~~y) == y)
+    }
+}
+```
 
-// Set a bit
-let new_flags = flags | 0b0001  // 0b1011
+Common bitwise patterns:
 
-// Clear a bit
-let cleared = flags & ~0b0010  // 0b1000
+```vole
+tests {
+    test "bitwise patterns" {
+        // Set bit 3: 0 | (1 << 3) = 8
+        let x = 0 | (1 << 3)
+        assert(x == 8)
 
-// Toggle a bit
-let toggled = flags ^ 0b0010   // 0b1000
+        // Clear bit 3: 15 & ~8 = 7
+        let y = 15 & ~(1 << 3)
+        assert(y == 7)
+
+        // Toggle bit 2: 10 ^ 4 = 14
+        let z = 10 ^ (1 << 2)
+        assert(z == 14)
+    }
+}
+```
+
+Masking to extract bytes:
+
+```vole
+tests {
+    test "byte masking" {
+        let value = 43981
+
+        // Extract low byte
+        let low = value & 255
+        assert(low == 205)
+
+        // Extract high byte
+        let high = (value >> 8) & 255
+        assert(high == 171)
+    }
+}
+```
+
+Binary literals can be used for clarity:
+
+```vole
+tests {
+    test "binary literals" {
+        let result = 0b1100 & 0b1010
+        assert(result == 0b1000)
+    }
+}
+```
+
+### Compound Assignment Operators
+
+Modify a mutable variable in place:
+
+```vole
+tests {
+    test "compound assignment" {
+        let mut x = 10
+        x += 5
+        assert(x == 15)
+
+        x -= 3
+        assert(x == 12)
+
+        x *= 2
+        assert(x == 24)
+
+        x /= 4
+        assert(x == 6)
+
+        x %= 4
+        assert(x == 2)
+    }
+}
+```
+
+Works with array indexing:
+
+```vole
+tests {
+    test "compound assignment on array" {
+        let mut arr = [1, 2, 3]
+        arr[0] += 10
+        assert(arr[0] == 11)
+    }
+}
 ```
 
 ### Type Operators
@@ -204,32 +406,42 @@ let toggled = flags ^ 0b0010   // 0b1000
 Check type at runtime with `is`:
 
 ```vole
-let x: i32 | string = get_value()
-
-if x is i32 {
-    println("it's an integer")
-    println(x + 10)  // x narrowed to i32
+tests {
+    test "is operator" {
+        let x: i64 | string = 5
+        assert(x is i64)
+        assert(!(x is string))
+    }
 }
 ```
 
-Compare types:
+Type narrowing in if branches -- after an `is` check, the variable is narrowed to that type:
 
 ```vole
-let t = type_of(42)
-println(t == i32)     // true
-println(t == string)  // false
+tests {
+    test "type narrowing with is" {
+        let x: i64 | string = "hello"
+        if x is string {
+            let len = x.length()
+            assert(len == 5)
+        } else {
+            assert(false)
+        }
+    }
+}
 ```
 
-Use in conditions:
+Type narrowing also works in `when` expressions:
 
 ```vole
-func process(value: i32 | string | bool) {
-    if value is i32 {
-        println("number")
-    } else if value is string {
-        println("string")
-    } else {
-        println("boolean")
+tests {
+    test "is in when expression" {
+        let x: i64 | string = "hello"
+        let result = when {
+            x is string => x.length()
+            _ => 0
+        }
+        assert(result == 5)
     }
 }
 ```
@@ -239,21 +451,32 @@ func process(value: i32 | string | bool) {
 Provide a default for optional values with `??`:
 
 ```vole
-let name: string? = nil
-let display = name ?? "Anonymous"  // "Anonymous"
+tests {
+    test "null coalescing" {
+        let x: i32? = 42
+        let result = x ?? 0
+        assert(result == 42)
 
-let other: string? = "Alice"
-let show = other ?? "Anonymous"    // "Alice"
+        let y: i32? = nil
+        let result2 = y ?? 99
+        assert(result2 == 99)
+    }
+}
 ```
 
 Chain multiple fallbacks:
 
 ```vole
-let primary: string? = nil
-let secondary: string? = nil
-let fallback = "default"
+tests {
+    test "null coalescing chain" {
+        let a: i32? = nil
+        let b: i32? = nil
+        let c: i32? = 42
 
-let result = primary ?? secondary ?? fallback
+        let result = a ?? b ?? c ?? 0
+        assert(result == 42)
+    }
+}
 ```
 
 ### Optional Chaining
@@ -261,57 +484,78 @@ let result = primary ?? secondary ?? fallback
 Safely access fields on optional values with `?.`:
 
 ```vole
-let user: User? = get_user()
+class Person {
+    name: string,
+    age: i32,
+}
 
-// Returns nil if user is nil
-let name = user?.name
-
-// Chain multiple accesses
-let city = user?.address?.city
-```
-
-Without optional chaining, you'd need:
-
-```vole
-let city = if user != nil {
-    if user.address != nil {
-        user.address.city
-    } else {
-        nil
+tests {
+    test "optional chaining non-nil" {
+        let p: Person? = Person { name: "Alice", age: 30 }
+        let name = p?.name
+        assert((name ?? "") == "Alice")
     }
-} else {
-    nil
+
+    test "optional chaining nil" {
+        let p: Person? = nil
+        let name = p?.name
+        assert(name is nil)
+    }
+
+    test "optional chaining with null coalescing" {
+        let p: Person? = nil
+        let name = p?.name ?? "Unknown"
+        assert(name == "Unknown")
+    }
 }
 ```
 
-Combine with null coalescing:
+Nested optional chaining:
 
 ```vole
-let city = user?.address?.city ?? "Unknown"
+class Employee {
+    name: string,
+}
+
+class Company {
+    name: string,
+    ceo: Employee?,
+}
+
+tests {
+    test "nested optional chaining" {
+        let c: Company? = Company {
+            name: "Acme",
+            ceo: Employee { name: "Eve" },
+        }
+        let ceoName = c?.ceo?.name
+        assert((ceoName ?? "") == "Eve")
+    }
+
+    test "nested optional chaining nil" {
+        let c: Company? = Company {
+            name: "Startup",
+            ceo: nil,
+        }
+        let ceoName = c?.ceo?.name ?? "No CEO"
+        assert(ceoName == "No CEO")
+    }
+}
 ```
 
-### Operator Precedence
+### Discard Operator
 
-From highest to lowest:
-
-1. Unary: `-`, `!`, `~`
-2. Multiplicative: `*`, `/`, `%`
-3. Additive: `+`, `-`
-4. Shift: `<<`, `>>`
-5. Comparison: `<`, `>`, `<=`, `>=`
-6. Equality: `==`, `!=`
-7. Bitwise AND: `&`
-8. Bitwise XOR: `^`
-9. Bitwise OR: `|`
-10. Logical AND: `&&`
-11. Logical OR: `||`
-12. Null coalescing: `??`
-
-Use parentheses for clarity:
+Use `_ =` to explicitly discard a value (useful for calling functions for side effects):
 
 ```vole
-let result = (a + b) * c
-let check = (x > 0) && (y < 10)
+func get_value() -> i64 => 42
+
+tests {
+    test "discard value" {
+        _ = get_value()
+        assert(true)
+    }
+}
 ```
 
 ### String Concatenation
@@ -319,6 +563,55 @@ let check = (x > 0) && (y < 10)
 The `+` operator concatenates strings:
 
 ```vole
-let greeting = "Hello, " + "World!"
-let message = "Count: " + count
+tests {
+    test "string concatenation" {
+        let result = "a" + "b" + "c"
+        assert(result == "abc")
+    }
+}
+```
+
+String interpolation is also available using `{}` inside string literals:
+
+```vole
+tests {
+    test "string interpolation" {
+        let name = "world"
+        let greeting = "hello {name}"
+        assert(greeting == "hello world")
+    }
+}
+```
+
+### Operator Precedence
+
+From highest to lowest:
+
+```vole,ignore
+1.  Unary: -, !, ~
+2.  Multiplicative: *, /, %
+3.  Additive: +, -
+4.  Shift: <<, >>
+5.  Comparison: <, >, <=, >=
+6.  Equality: ==, !=
+7.  Bitwise AND: &
+8.  Bitwise XOR: ^
+9.  Bitwise OR: |
+10. Logical AND: &&
+11. Logical OR: ||
+12. Null coalescing: ??
+```
+
+Use parentheses for clarity:
+
+```vole
+tests {
+    test "parentheses for clarity" {
+        let result = (2 + 3) * 4
+        assert(result == 20)
+
+        let check = (5 > 0) && (10 < 20)
+        assert(check == true)
+    }
+}
 ```

@@ -26,13 +26,15 @@ vole test test/unit
 Define tests with the `test` keyword:
 
 ```vole
-test "addition works" {
-    assert(1 + 1 == 2)
-}
+tests {
+    test "addition works" {
+        assert(1 + 1 == 2)
+    }
 
-test "string concatenation" {
-    let result = "Hello" + " " + "World"
-    assert(result == "Hello World")
+    test "string concatenation" {
+        let result = "Hello" + " " + "World"
+        assert(result == "Hello World")
+    }
 }
 ```
 
@@ -43,20 +45,22 @@ Tests are collected and run by the test runner.
 For simple single-assertion tests, use expression syntax:
 
 ```vole
-test "addition works" => assert(1 + 1 == 2)
-
-test "comparison" => assert(10 > 5)
-
-test "string length" => assert("hello".length == 5)
+tests {
+    test "addition works" => assert(1 + 1 == 2)
+    test "comparison" => assert(10 > 5)
+    test "string length" => assert("hello".length() == 5)
+}
 ```
 
 Use block syntax when you need multiple statements or local variables:
 
 ```vole
-test "complex setup" {
-    let a = 10
-    let b = 20
-    assert(a + b == 30)
+tests {
+    test "complex setup" {
+        let a = 10
+        let b = 20
+        assert(a + b == 30)
+    }
 }
 ```
 
@@ -65,13 +69,15 @@ test "complex setup" {
 Use `assert()` to verify conditions:
 
 ```vole
-test "assertions" {
-    assert(true)
-    assert(1 < 2)
-    assert("hello".length == 5)
+tests {
+    test "assertions" {
+        assert(true)
+        assert(1 < 2)
+        assert("hello".length() == 5)
 
-    let x = 42
-    assert(x == 42)
+        let x = 42
+        assert(x == 42)
+    }
 }
 ```
 
@@ -103,7 +109,7 @@ tests "Math operations" {
 }
 
 tests "String operations" {
-    test "length" => assert("hello".length == 5)
+    test "length" => assert("hello".length() == 5)
     test "concatenation" => assert("a" + "b" == "ab")
 }
 ```
@@ -114,30 +120,21 @@ Define helper functions and constants scoped to a tests block:
 
 ```vole
 tests "Math helpers" {
-    // Scoped function - only visible within this tests block
-    func double(x: i64) => x * 2
+    func double(x: i64) -> i64 => x * 2
 
-    // Scoped constant
     let FACTOR = 10
 
     test "double works" => assert(double(21) == 42)
-
     test "use constant" => assert(double(FACTOR) == 20)
 }
-
-// double and FACTOR are not visible here
 ```
 
-Declarations must appear before test cases. Use scoped declarations to:
-- Keep helpers close to where they're used
-- Avoid polluting module-level namespace
-- Make tests self-documenting
+Declarations must appear before test cases. Scoped declarations are only visible within their tests block.
 
 For helpers shared across multiple tests blocks, keep them at module level:
 
 ```vole
-// Module-level helper - shared across all tests blocks
-func shared_helper(x: i64) => x + 1
+func shared_helper(x: i64) -> i64 => x + 1
 
 tests "first group" {
     test "uses shared" => assert(shared_helper(1) == 2)
@@ -145,6 +142,29 @@ tests "first group" {
 
 tests "second group" {
     test "also uses shared" => assert(shared_helper(10) == 11)
+}
+```
+
+### Imports in Tests Blocks
+
+You can import modules inside tests blocks:
+
+```vole
+tests "using math" {
+    let math = import "std:math"
+
+    test "sqrt works" {
+        assert(math.sqrt(16.0) == 4.0)
+    }
+}
+
+tests "destructured import" {
+    let { sqrt, min, max } = import "std:math"
+
+    test "imported functions work" {
+        assert(sqrt(25.0) == 5.0)
+        assert(min(1.0, 2.0) == 1.0)
+    }
 }
 ```
 
@@ -168,11 +188,8 @@ vole test test/unit/*.vole
 A typical test file with scoped helpers:
 
 ```vole
-// test/unit/calculator.vole
-
 tests "Calculator" {
-    // Scoped helper function
-    func add(a: i32, b: i32) -> i32 => a + b
+    func add(a: i64, b: i64) -> i64 => a + b
 
     test "add positive numbers" => assert(add(2, 3) == 5)
     test "add negative numbers" => assert(add(-1, -1) == -2)
@@ -180,15 +197,14 @@ tests "Calculator" {
 }
 ```
 
-Or with module-level functions when testing external code:
+Or with module-level functions when testing imported code:
 
 ```vole
-// test/unit/math.vole
-import math
+let math = import "std:math"
 
 tests "math module" {
-    test "abs positive" => assert(math.abs(5) == 5)
-    test "abs negative" => assert(math.abs(-5) == 5)
+    test "sqrt" => assert(math.sqrt(4.0) == 2.0)
+    test "abs" => assert(math.abs(-5.0) == 5.0)
 }
 ```
 
@@ -197,50 +213,36 @@ tests "math module" {
 **Test one thing per test:**
 
 ```vole
-// Good - concise expression tests
-test "array length" => assert([1, 2, 3].length == 3)
+tests {
+    test "array length" {
+        assert([1, 2, 3].length() == 3)
+    }
 
-test "empty array length" {
-    let empty: [i32] = []
-    assert(empty.length == 0)
+    test "empty array length" {
+        let empty: [i64] = []
+        assert(empty.length() == 0)
+    }
 }
-
-// Avoid - multiple concerns in one test
-test "array stuff" {
-    assert([1, 2, 3].length == 3)
-    assert([].length == 0)
-    assert([1] + [2] == [1, 2])
-}
-```
-
-**Descriptive test names:**
-
-```vole
-// Good
-test "filter removes non-matching elements" { }
-test "map preserves array length" { }
-test "reduce with empty array returns initial value" { }
-
-// Avoid
-test "filter test" { }
-test "test1" { }
-test "it works" { }
 ```
 
 **Arrange-Act-Assert pattern:**
 
 ```vole
-test "user can be created with valid data" {
-    // Arrange
-    let name = "Alice"
-    let age = 30
+class User {
+    name: string,
+    age: i64,
+}
 
-    // Act
-    let user = User { name: name, age: age }
+tests {
+    test "user can be created with valid data" {
+        let name = "Alice"
+        let age = 30
 
-    // Assert
-    assert(user.name == "Alice")
-    assert(user.age == 30)
+        let user = User { name: name, age: age }
+
+        assert(user.name == "Alice")
+        assert(user.age == 30)
+    }
 }
 ```
 
@@ -263,7 +265,7 @@ Test that errors are raised correctly:
 ```vole
 error DivByZero {}
 
-func divide(a: i32, b: i32) -> fallible(i32, DivByZero) {
+func divide(a: i64, b: i64) -> fallible(i64, DivByZero) {
     if b == 0 {
         raise DivByZero {}
     }
@@ -294,19 +296,18 @@ tests "divide function" {
 Share setup across tests using scoped helpers:
 
 ```vole
-record User {
-    name: string
-    age: i32
-    active: bool
+class User {
+    name: string,
+    age: i64,
+    active: bool,
 }
 
 tests "User operations" {
-    // Scoped factory function
     func make_test_user() -> User {
         return User {
             name: "Test User",
             age: 25,
-            active: true
+            active: true,
         }
     }
 
@@ -322,15 +323,13 @@ tests "User operations" {
 }
 ```
 
-Note: Record definitions must remain at module level (scoped types not yet supported).
-
 ### Testing Iterators
 
 ```vole
 tests "Iterator operations" {
     test "map transforms elements" {
         let nums = [1, 2, 3]
-        let doubled = nums.map((x) => x * 2).collect()
+        let doubled = nums.iter().map((x) => x * 2).collect()
         assert(doubled[0] == 2)
         assert(doubled[1] == 4)
         assert(doubled[2] == 6)
@@ -338,15 +337,15 @@ tests "Iterator operations" {
 
     test "filter selects matching" {
         let nums = [1, 2, 3, 4, 5]
-        let evens = nums.filter((x) => x % 2 == 0).collect()
-        assert(evens.length == 2)
+        let evens = nums.iter().filter((x) => x % 2 == 0).collect()
+        assert(evens.length() == 2)
         assert(evens[0] == 2)
         assert(evens[1] == 4)
     }
 
     test "reduce accumulates" {
         let nums = [1, 2, 3, 4, 5]
-        let sum = nums.reduce(0, (acc, x) => acc + x)
+        let sum = nums.iter().reduce(0, (acc, x) => acc + x)
         assert(sum == 15)
     }
 }
@@ -359,18 +358,25 @@ Recommended directory structure:
 ```
 test/
 └── unit/           # Unit tests using assert()
-    ├── language/   # Language feature tests
+    ├── classes/    # Class and struct tests
+    ├── closures/   # Closure tests
+    ├── control_flow/ # Control flow tests
+    ├── functions/  # Function tests
+    ├── generics/   # Generic type tests
+    ├── imports/    # Import system tests
+    ├── interfaces/ # Interface tests
+    ├── iterators/  # Iterator tests
+    ├── modules/    # Module tests
     ├── types/      # Type system tests
     └── ...
 ```
 
 ### Best Practices
 
-1. **Keep tests fast** - Avoid slow operations in tests
-2. **Test behavior, not implementation** - Focus on what, not how
-3. **One assertion focus per test** - Even if multiple asserts
-4. **Use descriptive names** - Test name should explain the scenario
-5. **Test edge cases** - Empty, zero, negative, boundary values
-6. **Don't test the language** - Test your code, not Vole itself
-7. **Use expression syntax for simple tests** - `test "name" => assert(...)`
-8. **Scope helpers to tests blocks** - Keep helpers close to where they're used
+1. **Keep tests fast** -- avoid slow operations in tests
+2. **Test behavior, not implementation** -- focus on what, not how
+3. **One assertion focus per test** -- even if multiple asserts
+4. **Use descriptive names** -- test name should explain the scenario
+5. **Test edge cases** -- empty, zero, negative, boundary values
+6. **Use expression syntax for simple tests** -- `test "name" => assert(...)`
+7. **Scope helpers to tests blocks** -- keep helpers close to where they're used

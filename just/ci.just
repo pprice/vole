@@ -5,10 +5,10 @@ set working-directory := ".."
 import 'common.just'
 
 # Run all checks (mirrors CI) - default command
-default: fmt-check clippy build test snap unit mem-all
+default: fmt-check clippy build test snap unit mem-all doc-check
 
 # Pre-commit checks with auto-fixes
-pre-commit: fmt clippy-fix clippy build test snap unit mem
+pre-commit: fmt clippy-fix clippy build test snap unit mem doc-check
 
 # === CI-specific recipes ===
 

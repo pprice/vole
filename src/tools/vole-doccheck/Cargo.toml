@@ -1,0 +1,11 @@
+[package]
+name = "vole-doccheck"
+version = "0.1.0"
+edition = "2024"
+description = "Validates vole code blocks in markdown documentation"
+
+[dependencies]
+glob = "0.3"
+
+[lints]
+workspace = true
