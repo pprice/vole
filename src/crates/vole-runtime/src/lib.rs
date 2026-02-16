@@ -30,6 +30,7 @@ pub mod signal;
 pub mod stdlib;
 pub mod string;
 pub mod string_builder;
+pub mod task;
 pub mod type_registry;
 pub mod value;
 

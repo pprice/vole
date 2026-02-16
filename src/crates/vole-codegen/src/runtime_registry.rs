@@ -233,6 +233,12 @@ runtime_keys! {
     TaskIsDone             => "vole_task_is_done"            : (I64) -> I64,
     SchedulerRun           => "vole_scheduler_run"           : () -> Void,
 
+    // ── Task handles (RcTask) ───────────────────────────────────────────
+    RcTaskRun              => "vole_rctask_run"              : (Ptr, Ptr) -> Ptr,
+    RcTaskJoin             => "vole_rctask_join"             : (Ptr) -> I64,
+    RcTaskCancel           => "vole_rctask_cancel"           : (Ptr) -> Void,
+    RcTaskIsDone           => "vole_rctask_is_done"          : (Ptr) -> I64,
+
     // ── Channels ──────────────────────────────────────────────────────
     ChannelNew             => "vole_channel_new"             : (I64) -> Ptr,
     ChannelSend            => "vole_channel_send"            : (Ptr, I64, I64) -> I64,
@@ -729,6 +735,23 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_scheduler_run",
         ptr: vole_runtime::scheduler::vole_scheduler_run as *const u8,
+    },
+    // ── Task handles (RcTask) ───────────────────────────────────────────
+    LinkableRuntimeSymbol {
+        c_name: "vole_rctask_run",
+        ptr: vole_runtime::task::vole_rctask_run as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_rctask_join",
+        ptr: vole_runtime::task::vole_rctask_join as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_rctask_cancel",
+        ptr: vole_runtime::task::vole_rctask_cancel as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_rctask_is_done",
+        ptr: vole_runtime::task::vole_rctask_is_done as *const u8,
     },
     // ── Channels ──────────────────────────────────────────────────────
     LinkableRuntimeSymbol {

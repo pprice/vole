@@ -138,6 +138,8 @@ pub enum RuntimeTypeId {
     Instance = 7,
     Rng = 8,
     Buffer = 9,
+    /// RC-managed task handle for green threads.
+    Task = 10,
     Iterator = 11,
     /// Heap-allocated union buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
     /// Not RC-managed itself (no RcHeader), but may contain an RC payload.
@@ -161,6 +163,7 @@ impl RuntimeTypeId {
             7 => Some(Self::Instance),
             8 => Some(Self::Rng),
             9 => Some(Self::Buffer),
+            10 => Some(Self::Task),
             11 => Some(Self::Iterator),
             12 => Some(Self::UnionHeap),
             13 => Some(Self::Channel),
@@ -180,6 +183,7 @@ impl RuntimeTypeId {
             Self::Instance => "Instance",
             Self::Rng => "Rng",
             Self::Buffer => "Buffer",
+            Self::Task => "Task",
             Self::Iterator => "Iterator",
             Self::UnionHeap => "UnionHeap",
             Self::Channel => "Channel",
@@ -207,6 +211,7 @@ pub fn tag_needs_rc(tag: u64) -> bool {
                 | T::Instance
                 | T::Rng
                 | T::Buffer
+                | T::Task
                 | T::Iterator
                 | T::Channel,
         )
