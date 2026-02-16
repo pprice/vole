@@ -1,0 +1,293 @@
+// Integration test: Mock HTTP server simulation.
+//
+// Simulates an HTTP server that spawns handler tasks per request.
+// Phase 1 channels carry i64, so requests are encoded as i64 values
+// (path IDs) and responses as i64 values (status codes or computed
+// results). Tests cover: per-request task spawning, concurrent
+// request handling, stateful server with actor counter, and
+// pipeline request-response.
+
+let { Task, Channel } = import "std:task"
+
+tests {
+    test "server handles single request" {
+        let req_ch = Channel.buffered(1)
+        let resp_ch = Channel.buffered(1)
+
+        // Server: reads one request, spawns handler, closes response channel.
+        let server = Task.run(() -> i64 => {
+            let mut handled = 0
+            let mut req = req_ch.receive()
+            while req != 0 || !req_ch.is_closed() {
+                // Spawn a handler task per request (like a real HTTP server).
+                let request_id = req
+                let handler = Task.run(() -> i64 => {
+                    // Simulate processing: return request_id * 100 as "response".
+                    resp_ch.send(request_id * 100)
+                    return 0
+                })
+                _ = handler.join()
+                handled = handled + 1
+                req = req_ch.receive()
+            }
+            resp_ch.close()
+            return handled
+        })
+
+        // Client: send one request (path ID = 42).
+        req_ch.send(42)
+        req_ch.close()
+
+        // Read response.
+        let resp = resp_ch.receive()
+        assert(resp == 4200)
+
+        let handled = server.join()
+        assert(handled == 1)
+    }
+
+    test "server handles 5 concurrent requests" {
+        let req_ch = Channel.buffered(8)
+        let resp_ch = Channel.buffered(8)
+
+        // Server: reads requests, spawns one task per request.
+        let server = Task.run(() -> i64 => {
+            let mut handled = 0
+            let mut req = req_ch.receive()
+            while req != 0 || !req_ch.is_closed() {
+                let request_id = req
+                let handler = Task.run(() -> i64 => {
+                    // Response = request_id + 1000
+                    resp_ch.send(request_id + 1000)
+                    return 0
+                })
+                _ = handler.join()
+                handled = handled + 1
+                req = req_ch.receive()
+            }
+            resp_ch.close()
+            return handled
+        })
+
+        // Client: send 5 requests (path IDs 1..5).
+        let mut i = 1
+        while i <= 5 {
+            req_ch.send(i)
+            i = i + 1
+        }
+        req_ch.close()
+
+        // Collect all responses.
+        let mut total = 0
+        let mut count = 0
+        let mut v = resp_ch.receive()
+        while v != 0 || !resp_ch.is_closed() {
+            total = total + v
+            count = count + 1
+            v = resp_ch.receive()
+        }
+
+        let handled = server.join()
+        assert(handled == 5)
+        assert(count == 5)
+        // Sum of (1+1000)+(2+1000)+(3+1000)+(4+1000)+(5+1000) = 5015
+        assert(total == 5015)
+    }
+
+    test "stateful server counts requests with actor" {
+        let req_ch = Channel.buffered(4)
+        let resp_ch = Channel.buffered(4)
+
+        // Counter actor: increments for each message, returns final count.
+        let counter = Task.state(0, (count: i64, msg: i64) -> i64 => {
+            return count + msg
+        })
+
+        // Server: reads requests, increments counter, responds with ack.
+        let server = Task.run(() -> i64 => {
+            let mut handled = 0
+            let mut req = req_ch.receive()
+            while req != 0 || !req_ch.is_closed() {
+                counter.send(1)
+                // Acknowledge: send request_id back as confirmation.
+                resp_ch.send(req)
+                handled = handled + 1
+                req = req_ch.receive()
+            }
+            resp_ch.close()
+            return handled
+        })
+
+        // Client: send 3 requests.
+        req_ch.send(10)
+        req_ch.send(20)
+        req_ch.send(30)
+        req_ch.close()
+
+        // Drain responses.
+        let mut resp_sum = 0
+        let mut resp_count = 0
+        let mut v = resp_ch.receive()
+        while v != 0 || !resp_ch.is_closed() {
+            resp_sum = resp_sum + v
+            resp_count = resp_count + 1
+            v = resp_ch.receive()
+        }
+
+        let handled = server.join()
+        assert(handled == 3)
+        assert(resp_count == 3)
+        assert(resp_sum == 60)
+
+        // Verify counter actor recorded all 3 increments.
+        let final_count = counter.close_and_join()
+        assert(final_count == 3)
+    }
+
+    test "server pipeline: request -> process -> respond" {
+        // req_ch large enough for all 8 items so main thread never blocks
+        // (main thread cannot block on send; it's not a scheduler task).
+        let req_ch = Channel.buffered(8)
+        let process_ch = Channel.buffered(4)
+        let resp_ch = Channel.buffered(4)
+
+        // Acceptor: reads requests, forwards to processing pipeline.
+        let acceptor = Task.run(() -> i64 => {
+            let mut count = 0
+            let mut req = req_ch.receive()
+            while req != 0 || !req_ch.is_closed() {
+                process_ch.send(req)
+                count = count + 1
+                req = req_ch.receive()
+            }
+            process_ch.close()
+            return count
+        })
+
+        // Processor: transforms requests (squares them) and sends to responder.
+        let processor = Task.run(() -> i64 => {
+            let mut count = 0
+            let mut v = process_ch.receive()
+            while v != 0 || !process_ch.is_closed() {
+                resp_ch.send(v * v)
+                count = count + 1
+                v = process_ch.receive()
+            }
+            resp_ch.close()
+            return count
+        })
+
+        // Client: send 8 requests.
+        let mut i = 1
+        while i <= 8 {
+            req_ch.send(i)
+            i = i + 1
+        }
+        req_ch.close()
+
+        // Collect responses.
+        let mut total = 0
+        let mut count = 0
+        let mut v = resp_ch.receive()
+        while v != 0 || !resp_ch.is_closed() {
+            total = total + v
+            count = count + 1
+            v = resp_ch.receive()
+        }
+
+        let accepted = acceptor.join()
+        let processed = processor.join()
+        assert(accepted == 8)
+        assert(processed == 8)
+        assert(count == 8)
+        // Sum of 1^2 + 2^2 + ... + 8^2 = 204
+        assert(total == 204)
+    }
+
+    test "server with Task.all for batch processing" {
+        // Simulate a server that receives a batch of requests and
+        // processes them all concurrently using Task.all.
+        let resp_ch = Channel.buffered(10)
+
+        let server = Task.run(() -> i64 => {
+            let fns: [() -> i64] = [
+                () -> i64 => { return 10 },
+                () -> i64 => { return 20 },
+                () -> i64 => { return 30 },
+                () -> i64 => { return 40 },
+                () -> i64 => { return 50 },
+            ]
+            let results = Task.all(fns)
+            // Send all results to response channel.
+            let mut i = 0
+            while i < results.length() {
+                resp_ch.send(results[i])
+                i = i + 1
+            }
+            resp_ch.close()
+            return results.length()
+        })
+
+        // Collect responses.
+        let mut total = 0
+        let mut count = 0
+        let mut v = resp_ch.receive()
+        while v != 0 || !resp_ch.is_closed() {
+            total = total + v
+            count = count + 1
+            v = resp_ch.receive()
+        }
+
+        let batch_size = server.join()
+        assert(batch_size == 5)
+        assert(count == 5)
+        assert(total == 150)
+    }
+
+    test "server select: multiplex two request channels" {
+        let req_ch1 = Channel.buffered(4)
+        let req_ch2 = Channel.buffered(4)
+        let resp_ch = Channel.buffered(8)
+
+        // Server: select across two request channels.
+        let server = Task.run(() -> i64 => {
+            let mut handled = 0
+            // Process a fixed number of requests (no select-in-loop
+            // since we can't detect "both closed" with select).
+            let mut remaining = 5
+
+            while remaining > 0 {
+                let r = Task.select2(req_ch1, req_ch2, 0)
+                if !r.timed_out {
+                    // select2 already receives the value into r.value.
+                    resp_ch.send(r.channel_index * 1000 + r.value)
+                    handled = handled + 1
+                }
+                remaining = remaining - 1
+            }
+            resp_ch.close()
+            return handled
+        })
+
+        // Send requests to both channels.
+        req_ch1.send(1)
+        req_ch1.send(2)
+        req_ch1.send(3)
+        req_ch2.send(4)
+        req_ch2.send(5)
+
+        // Drain responses.
+        let mut total = 0
+        let mut count = 0
+        let mut v = resp_ch.receive()
+        while v != 0 || !resp_ch.is_closed() {
+            total = total + v
+            count = count + 1
+            v = resp_ch.receive()
+        }
+
+        let handled = server.join()
+        assert(handled == 5)
+        assert(count == 5)
+    }
+}
