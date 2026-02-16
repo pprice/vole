@@ -1,5 +1,6 @@
 # CLAUDE.md
 Vole is a Type-space JIT Programming language
+
 This project uses a CLI ticket system for task management. Run `tk help` when you need to use it.
 
 ## Rules
@@ -11,6 +12,7 @@ This project uses a CLI ticket system for task management. Run `tk help` when yo
 - NEVER "simplfy" tests in `vole/test`; you are hiding  bugs doing so
 - NEVER assume "pre-existing failures", you likely broke it.
 - NEVER opt out of work, simplify, for think tasks are too complex, _especially_ from tickets
+- NEVER add new just file commands unless the user asks you to
 - If you take shortcuts, track them in tickets with `tk`
 </IMPORTANT>
 
@@ -39,6 +41,7 @@ just ci             # All checks (format, clippy, test, snap)
 just unit           # Run vole unit tests
 just snap           # Run snapshot tests
 just dev            # List dev tools (see just/dev.justfile)
+just agent          # List agent specific tools (e.g. work tree management)
 ```
 
 Cargo
@@ -47,7 +50,7 @@ cargo run -- run file.vole    # Execute
 cargo run -- test dir/        # Run test blocks
 ```
 
-Recommended system tools
+Additional tools
 ```
 ast-grep    # Use for large scale renames and finds with -l rust
 tk          # Use for tracking work
@@ -72,14 +75,10 @@ NEVER "simplify" tests, even if you just created them.
 ## Debugging
 
 ```bash
-vole inspect ast file.vole       # Show AST
-vole inspect ir file.vole        # Show Cranelift IR
+vole inspect ast file.vole         # Show AST
+vole inspect ir file.vole          # Show Cranelift IR
 just dev-backtrace-test file.vole  # Debug segfaults
-just trace file.vole             # Tracing with VOLE_LOG
-just dev iterator-stress         # Repeated leak/stress corpus for iterators
-just dev iterator-asan           # ASAN run for iterator parity tests (nightly)
-just dev iterator-bench-baseline # Record iterator benchmark baseline JSON
-just dev iterator-bench-compare  # Compare current iterator runtimes vs baseline
+just trace file.vole               # Tracing with VOLE_LOG
 ```
 
 For release-only issues, use `cargo build --profile release-local` which keeps symbols for debugging while maintaining release optimizations.

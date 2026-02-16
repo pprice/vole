@@ -1,0 +1,170 @@
+//! Rule: iterator filter+collect expression.
+//!
+//! Generates `arr.iter().filter((x) => pred).collect()` where the
+//! predicate filters elements of the source array. The element type
+//! must match the target array element type.
+
+use crate::emit::Emit;
+use crate::rule::{ExprRule, Param, Params, TypeInfo};
+use crate::scope::Scope;
+use crate::symbols::PrimitiveType;
+
+pub struct IterFilterCollect;
+
+impl ExprRule for IterFilterCollect {
+    fn name(&self) -> &'static str {
+        "iter_filter_collect"
+    }
+
+    fn params(&self) -> Vec<Param> {
+        vec![Param::prob("probability", 0.08)]
+    }
+
+    fn precondition(&self, scope: &Scope, _params: &Params) -> bool {
+        !scope.array_vars().is_empty()
+    }
+
+    fn generate(
+        &self,
+        scope: &Scope,
+        emit: &mut Emit,
+        _params: &Params,
+        expected_type: &TypeInfo,
+    ) -> Option<String> {
+        let target_elem = match expected_type {
+            TypeInfo::Array(inner) => inner.as_ref(),
+            _ => return None,
+        };
+
+        let array_vars = scope.array_vars();
+
+        // Filter to arrays whose element type matches and supports predicates
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| {
+                elem_ty == target_elem
+                    && matches!(
+                        elem_ty,
+                        TypeInfo::Primitive(
+                            PrimitiveType::I64
+                                | PrimitiveType::F64
+                                | PrimitiveType::I32
+                                | PrimitiveType::Bool
+                                | PrimitiveType::String
+                        )
+                    )
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = emit.gen_range(0..candidates.len());
+        let (var_name, elem_ty) = candidates[idx];
+
+        let pred = gen_filter_pred(emit, elem_ty)?;
+
+        Some(format!(
+            "{}.iter().filter((x) => {}).collect()",
+            var_name, pred
+        ))
+    }
+}
+
+fn gen_filter_pred(emit: &mut Emit, elem_ty: &TypeInfo) -> Option<String> {
+    match elem_ty {
+        TypeInfo::Primitive(PrimitiveType::I64) => match emit.gen_range(0..4) {
+            0 => {
+                let n = emit.gen_i64_range(0, 5);
+                Some(format!("x > {}", n))
+            }
+            1 => {
+                let n = emit.gen_i64_range(0, 10);
+                Some(format!("x < {}", n))
+            }
+            2 => Some("x % 2 == 0".to_string()),
+            _ => {
+                let n = emit.gen_i64_range(0, 5);
+                Some(format!("x != {}", n))
+            }
+        },
+        TypeInfo::Primitive(PrimitiveType::F64) => {
+            let n = emit.gen_i64_range(0, 50);
+            Some(format!("x > {}.0", n))
+        }
+        TypeInfo::Primitive(PrimitiveType::I32) => match emit.gen_range(0..3) {
+            0 => {
+                let n = emit.gen_i64_range(0, 5);
+                Some(format!("x > {}", n))
+            }
+            1 => {
+                let n = emit.gen_i64_range(0, 10);
+                Some(format!("x < {}", n))
+            }
+            _ => Some("x % 2 == 0".to_string()),
+        },
+        TypeInfo::Primitive(PrimitiveType::Bool) => {
+            if emit.gen_bool(0.5) {
+                Some("x".to_string())
+            } else {
+                Some("!x".to_string())
+            }
+        }
+        TypeInfo::Primitive(PrimitiveType::String) => {
+            let n = emit.gen_i64_range(0, 3);
+            Some(format!("x.length() > {}", n))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::resolver::ResolvedParams;
+    use crate::rule::{ParamValue, StmtRule};
+    use crate::symbols::SymbolTable;
+    use rand::SeedableRng;
+
+    fn test_emit<'a>(rng: &'a mut dyn rand::RngCore, resolved: &'a ResolvedParams) -> Emit<'a> {
+        static EMPTY_STMT: &[Box<dyn StmtRule>] = &[];
+        static EMPTY_EXPR: &[Box<dyn ExprRule>] = &[];
+        Emit::new(rng, EMPTY_STMT, EMPTY_EXPR, resolved)
+    }
+
+    #[test]
+    fn name_is_correct() {
+        assert_eq!(IterFilterCollect.name(), "iter_filter_collect");
+    }
+
+    #[test]
+    fn generates_filter_collect() {
+        let table = SymbolTable::new();
+        let mut scope = Scope::new(&[], &table);
+        scope.add_local(
+            "arr".into(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            false,
+        );
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let resolved = ResolvedParams::new();
+        let mut emit = test_emit(&mut rng, &resolved);
+        let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
+
+        let result = IterFilterCollect.generate(
+            &scope,
+            &mut emit,
+            &params,
+            &TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+        );
+        assert!(result.is_some());
+        let text = result.unwrap();
+        assert!(
+            text.contains(".iter().filter("),
+            "expected filter, got: {text}"
+        );
+        assert!(text.contains(".collect()"), "expected collect, got: {text}");
+    }
+}

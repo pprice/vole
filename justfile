@@ -8,6 +8,7 @@ import 'just/common.just'
 mod ci 'just/ci.just'
 mod dev 'just/dev.just'
 mod trace 'just/trace.just'
+mod agent 'just/agent.just'
 
 # Default recipe - show available commands
 default:

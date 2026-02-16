@@ -8,6 +8,7 @@
 
 use crate::emitter::EmitConfig;
 use crate::planner::PlanConfig;
+use crate::resolver::RuleOverrides;
 
 /// A generation profile combining plan and emit configurations.
 ///
@@ -21,6 +22,8 @@ pub struct Profile {
     pub plan: PlanConfig,
     /// Configuration for the emit phase.
     pub emit: EmitConfig,
+    /// Per-rule parameter overrides (optional `[rules]` section in TOML).
+    pub rules: RuleOverrides,
 }
 
 /// Error type for profile lookup failures.

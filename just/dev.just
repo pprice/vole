@@ -7,6 +7,46 @@ set working-directory := ".."
 default:
     @just --list dev
 
+# Open a new zellij tab and start a ticket agent workflow.
+# Usage:
+#   just dev start-ticket [ticket_id] [agent_name]
+# Notes:
+#   - Must be run inside an active zellij session.
+#   - If ticket_id is omitted, this reads it from .ticket in repo root.
+start-ticket ticket_id="" agent_name="claude":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v zellij >/dev/null 2>&1; then
+      echo "ERROR: zellij not found in PATH" >&2
+      exit 1
+    fi
+
+    if [[ -z "${ZELLIJ:-}" ]]; then
+      echo "ERROR: this command must be run inside a zellij session" >&2
+      exit 1
+    fi
+
+    repo_root="$(git rev-parse --show-toplevel)"
+    ticket_id="{{ticket_id}}"
+
+    if [[ -z "${ticket_id}" ]]; then
+      if [[ -f "${repo_root}/.ticket" || -L "${repo_root}/.ticket" ]]; then
+        ticket_id="$(head -n1 "${repo_root}/.ticket" | tr -d '[:space:]')"
+      fi
+    fi
+
+    if [[ -z "${ticket_id}" ]]; then
+      echo "ERROR: no ticket_id provided and .ticket is missing/empty" >&2
+      exit 1
+    fi
+
+    tab_name="agent-${ticket_id}"
+    zellij action new-tab --name "${tab_name}" --cwd "${repo_root}"
+    zellij action go-to-tab-name "${tab_name}"
+    zellij action write-chars "cd ${repo_root} && just agent start-ticket ${ticket_id} --agent {{agent_name}}"
+    zellij action write 10
+
 # Show next available error code for a category (lexer, parser, sema)
 next-error category:
     #!/usr/bin/env bash
@@ -139,59 +179,6 @@ leak-check *args:
 # Run leak detection on all unit tests
 leak-check-all:
     cargo run -p vole-leak -- test/unit/
-
-# Iterator stress corpus: run leak tracking repeatedly to catch flaky lifetime bugs
-iterator-stress rounds="3":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=(
-      test/unit/language/iterators/iterators.vole
-      test/unit/language/iterators/iterator_chain.vole
-      test/unit/language/iterators/iterator_flatten.vole
-      test/unit/language/iterators/iterator_chunks_windows.vole
-      test/unit/language/iterators/iterator_enumerate_zip.vole
-      test/unit/mem/iterators/iterators.vole
-      test/unit/mem/iterators/consumption.vole
-    )
-    for r in $(seq 1 "{{rounds}}"); do
-      echo "== iterator stress round ${r}/{{rounds}} =="
-      for f in "${files[@]}"; do
-        cargo run -p vole-leak -- "$f"
-      done
-    done
-
-# AddressSanitizer run focused on iterator runtime tests.
-# Requires nightly rust toolchain.
-iterator-asan:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! rustup toolchain list | grep -q '^nightly'; then
-      echo "nightly toolchain not found; install with: rustup toolchain install nightly"
-      exit 1
-    fi
-    ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 \
-    RUSTFLAGS="-Zsanitizer=address" \
-    cargo +nightly test -p vole-runtime --target x86_64-unknown-linux-gnu iterator_parity -- --test-threads=1
-
-# Record baseline runtime metrics for iterator migration benchmarks.
-# Policy: <=2% expected noise, >2% investigate, >5% regression.
-iterator-bench-baseline output="artifacts/bench/iterator-baseline.json" iterations="12" warmup="3":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p "$(dirname "{{output}}")"
-    cargo run --release --bin vole -- bench run test/bench/iterators/*.vole -n "{{iterations}}" -w "{{warmup}}" -o "{{output}}"
-
-# Compare current runtime metrics against a recorded iterator baseline.
-iterator-bench-compare baseline="artifacts/bench/iterator-baseline.json" output="artifacts/bench/iterator-current.json":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p "$(dirname "{{output}}")"
-    cargo run --release --bin vole -- bench compare "{{baseline}}" -o "{{output}}"
-    echo
-    echo "Regression envelope:"
-    echo "  - <= 2%: expected variance"
-    echo "  - > 2%: investigate"
-    echo "  - > 5%: regression, open a tk bug and block backend default switch"
 
 # Run valgrind on a small RC test suite
 valgrind file="test/unit/mem/basics/cleanup.vole":
