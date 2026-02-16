@@ -119,7 +119,7 @@ class Task<T: Sendable> {
         //   let final_count = counter.close_and_join()
         //   assert(final_count == 2)
         func state(initial: i64, handler: (i64, i64) -> i64) -> StateActor {
-            let ch = Channel<i64> { _ptr: _channel_new(8) }
+            let ch = Channel.buffered<i64>(8)
             let task = Task.run<i64>(() -> i64 => {
                 let mut current = initial
                 let mut r = _channel_recv(ch._ptr)

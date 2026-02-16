@@ -200,6 +200,10 @@ impl Analyzer {
     }
 
     /// Single iteration: derive concrete static monomorphs from identity-substituted ones.
+    ///
+    /// Collects concrete substitutions from ALL classes and matches them against
+    /// identity instances by TypeParam name, enabling cross-class propagation
+    /// (e.g., Task.state<i64> calling Channel.buffered<T>).
     fn derive_concrete_static_method_monomorphs(
         &mut self,
     ) -> Vec<(
@@ -211,8 +215,7 @@ impl Analyzer {
             .static_method_monomorph_cache
             .collect_instances();
 
-        let mut concrete_subs_by_class: FxHashMap<NameId, Vec<FxHashMap<NameId, ArenaTypeId>>> =
-            FxHashMap::default();
+        let mut all_concrete_subs: Vec<FxHashMap<NameId, ArenaTypeId>> = Vec::new();
         let mut identity_instances: Vec<&crate::generic::StaticMethodMonomorphInstance> =
             Vec::new();
 
@@ -226,30 +229,31 @@ impl Analyzer {
                 if has_type_param_value {
                     identity_instances.push(inst);
                 } else if !inst.substitutions.is_empty() {
-                    concrete_subs_by_class
-                        .entry(inst.class_name)
-                        .or_default()
-                        .push(inst.substitutions.clone());
+                    all_concrete_subs.push(inst.substitutions.clone());
                 }
             }
         }
 
-        for subs_list in concrete_subs_by_class.values_mut() {
-            subs_list.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
-            subs_list.dedup();
-        }
+        all_concrete_subs.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+        all_concrete_subs.dedup();
 
         let mut new_instances = Vec::new();
 
         for identity_inst in &identity_instances {
-            let Some(concrete_subs_list) = concrete_subs_by_class.get(&identity_inst.class_name)
-            else {
-                continue;
-            };
-
-            for concrete_subs in concrete_subs_list {
+            for concrete_subs in &all_concrete_subs {
                 let composed_subs =
                     self.compose_substitutions(&identity_inst.substitutions, concrete_subs);
+
+                // Skip if composition still contains type params (incomplete match).
+                {
+                    let arena = self.type_arena();
+                    if composed_subs
+                        .values()
+                        .any(|&v| arena.unwrap_type_param(v).is_some())
+                    {
+                        continue;
+                    }
+                }
 
                 let Some(key) = self.build_static_method_monomorph_key(
                     identity_inst.class_name,
@@ -296,6 +300,8 @@ impl Analyzer {
 
     /// Single iteration: derive concrete monomorphs from identity-substituted ones.
     ///
+    /// Collects concrete substitutions from ALL classes and matches them against
+    /// identity instances by TypeParam name, enabling cross-class propagation.
     /// Returns a list of (key, instance) pairs to insert into the cache.
     fn derive_concrete_class_method_monomorphs(
         &mut self,
@@ -309,8 +315,7 @@ impl Analyzer {
             .collect_instances();
 
         // Partition into concrete and identity substitutions.
-        let mut concrete_subs_by_class: FxHashMap<NameId, Vec<FxHashMap<NameId, ArenaTypeId>>> =
-            FxHashMap::default();
+        let mut all_concrete_subs: Vec<FxHashMap<NameId, ArenaTypeId>> = Vec::new();
         let mut identity_instances: Vec<&crate::generic::ClassMethodMonomorphInstance> = Vec::new();
 
         {
@@ -323,30 +328,31 @@ impl Analyzer {
                 if has_type_param_value {
                     identity_instances.push(inst);
                 } else if !inst.substitutions.is_empty() {
-                    concrete_subs_by_class
-                        .entry(inst.class_name)
-                        .or_default()
-                        .push(inst.substitutions.clone());
+                    all_concrete_subs.push(inst.substitutions.clone());
                 }
             }
         }
 
-        for subs_list in concrete_subs_by_class.values_mut() {
-            subs_list.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
-            subs_list.dedup();
-        }
+        all_concrete_subs.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+        all_concrete_subs.dedup();
 
         let mut new_instances = Vec::new();
 
         for identity_inst in &identity_instances {
-            let Some(concrete_subs_list) = concrete_subs_by_class.get(&identity_inst.class_name)
-            else {
-                continue;
-            };
-
-            for concrete_subs in concrete_subs_list {
+            for concrete_subs in &all_concrete_subs {
                 let composed_subs =
                     self.compose_substitutions(&identity_inst.substitutions, concrete_subs);
+
+                // Skip if composition still contains type params (incomplete match).
+                {
+                    let arena = self.type_arena();
+                    if composed_subs
+                        .values()
+                        .any(|&v| arena.unwrap_type_param(v).is_some())
+                    {
+                        continue;
+                    }
+                }
 
                 let Some(key) = self.build_class_method_monomorph_key(
                     identity_inst.class_name,
