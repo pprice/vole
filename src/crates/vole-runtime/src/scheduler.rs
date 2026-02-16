@@ -116,7 +116,9 @@ pub struct Task {
     pub id: TaskId,
     pub state: TaskState,
     /// The coroutine providing the execution stack.
-    pub coroutine: VoleCoroutine,
+    /// Boxed to prevent HashMap resizing from moving the coroutine struct
+    /// while it's being resumed (corosensei writes back to &mut self on yield).
+    pub coroutine: Box<VoleCoroutine>,
     /// Result value (set when task completes). Stored as i64 (tagged pointer or value).
     pub result: Option<i64>,
     /// Tasks waiting for this task to complete (for join).
@@ -229,7 +231,7 @@ impl Scheduler {
         let task = Task {
             id,
             state: TaskState::Pending,
-            coroutine: coro,
+            coroutine: Box::new(coro),
             result: None,
             join_waiters: Vec::new(),
             block_reason: None,
