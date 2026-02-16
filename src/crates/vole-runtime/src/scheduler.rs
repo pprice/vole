@@ -4,7 +4,8 @@
 //! (Task.yield(), channel ops, join). Uses `VoleCoroutine` for stack switching.
 
 use std::cell::{Cell, UnsafeCell};
-use std::collections::VecDeque;
+use std::collections::{BinaryHeap, VecDeque};
+use std::time::Instant;
 
 use rustc_hash::FxHashMap;
 
@@ -98,6 +99,18 @@ pub enum BlockReason {
     Select,
 }
 
+/// Source that woke a task from a `select` wait.
+///
+/// Set by the channel (or timer) that unblocks the task, read by the
+/// select implementation after the coroutine resumes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WakeupSource {
+    /// Woken by channel at the given 0-based index in the select argument list.
+    Channel(usize),
+    /// Woken by timeout expiry.
+    Timeout,
+}
+
 /// A single green thread.
 pub struct Task {
     pub id: TaskId,
@@ -117,11 +130,43 @@ pub struct Task {
     /// Cached yielder pointer for this task's coroutine. Set on first resume,
     /// restored by step_task on subsequent resumes so channel operations can yield.
     pub yielder_ptr: *const u8,
+    /// Set by the wakeup source (channel send or timer) before unblocking
+    /// a select-waiting task. Read by the `task_select` FFI after resume.
+    pub wakeup_source: Option<WakeupSource>,
 }
 
 // =============================================================================
 // Scheduler
 // =============================================================================
+
+/// Timer entry for select timeouts.
+///
+/// Stored in a min-heap (earliest deadline first).
+struct TimerEntry {
+    deadline: Instant,
+    task_id: TaskId,
+}
+
+impl PartialEq for TimerEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.deadline == other.deadline
+    }
+}
+
+impl Eq for TimerEntry {}
+
+impl PartialOrd for TimerEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for TimerEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // Reverse ordering: BinaryHeap is a max-heap, we want min-heap.
+        other.deadline.cmp(&self.deadline)
+    }
+}
 
 /// M:1 cooperative scheduler. All tasks share a single OS thread.
 pub struct Scheduler {
@@ -133,6 +178,8 @@ pub struct Scheduler {
     run_queue: VecDeque<TaskId>,
     /// All live tasks, indexed by TaskId.
     tasks: FxHashMap<TaskId, Task>,
+    /// Timer queue for select timeouts (min-heap by deadline).
+    timer_queue: BinaryHeap<TimerEntry>,
 }
 
 impl Default for Scheduler {
@@ -148,6 +195,7 @@ impl Scheduler {
             current: None,
             run_queue: VecDeque::new(),
             tasks: FxHashMap::default(),
+            timer_queue: BinaryHeap::new(),
         }
     }
 
@@ -188,6 +236,7 @@ impl Scheduler {
             panicked: false,
             panic_message: None,
             yielder_ptr: std::ptr::null(),
+            wakeup_source: None,
         };
 
         self.tasks.insert(id, task);
@@ -321,12 +370,19 @@ impl Scheduler {
     /// Run the scheduler loop until all tasks complete or deadlock.
     pub fn run(&mut self) {
         loop {
+            self.fire_expired_timers();
+
             let task_id = match self.run_queue.pop_front() {
                 Some(id) => id,
                 None => {
                     // No ready tasks.
-                    if self.has_blocked_tasks() {
+                    if self.has_blocked_tasks() && !self.has_pending_timers() {
                         self.panic_deadlock();
+                    }
+                    if self.has_pending_timers() {
+                        // Timers pending but no ready tasks: busy-wait for timers.
+                        std::thread::yield_now();
+                        continue;
                     }
                     return; // All tasks done.
                 }
@@ -347,11 +403,17 @@ impl Scheduler {
                 return;
             }
 
+            self.fire_expired_timers();
+
             let task_id = match self.run_queue.pop_front() {
                 Some(id) => id,
                 None => {
-                    if self.has_blocked_tasks() {
+                    if self.has_blocked_tasks() && !self.has_pending_timers() {
                         self.panic_deadlock();
+                    }
+                    if self.has_pending_timers() {
+                        std::thread::yield_now();
+                        continue;
                     }
                     return; // All tasks done (target must be done too).
                 }
@@ -476,10 +538,12 @@ impl Scheduler {
     /// Used by main-thread channel recv to pump the scheduler inline.
     /// Panics on deadlock (blocked tasks with empty run queue).
     pub fn pump_one(&mut self) -> bool {
+        self.fire_expired_timers();
+
         let task_id = match self.run_queue.pop_front() {
             Some(id) => id,
             None => {
-                if self.has_blocked_tasks() {
+                if self.has_blocked_tasks() && !self.has_pending_timers() {
                     self.panic_deadlock();
                 }
                 return false;
@@ -487,6 +551,61 @@ impl Scheduler {
         };
         self.step_task(task_id);
         true
+    }
+
+    /// Register a timer that will fire at the given deadline.
+    ///
+    /// When the timer fires (deadline reached), the task is woken with
+    /// `WakeupSource::Timeout`.
+    pub fn register_timer(&mut self, task_id: TaskId, deadline: Instant) {
+        self.timer_queue.push(TimerEntry { deadline, task_id });
+    }
+
+    /// Fire all expired timers: unblock tasks whose deadlines have passed.
+    ///
+    /// Called at the start of each scheduler step (run/pump_one) to ensure
+    /// timers are checked even when tasks are yielding.
+    pub fn fire_expired_timers(&mut self) {
+        let now = Instant::now();
+        while let Some(entry) = self.timer_queue.peek() {
+            if entry.deadline > now {
+                break;
+            }
+            let entry = self.timer_queue.pop().unwrap();
+            if let Some(task) = self.tasks.get_mut(&entry.task_id)
+                && task.state == TaskState::Blocked
+            {
+                // Only set timeout wakeup if no channel has already woken it.
+                if task.wakeup_source.is_none() {
+                    task.wakeup_source = Some(WakeupSource::Timeout);
+                }
+                task.state = TaskState::Pending;
+                task.block_reason = None;
+                self.run_queue.push_back(entry.task_id);
+            }
+        }
+    }
+
+    /// Set the wakeup source for a task (used by channel select-wake).
+    pub fn set_wakeup_source(&mut self, task_id: TaskId, source: WakeupSource) {
+        if let Some(task) = self.tasks.get_mut(&task_id) {
+            // First wake wins: don't overwrite an existing source.
+            if task.wakeup_source.is_none() {
+                task.wakeup_source = Some(source);
+            }
+        }
+    }
+
+    /// Read and clear the wakeup source for a task.
+    pub fn take_wakeup_source(&mut self, task_id: TaskId) -> Option<WakeupSource> {
+        self.tasks
+            .get_mut(&task_id)
+            .and_then(|t| t.wakeup_source.take())
+    }
+
+    /// Check whether there are any pending timers.
+    pub fn has_pending_timers(&self) -> bool {
+        !self.timer_queue.is_empty()
     }
 
     // ─── Private helpers ────────────────────────────────────────────

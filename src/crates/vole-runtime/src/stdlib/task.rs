@@ -7,6 +7,7 @@
 use crate::channel::{self, RcChannel};
 use crate::closure::Closure;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
+use crate::scheduler;
 use crate::task::{self, RcTask};
 use crate::value::{RuntimeTypeId, rc_inc};
 
@@ -115,6 +116,33 @@ pub fn module() -> NativeModule {
         task_is_done_wrapper as *const u8,
         NativeSignature {
             params: vec![NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // task_select2: (ch1: i64, ch2: i64, timeout_nanos: i64) -> i64
+    // Returns channel_index (0 or 1) on success, -1 on timeout.
+    m.register(
+        "task_select2",
+        task_select2_wrapper as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // task_select3: (ch1: i64, ch2: i64, ch3: i64, timeout_nanos: i64) -> i64
+    // Returns channel_index (0, 1, or 2) on success, -1 on timeout.
+    m.register(
+        "task_select3",
+        task_select3_wrapper as *const u8,
+        NativeSignature {
+            params: vec![
+                NativeType::I64,
+                NativeType::I64,
+                NativeType::I64,
+                NativeType::I64,
+            ],
             return_type: NativeType::I64,
         },
     );
@@ -233,6 +261,158 @@ extern "C" fn task_is_done_wrapper(task_handle: i64) -> i64 {
 }
 
 // =============================================================================
+// Select wrapper functions
+// =============================================================================
+
+/// Select on 2 channels with optional timeout.
+///
+/// Returns channel_index (0 or 1) if a channel becomes ready,
+/// or -1 if the timeout expires. A timeout_nanos of 0 means no timeout.
+#[unsafe(no_mangle)]
+extern "C" fn task_select2_wrapper(ch1: i64, ch2: i64, timeout_nanos: i64) -> i64 {
+    let channels = [ch1 as *mut RcChannel, ch2 as *mut RcChannel];
+    task_select_impl(&channels, timeout_nanos)
+}
+
+/// Select on 3 channels with optional timeout.
+///
+/// Returns channel_index (0, 1, or 2) if a channel becomes ready,
+/// or -1 if the timeout expires. A timeout_nanos of 0 means no timeout.
+#[unsafe(no_mangle)]
+extern "C" fn task_select3_wrapper(ch1: i64, ch2: i64, ch3: i64, timeout_nanos: i64) -> i64 {
+    let channels = [
+        ch1 as *mut RcChannel,
+        ch2 as *mut RcChannel,
+        ch3 as *mut RcChannel,
+    ];
+    task_select_impl(&channels, timeout_nanos)
+}
+
+/// Core select implementation shared by select2 and select3.
+///
+/// Follows the Phase 1 Semantics Contract (Section 5):
+/// 1. Duplicate channel detection (panic on duplicates).
+/// 2. Non-blocking poll phase (lowest-index tie-break).
+/// 3. Blocking phase with select-waiter registration.
+/// 4. Optional timeout via scheduler timer queue.
+fn task_select_impl(channels: &[*mut RcChannel], timeout_nanos: i64) -> i64 {
+    // Section 5.6: Reject duplicate channel arguments.
+    check_duplicate_channels(channels);
+
+    // Section 5.2: Non-blocking poll phase (lowest-index wins).
+    for (i, ch) in channels.iter().enumerate() {
+        if channel::channel_has_data(*ch) {
+            return i as i64;
+        }
+    }
+
+    // No channel is immediately ready. If we have no timeout, we must block.
+    // If timeout_nanos > 0, we block with a timer.
+
+    // Get current task ID for registering as select-waiter.
+    let current_task_id =
+        scheduler::with_scheduler(|sched| sched.current_task().map(|id| id.as_raw()));
+
+    let Some(task_id_raw) = current_task_id else {
+        // Called from main thread (no current task). Drive the scheduler
+        // inline until a channel becomes ready, similar to main_thread_recv_loop.
+        return main_thread_select_loop(channels, timeout_nanos);
+    };
+
+    // Register as select-waiter on all channels.
+    for (i, ch) in channels.iter().enumerate() {
+        channel::channel_add_select_waiter(*ch, task_id_raw, i);
+    }
+
+    // Block the current task with Select reason.
+    scheduler::with_scheduler(|sched| {
+        sched.block_current(scheduler::BlockReason::Select);
+    });
+
+    // Register timeout timer if specified.
+    if timeout_nanos > 0 {
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_nanos(timeout_nanos as u64);
+        scheduler::with_scheduler(|sched| {
+            sched.register_timer(scheduler::TaskId::from_raw(task_id_raw), deadline);
+        });
+    }
+
+    // Yield the coroutine back to the scheduler.
+    scheduler::yield_current_coroutine();
+
+    // --- Resumed after wakeup ---
+
+    // Read and clear the wakeup source.
+    let wakeup = scheduler::with_scheduler(|sched| {
+        sched.take_wakeup_source(scheduler::TaskId::from_raw(task_id_raw))
+    });
+
+    // Unregister from all channels.
+    for ch in channels {
+        channel::channel_remove_select_waiter(*ch, task_id_raw);
+    }
+
+    match wakeup {
+        Some(scheduler::WakeupSource::Channel(index)) => index as i64,
+        Some(scheduler::WakeupSource::Timeout) => -1,
+        None => {
+            // Shouldn't happen in Phase 1 (no spurious wakes), but
+            // treat as timeout for safety.
+            -1
+        }
+    }
+}
+
+/// Drive the scheduler from the main thread until a channel becomes ready.
+///
+/// Similar to `main_thread_recv_loop` in channel.rs. The main thread is not
+/// a scheduler task, so it pumps the scheduler inline to let producer tasks
+/// make progress.
+fn main_thread_select_loop(channels: &[*mut RcChannel], timeout_nanos: i64) -> i64 {
+    let deadline = if timeout_nanos > 0 {
+        Some(std::time::Instant::now() + std::time::Duration::from_nanos(timeout_nanos as u64))
+    } else {
+        None
+    };
+
+    loop {
+        // Run one scheduler step to let tasks make progress.
+        let has_runnable = scheduler::with_scheduler(|sched| sched.pump_one());
+
+        // Re-check channels after scheduler step.
+        for (i, ch) in channels.iter().enumerate() {
+            if channel::channel_has_data(*ch) {
+                return i as i64;
+            }
+        }
+
+        // Check timeout.
+        if let Some(dl) = deadline
+            && std::time::Instant::now() >= dl
+        {
+            return -1;
+        }
+
+        // No runnable tasks and no data: all tasks done or deadlocked.
+        if !has_runnable {
+            return -1;
+        }
+    }
+}
+
+/// Check for duplicate channel pointers and panic if found.
+fn check_duplicate_channels(channels: &[*mut RcChannel]) {
+    for i in 0..channels.len() {
+        for j in (i + 1)..channels.len() {
+            if std::ptr::eq(channels[i], channels[j]) {
+                panic!("Task.select: duplicate channel at indices {} and {}", i, j);
+            }
+        }
+    }
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -254,6 +434,8 @@ mod tests {
         assert!(m.get("task_join").is_some());
         assert!(m.get("task_cancel").is_some());
         assert!(m.get("task_is_done").is_some());
+        assert!(m.get("task_select2").is_some());
+        assert!(m.get("task_select3").is_some());
     }
 
     #[test]
@@ -345,6 +527,91 @@ mod tests {
         assert_eq!(f.signature.params.len(), 1);
         assert_eq!(f.signature.params[0], NativeType::I64);
         assert_eq!(f.signature.return_type, NativeType::I64);
+    }
+
+    #[test]
+    fn task_select2_signature() {
+        let m = module();
+        let f = m.get("task_select2").unwrap();
+        assert_eq!(f.signature.params.len(), 3);
+        assert_eq!(f.signature.return_type, NativeType::I64);
+    }
+
+    #[test]
+    fn task_select3_signature() {
+        let m = module();
+        let f = m.get("task_select3").unwrap();
+        assert_eq!(f.signature.params.len(), 4);
+        assert_eq!(f.signature.return_type, NativeType::I64);
+    }
+
+    #[test]
+    fn select_poll_finds_buffered_data() {
+        // Create two channels, put data in ch2.
+        let ch1 = channel_new_wrapper(4);
+        let ch2 = channel_new_wrapper(4);
+
+        channel_send_wrapper(ch2, 42);
+
+        // Poll should find ch2 (index 1).
+        let result = task_select2_wrapper(ch1, ch2, 0);
+        assert_eq!(result, 1);
+
+        crate::value::rc_dec(ch1 as *mut u8);
+        crate::value::rc_dec(ch2 as *mut u8);
+    }
+
+    #[test]
+    fn select_poll_lowest_index_wins() {
+        // Both channels have data -- index 0 should win.
+        let ch1 = channel_new_wrapper(4);
+        let ch2 = channel_new_wrapper(4);
+
+        channel_send_wrapper(ch1, 10);
+        channel_send_wrapper(ch2, 20);
+
+        let result = task_select2_wrapper(ch1, ch2, 0);
+        assert_eq!(result, 0);
+
+        crate::value::rc_dec(ch1 as *mut u8);
+        crate::value::rc_dec(ch2 as *mut u8);
+    }
+
+    #[test]
+    fn select_poll_closed_channel_is_ready() {
+        // A closed channel counts as "ready" (recv returns 0/nil).
+        let ch1 = channel_new_wrapper(4);
+        let ch2 = channel_new_wrapper(4);
+
+        channel_close_wrapper(ch2);
+
+        let result = task_select2_wrapper(ch1, ch2, 0);
+        assert_eq!(result, 1);
+
+        crate::value::rc_dec(ch1 as *mut u8);
+        crate::value::rc_dec(ch2 as *mut u8);
+    }
+
+    #[test]
+    fn select_no_data_returns_neg1_from_main_thread() {
+        // From main thread (no current task), if no channel is ready,
+        // select returns -1 immediately.
+        let ch1 = channel_new_wrapper(4);
+        let ch2 = channel_new_wrapper(4);
+
+        let result = task_select2_wrapper(ch1, ch2, 0);
+        assert_eq!(result, -1);
+
+        crate::value::rc_dec(ch1 as *mut u8);
+        crate::value::rc_dec(ch2 as *mut u8);
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate channel")]
+    fn select_rejects_duplicate_channels() {
+        let ch = channel_new_wrapper(4);
+        let channels = [ch as *mut RcChannel, ch as *mut RcChannel];
+        check_duplicate_channels(&channels);
     }
 
     #[test]

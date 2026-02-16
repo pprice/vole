@@ -26,12 +26,23 @@ pub struct WaitingTask {
     pub value: Option<TaggedValue>,
 }
 
+/// A task waiting in a `select` call on this channel.
+#[derive(Debug)]
+pub struct SelectWaiter {
+    /// The scheduler task ID (as u64).
+    pub task_id: u64,
+    /// The 0-based index of this channel in the select argument list.
+    pub channel_index: usize,
+}
+
 /// Owned inner state, heap-allocated via `Box`. NOT `#[repr(C)]` -- only
 /// accessed through FFI functions, never from JIT code directly.
 pub struct ChannelInner {
     pub buffer: VecDeque<TaggedValue>,
     pub waiting_senders: VecDeque<WaitingTask>,
     pub waiting_receivers: VecDeque<WaitingTask>,
+    /// Tasks blocked in `Task.select()` that include this channel.
+    pub select_waiters: Vec<SelectWaiter>,
     pub closed: bool,
 }
 
@@ -69,6 +80,7 @@ impl RcChannel {
                 buffer: VecDeque::with_capacity(capacity),
                 waiting_senders: VecDeque::new(),
                 waiting_receivers: VecDeque::new(),
+                select_waiters: Vec::new(),
                 closed: false,
             }));
 
@@ -145,6 +157,8 @@ fn buffered_send(inner: &mut ChannelInner, capacity: usize, tv: TaggedValue) -> 
     // If buffer has room, enqueue.
     if inner.buffer.len() < capacity {
         inner.buffer.push_back(tv);
+        // Notify any select-waiters that data is now available.
+        notify_select_waiters(inner);
         return 0;
     }
 
@@ -198,6 +212,10 @@ fn unbuffered_send(inner: &mut ChannelInner, tv: TaggedValue) -> i64 {
             task_id: tid,
             value: Some(tv),
         });
+        // Notify select-waiters: the sender's value is available for
+        // rendezvous. When the select-woken task does recv, it will
+        // find this waiting sender.
+        notify_select_waiters(inner);
         // Yield the coroutine back to the scheduler.
         scheduler::yield_current_coroutine();
     }
@@ -272,6 +290,29 @@ fn channel_recv_impl(
     }
 }
 
+/// Notify select-waiters that this channel has data available.
+///
+/// Called after a successful buffered send or unbuffered rendezvous that
+/// leaves data for a select-waiter. Wakes select-waiters and sets their
+/// `WakeupSource` to the channel's index in their select argument list.
+fn notify_select_waiters(inner: &mut ChannelInner) {
+    // Wake all select-waiters for this channel. Each select-waiter will
+    // compete to recv; the scheduler's cooperative model ensures only one
+    // actually gets the value, and the others will re-block or find
+    // nothing and continue.
+    // In practice, for Phase 1 M:1, there's typically at most one
+    // select-waiter per channel.
+    for waiter in inner.select_waiters.drain(..) {
+        scheduler::with_scheduler(|sched| {
+            sched.set_wakeup_source(
+                scheduler::TaskId::from_raw(waiter.task_id),
+                scheduler::WakeupSource::Channel(waiter.channel_index),
+            );
+            sched.unblock(scheduler::TaskId::from_raw(waiter.task_id));
+        });
+    }
+}
+
 /// Wake one waiting sender and move its value into the buffer.
 fn wake_one_sender(inner: &mut ChannelInner) {
     if let Some(waiter) = inner.waiting_senders.pop_front() {
@@ -309,6 +350,56 @@ fn channel_close_impl(inner: &mut ChannelInner) {
         scheduler::with_scheduler(|sched| {
             sched.unblock(scheduler::TaskId::from_raw(waiter.task_id));
         });
+    }
+
+    // Wake all select-waiters. They will see the channel is closed
+    // and handle it accordingly (either recv remaining data or return).
+    notify_select_waiters(inner);
+}
+
+// =============================================================================
+// Select support
+// =============================================================================
+
+/// Check if a channel has data available for a non-blocking recv.
+///
+/// Returns `true` if the buffer is non-empty, or (for unbuffered channels)
+/// if a sender is waiting with a value, or if the channel is closed.
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
+pub fn channel_has_data(ch: *mut RcChannel) -> bool {
+    unsafe {
+        let inner = &*(*ch).inner;
+        let capacity = (*ch).capacity;
+        !inner.buffer.is_empty()
+            || (capacity == 0 && !inner.waiting_senders.is_empty())
+            || inner.closed
+    }
+}
+
+/// Register a select-waiter on a channel.
+///
+/// The waiter will be notified (woken) when data becomes available
+/// on this channel.
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
+pub fn channel_add_select_waiter(ch: *mut RcChannel, task_id: u64, channel_index: usize) {
+    unsafe {
+        let inner = &mut *(*ch).inner;
+        inner.select_waiters.push(SelectWaiter {
+            task_id,
+            channel_index,
+        });
+    }
+}
+
+/// Remove a select-waiter from a channel.
+///
+/// Called by the select implementation after wakeup to unregister from
+/// channels that were NOT the wakeup source.
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
+pub fn channel_remove_select_waiter(ch: *mut RcChannel, task_id: u64) {
+    unsafe {
+        let inner = &mut *(*ch).inner;
+        inner.select_waiters.retain(|w| w.task_id != task_id);
     }
 }
 

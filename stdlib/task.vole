@@ -33,6 +33,20 @@ external("std:task") {
     func "task_join" as _task_join(task: handle) -> i64
     func "task_cancel" as _task_cancel(task: handle)
     func "task_is_done" as _task_is_done(task: handle) -> i64
+    func "task_select2" as _task_select2(ch1: handle, ch2: handle, timeout_nanos: i64) -> i64
+    func "task_select3" as _task_select3(ch1: handle, ch2: handle, ch3: handle, timeout_nanos: i64) -> i64
+}
+
+// =============================================================================
+// SelectResult - return type for Task.select
+// =============================================================================
+
+// Result of a Task.select operation. Check `timed_out` first, then
+// dispatch on `channel_index` to determine which channel produced the value.
+struct SelectResult {
+    channel_index: i64,
+    value: i64,
+    timed_out: bool,
 }
 
 // =============================================================================
@@ -96,6 +110,49 @@ class Task {
                 return current
             })
             return StateActor { _ch: ch._ptr, _task: task._handle }
+        }
+
+        // Wait on two channels simultaneously, returning when the first
+        // channel becomes ready or the timeout expires.
+        //
+        // `timeout_nanos` is the maximum wait in nanoseconds (0 = no timeout).
+        // Returns a SelectResult with:
+        //   - channel_index: 0 or 1 (which channel has data)
+        //   - value: the received value from that channel
+        //   - timed_out: true if the timeout expired before any channel was ready
+        //
+        // Example:
+        //   let result = Task.select2(ch1, ch2, 0)
+        //   if result.timed_out { println("timeout") }
+        //   else if result.channel_index == 0 { handle(result.value) }
+        func select2(ch1: Channel, ch2: Channel, timeout_nanos: i64) -> SelectResult {
+            let idx = _task_select2(ch1._ptr, ch2._ptr, timeout_nanos)
+            if idx == -1 {
+                return SelectResult { channel_index: -1, value: 0, timed_out: true }
+            }
+            let value = when {
+                idx == 0 => ch1.receive(),
+                _ => ch2.receive(),
+            }
+            return SelectResult { channel_index: idx, value: value, timed_out: false }
+        }
+
+        // Wait on three channels simultaneously, returning when the first
+        // channel becomes ready or the timeout expires.
+        //
+        // `timeout_nanos` is the maximum wait in nanoseconds (0 = no timeout).
+        // Returns a SelectResult with channel_index 0, 1, or 2.
+        func select3(ch1: Channel, ch2: Channel, ch3: Channel, timeout_nanos: i64) -> SelectResult {
+            let idx = _task_select3(ch1._ptr, ch2._ptr, ch3._ptr, timeout_nanos)
+            if idx == -1 {
+                return SelectResult { channel_index: -1, value: 0, timed_out: true }
+            }
+            let value = when {
+                idx == 0 => ch1.receive(),
+                idx == 1 => ch2.receive(),
+                _ => ch3.receive(),
+            }
+            return SelectResult { channel_index: idx, value: value, timed_out: false }
         }
 
         // Fan-out: spawn one task per closure and collect all results.
