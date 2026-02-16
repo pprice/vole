@@ -1,4 +1,4 @@
-let { Task, Channel, SelectResult, parallel } = import "std:task"
+let { Task, Channel, SelectResult } = import "std:task"
 
 tests {
     test "run and join returns closure result" {
@@ -181,7 +181,7 @@ tests {
     }
 
     test "parallel map doubles values" {
-        let results = parallel([1, 2, 3, 4, 5], 2, (x: i64) -> i64 => { return x * 2 })
+        let results = Task.parallel<i64>([1, 2, 3, 4, 5], (x: i64) -> i64 => { return x * 2 })
         assert(results.length() == 5)
         let mut sum = 0
         for v in results.iter() {
@@ -190,18 +190,14 @@ tests {
         assert(sum == 30)
     }
 
-    test "parallel with single worker" {
-        let results = parallel([10, 20, 30], 1, (x: i64) -> i64 => { return x + 1 })
-        assert(results.length() == 3)
-        let mut sum = 0
-        for v in results.iter() {
-            sum = sum + v
-        }
-        assert(sum == 63)
+    test "parallel with single item" {
+        let results = Task.parallel<i64>([10], (x: i64) -> i64 => { return x + 1 })
+        assert(results.length() == 1)
+        assert(results[0] == 11)
     }
 
-    test "parallel with more workers than items" {
-        let results = parallel([5, 10], 8, (x: i64) -> i64 => { return x * 10 })
+    test "parallel with multiple items" {
+        let results = Task.parallel<i64>([5, 10], (x: i64) -> i64 => { return x * 10 })
         assert(results.length() == 2)
         let mut sum = 0
         for v in results.iter() {
@@ -211,7 +207,7 @@ tests {
     }
 
     test "parallel identity transform" {
-        let results = parallel([7, 14, 21], 3, (x: i64) -> i64 => { return x })
+        let results = Task.parallel<i64>([7, 14, 21], (x: i64) -> i64 => { return x })
         assert(results.length() == 3)
         let mut sum = 0
         for v in results.iter() {

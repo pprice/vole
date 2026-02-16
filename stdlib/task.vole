@@ -106,6 +106,10 @@ class Task<T: Sendable> {
         // The actor owns mutable state, receives i64 messages through a
         // channel, and applies the handler to update the state.
         //
+        // NOTE: StateActor is i64-only due to a codegen bug where union
+        // type narrowing (T | Done → T) mis-resolves values inside
+        // monomorphized module methods. See ticket for tracking.
+        //
         // Example:
         //   let counter = Task.state(0, (count: i64, msg: i64) -> i64 => {
         //       return count + msg
@@ -340,18 +344,3 @@ class StateActor {
     }
 }
 
-// Process array items concurrently using up to `max` worker tasks.
-// Each item from `items` is passed through `transform` in a worker task.
-// Returns the transformed results as an array.
-//
-// NOTE: Output order is NOT guaranteed to match input order.
-//
-// Example:
-//   let results = parallel([1, 2, 3, 4], 2, (x: i64) -> i64 => {
-//       return x * 10
-//   })
-//   // results contains [10, 20, 30, 40] in some order
-func parallel(items: [i64], max: i64, transform: (i64) -> i64) -> [i64] {
-    _ = max
-    return Task.parallel<i64>(items, transform)
-}
