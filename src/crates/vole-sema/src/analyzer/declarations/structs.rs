@@ -12,6 +12,21 @@ impl Analyzer {
             self.name_table_mut()
                 .intern(self.module.current_module, &[struct_decl.name], interner);
 
+        // Dispatch to appropriate handler based on whether struct is generic
+        if struct_decl.type_params.is_empty() {
+            self.collect_struct_signature_non_generic(struct_decl, name_id, interner);
+        } else {
+            self.collect_struct_signature_generic(struct_decl, name_id, interner);
+        }
+    }
+
+    /// Collect signature for a non-generic struct.
+    fn collect_struct_signature_non_generic(
+        &mut self,
+        struct_decl: &StructDecl,
+        name_id: NameId,
+        interner: &Interner,
+    ) {
         let entity_type_id = self
             .entity_registry_mut()
             .type_by_name(name_id)
@@ -82,6 +97,105 @@ impl Analyzer {
                     method,
                     interner,
                     None, // no type_param_scope for non-generic structs
+                    method_type_params,
+                );
+            }
+        }
+    }
+
+    /// Collect signature for a generic struct.
+    fn collect_struct_signature_generic(
+        &mut self,
+        struct_decl: &StructDecl,
+        name_id: NameId,
+        interner: &Interner,
+    ) {
+        // Validate field defaults
+        let field_has_default = self.validate_field_defaults(&struct_decl.fields, interner);
+
+        // Build type params with resolved constraints
+        let type_param_scope =
+            self.build_type_params_with_constraints(&struct_decl.type_params, interner);
+
+        // Collect field info with type params in scope
+        let (field_names, field_type_ids) =
+            self.collect_field_info(&struct_decl.fields, interner, Some(&type_param_scope));
+
+        // Lookup shell registered in pass 0.5
+        let entity_type_id = self
+            .entity_registry_mut()
+            .type_by_name(name_id)
+            .expect("struct shell registered in register_all_type_shells");
+
+        // Skip if already processed (shared cache scenario)
+        if self
+            .entity_registry()
+            .get_type(entity_type_id)
+            .generic_info
+            .is_some()
+        {
+            return;
+        }
+
+        // Set type params on the type definition (needed for method substitutions)
+        self.register_type_params_on_entity(entity_type_id, &type_param_scope);
+
+        // Set generic info for type inference during struct literal checking
+        // Use to_params() since we still need type_param_scope below
+        self.entity_registry_mut().set_generic_info(
+            entity_type_id,
+            GenericTypeInfo {
+                type_params: type_param_scope.to_params(),
+                field_names: field_names.clone(),
+                field_types: field_type_ids.clone(),
+                field_has_default,
+            },
+        );
+
+        // Register fields with placeholder types
+        self.register_type_fields(
+            entity_type_id,
+            struct_decl.name,
+            &struct_decl.fields,
+            &field_names,
+            &field_type_ids,
+            interner,
+        );
+
+        // Build self_type_id with type param placeholders
+        let type_arg_ids = self.build_type_arg_placeholders(&type_param_scope);
+        let self_type_id = self
+            .type_arena_mut()
+            .struct_type(entity_type_id, type_arg_ids);
+        let base_type_id = self
+            .type_arena_mut()
+            .struct_type(entity_type_id, TypeIdVec::new());
+        self.entity_registry_mut()
+            .set_base_type_id(entity_type_id, base_type_id);
+
+        // Register instance methods with type params in scope
+        for method in &struct_decl.methods {
+            self.register_instance_method(
+                entity_type_id,
+                struct_decl.name,
+                method,
+                interner,
+                Some(&type_param_scope),
+                Some(self_type_id),
+            );
+        }
+
+        // Register static methods with type params in scope
+        if let Some(ref statics) = struct_decl.statics {
+            for method in &statics.methods {
+                let method_type_params =
+                    self.build_method_type_params(method, Some(&type_param_scope), interner);
+                self.register_static_method_helper(
+                    entity_type_id,
+                    struct_decl.name,
+                    method,
+                    interner,
+                    Some(&type_param_scope),
                     method_type_params,
                 );
             }
