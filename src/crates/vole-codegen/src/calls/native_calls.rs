@@ -88,7 +88,7 @@ impl Cg<'_, '_, '_> {
     /// For struct returns, uses C ABI conventions:
     /// - Small structs (1-2 fields): multi-value return in registers
     /// - Large structs (3+ fields): sret convention with hidden first param
-    pub(super) fn call_native_indirect(
+    pub(crate) fn call_native_indirect(
         &mut self,
         native_func: &NativeFunction,
         args: &[Value],

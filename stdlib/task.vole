@@ -195,6 +195,8 @@ class Task {
 
     // Block until the task completes and return its result.
     // Panics if the task was cancelled or panicked.
+    // NOTE: codegen intercepts this method and emits inline tag extraction.
+    // The body below is a fallback that is never called at runtime.
     func join() -> i64 {
         let r = _task_join(self._handle)
         return r.value
@@ -233,8 +235,8 @@ class Channel {
 
     // Send a value on the channel.
     // Returns true on success, false if the channel is closed.
-    // Currently passes the I64 type tag (2); future typed channels
-    // will pass the actual type tag from the codegen layer.
+    // NOTE: codegen intercepts this method and emits the correct RuntimeTypeId
+    // tag based on the element type. The body below is a fallback.
     func send(value: i64) -> bool {
         return _channel_send(self._ptr, 2, value) == 0
     }
@@ -242,6 +244,8 @@ class Channel {
     // Receive a value from the channel.
     // Returns the value, or 0 if the channel is closed and empty.
     // Use is_closed() to distinguish "received 0" from "channel closed".
+    // NOTE: codegen intercepts this method and extracts the typed value
+    // from the RecvResult struct return. The body below is a fallback.
     func receive() -> i64 {
         let r = _channel_recv(self._ptr)
         return r.value

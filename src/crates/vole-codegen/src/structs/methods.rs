@@ -128,6 +128,17 @@ impl Cg<'_, '_, '_> {
             return self.array_push_call(&obj, mc);
         }
 
+        // Handle Channel/Task method interceptions — emit RuntimeTypeId tags
+        // and struct-return unboxing directly in codegen, replacing Vole-level stubs.
+        if let Some(class_name) = self.class_name_str(obj.type_id) {
+            match (class_name.as_str(), method_name_str) {
+                ("Channel", "send") => return self.channel_send_call(&obj, mc),
+                ("Channel", "receive") => return self.channel_recv_call(&obj),
+                ("Task", "join") => return self.task_join_call(&obj),
+                _ => {}
+            }
+        }
+
         // Handle RuntimeIterator methods - these call external functions directly
         // without interface boxing or vtable dispatch
         let runtime_iter_elem = self.arena().unwrap_runtime_iterator(obj.type_id);
@@ -1076,6 +1087,120 @@ impl Cg<'_, '_, '_> {
             types::I64,
             void_type_id,
         ))
+    }
+
+    /// Get the class name string for a type, if it is a class type.
+    fn class_name_str(&self, type_id: TypeId) -> Option<String> {
+        let (type_def_id, _) = self.arena().unwrap_class(type_id)?;
+        let name_id = self.query().type_name_id(type_def_id);
+        self.name_table().last_segment_str(name_id)
+    }
+
+    /// Handle Channel.send(value) — emit the correct RuntimeTypeId tag via codegen.
+    ///
+    /// Instead of relying on a hardcoded tag in the Vole source, the codegen computes
+    /// the tag from the element type (currently always i64 since Channel is not generic
+    /// yet) and calls the `channel_send` wrapper directly.
+    fn channel_send_call(
+        &mut self,
+        ch_obj: &CompiledValue,
+        mc: &MethodCallExpr,
+    ) -> CodegenResult<CompiledValue> {
+        if mc.args.len() != 1 {
+            return Err(CodegenError::arg_count("Channel.send", 1, mc.args.len()));
+        }
+
+        // Compile the value argument
+        let value = self.expr(&mc.args[0])?;
+
+        // Compute the RuntimeTypeId tag for the element type.
+        // Channel is not yet generic, so the element type is always i64.
+        let elem_type_id = TypeId::I64;
+        let tag = {
+            let arena = self.arena();
+            array_element_tag_id(elem_type_id, arena)
+        };
+        let tag_val = self.builder.ins().iconst(types::I64, tag);
+
+        // Convert the value to i64 bits for storage
+        let value_bits = convert_to_i64_for_storage(self.builder, &value);
+
+        // Look up the channel_send wrapper in the native registry
+        let native_func = self
+            .native_registry()
+            .lookup("std:task", "channel_send")
+            .ok_or_else(|| CodegenError::not_found("native function", "std:task::channel_send"))?;
+
+        // Extract _ptr field (slot 0) from Channel class instance via runtime getter
+        let ch_handle = self.get_field_cached(ch_obj.value, 0)?;
+
+        // Call channel_send_wrapper(ch_handle, tag, value_bits) -> i64
+        let call_inst = self.call_native_indirect(native_func, &[ch_handle, tag_val, value_bits]);
+        let results = self.builder.inst_results(call_inst);
+        let send_result = results[0];
+
+        // Return (send_result == 0) as bool — true on success, false if closed
+        let zero = self.builder.ins().iconst(types::I64, 0);
+        let is_ok = self.builder.ins().icmp(IntCC::Equal, send_result, zero);
+        Ok(CompiledValue::new(is_ok, types::I8, TypeId::BOOL))
+    }
+
+    /// Handle Channel.receive() — call recv wrapper and extract the value field.
+    ///
+    /// The `channel_recv` wrapper returns a `RecvResult { tag, value }` struct via
+    /// register pair (RAX + RDX). We extract the value field and return it as a
+    /// typed CompiledValue.
+    fn channel_recv_call(&mut self, ch_obj: &CompiledValue) -> CodegenResult<CompiledValue> {
+        // The element type (currently always i64 since Channel is not generic yet)
+        let elem_type_id = TypeId::I64;
+
+        // Look up the channel_recv wrapper
+        let native_func = self
+            .native_registry()
+            .lookup("std:task", "channel_recv")
+            .ok_or_else(|| CodegenError::not_found("native function", "std:task::channel_recv"))?;
+
+        // Extract _ptr field (slot 0) from Channel class instance via runtime getter
+        let ch_handle = self.get_field_cached(ch_obj.value, 0)?;
+
+        // Call channel_recv_wrapper(ch_handle) -> RecvResult { tag, value }
+        // This is a struct return with 2 fields — returned in RAX + RDX
+        let call_inst = self.call_native_indirect(native_func, &[ch_handle]);
+        let results = self.builder.inst_results(call_inst).to_vec();
+
+        // results[0] = tag (i64), results[1] = value (i64)
+        // We discard the tag and return the value as the element type
+        let raw_value = results[1];
+        Ok(self.convert_field_value(raw_value, elem_type_id))
+    }
+
+    /// Handle Task.join() — call join wrapper and extract the value field.
+    ///
+    /// The `task_join` wrapper returns a `JoinResult { tag, value }` struct via
+    /// register pair (RAX + RDX). We extract the value field and return it as a
+    /// typed CompiledValue.
+    fn task_join_call(&mut self, task_obj: &CompiledValue) -> CodegenResult<CompiledValue> {
+        // The return type (currently always i64 since Task is not generic yet)
+        let result_type_id = TypeId::I64;
+
+        // Look up the task_join wrapper
+        let native_func = self
+            .native_registry()
+            .lookup("std:task", "task_join")
+            .ok_or_else(|| CodegenError::not_found("native function", "std:task::task_join"))?;
+
+        // Extract _handle field (slot 0) from Task class instance via runtime getter
+        let task_handle = self.get_field_cached(task_obj.value, 0)?;
+
+        // Call task_join_wrapper(task_handle) -> JoinResult { tag, value }
+        // This is a struct return with 2 fields — returned in RAX + RDX
+        let call_inst = self.call_native_indirect(native_func, &[task_handle]);
+        let results = self.builder.inst_results(call_inst).to_vec();
+
+        // results[0] = tag (i64), results[1] = value (i64)
+        // We discard the tag and return the value as the result type
+        let raw_value = results[1];
+        Ok(self.convert_field_value(raw_value, result_type_id))
     }
 
     /// Resolve an Iterator interface method: find the external binding and
