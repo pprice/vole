@@ -9,7 +9,7 @@ use crate::closure::Closure;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 use crate::scheduler;
 use crate::task::{self, RcTask};
-use crate::value::{RuntimeTypeId, rc_inc};
+use crate::value::rc_inc;
 
 // =============================================================================
 // C-ABI result structs
@@ -194,18 +194,17 @@ extern "C" fn channel_send_wrapper(ch: i64, tag: i64, value: i64) -> i64 {
 ///
 /// Returns a `RecvResult { tag, value }`. On success, `tag` is the
 /// `RuntimeTypeId` of the received value. When the channel is closed and
-/// empty, returns `{ tag: RuntimeTypeId::I64, value: 0 }` (nil sentinel).
+/// empty, returns `{ tag: -1, value: 0 }` so Vole code can distinguish
+/// "channel closed" from "received literal 0".
 #[unsafe(no_mangle)]
 extern "C" fn channel_recv_wrapper(ch: i64) -> RecvResult {
     let ch_ptr = ch as *mut RcChannel;
     let mut out = [0i64; 2]; // [tag, value]
     let tag = channel::vole_channel_recv(ch_ptr, out.as_mut_ptr());
     if tag == -1 {
-        // Channel closed and empty -- return nil sentinel.
-        return RecvResult {
-            tag: RuntimeTypeId::I64 as i64,
-            value: 0,
-        };
+        // Channel closed and empty -- pass through tag=-1 so Vole callers
+        // can unambiguously detect closure without sentinel value assumptions.
+        return RecvResult { tag: -1, value: 0 };
     }
     RecvResult {
         tag: out[0],
@@ -453,6 +452,7 @@ fn check_duplicate_channels(channels: &[*mut RcChannel]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::RuntimeTypeId;
 
     #[test]
     fn module_registration() {
@@ -677,9 +677,9 @@ mod tests {
         channel_close_wrapper(ch);
         assert_eq!(channel_is_closed_wrapper(ch), 1);
 
-        // Recv on closed+empty returns nil sentinel (tag=I64, value=0).
+        // Recv on closed+empty returns tag=-1 (closed signal), value=0.
         let r3 = channel_recv_wrapper(ch);
-        assert_eq!(r3.tag, i64_tag);
+        assert_eq!(r3.tag, -1);
         assert_eq!(r3.value, 0);
 
         // Cleanup (rc_dec).

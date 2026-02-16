@@ -318,6 +318,86 @@ tests {
     }
 
     // =========================================================================
+    // Zero-value sentinel tests — verify that literal 0 is not confused
+    // with "channel closed" in iterators and state actors.
+    // =========================================================================
+
+    test "channel iter correctly receives literal zero" {
+        let ch = Channel.buffered(4)
+        ch.send(0)
+        ch.send(1)
+        ch.send(0)
+        ch.close()
+        let arr = ch.iter().collect()
+        assert(arr.length() == 3)
+        assert(arr[0] == 0)
+        assert(arr[1] == 1)
+        assert(arr[2] == 0)
+    }
+
+    test "channel iter with only zeros" {
+        let ch = Channel.buffered(4)
+        ch.send(0)
+        ch.send(0)
+        ch.send(0)
+        ch.close()
+        let mut count = 0
+        for v in ch.iter() {
+            assert(v == 0)
+            count = count + 1
+        }
+        assert(count == 3)
+    }
+
+    test "stream iterator correctly receives literal zero" {
+        let s = Task.stream((emit: (i64) -> void) => {
+            emit(0)
+            emit(1)
+            emit(0)
+        })
+        let result = s.collect()
+        assert(result.length() == 3)
+        assert(result[0] == 0)
+        assert(result[1] == 1)
+        assert(result[2] == 0)
+    }
+
+    test "stream iterator with only zeros" {
+        let s = Task.stream((emit: (i64) -> void) => {
+            emit(0)
+            emit(0)
+            emit(0)
+        })
+        let mut count = 0
+        for v in s {
+            assert(v == 0)
+            count = count + 1
+        }
+        assert(count == 3)
+    }
+
+    test "state actor processes zero messages correctly" {
+        let counter = Task.state(0, (count: i64, msg: i64) -> i64 => {
+            return count + 1
+        })
+        counter.send(0)
+        counter.send(0)
+        counter.send(0)
+        let result = counter.close_and_join()
+        assert(result == 3)
+    }
+
+    test "state actor with zero initial and zero messages" {
+        let actor = Task.state(0, (s: i64, m: i64) -> i64 => {
+            return s + m + 1
+        })
+        actor.send(0)
+        actor.send(0)
+        let result = actor.close_and_join()
+        assert(result == 2)
+    }
+
+    // =========================================================================
     // Task.select tests
     // =========================================================================
 

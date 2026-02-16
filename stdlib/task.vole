@@ -118,10 +118,10 @@ class Task {
             let ch = Channel.buffered(8)
             let task = Task.run(() -> i64 => {
                 let mut current = initial
-                let mut v = ch.receive()
-                while v != 0 || !ch.is_closed() {
-                    current = handler(current, v)
-                    v = ch.receive()
+                let mut r = _channel_recv(ch._ptr)
+                while r.tag != -1 {
+                    current = handler(current, r.value)
+                    r = _channel_recv(ch._ptr)
                 }
                 return current
             })
@@ -280,9 +280,7 @@ class ChannelIterator implements Iterator<i64> {
 implement Iterator<i64> for ChannelIterator {
     func next() -> i64 | Done {
         let r = _channel_recv(self._ptr)
-        // Phase 1 limitation: recv returns 0 both for "received literal 0"
-        // and "channel closed+empty". We disambiguate by checking is_closed.
-        if r.value == 0 && _channel_is_closed(self._ptr) == 1 {
+        if r.tag == -1 {
             return Done {}
         }
         return r.value
@@ -301,7 +299,7 @@ class StreamIterator implements Iterator<i64> {
 implement Iterator<i64> for StreamIterator {
     func next() -> i64 | Done {
         let r = _channel_recv(self._ch)
-        if r.value == 0 && _channel_is_closed(self._ch) == 1 {
+        if r.tag == -1 {
             return Done {}
         }
         return r.value
