@@ -9,7 +9,7 @@ use std::cell::Cell;
 
 use crate::alloc_track;
 use crate::scheduler::{self, TaskId};
-use crate::value::{RcHeader, RuntimeTypeId, rc_dec, tag_needs_rc};
+use crate::value::{RcHeader, RuntimeTypeId, TaggedValue, rc_dec, tag_needs_rc};
 
 // =============================================================================
 // Types
@@ -138,7 +138,7 @@ pub extern "C" fn vole_rctask_run(body_fn: *const u8, closure_ptr: *const u8) ->
     RcTask::new(task_id)
 }
 
-/// Join: block until the task completes, return its result.
+/// Join: block until the task completes, return its tagged result.
 ///
 /// If called from the main thread (no current task), drives the scheduler
 /// inline until the target completes. If called from within a task, blocks
@@ -148,13 +148,13 @@ pub extern "C" fn vole_rctask_run(body_fn: *const u8, closure_ptr: *const u8) ->
 /// If the task panicked, propagates the panic.
 /// If the task was cancelled, panics with "joined task was cancelled".
 ///
-/// Returns the raw i64 value for FFI compatibility. The full TaggedValue
-/// (tag + value) is cached on the RcTask handle for future use.
+/// Returns a `TaggedValue` with the type tag and value. The FFI wrapper
+/// (`task_join_wrapper`) converts this to a `JoinResult` struct for Vole.
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> i64 {
+pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> TaggedValue {
     if task_ptr.is_null() {
-        return 0;
+        return TaggedValue::from_i64(0);
     }
 
     let task_id = unsafe { (*task_ptr).task_id.get() };
@@ -184,7 +184,7 @@ pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> i64 {
         (*task_ptr).completed.set(true);
     }
 
-    tv.value as i64
+    tv
 }
 
 /// Cancel a task.

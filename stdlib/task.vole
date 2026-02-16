@@ -25,16 +25,32 @@
 // Native bindings to std:task module
 external("std:task") {
     func "channel_new" as _channel_new(capacity: i64) -> handle
-    func "channel_send" as _channel_send(ch: handle, value: i64) -> i64
-    func "channel_recv" as _channel_recv(ch: handle) -> i64
+    func "channel_send" as _channel_send(ch: handle, tag: i64, value: i64) -> i64
+    func "channel_recv" as _channel_recv(ch: handle) -> RecvResult
     func "channel_close" as _channel_close(ch: handle)
     func "channel_is_closed" as _channel_is_closed(ch: handle) -> i64
     func "task_run" as _task_run(closure: handle) -> handle
-    func "task_join" as _task_join(task: handle) -> i64
+    func "task_join" as _task_join(task: handle) -> JoinResult
     func "task_cancel" as _task_cancel(task: handle)
     func "task_is_done" as _task_is_done(task: handle) -> i64
     func "task_select2" as _task_select2(ch1: handle, ch2: handle, timeout_nanos: i64) -> i64
     func "task_select3" as _task_select3(ch1: handle, ch2: handle, ch3: handle, timeout_nanos: i64) -> i64
+}
+
+// =============================================================================
+// FFI result structs
+// =============================================================================
+
+// Result of a channel recv: carries the type tag and raw value.
+struct RecvResult {
+    tag: i64,
+    value: i64,
+}
+
+// Result of a task join: carries the type tag and raw value.
+struct JoinResult {
+    tag: i64,
+    value: i64,
 }
 
 // =============================================================================
@@ -180,7 +196,8 @@ class Task {
     // Block until the task completes and return its result.
     // Panics if the task was cancelled or panicked.
     func join() -> i64 {
-        return _task_join(self._handle)
+        let r = _task_join(self._handle)
+        return r.value
     }
 
     // Request cooperative cancellation of the task.
@@ -216,15 +233,18 @@ class Channel {
 
     // Send a value on the channel.
     // Returns true on success, false if the channel is closed.
+    // Currently passes the I64 type tag (2); future typed channels
+    // will pass the actual type tag from the codegen layer.
     func send(value: i64) -> bool {
-        return _channel_send(self._ptr, value) == 0
+        return _channel_send(self._ptr, 2, value) == 0
     }
 
     // Receive a value from the channel.
     // Returns the value, or 0 if the channel is closed and empty.
     // Use is_closed() to distinguish "received 0" from "channel closed".
     func receive() -> i64 {
-        return _channel_recv(self._ptr)
+        let r = _channel_recv(self._ptr)
+        return r.value
     }
 
     // Close the channel. Wakes all waiting tasks.
@@ -255,13 +275,13 @@ class ChannelIterator implements Iterator<i64> {
 
 implement Iterator<i64> for ChannelIterator {
     func next() -> i64 | Done {
-        let v = _channel_recv(self._ptr)
+        let r = _channel_recv(self._ptr)
         // Phase 1 limitation: recv returns 0 both for "received literal 0"
         // and "channel closed+empty". We disambiguate by checking is_closed.
-        if v == 0 && _channel_is_closed(self._ptr) == 1 {
+        if r.value == 0 && _channel_is_closed(self._ptr) == 1 {
             return Done {}
         }
-        return v
+        return r.value
     }
 }
 
@@ -276,11 +296,11 @@ class StreamIterator implements Iterator<i64> {
 
 implement Iterator<i64> for StreamIterator {
     func next() -> i64 | Done {
-        let v = _channel_recv(self._ch)
-        if v == 0 && _channel_is_closed(self._ch) == 1 {
+        let r = _channel_recv(self._ch)
+        if r.value == 0 && _channel_is_closed(self._ch) == 1 {
             return Done {}
         }
-        return v
+        return r.value
     }
 }
 
@@ -295,14 +315,15 @@ class StateActor {
     // Send a message to the actor.
     // The actor's handler will be called with (current_state, msg).
     func send(msg: i64) {
-        _ = _channel_send(self._ch, msg)
+        _ = _channel_send(self._ch, 2, msg)
     }
 
     // Close the channel and wait for the actor task to finish.
     // Returns the actor's final state.
     func close_and_join() -> i64 {
         _channel_close(self._ch)
-        return _task_join(self._task)
+        let r = _task_join(self._task)
+        return r.value
     }
 }
 

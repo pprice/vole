@@ -11,6 +11,26 @@ use crate::scheduler;
 use crate::task::{self, RcTask};
 use crate::value::{RuntimeTypeId, rc_inc};
 
+// =============================================================================
+// C-ABI result structs
+// =============================================================================
+
+/// Result struct for channel recv: returns both type tag and value.
+/// 2 fields => returned in registers (RAX + RDX).
+#[repr(C)]
+pub struct RecvResult {
+    pub tag: i64,
+    pub value: i64,
+}
+
+/// Result struct for task join: returns both type tag and value.
+/// 2 fields => returned in registers (RAX + RDX).
+#[repr(C)]
+pub struct JoinResult {
+    pub tag: i64,
+    pub value: i64,
+}
+
 /// Create the std:task native module
 pub fn module() -> NativeModule {
     let mut m = NativeModule::new();
@@ -25,23 +45,23 @@ pub fn module() -> NativeModule {
         },
     );
 
-    // channel_send: (ch: i64, value: i64) -> i64 (0=ok, -1=closed)
+    // channel_send: (ch: i64, tag: i64, value: i64) -> i64 (0=ok, -1=closed)
     m.register(
         "channel_send",
         channel_send_wrapper as *const u8,
         NativeSignature {
-            params: vec![NativeType::I64, NativeType::I64],
+            params: vec![NativeType::I64, NativeType::I64, NativeType::I64],
             return_type: NativeType::I64,
         },
     );
 
-    // channel_recv: (ch: i64) -> i64 (value or 0 if closed+empty)
+    // channel_recv: (ch: i64) -> RecvResult { tag, value }
     m.register(
         "channel_recv",
         channel_recv_wrapper as *const u8,
         NativeSignature {
             params: vec![NativeType::I64],
-            return_type: NativeType::I64,
+            return_type: NativeType::Struct { field_count: 2 },
         },
     );
 
@@ -90,13 +110,13 @@ pub fn module() -> NativeModule {
         },
     );
 
-    // task_join: (task: i64) -> i64 (result value)
+    // task_join: (task: i64) -> JoinResult { tag, value }
     m.register(
         "task_join",
         task_join_wrapper as *const u8,
         NativeSignature {
             params: vec![NativeType::I64],
-            return_type: NativeType::I64,
+            return_type: NativeType::Struct { field_count: 2 },
         },
     );
 
@@ -160,30 +180,37 @@ extern "C" fn channel_new_wrapper(capacity: i64) -> i64 {
     channel::vole_channel_new(capacity) as i64
 }
 
-/// Send a value on a channel. Phase 1: stores with I64 tag.
+/// Send a tagged value on a channel. Passes the type tag through to the
+/// underlying channel send.
 ///
 /// Returns 0 on success, -1 if channel is closed.
 #[unsafe(no_mangle)]
-extern "C" fn channel_send_wrapper(ch: i64, value: i64) -> i64 {
+extern "C" fn channel_send_wrapper(ch: i64, tag: i64, value: i64) -> i64 {
     let ch_ptr = ch as *mut RcChannel;
-    channel::vole_channel_send(ch_ptr, RuntimeTypeId::I64 as i64, value)
+    channel::vole_channel_send(ch_ptr, tag, value)
 }
 
-/// Receive a value from a channel. Phase 1: returns raw i64 value.
+/// Receive a tagged value from a channel.
 ///
-/// Returns the value on success, 0 if the channel is closed and empty.
-/// The caller must check `is_closed` separately to distinguish "received 0"
-/// from "channel closed".
+/// Returns a `RecvResult { tag, value }`. On success, `tag` is the
+/// `RuntimeTypeId` of the received value. When the channel is closed and
+/// empty, returns `{ tag: RuntimeTypeId::I64, value: 0 }` (nil sentinel).
 #[unsafe(no_mangle)]
-extern "C" fn channel_recv_wrapper(ch: i64) -> i64 {
+extern "C" fn channel_recv_wrapper(ch: i64) -> RecvResult {
     let ch_ptr = ch as *mut RcChannel;
     let mut out = [0i64; 2]; // [tag, value]
     let tag = channel::vole_channel_recv(ch_ptr, out.as_mut_ptr());
     if tag == -1 {
-        // Channel closed and empty -- return 0 (nil value for Phase 1).
-        return 0;
+        // Channel closed and empty -- return nil sentinel.
+        return RecvResult {
+            tag: RuntimeTypeId::I64 as i64,
+            value: 0,
+        };
     }
-    out[1] // The raw value.
+    RecvResult {
+        tag: out[0],
+        value: out[1],
+    }
 }
 
 /// Close a channel.
@@ -239,11 +266,18 @@ extern "C" fn task_run_wrapper(closure_ptr: i64) -> i64 {
     task_handle as i64
 }
 
-/// Join a task: block until it completes, return its result.
+/// Join a task: block until it completes, return its tagged result.
+///
+/// Returns a `JoinResult { tag, value }` where `tag` is the `RuntimeTypeId`
+/// of the task's return value and `value` is the raw i64 value.
 #[unsafe(no_mangle)]
-extern "C" fn task_join_wrapper(task_handle: i64) -> i64 {
+extern "C" fn task_join_wrapper(task_handle: i64) -> JoinResult {
     let task_ptr = task_handle as *mut RcTask;
-    task::vole_rctask_join(task_ptr)
+    let tv = task::vole_rctask_join(task_ptr);
+    JoinResult {
+        tag: tv.tag as i64,
+        value: tv.value as i64,
+    }
 }
 
 /// Cancel a task.
@@ -451,9 +485,10 @@ mod tests {
     fn channel_send_signature() {
         let m = module();
         let f = m.get("channel_send").unwrap();
-        assert_eq!(f.signature.params.len(), 2);
+        assert_eq!(f.signature.params.len(), 3);
         assert_eq!(f.signature.params[0], NativeType::I64);
         assert_eq!(f.signature.params[1], NativeType::I64);
+        assert_eq!(f.signature.params[2], NativeType::I64);
         assert_eq!(f.signature.return_type, NativeType::I64);
     }
 
@@ -463,7 +498,10 @@ mod tests {
         let f = m.get("channel_recv").unwrap();
         assert_eq!(f.signature.params.len(), 1);
         assert_eq!(f.signature.params[0], NativeType::I64);
-        assert_eq!(f.signature.return_type, NativeType::I64);
+        assert_eq!(
+            f.signature.return_type,
+            NativeType::Struct { field_count: 2 }
+        );
     }
 
     #[test]
@@ -508,7 +546,10 @@ mod tests {
         let f = m.get("task_join").unwrap();
         assert_eq!(f.signature.params.len(), 1);
         assert_eq!(f.signature.params[0], NativeType::I64);
-        assert_eq!(f.signature.return_type, NativeType::I64);
+        assert_eq!(
+            f.signature.return_type,
+            NativeType::Struct { field_count: 2 }
+        );
     }
 
     #[test]
@@ -551,7 +592,7 @@ mod tests {
         let ch1 = channel_new_wrapper(4);
         let ch2 = channel_new_wrapper(4);
 
-        channel_send_wrapper(ch2, 42);
+        channel_send_wrapper(ch2, RuntimeTypeId::I64 as i64, 42);
 
         // Poll should find ch2 (index 1).
         let result = task_select2_wrapper(ch1, ch2, 0);
@@ -567,8 +608,8 @@ mod tests {
         let ch1 = channel_new_wrapper(4);
         let ch2 = channel_new_wrapper(4);
 
-        channel_send_wrapper(ch1, 10);
-        channel_send_wrapper(ch2, 20);
+        channel_send_wrapper(ch1, RuntimeTypeId::I64 as i64, 10);
+        channel_send_wrapper(ch2, RuntimeTypeId::I64 as i64, 20);
 
         let result = task_select2_wrapper(ch1, ch2, 0);
         assert_eq!(result, 0);
@@ -620,18 +661,26 @@ mod tests {
         let ch = channel_new_wrapper(4);
         assert!(ch != 0);
 
-        assert_eq!(channel_send_wrapper(ch, 42), 0);
-        assert_eq!(channel_send_wrapper(ch, 99), 0);
+        let i64_tag = RuntimeTypeId::I64 as i64;
+        assert_eq!(channel_send_wrapper(ch, i64_tag, 42), 0);
+        assert_eq!(channel_send_wrapper(ch, i64_tag, 99), 0);
 
-        assert_eq!(channel_recv_wrapper(ch), 42);
-        assert_eq!(channel_recv_wrapper(ch), 99);
+        let r1 = channel_recv_wrapper(ch);
+        assert_eq!(r1.tag, i64_tag);
+        assert_eq!(r1.value, 42);
+
+        let r2 = channel_recv_wrapper(ch);
+        assert_eq!(r2.tag, i64_tag);
+        assert_eq!(r2.value, 99);
 
         // Close and verify.
         channel_close_wrapper(ch);
         assert_eq!(channel_is_closed_wrapper(ch), 1);
 
-        // Recv on closed+empty returns 0.
-        assert_eq!(channel_recv_wrapper(ch), 0);
+        // Recv on closed+empty returns nil sentinel (tag=I64, value=0).
+        let r3 = channel_recv_wrapper(ch);
+        assert_eq!(r3.tag, i64_tag);
+        assert_eq!(r3.value, 0);
 
         // Cleanup (rc_dec).
         crate::value::rc_dec(ch as *mut u8);
@@ -641,7 +690,7 @@ mod tests {
     fn send_on_closed_returns_neg1() {
         let ch = channel_new_wrapper(4);
         channel_close_wrapper(ch);
-        assert_eq!(channel_send_wrapper(ch, 42), -1);
+        assert_eq!(channel_send_wrapper(ch, RuntimeTypeId::I64 as i64, 42), -1);
 
         crate::value::rc_dec(ch as *mut u8);
     }
