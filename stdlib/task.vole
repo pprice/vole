@@ -72,6 +72,32 @@ class Task {
             return StreamIterator { _ch: ch._ptr, _task: task._handle }
         }
 
+        // Create a stateful actor backed by a task and channel.
+        // The actor owns mutable state, receives i64 messages through a
+        // channel, and applies the handler to update the state.
+        //
+        // Example:
+        //   let counter = Task.state(0, (count: i64, msg: i64) -> i64 => {
+        //       return count + msg
+        //   })
+        //   counter.send(1)
+        //   counter.send(1)
+        //   let final_count = counter.close_and_join()
+        //   assert(final_count == 2)
+        func state(initial: i64, handler: (i64, i64) -> i64) -> StateActor {
+            let ch = Channel.buffered(8)
+            let task = Task.run(() -> i64 => {
+                let mut current = initial
+                let mut v = ch.receive()
+                while v != 0 || !ch.is_closed() {
+                    current = handler(current, v)
+                    v = ch.receive()
+                }
+                return current
+            })
+            return StateActor { _ch: ch._ptr, _task: task._handle }
+        }
+
         // Fan-out: spawn one task per closure and collect all results.
         // Results are returned in the same order as the input closures.
         func all(fns: [() -> i64]) -> [i64] {
@@ -198,5 +224,27 @@ implement Iterator<i64> for StreamIterator {
             return Done {}
         }
         return v
+    }
+}
+
+// =============================================================================
+// StateActor - stateful actor backed by a task and channel
+// =============================================================================
+
+class StateActor {
+    _ch: handle,
+    _task: handle,
+
+    // Send a message to the actor.
+    // The actor's handler will be called with (current_state, msg).
+    func send(msg: i64) {
+        _ = _channel_send(self._ch, msg)
+    }
+
+    // Close the channel and wait for the actor task to finish.
+    // Returns the actor's final state.
+    func close_and_join() -> i64 {
+        _channel_close(self._ch)
+        return _task_join(self._task)
     }
 }

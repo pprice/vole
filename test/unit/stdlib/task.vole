@@ -126,6 +126,60 @@ tests {
         assert(result.length() == 0)
     }
 
+    test "state actor accumulates messages" {
+        let counter = Task.state(0, (count: i64, msg: i64) -> i64 => {
+            return count + msg
+        })
+        counter.send(1)
+        counter.send(2)
+        counter.send(3)
+        let result = counter.close_and_join()
+        assert(result == 6)
+    }
+
+    test "state actor with initial value" {
+        let counter = Task.state(100, (count: i64, msg: i64) -> i64 => {
+            return count + msg
+        })
+        counter.send(10)
+        counter.send(20)
+        let result = counter.close_and_join()
+        assert(result == 130)
+    }
+
+    test "state actor with no messages returns initial" {
+        let actor = Task.state(42, (s: i64, m: i64) -> i64 => {
+            return s + m
+        })
+        let result = actor.close_and_join()
+        assert(result == 42)
+    }
+
+    test "state actor multiply handler" {
+        let product = Task.state(1, (acc: i64, msg: i64) -> i64 => {
+            return acc * msg
+        })
+        product.send(2)
+        product.send(3)
+        product.send(4)
+        let result = product.close_and_join()
+        assert(result == 24)
+    }
+
+    test "state actor max handler" {
+        let max_actor = Task.state(0, (best: i64, msg: i64) -> i64 => {
+            if msg > best { return msg }
+            return best
+        })
+        max_actor.send(3)
+        max_actor.send(7)
+        max_actor.send(2)
+        max_actor.send(9)
+        max_actor.send(1)
+        let result = max_actor.close_and_join()
+        assert(result == 9)
+    }
+
     test "buffered channel send and receive" {
         let ch = Channel.buffered(4)
         assert(ch.send(42))
