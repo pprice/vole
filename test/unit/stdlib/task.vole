@@ -81,6 +81,51 @@ tests {
         assert(results[1] == 12)
     }
 
+    test "stream produces values consumed by for loop" {
+        let mut sum = 0
+        let s = Task.stream((emit: (i64) -> void) => {
+            emit(1)
+            emit(2)
+            emit(3)
+        })
+        for v in s {
+            sum = sum + v
+        }
+        assert(sum == 6)
+    }
+
+    test "stream works with collect" {
+        let s = Task.stream((emit: (i64) -> void) => {
+            emit(10)
+            emit(20)
+            emit(30)
+        })
+        let result = s.collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 20)
+        assert(result[2] == 30)
+    }
+
+    test "stream with captured values" {
+        let base = 100
+        let s = Task.stream((emit: (i64) -> void) => {
+            emit(base + 1)
+            emit(base + 2)
+        })
+        let result = s.collect()
+        assert(result[0] == 101)
+        assert(result[1] == 102)
+    }
+
+    test "empty stream produces no values" {
+        let s = Task.stream((emit: (i64) -> void) => {
+            // produce nothing
+        })
+        let result = s.collect()
+        assert(result.length() == 0)
+    }
+
     test "buffered channel send and receive" {
         let ch = Channel.buffered(4)
         assert(ch.send(42))

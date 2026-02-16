@@ -49,6 +49,29 @@ class Task {
             return Task { _handle: _task_run(body) }
         }
 
+        // Create a streaming iterator backed by a producer task.
+        // The producer receives an `emit` callback to send values.
+        // The returned iterator yields values until the producer finishes.
+        //
+        // Example:
+        //   let s = Task.stream((emit: (i64) -> void) => {
+        //       emit(1)
+        //       emit(2)
+        //       emit(3)
+        //   })
+        //   for v in s { println(v) }
+        func stream(producer: ((i64) -> void) -> void) -> Iterator<i64> {
+            let ch = Channel.buffered(1)
+            let task = Task.run(() -> i64 => {
+                producer((value: i64) => {
+                    _ = ch.send(value)
+                })
+                ch.close()
+                return 0
+            })
+            return StreamIterator { _ch: ch._ptr, _task: task._handle }
+        }
+
         // Fan-out: spawn one task per closure and collect all results.
         // Results are returned in the same order as the input closures.
         func all(fns: [() -> i64]) -> [i64] {
@@ -153,6 +176,25 @@ implement Iterator<i64> for ChannelIterator {
         // Phase 1 limitation: recv returns 0 both for "received literal 0"
         // and "channel closed+empty". We disambiguate by checking is_closed.
         if v == 0 && _channel_is_closed(self._ptr) == 1 {
+            return Done {}
+        }
+        return v
+    }
+}
+
+// =============================================================================
+// StreamIterator - drains a Task.stream's channel, keeping the task alive
+// =============================================================================
+
+class StreamIterator implements Iterator<i64> {
+    _ch: handle,
+    _task: handle,
+}
+
+implement Iterator<i64> for StreamIterator {
+    func next() -> i64 | Done {
+        let v = _channel_recv(self._ch)
+        if v == 0 && _channel_is_closed(self._ch) == 1 {
             return Done {}
         }
         return v

@@ -3,7 +3,7 @@
 //! All tasks run on a single OS thread, interleaving at explicit yield points
 //! (Task.yield(), channel ops, join). Uses `VoleCoroutine` for stack switching.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, UnsafeCell};
 use std::collections::VecDeque;
 
 use rustc_hash::FxHashMap;
@@ -16,6 +16,36 @@ use crate::coroutine::VoleCoroutine;
 // from within a coroutine (which would cause a RefCell double-borrow).
 thread_local! {
     static TASK_RESULT: Cell<i64> = const { Cell::new(0) };
+}
+
+// Thread-local pointer to the current task's yielder. Set by `step_task`
+// before resuming a coroutine, cleared after. Channel operations use this
+// to yield the current coroutine when they need to block (e.g., send on
+// a full buffer, recv on an empty buffer).
+thread_local! {
+    static CURRENT_YIELDER: Cell<*const u8> = const { Cell::new(std::ptr::null()) };
+}
+
+/// Yield the current task's coroutine back to the scheduler.
+///
+/// Called by channel operations when they need to block. The caller must
+/// have set the task state to `Blocked` via `block_current` before calling
+/// this. After the task is unblocked and resumed, this function returns.
+///
+/// Returns `false` if there is no current yielder (main-thread context).
+pub fn yield_current_coroutine() -> bool {
+    let yielder_ptr = CURRENT_YIELDER.with(|cell| cell.get());
+    if yielder_ptr.is_null() {
+        return false;
+    }
+    // SAFETY: The yielder pointer is valid for the duration of the coroutine's
+    // execution. We are inside that coroutine. The suspend call switches back
+    // to step_task which will handle re-queueing or blocking.
+    unsafe {
+        let yielder = &*(yielder_ptr as *const corosensei::Yielder<i64, i64>);
+        yielder.suspend(1); // Signal 1 = blocked yield (vs 0 = voluntary)
+    }
+    true
 }
 
 // =============================================================================
@@ -84,6 +114,9 @@ pub struct Task {
     pub panicked: bool,
     /// Panic message, if the task panicked.
     pub panic_message: Option<String>,
+    /// Cached yielder pointer for this task's coroutine. Set on first resume,
+    /// restored by step_task on subsequent resumes so channel operations can yield.
+    pub yielder_ptr: *const u8,
 }
 
 // =============================================================================
@@ -135,7 +168,11 @@ impl Scheduler {
 
         let coro = VoleCoroutine::new(move |yielder, _input| {
             let yielder_ptr = yielder as *const corosensei::Yielder<i64, i64> as *const u8;
+            // Set the yielder so channel operations can yield this coroutine.
+            CURRENT_YIELDER.with(|cell| cell.set(yielder_ptr));
             let result = func(closure as *const u8, yielder_ptr);
+            // Clear the yielder before exiting.
+            CURRENT_YIELDER.with(|cell| cell.set(std::ptr::null()));
             // Store the task's return value in the thread-local transfer slot.
             // step_task reads it after the coroutine completes.
             TASK_RESULT.with(|cell| cell.set(result));
@@ -150,6 +187,7 @@ impl Scheduler {
             block_reason: None,
             panicked: false,
             panic_message: None,
+            yielder_ptr: std::ptr::null(),
         };
 
         self.tasks.insert(id, task);
@@ -223,6 +261,9 @@ impl Scheduler {
             target_task.join_waiters.push(current_id);
         }
         self.block_current(BlockReason::Join(target));
+        // Yield the coroutine back to the scheduler. When the target
+        // completes or is cancelled, this task is unblocked and resumes.
+        yield_current_coroutine();
 
         // After being woken: target is now in a terminal state.
         if let Some(task) = self.tasks.get(&target) {
@@ -336,10 +377,29 @@ impl Scheduler {
             task.state = TaskState::Running;
         }
 
+        // Save the previous CURRENT_YIELDER and restore this task's yielder.
+        // This ensures that when tasks interleave, each task's channel
+        // operations use the correct yielder for suspension.
+        let prev_yielder = CURRENT_YIELDER.with(|cell| cell.get());
+        let task_yielder = self
+            .tasks
+            .get(&task_id)
+            .map_or(std::ptr::null(), |t| t.yielder_ptr);
+        CURRENT_YIELDER.with(|cell| cell.set(task_yielder));
+
         let resume_result = {
             let task = self.tasks.get_mut(&task_id).expect("task not found");
             task.coroutine.resume(0)
         };
+
+        // After resume: the coroutine may have set CURRENT_YIELDER (on first
+        // resume). Capture it back to the task for next time.
+        let updated_yielder = CURRENT_YIELDER.with(|cell| cell.get());
+        if let Some(task) = self.tasks.get_mut(&task_id) {
+            task.yielder_ptr = updated_yielder;
+        }
+        // Restore the previous yielder.
+        CURRENT_YIELDER.with(|cell| cell.set(prev_yielder));
 
         match resume_result {
             Some(_signal) => {
@@ -409,6 +469,26 @@ impl Scheduler {
         }
     }
 
+    /// Execute one scheduler step from the main thread: pop the next ready
+    /// task and resume it. Returns `true` if a task was stepped, `false` if
+    /// the run queue was empty.
+    ///
+    /// Used by main-thread channel recv to pump the scheduler inline.
+    /// Panics on deadlock (blocked tasks with empty run queue).
+    pub fn pump_one(&mut self) -> bool {
+        let task_id = match self.run_queue.pop_front() {
+            Some(id) => id,
+            None => {
+                if self.has_blocked_tasks() {
+                    self.panic_deadlock();
+                }
+                return false;
+            }
+        };
+        self.step_task(task_id);
+        true
+    }
+
     // ─── Private helpers ────────────────────────────────────────────
 
     fn has_blocked_tasks(&self) -> bool {
@@ -450,14 +530,29 @@ impl Scheduler {
 // =============================================================================
 
 thread_local! {
-    static SCHEDULER: RefCell<Option<Scheduler>> = const { RefCell::new(None) };
+    static SCHEDULER: UnsafeCell<Option<Scheduler>> = const { UnsafeCell::new(None) };
 }
 
 /// Run a function with the thread-local scheduler, lazily initializing it.
+///
+/// # Safety
+///
+/// Uses `UnsafeCell` instead of `RefCell` to allow re-entrant access. This is
+/// required because the M:1 scheduler resumes coroutines (via `step_task`),
+/// and inside those coroutines, channel/task operations call `with_scheduler`
+/// again. With `RefCell`, this would panic with "already borrowed".
+///
+/// Re-entrant mutable access is safe here because:
+/// 1. The scheduler is thread-local (no cross-thread aliasing).
+/// 2. Coroutine resume is a stack switch: the outer `with_scheduler` call is
+///    suspended on the outer stack while the coroutine runs, so no two frames
+///    access the scheduler simultaneously.
+/// 3. When the coroutine yields/completes, we return to the outer frame.
 pub fn with_scheduler<R>(f: impl FnOnce(&mut Scheduler) -> R) -> R {
     SCHEDULER.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        let sched = borrow.get_or_insert_with(Scheduler::new);
+        // SAFETY: See function doc. Single-threaded, coroutine-switched access.
+        let opt = unsafe { &mut *cell.get() };
+        let sched = opt.get_or_insert_with(Scheduler::new);
         f(sched)
     })
 }

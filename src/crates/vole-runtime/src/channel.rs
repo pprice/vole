@@ -160,6 +160,9 @@ fn buffered_send(inner: &mut ChannelInner, capacity: usize, tv: TaggedValue) -> 
             task_id: tid,
             value: Some(tv),
         });
+        // Yield the coroutine back to the scheduler. When this task is
+        // unblocked (a receiver consumes a value), it will resume here.
+        scheduler::yield_current_coroutine();
     }
 
     0
@@ -195,6 +198,8 @@ fn unbuffered_send(inner: &mut ChannelInner, tv: TaggedValue) -> i64 {
             task_id: tid,
             value: Some(tv),
         });
+        // Yield the coroutine back to the scheduler.
+        scheduler::yield_current_coroutine();
     }
 
     0
@@ -250,6 +255,9 @@ fn channel_recv_impl(
             task_id: tid,
             value: None,
         });
+        // Yield the coroutine back to the scheduler. When a sender provides
+        // a value (or the channel closes), this task is unblocked and resumes.
+        scheduler::yield_current_coroutine();
     }
 
     // After being woken, the value was placed in the transfer slot.
@@ -367,6 +375,11 @@ pub extern "C" fn vole_channel_send(ch: *mut RcChannel, tag: i64, value: i64) ->
 ///
 /// Writes the received value to the `out` buffer (2 x i64: [tag, value]).
 /// Returns the tag on success, -1 if the channel is closed and empty.
+///
+/// When called from the main thread (no current task), drives the scheduler
+/// in a loop until data is available or the channel is closed. This allows
+/// patterns like `for v in ch.iter()` from the main thread to interleave
+/// with producer tasks.
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_channel_recv(ch: *mut RcChannel, out: *mut i64) -> i64 {
@@ -375,7 +388,66 @@ pub extern "C" fn vole_channel_recv(ch: *mut RcChannel, out: *mut i64) -> i64 {
         let capacity = (*ch).capacity;
         let out_tag = &mut *out;
         let out_value = &mut *out.add(1);
-        channel_recv_impl(inner, capacity, out_tag, out_value)
+
+        // Fast path: buffer has data or we're within a task (cooperative blocking).
+        let has_current_task = scheduler::with_scheduler(|sched| sched.current_task().is_some());
+        if has_current_task || !inner.buffer.is_empty() || inner.closed {
+            return channel_recv_impl(inner, capacity, out_tag, out_value);
+        }
+
+        // For unbuffered: check if a sender is waiting.
+        if capacity == 0 && !inner.waiting_senders.is_empty() {
+            return channel_recv_impl(inner, capacity, out_tag, out_value);
+        }
+
+        // Main-thread path: drive the scheduler until data arrives or channel closes.
+        // Drop the inner reference before pumping the scheduler, then re-check.
+        let _ = inner;
+        main_thread_recv_loop(ch, out)
+    }
+}
+
+/// Drive the scheduler from the main thread until the channel has data or closes.
+///
+/// This is analogous to `run_until_done` for task join: the main thread is not
+/// a scheduler task, so it must pump the scheduler inline to let producer tasks
+/// make progress.
+fn main_thread_recv_loop(ch: *mut RcChannel, out: *mut i64) -> i64 {
+    loop {
+        // Run one scheduler step to let tasks make progress.
+        let has_runnable = scheduler::with_scheduler(|sched| sched.pump_one());
+
+        // Re-check channel state after scheduler step.
+        unsafe {
+            let inner = &mut *(*ch).inner;
+            let capacity = (*ch).capacity;
+
+            // Data available in buffer?
+            if !inner.buffer.is_empty() {
+                let out_tag = &mut *out;
+                let out_value = &mut *out.add(1);
+                return channel_recv_impl(inner, capacity, out_tag, out_value);
+            }
+
+            // Unbuffered with a waiting sender?
+            if capacity == 0 && !inner.waiting_senders.is_empty() {
+                let out_tag = &mut *out;
+                let out_value = &mut *out.add(1);
+                return channel_recv_impl(inner, capacity, out_tag, out_value);
+            }
+
+            // Channel closed?
+            if inner.closed {
+                return -1;
+            }
+        }
+
+        // No runnable tasks and no data -- all tasks done or deadlocked.
+        // pump_one already panics on deadlock, so if we get here with
+        // !has_runnable, all tasks completed without producing data.
+        if !has_runnable {
+            return -1;
+        }
     }
 }
 
