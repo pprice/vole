@@ -1099,24 +1099,70 @@ impl Cg<'_, '_, '_> {
         self.name_table().last_segment_str(name_id)
     }
 
-    /// Extract Channel<T>'s concrete element type, defaulting to i64 when unavailable.
-    fn channel_element_type_id(&self, ch_type_id: TypeId) -> TypeId {
-        let elem_type_id = self
+    /// Extract the first type argument from a generic class (e.g. Channel<T>, Task<T>,
+    /// StateActor<T>), applying any active monomorphization substitutions.
+    /// Defaults to i64 when the class has no type arguments.
+    fn class_first_type_arg(&self, class_type_id: TypeId) -> TypeId {
+        let raw = self
             .arena()
-            .unwrap_class(ch_type_id)
+            .unwrap_class(class_type_id)
             .and_then(|(_, type_args)| type_args.first().copied())
             .unwrap_or(TypeId::I64);
-        self.try_substitute_type(elem_type_id)
+        self.try_substitute_type(raw)
     }
 
-    /// Extract Task<T>'s concrete result type, defaulting to i64 when unavailable.
-    fn task_result_type_id(&self, task_type_id: TypeId) -> TypeId {
-        let result_type_id = self
-            .arena()
-            .unwrap_class(task_type_id)
-            .and_then(|(_, type_args)| type_args.first().copied())
+    /// Emit `vole_task_set_spawn_tag(tag)` before `Task.run(closure)` so the
+    /// scheduler knows the closure's return-value ABI (f64 in XMM0 vs i64 in RAX).
+    ///
+    /// Returns `Ok(Some(..))` only if this is NOT a `Task.run` call (never handles
+    /// the call itself — always returns `Ok(None)` for `Task.run` so the normal
+    /// monomorphized call path handles it). The side-effect is the emitted tag-set
+    /// call that executes before the actual `_task_run` native call.
+    fn try_task_run_intercept(
+        &mut self,
+        type_def_id: TypeDefId,
+        mc: &MethodCallExpr,
+        _expr_id: NodeId,
+    ) -> CodegenResult<Option<CompiledValue>> {
+        // Check if this is Task.run
+        let type_name_id = self.query().type_name_id(type_def_id);
+        let type_name = self.name_table().last_segment_str(type_name_id);
+        if type_name.as_deref() != Some("Task") {
+            return Ok(None);
+        }
+        let method_name = self.interner().resolve(mc.method);
+        if method_name != "run" {
+            return Ok(None);
+        }
+        if mc.args.is_empty() {
+            return Ok(None);
+        }
+
+        // Peek at the first argument's type to determine the closure's return type.
+        // We need the type WITHOUT compiling the argument (compilation happens later
+        // in the normal call path).
+        let closure_expr = &mc.args[0];
+        let return_type_id = self
+            .get_expr_type(&closure_expr.id)
+            .and_then(|func_type_id| {
+                self.arena()
+                    .unwrap_function(func_type_id)
+                    .map(|(_, ret, _)| self.try_substitute_type(ret))
+            })
             .unwrap_or(TypeId::I64);
-        self.try_substitute_type(result_type_id)
+
+        // Compute the RuntimeTypeId tag for the return type.
+        let tag = {
+            let arena = self.arena();
+            array_element_tag_id(return_type_id, arena)
+        };
+        let tag_val = self.builder.ins().iconst(types::I64, tag);
+
+        // Emit: vole_task_set_spawn_tag(tag)
+        self.call_runtime_void(RuntimeKey::TaskSetSpawnTag, &[tag_val])?;
+
+        // Return None so the normal monomorphized call path handles the actual call.
+        Ok(None)
     }
 
     /// Handle Channel.send(value) — emit the correct RuntimeTypeId tag via codegen.
@@ -1137,7 +1183,7 @@ impl Cg<'_, '_, '_> {
         let value = self.expr(&mc.args[0])?;
 
         // Compute the RuntimeTypeId tag for Channel<T>'s concrete element type.
-        let elem_type_id = self.channel_element_type_id(ch_obj.type_id);
+        let elem_type_id = self.class_first_type_arg(ch_obj.type_id);
         let tag = {
             let arena = self.arena();
             array_element_tag_id(elem_type_id, arena)
@@ -1167,32 +1213,41 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(is_ok, types::I8, TypeId::BOOL))
     }
 
-    /// Handle Channel.receive() — call recv wrapper and extract the value field.
+    /// Call a native FFI function that returns a `{ tag, value }` struct, extract
+    /// the value (slot 1), and convert it to the concrete element type `T` derived
+    /// from the class's first type argument.
     ///
-    /// The `channel_recv` wrapper returns a `RecvResult { tag, value }` struct via
-    /// register pair (RAX + RDX). We extract the value field and return it as a
-    /// typed CompiledValue.
-    fn channel_recv_call(&mut self, ch_obj: &CompiledValue) -> CodegenResult<CompiledValue> {
-        let elem_type_id = self.channel_element_type_id(ch_obj.type_id);
+    /// Shared by `channel_recv_call` and `task_join_call` — both follow the same
+    /// pattern: look up an FFI wrapper by module+name, pass slot-0 of the class
+    /// instance as the handle, and reinterpret the second return register as `T`.
+    fn call_tagged_ffi(
+        &mut self,
+        obj: &CompiledValue,
+        ffi_module: &str,
+        ffi_name: &str,
+    ) -> CodegenResult<CompiledValue> {
+        let elem_type_id = self.class_first_type_arg(obj.type_id);
 
-        // Look up the channel_recv wrapper
         let native_func = self
             .native_registry()
-            .lookup("std:task", "channel_recv")
-            .ok_or_else(|| CodegenError::not_found("native function", "std:task::channel_recv"))?;
+            .lookup(ffi_module, ffi_name)
+            .ok_or_else(|| {
+                CodegenError::not_found("native function", format!("{ffi_module}::{ffi_name}"))
+            })?;
 
-        // Extract _ptr field (slot 0) from Channel class instance via runtime getter
-        let ch_handle = self.get_field_cached(ch_obj.value, 0)?;
+        let handle = self.get_field_cached(obj.value, 0)?;
 
-        // Call channel_recv_wrapper(ch_handle) -> RecvResult { tag, value }
-        // This is a struct return with 2 fields — returned in RAX + RDX
-        let call_inst = self.call_native_indirect(native_func, &[ch_handle]);
+        let call_inst = self.call_native_indirect(native_func, &[handle]);
         let results = self.builder.inst_results(call_inst).to_vec();
 
-        // results[0] = tag (i64), results[1] = value (i64)
-        // We discard the tag and return the value as the element type
+        // results[0] = tag (i64, discarded), results[1] = value (i64 bits)
         let raw_value = results[1];
         Ok(self.convert_field_value(raw_value, elem_type_id))
+    }
+
+    /// Handle Channel.receive() — call recv wrapper and extract the typed value.
+    fn channel_recv_call(&mut self, ch_obj: &CompiledValue) -> CodegenResult<CompiledValue> {
+        self.call_tagged_ffi(ch_obj, "std:task", "channel_recv")
     }
 
     /// Handle Channel.try_receive() — call recv wrapper and return `T | Done`.
@@ -1206,7 +1261,7 @@ impl Cg<'_, '_, '_> {
         method_sym: Symbol,
         expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
-        let elem_type_id = self.channel_element_type_id(ch_obj.type_id);
+        let elem_type_id = self.class_first_type_arg(ch_obj.type_id);
 
         let inferred_return_type = self
             .get_substituted_return_type(&expr_id)
@@ -1307,40 +1362,13 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
-    /// Handle Task.join() — call join wrapper and extract the value field.
-    ///
-    /// The `task_join` wrapper returns a `JoinResult { tag, value }` struct via
-    /// register pair (RAX + RDX). We extract the value field and return it as a
-    /// typed CompiledValue.
+    /// Handle Task.join() — call join wrapper and extract the typed value.
     fn task_join_call(
         &mut self,
         task_obj: &CompiledValue,
-        expr_id: NodeId,
+        _expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
-        let result_type_id = self
-            .get_substituted_return_type(&expr_id)
-            .or_else(|| self.get_expr_type(&expr_id))
-            .map(|ty| self.substitute_type(ty))
-            .unwrap_or_else(|| self.task_result_type_id(task_obj.type_id));
-
-        // Look up the task_join wrapper
-        let native_func = self
-            .native_registry()
-            .lookup("std:task", "task_join")
-            .ok_or_else(|| CodegenError::not_found("native function", "std:task::task_join"))?;
-
-        // Extract _handle field (slot 0) from Task class instance via runtime getter
-        let task_handle = self.get_field_cached(task_obj.value, 0)?;
-
-        // Call task_join_wrapper(task_handle) -> JoinResult { tag, value }
-        // This is a struct return with 2 fields — returned in RAX + RDX
-        let call_inst = self.call_native_indirect(native_func, &[task_handle]);
-        let results = self.builder.inst_results(call_inst).to_vec();
-
-        // results[0] = tag (i64), results[1] = value (i64)
-        // We discard the tag and return the value as the result type
-        let raw_value = results[1];
-        Ok(self.convert_field_value(raw_value, result_type_id))
+        self.call_tagged_ffi(task_obj, "std:task", "task_join")
     }
 
     /// Resolve an Iterator interface method: find the external binding and
@@ -1850,6 +1878,12 @@ impl Cg<'_, '_, '_> {
 
         // Check for Array.filled<T> intrinsic (compiled as ArrayFilled runtime call)
         if let Some(result) = self.try_array_filled_intrinsic(type_def_id, mc, expr_id)? {
+            return Ok(result);
+        }
+
+        // Check for Task.run(closure) — intercept to pass the return type tag
+        // so the scheduler knows the closure's return ABI (f64 vs i64).
+        if let Some(result) = self.try_task_run_intercept(type_def_id, mc, expr_id)? {
             return Ok(result);
         }
 

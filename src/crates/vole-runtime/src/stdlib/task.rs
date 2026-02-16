@@ -243,6 +243,11 @@ extern "C" fn channel_iter_wrapper(ch: i64) -> i64 {
 /// (the task now owns a reference), and spawns it on the scheduler. The
 /// closure reference is stored on the RcTask so it will be rc_dec'd when
 /// the task handle is dropped.
+///
+/// Reads the task return type tag from the `TASK_SPAWN_RETURN_TAG` thread-local
+/// (set by codegen via `vole_task_set_spawn_tag` before calling this wrapper).
+/// The tag tells the scheduler which ABI convention the closure uses for its
+/// return value (integer types in RAX, f64 in XMM0).
 #[unsafe(no_mangle)]
 extern "C" fn task_run_wrapper(closure_ptr: i64) -> i64 {
     let closure = closure_ptr as *mut Closure;
@@ -253,11 +258,14 @@ extern "C" fn task_run_wrapper(closure_ptr: i64) -> i64 {
     // Extract the function pointer from the Vole closure.
     let func_ptr = unsafe { Closure::get_func(closure) };
 
+    // Read the return type tag set by codegen.
+    let return_tag = scheduler::take_spawn_return_tag();
+
     // RC-inc the closure: the task now owns a reference.
     rc_inc(closure as *mut u8);
 
-    // Spawn the task with the closure's function and closure pointer.
-    let task_handle = task::vole_rctask_run(func_ptr, closure as *const u8);
+    // Spawn the task with the closure's function, closure pointer, and return tag.
+    let task_handle = task::vole_rctask_run(func_ptr, closure as *const u8, return_tag);
 
     // Store the closure pointer on the task so it gets rc_dec'd on drop.
     RcTask::set_closure(task_handle, closure as *const u8);

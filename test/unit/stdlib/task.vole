@@ -443,9 +443,43 @@ tests {
         assert(result == true)
     }
 
-    // NOTE: StateActor<f64> is blocked by Task<f64>.join() codegen bug (vu-p06l).
-    // The JoinResult struct stores values as i64, and the join intercept does not
-    // reinterpret-cast f64 payloads. Channel<f64> works, but Task<f64>.join() does not.
+    test "task f64 join" {
+        let t = Task.run(() -> f64 => { return 3.14 })
+        let result = t.join()
+        assert(result == 3.14)
+    }
+
+    test "task all f64" {
+        let fns: [() -> f64] = [
+            () -> f64 => { return 1.1 },
+            () -> f64 => { return 2.2 },
+            () -> f64 => { return 3.3 },
+        ]
+        let results = Task.all(fns)
+        assert(results.length() == 3)
+        assert(results[0] == 1.1)
+        assert(results[1] == 2.2)
+        assert(results[2] == 3.3)
+    }
+
+    test "state actor f64 accumulates" {
+        let actor = Task.state(0.0, (acc: f64, msg: f64) -> f64 => {
+            return acc + msg
+        })
+        actor.send(1.5)
+        actor.send(2.5)
+        actor.send(3.0)
+        let result = actor.close_and_join()
+        assert(result == 7.0)
+    }
+
+    test "state actor f64 no messages returns initial" {
+        let actor = Task.state(3.14, (s: f64, m: f64) -> f64 => {
+            return s + m
+        })
+        let result = actor.close_and_join()
+        assert(result == 3.14)
+    }
 
     // =========================================================================
     // Task.select tests

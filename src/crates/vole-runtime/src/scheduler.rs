@@ -31,6 +31,31 @@ thread_local! {
     static CURRENT_YIELDER: Cell<*const u8> = const { Cell::new(std::ptr::null()) };
 }
 
+// Thread-local slot for passing the task body's return type tag from codegen
+// to `task_run_wrapper`. Set by `vole_task_set_spawn_tag` (emitted just before
+// the `task_run` native call), consumed by `take_spawn_return_tag`.
+// Defaults to `RuntimeTypeId::I64` so existing i64-returning tasks work
+// without any codegen changes.
+thread_local! {
+    static TASK_SPAWN_RETURN_TAG: Cell<u64> = const { Cell::new(RuntimeTypeId::I64 as u64) };
+}
+
+/// Set the return type tag that will be used for the next `task_run_wrapper` call.
+/// Called by JIT-emitted code immediately before calling the `task_run` native.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_task_set_spawn_tag(tag: i64) {
+    TASK_SPAWN_RETURN_TAG.with(|cell| cell.set(tag as u64));
+}
+
+/// Consume the return type tag, resetting it to the default (I64).
+pub fn take_spawn_return_tag() -> u64 {
+    TASK_SPAWN_RETURN_TAG.with(|cell| {
+        let tag = cell.get();
+        cell.set(RuntimeTypeId::I64 as u64);
+        tag
+    })
+}
+
 /// Yield the current task's coroutine back to the scheduler.
 ///
 /// Called by channel operations when they need to block. The caller must
@@ -212,34 +237,50 @@ impl Scheduler {
     }
 
     /// Spawn a new task. Returns its TaskId.
+    ///
+    /// `return_tag` tells the scheduler what ABI the body function uses for
+    /// its return value. When the tag is `F64`, the function is called with
+    /// a `-> f64` signature (return value in XMM0 per SysV ABI) and the raw
+    /// bits are stored. All other tags use `-> i64` (return value in RAX).
     #[expect(clippy::not_unsafe_ptr_arg_deref)]
-    pub fn spawn(&mut self, body_fn: *const u8, closure_ptr: *const u8) -> TaskId {
+    pub fn spawn(&mut self, body_fn: *const u8, closure_ptr: *const u8, return_tag: u64) -> TaskId {
         let id = TaskId(self.next_id);
         self.next_id += 1;
 
-        // Safety: body_fn and closure_ptr come from JIT-generated code.
-        // Use C-unwind ABI because the body may call vole_generator_yield
-        // or other functions that perform stack switches via corosensei.
-        // The Vole function returns i64 in RAX -- we capture it and store
-        // it as the task's result via set_current_result.
-        let func: extern "C-unwind" fn(*const u8, *const u8) -> i64 =
-            unsafe { std::mem::transmute(body_fn) };
         let closure = closure_ptr as usize;
+        let is_f64 = return_tag == RuntimeTypeId::F64 as u64;
 
         let coro = VoleCoroutine::new(move |yielder, _input| {
             let yielder_ptr = yielder as *const corosensei::Yielder<i64, i64> as *const u8;
             // Set the yielder so channel operations can yield this coroutine.
             CURRENT_YIELDER.with(|cell| cell.set(yielder_ptr));
-            let result = func(closure as *const u8, yielder_ptr);
+
+            // Call the body function with the correct ABI for its return type.
+            // f64 returns live in XMM0 (SysV) and must be read through a
+            // `-> f64` function pointer; everything else returns in RAX via
+            // `-> i64`.
+            let (tag, value) = if is_f64 {
+                // Safety: body_fn comes from JIT-generated code with a
+                // `-> f64` Cranelift signature.
+                let func: extern "C-unwind" fn(*const u8, *const u8) -> f64 =
+                    unsafe { std::mem::transmute(body_fn) };
+                let result = func(closure as *const u8, yielder_ptr);
+                (RuntimeTypeId::F64 as u64, result.to_bits())
+            } else {
+                // Safety: body_fn comes from JIT-generated code with a
+                // `-> i64` (or ptr/bool/void) Cranelift signature.
+                let func: extern "C-unwind" fn(*const u8, *const u8) -> i64 =
+                    unsafe { std::mem::transmute(body_fn) };
+                let result = func(closure as *const u8, yielder_ptr);
+                (return_tag, result as u64)
+            };
+
             // Clear the yielder before exiting.
             CURRENT_YIELDER.with(|cell| cell.set(std::ptr::null()));
             // Store the task's return value in the thread-local transfer slots.
             // step_task reads them after the coroutine completes.
-            // Tag as I64 for backward compatibility: the coroutine body
-            // returns a raw i64, and the type tag will be upgraded when
-            // codegen emits tagged returns (ticket vu-kkdw).
-            TASK_RESULT_TAG.with(|cell| cell.set(RuntimeTypeId::I64 as u64));
-            TASK_RESULT_VALUE.with(|cell| cell.set(result as u64));
+            TASK_RESULT_TAG.with(|cell| cell.set(tag));
+            TASK_RESULT_VALUE.with(|cell| cell.set(value));
         });
 
         let task = Task {
@@ -742,7 +783,7 @@ pub fn with_scheduler<R>(f: impl FnOnce(&mut Scheduler) -> R) -> R {
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_task_spawn(body_fn: *const u8, closure_ptr: *const u8) -> i64 {
     with_scheduler(|sched| {
-        let task_id = sched.spawn(body_fn, closure_ptr);
+        let task_id = sched.spawn(body_fn, closure_ptr, RuntimeTypeId::I64 as u64);
         task_id.0 as i64
     })
 }
@@ -847,7 +888,11 @@ mod tests {
             FLAG.store(42, Ordering::SeqCst);
         }
 
-        sched.spawn(body as *const u8, std::ptr::null());
+        sched.spawn(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
         sched.run();
 
         assert_eq!(FLAG.load(Ordering::SeqCst), 42);
@@ -879,8 +924,16 @@ mod tests {
             ORDER.store(2, Ordering::SeqCst);
         }
 
-        sched.spawn(body_a as *const u8, std::ptr::null());
-        sched.spawn(body_b as *const u8, std::ptr::null());
+        sched.spawn(
+            body_a as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
+        sched.spawn(
+            body_b as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
         sched.run();
 
         assert_eq!(ORDER.load(Ordering::SeqCst), 3);
@@ -897,7 +950,11 @@ mod tests {
             RAN.store(1, Ordering::SeqCst);
         }
 
-        let task_id = sched.spawn(body as *const u8, std::ptr::null());
+        let task_id = sched.spawn(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
         sched.cancel(task_id);
         sched.run();
 
@@ -912,7 +969,11 @@ mod tests {
         // Spawn a task, then cancel it. Any would-be joiners should
         // see Cancelled state.
         extern "C" fn body(_closure: *const u8, _yielder: *const u8) {}
-        let task_id = sched.spawn(body as *const u8, std::ptr::null());
+        let task_id = sched.spawn(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
         sched.cancel(task_id);
 
         assert!(sched.is_done(task_id));
@@ -938,7 +999,11 @@ mod tests {
         }
 
         for _ in 0..50 {
-            sched.spawn(body as *const u8, std::ptr::null());
+            sched.spawn(
+                body as *const u8,
+                std::ptr::null(),
+                RuntimeTypeId::I64 as u64,
+            );
         }
         sched.run();
 
@@ -960,8 +1025,16 @@ mod tests {
 
         // Manually create two blocked tasks with no way to unblock.
         extern "C" fn body(_closure: *const u8, _yielder: *const u8) {}
-        let id1 = sched.spawn(body as *const u8, std::ptr::null());
-        let id2 = sched.spawn(body as *const u8, std::ptr::null());
+        let id1 = sched.spawn(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
+        let id2 = sched.spawn(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
 
         // Remove from run queue and set to blocked.
         sched.run_queue.clear();
@@ -994,7 +1067,11 @@ mod tests {
             // Task completes without setting a result.
         }
 
-        let id = sched.spawn(body as *const u8, std::ptr::null());
+        let id = sched.spawn(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
         sched.run();
 
         assert!(sched.is_done(id));

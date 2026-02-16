@@ -233,8 +233,11 @@ runtime_keys! {
     TaskIsDone             => "vole_task_is_done"            : (I64) -> I64,
     SchedulerRun           => "vole_scheduler_run"           : () -> Void,
 
+    // ── Task spawn tag ──────────────────────────────────────────────────
+    TaskSetSpawnTag        => "vole_task_set_spawn_tag"      : (I64) -> Void,
+
     // ── Task handles (RcTask) ───────────────────────────────────────────
-    RcTaskRun              => "vole_rctask_run"              : (Ptr, Ptr) -> Ptr,
+    RcTaskRun              => "vole_rctask_run"              : (Ptr, Ptr, I64) -> Ptr,
     RcTaskJoin             => "vole_rctask_join"             : (Ptr) -> I64,
     RcTaskCancel           => "vole_rctask_cancel"           : (Ptr) -> Void,
     RcTaskIsDone           => "vole_rctask_is_done"          : (Ptr) -> I64,
@@ -735,6 +738,10 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_scheduler_run",
         ptr: vole_runtime::scheduler::vole_scheduler_run as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_task_set_spawn_tag",
+        ptr: vole_runtime::scheduler::vole_task_set_spawn_tag as *const u8,
     },
     // ── Task handles (RcTask) ───────────────────────────────────────────
     LinkableRuntimeSymbol {

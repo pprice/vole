@@ -126,15 +126,21 @@ extern "C" fn task_drop(ptr: *mut u8) {
 // FFI functions
 // =============================================================================
 
-/// Spawn a new task. Takes a closure pointer and function pointer.
+/// Spawn a new task. Takes a function pointer, closure pointer, and return type tag.
 ///
 /// Returns an `*mut RcTask` as i64 (opaque handle for Vole).
 ///
 /// The closure_ptr should be the Vole closure pointer, and body_fn should
-/// be the function pointer extracted from the closure.
+/// be the function pointer extracted from the closure. `return_tag` is the
+/// `RuntimeTypeId` of the closure's return type, needed so the scheduler
+/// calls the function with the correct ABI (f64 returns live in XMM0).
 #[unsafe(no_mangle)]
-pub extern "C" fn vole_rctask_run(body_fn: *const u8, closure_ptr: *const u8) -> *mut RcTask {
-    let task_id = scheduler::with_scheduler(|sched| sched.spawn(body_fn, closure_ptr));
+pub extern "C" fn vole_rctask_run(
+    body_fn: *const u8,
+    closure_ptr: *const u8,
+    return_tag: u64,
+) -> *mut RcTask {
+    let task_id = scheduler::with_scheduler(|sched| sched.spawn(body_fn, closure_ptr, return_tag));
     RcTask::new(task_id)
 }
 
@@ -262,7 +268,11 @@ mod tests {
 
         let tid = scheduler::with_scheduler(|sched| {
             extern "C" fn body(_c: *const u8, _y: *const u8) {}
-            sched.spawn(body as *const u8, std::ptr::null())
+            sched.spawn(
+                body as *const u8,
+                std::ptr::null(),
+                RuntimeTypeId::I64 as u64,
+            )
         });
 
         let task = RcTask::new(tid);
@@ -298,7 +308,11 @@ mod tests {
             FLAG.store(42, Ordering::SeqCst);
         }
 
-        let task = vole_rctask_run(body as *const u8, std::ptr::null());
+        let task = vole_rctask_run(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
         assert!(!task.is_null());
 
         // Task hasn't run yet (scheduler not driven).
@@ -327,7 +341,11 @@ mod tests {
             RAN.store(1, Ordering::SeqCst);
         }
 
-        let task = vole_rctask_run(body as *const u8, std::ptr::null());
+        let task = vole_rctask_run(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
         vole_rctask_cancel(task);
 
         // Drive the scheduler.
@@ -349,7 +367,11 @@ mod tests {
 
         extern "C" fn body(_c: *const u8, _y: *const u8) {}
 
-        let task = vole_rctask_run(body as *const u8, std::ptr::null());
+        let task = vole_rctask_run(
+            body as *const u8,
+            std::ptr::null(),
+            RuntimeTypeId::I64 as u64,
+        );
 
         // Before run: not done.
         assert_eq!(vole_rctask_is_done(task), 0);
@@ -376,7 +398,13 @@ mod tests {
         extern "C" fn body(_c: *const u8, _y: *const u8) {}
 
         let tasks: Vec<*mut RcTask> = (0..5)
-            .map(|_| vole_rctask_run(body as *const u8, std::ptr::null()))
+            .map(|_| {
+                vole_rctask_run(
+                    body as *const u8,
+                    std::ptr::null(),
+                    RuntimeTypeId::I64 as u64,
+                )
+            })
             .collect();
 
         assert_eq!(alloc_track::count(RuntimeTypeId::Task as u32) - before, 5);
