@@ -73,7 +73,14 @@ class Map<K: Hashable + Equatable, V> {
     }
 
     func contains_key(key: K) -> bool {
-        return self.get(key) != nil
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        return match bucket {
+            MapEntry { key: existing_key, value: existing_value } => existing_key.equals(key)
+            Empty => false
+            Deleted => false
+        }
     }
 
     func keys() -> Iterator<K> {

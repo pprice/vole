@@ -385,7 +385,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// For interface types, extracts the data word before decrementing.
     pub fn consume_rc_value(&mut self, cv: &mut CompiledValue) -> CodegenResult<()> {
         if cv.is_owned() {
-            self.emit_rc_dec_for_type(cv.value, cv.type_id)?;
+            if self.rc_state(cv.type_id).needs_cleanup() {
+                self.emit_rc_dec_for_type(cv.value, cv.type_id)?;
+            } else if let Some(rc_tags) = self.rc_state(cv.type_id).union_variants() {
+                self.emit_union_rc_dec(cv.value, rc_tags)?;
+            }
             cv.mark_consumed();
         } else if cv.is_borrowed() {
             // Borrowed values don't need RC decrement — they reference an

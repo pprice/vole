@@ -617,11 +617,13 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an indirect call (closure or function value)
     fn indirect_call(&mut self, call: &CallExpr) -> CodegenResult<CompiledValue> {
-        let callee = self.expr(&call.callee)?;
+        let mut callee = self.expr(&call.callee)?;
 
         if self.arena().is_function(callee.type_id) {
             // Note: Indirect calls don't support default params lookup (use callee.id as placeholder)
-            return self.call_closure_value(callee.value, callee.type_id, call, call.callee.id);
+            let result = self.call_closure_value(callee.value, callee.type_id, call, call.callee.id)?;
+            self.consume_rc_value(&mut callee)?;
+            return Ok(result);
         }
 
         Err(CodegenError::type_mismatch(

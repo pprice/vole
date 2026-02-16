@@ -794,7 +794,17 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a for loop over an array
     fn for_array(&mut self, for_stmt: &vole_frontend::ast::ForStmt) -> CodegenResult<bool> {
-        let mut arr = self.expr(&for_stmt.iterable)?;
+        let arr = self.expr(&for_stmt.iterable)?;
+
+        // Track owned iterable temporaries in a dedicated scope so they are
+        // cleaned up on both normal loop exit and early returns from the body.
+        self.push_rc_scope();
+        if arr.is_owned() && self.rc_state(arr.type_id).needs_cleanup() {
+            let tracked_var = self.builder.declare_var(self.cranelift_type(arr.type_id));
+            self.builder.def_var(tracked_var, arr.value);
+            let drop_flag = self.register_rc_local(tracked_var, arr.type_id);
+            crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+        }
 
         // Get element type using arena method
         let elem_type_id = self
@@ -898,8 +908,7 @@ impl Cg<'_, '_, '_> {
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
-        // Safety net: consume the iterable's RC value after the loop
-        self.consume_rc_value(&mut arr)?;
+        self.pop_rc_scope_with_cleanup(None)?;
 
         Ok(false)
     }
@@ -943,10 +952,23 @@ impl Cg<'_, '_, '_> {
             // so the iterator now owns its own reference. Release the caller's
             // reference to the boxed interface data_ptr to avoid leaking it.
             self.consume_rc_value(&mut iter)?;
-            // Track the RcIterator pointer as Owned so it gets rc_dec'd after the
-            // loop. Use elem_type_id (a non-interface type) so consume_rc_value
-            // emits a plain rc_dec on the pointer, not an interface data_ptr extract.
-            iter = CompiledValue::owned(wrapped, types::I64, elem_type_id);
+            // Track as RuntimeIterator<T> so loop cleanup can register and release
+            // it like any other RC temporary.
+            let runtime_iter_type_id = self
+                .arena()
+                .lookup_runtime_iterator(elem_type_id)
+                .unwrap_or(TypeId::STRING);
+            iter = CompiledValue::owned(wrapped, types::I64, runtime_iter_type_id);
+        }
+
+        // Track owned iterator temporaries in a dedicated scope so they are
+        // cleaned up even if the loop body returns early.
+        self.push_rc_scope();
+        if iter.is_owned() && self.rc_state(iter.type_id).needs_cleanup() {
+            let tracked_var = self.builder.declare_var(self.cranelift_type(iter.type_id));
+            self.builder.def_var(tracked_var, iter.value);
+            let drop_flag = self.register_rc_local(tracked_var, iter.type_id);
+            crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
         }
 
         // Create a stack slot for the out_value parameter
@@ -1019,11 +1041,7 @@ impl Cg<'_, '_, '_> {
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
-        // Free the iterator after the loop. For owned temporaries (e.g.
-        // `for x in arr.iter()`), consume_rc_value emits rc_dec. For borrowed
-        // values (e.g. `let it = arr.iter(); for x in it`), the variable's
-        // scope-exit cleanup handles the rc_dec instead.
-        self.consume_rc_value(&mut iter)?;
+        self.pop_rc_scope_with_cleanup(None)?;
 
         Ok(false)
     }
@@ -1031,10 +1049,28 @@ impl Cg<'_, '_, '_> {
     /// Compile a for loop over a string (iterating characters)
     fn for_string(&mut self, for_stmt: &vole_frontend::ast::ForStmt) -> CodegenResult<bool> {
         // Compile the string expression
-        let mut string_val = self.expr(&for_stmt.iterable)?;
+        let string_val = self.expr(&for_stmt.iterable)?;
 
         // Create a string chars iterator from the string
         let iter_val = self.call_runtime(RuntimeKey::StringCharsIter, &[string_val.value])?;
+
+        // Track owned temporaries in a dedicated scope so early returns from
+        // the loop body still clean up the iterator and source string.
+        self.push_rc_scope();
+        if string_val.is_owned() && self.rc_state(string_val.type_id).needs_cleanup() {
+            let tracked_string = self.builder.declare_var(self.cranelift_type(string_val.type_id));
+            self.builder.def_var(tracked_string, string_val.value);
+            let drop_flag = self.register_rc_local(tracked_string, string_val.type_id);
+            crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+        }
+        let iter_type_id = self
+            .arena()
+            .lookup_runtime_iterator(TypeId::STRING)
+            .unwrap_or(TypeId::STRING);
+        let tracked_iter = self.builder.declare_var(self.cranelift_type(iter_type_id));
+        self.builder.def_var(tracked_iter, iter_val);
+        let iter_drop_flag = self.register_rc_local(tracked_iter, iter_type_id);
+        crate::rc_cleanup::set_drop_flag_live(self.builder, iter_drop_flag);
 
         // Create a stack slot for the out_value parameter
         let slot_data = self.alloc_stack(8);
@@ -1086,11 +1122,7 @@ impl Cg<'_, '_, '_> {
         // iter_next returns 0 (no new value loaded), and the continue block
         // already freed the previous iteration's char string.
 
-        // Free the string chars iterator after the loop
-        self.call_runtime_void(RuntimeKey::RcDec, &[iter_val])?;
-
-        // Safety net: consume the string iterable's RC value after the loop
-        self.consume_rc_value(&mut string_val)?;
+        self.pop_rc_scope_with_cleanup(None)?;
 
         Ok(false)
     }

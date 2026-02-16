@@ -5,7 +5,6 @@ use cranelift_module::Module;
 use smallvec::{SmallVec, smallvec};
 
 use crate::RuntimeKey;
-use crate::union_layout;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
@@ -28,6 +27,22 @@ use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 
 impl Cg<'_, '_, '_> {
+    fn consume_method_receiver(
+        &mut self,
+        receiver: &mut CompiledValue,
+        receiver_is_global_init_rc_iface: bool,
+    ) -> CodegenResult<()> {
+        // Global interface initializers are recompiled per use. They can surface as
+        // untracked/borrowed values in method-call paths, but still represent fresh
+        // temporary interface boxes that must be released after dispatch.
+        if receiver_is_global_init_rc_iface && self.arena().is_interface(receiver.type_id) {
+            self.emit_rc_dec_for_type(receiver.value, receiver.type_id)?;
+            receiver.mark_consumed();
+            return Ok(());
+        }
+        self.consume_rc_value(receiver)
+    }
+
     /// Look up a method NameId using the context's interner (which may be a module interner)
     fn method_name_id(&self, name: Symbol) -> CodegenResult<NameId> {
         let name_table = self.name_table();
@@ -118,6 +133,8 @@ impl Cg<'_, '_, '_> {
 
         // Handle built-in methods (passing concrete_return_hint for iter methods)
         if let Some(result) = self.builtin_method(&obj, method_name_str, concrete_return_hint)? {
+            let mut obj = obj;
+            self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
             return Ok(result);
         }
 
@@ -125,7 +142,10 @@ impl Cg<'_, '_, '_> {
         if let Some(_elem_type_id) = self.arena().unwrap_array(obj.type_id)
             && method_name_str == "push"
         {
-            return self.array_push_call(&obj, mc);
+            let result = self.array_push_call(&obj, mc)?;
+            let mut obj = obj;
+            self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+            return Ok(result);
         }
 
         // Handle RuntimeIterator methods - these call external functions directly
@@ -165,7 +185,7 @@ impl Cg<'_, '_, '_> {
                 // data_ptr so the underlying instance is freed. For borrowed
                 // receivers (variables), consume_rc_value is a no-op.
                 let mut obj = obj;
-                self.consume_rc_value(&mut obj)?;
+                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                 return Ok(result);
             }
 
@@ -190,7 +210,7 @@ impl Cg<'_, '_, '_> {
                 )?;
                 // Consume the owned RC receiver after the call (same as above).
                 let mut obj = obj;
-                self.consume_rc_value(&mut obj)?;
+                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                 return Ok(result);
             }
 
@@ -209,9 +229,8 @@ impl Cg<'_, '_, '_> {
                         method_name_id,
                         *func_type_id,
                     )?;
-                    if receiver_is_global_init_rc_iface {
-                        self.emit_rc_dec_for_type(obj.value, obj.type_id)?;
-                    }
+                    let mut obj = obj;
+                    self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                     return Ok(result);
                 }
                 // For functional interfaces, the object holds the function ptr or closure
@@ -227,7 +246,11 @@ impl Cg<'_, '_, '_> {
                         })
                         .unwrap_or(true)
                 };
-                return self.functional_interface_call(obj.value, *func_type_id, is_closure, mc);
+                let result =
+                    self.functional_interface_call(obj.value, *func_type_id, is_closure, mc)?;
+                let mut obj = obj;
+                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                return Ok(result);
             }
 
             // External method calls
@@ -289,7 +312,7 @@ impl Cg<'_, '_, '_> {
                     // dispatch recompiles with expected type context.
                     self.consume_rc_args(&mut rc_temps)?;
                     let mut obj = obj;
-                    self.consume_rc_value(&mut obj)?;
+                    self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                     return self.call_generic_external_intrinsic_args(
                         &ext_module_path,
                         &key,
@@ -306,7 +329,7 @@ impl Cg<'_, '_, '_> {
                 // leaks/heap corruption. Similarly, Owned string arguments
                 // (e.g., s.replace("world", "vole")) need cleanup.
                 let mut obj = obj;
-                self.consume_rc_value(&mut obj)?;
+                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                 self.consume_rc_args(&mut rc_temps)?;
                 return Ok(result);
             }
@@ -382,7 +405,7 @@ impl Cg<'_, '_, '_> {
                     func_type_id,
                 )?;
                 let mut obj = obj;
-                self.consume_rc_value(&mut obj)?;
+                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                 return Ok(result);
             }
 
@@ -415,7 +438,7 @@ impl Cg<'_, '_, '_> {
                 let result = self.call_external_id(&external_info, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call
                 let mut obj = obj;
-                self.consume_rc_value(&mut obj)?;
+                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                 self.consume_rc_args(&mut rc_temps)?;
                 return Ok(result);
             }
@@ -660,7 +683,7 @@ impl Cg<'_, '_, '_> {
 
                 // Now consume RC receiver and arg temps
                 let mut obj = obj;
-                self.consume_rc_value(&mut obj)?;
+                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
                 self.consume_rc_args(&mut rc_temps)?;
 
                 return Ok(union_copy);
@@ -673,7 +696,7 @@ impl Cg<'_, '_, '_> {
         // corruption. Similarly, Owned class arguments (e.g., b.equals(Id{n:5}))
         // need cleanup after the callee has consumed them.
         let mut obj = obj;
-        self.consume_rc_value(&mut obj)?;
+        self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
         self.consume_rc_args(&mut rc_temps)?;
 
         if is_sret {
@@ -723,43 +746,13 @@ impl Cg<'_, '_, '_> {
                 actual_result
             };
 
-            // For Union return types, the callee returns a pointer to its stack memory
-            // which becomes invalid after the call. Copy the union to our own stack.
-            let (final_value, final_type) = if self.arena().is_union(return_type_id) {
-                let union_size = self.type_size(return_type_id);
-                let local_slot = self.alloc_stack(union_size);
+            // For union returns, copy out of the callee stack into a local stack
+            // slot and mark RC unions as owned so discard paths can clean them.
+            if self.arena().is_union(return_type_id) {
+                return Ok(self.copy_union_ptr_to_local(result_value, return_type_id));
+            }
 
-                // Copy tag (8 bytes at offset 0)
-                let tag = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), result_value, 0);
-                self.builder.ins().stack_store(tag, local_slot, 0);
-
-                // Copy payload (8 bytes at offset 8) only if union has payload data.
-                // Sentinel-only unions have union_size == 8 (tag only), no payload.
-                if union_size > union_layout::TAG_ONLY_SIZE {
-                    let payload = self.builder.ins().load(
-                        types::I64,
-                        MemFlags::new(),
-                        result_value,
-                        union_layout::PAYLOAD_OFFSET,
-                    );
-                    self.builder.ins().stack_store(
-                        payload,
-                        local_slot,
-                        union_layout::PAYLOAD_OFFSET,
-                    );
-                }
-
-                let ptr_type = self.ptr_type();
-                let local_ptr = self.builder.ins().stack_addr(ptr_type, local_slot, 0);
-                (local_ptr, expected_ty)
-            } else {
-                (result_value, expected_ty)
-            };
-
-            Ok(CompiledValue::new(final_value, final_type, return_type_id))
+            Ok(CompiledValue::new(result_value, expected_ty, return_type_id))
         }
     }
 
@@ -2071,7 +2064,7 @@ impl Cg<'_, '_, '_> {
         // Compile value argument
         let value = self.expr(&mc.args[1])?;
 
-        let (tag_val, value_bits, _stored_value) =
+        let (tag_val, value_bits, mut stored_value) =
             self.prepare_dynamic_array_store(value, elem_type_id)?;
 
         // Call vole_array_filled(count, tag, value) -> *mut RcArray
@@ -2079,6 +2072,10 @@ impl Cg<'_, '_, '_> {
         let args = self.coerce_call_args(filled_ref, &[count.value, tag_val, value_bits]);
         let call = self.builder.ins().call(filled_ref, &args);
         let result_val = self.builder.inst_results(call)[0];
+
+        // Array.filled clones the provided element into each slot; release the
+        // original temporary value now that ownership has transferred.
+        self.consume_rc_value(&mut stored_value)?;
 
         let mut result = CompiledValue::new(result_val, self.ptr_type(), return_type_id);
         result.rc_lifecycle = RcLifecycle::Owned;

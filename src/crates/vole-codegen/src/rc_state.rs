@@ -16,6 +16,7 @@
 
 use vole_sema::entity_registry::EntityRegistry;
 use vole_sema::type_arena::{SemaType, TypeArena, TypeId};
+use rustc_hash::FxHashMap;
 
 /// Reference counting state for a type.
 ///
@@ -229,16 +230,30 @@ fn compute_composite_rc_offsets(
     type_id: TypeId,
 ) -> Option<(Vec<i32>, Vec<i32>)> {
     // Struct: iterate fields, collect offsets of RC-typed fields
-    if let Some((type_def_id, _)) = arena.unwrap_struct(type_id) {
+    if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id) {
         let type_def = registry.get_type(type_def_id);
         let generic_info = type_def.generic_info.as_ref()?;
-        let field_types = &generic_info.field_types;
+        let field_types: Vec<TypeId> = if !type_args.is_empty() && !generic_info.type_params.is_empty() {
+            let subs: FxHashMap<_, _> = generic_info
+                .type_params
+                .iter()
+                .zip(type_args.iter())
+                .map(|(param, &arg)| (param.name_id, arg))
+                .collect();
+            generic_info
+                .field_types
+                .iter()
+                .map(|&field_ty| arena.expect_substitute(field_ty, &subs, "rc_state struct fields"))
+                .collect()
+        } else {
+            generic_info.field_types.clone()
+        };
 
         let mut shallow_offsets = Vec::new();
         let mut deep_offsets = Vec::new();
         let mut byte_offset = 0i32;
 
-        for field_type in field_types {
+        for field_type in &field_types {
             let slots = crate::structs::field_flat_slots(*field_type, arena, registry);
 
             // Shallow: only direct RC fields

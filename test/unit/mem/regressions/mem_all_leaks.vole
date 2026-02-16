@@ -1,0 +1,116 @@
+let { Array } = import "std:array"
+let { Map } = import "std:collections/map"
+let { Set } = import "std:collections/set"
+
+class Point {
+    x: i64,
+    y: i64,
+}
+
+implement Hashable for Point {
+    func hash() -> i64 {
+        return self.x * 31 + self.y
+    }
+}
+
+implement Equatable for Point {
+    func equals(other: Point) -> bool {
+        return self.x == other.x && self.y == other.y
+    }
+}
+
+class Entry {
+    value: i64,
+}
+
+class Empty {}
+
+interface PredicateI64 {
+    func check(value: i64) -> bool
+}
+
+let isEvenPred: PredicateI64 = (x: i64) => x % 2 == 0
+
+interface Describable {
+    func describe() -> string
+}
+
+implement Describable for i64 {
+    func describe() -> string {
+        return "{self}"
+    }
+}
+
+class Processor<T: Describable> {
+    items: [T],
+
+    func describe_all() -> string {
+        let mut result = ""
+        for item in self.items {
+            let desc = ((x: T) -> string => x.describe())(item)
+            result = "{result}{desc},"
+        }
+        return result
+    }
+}
+
+struct Box<T> {
+    value: T,
+}
+
+tests "mem-all leak regressions" {
+    test "map contains_key with class values" {
+        let m = Map.new<i64, Point>()
+        m.set(1, Point { x: 10, y: 20 })
+        assert(m.contains_key(1))
+        assert(!m.contains_key(2))
+    }
+
+    test "map remove discarded optional class" {
+        let m = Map.new<Point, Point>()
+        let k = Point { x: 1, y: 2 }
+        m.set(k, Point { x: 100, y: 200 })
+        _ = m.remove(k)
+        assert(m.len() == 0)
+    }
+
+    test "set subset and disjoint early return" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = Set.new<i64>()
+        _ = b.add(1)
+        _ = b.add(3)
+
+        assert(!a.is_subset(b))
+        assert(!a.is_disjoint(b))
+        assert(!a.is_superset(b))
+    }
+
+    test "functional interface global method call" {
+        assert(isEvenPred.check(4))
+        assert(!isEvenPred.check(3))
+    }
+
+    test "inline lambda call in generic method" {
+        let proc = Processor { items: [1, 2, 3] }
+        assert(proc.describe_all() == "1,2,3,")
+    }
+
+    test "array filled with union class and sentinel" {
+        let arr = Array.filled<Entry | Empty>(8, Empty {})
+        assert(arr.length() == 8)
+    }
+
+    test "generic struct field with string concat" {
+        let b = Box { value: "he" + "llo" }
+        assert(b.value == "hello")
+    }
+
+    test "temporary collect result used for length" {
+        let iter = [42].iter()
+        _ = iter.next()
+        assert(iter.collect().length() == 0)
+    }
+}

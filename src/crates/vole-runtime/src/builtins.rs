@@ -23,7 +23,7 @@
 
 use crate::RcString;
 use crate::array::RcArray;
-use crate::value::{RuntimeTypeId, TaggedValue};
+use crate::value::{RuntimeTypeId, TaggedValue, union_heap_cleanup};
 use std::alloc::Layout;
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
@@ -516,6 +516,8 @@ pub extern "C" fn vole_array_filled(count: i64, tag: u64, value: u64) -> *mut Rc
                     },
                 );
             }
+            // The source union heap buffer is no longer needed after cloning.
+            union_heap_cleanup(value as *mut u8);
         } else {
             for i in 0..n {
                 tv.rc_inc_if_needed();

@@ -20,7 +20,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
 use super::context::Cg;
-use super::types::CompiledValue;
+use super::types::{CompiledValue, RcLifecycle};
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Void / zero defaults ==========
@@ -594,7 +594,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        self.compiled(ptr, union_type_id)
+        let mut value = self.compiled(ptr, union_type_id);
+        if self.rc_state(union_type_id).union_variants().is_some() {
+            value.rc_lifecycle = RcLifecycle::Owned;
+        }
+        value
     }
 
     /// Load the payload from a union pointer, returning zero if the union is tag-only.

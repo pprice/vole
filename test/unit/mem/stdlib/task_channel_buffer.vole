@@ -1,0 +1,72 @@
+let { Task, Channel } = import "std:task"
+
+class Packet {
+    body: string,
+}
+
+implement Transferable for Packet {
+    func transfer() -> Packet {
+        return Packet { body: self.body }
+    }
+}
+
+tests "task/channel/buffer RC smoke" {
+    test "task state with string payloads closes and joins" {
+        let actor = Task.state("seed", (current: string, msg: string) -> string => {
+            return current + ":" + msg
+        })
+        actor.send("a")
+        actor.send("b")
+        let result = actor.close_and_join()
+        assert(result == "seed:a:b")
+    }
+
+    test "task producer sends strings and channel iterator drains" {
+        let ch = Channel.buffered<string>(4)
+        let producer = Task.run(() -> i64 => {
+            _ = ch.send("left")
+            _ = ch.send("right")
+            ch.close()
+            return 0
+        })
+
+        let out = ch.iter().collect()
+        assert(out.length() == 2)
+        assert(out[0] == "left")
+        assert(out[1] == "right")
+        _ = producer.join()
+    }
+
+    test "channel try_receive drains transferable class then done" {
+        let ch = Channel.buffered<Packet>(2)
+        _ = ch.send(Packet { body: "payload" })
+        ch.close()
+
+        let first = ch.try_receive()
+        let done = ch.try_receive()
+
+        assert(first is Packet)
+        if first is Packet {
+            assert(first.body == "payload")
+        }
+        assert(done is Done)
+    }
+
+    test "buffer append from temporary keeps data intact" {
+        let buf = Buffer.from_string("vo")
+        buf.append(Buffer.from_string("le"))
+        assert(buf.to_string_raw() == "vole")
+    }
+
+    test "buffer slices and temporary strings in loop" {
+        let buf = Buffer.from_string("abcdef")
+        let mut acc = ""
+        let mut i = 0
+        while i < 3 {
+            let part = buf.slice(i, i + 2)
+            acc = acc + part.to_string_raw()
+            i = i + 1
+        }
+        assert(acc == "abbccd")
+    }
+}
