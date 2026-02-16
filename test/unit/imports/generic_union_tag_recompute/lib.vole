@@ -1,0 +1,47 @@
+// Module with generic class methods that use `is Done` / `is nil` on unions
+// containing type parameters.
+//
+// The arena sorts union variants by type category:
+//   TypeParam  -> (40, ...)
+//   Struct/Done -> (50, ...)
+//   Primitive   -> (100, ...)
+//
+// So `T | Done` sorts to [Done, T] (indices: Done=0, T=1),
+// but `i64 | Done` sorts to [i64, Done] (indices: i64=0, Done=1).
+//
+// Sema analyses this module with generic types and stores tag indices for the
+// generic ordering.  After monomorphization the substituted union may have a
+// different order, so the stored CheckTag indices become stale.
+//
+// Regression test for ticket vu-43qy.
+
+class Container<T> {
+    _value: T | Done,
+
+    statics {
+        func of(v: T) -> Container<T> {
+            return Container { _value: v }
+        }
+        func empty() -> Container<T> {
+            return Container { _value: Done {} }
+        }
+    }
+
+    // This method has `is Done` inside module code on a T | Done union.
+    // Sema stores CheckTag for the generic ordering; codegen must recompute
+    // for the substituted ordering.
+    func is_present() -> bool {
+        if self._value is Done {
+            return false
+        }
+        return true
+    }
+
+    // Same pattern using the T variant check.
+    func is_empty() -> bool {
+        if self._value is T {
+            return false
+        }
+        return true
+    }
+}

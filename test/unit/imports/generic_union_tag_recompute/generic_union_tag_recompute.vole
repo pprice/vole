@@ -1,0 +1,55 @@
+// Regression test for vu-43qy: union tag index mismatch between generic and
+// substituted types.
+//
+// When a module function uses `is Done` on a `T | Done` union, sema stores
+// a tag index based on the generic ordering (TypeParam sort key 40 vs
+// Struct/Done sort key 50).  After monomorphization with T=i64, the union
+// `i64 | Done` has a different ordering (Primitive key 100 vs Struct key 50),
+// so the stored tag index is stale.  Codegen must recompute it.
+
+let { Container } = import "./lib"
+
+tests "generic union tag recompute (vu-43qy)" {
+    // ── Container<i64> ──
+    test "is_present: i64 value detected" {
+        let c = Container.of<i64>(42)
+        assert(c.is_present())
+    }
+
+    test "is_present: Done detected in i64 container" {
+        let c = Container.empty<i64>()
+        assert(!c.is_present())
+    }
+
+    test "is_empty: i64 value means not empty" {
+        let c = Container.of<i64>(42)
+        assert(!c.is_empty())
+    }
+
+    test "is_empty: Done means empty in i64 container" {
+        let c = Container.empty<i64>()
+        assert(c.is_empty())
+    }
+
+    // ── Container<string> ──
+    test "is_present: string value detected" {
+        let c = Container.of<string>("hello")
+        assert(c.is_present())
+    }
+
+    test "is_present: Done detected in string container" {
+        let c = Container.empty<string>()
+        assert(!c.is_present())
+    }
+
+    // ── Container<bool> ──
+    test "is_present: bool value detected" {
+        let c = Container.of<bool>(true)
+        assert(c.is_present())
+    }
+
+    test "is_present: Done detected in bool container" {
+        let c = Container.empty<bool>()
+        assert(!c.is_present())
+    }
+}

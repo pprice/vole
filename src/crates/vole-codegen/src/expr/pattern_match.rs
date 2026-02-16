@@ -55,8 +55,20 @@ impl Cg<'_, '_, '_> {
                 let name = self.interner().resolve(*sym);
                 let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
                 let query = self.query();
-                let type_def_id = query.resolve_type_def_by_str(module_id, name)?;
-                self.registry().get_type(type_def_id).base_type_id
+                if let Some(type_def_id) = query.resolve_type_def_by_str(module_id, name) {
+                    return self.registry().get_type(type_def_id).base_type_id;
+                }
+                // If name resolution failed, check if this is a type parameter
+                // that can be resolved via the current substitutions map.
+                if let Some(subs) = self.substitutions {
+                    let name_table = self.name_table();
+                    for (&name_id, &type_id) in subs {
+                        if name_table.last_segment_str(name_id).as_deref() == Some(name) {
+                            return Some(type_id);
+                        }
+                    }
+                }
+                None
             }
             _ => None,
         }
@@ -147,7 +159,23 @@ impl Cg<'_, '_, '_> {
         is_expr: &vole_frontend::ast::IsExpr,
         expr_id: NodeId,
     ) -> Option<IsCheckResult> {
-        // First check sema's pre-computed result
+        // When substitutions are active (monomorphized module code), prefer
+        // recomputation over sema's stored result: sema stored tag indices for
+        // the generic union ordering which may differ from the substituted ordering.
+        // Fall back to the sema result only when the tested type cannot be resolved.
+        if self.substitutions.is_some() {
+            if let Some(tested_type_id) = self.resolve_simple_type_expr(&is_expr.type_expr) {
+                let value_type_id = match &is_expr.value.kind {
+                    ExprKind::Identifier(sym) => self.vars.get(sym).map(|(_, tid)| *tid)?,
+                    _ => return self.get_is_check_result(expr_id),
+                };
+                return Some(self.compute_is_check_result(value_type_id, tested_type_id));
+            }
+            // Cannot resolve tested type — fall through to sema's result
+            return self.get_is_check_result(expr_id);
+        }
+
+        // Non-monomorphized path: trust sema's pre-computed result
         if let Some(result) = self.get_is_check_result(expr_id) {
             return Some(result);
         }
@@ -175,18 +203,37 @@ impl Cg<'_, '_, '_> {
         // Look up pre-computed type check result from sema (module-aware).
         // Falls back to computing it at codegen time for monomorphized generic functions,
         // since sema skips generic function bodies.
-        let is_check_result = match self.get_is_check_result(expr_id) {
-            Some(result) => result,
-            None => {
-                // Monomorphized generic: compute from substituted types
-                let tested_type_id = self
-                    .resolve_simple_type_expr(&is_expr.type_expr)
-                    .ok_or_else(|| {
-                        CodegenError::internal(
-                            "is expression in monomorphized generic: cannot resolve tested type",
-                        )
-                    })?;
+        //
+        // When substitutions are active (monomorphized module code), prefer recomputation:
+        // sema analyzed the module body with generic types (e.g. `T | Done`) and stored
+        // tag indices based on that ordering.  After substitution the union variant order
+        // may change (e.g. `i64 | Done` sorts differently), making stored CheckTag
+        // indices stale.  Fall back to the sema result only when the tested type cannot
+        // be resolved (complex type expressions that resolve_simple_type_expr doesn't handle).
+        let is_check_result = if self.substitutions.is_some() {
+            if let Some(tested_type_id) = self.resolve_simple_type_expr(&is_expr.type_expr) {
                 self.compute_is_check_result(value.type_id, tested_type_id)
+            } else if let Some(result) = self.get_is_check_result(expr_id) {
+                result
+            } else {
+                return Err(CodegenError::internal(
+                    "is expression in monomorphized generic: cannot resolve tested type",
+                ));
+            }
+        } else {
+            match self.get_is_check_result(expr_id) {
+                Some(result) => result,
+                None => {
+                    // Monomorphized generic: compute from substituted types
+                    let tested_type_id = self
+                        .resolve_simple_type_expr(&is_expr.type_expr)
+                        .ok_or_else(|| {
+                            CodegenError::internal(
+                                "is expression in monomorphized generic: cannot resolve tested type",
+                            )
+                        })?;
+                    self.compute_is_check_result(value.type_id, tested_type_id)
+                }
             }
         };
         match is_check_result {
