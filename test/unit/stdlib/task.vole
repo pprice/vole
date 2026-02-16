@@ -32,6 +32,54 @@ tests {
         assert(t.is_done())
     }
 
+    test "all with single function" {
+        let fns: [() -> i64] = [() -> i64 => { return 42 }]
+        let results = Task.all(fns)
+        assert(results.length() == 1)
+        assert(results[0] == 42)
+    }
+
+    test "all with multiple functions" {
+        let fns: [() -> i64] = [
+            () -> i64 => { return 1 },
+            () -> i64 => { return 2 },
+            () -> i64 => { return 3 },
+        ]
+        let results = Task.all(fns)
+        assert(results.length() == 3)
+        assert(results[0] == 1)
+        assert(results[1] == 2)
+        assert(results[2] == 3)
+    }
+
+    test "all with empty array" {
+        let fns: [() -> i64] = []
+        let results = Task.all(fns)
+        assert(results.length() == 0)
+    }
+
+    test "all preserves order" {
+        let fns: [() -> i64] = [
+            () -> i64 => { return 100 },
+            () -> i64 => { return 200 },
+            () -> i64 => { return 300 },
+        ]
+        let results = Task.all(fns)
+        assert(results[0] == 100)
+        assert(results[1] == 200)
+        assert(results[2] == 300)
+    }
+
+    test "all with captured values" {
+        let base = 10
+        let fns: [() -> i64] = [
+            () -> i64 => { return base + 1 },
+            () -> i64 => { return base + 2 },
+        ]
+        let results = Task.all(fns)
+        assert(results[0] == 11)
+        assert(results[1] == 12)
+    }
 
     test "buffered channel send and receive" {
         let ch = Channel.buffered(4)

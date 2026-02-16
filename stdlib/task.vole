@@ -48,6 +48,27 @@ class Task {
         func run(body: () -> i64) -> Task {
             return Task { _handle: _task_run(body) }
         }
+
+        // Fan-out: spawn one task per closure and collect all results.
+        // Results are returned in the same order as the input closures.
+        func all(fns: [() -> i64]) -> [i64] {
+            // Spawn all tasks first.
+            let tasks: [Task] = []
+            let mut i = 0
+            while i < fns.length() {
+                tasks.push(Task.run(fns[i]))
+                i = i + 1
+            }
+
+            // Join all tasks and collect results in order.
+            let results: [i64] = []
+            let mut j = 0
+            while j < tasks.length() {
+                results.push(tasks[j].join())
+                j = j + 1
+            }
+            return results
+        }
     }
 
     // Block until the task completes and return its result.
