@@ -635,9 +635,20 @@ impl Scheduler {
 
     /// Store a transfer value on a specific task (used by channel send
     /// when handing a value directly to a blocked receiver).
+    ///
+    /// Ownership: the caller transfers ownership of `tv` to the task's
+    /// transfer slot. If the task does not exist (should not happen in
+    /// normal operation) or already holds a transfer value, the displaced
+    /// value is `rc_dec`'d to prevent leaks.
     pub fn set_transfer_value(&mut self, task_id: TaskId, tv: TaggedValue) {
         if let Some(task) = self.tasks.get_mut(&task_id) {
-            task.transfer_value = Some(tv);
+            if let Some(old) = task.transfer_value.replace(tv) {
+                // Defensive: dec the displaced value (shouldn't happen).
+                old.rc_dec_if_needed();
+            }
+        } else {
+            // Task gone — dec the orphaned value so RC stays balanced.
+            tv.rc_dec_if_needed();
         }
     }
 

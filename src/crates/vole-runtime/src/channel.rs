@@ -136,6 +136,11 @@ unsafe extern "C" fn channel_drop(ptr: *mut u8) {
 
 /// Send a value on a buffered channel.
 ///
+/// **Ownership**: the caller transfers ownership of `tv` to this function.
+/// On success the channel (buffer, transfer slot, or waiting-sender queue)
+/// takes over the reference. On failure (channel closed) this function
+/// calls `rc_dec_if_needed` so the caller must NOT dec again.
+///
 /// Returns 0 on success, -1 if the channel is closed.
 fn buffered_send(inner: &mut ChannelInner, capacity: usize, tv: TaggedValue) -> i64 {
     if inner.closed {
@@ -185,6 +190,9 @@ fn buffered_send(inner: &mut ChannelInner, capacity: usize, tv: TaggedValue) -> 
 
 /// Send a value on an unbuffered (rendezvous) channel.
 ///
+/// **Ownership**: same contract as `buffered_send` — caller transfers
+/// ownership; on failure the value is `rc_dec`'d here.
+///
 /// Returns 0 on success, -1 if the channel is closed.
 fn unbuffered_send(inner: &mut ChannelInner, tv: TaggedValue) -> i64 {
     if inner.closed {
@@ -226,6 +234,11 @@ fn unbuffered_send(inner: &mut ChannelInner, tv: TaggedValue) -> i64 {
 }
 
 /// Receive a value from the channel.
+///
+/// **Ownership**: on success the caller receives ownership of the value
+/// (transferred from the buffer, waiting sender, or transfer slot).
+/// No `rc_inc` is performed — this is a move, not a copy. The caller
+/// is responsible for eventually calling `rc_dec` when done with the value.
 ///
 /// On success, writes the tag and value to `out_tag` and `out_value` and
 /// returns the tag. Returns -1 if the channel is closed and empty.
@@ -768,6 +781,202 @@ mod tests {
             assert!(inner.buffer.is_empty());
 
             rc_dec(ch as *mut u8);
+        }
+    }
+
+    /// Helper: create an RcString with an extra rc_inc so we can inspect
+    /// the refcount after the channel operations dec it.
+    unsafe fn make_tracked_string(s: &str) -> (*mut crate::string::RcString, *const RcHeader) {
+        let ptr = crate::string::RcString::new(s);
+        // Starts at refcount 1. Inc to 2 so we retain a "tracking" ref.
+        rc_inc(ptr as *mut u8);
+        let header = ptr as *const RcHeader;
+        (ptr, header)
+    }
+
+    /// Read the current refcount of an RcHeader.
+    unsafe fn refcount(header: *const RcHeader) -> u32 {
+        unsafe {
+            (*header)
+                .ref_count
+                .load(std::sync::atomic::Ordering::Relaxed)
+        }
+    }
+
+    #[test]
+    fn send_rc_on_closed_channel_decs_value() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ch = RcChannel::new(4);
+
+        unsafe {
+            let inner = &mut *(*ch).inner;
+            let cap = (*ch).capacity;
+            channel_close_impl(inner);
+
+            let (s, hdr) = make_tracked_string("closed-send");
+            assert_eq!(refcount(hdr), 2);
+
+            // Send on closed channel should dec the value.
+            let tv = TaggedValue::from_string(s);
+            assert_eq!(buffered_send(inner, cap, tv), -1);
+
+            // Channel consumed & dec'd its copy; our tracking ref remains.
+            assert_eq!(refcount(hdr), 1);
+
+            rc_dec(ch as *mut u8);
+            rc_dec(s as *mut u8); // Drop our tracking ref.
+        }
+    }
+
+    #[test]
+    fn close_decs_waiting_sender_rc_values() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ch = RcChannel::new(4);
+
+        unsafe {
+            let inner = &mut *(*ch).inner;
+
+            // Simulate a waiting sender with an RC value (as if the
+            // channel buffer were full and the sender blocked).
+            let (s, hdr) = make_tracked_string("waiting-sender");
+            assert_eq!(refcount(hdr), 2);
+
+            inner.waiting_senders.push_back(WaitingTask {
+                task_id: 999, // Fake task ID; close won't find it in
+                // scheduler but that only means unblock is skipped.
+                value: Some(TaggedValue::from_string(s)),
+            });
+
+            // Close should dec the waiting sender's value.
+            channel_close_impl(inner);
+            assert_eq!(refcount(hdr), 1);
+
+            rc_dec(ch as *mut u8);
+            rc_dec(s as *mut u8);
+        }
+    }
+
+    #[test]
+    fn buffered_send_recv_rc_roundtrip() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ch = RcChannel::new(4);
+
+        unsafe {
+            let inner = &mut *(*ch).inner;
+            let cap = (*ch).capacity;
+
+            let (s, hdr) = make_tracked_string("roundtrip");
+            assert_eq!(refcount(hdr), 2);
+
+            // Send transfers ownership into the buffer (no extra inc).
+            buffered_send(inner, cap, TaggedValue::from_string(s));
+            assert_eq!(refcount(hdr), 2);
+
+            // Recv transfers ownership out of the buffer to the receiver.
+            let mut tag: i64 = 0;
+            let mut val: i64 = 0;
+            let result_tag = channel_recv_impl(inner, cap, &mut tag, &mut val);
+            assert_eq!(result_tag, RuntimeTypeId::String as i64);
+            assert_eq!(val, s as i64);
+            // Refcount unchanged — ownership transferred, not copied.
+            assert_eq!(refcount(hdr), 2);
+
+            // The receiver now owns the value. Dec it to simulate
+            // the receiver's scope ending.
+            rc_dec(val as *mut u8);
+            assert_eq!(refcount(hdr), 1);
+
+            rc_dec(ch as *mut u8);
+            rc_dec(s as *mut u8);
+        }
+    }
+
+    #[test]
+    fn drop_decs_multiple_buffered_rc_values() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ch = RcChannel::new(4);
+
+        unsafe {
+            let inner = &mut *(*ch).inner;
+            let cap = (*ch).capacity;
+
+            let (s1, hdr1) = make_tracked_string("alpha");
+            let (s2, hdr2) = make_tracked_string("beta");
+            let (s3, hdr3) = make_tracked_string("gamma");
+
+            buffered_send(inner, cap, TaggedValue::from_string(s1));
+            buffered_send(inner, cap, TaggedValue::from_string(s2));
+            buffered_send(inner, cap, TaggedValue::from_string(s3));
+
+            assert_eq!(refcount(hdr1), 2);
+            assert_eq!(refcount(hdr2), 2);
+            assert_eq!(refcount(hdr3), 2);
+
+            // Drop the channel — all three strings should be dec'd.
+            rc_dec(ch as *mut u8);
+
+            assert_eq!(refcount(hdr1), 1);
+            assert_eq!(refcount(hdr2), 1);
+            assert_eq!(refcount(hdr3), 1);
+
+            rc_dec(s1 as *mut u8);
+            rc_dec(s2 as *mut u8);
+            rc_dec(s3 as *mut u8);
+        }
+    }
+
+    #[test]
+    fn recv_then_drop_no_double_dec() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ch = RcChannel::new(4);
+
+        unsafe {
+            let inner = &mut *(*ch).inner;
+            let cap = (*ch).capacity;
+
+            let (s, hdr) = make_tracked_string("no-double-dec");
+            assert_eq!(refcount(hdr), 2);
+
+            buffered_send(inner, cap, TaggedValue::from_string(s));
+
+            // Recv the value (ownership transfer out of buffer).
+            let mut tag: i64 = 0;
+            let mut val: i64 = 0;
+            channel_recv_impl(inner, cap, &mut tag, &mut val);
+            assert_eq!(refcount(hdr), 2);
+
+            // Drop channel — buffer is now empty, so no dec from channel.
+            rc_dec(ch as *mut u8);
+            // Refcount should still be 2: one from recv, one from tracking.
+            assert_eq!(refcount(hdr), 2);
+
+            // Clean up both refs.
+            rc_dec(val as *mut u8);
+            assert_eq!(refcount(hdr), 1);
+            rc_dec(s as *mut u8);
+        }
+    }
+
+    #[test]
+    fn unbuffered_send_on_closed_decs_rc_value() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ch = RcChannel::new(0); // unbuffered
+
+        unsafe {
+            let inner = &mut *(*ch).inner;
+            channel_close_impl(inner);
+
+            let (s, hdr) = make_tracked_string("unbuf-closed");
+            assert_eq!(refcount(hdr), 2);
+
+            let tv = TaggedValue::from_string(s);
+            assert_eq!(unbuffered_send(inner, tv), -1);
+
+            // Value should have been dec'd by the failed send.
+            assert_eq!(refcount(hdr), 1);
+
+            rc_dec(ch as *mut u8);
+            rc_dec(s as *mut u8);
         }
     }
 }
