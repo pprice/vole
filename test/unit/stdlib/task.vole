@@ -600,4 +600,138 @@ tests {
         assert(r2.channel_index == 1)
         assert(r2.value == 20)
     }
+
+    // =========================================================================
+    // Generic SelectResult<T> tests (non-i64 types)
+    // =========================================================================
+
+    test "select2 with string channels" {
+        let ch1 = Channel.buffered<string>(4)
+        let ch2 = Channel.buffered<string>(4)
+        ch2.send("hello")
+        let result = Task.select2<string>(ch1, ch2, 0)
+        assert(!result.timed_out)
+        assert(result.channel_index == 1)
+        assert(result.value == "hello")
+    }
+
+    test "select2 with string channels lowest index wins" {
+        let ch1 = Channel.buffered<string>(4)
+        let ch2 = Channel.buffered<string>(4)
+        ch1.send("first")
+        ch2.send("second")
+        let result = Task.select2<string>(ch1, ch2, 0)
+        assert(!result.timed_out)
+        assert(result.channel_index == 0)
+        assert(result.value == "first")
+    }
+
+    test "select2 with bool channels" {
+        let ch1 = Channel.buffered<bool>(4)
+        let ch2 = Channel.buffered<bool>(4)
+        ch1.send(true)
+        let result = Task.select2<bool>(ch1, ch2, 0)
+        assert(!result.timed_out)
+        assert(result.channel_index == 0)
+        assert(result.value == true)
+    }
+
+    test "select2 with f64 channels" {
+        let ch1 = Channel.buffered<f64>(4)
+        let ch2 = Channel.buffered<f64>(4)
+        ch2.send(3.14)
+        let result = Task.select2<f64>(ch1, ch2, 0)
+        assert(!result.timed_out)
+        assert(result.channel_index == 1)
+        assert(result.value == 3.14)
+    }
+
+    test "select3 with string channels" {
+        let ch1 = Channel.buffered<string>(4)
+        let ch2 = Channel.buffered<string>(4)
+        let ch3 = Channel.buffered<string>(4)
+        ch3.send("third")
+        let result = Task.select3<string>(ch1, ch2, ch3, 0)
+        assert(!result.timed_out)
+        assert(result.channel_index == 2)
+        assert(result.value == "third")
+    }
+
+    test "select3 with f64 channels all ready" {
+        let ch1 = Channel.buffered<f64>(4)
+        let ch2 = Channel.buffered<f64>(4)
+        let ch3 = Channel.buffered<f64>(4)
+        ch1.send(1.1)
+        ch2.send(2.2)
+        ch3.send(3.3)
+        let result = Task.select3<f64>(ch1, ch2, ch3, 0)
+        assert(!result.timed_out)
+        assert(result.channel_index == 0)
+        assert(result.value == 1.1)
+    }
+
+    test "select2 string multiple rounds" {
+        let ch1 = Channel.buffered<string>(4)
+        let ch2 = Channel.buffered<string>(4)
+        ch1.send("alpha")
+        ch2.send("beta")
+
+        let r1 = Task.select2<string>(ch1, ch2, 0)
+        assert(r1.channel_index == 0)
+        assert(r1.value == "alpha")
+
+        let r2 = Task.select2<string>(ch1, ch2, 0)
+        assert(r2.channel_index == 1)
+        assert(r2.value == "beta")
+    }
+
+    test "select2 with string task producing value" {
+        let ch1 = Channel.buffered<string>(1)
+        let ch2 = Channel.buffered<string>(1)
+        let t = Task.run(() -> i64 => {
+            ch2.send("from task")
+            return 0
+        })
+        let result = Task.select2<string>(ch1, ch2, 0)
+        assert(!result.timed_out)
+        assert(result.channel_index == 1)
+        assert(result.value == "from task")
+        _ = t.join()
+    }
+
+    test "select2 string timeout" {
+        let ch1 = Channel.buffered<string>(4)
+        let ch2 = Channel.buffered<string>(4)
+        let t = Task.run(() -> i64 => {
+            let result = Task.select2<string>(ch1, ch2, 1)
+            if result.timed_out { return 1 }
+            return 0
+        })
+        let v = t.join()
+        assert(v == 1)
+    }
+
+    test "select2 bool timeout" {
+        let ch1 = Channel.buffered<bool>(4)
+        let ch2 = Channel.buffered<bool>(4)
+        let t = Task.run(() -> i64 => {
+            let result = Task.select2<bool>(ch1, ch2, 1)
+            if result.timed_out { return 1 }
+            return 0
+        })
+        let v = t.join()
+        assert(v == 1)
+    }
+
+    test "select2 f64 timeout" {
+        let ch1 = Channel.buffered<f64>(4)
+        let ch2 = Channel.buffered<f64>(4)
+        let t = Task.run(() -> i64 => {
+            let result = Task.select2<f64>(ch1, ch2, 1)
+            if result.timed_out { return 1 }
+            return 0
+        })
+        let v = t.join()
+        assert(v == 1)
+    }
 }
