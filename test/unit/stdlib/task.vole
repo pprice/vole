@@ -401,6 +401,53 @@ tests {
     }
 
     // =========================================================================
+    // Generic StateActor<T> tests (non-i64 types)
+    // =========================================================================
+
+    test "state actor with string concatenation" {
+        let actor = Task.state("hello", (current: string, msg: string) -> string => {
+            return current + " " + msg
+        })
+        actor.send("world")
+        actor.send("from")
+        actor.send("vole")
+        let result = actor.close_and_join()
+        assert(result == "hello world from vole")
+    }
+
+    test "state actor with string no messages returns initial" {
+        let actor = Task.state("initial", (s: string, m: string) -> string => {
+            return s + m
+        })
+        let result = actor.close_and_join()
+        assert(result == "initial")
+    }
+
+    test "state actor with bool toggles" {
+        let actor = Task.state(false, (current: bool, msg: bool) -> bool => {
+            if msg { return !current }
+            return current
+        })
+        actor.send(true)   // false -> true
+        actor.send(true)   // true -> false
+        actor.send(true)   // false -> true
+        let result = actor.close_and_join()
+        assert(result == true)
+    }
+
+    test "state actor with bool no messages returns initial" {
+        let actor = Task.state(true, (s: bool, m: bool) -> bool => {
+            return s
+        })
+        let result = actor.close_and_join()
+        assert(result == true)
+    }
+
+    // NOTE: StateActor<f64> is blocked by Task<f64>.join() codegen bug (vu-p06l).
+    // The JoinResult struct stores values as i64, and the join intercept does not
+    // reinterpret-cast f64 payloads. Channel<f64> works, but Task<f64>.join() does not.
+
+    // =========================================================================
     // Task.select tests
     // =========================================================================
 

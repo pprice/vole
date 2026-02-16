@@ -103,12 +103,8 @@ class Task<T: Sendable> {
         }
 
         // Create a stateful actor backed by a task and channel.
-        // The actor owns mutable state, receives i64 messages through a
-        // channel, and applies the handler to update the state.
-        //
-        // NOTE: StateActor is i64-only due to a codegen bug where union
-        // type narrowing (T | Done → T) mis-resolves values inside
-        // monomorphized module methods. See ticket for tracking.
+        // The actor owns mutable state, receives messages of type T through
+        // a channel, and applies the handler to update the state.
         //
         // Example:
         //   let counter = Task.state(0, (count: i64, msg: i64) -> i64 => {
@@ -118,18 +114,16 @@ class Task<T: Sendable> {
         //   counter.send(1)
         //   let final_count = counter.close_and_join()
         //   assert(final_count == 2)
-        func state(initial: i64, handler: (i64, i64) -> i64) -> StateActor {
-            let ch = Channel.buffered<i64>(8)
-            let task = Task.run<i64>(() -> i64 => {
+        func state(initial: T, handler: (T, T) -> T) -> StateActor<T> {
+            let ch = Channel.buffered<T>(8)
+            let task = Task.run<T>(() -> T => {
                 let mut current = initial
-                let mut r = _channel_recv(ch._ptr)
-                while r.tag != -1 {
-                    current = handler(current, r.value)
-                    r = _channel_recv(ch._ptr)
+                for msg in ch.iter() {
+                    current = handler(current, msg)
                 }
                 return current
             })
-            return StateActor { _ch: ch._ptr, _task: task._handle }
+            return StateActor<T> { _ch: ch._ptr, _task: task._handle }
         }
 
         // Wait on two channels simultaneously, returning when the first
@@ -325,22 +319,23 @@ implement Iterator<T> for StreamIterator<T> {
 // StateActor - stateful actor backed by a task and channel
 // =============================================================================
 
-class StateActor {
+class StateActor<T: Sendable> {
     _ch: handle,
     _task: handle,
 
     // Send a message to the actor.
     // The actor's handler will be called with (current_state, msg).
-    func send(msg: i64) {
-        _ = _channel_send(self._ch, 2, msg)
+    func send(msg: T) {
+        let ch = Channel<T> { _ptr: self._ch }
+        _ = ch.send(msg)
     }
 
     // Close the channel and wait for the actor task to finish.
     // Returns the actor's final state.
-    func close_and_join() -> i64 {
+    func close_and_join() -> T {
         _channel_close(self._ch)
-        let r = _task_join(self._task)
-        return r.value
+        let task = Task<T> { _handle: self._task }
+        return task.join()
     }
 }
 
