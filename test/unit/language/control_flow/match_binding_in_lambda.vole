@@ -1,0 +1,53 @@
+// Tests that match pattern bindings inside lambdas are recognized as locals,
+// not incorrectly treated as captured variables.
+
+tests "match identifier binding in lambda" {
+    test "match binding pattern inside a lambda" {
+        let classify = (x: i64) -> string => match x {
+            0 => "zero"
+            n => "number: {n}"
+        }
+        assert(classify(0) == "zero")
+        assert(classify(42) == "number: 42")
+    }
+
+    test "match binding used in arm body inside lambda" {
+        let double_or_zero = (x: i64) -> i64 => match x {
+            0 => 0
+            n => n * 2
+        }
+        assert(double_or_zero(0) == 0)
+        assert(double_or_zero(5) == 10)
+    }
+
+    test "match with capture and binding in lambda" {
+        let offset = 10
+        let adjust = (x: i64) -> i64 => match x {
+            0 => offset
+            n => n + offset
+        }
+        assert(adjust(0) == 10)
+        assert(adjust(5) == 15)
+    }
+
+    test "returned lambda with match binding" {
+        let make_classifier = (threshold: i64) -> (i64) -> string => {
+            return (x: i64) -> string => match x {
+                val threshold => "at threshold"
+                n => "value: {n}"
+            }
+        }
+        let classify = make_classifier(50)
+        assert(classify(50) == "at threshold")
+        assert(classify(25) == "value: 25")
+    }
+
+    test "match string binding in lambda" {
+        let check = (s: string) -> string => match s {
+            "hello" => "greeting"
+            other => "got: {other}"
+        }
+        assert(check("hello") == "greeting")
+        assert(check("world") == "got: world")
+    }
+}

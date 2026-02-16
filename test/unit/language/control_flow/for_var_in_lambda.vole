@@ -1,0 +1,66 @@
+// Tests that for-loop variables inside lambdas are recognized as locals,
+// not incorrectly treated as captured variables.
+
+tests "for-loop variable in lambda" {
+    test "for-in loop inside a lambda uses loop var" {
+        let sum_array = (arr: [i64]) -> i64 => {
+            let mut total = 0
+            for item in arr {
+                total = total + item
+            }
+            return total
+        }
+        assert(sum_array([1, 2, 3]) == 6)
+        assert(sum_array([10, 20]) == 30)
+    }
+
+    test "for-in loop var does not shadow outer capture" {
+        let outer = 100
+        let process = (arr: [i64]) -> i64 => {
+            let mut total = outer
+            for item in arr {
+                total = total + item
+            }
+            return total
+        }
+        assert(process([1, 2, 3]) == 106)
+    }
+
+    test "nested for-in loops inside a lambda" {
+        let flat_sum = (matrix: [[i64]]) -> i64 => {
+            let mut total = 0
+            for row in matrix {
+                for item in row {
+                    total = total + item
+                }
+            }
+            return total
+        }
+        assert(flat_sum([[1, 2], [3, 4]]) == 10)
+    }
+
+    test "returned lambda with for-in loop" {
+        let make_summer = () -> ([i64]) -> i64 => {
+            return (arr: [i64]) -> i64 => {
+                let mut total = 0
+                for item in arr {
+                    total = total + item
+                }
+                return total
+            }
+        }
+        let summer = make_summer()
+        assert(summer([5, 10, 15]) == 30)
+    }
+
+    test "for-in with string array in lambda" {
+        let join = (parts: [string]) -> string => {
+            let mut result = ""
+            for part in parts {
+                result = "{result}{part}"
+            }
+            return result
+        }
+        assert(join(["a", "b", "c"]) == "abc")
+    }
+}

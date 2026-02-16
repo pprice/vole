@@ -515,6 +515,7 @@ impl Analyzer {
                 declaration_span: for_stmt.span,
             },
         );
+        self.add_lambda_local(for_stmt.var_name);
 
         // For loop body may never execute, so we collect return_types
         // but don't propagate definitely_returns

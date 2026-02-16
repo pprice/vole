@@ -70,6 +70,7 @@ impl Analyzer {
                             declaration_span: pattern.span,
                         },
                     );
+                    self.add_lambda_local(*name);
                     None
                 }
             }
@@ -503,6 +504,7 @@ impl Analyzer {
                         declaration_span: field_pat.span,
                     },
                 );
+                self.add_lambda_local(field_pat.binding);
             } else {
                 // Unknown field in pattern
                 self.add_error(
