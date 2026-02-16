@@ -235,6 +235,9 @@ impl Compiler<'_> {
         }
 
         // Clear main-program module bindings while compiling module interner code.
+        // The IIFE ensures bindings are restored even when `?` returns early.
+        // Note: a panic inside the closure would skip the restore, but panics
+        // during compilation are fatal to the entire process anyway.
         let saved_bindings = std::mem::take(&mut self.global_module_bindings);
         let compile_result = (|| -> CodegenResult<bool> {
             let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
@@ -375,6 +378,19 @@ impl Compiler<'_> {
     /// Returns true when the type references a nominal definition from the main
     /// program (or a tests virtual module), not from imported module programs.
     fn type_depends_on_program_definitions(&self, type_id: TypeId) -> bool {
+        let mut visited = rustc_hash::FxHashSet::default();
+        self.type_depends_on_program_definitions_inner(type_id, &mut visited)
+    }
+
+    fn type_depends_on_program_definitions_inner(
+        &self,
+        type_id: TypeId,
+        visited: &mut rustc_hash::FxHashSet<TypeId>,
+    ) -> bool {
+        if !visited.insert(type_id) {
+            return false; // cycle — treat as not program-owned
+        }
+
         let arena = self.analyzed.type_arena();
 
         let nominal_is_program_owned = |type_def_id| {
@@ -393,50 +409,50 @@ impl Compiler<'_> {
                 || type_args
                     .iter()
                     .copied()
-                    .any(|ty| self.type_depends_on_program_definitions(ty));
+                    .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
         if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
-                    .any(|ty| self.type_depends_on_program_definitions(ty));
+                    .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
         if let Some((type_def_id, type_args)) = arena.unwrap_interface(type_id) {
             return nominal_is_program_owned(type_def_id)
                 || type_args
                     .iter()
                     .copied()
-                    .any(|ty| self.type_depends_on_program_definitions(ty));
+                    .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
         if let Some(elem) = arena.unwrap_array(type_id) {
-            return self.type_depends_on_program_definitions(elem);
+            return self.type_depends_on_program_definitions_inner(elem, visited);
         }
         if let Some((elem, _)) = arena.unwrap_fixed_array(type_id) {
-            return self.type_depends_on_program_definitions(elem);
+            return self.type_depends_on_program_definitions_inner(elem, visited);
         }
         if let Some(elements) = arena.unwrap_tuple(type_id) {
             return elements
                 .iter()
                 .copied()
-                .any(|ty| self.type_depends_on_program_definitions(ty));
+                .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
         if let Some(variants) = arena.unwrap_union(type_id) {
             return variants
                 .iter()
                 .copied()
-                .any(|ty| self.type_depends_on_program_definitions(ty));
+                .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited));
         }
         if let Some((ok_type, err_type)) = arena.unwrap_fallible(type_id) {
-            return self.type_depends_on_program_definitions(ok_type)
-                || self.type_depends_on_program_definitions(err_type);
+            return self.type_depends_on_program_definitions_inner(ok_type, visited)
+                || self.type_depends_on_program_definitions_inner(err_type, visited);
         }
         if let Some((params, ret, _)) = arena.unwrap_function(type_id) {
             return params
                 .iter()
                 .copied()
-                .any(|ty| self.type_depends_on_program_definitions(ty))
-                || self.type_depends_on_program_definitions(ret);
+                .any(|ty| self.type_depends_on_program_definitions_inner(ty, visited))
+                || self.type_depends_on_program_definitions_inner(ret, visited);
         }
 
         false
@@ -606,6 +622,9 @@ impl Compiler<'_> {
             return Ok(());
         }
 
+        // Save/restore module bindings when compiling module code via IIFE.
+        // Ensures bindings are restored even when `?` returns early.
+        // A panic would skip the restore, but panics are fatal anyway.
         let saved_bindings = if module_path.is_some() {
             Some(std::mem::take(&mut self.global_module_bindings))
         } else {
@@ -807,6 +826,9 @@ impl Compiler<'_> {
             return Ok(());
         }
 
+        // Save/restore module bindings when compiling module code via IIFE.
+        // Ensures bindings are restored even when `?` returns early.
+        // A panic would skip the restore, but panics are fatal anyway.
         let saved_bindings = if module_path.is_some() {
             Some(std::mem::take(&mut self.global_module_bindings))
         } else {

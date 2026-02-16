@@ -21,12 +21,9 @@ tests {
                 let req_val = req_ch.try_receive()
                 if req_val is Done { break }
                 if req_val is i64 {
-                    // Spawn a handler task per request (like a real HTTP server).
-                    let handler_input = Channel.buffered<i64>(1)
-                    handler_input.send(req_val)
-                    handler_input.close()
+                    // Rebind narrowed value so the closure captures i64, not the union.
+                    let request_id = req_val
                     let handler = Task.run(() -> i64 => {
-                        let request_id = handler_input.receive()
                         // Simulate processing: return request_id * 100 as "response".
                         resp_ch.send(request_id * 100)
                         return 0
@@ -62,11 +59,9 @@ tests {
                 let req_val = req_ch.try_receive()
                 if req_val is Done { break }
                 if req_val is i64 {
-                    let handler_input = Channel.buffered<i64>(1)
-                    handler_input.send(req_val)
-                    handler_input.close()
+                    // Rebind narrowed value so the closure captures i64, not the union.
+                    let request_id = req_val
                     let handler = Task.run(() -> i64 => {
-                        let request_id = handler_input.receive()
                         // Response = request_id + 1000
                         resp_ch.send(request_id + 1000)
                         return 0

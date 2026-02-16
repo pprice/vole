@@ -25,10 +25,6 @@ pub struct RcTask {
     pub header: RcHeader,
     /// The scheduler task ID.
     pub task_id: Cell<u64>,
-    /// Join result type tag (RuntimeTypeId as u64).
-    pub result_tag: Cell<u64>,
-    /// Join result value.
-    pub result_value: Cell<u64>,
     /// Whether the task has completed.
     pub completed: Cell<bool>,
     /// Optional closure pointer (RC-managed). Stored here so we can rc_dec
@@ -56,8 +52,6 @@ impl RcTask {
                 RcHeader::with_drop_fn(RuntimeTypeId::Task as u32, task_drop),
             );
             (*task).task_id = Cell::new(task_id.as_raw());
-            (*task).result_tag = Cell::new(RuntimeTypeId::I64 as u64);
-            (*task).result_value = Cell::new(0);
             (*task).completed = Cell::new(false);
             (*task).closure_ptr = Cell::new(std::ptr::null());
         }

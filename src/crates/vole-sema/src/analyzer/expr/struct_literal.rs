@@ -574,6 +574,8 @@ impl Analyzer {
                 },
                 span,
             );
+            // Return early to avoid confusing secondary errors from truncated zip.
+            return FxHashMap::default();
         }
         let mut explicit_map = FxHashMap::default();
         for (param, type_expr) in type_params.iter().zip(type_args.iter()) {
