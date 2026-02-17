@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::entity_defs::MethodBinding;
+use crate::optimizer::constant_folding::eval_const_expr;
 
 /// RAII guard that removes a canonical path from the modules_in_progress set on drop.
 /// Replaces the `bail_module!` macro so extracted helper functions don't need the macro.
@@ -485,6 +486,10 @@ impl Analyzer {
             deferred_generic_externals: Vec::new(),
         };
 
+        // Track constants by Symbol so later declarations can reference earlier ones.
+        // E.g. `let PI = 3.14159; let TWO_PI = PI * 2.0` — TWO_PI can see PI.
+        let mut known_constants = std::collections::HashMap::<Symbol, ConstantValue>::new();
+
         for decl in &program.declarations {
             match decl {
                 Decl::Function(f) => {
@@ -501,19 +506,19 @@ impl Analyzer {
                     let name_id =
                         self.name_table_mut()
                             .intern(module_id, &[l.name], module_interner);
+                    let const_val = eval_const_expr(init_expr, &known_constants);
                     let arena = self.type_arena();
-                    let (ty_id, const_val) = match &init_expr.kind {
-                        ExprKind::FloatLiteral(v, _) => (arena.f64(), Some(ConstantValue::F64(*v))),
-                        ExprKind::IntLiteral(v, _) => (arena.i64(), Some(ConstantValue::I64(*v))),
-                        ExprKind::BoolLiteral(v) => (arena.bool(), Some(ConstantValue::Bool(*v))),
-                        ExprKind::StringLiteral(v) => {
-                            (arena.string(), Some(ConstantValue::String(v.clone())))
-                        }
-                        _ => (arena.invalid(), None),
+                    let ty_id = match &const_val {
+                        Some(ConstantValue::F64(_)) => arena.f64(),
+                        Some(ConstantValue::I64(_)) => arena.i64(),
+                        Some(ConstantValue::Bool(_)) => arena.bool(),
+                        Some(ConstantValue::String(_)) => arena.string(),
+                        None => arena.invalid(),
                     };
                     drop(arena);
                     decls.exports.insert(name_id, ty_id);
                     if let Some(cv) = const_val {
+                        known_constants.insert(l.name, cv.clone());
                         decls.constants.insert(name_id, cv);
                     }
                 }

@@ -1,0 +1,40 @@
+// Module with computed constants for cross-module constant export tests.
+//
+// These declarations exercise the eval_const_expr path during module scanning.
+// Earlier constants must be visible to later ones (e.g. TWO_PI references PI).
+
+// Literal constants (baseline)
+let PI = 3.14159265358979323846
+let MAX_SIZE = 1024
+
+// Computed float constants (binary ops on literals)
+let TWO_PI = PI * 2.0
+let HALF_PI = PI / 2.0
+let PI_PLUS_ONE = PI + 1.0
+let PI_MINUS_ONE = PI - 1.0
+
+// Chained constant references (TWO_PI -> PI -> literal)
+let FOUR_PI = TWO_PI * 2.0
+
+// Computed integer constants
+let DOUBLE_MAX = MAX_SIZE * 2
+let OFFSET = MAX_SIZE + 256
+let FLAGS = 0xFF00 | 0x00FF
+
+// Unary operations
+let NEG_PI = -PI
+let NOT_FALSE = !false
+
+// Boolean constant
+let IS_ENABLED = true
+
+// String concatenation
+let GREETING = "hello" + " " + "world"
+
+// Mixed int/float promotion
+let SCALED = 10 * 3.14
+
+// Helper function that uses a computed constant
+func circumference(radius: f64) -> f64 {
+    return TWO_PI * radius
+}

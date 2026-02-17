@@ -1,0 +1,86 @@
+// Tests for computed constant export from module scanning.
+//
+// Verifies that expressions like `let TWO_PI = PI * 2.0` are evaluated
+// during module scanning and exported as inlineable constants.
+
+let lib = import "./computed_constants_lib"
+
+tests {
+    test "literal float constant" {
+        assert(lib.PI > 3.14159)
+        assert(lib.PI < 3.14160)
+    }
+
+    test "literal int constant" {
+        assert(lib.MAX_SIZE == 1024)
+    }
+
+    test "computed float: multiply" {
+        // TWO_PI = PI * 2.0
+        let expected = 3.14159265358979323846 * 2.0
+        assert(lib.TWO_PI == expected)
+    }
+
+    test "computed float: divide" {
+        // HALF_PI = PI / 2.0
+        let expected = 3.14159265358979323846 / 2.0
+        assert(lib.HALF_PI == expected)
+    }
+
+    test "computed float: add" {
+        let expected = 3.14159265358979323846 + 1.0
+        assert(lib.PI_PLUS_ONE == expected)
+    }
+
+    test "computed float: subtract" {
+        let expected = 3.14159265358979323846 - 1.0
+        assert(lib.PI_MINUS_ONE == expected)
+    }
+
+    test "chained constant reference" {
+        // FOUR_PI = TWO_PI * 2.0 = PI * 4.0
+        let expected = 3.14159265358979323846 * 4.0
+        assert(lib.FOUR_PI == expected)
+    }
+
+    test "computed int: multiply" {
+        assert(lib.DOUBLE_MAX == 2048)
+    }
+
+    test "computed int: add" {
+        assert(lib.OFFSET == 1280)
+    }
+
+    test "computed int: bitwise or" {
+        assert(lib.FLAGS == 0xFFFF)
+    }
+
+    test "unary negation" {
+        assert(lib.NEG_PI < 0.0)
+        assert(lib.NEG_PI == -lib.PI)
+    }
+
+    test "unary not" {
+        assert(lib.NOT_FALSE == true)
+    }
+
+    test "boolean constant" {
+        assert(lib.IS_ENABLED == true)
+    }
+
+    test "string concatenation" {
+        assert(lib.GREETING == "hello world")
+    }
+
+    test "mixed int/float promotion" {
+        // 10 * 3.14 = 31.4
+        assert(lib.SCALED > 31.39)
+        assert(lib.SCALED < 31.41)
+    }
+
+    test "function using computed constant" {
+        // circumference(1.0) = TWO_PI * 1.0 = TWO_PI
+        let c = lib.circumference(1.0)
+        assert(c == lib.TWO_PI)
+    }
+}

@@ -20,6 +20,7 @@
 //! ```
 
 use crate::ExpressionData;
+use crate::types::ConstantValue;
 use std::collections::HashMap;
 use vole_frontend::ast::{BlockExpr, NumericSuffix, StringPart, UnaryExpr};
 use vole_frontend::{
@@ -60,6 +61,26 @@ impl ConstValue {
             ConstValue::String(s) => ExprKind::StringLiteral(s.clone()),
         }
     }
+
+    /// Convert to a module-level ConstantValue (drops numeric suffix info).
+    fn to_constant_value(&self) -> ConstantValue {
+        match self {
+            ConstValue::Int(v, _) => ConstantValue::I64(*v),
+            ConstValue::Float(v, _) => ConstantValue::F64(*v),
+            ConstValue::Bool(v) => ConstantValue::Bool(*v),
+            ConstValue::String(s) => ConstantValue::String(s.clone()),
+        }
+    }
+
+    /// Create from a module-level ConstantValue.
+    fn from_constant_value(cv: &ConstantValue) -> Self {
+        match cv {
+            ConstantValue::I64(v) => ConstValue::Int(*v, None),
+            ConstantValue::F64(v) => ConstValue::Float(*v, None),
+            ConstantValue::Bool(v) => ConstValue::Bool(*v),
+            ConstantValue::String(s) => ConstValue::String(s.clone()),
+        }
+    }
 }
 
 /// Run constant folding on the program.
@@ -67,6 +88,121 @@ pub fn fold_constants(program: &mut Program, expr_data: &mut ExpressionData) -> 
     let mut folder = ConstantFolder::new(expr_data);
     folder.fold_program(program);
     folder.stats
+}
+
+/// Evaluate a constant expression without mutating the AST.
+///
+/// This is a lightweight evaluator for use during module scanning (before
+/// the optimizer runs). It handles:
+/// - Literals (int, float, bool, string)
+/// - Unary operations on constants (negation, not, bitwise not)
+/// - Binary operations on constants (arithmetic, comparison, logic)
+/// - References to already-known constants via the `known_constants` map
+///
+/// Returns `None` if the expression cannot be evaluated at compile time.
+pub fn eval_const_expr(
+    expr: &Expr,
+    known_constants: &HashMap<Symbol, ConstantValue>,
+) -> Option<ConstantValue> {
+    eval_const_value(expr, known_constants).map(|cv| cv.to_constant_value())
+}
+
+/// Internal: evaluate an expression to ConstValue (preserves suffix info).
+fn eval_const_value(
+    expr: &Expr,
+    known_constants: &HashMap<Symbol, ConstantValue>,
+) -> Option<ConstValue> {
+    match &expr.kind {
+        ExprKind::IntLiteral(v, suffix) => Some(ConstValue::Int(*v, *suffix)),
+        ExprKind::FloatLiteral(v, suffix) => Some(ConstValue::Float(*v, *suffix)),
+        ExprKind::BoolLiteral(v) => Some(ConstValue::Bool(*v)),
+        ExprKind::StringLiteral(s) => Some(ConstValue::String(s.clone())),
+        ExprKind::Grouping(inner) => eval_const_value(inner, known_constants),
+        ExprKind::Identifier(sym) => known_constants
+            .get(sym)
+            .map(ConstValue::from_constant_value),
+        ExprKind::Binary(bin) => eval_binary(bin, known_constants),
+        ExprKind::Unary(unary) => eval_unary(unary, known_constants),
+        _ => None,
+    }
+}
+
+/// Evaluate a binary expression on two constant operands.
+fn eval_binary(
+    bin: &BinaryExpr,
+    known_constants: &HashMap<Symbol, ConstantValue>,
+) -> Option<ConstValue> {
+    let left = eval_const_value(&bin.left, known_constants)?;
+    let right = eval_const_value(&bin.right, known_constants)?;
+
+    match (left, right) {
+        (ConstValue::Int(l, l_suffix), ConstValue::Int(r, r_suffix)) => {
+            let s = l_suffix.or(r_suffix);
+            match bin.op {
+                BinaryOp::Add => Some(ConstValue::Int(l.wrapping_add(r), s)),
+                BinaryOp::Sub => Some(ConstValue::Int(l.wrapping_sub(r), s)),
+                BinaryOp::Mul => Some(ConstValue::Int(l.wrapping_mul(r), s)),
+                BinaryOp::Div if r != 0 => Some(ConstValue::Int(l / r, s)),
+                BinaryOp::Mod if r != 0 => Some(ConstValue::Int(l % r, s)),
+                BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
+                BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
+                BinaryOp::Lt => Some(ConstValue::Bool(l < r)),
+                BinaryOp::Gt => Some(ConstValue::Bool(l > r)),
+                BinaryOp::Le => Some(ConstValue::Bool(l <= r)),
+                BinaryOp::Ge => Some(ConstValue::Bool(l >= r)),
+                BinaryOp::BitAnd => Some(ConstValue::Int(l & r, s)),
+                BinaryOp::BitOr => Some(ConstValue::Int(l | r, s)),
+                BinaryOp::BitXor => Some(ConstValue::Int(l ^ r, s)),
+                BinaryOp::Shl => Some(ConstValue::Int(l << (r & 63), s)),
+                BinaryOp::Shr => Some(ConstValue::Int(l >> (r & 63), s)),
+                _ => None,
+            }
+        }
+        (ConstValue::Float(l, l_suffix), ConstValue::Float(r, r_suffix)) => {
+            fold_float_binary(l, r, l_suffix.or(r_suffix), bin.op)
+        }
+        (ConstValue::Int(l, _), ConstValue::Float(r, suffix)) => {
+            fold_float_binary(l as f64, r, suffix, bin.op)
+        }
+        (ConstValue::Float(l, suffix), ConstValue::Int(r, _)) => {
+            fold_float_binary(l, r as f64, suffix, bin.op)
+        }
+        (ConstValue::Bool(l), ConstValue::Bool(r)) => match bin.op {
+            BinaryOp::And => Some(ConstValue::Bool(l && r)),
+            BinaryOp::Or => Some(ConstValue::Bool(l || r)),
+            BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
+            BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
+            _ => None,
+        },
+        (ConstValue::String(l), ConstValue::String(r)) => match bin.op {
+            BinaryOp::Add => Some(ConstValue::String(l + &r)),
+            BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
+            BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Evaluate a unary expression on a constant operand.
+fn eval_unary(
+    unary: &UnaryExpr,
+    known_constants: &HashMap<Symbol, ConstantValue>,
+) -> Option<ConstValue> {
+    let operand = eval_const_value(&unary.operand, known_constants)?;
+    match (unary.op, operand) {
+        (vole_frontend::UnaryOp::Neg, ConstValue::Int(v, suffix)) => {
+            Some(ConstValue::Int(-v, suffix))
+        }
+        (vole_frontend::UnaryOp::Neg, ConstValue::Float(v, suffix)) => {
+            Some(ConstValue::Float(-v, suffix))
+        }
+        (vole_frontend::UnaryOp::Not, ConstValue::Bool(v)) => Some(ConstValue::Bool(!v)),
+        (vole_frontend::UnaryOp::BitNot, ConstValue::Int(v, suffix)) => {
+            Some(ConstValue::Int(!v, suffix))
+        }
+        _ => None,
+    }
 }
 
 /// Fold a binary operation on two f64 values at compile time.
