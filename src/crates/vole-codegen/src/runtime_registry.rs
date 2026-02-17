@@ -132,9 +132,31 @@ runtime_keys! {
     I128Srem               => "vole_i128_srem"               : (I128, I128) -> I128,
     F64ToString            => "vole_f64_to_string"           : (F64) -> Ptr,
     F32ToString            => "vole_f32_to_string"           : (F32) -> Ptr,
+    F128ToString           => "vole_f128_to_string"          : (I128) -> Ptr,
     BoolToString           => "vole_bool_to_string"          : (I8) -> Ptr,
     NilToString            => "vole_nil_to_string"           : () -> Ptr,
     ArrayI64ToString       => "vole_array_i64_to_string"     : (Ptr) -> Ptr,
+
+    // ── f128 ops/conversions ────────────────────────────────────────
+    F128Add                => "vole_f128_add"                : (I128, I128) -> I128,
+    F128Sub                => "vole_f128_sub"                : (I128, I128) -> I128,
+    F128Mul                => "vole_f128_mul"                : (I128, I128) -> I128,
+    F128Div                => "vole_f128_div"                : (I128, I128) -> I128,
+    F128Rem                => "vole_f128_rem"                : (I128, I128) -> I128,
+    F128Neg                => "vole_f128_neg"                : (I128) -> I128,
+    F128Eq                 => "vole_f128_eq"                 : (I128, I128) -> I8,
+    F128Lt                 => "vole_f128_lt"                 : (I128, I128) -> I8,
+    F128Le                 => "vole_f128_le"                 : (I128, I128) -> I8,
+    F128Gt                 => "vole_f128_gt"                 : (I128, I128) -> I8,
+    F128Ge                 => "vole_f128_ge"                 : (I128, I128) -> I8,
+    F64ToF128              => "vole_f64_to_f128"             : (F64) -> I128,
+    F32ToF128              => "vole_f32_to_f128"             : (F32) -> I128,
+    I64ToF128              => "vole_i64_to_f128"             : (I64) -> I128,
+    I128ToF128             => "vole_i128_to_f128"            : (I128) -> I128,
+    F128ToF64              => "vole_f128_to_f64"             : (I128) -> F64,
+    F128ToF32              => "vole_f128_to_f32"             : (I128) -> F32,
+    F128ToI64              => "vole_f128_to_i64"             : (I128) -> I64,
+    F128ToI128             => "vole_f128_to_i128"            : (I128) -> I128,
 
     // ── IO ───────────────────────────────────────────────────────────
     Flush                  => "vole_flush"                   : () -> Void,
@@ -354,6 +376,10 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
         ptr: vole_runtime::builtins::vole_f32_to_string as *const u8,
     },
     LinkableRuntimeSymbol {
+        c_name: "vole_f128_to_string",
+        ptr: vole_runtime::builtins::vole_f128_to_string as *const u8,
+    },
+    LinkableRuntimeSymbol {
         c_name: "vole_i128_to_string",
         ptr: vole_runtime::builtins::vole_i128_to_string as *const u8,
     },
@@ -364,6 +390,82 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_i128_srem",
         ptr: vole_runtime::builtins::vole_i128_srem as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_add",
+        ptr: vole_runtime::builtins::vole_f128_add as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_sub",
+        ptr: vole_runtime::builtins::vole_f128_sub as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_mul",
+        ptr: vole_runtime::builtins::vole_f128_mul as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_div",
+        ptr: vole_runtime::builtins::vole_f128_div as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_rem",
+        ptr: vole_runtime::builtins::vole_f128_rem as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_neg",
+        ptr: vole_runtime::builtins::vole_f128_neg as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_eq",
+        ptr: vole_runtime::builtins::vole_f128_eq as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_lt",
+        ptr: vole_runtime::builtins::vole_f128_lt as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_le",
+        ptr: vole_runtime::builtins::vole_f128_le as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_gt",
+        ptr: vole_runtime::builtins::vole_f128_gt as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_ge",
+        ptr: vole_runtime::builtins::vole_f128_ge as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f64_to_f128",
+        ptr: vole_runtime::builtins::vole_f64_to_f128 as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f32_to_f128",
+        ptr: vole_runtime::builtins::vole_f32_to_f128 as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_i64_to_f128",
+        ptr: vole_runtime::builtins::vole_i64_to_f128 as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_i128_to_f128",
+        ptr: vole_runtime::builtins::vole_i128_to_f128 as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_to_f64",
+        ptr: vole_runtime::builtins::vole_f128_to_f64 as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_to_f32",
+        ptr: vole_runtime::builtins::vole_f128_to_f32 as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_to_i64",
+        ptr: vole_runtime::builtins::vole_f128_to_i64 as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_f128_to_i128",
+        ptr: vole_runtime::builtins::vole_f128_to_i128 as *const u8,
     },
     LinkableRuntimeSymbol {
         c_name: "vole_bool_to_string",

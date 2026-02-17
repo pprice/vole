@@ -470,9 +470,7 @@ impl Cg<'_, '_, '_> {
         {
             let arena = self.arena();
             let is_declared_union = arena.is_union(declared_type_id);
-            let is_declared_integer = arena.is_integer(declared_type_id);
-            let is_declared_f32 = declared_type_id == arena.f32();
-            let is_declared_f64 = declared_type_id == arena.f64();
+            let is_declared_numeric = arena.is_numeric(declared_type_id);
             let is_declared_interface = arena.is_interface(declared_type_id);
             let is_declared_unknown = arena.is_unknown(declared_type_id);
 
@@ -484,27 +482,9 @@ impl Cg<'_, '_, '_> {
                 let wrapped = self.construct_union_id(*init, declared_type_id)?;
                 is_stack_union = true;
                 (wrapped.value, wrapped.type_id)
-            } else if is_declared_integer && init.type_id.is_integer() {
-                let arena = self.arena();
-                let declared_cty = type_id_to_cranelift(declared_type_id, arena, self.ptr_type());
-                let init_cty = init.ty;
-                if declared_cty.bits() < init_cty.bits() {
-                    let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
-                    (narrowed, declared_type_id)
-                } else if declared_cty.bits() > init_cty.bits() {
-                    let widened = self.builder.ins().sextend(declared_cty, init.value);
-                    (widened, declared_type_id)
-                } else {
-                    (init.value, declared_type_id)
-                }
-            } else if is_declared_f32 && init.type_id.is_float() && init.ty == types::F64 {
-                // f64 -> f32: demote to narrower float
-                let narrowed = self.builder.ins().fdemote(types::F32, init.value);
-                (narrowed, declared_type_id)
-            } else if is_declared_f64 && init.type_id.is_float() && init.ty == types::F32 {
-                // f32 -> f64: promote to wider float
-                let widened = self.builder.ins().fpromote(types::F64, init.value);
-                (widened, declared_type_id)
+            } else if is_declared_numeric && init.type_id.is_numeric() {
+                let coerced = self.coerce_to_type(*init, declared_type_id)?;
+                (coerced.value, coerced.type_id)
             } else if is_declared_interface {
                 // For functional interfaces, keep the actual function type from the lambda
                 // This preserves the is_closure flag for proper calling convention

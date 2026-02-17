@@ -122,9 +122,17 @@ impl Cg<'_, '_, '_> {
         let is_wide = crate::types::is_wide_type(field_type_id, self.arena());
         let mut cv = if is_wide {
             let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
-            let value =
+            let wide_i128 =
                 super::helpers::load_wide_field(self.builder, get_func_ref, obj.value, slot);
-            CompiledValue::new(value, types::I128, field_type_id)
+            if field_type_id == self.arena().f128() {
+                let value = self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide_i128);
+                CompiledValue::new(value, types::F128, field_type_id)
+            } else {
+                CompiledValue::new(wide_i128, types::I128, field_type_id)
+            }
         } else {
             let result_raw = self.get_field_cached(obj.value, slot as u32)?;
             self.convert_field_value(result_raw, field_type_id)
@@ -323,10 +331,16 @@ impl Cg<'_, '_, '_> {
                 if rc_old.is_some() && value.is_borrowed() {
                     self.emit_rc_inc_for_type(value.value, field_type_id)?;
                 }
-                if value.ty == types::I128 {
-                    // i128 needs 2 x 8-byte stores (low then high)
-                    let (low, high) =
-                        super::helpers::split_i128_for_storage(self.builder, value.value);
+                if value.ty == types::I128 || value.ty == types::F128 {
+                    // Wide types need 2 x 8-byte stores (low then high).
+                    let wide = if value.ty == types::F128 {
+                        self.builder
+                            .ins()
+                            .bitcast(types::I128, MemFlags::new(), value.value)
+                    } else {
+                        value.value
+                    };
+                    let (low, high) = super::helpers::split_i128_for_storage(self.builder, wide);
                     self.builder
                         .ins()
                         .store(MemFlags::new(), low, obj.value, offset);
@@ -435,8 +449,15 @@ impl Cg<'_, '_, '_> {
                 .builder
                 .ins()
                 .load(types::I64, MemFlags::new(), struct_ptr, offset + 8);
-            let value = reconstruct_i128(self.builder, low, high);
-            return Ok(CompiledValue::new(value, types::I128, field_type_id));
+            let wide_i128 = reconstruct_i128(self.builder, low, high);
+            if field_type_id == self.arena().f128() {
+                let value = self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide_i128);
+                return Ok(CompiledValue::new(value, types::F128, field_type_id));
+            }
+            return Ok(CompiledValue::new(wide_i128, types::I128, field_type_id));
         }
 
         // Non-struct field: load as i64, then convert to proper type

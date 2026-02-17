@@ -76,6 +76,7 @@ impl<'src> Parser<'src> {
                 | TokenType::KwU64
                 | TokenType::KwF32
                 | TokenType::KwF64
+                | TokenType::KwF128
                 | TokenType::KwBool
                 | TokenType::KwString
         )

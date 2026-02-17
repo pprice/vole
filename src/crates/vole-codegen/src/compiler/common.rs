@@ -274,6 +274,11 @@ fn emit_implicit_return(
                     cg.builder.ins().f64const(0.0)
                 } else if ret_type == types::F32 {
                     cg.builder.ins().f32const(0.0)
+                } else if ret_type == types::F128 {
+                    let zero_bits = cg.builder.ins().iconst(types::I128, 0);
+                    cg.builder
+                        .ins()
+                        .bitcast(types::F128, MemFlags::new(), zero_bits)
                 } else {
                     cg.builder.ins().iconst(ret_type, 0)
                 };
@@ -476,6 +481,9 @@ pub fn finalize_function_body(
                     builder.ins().f64const(0.0)
                 } else if ret_type == types::F32 {
                     builder.ins().f32const(0.0)
+                } else if ret_type == types::F128 {
+                    let zero_bits = builder.ins().iconst(types::I128, 0);
+                    builder.ins().bitcast(types::F128, MemFlags::new(), zero_bits)
                 } else {
                     builder.ins().iconst(ret_type, 0)
                 };

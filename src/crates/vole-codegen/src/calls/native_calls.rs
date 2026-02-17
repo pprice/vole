@@ -123,17 +123,7 @@ impl Cg<'_, '_, '_> {
             .map(|(&arg, param)| {
                 let expected_ty = param.value_type;
                 let actual_ty = self.builder.func.dfg.value_type(arg);
-                if actual_ty == expected_ty {
-                    arg
-                } else if actual_ty.is_int() && expected_ty.is_int() {
-                    if expected_ty.bits() < actual_ty.bits() {
-                        self.builder.ins().ireduce(expected_ty, arg)
-                    } else {
-                        self.builder.ins().sextend(expected_ty, arg)
-                    }
-                } else {
-                    arg
-                }
+                self.coerce_cranelift_value(arg, actual_ty, expected_ty)
             })
             .collect();
         let sig_ref = self.builder.import_signature(sig);
@@ -244,11 +234,14 @@ impl Cg<'_, '_, '_> {
         }
 
         // Non-struct: standard single result
-        CompiledValue::new(
-            results[0],
-            native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type()),
-            type_id,
-        )
+        let actual_ty = native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type());
+        let expected_ty = self.cranelift_type(type_id);
+        let value = if actual_ty == expected_ty {
+            results[0]
+        } else {
+            self.coerce_cranelift_value(results[0], actual_ty, expected_ty)
+        };
+        CompiledValue::new(value, expected_ty, type_id)
     }
 
     /// Compile a native function call with known Vole types (for generic external functions)

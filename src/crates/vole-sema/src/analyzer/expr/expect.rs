@@ -525,7 +525,9 @@ impl Analyzer {
     /// Float > int, wider > narrower
     pub(crate) fn numeric_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
         // Float types take precedence, wider float wins
-        if left == ArenaTypeId::F64 || right == ArenaTypeId::F64 {
+        if left == ArenaTypeId::F128 || right == ArenaTypeId::F128 {
+            ArenaTypeId::F128
+        } else if left == ArenaTypeId::F64 || right == ArenaTypeId::F64 {
             ArenaTypeId::F64
         } else if left == ArenaTypeId::F32 || right == ArenaTypeId::F32 {
             ArenaTypeId::F32

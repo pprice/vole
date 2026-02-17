@@ -254,6 +254,7 @@ fn primitive_type_str(prim: PrimitiveType) -> &'static str {
         PrimitiveType::U64 => "u64",
         PrimitiveType::F32 => "f32",
         PrimitiveType::F64 => "f64",
+        PrimitiveType::F128 => "f128",
         PrimitiveType::Bool => "bool",
         PrimitiveType::String => "string",
     }

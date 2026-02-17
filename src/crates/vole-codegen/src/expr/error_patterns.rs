@@ -411,7 +411,7 @@ impl Cg<'_, '_, '_> {
                 self.builder.def_var(var, converted.value);
                 arm_variables.insert(field_pattern.binding, (var, field_ty_id));
             } else if is_wide {
-                // Wide (i128) field in multi-field or single-wide-field error
+                // Wide (i128/f128) field in multi-field or single-wide-field error.
                 let field_offset = field_byte_offsets[field_idx];
                 let low =
                     self.builder
@@ -421,9 +421,19 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .load(types::I64, MemFlags::new(), payload, field_offset + 8);
-                let i128_val = super::super::structs::reconstruct_i128(self.builder, low, high);
-                let var = self.builder.declare_var(types::I128);
-                self.builder.def_var(var, i128_val);
+                let wide_i128 = super::super::structs::reconstruct_i128(self.builder, low, high);
+                let (wide_val, wide_ty) = if field_ty_id == self.arena().f128() {
+                    (
+                        self.builder
+                            .ins()
+                            .bitcast(types::F128, MemFlags::new(), wide_i128),
+                        types::F128,
+                    )
+                } else {
+                    (wide_i128, types::I128)
+                };
+                let var = self.builder.declare_var(wide_ty);
+                self.builder.def_var(var, wide_val);
                 arm_variables.insert(field_pattern.binding, (var, field_ty_id));
             } else {
                 // Non-wide field in multi-field error, payload is a pointer to field data

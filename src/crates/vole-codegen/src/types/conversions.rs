@@ -236,6 +236,7 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
         ArenaType::Primitive(PrimitiveType::I128) => types::I128,
         ArenaType::Primitive(PrimitiveType::F32) => types::F32,
         ArenaType::Primitive(PrimitiveType::F64) => types::F64,
+        ArenaType::Primitive(PrimitiveType::F128) => types::F128,
         ArenaType::Primitive(PrimitiveType::Bool) => types::I8,
         ArenaType::Primitive(PrimitiveType::String) => pointer_type,
         ArenaType::Handle => pointer_type,
@@ -258,7 +259,10 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
 /// Currently only i128 (128-bit integer) is wider than a single u64.
 pub(crate) fn is_wide_type(ty: TypeId, arena: &TypeArena) -> bool {
     use vole_sema::type_arena::SemaType;
-    matches!(arena.get(ty), SemaType::Primitive(PrimitiveType::I128))
+    matches!(
+        arena.get(ty),
+        SemaType::Primitive(PrimitiveType::I128 | PrimitiveType::F128)
+    )
 }
 
 /// Get the byte size of a field: 16 for i128 (wide) types, 8 for all others.
@@ -333,7 +337,9 @@ pub(crate) fn type_id_size(
         ArenaType::Primitive(PrimitiveType::I64)
         | ArenaType::Primitive(PrimitiveType::U64)
         | ArenaType::Primitive(PrimitiveType::F64) => 8,
-        ArenaType::Primitive(PrimitiveType::I128) => 16,
+        ArenaType::Primitive(PrimitiveType::I128) | ArenaType::Primitive(PrimitiveType::F128) => {
+            16
+        }
         ArenaType::Primitive(PrimitiveType::String) | ArenaType::Array(_) => pointer_type.bytes(),
         ArenaType::Handle => pointer_type.bytes(),
         ArenaType::Interface { .. } => pointer_type.bytes(),
@@ -504,6 +510,29 @@ pub(crate) fn convert_to_type(
     target: Type,
     arena: &TypeArena,
 ) -> Value {
+    fn pack_f64_to_f128(builder: &mut FunctionBuilder, f64_val: Value) -> Value {
+        // Runtime f128 currently uses a compact software representation:
+        // low 64 bits = f64 payload, high 64 bits = 0.
+        let bits64 = builder
+            .ins()
+            .bitcast(types::I64, MemFlags::new(), f64_val);
+        let bits128 = builder.ins().uextend(types::I128, bits64);
+        builder
+            .ins()
+            .bitcast(types::F128, MemFlags::new(), bits128)
+    }
+
+    fn unpack_f128_to_f64(builder: &mut FunctionBuilder, f128_val: Value) -> Value {
+        // Reverse of pack_f64_to_f128: read low 64-bit payload as f64 bits.
+        let bits128 = builder
+            .ins()
+            .bitcast(types::I128, MemFlags::new(), f128_val);
+        let bits64 = builder.ins().ireduce(types::I64, bits128);
+        builder
+            .ins()
+            .bitcast(types::F64, MemFlags::new(), bits64)
+    }
+
     if val.ty == target {
         return val.value;
     }
@@ -513,6 +542,10 @@ pub(crate) fn convert_to_type(
         if val.ty == types::I64 || val.ty == types::I32 {
             return builder.ins().fcvt_from_sint(types::F64, val.value);
         }
+        // Convert f128 to f64
+        if val.ty == types::F128 {
+            return unpack_f128_to_f64(builder, val.value);
+        }
         // Convert f32 to f64
         if val.ty == types::F32 {
             return builder.ins().fpromote(types::F64, val.value);
@@ -520,9 +553,33 @@ pub(crate) fn convert_to_type(
     }
 
     if target == types::F32 {
+        if val.ty == types::F128 {
+            let f64_val = unpack_f128_to_f64(builder, val.value);
+            return builder.ins().fdemote(types::F32, f64_val);
+        }
         // Convert f64 to f32
         if val.ty == types::F64 {
             return builder.ins().fdemote(types::F32, val.value);
+        }
+    }
+
+    if target == types::F128 {
+        if val.ty == types::F64 {
+            return pack_f64_to_f128(builder, val.value);
+        }
+        if val.ty == types::F32 {
+            let f64_val = builder.ins().fpromote(types::F64, val.value);
+            return pack_f64_to_f128(builder, f64_val);
+        }
+        if val.ty.is_int() {
+            let f64_val = if val.ty == types::I128 {
+                // x64 lowering has no i128->float conversion path; use low 64 bits.
+                let low = builder.ins().ireduce(types::I64, val.value);
+                builder.ins().fcvt_from_sint(types::F64, low)
+            } else {
+                builder.ins().fcvt_from_sint(types::F64, val.value)
+            };
+            return pack_f64_to_f128(builder, f64_val);
         }
     }
 
@@ -538,6 +595,15 @@ pub(crate) fn convert_to_type(
     // Integer narrowing
     if target.is_int() && val.ty.is_int() && target.bits() < val.ty.bits() {
         return builder.ins().ireduce(target, val.value);
+    }
+
+    if target.is_int() && val.ty == types::F128 {
+        let f64_val = unpack_f128_to_f64(builder, val.value);
+        if target == types::I128 {
+            let narrowed = builder.ins().fcvt_to_sint(types::I64, f64_val);
+            return builder.ins().sextend(types::I128, narrowed);
+        }
+        return builder.ins().fcvt_to_sint(target, f64_val);
     }
 
     val.value
@@ -760,6 +826,7 @@ pub(crate) fn native_type_to_cranelift(nt: &NativeType, pointer_type: Type) -> T
         NativeType::U64 => types::I64,
         NativeType::F32 => types::F32,
         NativeType::F64 => types::F64,
+        NativeType::F128 => types::F128,
         NativeType::Bool => types::I8,
         NativeType::String => pointer_type,
         NativeType::Handle => pointer_type,

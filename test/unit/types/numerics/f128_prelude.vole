@@ -1,0 +1,81 @@
+// Test f128 prelude methods (Equatable, Comparable, Hashable, Stringable, Default, Bounded, FloatConstants)
+
+tests "f128 Equatable" {
+    test "f128 equals same value" {
+        let a: f128 = 42
+        let b: f128 = 42
+        assert(a.equals(b))
+    }
+
+    test "f128 equals different values" {
+        let a: f128 = 42
+        let b: f128 = 43
+        assert(!a.equals(b))
+    }
+}
+
+tests "f128 Comparable" {
+    test "f128 compare less than" {
+        let a: f128 = 1.5
+        let b: f128 = 2.5
+        assert(a.compare(b) < 0)
+    }
+
+    test "f128 compare greater than" {
+        let a: f128 = 3.5
+        let b: f128 = 2.5
+        assert(a.compare(b) > 0)
+    }
+
+    test "f128 compare equal" {
+        let a: f128 = 7.0
+        let b: f128 = 7.0
+        assert(a.compare(b) == 0)
+    }
+}
+
+tests "f128 Stringable and Hashable" {
+    test "f128 to_string" {
+        let x: f128 = 42
+        assert(x.to_string() == "42")
+    }
+
+    test "f128 hash consistency" {
+        let a: f128 = 12.5
+        let b: f128 = 12.5
+        assert(a.hash() == b.hash())
+    }
+}
+
+tests "f128 Default and Bounded" {
+    test "f128 default_value" {
+        let x = f128.default_value()
+        assert(x == 0.0_f128)
+    }
+
+    test "f128 bounds are ordered" {
+        let min = f128.min_value()
+        let max = f128.max_value()
+        assert(max > min)
+    }
+}
+
+tests "f128 FloatConstants" {
+    test "f128 nan is not equal to itself" {
+        let n = f128.nan()
+        assert(n != n)
+    }
+
+    test "f128 infinity ordering" {
+        let inf = f128.infinity()
+        let neg = f128.neg_infinity()
+        assert(inf > 1.0e300_f128)
+        assert(neg < -1.0e300_f128)
+    }
+
+    test "f128 epsilon is small positive" {
+        let eps = f128.epsilon()
+        assert(eps > 0.0_f128)
+        assert(eps < 1.0_f128)
+    }
+}

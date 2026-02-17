@@ -13,7 +13,8 @@ use smallvec::SmallVec;
 use vole_frontend::Expr;
 use vole_sema::type_arena::TypeId;
 
-use crate::errors::CodegenResult;
+use crate::errors::{CodegenError, CodegenResult};
+use crate::RuntimeKey;
 use crate::union_layout;
 
 use super::context::{Cg, deref_expr_ptr};
@@ -53,6 +54,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.builder
                     .ins()
                     .bitcast(types::I64, MemFlags::new(), f64_val)
+            } else if actual_ty == types::F128 && expected_ty == types::I128 {
+                self.builder
+                    .ins()
+                    .bitcast(types::I128, MemFlags::new(), value)
             } else {
                 value
             }
@@ -61,6 +66,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.builder
                     .ins()
                     .bitcast(types::F64, MemFlags::new(), value)
+            } else if actual_ty == types::I128 && expected_ty == types::F128 {
+                self.builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), value)
             } else {
                 value
             }
@@ -152,6 +161,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             is_target_unknown,
             is_value_unknown,
             is_value_runtime_iterator,
+            is_target_numeric,
+            is_value_numeric,
         ) = {
             let arena = self.arena();
             (
@@ -162,8 +173,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 arena.is_unknown(resolved_target_type_id),
                 arena.is_unknown(resolved_value_type_id),
                 arena.is_runtime_iterator(resolved_value_type_id),
+                arena.is_numeric(resolved_target_type_id),
+                arena.is_numeric(resolved_value_type_id),
             )
         };
+
+        if is_target_numeric && is_value_numeric && resolved_target_type_id != resolved_value_type_id
+        {
+            return self.coerce_numeric_to_type(resolved_value, resolved_target_type_id);
+        }
         // RuntimeIterator is a concrete type that implements Iterator dispatch
         // directly via runtime_iterator_method; skip interface boxing.
         if is_target_interface && !is_value_interface && !is_value_runtime_iterator {
@@ -177,6 +195,124 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    fn coerce_numeric_to_type(
+        &mut self,
+        value: CompiledValue,
+        target_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let target_ty = self.cranelift_type(target_type_id);
+        if value.ty == target_ty {
+            return Ok(CompiledValue::new(value.value, target_ty, target_type_id));
+        }
+
+        let source_is_unsigned = self.arena().is_unsigned(value.type_id);
+        let target_is_unsigned = self.arena().is_unsigned(target_type_id);
+
+        let converted = if target_ty == types::F128 {
+            match value.ty {
+                ty if ty == types::F128 => value.value,
+                ty if ty == types::F64 => {
+                    let bits = self.call_runtime(RuntimeKey::F64ToF128, &[value.value])?;
+                    self.builder
+                        .ins()
+                        .bitcast(types::F128, MemFlags::new(), bits)
+                }
+                ty if ty == types::F32 => {
+                    let bits = self.call_runtime(RuntimeKey::F32ToF128, &[value.value])?;
+                    self.builder
+                        .ins()
+                        .bitcast(types::F128, MemFlags::new(), bits)
+                }
+                ty if ty == types::I128 => {
+                    let bits = self.call_runtime(RuntimeKey::I128ToF128, &[value.value])?;
+                    self.builder
+                        .ins()
+                        .bitcast(types::F128, MemFlags::new(), bits)
+                }
+                ty if ty.is_int() => {
+                    let i64_val = if ty == types::I64 {
+                        value.value
+                    } else if ty.bytes() < 8 {
+                        if source_is_unsigned {
+                            self.builder.ins().uextend(types::I64, value.value)
+                        } else {
+                            self.builder.ins().sextend(types::I64, value.value)
+                        }
+                    } else {
+                        self.builder.ins().ireduce(types::I64, value.value)
+                    };
+                    let bits = self.call_runtime(RuntimeKey::I64ToF128, &[i64_val])?;
+                    self.builder
+                        .ins()
+                        .bitcast(types::F128, MemFlags::new(), bits)
+                }
+                _ => value.value,
+            }
+        } else if value.ty == types::F128 {
+            let f128_bits = self
+                .builder
+                .ins()
+                .bitcast(types::I128, MemFlags::new(), value.value);
+            match target_ty {
+                ty if ty == types::F64 => {
+                    self.call_runtime(RuntimeKey::F128ToF64, &[f128_bits])?
+                }
+                ty if ty == types::F32 => {
+                    self.call_runtime(RuntimeKey::F128ToF32, &[f128_bits])?
+                }
+                ty if ty == types::I128 => {
+                    self.call_runtime(RuntimeKey::F128ToI128, &[f128_bits])?
+                }
+                ty if ty.is_int() => {
+                    let i64_val = self.call_runtime(RuntimeKey::F128ToI64, &[f128_bits])?;
+                    if ty == types::I64 {
+                        i64_val
+                    } else if ty.bytes() < 8 {
+                        self.builder.ins().ireduce(ty, i64_val)
+                    } else {
+                        // i128 path is handled above; keep for defensive completeness.
+                        self.builder.ins().sextend(ty, i64_val)
+                    }
+                }
+                _ => value.value,
+            }
+        } else if target_ty.is_int() && value.ty.is_int() {
+            if target_ty.bytes() > value.ty.bytes() {
+                if source_is_unsigned {
+                    self.builder.ins().uextend(target_ty, value.value)
+                } else {
+                    self.builder.ins().sextend(target_ty, value.value)
+                }
+            } else {
+                self.builder.ins().ireduce(target_ty, value.value)
+            }
+        } else if target_ty.is_float() && value.ty.is_float() {
+            if value.ty == types::F32 && target_ty == types::F64 {
+                self.builder.ins().fpromote(types::F64, value.value)
+            } else if value.ty == types::F64 && target_ty == types::F32 {
+                self.builder.ins().fdemote(types::F32, value.value)
+            } else {
+                value.value
+            }
+        } else if target_ty.is_float() && value.ty.is_int() {
+            if source_is_unsigned {
+                self.builder.ins().fcvt_from_uint(target_ty, value.value)
+            } else {
+                self.builder.ins().fcvt_from_sint(target_ty, value.value)
+            }
+        } else if target_ty.is_int() && value.ty.is_float() {
+            if target_is_unsigned {
+                self.builder.ins().fcvt_to_uint(target_ty, value.value)
+            } else {
+                self.builder.ins().fcvt_to_sint(target_ty, value.value)
+            }
+        } else {
+            value.value
+        };
+
+        Ok(CompiledValue::new(converted, target_ty, target_type_id))
+    }
+
     /// Box a value into the unknown type (TaggedValue representation).
     ///
     /// Creates a 16-byte stack slot containing:
@@ -186,6 +322,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Returns a pointer to the TaggedValue.
     pub fn box_to_unknown(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
         use crate::types::unknown_type_tag;
+
+        if value.ty == types::I128 || value.ty == types::F128 {
+            return Err(CodegenError::type_mismatch(
+                "unknown boxing",
+                "a type that fits in 64 bits",
+                "128-bit values (i128/f128 cannot be boxed as unknown)",
+            ));
+        }
 
         // Get the runtime tag for this type
         let tag = unknown_type_tag(value.type_id, self.arena());

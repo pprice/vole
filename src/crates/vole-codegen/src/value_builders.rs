@@ -39,6 +39,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.builder.ins().f64const(0.0)
         } else if ty == types::F32 {
             self.builder.ins().f32const(0.0)
+        } else if ty == types::F128 {
+            let zero_bits = self.builder.ins().iconst(types::I128, 0);
+            self.builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), zero_bits)
         } else {
             self.builder.ins().iconst(ty, 0)
         }
@@ -81,10 +86,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             (ty, type_id)
         };
         // Cranelift's iconst doesn't support I128 directly - we need to create
-        // an i64 constant and sign-extend it to i128
+        // an i64 constant and sign-extend it to i128.
+        // For f128, use the runtime software representation (f64 payload in low 64 bits).
         let value = if ty == types::I128 {
             let i64_val = self.builder.ins().iconst(types::I64, n);
             self.builder.ins().sextend(types::I128, i64_val)
+        } else if ty == types::F128 {
+            let low = self.builder.ins().iconst(types::I64, (n as f64).to_bits() as i64);
+            let wide = self.builder.ins().uextend(types::I128, low);
+            self.builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), wide)
         } else {
             self.builder.ins().iconst(ty, n)
         };
@@ -102,6 +114,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ArenaType::Primitive(PrimitiveType::F32) => {
                 let v = self.builder.ins().f32const(n as f32);
                 (types::F32, v)
+            }
+            ArenaType::Primitive(PrimitiveType::F128) => {
+                // Runtime f128 currently uses a compact software representation:
+                // low 64 bits = f64 payload, high 64 bits = 0.
+                let low = self.builder.ins().iconst(types::I64, n.to_bits() as i64);
+                let wide = self.builder.ins().uextend(types::I128, low);
+                let v = self.builder.ins().bitcast(types::F128, MemFlags::new(), wide);
+                (types::F128, v)
             }
             _ => {
                 // Default to F64

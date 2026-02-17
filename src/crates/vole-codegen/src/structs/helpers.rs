@@ -137,6 +137,9 @@ pub(crate) fn convert_field_value_id(
             let fval = builder.ins().bitcast(types::F32, MemFlags::new(), i32_val);
             (fval, types::F32)
         }
+        ArenaType::Primitive(PrimitiveType::F128) => {
+            panic!("f128 cannot be reconstructed from a single i64 slot")
+        }
         ArenaType::Primitive(PrimitiveType::Bool) => {
             let bval = builder.ins().ireduce(types::I8, raw_value);
             (bval, types::I8)
@@ -184,6 +187,7 @@ pub(crate) fn convert_to_i64_for_storage(
         // i128 should not reach here - callers must use store_field_value,
         // split_i128_for_storage, or store_i128_to_stack instead
         types::I128 => panic!("i128 must use store_field_value for 2-slot storage"),
+        types::F128 => panic!("f128 must use store_field_value for 2-slot storage"),
         _ => value.value,
     }
 }
@@ -235,8 +239,15 @@ pub(crate) fn store_value_to_stack(
     slot: codegen::ir::StackSlot,
     offset: i32,
 ) -> i32 {
-    if value.ty == types::I128 {
-        store_i128_to_stack(builder, value.value, slot, offset);
+    if value.ty == types::I128 || value.ty == types::F128 {
+        let wide = if value.ty == types::F128 {
+            builder
+                .ins()
+                .bitcast(types::I128, MemFlags::new(), value.value)
+        } else {
+            value.value
+        };
+        store_i128_to_stack(builder, wide, slot, offset);
         16
     } else {
         let store_val = convert_to_i64_for_storage(builder, value);
@@ -257,9 +268,16 @@ pub(crate) fn store_field_value(
 ) {
     let slot_val = builder.ins().iconst(types::I32, slot as i64);
 
-    if value.ty == types::I128 {
-        // Split i128 into low/high halves and store in 2 consecutive slots
-        let (low, high) = split_i128_for_storage(builder, value.value);
+    if value.ty == types::I128 || value.ty == types::F128 {
+        // Split wide values into low/high halves and store in 2 consecutive slots.
+        let wide = if value.ty == types::F128 {
+            builder
+                .ins()
+                .bitcast(types::I128, MemFlags::new(), value.value)
+        } else {
+            value.value
+        };
+        let (low, high) = split_i128_for_storage(builder, wide);
         builder
             .ins()
             .call(set_func_ref, &[instance_ptr, slot_val, low]);

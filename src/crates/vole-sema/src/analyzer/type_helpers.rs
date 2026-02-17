@@ -52,6 +52,7 @@ impl Analyzer {
             PrimitiveType::U64 => ArenaTypeId::U64,
             PrimitiveType::F32 => ArenaTypeId::F32,
             PrimitiveType::F64 => ArenaTypeId::F64,
+            PrimitiveType::F128 => ArenaTypeId::F128,
             PrimitiveType::Bool => ArenaTypeId::BOOL,
             PrimitiveType::String => ArenaTypeId::STRING,
         }
@@ -396,6 +397,7 @@ impl Analyzer {
             NumericSuffix::I128 => ArenaTypeId::I128,
             NumericSuffix::F32 => ArenaTypeId::F32,
             NumericSuffix::F64 => ArenaTypeId::F64,
+            NumericSuffix::F128 => ArenaTypeId::F128,
         }
     }
 
@@ -413,6 +415,7 @@ impl Analyzer {
             NumericSuffix::I128 => "i128 range".to_string(),
             NumericSuffix::F32 => "f32 range".to_string(),
             NumericSuffix::F64 => "f64 range".to_string(),
+            NumericSuffix::F128 => "f128 range".to_string(),
         }
     }
 }

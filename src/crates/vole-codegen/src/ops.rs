@@ -26,6 +26,7 @@ fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
         TypeId::I128 => types::I128,
         TypeId::F32 => types::F32,
         TypeId::F64 => types::F64,
+        TypeId::F128 => types::F128,
         _ => types::I64, // Default for other types
     }
 }
@@ -34,7 +35,9 @@ fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
 /// Mirrors sema's numeric_result_type/integer_result_type logic to ensure consistency.
 fn numeric_result_type_id(left: TypeId, right: TypeId) -> TypeId {
     // Float types take precedence, wider float wins
-    if left == TypeId::F64 || right == TypeId::F64 {
+    if left == TypeId::F128 || right == TypeId::F128 {
+        TypeId::F128
+    } else if left == TypeId::F64 || right == TypeId::F64 {
         TypeId::F64
     } else if left == TypeId::F32 || right == TypeId::F32 {
         TypeId::F32
@@ -568,35 +571,52 @@ impl Cg<'_, '_, '_> {
             (left_type_id, left.ty)
         };
 
-        // Convert operands - access arena via env to avoid borrow conflict
-        let arena = self.env.analyzed.type_arena();
-        let left_val = convert_to_type(self.builder, left, result_ty, arena);
-        let right_val = convert_to_type(self.builder, right, result_ty, arena);
+        let (left_val, right_val) = if result_ty == types::F128 {
+            (
+                self.coerce_value_to_f128(left)?,
+                self.coerce_value_to_f128(right)?,
+            )
+        } else {
+            // Convert operands - access arena via env to avoid borrow conflict
+            let arena = self.env.analyzed.type_arena();
+            (
+                convert_to_type(self.builder, left, result_ty, arena),
+                convert_to_type(self.builder, right, result_ty, arena),
+            )
+        };
 
         let result = match op {
             BinaryOp::Add => {
-                if result_ty == types::F64 || result_ty == types::F32 {
+                if result_ty == types::F128 {
+                    self.call_f128_binary_op(RuntimeKey::F128Add, left_val, right_val)?
+                } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fadd(left_val, right_val)
                 } else {
                     self.builder.ins().iadd(left_val, right_val)
                 }
             }
             BinaryOp::Sub => {
-                if result_ty == types::F64 || result_ty == types::F32 {
+                if result_ty == types::F128 {
+                    self.call_f128_binary_op(RuntimeKey::F128Sub, left_val, right_val)?
+                } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fsub(left_val, right_val)
                 } else {
                     self.builder.ins().isub(left_val, right_val)
                 }
             }
             BinaryOp::Mul => {
-                if result_ty == types::F64 || result_ty == types::F32 {
+                if result_ty == types::F128 {
+                    self.call_f128_binary_op(RuntimeKey::F128Mul, left_val, right_val)?
+                } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fmul(left_val, right_val)
                 } else {
                     self.builder.ins().imul(left_val, right_val)
                 }
             }
             BinaryOp::Div => {
-                if result_ty == types::F64 || result_ty == types::F32 {
+                if result_ty == types::F128 {
+                    self.call_f128_binary_op(RuntimeKey::F128Div, left_val, right_val)?
+                } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fdiv(left_val, right_val)
                 } else if result_ty == types::I128 {
                     // Cranelift x64 doesn't support sdiv.i128; use runtime helper
@@ -613,7 +633,9 @@ impl Cg<'_, '_, '_> {
                 }
             }
             BinaryOp::Mod => {
-                if result_ty == types::F64 || result_ty == types::F32 {
+                if result_ty == types::F128 {
+                    self.call_f128_binary_op(RuntimeKey::F128Rem, left_val, right_val)?
+                } else if result_ty == types::F64 || result_ty == types::F32 {
                     let div = self.builder.ins().fdiv(left_val, right_val);
                     let floor = self.builder.ins().floor(div);
                     let mul = self.builder.ins().fmul(floor, right_val);
@@ -635,6 +657,8 @@ impl Cg<'_, '_, '_> {
             BinaryOp::Eq => {
                 if left_is_string {
                     self.string_eq(left_val, right_val)?
+                } else if result_ty == types::F128 {
+                    self.call_f128_cmp(RuntimeKey::F128Eq, left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
                 } else {
@@ -644,6 +668,10 @@ impl Cg<'_, '_, '_> {
             BinaryOp::Ne => {
                 if left_is_string {
                     let eq = self.string_eq(left_val, right_val)?;
+                    let one = self.builder.ins().iconst(types::I8, 1);
+                    self.builder.ins().isub(one, eq)
+                } else if result_ty == types::F128 {
+                    let eq = self.call_f128_cmp(RuntimeKey::F128Eq, left_val, right_val)?;
                     let one = self.builder.ins().iconst(types::I8, 1);
                     self.builder.ins().isub(one, eq)
                 } else if result_ty == types::F64 || result_ty == types::F32 {
@@ -656,50 +684,74 @@ impl Cg<'_, '_, '_> {
                         .icmp(IntCC::NotEqual, left_val, right_val)
                 }
             }
-            BinaryOp::Lt => self.emit_cmp(
-                result_ty,
-                left_type_id,
-                left_val,
-                right_val,
-                CmpCodes {
-                    float: FloatCC::LessThan,
-                    unsigned: IntCC::UnsignedLessThan,
-                    signed: IntCC::SignedLessThan,
-                },
-            ),
-            BinaryOp::Gt => self.emit_cmp(
-                result_ty,
-                left_type_id,
-                left_val,
-                right_val,
-                CmpCodes {
-                    float: FloatCC::GreaterThan,
-                    unsigned: IntCC::UnsignedGreaterThan,
-                    signed: IntCC::SignedGreaterThan,
-                },
-            ),
-            BinaryOp::Le => self.emit_cmp(
-                result_ty,
-                left_type_id,
-                left_val,
-                right_val,
-                CmpCodes {
-                    float: FloatCC::LessThanOrEqual,
-                    unsigned: IntCC::UnsignedLessThanOrEqual,
-                    signed: IntCC::SignedLessThanOrEqual,
-                },
-            ),
-            BinaryOp::Ge => self.emit_cmp(
-                result_ty,
-                left_type_id,
-                left_val,
-                right_val,
-                CmpCodes {
-                    float: FloatCC::GreaterThanOrEqual,
-                    unsigned: IntCC::UnsignedGreaterThanOrEqual,
-                    signed: IntCC::SignedGreaterThanOrEqual,
-                },
-            ),
+            BinaryOp::Lt => {
+                if result_ty == types::F128 {
+                    self.call_f128_cmp(RuntimeKey::F128Lt, left_val, right_val)?
+                } else {
+                    self.emit_cmp(
+                        result_ty,
+                        left_type_id,
+                        left_val,
+                        right_val,
+                        CmpCodes {
+                            float: FloatCC::LessThan,
+                            unsigned: IntCC::UnsignedLessThan,
+                            signed: IntCC::SignedLessThan,
+                        },
+                    )
+                }
+            }
+            BinaryOp::Gt => {
+                if result_ty == types::F128 {
+                    self.call_f128_cmp(RuntimeKey::F128Gt, left_val, right_val)?
+                } else {
+                    self.emit_cmp(
+                        result_ty,
+                        left_type_id,
+                        left_val,
+                        right_val,
+                        CmpCodes {
+                            float: FloatCC::GreaterThan,
+                            unsigned: IntCC::UnsignedGreaterThan,
+                            signed: IntCC::SignedGreaterThan,
+                        },
+                    )
+                }
+            }
+            BinaryOp::Le => {
+                if result_ty == types::F128 {
+                    self.call_f128_cmp(RuntimeKey::F128Le, left_val, right_val)?
+                } else {
+                    self.emit_cmp(
+                        result_ty,
+                        left_type_id,
+                        left_val,
+                        right_val,
+                        CmpCodes {
+                            float: FloatCC::LessThanOrEqual,
+                            unsigned: IntCC::UnsignedLessThanOrEqual,
+                            signed: IntCC::SignedLessThanOrEqual,
+                        },
+                    )
+                }
+            }
+            BinaryOp::Ge => {
+                if result_ty == types::F128 {
+                    self.call_f128_cmp(RuntimeKey::F128Ge, left_val, right_val)?
+                } else {
+                    self.emit_cmp(
+                        result_ty,
+                        left_type_id,
+                        left_val,
+                        right_val,
+                        CmpCodes {
+                            float: FloatCC::GreaterThanOrEqual,
+                            unsigned: IntCC::UnsignedGreaterThanOrEqual,
+                            signed: IntCC::SignedGreaterThanOrEqual,
+                        },
+                    )
+                }
+            }
             BinaryOp::And | BinaryOp::Or => unreachable!("handled above"),
             BinaryOp::BitAnd => self.builder.ins().band(left_val, right_val),
             BinaryOp::BitOr => self.builder.ins().bor(left_val, right_val),
@@ -733,6 +785,77 @@ impl Cg<'_, '_, '_> {
         };
 
         Ok(CompiledValue::new(result, final_ty, final_type_id))
+    }
+
+    fn coerce_value_to_f128(&mut self, value: CompiledValue) -> CodegenResult<Value> {
+        match value.ty {
+            ty if ty == types::F128 => Ok(value.value),
+            ty if ty == types::F64 => {
+                let bits = self.call_runtime(RuntimeKey::F64ToF128, &[value.value])?;
+                Ok(self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), bits))
+            }
+            ty if ty == types::F32 => {
+                let bits = self.call_runtime(RuntimeKey::F32ToF128, &[value.value])?;
+                Ok(self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), bits))
+            }
+            ty if ty == types::I128 => {
+                let bits = self.call_runtime(RuntimeKey::I128ToF128, &[value.value])?;
+                Ok(self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), bits))
+            }
+            ty if ty.is_int() => {
+                let v = if ty == types::I64 {
+                    value.value
+                } else {
+                    self.builder.ins().sextend(types::I64, value.value)
+                };
+                let bits = self.call_runtime(RuntimeKey::I64ToF128, &[v])?;
+                Ok(self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), bits))
+            }
+            _ => Err(CodegenError::type_mismatch(
+                "f128 coercion",
+                "numeric type",
+                format!("{:?}", value.ty),
+            )),
+        }
+    }
+
+    fn call_f128_binary_op(
+        &mut self,
+        key: RuntimeKey,
+        left: Value,
+        right: Value,
+    ) -> CodegenResult<Value> {
+        let left_bits = self.builder.ins().bitcast(types::I128, MemFlags::new(), left);
+        let right_bits = self
+            .builder
+            .ins()
+            .bitcast(types::I128, MemFlags::new(), right);
+        let result_bits = self.call_runtime(key, &[left_bits, right_bits])?;
+        Ok(self
+            .builder
+            .ins()
+            .bitcast(types::F128, MemFlags::new(), result_bits))
+    }
+
+    fn call_f128_cmp(&mut self, key: RuntimeKey, left: Value, right: Value) -> CodegenResult<Value> {
+        let left_bits = self.builder.ins().bitcast(types::I128, MemFlags::new(), left);
+        let right_bits = self
+            .builder
+            .ins()
+            .bitcast(types::I128, MemFlags::new(), right);
+        self.call_runtime(key, &[left_bits, right_bits])
     }
 
     /// String equality comparison
@@ -972,12 +1095,12 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op, line)?;
 
         // Store back
-        // i128 cannot fit in a TaggedValue (u64 payload)
-        if result.ty == types::I128 {
+        // Wide 128-bit values cannot fit in a TaggedValue (u64 payload).
+        if result.ty == types::I128 || result.ty == types::F128 {
             return Err(CodegenError::type_mismatch(
                 "array compound assignment",
                 "a type that fits in 64 bits",
-                "i128 (128-bit values cannot be stored in arrays)",
+                "128-bit values (i128/f128 cannot be stored in arrays)",
             ));
         }
         let (tag_val, store_value, _stored) =

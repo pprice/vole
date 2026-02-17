@@ -20,6 +20,7 @@ pub enum PrimitiveTypeId {
     U64,
     F32,
     F64,
+    F128,
     Bool,
     String,
     Range,
@@ -41,6 +42,7 @@ impl PrimitiveTypeId {
             PrimitiveTypeId::U64 => "u64",
             PrimitiveTypeId::F32 => "f32",
             PrimitiveTypeId::F64 => "f64",
+            PrimitiveTypeId::F128 => "f128",
             PrimitiveTypeId::Bool => "bool",
             PrimitiveTypeId::String => "string",
             PrimitiveTypeId::Range => "range",
@@ -80,6 +82,7 @@ impl ImplTypeId {
                     PrimitiveType::U64 => PrimitiveTypeId::U64,
                     PrimitiveType::F32 => PrimitiveTypeId::F32,
                     PrimitiveType::F64 => PrimitiveTypeId::F64,
+                    PrimitiveType::F128 => PrimitiveTypeId::F128,
                     PrimitiveType::Bool => PrimitiveTypeId::Bool,
                     PrimitiveType::String => PrimitiveTypeId::String,
                 };

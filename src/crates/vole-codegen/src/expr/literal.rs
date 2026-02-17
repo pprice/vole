@@ -107,12 +107,12 @@ impl Cg<'_, '_, '_> {
             // RC: inc borrowed RC elements so the array gets its own reference.
             self.rc_inc_borrowed_for_container(&compiled)?;
 
-            // i128 cannot fit in a TaggedValue (u64 payload) - reject at compile time
-            if compiled.ty == types::I128 {
+            // Wide 128-bit values cannot fit in a TaggedValue (u64 payload).
+            if compiled.ty == types::I128 || compiled.ty == types::F128 {
                 return Err(CodegenError::type_mismatch(
                     "array element",
                     "a type that fits in 64 bits",
-                    "i128 (128-bit values cannot be stored in arrays)",
+                    "128-bit values (i128/f128 cannot be stored in arrays)",
                 ));
             }
 

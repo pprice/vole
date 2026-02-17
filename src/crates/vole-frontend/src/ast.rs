@@ -613,6 +613,7 @@ pub enum NumericSuffix {
     I128,
     F32,
     F64,
+    F128,
 }
 
 impl NumericSuffix {
@@ -630,13 +631,14 @@ impl NumericSuffix {
             "i128" => Some(NumericSuffix::I128),
             "f32" => Some(NumericSuffix::F32),
             "f64" => Some(NumericSuffix::F64),
+            "f128" => Some(NumericSuffix::F128),
             _ => None,
         }
     }
 
-    /// Whether this is a float suffix (f32, f64).
+    /// Whether this is a float suffix (f32, f64, f128).
     pub fn is_float(self) -> bool {
-        matches!(self, NumericSuffix::F32 | NumericSuffix::F64)
+        matches!(self, NumericSuffix::F32 | NumericSuffix::F64 | NumericSuffix::F128)
     }
 
     /// Whether this is an integer suffix (u8..u64, i8..i64).
@@ -658,6 +660,7 @@ impl NumericSuffix {
             NumericSuffix::I128 => "i128",
             NumericSuffix::F32 => "f32",
             NumericSuffix::F64 => "f64",
+            NumericSuffix::F128 => "f128",
         }
     }
 
@@ -675,6 +678,7 @@ impl NumericSuffix {
             NumericSuffix::I128 => PrimitiveType::I128,
             NumericSuffix::F32 => PrimitiveType::F32,
             NumericSuffix::F64 => PrimitiveType::F64,
+            NumericSuffix::F128 => PrimitiveType::F128,
         }
     }
 }

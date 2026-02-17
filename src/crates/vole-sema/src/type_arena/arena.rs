@@ -42,13 +42,13 @@ macro_rules! define_primitive_types {
     };
 }
 
-// Define all TypeId-based primitives (20 types)
+// Define all TypeId-based primitives (21 types)
 // Note: never and unknown are handled specially as they return TypeId constants directly
 define_primitive_types!(
     // Signed integers
     i8, i16, i32, i64, i128, // Unsigned integers
     u8, u16, u32, u64, // Floating point
-    f32, f64, // Other primitives
+    f32, f64, f128, // Other primitives
     bool, string, // Opaque handle type
     handle, // Special types
     void, nil, done, range, metatype, invalid
@@ -121,6 +121,9 @@ impl TypeArena {
         debug_assert_eq!(arena.primitives.f32, TypeId::F32);
         arena.primitives.f64 = arena.intern(SemaType::Primitive(PrimitiveType::F64));
         debug_assert_eq!(arena.primitives.f64, TypeId::F64);
+
+        arena.primitives.f128 = arena.intern(SemaType::Primitive(PrimitiveType::F128));
+        debug_assert_eq!(arena.primitives.f128, TypeId::F128);
 
         arena.primitives.bool = arena.intern(SemaType::Primitive(PrimitiveType::Bool));
         debug_assert_eq!(arena.primitives.bool, TypeId::BOOL);
@@ -234,6 +237,7 @@ impl TypeArena {
             PrimitiveType::U64 => self.primitives.u64,
             PrimitiveType::F32 => self.primitives.f32,
             PrimitiveType::F64 => self.primitives.f64,
+            PrimitiveType::F128 => self.primitives.f128,
             PrimitiveType::Bool => self.primitives.bool,
             PrimitiveType::String => self.primitives.string,
         }

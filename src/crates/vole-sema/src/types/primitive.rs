@@ -24,6 +24,7 @@ pub enum PrimitiveType {
     // Floating point
     F32,
     F64,
+    F128,
     // Other primitives
     Bool,
     String,
@@ -38,7 +39,7 @@ impl PrimitiveType {
             PrimitiveType::I16 | PrimitiveType::U16 => Some(16),
             PrimitiveType::I32 | PrimitiveType::U32 | PrimitiveType::F32 => Some(32),
             PrimitiveType::I64 | PrimitiveType::U64 | PrimitiveType::F64 => Some(64),
-            PrimitiveType::I128 => Some(128),
+            PrimitiveType::I128 | PrimitiveType::F128 => Some(128),
             PrimitiveType::Bool | PrimitiveType::String => None,
         }
     }
@@ -58,6 +59,7 @@ impl PrimitiveType {
                 | PrimitiveType::U64
                 | PrimitiveType::F32
                 | PrimitiveType::F64
+                | PrimitiveType::F128
         )
     }
 
@@ -88,7 +90,7 @@ impl PrimitiveType {
 
     /// Check if this type is a floating point type.
     pub fn is_float(self) -> bool {
-        matches!(self, PrimitiveType::F32 | PrimitiveType::F64)
+        matches!(self, PrimitiveType::F32 | PrimitiveType::F64 | PrimitiveType::F128)
     }
 
     /// Check if this type can be implicitly widened to target type.
@@ -124,7 +126,8 @@ impl PrimitiveType {
             (PrimitiveType::U32, PrimitiveType::I64 | PrimitiveType::I128) => true,
             (PrimitiveType::U64, PrimitiveType::I128) => true,
             // Float widening
-            (PrimitiveType::F32, PrimitiveType::F64) => true,
+            (PrimitiveType::F32, PrimitiveType::F64 | PrimitiveType::F128) => true,
+            (PrimitiveType::F64, PrimitiveType::F128) => true,
             _ => false,
         }
     }
@@ -143,6 +146,7 @@ impl PrimitiveType {
             PrimitiveType::U64 => "u64",
             PrimitiveType::F32 => "f32",
             PrimitiveType::F64 => "f64",
+            PrimitiveType::F128 => "f128",
             PrimitiveType::Bool => "bool",
             PrimitiveType::String => "string",
         }
@@ -162,6 +166,7 @@ impl PrimitiveType {
             AstPrimitiveType::U64 => PrimitiveType::U64,
             AstPrimitiveType::F32 => PrimitiveType::F32,
             AstPrimitiveType::F64 => PrimitiveType::F64,
+            AstPrimitiveType::F128 => PrimitiveType::F128,
             AstPrimitiveType::Bool => PrimitiveType::Bool,
             AstPrimitiveType::String => PrimitiveType::String,
         }
@@ -174,6 +179,7 @@ impl PrimitiveType {
             return None;
         }
         Some(match (left, right) {
+            (PrimitiveType::F128, _) | (_, PrimitiveType::F128) => PrimitiveType::F128,
             (PrimitiveType::F64, _) | (_, PrimitiveType::F64) => PrimitiveType::F64,
             (PrimitiveType::F32, _) | (_, PrimitiveType::F32) => PrimitiveType::F32,
             (PrimitiveType::I128, _) | (_, PrimitiveType::I128) => PrimitiveType::I128,
@@ -213,6 +219,7 @@ mod tests {
         assert!(PrimitiveType::U64.is_numeric());
         assert!(PrimitiveType::F32.is_numeric());
         assert!(PrimitiveType::F64.is_numeric());
+        assert!(PrimitiveType::F128.is_numeric());
         assert!(!PrimitiveType::Bool.is_numeric());
         assert!(!PrimitiveType::String.is_numeric());
     }
@@ -256,6 +263,8 @@ mod tests {
 
         // Float widening
         assert!(PrimitiveType::F32.can_widen_to(PrimitiveType::F64));
+        assert!(PrimitiveType::F32.can_widen_to(PrimitiveType::F128));
+        assert!(PrimitiveType::F64.can_widen_to(PrimitiveType::F128));
         assert!(!PrimitiveType::F64.can_widen_to(PrimitiveType::F32));
     }
 
@@ -268,6 +277,7 @@ mod tests {
         assert_eq!(PrimitiveType::I128.bit_width(), Some(128));
         assert_eq!(PrimitiveType::F32.bit_width(), Some(32));
         assert_eq!(PrimitiveType::F64.bit_width(), Some(64));
+        assert_eq!(PrimitiveType::F128.bit_width(), Some(128));
         assert_eq!(PrimitiveType::Bool.bit_width(), None);
         assert_eq!(PrimitiveType::String.bit_width(), None);
     }
@@ -285,6 +295,10 @@ mod tests {
         assert_eq!(
             PrimitiveType::promote(PrimitiveType::F32, PrimitiveType::F64),
             Some(PrimitiveType::F64)
+        );
+        assert_eq!(
+            PrimitiveType::promote(PrimitiveType::F64, PrimitiveType::F128),
+            Some(PrimitiveType::F128)
         );
         assert_eq!(
             PrimitiveType::promote(PrimitiveType::Bool, PrimitiveType::I32),
@@ -306,6 +320,10 @@ mod tests {
         assert_eq!(
             PrimitiveType::from_ast(AstPrimitive::F32),
             PrimitiveType::F32
+        );
+        assert_eq!(
+            PrimitiveType::from_ast(AstPrimitive::F128),
+            PrimitiveType::F128
         );
     }
 }

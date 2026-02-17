@@ -1,0 +1,84 @@
+// Test core f128 behavior (currently backed by software/runtime helpers)
+
+func make_value() -> f128 {
+    return 1.25_f128
+}
+
+func add_one(x: f128) -> f128 {
+    return x + 1.0_f128
+}
+
+tests "f128 literals and coercion" {
+    test "f128 suffix literal" {
+        let x = 3.5_f128
+        assert(x > 3.0_f128)
+        assert(x < 4.0_f128)
+    }
+
+    test "f128 from f64 annotation" {
+        let x: f128 = 2.25
+        assert(x > 2.0_f128)
+        assert(x < 2.5_f128)
+    }
+
+    test "f128 from integer annotation" {
+        let x: f128 = 42
+        assert(x == 42.0_f128)
+    }
+}
+
+tests "f128 arithmetic and comparison" {
+    test "f128 add and sub" {
+        let a = 4.5_f128
+        let b = 1.25_f128
+        let sum = a + b
+        let diff = a - b
+        assert(sum > 5.7_f128)
+        assert(sum < 5.8_f128)
+        assert(diff > 3.2_f128)
+        assert(diff < 3.3_f128)
+    }
+
+    test "f128 mul and div" {
+        let a = 3.0_f128
+        let b = 2.0_f128
+        assert(a * b == 6.0_f128)
+        assert(a / b == 1.5_f128)
+    }
+
+    test "f128 remainder" {
+        let x = 7.0_f128
+        let y = 2.0_f128
+        assert(x % y == 1.0_f128)
+    }
+
+    test "f128 comparisons" {
+        let a = 1.0_f128
+        let b = 2.0_f128
+        assert(a < b)
+        assert(b > a)
+        assert(a <= a)
+        assert(b >= b)
+    }
+}
+
+tests "f128 function values" {
+    test "return f128 from function" {
+        let x = make_value()
+        assert(x > 1.2_f128)
+        assert(x < 1.3_f128)
+    }
+
+    test "pass f128 through function" {
+        let x = add_one(4.0_f128)
+        assert(x == 5.0_f128)
+    }
+}
+
+tests "f128 unary operations" {
+    test "unary negation" {
+        let x = -3.0_f128
+        assert(x < 0.0_f128)
+        assert(-x == 3.0_f128)
+    }
+}

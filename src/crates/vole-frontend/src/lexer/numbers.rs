@@ -243,7 +243,7 @@ impl<'src> Lexer<'src> {
         let after_underscore = &remaining[1..];
         // Check if it starts with a known suffix that is NOT followed by an alphanumeric or underscore
         for suffix in &[
-            "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "i128", "f32", "f64",
+            "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "i128", "f32", "f64", "f128",
         ] {
             if after_underscore.starts_with(suffix) {
                 let suffix_end = suffix.len();

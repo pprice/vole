@@ -123,9 +123,9 @@ macro_rules! define_name_primitives {
     };
 }
 
-// Define all name-based primitives (15 types that have NameIds)
+// Define all name-based primitives (16 types that have NameIds)
 define_name_primitives!(
-    i8, i16, i32, i64, i128, u8, u16, u32, u64, f32, f64, bool, string, handle, nil
+    i8, i16, i32, i64, i128, u8, u16, u32, u64, f32, f64, f128, bool, string, handle, nil
 );
 
 impl Primitives {
@@ -143,6 +143,7 @@ impl Primitives {
             PrimitiveType::U64 => self.u64,
             PrimitiveType::F32 => self.f32,
             PrimitiveType::F64 => self.f64,
+            PrimitiveType::F128 => self.f128,
             PrimitiveType::Bool => self.bool,
             PrimitiveType::String => self.string,
         }

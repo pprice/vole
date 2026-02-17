@@ -1106,12 +1106,12 @@ impl Cg<'_, '_, '_> {
         // Get the runtime function reference
         let push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
 
-        // i128 cannot fit in a TaggedValue (u64 payload)
-        if value.ty == types::I128 {
+        // Wide 128-bit values cannot fit in a TaggedValue (u64 payload).
+        if value.ty == types::I128 || value.ty == types::F128 {
             return Err(CodegenError::type_mismatch(
                 "array push",
                 "a type that fits in 64 bits",
-                "i128 (128-bit values cannot be stored in arrays)",
+                "128-bit values (i128/f128 cannot be stored in arrays)",
             ));
         }
         // Call vole_array_push(arr_ptr, tag, value)

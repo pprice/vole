@@ -29,6 +29,7 @@ fn primitive_type_name(p: AstPrimitive) -> &'static str {
         AstPrimitive::U64 => "u64",
         AstPrimitive::F32 => "f32",
         AstPrimitive::F64 => "f64",
+        AstPrimitive::F128 => "f128",
         AstPrimitive::Bool => "bool",
         AstPrimitive::String => "string",
     }

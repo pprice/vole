@@ -179,6 +179,12 @@ impl Cg<'_, '_, '_> {
             (RuntimeKey::F64ToString, val.value)
         } else if val.ty == types::F32 {
             (RuntimeKey::F32ToString, val.value)
+        } else if val.ty == types::F128 {
+            let bits = self
+                .builder
+                .ins()
+                .bitcast(types::I128, MemFlags::new(), val.value);
+            (RuntimeKey::F128ToString, bits)
         } else if val.ty == types::I128 {
             (RuntimeKey::I128ToString, val.value)
         } else if val.ty == types::I8 {

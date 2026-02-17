@@ -295,12 +295,12 @@ impl Cg<'_, '_, '_> {
         // owns its element independently of the source binding.
         self.rc_inc_borrowed_for_container(&val)?;
 
-        // i128 cannot fit in a TaggedValue (u64 payload)
-        if val.ty == types::I128 {
+        // Wide 128-bit values cannot fit in a TaggedValue (u64 payload).
+        if val.ty == types::I128 || val.ty == types::F128 {
             return Err(CodegenError::type_mismatch(
                 "array element assignment",
                 "a type that fits in 64 bits",
-                "i128 (128-bit values cannot be stored in arrays)",
+                "128-bit values (i128/f128 cannot be stored in arrays)",
             ));
         }
 

@@ -6,7 +6,7 @@ use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 
 // Re-use to_string functions from builtins (consolidated)
 use crate::builtins::{
-    bool_to_string, f64_to_string, i32_to_string, i64_to_string, i128_to_string,
+    bool_to_string, f128_to_string, f64_to_string, i32_to_string, i64_to_string, i128_to_string,
 };
 
 /// Convert a total ordering to the standard comparison result: -1, 0, or 1.
@@ -357,6 +357,40 @@ pub fn module() -> NativeModule {
         NativeSignature {
             params: vec![NativeType::F32, NativeType::F32],
             return_type: NativeType::I32,
+        },
+    );
+
+    // f128 functions
+    m.register(
+        "f128_equals",
+        f128_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I128, NativeType::I128],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "f128_compare",
+        f128_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I128, NativeType::I128],
+            return_type: NativeType::I32,
+        },
+    );
+    m.register(
+        "f128_to_string",
+        f128_to_string as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I128],
+            return_type: NativeType::String,
+        },
+    );
+    m.register(
+        "f128_hash",
+        f128_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I128],
+            return_type: NativeType::I64,
         },
     );
 
@@ -951,6 +985,38 @@ pub extern "C" fn f32_compare(a: f32, b: f32) -> i32 {
     partial_ordering_to_i32(a.partial_cmp(&b))
 }
 
+#[inline]
+fn f128_bits_to_f64(bits: i128) -> f64 {
+    crate::builtins::vole_f128_to_f64(bits)
+}
+
+/// Check if two f128 values are equal (IEEE: NaN != NaN).
+#[unsafe(no_mangle)]
+pub extern "C" fn f128_equals(a: i128, b: i128) -> i8 {
+    if f128_bits_to_f64(a) == f128_bits_to_f64(b) {
+        1
+    } else {
+        0
+    }
+}
+
+/// Compare two f128 values, returns -1, 0, or 1 (NaN returns 0).
+#[unsafe(no_mangle)]
+pub extern "C" fn f128_compare(a: i128, b: i128) -> i32 {
+    partial_ordering_to_i32(f128_bits_to_f64(a).partial_cmp(&f128_bits_to_f64(b)))
+}
+
+/// Hash an f128 payload. Current software representation hashes both 64-bit halves.
+#[unsafe(no_mangle)]
+pub extern "C" fn f128_hash(bits: i128) -> i64 {
+    let u = bits as u128;
+    let low = u as u64;
+    let high = (u >> 64) as u64;
+    let low_hash = hash_bits(low);
+    let high_hash = hash_bits(high).rotate_left(31);
+    low_hash ^ high_hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1106,6 +1172,16 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_f128_equals_compare() {
+        let one = crate::builtins::vole_f64_to_f128(1.0);
+        let two = crate::builtins::vole_f64_to_f128(2.0);
+        assert_eq!(f128_equals(one, one), 1);
+        assert_eq!(f128_equals(one, two), 0);
+        assert_eq!(f128_compare(one, two), -1);
+        assert_eq!(f128_compare(two, one), 1);
+    }
+
     // =========================================================================
     // bool function tests
     // =========================================================================
@@ -1150,6 +1226,10 @@ mod tests {
         assert!(m.get("f64_equals").is_some());
         assert!(m.get("f64_compare").is_some());
         assert!(m.get("f64_to_string").is_some());
+        assert!(m.get("f128_equals").is_some());
+        assert!(m.get("f128_compare").is_some());
+        assert!(m.get("f128_to_string").is_some());
+        assert!(m.get("f128_hash").is_some());
         assert!(m.get("bool_equals").is_some());
         assert!(m.get("bool_to_string").is_some());
 

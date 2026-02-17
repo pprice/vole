@@ -710,9 +710,16 @@ impl Cg<'_, '_, '_> {
                         .load(types::I64, MemFlags::new(), value.value, src_off);
                 self.builder.ins().stack_store(val, slot, dst_off);
             }
-        } else if value.ty == types::I128 {
-            // i128 needs 2 x 8-byte slots: low 64 bits at offset, high 64 bits at offset+8
-            let (low, high) = split_i128_for_storage(self.builder, value.value);
+        } else if value.ty == types::I128 || value.ty == types::F128 {
+            // Wide types need 2 x 8-byte slots: low bits at offset, high bits at offset+8.
+            let wide = if value.ty == types::F128 {
+                self.builder
+                    .ins()
+                    .bitcast(types::I128, MemFlags::new(), value.value)
+            } else {
+                value.value
+            };
+            let (low, high) = split_i128_for_storage(self.builder, wide);
             self.builder.ins().stack_store(low, slot, offset);
             self.builder.ins().stack_store(high, slot, offset + 8);
         } else {

@@ -145,6 +145,7 @@ impl Analyzer {
                 PrimitiveTypeId::U64,
                 PrimitiveTypeId::F32,
                 PrimitiveTypeId::F64,
+                PrimitiveTypeId::F128,
                 PrimitiveTypeId::Bool,
                 PrimitiveTypeId::String,
                 PrimitiveTypeId::Range,

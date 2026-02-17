@@ -5,6 +5,7 @@
 use cranelift::prelude::*;
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::RuntimeKey;
 use crate::types::CompiledValue;
 
 use vole_frontend::{AssignTarget, Expr, Symbol, UnaryOp};
@@ -21,7 +22,12 @@ impl Cg<'_, '_, '_> {
         let operand = self.expr(&un.operand)?;
         let result = match un.op {
             UnaryOp::Neg => {
-                if operand.ty.is_float() {
+                if operand.ty == types::F128 {
+                    let bits = self.call_runtime(RuntimeKey::F128Neg, &[operand.value])?;
+                    self.builder
+                        .ins()
+                        .bitcast(types::F128, MemFlags::new(), bits)
+                } else if operand.ty.is_float() {
                     self.builder.ins().fneg(operand.value)
                 } else {
                     self.builder.ins().ineg(operand.value)

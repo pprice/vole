@@ -82,6 +82,7 @@ define_keywords! {
     "u64"         => KwU64,
     "f32"         => KwF32,
     "f64"         => KwF64,
+    "f128"        => KwF128,
     "bool"        => KwBool,
     "string"      => KwString,
     "handle"      => KwHandle,
@@ -157,6 +158,7 @@ pub enum TokenType {
     KwU64,
     KwF32,
     KwF64,
+    KwF128,
     KwBool,
     KwString,
     KwHandle,  // handle type (opaque native pointer)
@@ -234,6 +236,7 @@ impl TokenType {
             Self::KwU64 => Some(PrimitiveType::U64),
             Self::KwF32 => Some(PrimitiveType::F32),
             Self::KwF64 => Some(PrimitiveType::F64),
+            Self::KwF128 => Some(PrimitiveType::F128),
             Self::KwBool => Some(PrimitiveType::Bool),
             Self::KwString => Some(PrimitiveType::String),
             _ => None,

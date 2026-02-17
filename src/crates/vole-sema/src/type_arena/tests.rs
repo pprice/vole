@@ -110,6 +110,7 @@ mod core_tests {
         assert_eq!(arena.primitive(PrimitiveType::I32), arena.i32());
         assert_eq!(arena.primitive(PrimitiveType::String), arena.string());
         assert_eq!(arena.primitive(PrimitiveType::Bool), arena.bool());
+        assert_eq!(arena.primitive(PrimitiveType::F128), arena.f128());
     }
 
     #[test]
@@ -212,6 +213,7 @@ mod core_tests {
         assert!(arena.is_numeric(arena.i32()));
         assert!(arena.is_numeric(arena.i64()));
         assert!(arena.is_numeric(arena.f64()));
+        assert!(arena.is_numeric(arena.f128()));
         assert!(!arena.is_numeric(arena.string()));
         assert!(!arena.is_numeric(arena.bool()));
     }
@@ -230,6 +232,7 @@ mod core_tests {
         let arena = TypeArena::new();
         assert!(arena.is_float(arena.f32()));
         assert!(arena.is_float(arena.f64()));
+        assert!(arena.is_float(arena.f128()));
         assert!(!arena.is_float(arena.i32()));
     }
 

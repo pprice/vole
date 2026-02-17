@@ -59,6 +59,28 @@ to_string_ffi!(f64, f64);
 to_string_ffi!(f32, f32);
 to_string_ffi!(i128, i128);
 
+#[inline]
+fn f128_bits_to_f64(bits: i128) -> f64 {
+    // Runtime f128 support currently uses a compact software representation where
+    // the low 64 bits carry an f64 payload and the high 64 bits are zeroed.
+    f64::from_bits((bits as u128) as u64)
+}
+
+#[inline]
+fn f64_to_f128_bits(v: f64) -> i128 {
+    (v.to_bits() as u128) as i128
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_to_string(bits: i128) -> *mut RcString {
+    RcString::new(&f128_bits_to_f64(bits).to_string())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn f128_to_string(bits: i128) -> *mut RcString {
+    vole_f128_to_string(bits)
+}
+
 // =============================================================================
 // i128 arithmetic helpers (Cranelift x64 doesn't support sdiv/srem for i128)
 // =============================================================================
@@ -100,6 +122,101 @@ pub extern "C" fn vole_i128_srem(a: i128, b: i128) -> i128 {
         vole_panic(msg, file.as_ptr(), file.len(), 0);
     }
     a % b
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_add(a: i128, b: i128) -> i128 {
+    f64_to_f128_bits(f128_bits_to_f64(a) + f128_bits_to_f64(b))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_sub(a: i128, b: i128) -> i128 {
+    f64_to_f128_bits(f128_bits_to_f64(a) - f128_bits_to_f64(b))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_mul(a: i128, b: i128) -> i128 {
+    f64_to_f128_bits(f128_bits_to_f64(a) * f128_bits_to_f64(b))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_div(a: i128, b: i128) -> i128 {
+    f64_to_f128_bits(f128_bits_to_f64(a) / f128_bits_to_f64(b))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_rem(a: i128, b: i128) -> i128 {
+    f64_to_f128_bits(f128_bits_to_f64(a) % f128_bits_to_f64(b))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_neg(a: i128) -> i128 {
+    f64_to_f128_bits(-f128_bits_to_f64(a))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_eq(a: i128, b: i128) -> i8 {
+    (f128_bits_to_f64(a) == f128_bits_to_f64(b)) as i8
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_lt(a: i128, b: i128) -> i8 {
+    (f128_bits_to_f64(a) < f128_bits_to_f64(b)) as i8
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_le(a: i128, b: i128) -> i8 {
+    (f128_bits_to_f64(a) <= f128_bits_to_f64(b)) as i8
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_gt(a: i128, b: i128) -> i8 {
+    (f128_bits_to_f64(a) > f128_bits_to_f64(b)) as i8
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_ge(a: i128, b: i128) -> i8 {
+    (f128_bits_to_f64(a) >= f128_bits_to_f64(b)) as i8
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f64_to_f128(value: f64) -> i128 {
+    f64_to_f128_bits(value)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f32_to_f128(value: f32) -> i128 {
+    f64_to_f128_bits(value as f64)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_i64_to_f128(value: i64) -> i128 {
+    f64_to_f128_bits(value as f64)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_i128_to_f128(value: i128) -> i128 {
+    f64_to_f128_bits(value as f64)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_to_f64(value: i128) -> f64 {
+    f128_bits_to_f64(value)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_to_f32(value: i128) -> f32 {
+    f128_bits_to_f64(value) as f32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_to_i64(value: i128) -> i64 {
+    f128_bits_to_f64(value) as i64
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f128_to_i128(value: i128) -> i128 {
+    f128_bits_to_f64(value) as i128
 }
 
 /// Convert bool to string (FFI entry point)

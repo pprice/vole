@@ -21,6 +21,16 @@ fn parse_float_literal() {
 }
 
 #[test]
+fn parse_float_literal_f128_suffix() {
+    let mut parser = Parser::new("3.25_f128");
+    let expr = parser.parse_expression().unwrap();
+    match expr.kind {
+        ExprKind::FloatLiteral(n, Some(NumericSuffix::F128)) => assert!((n - 3.25).abs() < 0.001),
+        _ => panic!("expected f128 float literal"),
+    }
+}
+
+#[test]
 fn parse_binary_add() {
     let mut parser = Parser::new("1 + 2");
     let expr = parser.parse_expression().unwrap();
@@ -1162,6 +1172,22 @@ fn test_parse_tuple_type_three_elements() {
         } else {
             panic!("expected tuple type");
         }
+    }
+}
+
+#[test]
+fn test_parse_f128_type() {
+    let source = "func foo(x: f128) { }";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().expect("should parse f128 type");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        assert!(matches!(
+            f.params[0].ty.kind,
+            TypeExprKind::Primitive(PrimitiveType::F128)
+        ));
+    } else {
+        panic!("expected function declaration");
     }
 }
 

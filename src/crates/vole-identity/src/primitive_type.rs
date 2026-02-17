@@ -16,6 +16,7 @@ pub enum PrimitiveType {
     U64,
     F32,
     F64,
+    F128,
     Bool,
     String,
 }
@@ -35,6 +36,7 @@ impl PrimitiveType {
             PrimitiveType::U64 => "u64",
             PrimitiveType::F32 => "f32",
             PrimitiveType::F64 => "f64",
+            PrimitiveType::F128 => "f128",
             PrimitiveType::Bool => "bool",
             PrimitiveType::String => "string",
         }

@@ -107,17 +107,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|(&arg, param_type)| {
                 let expected_ty = native_type_to_cranelift(param_type, ptr_type);
                 let actual_ty = self.builder.func.dfg.value_type(arg);
-                if actual_ty == expected_ty {
-                    arg
-                } else if actual_ty.is_int() && expected_ty.is_int() {
-                    if expected_ty.bits() < actual_ty.bits() {
-                        self.builder.ins().ireduce(expected_ty, arg)
-                    } else {
-                        self.builder.ins().sextend(expected_ty, arg)
-                    }
-                } else {
-                    arg
-                }
+                self.coerce_cranelift_value(arg, actual_ty, expected_ty)
             })
             .collect();
 
@@ -137,7 +127,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             let arena = self.arena();
             let cranelift_ty = type_id_to_cranelift(return_type_id, arena, ptr_type);
-            Ok(CompiledValue::new(results[0], cranelift_ty, return_type_id))
+            let actual_ty = self.builder.func.dfg.value_type(results[0]);
+            let result_val = if actual_ty == cranelift_ty {
+                results[0]
+            } else {
+                self.coerce_cranelift_value(results[0], actual_ty, cranelift_ty)
+            };
+            Ok(CompiledValue::new(result_val, cranelift_ty, return_type_id))
         }
     }
 

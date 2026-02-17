@@ -39,27 +39,28 @@ impl TypeId {
     // Floating point
     pub const F32: TypeId = TypeId(10);
     pub const F64: TypeId = TypeId(11);
+    pub const F128: TypeId = TypeId(12);
 
     // Other primitives
-    pub const BOOL: TypeId = TypeId(12);
-    pub const STRING: TypeId = TypeId(13);
+    pub const BOOL: TypeId = TypeId(13);
+    pub const STRING: TypeId = TypeId(14);
 
     // Opaque handle type
-    pub const HANDLE: TypeId = TypeId(14);
+    pub const HANDLE: TypeId = TypeId(15);
 
     // Special types
-    pub const VOID: TypeId = TypeId(15);
-    pub const NIL: TypeId = TypeId(16);
-    pub const DONE: TypeId = TypeId(17);
-    pub const RANGE: TypeId = TypeId(18);
-    pub const METATYPE: TypeId = TypeId(19);
+    pub const VOID: TypeId = TypeId(16);
+    pub const NIL: TypeId = TypeId(17);
+    pub const DONE: TypeId = TypeId(18);
+    pub const RANGE: TypeId = TypeId(19);
+    pub const METATYPE: TypeId = TypeId(20);
 
     // Top and bottom types
-    pub const NEVER: TypeId = TypeId(20);
-    pub const UNKNOWN: TypeId = TypeId(21);
+    pub const NEVER: TypeId = TypeId(21);
+    pub const UNKNOWN: TypeId = TypeId(22);
 
     /// First non-reserved TypeId index (for dynamic types)
-    pub const FIRST_DYNAMIC: u32 = 22;
+    pub const FIRST_DYNAMIC: u32 = 23;
 
     /// Get the raw index (for debugging/serialization)
     pub fn index(self) -> u32 {
@@ -136,7 +137,7 @@ impl TypeId {
     /// Check if this is a floating point type (no arena needed)
     #[inline]
     pub fn is_float(self) -> bool {
-        matches!(self, Self::F32 | Self::F64)
+        matches!(self, Self::F32 | Self::F64 | Self::F128)
     }
 
     /// Check if this is a numeric type (no arena needed)
@@ -148,7 +149,7 @@ impl TypeId {
     /// Check if this is a primitive type (no arena needed)
     #[inline]
     pub fn is_primitive(self) -> bool {
-        // Primitives are indices 1-13 (i8 through string)
+        // Primitives are indices 1-14 (i8 through string)
         self.0 >= Self::I8.0 && self.0 <= Self::STRING.0
     }
 
@@ -166,7 +167,7 @@ impl TypeId {
             Self::U16 => value >= 0 && value <= u16::MAX as i64,
             Self::U32 => value >= 0 && value <= u32::MAX as i64,
             Self::U64 => value >= 0,       // i64 positive values fit
-            Self::F32 | Self::F64 => true, // Integers can become floats
+            Self::F32 | Self::F64 | Self::F128 => true, // Integers can become floats
             _ => false,
         }
     }

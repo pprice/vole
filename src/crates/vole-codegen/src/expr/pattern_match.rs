@@ -47,6 +47,7 @@ impl Cg<'_, '_, '_> {
                 PrimitiveType::U64 => arena.u64(),
                 PrimitiveType::F32 => arena.f32(),
                 PrimitiveType::F64 => arena.f64(),
+                PrimitiveType::F128 => arena.f128(),
                 PrimitiveType::String => arena.string(),
             }),
             TEK::Named(sym) => {

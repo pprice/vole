@@ -48,6 +48,7 @@ impl TypeArena {
                 | PrimitiveType::U64
                 | PrimitiveType::F32
                 | PrimitiveType::F64
+                | PrimitiveType::F128
                 | PrimitiveType::Bool => MemoryKind::Value,
             },
 
@@ -140,6 +141,7 @@ mod tests {
         let a = arena();
         assert_eq!(a.memory_kind(TypeId::F32), MemoryKind::Value);
         assert_eq!(a.memory_kind(TypeId::F64), MemoryKind::Value);
+        assert_eq!(a.memory_kind(TypeId::F128), MemoryKind::Value);
     }
 
     #[test]

@@ -39,6 +39,7 @@ pub(crate) fn get_type_def_id_from_type_id(
                 PrimitiveType::U64 => name_table.primitives.u64,
                 PrimitiveType::F32 => name_table.primitives.f32,
                 PrimitiveType::F64 => name_table.primitives.f64,
+                PrimitiveType::F128 => name_table.primitives.f128,
                 PrimitiveType::Bool => name_table.primitives.bool,
                 PrimitiveType::String => name_table.primitives.string,
             };

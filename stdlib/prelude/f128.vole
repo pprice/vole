@@ -1,0 +1,63 @@
+// stdlib/prelude/f128.vole
+
+let { Equatable, Comparable, Hashable, Stringable, Default, Bounded, FloatConstants } = import "./traits"
+
+implement Equatable for f128 {
+    external("vole:std:runtime") {
+        func "f128_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for f128 {
+    external("vole:std:runtime") {
+        func "f128_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for f128 {
+    external("vole:std:runtime") {
+        func "f128_hash" as hash() -> i64
+    }
+}
+
+implement Stringable for f128 {
+    external("vole:std:runtime") {
+        func "f128_to_string" as to_string() -> string
+    }
+}
+
+implement Default for f128 {
+    statics {
+        func default_value() -> f128 {
+            return 0.0_f128
+        }
+    }
+}
+
+implement Bounded for f128 {
+    statics {
+        func min_value() -> f128 {
+            return -1.7976931348623157e308_f128
+        }
+        func max_value() -> f128 {
+            return 1.7976931348623157e308_f128
+        }
+    }
+}
+
+implement FloatConstants for f128 {
+    statics {
+        func nan() -> f128 {
+            return 0.0_f128 / 0.0_f128
+        }
+        func infinity() -> f128 {
+            return 1.0_f128 / 0.0_f128
+        }
+        func neg_infinity() -> f128 {
+            return -1.0_f128 / 0.0_f128
+        }
+        func epsilon() -> f128 {
+            return 2.220446049250313e-16_f128
+        }
+    }
+}

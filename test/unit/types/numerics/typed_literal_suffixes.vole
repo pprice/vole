@@ -52,6 +52,11 @@ tests "float suffix basics" {
         let x = 3.14_f64
         assert(x > 3.0)
     }
+
+    test "f128 suffix" {
+        let x = 3.14_f128
+        assert(x > 3.0_f128)
+    }
 }
 
 tests "suffix with type annotation" {
@@ -138,6 +143,12 @@ tests "suffix inference overrides default" {
         let y: f32 = x
         assert(y > 0.9)
     }
+
+    test "f128 inferred type" {
+        let x = 1.0_f128
+        let y: f128 = x
+        assert(y > 0.9_f128)
+    }
 }
 
 tests "negative suffix literals" {
@@ -175,6 +186,12 @@ tests "float suffix on decimal integer" {
         let x = 42_f64
         let y: f64 = x
         assert(y > 41.0)
+    }
+
+    test "100_f128 is valid" {
+        let x = 100_f128
+        let y: f128 = x
+        assert(y > 99.0_f128)
     }
 }
 

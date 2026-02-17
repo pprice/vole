@@ -742,13 +742,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CodegenResult<CompiledValue> {
         if crate::types::is_wide_type(field_type_id, self.arena()) {
             let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
-            let value = crate::structs::helpers::load_wide_field(
+            let wide_i128 = crate::structs::helpers::load_wide_field(
                 self.builder,
                 get_func_ref,
                 instance,
                 slot,
             );
-            Ok(CompiledValue::new(value, types::I128, field_type_id))
+            let arena = self.arena();
+            if field_type_id == arena.f128() {
+                let value = self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide_i128);
+                Ok(CompiledValue::new(value, types::F128, field_type_id))
+            } else {
+                Ok(CompiledValue::new(wide_i128, types::I128, field_type_id))
+            }
         } else {
             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
             let result_raw =

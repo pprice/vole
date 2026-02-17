@@ -507,6 +507,15 @@ mod tests {
     }
 
     #[test]
+    fn lex_f128_keyword_and_suffix() {
+        let mut lexer = Lexer::new("f128 3.5_f128");
+        assert_eq!(lexer.next_token().ty, TokenType::KwF128);
+        let lit = lexer.next_token();
+        assert_eq!(lit.ty, TokenType::FloatLiteral);
+        assert_eq!(lit.lexeme, "3.5_f128");
+    }
+
+    #[test]
     fn lex_string() {
         let mut lexer = Lexer::new("\"hello world\"");
         let t = lexer.next_token();
