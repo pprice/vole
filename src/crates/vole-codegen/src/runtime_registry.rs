@@ -157,6 +157,8 @@ runtime_keys! {
     F128ToF32              => "vole_f128_to_f32"             : (I128) -> F32,
     F128ToI64              => "vole_f128_to_i64"             : (I128) -> I64,
     F128ToI128             => "vole_f128_to_i128"            : (I128) -> I128,
+    Wide128Box             => "vole_wide128_box"             : (I128) -> Ptr,
+    Wide128Unbox           => "vole_wide128_unbox"           : (Ptr) -> I128,
 
     // ── IO ───────────────────────────────────────────────────────────
     Flush                  => "vole_flush"                   : () -> Void,
@@ -466,6 +468,14 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
     LinkableRuntimeSymbol {
         c_name: "vole_f128_to_i128",
         ptr: vole_runtime::builtins::vole_f128_to_i128 as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_wide128_box",
+        ptr: vole_runtime::builtins::vole_wide128_box as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_wide128_unbox",
+        ptr: vole_runtime::builtins::vole_wide128_unbox as *const u8,
     },
     LinkableRuntimeSymbol {
         c_name: "vole_bool_to_string",

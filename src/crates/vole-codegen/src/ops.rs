@@ -837,7 +837,10 @@ impl Cg<'_, '_, '_> {
         left: Value,
         right: Value,
     ) -> CodegenResult<Value> {
-        let left_bits = self.builder.ins().bitcast(types::I128, MemFlags::new(), left);
+        let left_bits = self
+            .builder
+            .ins()
+            .bitcast(types::I128, MemFlags::new(), left);
         let right_bits = self
             .builder
             .ins()
@@ -849,8 +852,16 @@ impl Cg<'_, '_, '_> {
             .bitcast(types::F128, MemFlags::new(), result_bits))
     }
 
-    fn call_f128_cmp(&mut self, key: RuntimeKey, left: Value, right: Value) -> CodegenResult<Value> {
-        let left_bits = self.builder.ins().bitcast(types::I128, MemFlags::new(), left);
+    fn call_f128_cmp(
+        &mut self,
+        key: RuntimeKey,
+        left: Value,
+        right: Value,
+    ) -> CodegenResult<Value> {
+        let left_bits = self
+            .builder
+            .ins()
+            .bitcast(types::I128, MemFlags::new(), left);
         let right_bits = self
             .builder
             .ins()
@@ -1075,19 +1086,33 @@ impl Cg<'_, '_, '_> {
                 .unwrap_array(arr.type_id)
                 .unwrap_or_else(|| arena.i64())
         };
+        let resolved_elem_type_id = self.try_substitute_type(elem_type_id);
 
         // Load current element
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[arr.value, idx.value])?;
-        let current = if self.arena().is_union(elem_type_id) {
-            if self.union_array_prefers_inline_storage(elem_type_id) {
+        let current = if self.arena().is_union(resolved_elem_type_id) {
+            if self.union_array_prefers_inline_storage(resolved_elem_type_id) {
                 let raw_tag =
                     self.call_runtime(RuntimeKey::ArrayGetTag, &[arr.value, idx.value])?;
-                self.decode_dynamic_array_union_element(raw_tag, raw_value, elem_type_id)
+                self.decode_dynamic_array_union_element(raw_tag, raw_value, resolved_elem_type_id)
             } else {
-                self.copy_union_heap_to_stack(raw_value, elem_type_id)
+                self.copy_union_heap_to_stack(raw_value, resolved_elem_type_id)
+            }
+        } else if resolved_elem_type_id == self.arena().i128()
+            || resolved_elem_type_id == self.arena().f128()
+        {
+            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_value])?;
+            if resolved_elem_type_id == self.arena().f128() {
+                let value = self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide_bits);
+                CompiledValue::new(value, types::F128, resolved_elem_type_id)
+            } else {
+                CompiledValue::new(wide_bits, types::I128, resolved_elem_type_id)
             }
         } else {
-            self.convert_field_value(raw_value, elem_type_id)
+            self.convert_field_value(raw_value, resolved_elem_type_id)
         };
 
         let rhs = self.expr(&compound.value)?;
@@ -1095,16 +1120,8 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op, line)?;
 
         // Store back
-        // Wide 128-bit values cannot fit in a TaggedValue (u64 payload).
-        if result.ty == types::I128 || result.ty == types::F128 {
-            return Err(CodegenError::type_mismatch(
-                "array compound assignment",
-                "a type that fits in 64 bits",
-                "128-bit values (i128/f128 cannot be stored in arrays)",
-            ));
-        }
         let (tag_val, store_value, _stored) =
-            self.prepare_dynamic_array_store(result, elem_type_id)?;
+            self.prepare_dynamic_array_store(result, resolved_elem_type_id)?;
         let array_set_ref = self.runtime_func_ref(RuntimeKey::ArraySet)?;
 
         let set_args =

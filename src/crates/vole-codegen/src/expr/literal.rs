@@ -5,15 +5,15 @@
 use cranelift::prelude::*;
 
 use crate::RuntimeKey;
-use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, array_element_tag_id, tuple_layout_id};
+use crate::errors::CodegenResult;
+use crate::types::{CompiledValue, array_element_tag_id, field_byte_size, tuple_layout_id};
 
 use vole_frontend::ast::RangeExpr;
 use vole_frontend::{Expr, ExprKind};
 use vole_sema::type_arena::TypeId;
 
 use super::super::context::Cg;
-use super::super::structs::convert_to_i64_for_storage;
+use super::super::structs::{convert_to_i64_for_storage, split_i128_for_storage};
 
 impl Cg<'_, '_, '_> {
     /// Compile an array or tuple literal
@@ -107,15 +107,6 @@ impl Cg<'_, '_, '_> {
             // RC: inc borrowed RC elements so the array gets its own reference.
             self.rc_inc_borrowed_for_container(&compiled)?;
 
-            // Wide 128-bit values cannot fit in a TaggedValue (u64 payload).
-            if compiled.ty == types::I128 || compiled.ty == types::F128 {
-                return Err(CodegenError::type_mismatch(
-                    "array element",
-                    "a type that fits in 64 bits",
-                    "128-bit values (i128/f128 cannot be stored in arrays)",
-                ));
-            }
-
             let push_args = self.coerce_call_args(array_push_ref, &[arr_ptr, tag_val, value_bits]);
             self.builder.ins().call(array_push_ref, &push_args);
 
@@ -181,11 +172,25 @@ impl Cg<'_, '_, '_> {
         count: usize,
         expr: &Expr,
     ) -> CodegenResult<CompiledValue> {
-        // Compile the element once
+        // Resolve fixed-array element type from sema.
+        let type_id = self.get_expr_type(&expr.id).unwrap_or_else(|| {
+            unreachable!(
+                "repeat literal at line {} has no type from sema",
+                expr.span.line
+            )
+        });
+        let (elem_type_id, _) = self.arena().unwrap_fixed_array(type_id).unwrap_or_else(|| {
+            unreachable!(
+                "repeat literal at line {} is missing fixed array type info",
+                expr.span.line
+            )
+        });
+
+        // Compile the element once.
         let mut elem_value = self.expr(element)?;
 
-        // Each element is aligned to 8 bytes
-        let elem_size = 8u32;
+        // Fixed arrays use a per-element stride (8 bytes normally, 16 for i128/f128).
+        let elem_size = field_byte_size(elem_type_id, self.arena());
         let total_size = elem_size * (count as u32);
 
         // Create stack slot for the fixed array
@@ -201,14 +206,31 @@ impl Cg<'_, '_, '_> {
         let needs_rc =
             self.rc_scopes.has_active_scope() && self.rc_state(elem_value.type_id).needs_cleanup();
         let is_borrowed = elem_value.is_borrowed();
+        let wide_bits = if elem_value.ty == types::I128 {
+            Some(elem_value.value)
+        } else if elem_value.ty == types::F128 {
+            Some(
+                self.builder
+                    .ins()
+                    .bitcast(types::I128, MemFlags::new(), elem_value.value),
+            )
+        } else {
+            None
+        };
         for i in 0..count {
             if needs_rc && (i > 0 || is_borrowed) {
                 self.emit_rc_inc_for_type(elem_value.value, elem_value.type_id)?;
             }
             let offset = (i as i32) * (elem_size as i32);
-            self.builder
-                .ins()
-                .stack_store(elem_value.value, slot, offset);
+            if let Some(wide_bits) = wide_bits {
+                let (low, high) = split_i128_for_storage(self.builder, wide_bits);
+                self.builder.ins().stack_store(low, slot, offset);
+                self.builder.ins().stack_store(high, slot, offset + 8);
+            } else {
+                self.builder
+                    .ins()
+                    .stack_store(elem_value.value, slot, offset);
+            }
         }
         // The element value is consumed into the repeat array container.
         elem_value.mark_consumed();
@@ -217,14 +239,6 @@ impl Cg<'_, '_, '_> {
         // Return pointer to the array
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-        // Get the full type from sema - sema always records repeat literal types
-        let type_id = self.get_expr_type(&expr.id).unwrap_or_else(|| {
-            unreachable!(
-                "repeat literal at line {} has no type from sema",
-                expr.span.line
-            )
-        });
 
         Ok(CompiledValue::new(ptr, ptr_type, type_id))
     }

@@ -465,36 +465,35 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Value, TypeId, bool)> {
         let mut is_stack_union = false;
 
-        let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
-            declared_type_id_opt
-        {
-            let arena = self.arena();
-            let is_declared_union = arena.is_union(declared_type_id);
-            let is_declared_numeric = arena.is_numeric(declared_type_id);
-            let is_declared_interface = arena.is_interface(declared_type_id);
-            let is_declared_unknown = arena.is_unknown(declared_type_id);
+        let (mut final_value, mut final_type_id) =
+            if let Some(declared_type_id) = declared_type_id_opt {
+                let arena = self.arena();
+                let is_declared_union = arena.is_union(declared_type_id);
+                let is_declared_numeric = arena.is_numeric(declared_type_id);
+                let is_declared_interface = arena.is_interface(declared_type_id);
+                let is_declared_unknown = arena.is_unknown(declared_type_id);
 
-            if is_declared_unknown && !self.arena().is_unknown(init.type_id) {
-                // Box value to unknown type (TaggedValue)
-                let boxed = self.box_to_unknown(*init)?;
-                (boxed.value, boxed.type_id)
-            } else if is_declared_union && !self.arena().is_union(init.type_id) {
-                let wrapped = self.construct_union_id(*init, declared_type_id)?;
-                is_stack_union = true;
-                (wrapped.value, wrapped.type_id)
-            } else if is_declared_numeric && init.type_id.is_numeric() {
-                let coerced = self.coerce_to_type(*init, declared_type_id)?;
-                (coerced.value, coerced.type_id)
-            } else if is_declared_interface {
-                // For functional interfaces, keep the actual function type from the lambda
-                // This preserves the is_closure flag for proper calling convention
-                (init.value, init.type_id)
+                if is_declared_unknown && !self.arena().is_unknown(init.type_id) {
+                    // Box value to unknown type (TaggedValue)
+                    let boxed = self.box_to_unknown(*init)?;
+                    (boxed.value, boxed.type_id)
+                } else if is_declared_union && !self.arena().is_union(init.type_id) {
+                    let wrapped = self.construct_union_id(*init, declared_type_id)?;
+                    is_stack_union = true;
+                    (wrapped.value, wrapped.type_id)
+                } else if is_declared_numeric && init.type_id.is_numeric() {
+                    let coerced = self.coerce_to_type(*init, declared_type_id)?;
+                    (coerced.value, coerced.type_id)
+                } else if is_declared_interface {
+                    // For functional interfaces, keep the actual function type from the lambda
+                    // This preserves the is_closure flag for proper calling convention
+                    (init.value, init.type_id)
+                } else {
+                    (init.value, declared_type_id)
+                }
             } else {
-                (init.value, declared_type_id)
-            }
-        } else {
-            (init.value, init.type_id)
-        };
+                (init.value, init.type_id)
+            };
 
         // Box value if assigning to interface type
         if let Some(declared_type_id) = declared_type_id_opt {
@@ -791,6 +790,10 @@ impl Cg<'_, '_, '_> {
             .arena()
             .unwrap_array(arr.type_id)
             .unwrap_or_else(|| self.arena().i64());
+        let (elem_is_i128, elem_is_f128) = {
+            let arena = self.arena();
+            (elem_type_id == arena.i128(), elem_type_id == arena.f128())
+        };
 
         let len_val = self
             .call_compiler_intrinsic_key_with_line(
@@ -814,6 +817,13 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().f64const(0.0)
         } else if elem_cr_type == types::F32 {
             self.builder.ins().f32const(0.0)
+        } else if elem_cr_type == types::F128 {
+            let zero_bits = self.builder.ins().sextend(types::I128, zero);
+            self.builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), zero_bits)
+        } else if elem_cr_type == types::I128 {
+            self.builder.ins().sextend(types::I128, zero)
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
             self.builder.ins().iconst(elem_cr_type, 0)
         } else {
@@ -860,6 +870,15 @@ impl Cg<'_, '_, '_> {
                     .value
             } else {
                 self.copy_union_heap_to_stack(elem_val, elem_type_id).value
+            }
+        } else if elem_is_i128 || elem_is_f128 {
+            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[elem_val])?;
+            if elem_is_f128 {
+                self.builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide_bits)
+            } else {
+                wide_bits
             }
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
             // Narrow the i64 runtime value to the element's actual Cranelift type.
@@ -962,14 +981,22 @@ impl Cg<'_, '_, '_> {
         // matching what for_array does.
         let elem_cr_type = self.cranelift_type(elem_type_id);
         let elem_var = self.builder.declare_var(elem_cr_type);
+        let zero_i64 = self.builder.ins().iconst(types::I64, 0);
         let elem_zero = if elem_cr_type == types::F64 {
             self.builder.ins().f64const(0.0)
         } else if elem_cr_type == types::F32 {
             self.builder.ins().f32const(0.0)
+        } else if elem_cr_type == types::F128 {
+            let zero_bits = self.builder.ins().sextend(types::I128, zero_i64);
+            self.builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), zero_bits)
+        } else if elem_cr_type == types::I128 {
+            self.builder.ins().sextend(types::I128, zero_i64)
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
             self.builder.ins().iconst(elem_cr_type, 0)
         } else {
-            self.builder.ins().iconst(types::I64, 0)
+            zero_i64
         };
         self.builder.def_var(elem_var, elem_zero);
         self.vars
@@ -997,7 +1024,17 @@ impl Cg<'_, '_, '_> {
             .ins()
             .load(types::I64, MemFlags::new(), slot_addr, 0);
         // Convert from i64 storage to the element's actual Cranelift type
-        let elem_val = if elem_cr_type == types::F64 {
+        let elem_val = if elem_type_id == self.arena().i128() || elem_type_id == self.arena().f128()
+        {
+            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
+            if elem_type_id == self.arena().f128() {
+                self.builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide_bits)
+            } else {
+                wide_bits
+            }
+        } else if elem_cr_type == types::F64 {
             self.builder
                 .ins()
                 .bitcast(types::F64, MemFlags::new(), raw_val)

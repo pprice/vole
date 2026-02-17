@@ -23,8 +23,8 @@
 
 use crate::RcString;
 use crate::array::RcArray;
-use crate::value::{RuntimeTypeId, TaggedValue, union_heap_cleanup};
-use std::alloc::Layout;
+use crate::value::{RcHeader, RuntimeTypeId, TaggedValue, union_heap_cleanup};
+use std::alloc::{Layout, alloc, dealloc};
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 
@@ -217,6 +217,52 @@ pub extern "C" fn vole_f128_to_i64(value: i128) -> i64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_f128_to_i128(value: i128) -> i128 {
     f128_bits_to_f64(value) as i128
+}
+
+#[repr(C)]
+struct RcWide128 {
+    header: RcHeader,
+    bits: i128,
+}
+
+#[inline]
+fn alloc_wide128(bits: i128) -> *mut RcWide128 {
+    let layout = Layout::new::<RcWide128>();
+    unsafe {
+        let ptr = alloc(layout) as *mut RcWide128;
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        std::ptr::write(
+            &mut (*ptr).header,
+            RcHeader::with_drop_fn(RuntimeTypeId::Wide128 as u32, wide128_drop),
+        );
+        std::ptr::write(&mut (*ptr).bits, bits);
+        crate::alloc_track::track_alloc(RuntimeTypeId::Wide128 as u32);
+        ptr
+    }
+}
+
+unsafe extern "C" fn wide128_drop(ptr: *mut u8) {
+    crate::alloc_track::track_dealloc(RuntimeTypeId::Wide128 as u32);
+    unsafe {
+        dealloc(ptr, Layout::new::<RcWide128>());
+    }
+}
+
+/// Box i128/f128 bits for dynamic array storage in TaggedValue payloads.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_wide128_box(bits: i128) -> *mut u8 {
+    alloc_wide128(bits) as *mut u8
+}
+
+/// Unbox i128/f128 bits from dynamic array storage payloads.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_wide128_unbox(ptr: *const u8) -> i128 {
+    if ptr.is_null() {
+        return 0;
+    }
+    unsafe { (*(ptr as *const RcWide128)).bits }
 }
 
 /// Convert bool to string (FFI entry point)
@@ -656,7 +702,7 @@ unsafe fn clone_union_heap_buffer(src: *const u8) -> *mut u8 {
             Ok(l) => l,
             Err(_) => panic!("union heap layout"),
         };
-        let dst = std::alloc::alloc(UNION_HEAP_LAYOUT);
+        let dst = alloc(UNION_HEAP_LAYOUT);
         if dst.is_null() {
             std::alloc::handle_alloc_error(UNION_HEAP_LAYOUT);
         }

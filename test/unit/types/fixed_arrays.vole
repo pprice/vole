@@ -71,4 +71,22 @@ tests {
         assert(a == 10)
         assert(b == 5)
     }
+
+    test "fixed i128 repeat literal and mutation" {
+        let mut arr: [i128; 3] = [0_i128; 3]
+        let big = 1_i128 << 64
+        arr[1] = big
+        assert(arr[0] == 0_i128)
+        assert(arr[1] == big)
+        assert(arr[2] == 0_i128)
+    }
+
+    test "fixed f128 repeat literal and dynamic index mutation" {
+        let mut arr: [f128; 3] = [0.5_f128; 3]
+        let i = 2
+        arr[i] = 9.25_f128
+        assert(arr[0] == 0.5_f128)
+        assert(arr[1] == 0.5_f128)
+        assert(arr[2] == 9.25_f128)
+    }
 }

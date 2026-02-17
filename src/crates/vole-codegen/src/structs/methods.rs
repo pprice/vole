@@ -1086,7 +1086,7 @@ impl Cg<'_, '_, '_> {
         let value = self.expr(&mc.args[0])?;
 
         let elem_type = self.arena().unwrap_array(arr_obj.type_id);
-        let (tag_val, value_bits, value) = if let Some(elem_id) = elem_type {
+        let (tag_val, value_bits, _value) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(value, elem_id)?
         } else {
             let value = if self.arena().is_struct(value.type_id) {
@@ -1106,14 +1106,6 @@ impl Cg<'_, '_, '_> {
         // Get the runtime function reference
         let push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
 
-        // Wide 128-bit values cannot fit in a TaggedValue (u64 payload).
-        if value.ty == types::I128 || value.ty == types::F128 {
-            return Err(CodegenError::type_mismatch(
-                "array push",
-                "a type that fits in 64 bits",
-                "128-bit values (i128/f128 cannot be stored in arrays)",
-            ));
-        }
         // Call vole_array_push(arr_ptr, tag, value)
         let push_args = self.coerce_call_args(push_ref, &[arr_obj.value, tag_val, value_bits]);
         self.builder.ins().call(push_ref, &push_args);
@@ -2061,6 +2053,10 @@ impl Cg<'_, '_, '_> {
         let elem_type_id = self.arena().unwrap_array(return_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("Array.filled", "array type", "non-array")
         })?;
+        let is_wide_elem = {
+            let arena = self.arena();
+            elem_type_id == arena.i128() || elem_type_id == arena.f128()
+        };
 
         // Compile count argument
         let count = self.expr(&mc.args[0])?;
@@ -2079,7 +2075,11 @@ impl Cg<'_, '_, '_> {
 
         // Array.filled clones the provided element into each slot; release the
         // original temporary value now that ownership has transferred.
-        self.consume_rc_value(&mut stored_value)?;
+        if is_wide_elem {
+            self.call_runtime_void(RuntimeKey::RcDec, &[value_bits])?;
+        } else {
+            self.consume_rc_value(&mut stored_value)?;
+        }
 
         let mut result = CompiledValue::new(result_val, self.ptr_type(), return_type_id);
         result.rc_lifecycle = RcLifecycle::Owned;

@@ -148,6 +148,8 @@ pub enum RuntimeTypeId {
     UnionHeap = 12,
     /// RC-managed channel for inter-task communication.
     Channel = 13,
+    /// RC-managed boxed 128-bit payload used by dynamic arrays for i128/f128.
+    Wide128 = 14,
 }
 
 impl RuntimeTypeId {
@@ -167,6 +169,7 @@ impl RuntimeTypeId {
             11 => Some(Self::Iterator),
             12 => Some(Self::UnionHeap),
             13 => Some(Self::Channel),
+            14 => Some(Self::Wide128),
             _ => None,
         }
     }
@@ -187,6 +190,7 @@ impl RuntimeTypeId {
             Self::Iterator => "Iterator",
             Self::UnionHeap => "UnionHeap",
             Self::Channel => "Channel",
+            Self::Wide128 => "Wide128",
         }
     }
 }
@@ -213,7 +217,8 @@ pub fn tag_needs_rc(tag: u64) -> bool {
                 | T::Buffer
                 | T::Task
                 | T::Iterator
-                | T::Channel,
+                | T::Channel
+                | T::Wide128,
         )
     )
 }

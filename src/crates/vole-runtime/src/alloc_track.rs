@@ -9,7 +9,7 @@
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 /// Number of type slots. Must be greater than the highest RuntimeTypeId variant.
-const NUM_TYPE_SLOTS: usize = 14;
+const NUM_TYPE_SLOTS: usize = 15;
 
 /// Per-type allocation counters, indexed by RuntimeTypeId discriminant.
 static TYPE_COUNTERS: [AtomicI64; NUM_TYPE_SLOTS] = {
@@ -251,6 +251,7 @@ mod tests {
             RuntimeTypeId::Instance as u32,
             RuntimeTypeId::Rng as u32,
             RuntimeTypeId::Iterator as u32,
+            RuntimeTypeId::Wide128 as u32,
         ];
 
         let before: Vec<i64> = types.iter().map(|&t| type_count(t)).collect();

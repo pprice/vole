@@ -44,4 +44,40 @@ tests "arrays" {
         assert(arr[0] == 42)
         assert(arr.length() == 1)
     }
+
+    test "i128 literal and index preserve wide values" {
+        let a = 1_i128 << 64
+        let b = 1_i128 << 63
+        let xs: [i128] = [a, b, 3_i128]
+        assert(xs[0] == a)
+        assert(xs[1] == b)
+        assert(xs[2] == 3_i128)
+    }
+
+    test "i128 index assignment preserves neighbors" {
+        let mut xs: [i128] = [0_i128, 1_i128, 2_i128]
+        let big = (1_i128 << 64) + 77_i128
+        xs[1] = big
+        assert(xs[0] == 0_i128)
+        assert(xs[1] == big)
+        assert(xs[2] == 2_i128)
+    }
+
+    test "f128 literal and index assignment" {
+        let mut xs: [f128] = [1.25_f128, 2.5_f128, 3.75_f128]
+        assert(xs[1] == 2.5_f128)
+        xs[1] = 42.5_f128
+        assert(xs[0] == 1.25_f128)
+        assert(xs[1] == 42.5_f128)
+        assert(xs[2] == 3.75_f128)
+    }
+
+    test "for iteration over i128 array" {
+        let xs: [i128] = [1_i128 << 64, 5_i128]
+        let mut sum: i128 = 0_i128
+        for x in xs {
+            sum = sum + x
+        }
+        assert(sum == (1_i128 << 64) + 5_i128)
+    }
 }

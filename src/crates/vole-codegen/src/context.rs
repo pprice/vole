@@ -543,6 +543,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let resolved_elem_type = self.try_substitute_type(elem_type_id);
         if !self.arena().is_union(resolved_elem_type) {
             value = self.coerce_to_type(value, resolved_elem_type)?;
+            if value.ty == types::I128 || value.ty == types::F128 {
+                let wide_bits = if value.ty == types::F128 {
+                    self.builder
+                        .ins()
+                        .bitcast(types::I128, MemFlags::new(), value.value)
+                } else {
+                    value.value
+                };
+                let boxed = self.call_runtime(RuntimeKey::Wide128Box, &[wide_bits])?;
+                let tag = {
+                    let arena = self.arena();
+                    crate::types::array_element_tag_id(value.type_id, arena)
+                };
+                let tag_val = self.builder.ins().iconst(types::I64, tag);
+                return Ok((tag_val, boxed, value));
+            }
             let tag = {
                 let arena = self.arena();
                 crate::types::array_element_tag_id(value.type_id, arena)

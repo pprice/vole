@@ -337,9 +337,7 @@ pub(crate) fn type_id_size(
         ArenaType::Primitive(PrimitiveType::I64)
         | ArenaType::Primitive(PrimitiveType::U64)
         | ArenaType::Primitive(PrimitiveType::F64) => 8,
-        ArenaType::Primitive(PrimitiveType::I128) | ArenaType::Primitive(PrimitiveType::F128) => {
-            16
-        }
+        ArenaType::Primitive(PrimitiveType::I128) | ArenaType::Primitive(PrimitiveType::F128) => 16,
         ArenaType::Primitive(PrimitiveType::String) | ArenaType::Array(_) => pointer_type.bytes(),
         ArenaType::Handle => pointer_type.bytes(),
         ArenaType::Interface { .. } => pointer_type.bytes(),
@@ -513,13 +511,9 @@ pub(crate) fn convert_to_type(
     fn pack_f64_to_f128(builder: &mut FunctionBuilder, f64_val: Value) -> Value {
         // Runtime f128 currently uses a compact software representation:
         // low 64 bits = f64 payload, high 64 bits = 0.
-        let bits64 = builder
-            .ins()
-            .bitcast(types::I64, MemFlags::new(), f64_val);
+        let bits64 = builder.ins().bitcast(types::I64, MemFlags::new(), f64_val);
         let bits128 = builder.ins().uextend(types::I128, bits64);
-        builder
-            .ins()
-            .bitcast(types::F128, MemFlags::new(), bits128)
+        builder.ins().bitcast(types::F128, MemFlags::new(), bits128)
     }
 
     fn unpack_f128_to_f64(builder: &mut FunctionBuilder, f128_val: Value) -> Value {
@@ -528,9 +522,7 @@ pub(crate) fn convert_to_type(
             .ins()
             .bitcast(types::I128, MemFlags::new(), f128_val);
         let bits64 = builder.ins().ireduce(types::I64, bits128);
-        builder
-            .ins()
-            .bitcast(types::F64, MemFlags::new(), bits64)
+        builder.ins().bitcast(types::F64, MemFlags::new(), bits64)
     }
 
     if val.ty == target {
@@ -764,6 +756,9 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
         | ArenaType::Primitive(PrimitiveType::I32)
         | ArenaType::Primitive(PrimitiveType::I16)
         | ArenaType::Primitive(PrimitiveType::I8) => RuntimeTypeId::I64 as i64,
+        ArenaType::Primitive(PrimitiveType::I128 | PrimitiveType::F128) => {
+            RuntimeTypeId::Wide128 as i64
+        }
         ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => {
             RuntimeTypeId::F64 as i64
         }
