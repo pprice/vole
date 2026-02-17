@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g., v2026.2.0)'
+        required: true
 
 permissions:
   contents: write
@@ -17,20 +22,26 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Get version from Cargo.toml
         id: version
         run: |
           VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "vole") | .version')
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          # Support both tag push (GITHUB_REF_NAME=v2026.2.0) and workflow_dispatch (input tag)
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          TAG_VERSION="${TAG#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if [ "$VERSION" != "$TAG_VERSION" ]; then
             echo "::error::Tag version ($TAG_VERSION) does not match Cargo.toml version ($VERSION)"
             exit 1
           fi
-          echo "Version $VERSION matches tag $GITHUB_REF_NAME"
+          echo "Version $VERSION matches tag $TAG"
 
   build:
     name: Build (${{ matrix.target }})
@@ -112,6 +123,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Download all artifacts
@@ -128,20 +140,21 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
+          TAG="${{ needs.validate.outputs.tag }}"
           PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -2 | tail -1)
-          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$GITHUB_REF_NAME" ]; then
-            echo "Generating changelog from $PREV_TAG to $GITHUB_REF_NAME"
-            CHANGES=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG".."$GITHUB_REF_NAME" --no-merges)
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
+            echo "Generating changelog from $PREV_TAG to $TAG"
+            CHANGES=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG".."$TAG" --no-merges)
           else
             echo "First release, including all commits"
             CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
           fi
-          # Write to file to handle multiline
           echo "$CHANGES" > /tmp/changelog.txt
 
       - name: Create release
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
+          TAG="${{ needs.validate.outputs.tag }}"
           BODY="## Vole ${VERSION}
 
           ### Changes
@@ -162,10 +175,9 @@ jobs:
           vole version
           \`\`\`"
 
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$TAG" \
             --title "Vole ${VERSION}" \
             --notes "$BODY" \
-            --verify-tag \
             release/*
         env:
           GH_TOKEN: ${{ github.token }}
