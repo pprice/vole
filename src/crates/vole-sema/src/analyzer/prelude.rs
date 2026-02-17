@@ -9,10 +9,11 @@
 
 use super::Analyzer;
 use crate::analysis_cache::CachedModule;
+use crate::errors::SemanticWarning;
 use crate::type_arena::TypeId as ArenaTypeId;
 use smallvec::smallvec;
 use vole_frontend::ast::Decl;
-use vole_frontend::{Interner, Parser};
+use vole_frontend::{Interner, Parser, Span};
 use vole_identity::NameId;
 
 impl Analyzer {
@@ -95,9 +96,22 @@ impl Analyzer {
             .to_string();
 
         // Check cache first using canonical_path for consistent lookup
-        if let Some(ref cache) = self.ctx.module_cache
-            && let Some(cached) = cache.borrow().get(import_path)
-        {
+        let cached_module = self
+            .ctx
+            .module_cache
+            .as_ref()
+            .and_then(|cache| cache.borrow().get(import_path).cloned());
+        if let Some(cached) = cached_module {
+            if cached.partial_error_count > 0 {
+                self.add_warning(
+                    SemanticWarning::PreludePartialAnalysis {
+                        module: import_path.to_string(),
+                        error_count: cached.partial_error_count,
+                    },
+                    Span::default(),
+                );
+            }
+
             // Use cached analysis results.
             for (name, func_type) in &cached.functions_by_name {
                 self.symbols
@@ -181,8 +195,19 @@ impl Analyzer {
 
         // Analyze the prelude file
         let analyze_result = sub_analyzer.analyze(&program, &prelude_interner);
+        let partial_error_count = match &analyze_result {
+            Ok(()) => 0,
+            Err(errors) => errors.len(),
+        };
         if let Err(ref errors) = analyze_result {
             tracing::warn!(import_path, ?errors, "prelude analysis errors");
+            self.add_warning(
+                SemanticWarning::PreludePartialAnalysis {
+                    module: import_path.to_string(),
+                    error_count: errors.len(),
+                },
+                Span::default(),
+            );
         }
         // Always store the module program, even if analysis had errors.
         // Partial analysis results (e.g. Map class with its methods) are still
@@ -204,6 +229,7 @@ impl Analyzer {
                     functions_by_name: sub_analyzer.symbols.functions_by_name.clone(),
                     is_check_results: sub_analyzer.results.is_check_results.clone(),
                     declared_var_types: sub_analyzer.results.declared_var_types.clone(),
+                    partial_error_count,
                 },
             );
         }
@@ -318,5 +344,126 @@ impl Analyzer {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis_cache::ModuleCache;
+    use crate::errors::SemanticWarning;
+    use crate::module::ModuleLoader;
+    use std::cell::RefCell;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::rc::Rc;
+    use tempfile::TempDir;
+
+    fn copy_dir_recursive(src: &Path, dst: &Path) {
+        fs::create_dir_all(dst).expect("create destination directory");
+        for entry in fs::read_dir(src).expect("read source directory") {
+            let entry = entry.expect("read dir entry");
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if src_path.is_dir() {
+                copy_dir_recursive(&src_path, &dst_path);
+            } else {
+                fs::copy(&src_path, &dst_path).expect("copy file");
+            }
+        }
+    }
+
+    fn setup_project_with_broken_prelude() -> TempDir {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let stdlib_src = repo_root.join("stdlib");
+        let stdlib_dst = temp.path().join("stdlib");
+        copy_dir_recursive(&stdlib_src, &stdlib_dst);
+
+        let probe_file = stdlib_dst.join("prelude/zz_partial_warning_probe.vole");
+        fs::write(
+            probe_file,
+            r#"
+func partial_warning_probe() -> i64 {
+    return "not-an-i64"
+}
+"#,
+        )
+        .expect("write probe prelude file");
+
+        fs::write(temp.path().join("main_a.vole"), "func main() {}\n").expect("write main_a");
+        fs::write(temp.path().join("main_b.vole"), "func main() {}\n").expect("write main_b");
+        temp
+    }
+
+    fn analyze_file(
+        project_root: &Path,
+        file_name: &str,
+        cache: Option<Rc<RefCell<ModuleCache>>>,
+    ) -> Vec<(String, usize)> {
+        let file_path = project_root.join(file_name);
+        let source = fs::read_to_string(&file_path).expect("read source");
+        let mut parser = Parser::new(&source);
+        let program = parser.parse_program().expect("parse source");
+        let mut interner = parser.into_interner();
+        interner.seed_builtin_symbols();
+
+        let mut builder =
+            crate::AnalyzerBuilder::new(file_path.to_string_lossy().as_ref())
+                .with_project_root(Some(project_root));
+        if let Some(cache) = cache {
+            builder = builder.with_cache(cache);
+        }
+        let mut analyzer = builder.build();
+        analyzer.module.module_loader = ModuleLoader::with_stdlib(project_root.join("stdlib"));
+        analyzer
+            .module
+            .module_loader
+            .set_project_root(project_root.to_path_buf());
+        let result = analyzer.analyze(&program, &interner);
+        assert!(result.is_ok(), "main program should still analyze successfully");
+
+        analyzer
+            .take_warnings()
+            .into_iter()
+            .filter_map(|warn| match warn.warning {
+                SemanticWarning::PreludePartialAnalysis {
+                    module,
+                    error_count,
+                } => Some((module, error_count)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn prelude_partial_analysis_emits_warning() {
+        let project = setup_project_with_broken_prelude();
+        let warnings = analyze_file(project.path(), "main_a.vole", None);
+        assert!(
+            warnings
+                .iter()
+                .any(|(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0)
+        );
+    }
+
+    #[test]
+    fn cached_partial_prelude_still_emits_warning() {
+        let project = setup_project_with_broken_prelude();
+        let cache = ModuleCache::shared();
+
+        let first = analyze_file(project.path(), "main_a.vole", Some(Rc::clone(&cache)));
+        assert!(
+            first
+                .iter()
+                .any(|(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0)
+        );
+
+        let second = analyze_file(project.path(), "main_b.vole", Some(cache));
+        assert!(
+            second
+                .iter()
+                .any(|(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0)
+        );
     }
 }

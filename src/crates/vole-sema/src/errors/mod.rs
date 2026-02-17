@@ -779,6 +779,16 @@ pub enum SemanticWarning {
         span: SourceSpan,
         label: String,
     },
+
+    #[error("prelude module '{module}' had partial semantic analysis ({error_count} errors)")]
+    #[diagnostic(
+        code(W3005),
+        help("prelude loading continued with partial results; review logs for underlying semantic errors")
+    )]
+    PreludePartialAnalysis {
+        module: String,
+        error_count: usize,
+    },
 }
 
 /// Returns a "did you mean" suggestion for common type typos.
