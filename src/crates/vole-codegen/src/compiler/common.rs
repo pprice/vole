@@ -483,7 +483,9 @@ pub fn finalize_function_body(
                     builder.ins().f32const(0.0)
                 } else if ret_type == types::F128 {
                     let zero_bits = builder.ins().iconst(types::I128, 0);
-                    builder.ins().bitcast(types::F128, MemFlags::new(), zero_bits)
+                    builder
+                        .ins()
+                        .bitcast(types::F128, MemFlags::new(), zero_bits)
                 } else {
                     builder.ins().iconst(ret_type, 0)
                 };

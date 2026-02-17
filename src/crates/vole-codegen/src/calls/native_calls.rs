@@ -234,7 +234,8 @@ impl Cg<'_, '_, '_> {
         }
 
         // Non-struct: standard single result
-        let actual_ty = native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type());
+        let actual_ty =
+            native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type());
         let expected_ty = self.cranelift_type(type_id);
         let value = if actual_ty == expected_ty {
             results[0]

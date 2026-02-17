@@ -90,7 +90,10 @@ impl PrimitiveType {
 
     /// Check if this type is a floating point type.
     pub fn is_float(self) -> bool {
-        matches!(self, PrimitiveType::F32 | PrimitiveType::F64 | PrimitiveType::F128)
+        matches!(
+            self,
+            PrimitiveType::F32 | PrimitiveType::F64 | PrimitiveType::F128
+        )
     }
 
     /// Check if this type can be implicitly widened to target type.

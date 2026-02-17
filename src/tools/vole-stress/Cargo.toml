@@ -1,6 +1,6 @@
 [package]
 name = "vole-stress"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "Generate synthetic Vole codebases for benchmarking"
 

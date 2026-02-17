@@ -638,7 +638,10 @@ impl NumericSuffix {
 
     /// Whether this is a float suffix (f32, f64, f128).
     pub fn is_float(self) -> bool {
-        matches!(self, NumericSuffix::F32 | NumericSuffix::F64 | NumericSuffix::F128)
+        matches!(
+            self,
+            NumericSuffix::F32 | NumericSuffix::F64 | NumericSuffix::F128
+        )
     }
 
     /// Whether this is an integer suffix (u8..u64, i8..i64).

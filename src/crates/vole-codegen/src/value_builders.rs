@@ -92,7 +92,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let i64_val = self.builder.ins().iconst(types::I64, n);
             self.builder.ins().sextend(types::I128, i64_val)
         } else if ty == types::F128 {
-            let low = self.builder.ins().iconst(types::I64, (n as f64).to_bits() as i64);
+            let low = self
+                .builder
+                .ins()
+                .iconst(types::I64, (n as f64).to_bits() as i64);
             let wide = self.builder.ins().uextend(types::I128, low);
             self.builder
                 .ins()
@@ -120,7 +123,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // low 64 bits = f64 payload, high 64 bits = 0.
                 let low = self.builder.ins().iconst(types::I64, n.to_bits() as i64);
                 let wide = self.builder.ins().uextend(types::I128, low);
-                let v = self.builder.ins().bitcast(types::F128, MemFlags::new(), wide);
+                let v = self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide);
                 (types::F128, v)
             }
             _ => {

@@ -53,7 +53,10 @@ fn test_let_string() {
 
 #[test]
 fn test_string_literal_escapes_braces() {
-    assert_eq!(fmt(r#"let s = "\{x\}""#), r#"let s = "\{x\}""#.to_string() + "\n");
+    assert_eq!(
+        fmt(r#"let s = "\{x\}""#),
+        r#"let s = "\{x\}""#.to_string() + "\n"
+    );
 }
 
 #[test]

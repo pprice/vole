@@ -166,7 +166,7 @@ impl TypeId {
             Self::U8 => value >= 0 && value <= u8::MAX as i64,
             Self::U16 => value >= 0 && value <= u16::MAX as i64,
             Self::U32 => value >= 0 && value <= u32::MAX as i64,
-            Self::U64 => value >= 0,       // i64 positive values fit
+            Self::U64 => value >= 0, // i64 positive values fit
             Self::F32 | Self::F64 | Self::F128 => true, // Integers can become floats
             _ => false,
         }

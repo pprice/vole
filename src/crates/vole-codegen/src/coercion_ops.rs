@@ -13,8 +13,8 @@ use smallvec::SmallVec;
 use vole_frontend::Expr;
 use vole_sema::type_arena::TypeId;
 
-use crate::errors::{CodegenError, CodegenResult};
 use crate::RuntimeKey;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
 use super::context::{Cg, deref_expr_ptr};
@@ -178,7 +178,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             )
         };
 
-        if is_target_numeric && is_value_numeric && resolved_target_type_id != resolved_value_type_id
+        if is_target_numeric
+            && is_value_numeric
+            && resolved_target_type_id != resolved_value_type_id
         {
             return self.coerce_numeric_to_type(resolved_value, resolved_target_type_id);
         }
@@ -254,12 +256,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .ins()
                 .bitcast(types::I128, MemFlags::new(), value.value);
             match target_ty {
-                ty if ty == types::F64 => {
-                    self.call_runtime(RuntimeKey::F128ToF64, &[f128_bits])?
-                }
-                ty if ty == types::F32 => {
-                    self.call_runtime(RuntimeKey::F128ToF32, &[f128_bits])?
-                }
+                ty if ty == types::F64 => self.call_runtime(RuntimeKey::F128ToF64, &[f128_bits])?,
+                ty if ty == types::F32 => self.call_runtime(RuntimeKey::F128ToF32, &[f128_bits])?,
                 ty if ty == types::I128 => {
                     self.call_runtime(RuntimeKey::F128ToI128, &[f128_bits])?
                 }

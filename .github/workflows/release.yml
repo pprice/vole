@@ -1,0 +1,171 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate:
+    name: Validate tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "vole") | .version')
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match Cargo.toml version ($VERSION)"
+            exit 1
+          fi
+          echo "Version $VERSION matches tag $GITHUB_REF_NAME"
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: vole-$VERSION-linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm64
+            artifact: vole-$VERSION-linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-13
+            artifact: vole-$VERSION-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-14
+            artifact: vole-$VERSION-macos-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: vole-$VERSION-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Set artifact name
+        id: artifact
+        shell: bash
+        run: echo "name=vole-${VERSION}-$(echo '${{ matrix.target }}' | sed 's/unknown-//;s/-gnu//;s/-msvc//')" >> "$GITHUB_OUTPUT"
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Run tests
+        if: matrix.target != 'aarch64-unknown-linux-gnu' || runner.arch == 'ARM64'
+        shell: bash
+        run: cargo test --release --target ${{ matrix.target }}
+
+      - name: Package artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p staging/${{ steps.artifact.outputs.name }}
+          cp target/${{ matrix.target }}/release/vole staging/${{ steps.artifact.outputs.name }}/
+          cp -r stdlib staging/${{ steps.artifact.outputs.name }}/stdlib
+          cd staging
+          tar czf ../${{ steps.artifact.outputs.name }}.tar.gz ${{ steps.artifact.outputs.name }}
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging/${{ steps.artifact.outputs.name }}
+          Copy-Item target/${{ matrix.target }}/release/vole.exe staging/${{ steps.artifact.outputs.name }}/
+          Copy-Item -Recurse stdlib staging/${{ steps.artifact.outputs.name }}/stdlib
+          Compress-Archive -Path staging/${{ steps.artifact.outputs.name }} -DestinationPath ${{ steps.artifact.outputs.name }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: |
+            ${{ steps.artifact.outputs.name }}.tar.gz
+            ${{ steps.artifact.outputs.name }}.zip
+
+  publish:
+    name: Publish Release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
+          cd release && sha256sum * > checksums.sha256
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -2 | tail -1)
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$GITHUB_REF_NAME" ]; then
+            echo "Generating changelog from $PREV_TAG to $GITHUB_REF_NAME"
+            CHANGES=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG".."$GITHUB_REF_NAME" --no-merges)
+          else
+            echo "First release, including all commits"
+            CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+          fi
+          # Write to file to handle multiline
+          echo "$CHANGES" > /tmp/changelog.txt
+
+      - name: Create release
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          BODY="## Vole ${VERSION}
+
+          ### Changes
+          $(cat /tmp/changelog.txt)
+
+          ### Checksums
+          \`\`\`
+          $(cat release/checksums.sha256)
+          \`\`\`
+
+          ### Installation
+
+          Download the archive for your platform, extract it, and add the directory to your PATH:
+
+          \`\`\`bash
+          tar xzf vole-${VERSION}-linux-x86_64.tar.gz
+          export PATH=\"\$PWD/vole-${VERSION}-linux-x86_64:\$PATH\"
+          vole version
+          \`\`\`"
+
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Vole ${VERSION}" \
+            --notes "$BODY" \
+            --verify-tag \
+            release/*
+        env:
+          GH_TOKEN: ${{ github.token }}

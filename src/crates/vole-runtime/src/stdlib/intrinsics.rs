@@ -6,7 +6,7 @@ use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 
 // Re-use to_string functions from builtins (consolidated)
 use crate::builtins::{
-    bool_to_string, f128_to_string, f64_to_string, i32_to_string, i64_to_string, i128_to_string,
+    bool_to_string, f64_to_string, f128_to_string, i32_to_string, i64_to_string, i128_to_string,
 };
 
 /// Convert a total ordering to the standard comparison result: -1, 0, or 1.

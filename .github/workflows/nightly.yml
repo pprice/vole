@@ -1,0 +1,146 @@
+name: Nightly Build
+
+on:
+  schedule:
+    # Run at 06:00 UTC daily
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-changes:
+    name: Check for new commits
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check if HEAD changed since last nightly
+        id: check
+        run: |
+          LAST_SHA=$(gh release view nightly --json targetCommitish -q .targetCommitish 2>/dev/null || echo "")
+          if [ "$LAST_SHA" = "$GITHUB_SHA" ]; then
+            echo "No new commits since last nightly, skipping build"
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New commits found (last: ${LAST_SHA:-none}, current: $GITHUB_SHA)"
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build:
+    name: Build (${{ matrix.target }})
+    needs: check-changes
+    if: needs.check-changes.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: vole-nightly-linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm64
+            artifact: vole-nightly-linux-arm64
+          - target: x86_64-apple-darwin
+            os: macos-13
+            artifact: vole-nightly-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-14
+            artifact: vole-nightly-macos-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: vole-nightly-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+        env:
+          VOLE_NIGHTLY: "1"
+
+      - name: Package artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p staging/${{ matrix.artifact }}
+          cp target/${{ matrix.target }}/release/vole staging/${{ matrix.artifact }}/
+          cp -r stdlib staging/${{ matrix.artifact }}/stdlib
+          cd staging
+          tar czf ../${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging/${{ matrix.artifact }}
+          Copy-Item target/${{ matrix.target }}/release/vole.exe staging/${{ matrix.artifact }}/
+          Copy-Item -Recurse stdlib staging/${{ matrix.artifact }}/stdlib
+          Compress-Archive -Path staging/${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.zip
+
+  publish:
+    name: Publish Nightly
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
+          cd release && sha256sum * > checksums.sha256
+
+      - name: Get version info
+        id: version
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "vole") | .version')
+          SHORT_SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          echo "version=${VERSION}-nightly.${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "tag_name=nightly" >> "$GITHUB_OUTPUT"
+
+      - name: Delete existing nightly release
+        run: gh release delete nightly --yes 2>/dev/null || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create nightly release
+        run: |
+          gh release create nightly \
+            --title "Nightly ${{ steps.version.outputs.version }}" \
+            --notes "Automated nightly build from \`main\` at ${{ github.sha }}.
+
+          Version: \`${{ steps.version.outputs.version }}\`
+          Commit: [\`$(echo $GITHUB_SHA | cut -c1-7)\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})" \
+            --prerelease \
+            --target ${{ github.sha }} \
+            release/*
+        env:
+          GH_TOKEN: ${{ github.token }}

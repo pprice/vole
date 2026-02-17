@@ -1,6 +1,6 @@
 [package]
 name = "vole-identity"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "Name identity system for the Vole programming language"
 

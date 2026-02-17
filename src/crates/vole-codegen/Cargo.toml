@@ -1,6 +1,6 @@
 [package]
 name = "vole-codegen"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 description = "Code generation for the Vole programming language (Cranelift JIT)"
 

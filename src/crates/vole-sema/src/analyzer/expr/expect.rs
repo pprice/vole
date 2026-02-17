@@ -249,19 +249,19 @@ impl Analyzer {
                         None
                     }
                 });
-                let lambda_ty_id = self.analyze_lambda(lambda, expr.id, expected_fn.as_ref(), interner);
+                let lambda_ty_id =
+                    self.analyze_lambda(lambda, expr.id, expected_fn.as_ref(), interner);
                 if let Some(expected_id) = expected
                     && self.types_compatible_id(lambda_ty_id, expected_id, interner)
+                    && self.type_arena().unwrap_function(expected_id).is_some()
                 {
-                    if self.type_arena().unwrap_function(expected_id).is_some() {
-                        // Preserve the caller's expected function type identity (e.g. closure
-                        // array literals passed directly to [() -> T] params), instead of
-                        // propagating a closure-flavored inferred type that only prints the same.
-                        return Ok(expected_id);
-                    }
+                    // Preserve the caller's expected function type identity (e.g. closure
+                    // array literals passed directly to [() -> T] params), instead of
+                    // propagating a closure-flavored inferred type that only prints the same.
                     // For functional interface expectations, keep the lambda's closure
                     // function type so codegen can perform interface boxing at assignment/
                     // argument sites.
+                    return Ok(expected_id);
                 }
                 Ok(lambda_ty_id)
             }

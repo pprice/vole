@@ -1,4 +1,10 @@
 [stdout]
 
 [stderr]
+  × [W3005]: prelude module 'std:prelude/i16' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
+  × [W3005]: prelude module 'std:prelude/i8' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
+  × [W3005]: prelude module 'std:prelude/u64' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
 compilation error: generic external mapping not found: only_f64: no where mapping arm for concrete type(s): i64

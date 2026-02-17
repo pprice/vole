@@ -602,11 +602,7 @@ impl Compiler<'_> {
         let module_id = self.query().module_id_or_main(module_path);
         for decl in &program.declarations {
             if let Decl::Implement(impl_block) = decl {
-                self.compile_module_implement_block(
-                    impl_block,
-                    module_interner,
-                    module_id,
-                )?;
+                self.compile_module_implement_block(impl_block, module_interner, module_id)?;
             }
         }
 

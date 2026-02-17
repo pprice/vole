@@ -4,8 +4,8 @@
 
 use cranelift::prelude::*;
 
-use crate::errors::{CodegenError, CodegenResult};
 use crate::RuntimeKey;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 
 use vole_frontend::{AssignTarget, Expr, Symbol, UnaryOp};

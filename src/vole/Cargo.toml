@@ -1,6 +1,6 @@
 [package]
 name = "vole"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 default-run = "vole"
 description = "A compiled programming language with JIT compilation via Cranelift"

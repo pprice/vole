@@ -1,5 +1,11 @@
 [stdout]
 
 [stderr]
+  × [W3005]: prelude module 'std:prelude/i16' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
+  × [W3005]: prelude module 'std:prelude/i8' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
+  × [W3005]: prelude module 'std:prelude/u64' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
 panic: array index out of bounds: index 5 but length is 3
   at <runtime>:0

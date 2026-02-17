@@ -2,9 +2,10 @@
 //!
 //! Search order:
 //! 1. $VOLE_STDLIB_PATH environment variable
-//! 2. <exe_dir>/../share/vole/stdlib (installed layout)
-//! 3. <exe_dir>/../../stdlib (development layout)
-//! 4. ./stdlib (current directory fallback)
+//! 2. <exe_dir>/stdlib (release tarball layout — stdlib next to binary)
+//! 3. <exe_dir>/../share/vole/stdlib (installed layout)
+//! 4. <exe_dir>/../../stdlib (development layout)
+//! 5. ./stdlib (current directory fallback)
 
 use std::path::{Path, PathBuf};
 
@@ -18,6 +19,7 @@ pub struct StdlibLocation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LocationSource {
     EnvVar,
+    Sibling,
     Installed,
     Development,
     CurrentDir,
@@ -51,7 +53,16 @@ impl StdlibLocator {
         if let Ok(exe_path) = std::env::current_exe()
             && let Some(exe_dir) = exe_path.parent()
         {
-            // 2. Check installed layout: <exe_dir>/../share/vole/stdlib
+            // 2. Check sibling layout: <exe_dir>/stdlib (release tarball)
+            let sibling_path = exe_dir.join("stdlib");
+            if Self::is_valid_stdlib(&sibling_path) {
+                return Some(StdlibLocation {
+                    path: sibling_path,
+                    source: LocationSource::Sibling,
+                });
+            }
+
+            // 3. Check installed layout: <exe_dir>/../share/vole/stdlib
             let installed_path = exe_dir.join("..").join("share").join("vole").join("stdlib");
             if Self::is_valid_stdlib(&installed_path) {
                 return Some(StdlibLocation {
@@ -60,7 +71,7 @@ impl StdlibLocator {
                 });
             }
 
-            // 3. Check development layout: <exe_dir>/../../stdlib
+            // 4. Check development layout: <exe_dir>/../../stdlib
             let dev_path = exe_dir.join("..").join("..").join("stdlib");
             if Self::is_valid_stdlib(&dev_path) {
                 return Some(StdlibLocation {
@@ -70,7 +81,7 @@ impl StdlibLocator {
             }
         }
 
-        // 4. Check current directory: ./stdlib
+        // 5. Check current directory: ./stdlib
         let cwd_path = PathBuf::from("./stdlib");
         if Self::is_valid_stdlib(&cwd_path) {
             return Some(StdlibLocation {

@@ -3,6 +3,9 @@ members = ["src/vole", "src/crates/*", "src/tools/*"]
 default-members = ["src/vole", "src/crates/*"]
 resolver = "2"
 
+[workspace.package]
+version = "2026.2.0"
+
 [workspace.lints.clippy]
 # Lint groups - errors for critical issues (lower priority so individual lints can override)
 correctness = { level = "deny", priority = -1 }

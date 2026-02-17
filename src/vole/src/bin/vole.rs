@@ -137,14 +137,7 @@ fn main() -> ExitCode {
                 iterations,
                 warmup,
                 output,
-            } => run_bench(
-                &paths,
-                iterations,
-                warmup,
-                output.as_ref(),
-                true,
-                true,
-            ),
+            } => run_bench(&paths, iterations, warmup, output.as_ref(), true, true),
             BenchCommands::Compare { baseline, output } => {
                 run_compare(&baseline, output.as_ref(), args.force)
             }

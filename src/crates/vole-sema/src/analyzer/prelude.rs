@@ -153,7 +153,7 @@ impl Analyzer {
                         generic_calls: cached.generic_calls.clone(),
                         class_method_calls: cached.class_method_generics.clone(),
                         static_method_calls: cached.static_method_generics.clone(),
-                        declared_var_types: cached.declared_var_types.clone(),
+                        declared_var_types: cached.declared_var_types,
                         ..ModuleAnalysisData::default()
                     },
                 );
@@ -408,9 +408,8 @@ func partial_warning_probe() -> i64 {
         let mut interner = parser.into_interner();
         interner.seed_builtin_symbols();
 
-        let mut builder =
-            crate::AnalyzerBuilder::new(file_path.to_string_lossy().as_ref())
-                .with_project_root(Some(project_root));
+        let mut builder = crate::AnalyzerBuilder::new(file_path.to_string_lossy().as_ref())
+            .with_project_root(Some(project_root));
         if let Some(cache) = cache {
             builder = builder.with_cache(cache);
         }
@@ -421,7 +420,10 @@ func partial_warning_probe() -> i64 {
             .module_loader
             .set_project_root(project_root.to_path_buf());
         let result = analyzer.analyze(&program, &interner);
-        assert!(result.is_ok(), "main program should still analyze successfully");
+        assert!(
+            result.is_ok(),
+            "main program should still analyze successfully"
+        );
 
         analyzer
             .take_warnings()
@@ -441,9 +443,9 @@ func partial_warning_probe() -> i64 {
         let project = setup_project_with_broken_prelude();
         let warnings = analyze_file(project.path(), "main_a.vole", None);
         assert!(
-            warnings
-                .iter()
-                .any(|(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0)
+            warnings.iter().any(
+                |(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0
+            )
         );
     }
 
@@ -454,16 +456,16 @@ func partial_warning_probe() -> i64 {
 
         let first = analyze_file(project.path(), "main_a.vole", Some(Rc::clone(&cache)));
         assert!(
-            first
-                .iter()
-                .any(|(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0)
+            first.iter().any(
+                |(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0
+            )
         );
 
         let second = analyze_file(project.path(), "main_b.vole", Some(cache));
         assert!(
-            second
-                .iter()
-                .any(|(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0)
+            second.iter().any(
+                |(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0
+            )
         );
     }
 }

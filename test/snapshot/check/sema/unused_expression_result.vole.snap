@@ -1,6 +1,12 @@
 [stdout]
 
 [stderr]
+  × [W3005]: prelude module 'std:prelude/i16' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
+  × [W3005]: prelude module 'std:prelude/i8' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
+  × [W3005]: prelude module 'std:prelude/u64' had partial semantic analysis (1 errors)
+  help: prelude loading continued with partial results; review logs for underlying semantic errors
   × [W3002]: unused expression result of type 'i64'
    ╭─[<path>/unused_expression_result.vole:5:5]
  4 │ func unused_arithmetic() {
