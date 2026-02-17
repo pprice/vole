@@ -22,7 +22,7 @@
 use crate::ExpressionData;
 use crate::types::ConstantValue;
 use std::collections::HashMap;
-use vole_frontend::ast::{BlockExpr, NumericSuffix, StringPart, UnaryExpr};
+use vole_frontend::ast::{BlockExpr, MethodCallExpr, NumericSuffix, StringPart, UnaryExpr};
 use vole_frontend::{
     BinaryExpr, BinaryOp, Block, Decl, Expr, ExprKind, FuncBody, FuncDecl, Program, Stmt, Symbol,
 };
@@ -40,6 +40,8 @@ pub struct FoldingStats {
     pub constants_propagated: usize,
     /// Number of dead branches eliminated (if/when with constant conditions)
     pub branches_eliminated: usize,
+    /// Number of pure intrinsic calls folded (e.g., f64.sqrt(4.0) -> 2.0)
+    pub intrinsics_folded: usize,
 }
 
 /// A constant value computed at compile time, with optional numeric suffix metadata.
@@ -475,9 +477,14 @@ impl<'a> ConstantFolder<'a> {
 
         // Then try to fold this expression
         if let Some(folded) = self.try_fold_expr(expr) {
-            // Update the expression in place
+            // Track intrinsic folds separately from general constant folds
+            let is_intrinsic = matches!(expr.kind, ExprKind::MethodCall(_));
             expr.kind = folded.to_expr_kind();
-            self.stats.constants_folded += 1;
+            if is_intrinsic {
+                self.stats.intrinsics_folded += 1;
+            } else {
+                self.stats.constants_folded += 1;
+            }
         } else {
             // Try algebraic optimizations (division -> multiplication)
             self.try_optimize_division(expr);
@@ -752,6 +759,7 @@ impl<'a> ConstantFolder<'a> {
             ExprKind::Binary(bin) => self.try_fold_binary(bin),
             ExprKind::Unary(unary) => self.try_fold_unary(unary),
             ExprKind::Grouping(inner) => self.try_fold_expr(inner),
+            ExprKind::MethodCall(mc) => self.try_fold_intrinsic(expr.id, mc),
             _ => None,
         }
     }
@@ -830,6 +838,33 @@ impl<'a> ConstantFolder<'a> {
             (vole_frontend::UnaryOp::Not, ConstValue::Bool(v)) => Some(ConstValue::Bool(!v)),
             (vole_frontend::UnaryOp::BitNot, ConstValue::Int(v, suffix)) => {
                 Some(ConstValue::Int(!v, suffix))
+            }
+            _ => None,
+        }
+    }
+
+    /// Try to fold a pure intrinsic method call with all-constant arguments.
+    ///
+    /// Uses the intrinsic key resolved by sema (e.g., "f64_sqrt") to identify
+    /// the specific intrinsic. Only folds calls that sema has verified are
+    /// compiler intrinsics with known type mappings.
+    fn try_fold_intrinsic(
+        &self,
+        expr_id: vole_frontend::NodeId,
+        mc: &MethodCallExpr,
+    ) -> Option<ConstValue> {
+        // Look up the sema-resolved intrinsic key for this call site
+        let intrinsic_key = self.expr_data.get_intrinsic_key(expr_id)?;
+
+        match mc.args.len() {
+            1 => {
+                let arg = self.get_const_value(&mc.args[0])?;
+                fold_intrinsic_unary(intrinsic_key, arg)
+            }
+            2 => {
+                let a = self.get_const_value(&mc.args[0])?;
+                let b = self.get_const_value(&mc.args[1])?;
+                fold_intrinsic_binary(intrinsic_key, a, b)
             }
             _ => None,
         }
@@ -942,6 +977,187 @@ fn power_of_two_shift(n: i64) -> Option<i64> {
     } else {
         None
     }
+}
+
+/// Fold a unary (single-argument) pure intrinsic by intrinsic key.
+///
+/// The `key` is a sema-resolved string like "f64_sqrt", "i32_abs", "u64_clz".
+/// Only pure, deterministic intrinsics are handled.
+fn fold_intrinsic_unary(key: &str, arg: ConstValue) -> Option<ConstValue> {
+    match key {
+        // Float unary operations (f64)
+        "f64_sqrt" => fold_f64_unary(arg, |v| if v >= 0.0 { Some(v.sqrt()) } else { None }),
+        "f64_abs" => fold_f64_unary(arg, |v| Some(v.abs())),
+        "f64_ceil" => fold_f64_unary(arg, |v| Some(v.ceil())),
+        "f64_floor" => fold_f64_unary(arg, |v| Some(v.floor())),
+        "f64_trunc" => fold_f64_unary(arg, |v| Some(v.trunc())),
+        "f64_round" => fold_f64_unary(arg, |v| Some(v.round())),
+        // Float unary operations (f32)
+        "f32_sqrt" => fold_f32_unary(arg, |v| if v >= 0.0 { Some(v.sqrt()) } else { None }),
+        "f32_abs" => fold_f32_unary(arg, |v| Some(v.abs())),
+        "f32_ceil" => fold_f32_unary(arg, |v| Some(v.ceil())),
+        "f32_floor" => fold_f32_unary(arg, |v| Some(v.floor())),
+        "f32_trunc" => fold_f32_unary(arg, |v| Some(v.trunc())),
+        "f32_round" => fold_f32_unary(arg, |v| Some(v.round())),
+        // Signed integer abs
+        "i8_abs" | "i16_abs" | "i32_abs" | "i64_abs" => {
+            fold_int_unary(key, arg, |v, _| v.wrapping_abs())
+        }
+        // Leading/trailing zeros and popcount (all integer types)
+        k if k.ends_with("_clz") => {
+            fold_int_unary(key, arg, count_leading_zeros)
+        }
+        k if k.ends_with("_ctz") => {
+            fold_int_unary(key, arg, count_trailing_zeros)
+        }
+        k if k.ends_with("_popcnt") => fold_int_unary(key, arg, popcount),
+        _ => None,
+    }
+}
+
+/// Fold a binary (two-argument) pure intrinsic by intrinsic key.
+fn fold_intrinsic_binary(key: &str, a: ConstValue, b: ConstValue) -> Option<ConstValue> {
+    match key {
+        "f64_min" => fold_f64_binary(a, b, f64::min),
+        "f64_max" => fold_f64_binary(a, b, f64::max),
+        "f32_min" => fold_f32_binary(a, b, f32::min),
+        "f32_max" => fold_f32_binary(a, b, f32::max),
+        k if k.ends_with("_min") => fold_int_binary(key, a, b, |va, vb| va.min(vb)),
+        k if k.ends_with("_max") => fold_int_binary(key, a, b, |va, vb| va.max(vb)),
+        _ => None,
+    }
+}
+
+/// Helper: fold a unary f64 intrinsic.
+fn fold_f64_unary(arg: ConstValue, f: impl FnOnce(f64) -> Option<f64>) -> Option<ConstValue> {
+    let v = match arg {
+        ConstValue::Float(v, _) => v,
+        ConstValue::Int(v, _) => v as f64,
+        _ => return None,
+    };
+    f(v).map(|r| ConstValue::Float(r, Some(NumericSuffix::F64)))
+}
+
+/// Helper: fold a unary f32 intrinsic.
+fn fold_f32_unary(arg: ConstValue, f: impl FnOnce(f32) -> Option<f32>) -> Option<ConstValue> {
+    let v = match arg {
+        ConstValue::Float(v, _) => v as f32,
+        ConstValue::Int(v, _) => v as f32,
+        _ => return None,
+    };
+    f(v).map(|r| ConstValue::Float(r as f64, Some(NumericSuffix::F32)))
+}
+
+/// Helper: fold a unary integer intrinsic by extracting bit width from the key prefix.
+fn fold_int_unary(
+    key: &str,
+    arg: ConstValue,
+    f: impl FnOnce(i64, u32) -> i64,
+) -> Option<ConstValue> {
+    let ConstValue::Int(v, _) = arg else {
+        return None;
+    };
+    let (suffix, bits) = int_suffix_and_bits_from_key(key)?;
+    Some(ConstValue::Int(f(v, bits), suffix))
+}
+
+/// Helper: fold a binary f64 intrinsic.
+fn fold_f64_binary(
+    a: ConstValue,
+    b: ConstValue,
+    f: impl FnOnce(f64, f64) -> f64,
+) -> Option<ConstValue> {
+    let va = match &a {
+        ConstValue::Float(v, _) => *v,
+        ConstValue::Int(v, _) => *v as f64,
+        _ => return None,
+    };
+    let vb = match &b {
+        ConstValue::Float(v, _) => *v,
+        ConstValue::Int(v, _) => *v as f64,
+        _ => return None,
+    };
+    Some(ConstValue::Float(f(va, vb), Some(NumericSuffix::F64)))
+}
+
+/// Helper: fold a binary f32 intrinsic.
+fn fold_f32_binary(
+    a: ConstValue,
+    b: ConstValue,
+    f: impl FnOnce(f32, f32) -> f32,
+) -> Option<ConstValue> {
+    let va = match &a {
+        ConstValue::Float(v, _) => *v as f32,
+        ConstValue::Int(v, _) => *v as f32,
+        _ => return None,
+    };
+    let vb = match &b {
+        ConstValue::Float(v, _) => *v as f32,
+        ConstValue::Int(v, _) => *v as f32,
+        _ => return None,
+    };
+    Some(ConstValue::Float(
+        f(va, vb) as f64,
+        Some(NumericSuffix::F32),
+    ))
+}
+
+/// Helper: fold a binary integer intrinsic.
+fn fold_int_binary(
+    key: &str,
+    a: ConstValue,
+    b: ConstValue,
+    f: impl FnOnce(i64, i64) -> i64,
+) -> Option<ConstValue> {
+    let (ConstValue::Int(va, _), ConstValue::Int(vb, _)) = (&a, &b) else {
+        return None;
+    };
+    let (suffix, _bits) = int_suffix_and_bits_from_key(key)?;
+    Some(ConstValue::Int(f(*va, *vb), suffix))
+}
+
+/// Extract NumericSuffix and bit width from an intrinsic key prefix (e.g., "i64_clz" -> (I64, 64)).
+fn int_suffix_and_bits_from_key(key: &str) -> Option<(Option<NumericSuffix>, u32)> {
+    if key.starts_with("i8_") {
+        Some((Some(NumericSuffix::I8), 8))
+    } else if key.starts_with("i16_") {
+        Some((Some(NumericSuffix::I16), 16))
+    } else if key.starts_with("i32_") {
+        Some((Some(NumericSuffix::I32), 32))
+    } else if key.starts_with("i64_") {
+        Some((Some(NumericSuffix::I64), 64))
+    } else if key.starts_with("u8_") {
+        Some((Some(NumericSuffix::U8), 8))
+    } else if key.starts_with("u16_") {
+        Some((Some(NumericSuffix::U16), 16))
+    } else if key.starts_with("u32_") {
+        Some((Some(NumericSuffix::U32), 32))
+    } else if key.starts_with("u64_") {
+        Some((Some(NumericSuffix::U64), 64))
+    } else {
+        None
+    }
+}
+
+/// Count leading zeros for a value with the given bit width.
+fn count_leading_zeros(v: i64, bits: u32) -> i64 {
+    let masked = (v as u64) & ((1u64.wrapping_shl(bits)).wrapping_sub(1));
+    let clz_64 = masked.leading_zeros();
+    (clz_64 - (64 - bits)) as i64
+}
+
+/// Count trailing zeros for a value with the given bit width.
+fn count_trailing_zeros(v: i64, bits: u32) -> i64 {
+    let masked = (v as u64) & ((1u64.wrapping_shl(bits)).wrapping_sub(1));
+    let ctz = masked.trailing_zeros();
+    // If value is 0, trailing_zeros returns 64, cap at bit width
+    ctz.min(bits) as i64
+}
+
+/// Population count (number of set bits) for a value with the given bit width.
+fn popcount(v: i64, bits: u32) -> i64 {
+    let masked = (v as u64) & ((1u64.wrapping_shl(bits)).wrapping_sub(1));
+    masked.count_ones() as i64
 }
 
 #[cfg(test)]

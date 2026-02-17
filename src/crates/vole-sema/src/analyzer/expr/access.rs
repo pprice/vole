@@ -1,9 +1,10 @@
 use super::super::methods::GenericContext;
 use super::super::*;
+use super::call::resolve_intrinsic_key_from_mappings;
 use crate::generic::{TypeParamInfo, merge_type_params};
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{NameId, TypeDefId};
 impl Analyzer {
     /// Get field type from a struct-like type by looking up the type definition
@@ -968,6 +969,25 @@ impl Analyzer {
         }
 
         self.results.generic_calls.insert(expr.id, key);
+
+        // Resolve intrinsic key for constant folding.
+        // If this is a generic external with compiler intrinsic mappings
+        // (e.g., math.sqrt maps to "f64_sqrt"), record the concrete key
+        // so the optimizer can fold calls with constant arguments.
+        {
+            let ext_info = self
+                .implement_registry()
+                .get_generic_external(method_name_str)
+                .cloned();
+            if let Some(ext_info) = ext_info {
+                let sub_types: FxHashSet<ArenaTypeId> = inferred_id.values().copied().collect();
+                if let Some(ikey) =
+                    resolve_intrinsic_key_from_mappings(&ext_info.type_mappings, &sub_types)
+                {
+                    self.results.intrinsic_keys.insert(expr.id, ikey);
+                }
+            }
+        }
 
         Ok((concrete_params, concrete_ret))
     }

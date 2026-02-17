@@ -190,6 +190,7 @@ impl Analyzer {
             }
         };
 
+        let intrinsic_keys = results.intrinsic_keys;
         let expression_data = ExpressionData::builder()
             .types(expr_types)
             .methods(method_resolutions)
@@ -203,6 +204,7 @@ impl Analyzer {
             .is_check_results(is_check_results)
             .declared_var_types(declared_var_types)
             .lambda_analysis(lambda_analysis)
+            .intrinsic_keys(intrinsic_keys)
             .build();
 
         AnalysisOutput {

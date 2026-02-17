@@ -120,6 +120,11 @@ pub struct ExpressionData {
     /// Lambda analysis results (captures and side effects).
     /// Keyed by lambda expression NodeId.
     lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
+    /// Resolved intrinsic keys for compiler intrinsic calls.
+    /// Maps call-site NodeId to the resolved intrinsic key (e.g., "f64_sqrt").
+    /// Set by sema during generic external intrinsic resolution; consumed by
+    /// the optimizer for constant folding of pure intrinsic calls.
+    intrinsic_keys: FxHashMap<NodeId, String>,
 }
 
 /// Builder for `ExpressionData` to reduce construction boilerplate.
@@ -149,6 +154,7 @@ pub struct ExpressionDataBuilder {
     is_check_results: FxHashMap<NodeId, IsCheckResult>,
     declared_var_types: FxHashMap<NodeId, TypeId>,
     lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
+    intrinsic_keys: FxHashMap<NodeId, String>,
 }
 
 impl ExpressionDataBuilder {
@@ -241,6 +247,12 @@ impl ExpressionDataBuilder {
         self
     }
 
+    /// Set resolved intrinsic keys for compiler intrinsic calls.
+    pub fn intrinsic_keys(mut self, intrinsic_keys: FxHashMap<NodeId, String>) -> Self {
+        self.intrinsic_keys = intrinsic_keys;
+        self
+    }
+
     /// Build the `ExpressionData` from this builder.
     pub fn build(self) -> ExpressionData {
         ExpressionData {
@@ -256,6 +268,7 @@ impl ExpressionDataBuilder {
             is_check_results: self.is_check_results,
             declared_var_types: self.declared_var_types,
             lambda_analysis: self.lambda_analysis,
+            intrinsic_keys: self.intrinsic_keys,
         }
     }
 }
@@ -623,5 +636,13 @@ impl ExpressionData {
     /// Get all lambda analysis results
     pub fn lambda_analysis(&self) -> &FxHashMap<NodeId, LambdaAnalysis> {
         &self.lambda_analysis
+    }
+
+    /// Look up the intrinsic key for a call-site expression.
+    ///
+    /// Returns the concrete intrinsic key (e.g., `"f64_sqrt"`) if this
+    /// call site was resolved as a compiler intrinsic.
+    pub fn get_intrinsic_key(&self, node: NodeId) -> Option<&str> {
+        self.intrinsic_keys.get(&node).map(|s| s.as_str())
     }
 }

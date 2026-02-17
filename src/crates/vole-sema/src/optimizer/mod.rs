@@ -115,6 +115,8 @@ pub struct OptimizerStats {
     pub div_to_shift: usize,
     /// Number of constant propagations (variable references replaced with literals)
     pub constants_propagated: usize,
+    /// Number of pure intrinsic calls folded (e.g., f64.sqrt(4.0) -> 2.0)
+    pub intrinsics_folded: usize,
 }
 
 /// Run all enabled optimization passes on the program.
@@ -145,6 +147,7 @@ pub fn optimize(
         stats.div_to_mul = folding_stats.div_to_mul;
         stats.div_to_shift = folding_stats.div_to_shift;
         stats.constants_propagated = folding_stats.constants_propagated;
+        stats.intrinsics_folded = folding_stats.intrinsics_folded;
     }
 
     stats

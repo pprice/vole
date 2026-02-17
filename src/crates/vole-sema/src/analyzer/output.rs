@@ -91,6 +91,9 @@ pub(crate) struct AnalysisResults {
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
     /// Used by codegen to compile scoped type declarations (records, classes) within tests blocks.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
+    /// Resolved intrinsic keys for compiler intrinsic calls (for optimizer constant folding).
+    /// Maps call-site NodeId to the resolved intrinsic key (e.g., "f64_sqrt").
+    pub intrinsic_keys: FxHashMap<NodeId, String>,
 }
 
 /// Function and global variable symbol tables.

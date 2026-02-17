@@ -651,4 +651,167 @@ tests {
         }
         assert(result == "big")
     }
+
+    // ============ Pure intrinsic call folding tests ============
+    // These test that calls to known-pure intrinsics with constant arguments
+    // are evaluated at compile time (e.g., math.sqrt(4.0) -> 2.0)
+
+    test "fold math.sqrt with constant f64" {
+        let math = import "std:math"
+        let result = math.sqrt(4.0)
+        assert(result == 2.0)
+    }
+
+    test "fold math.sqrt of 0" {
+        let math = import "std:math"
+        let result = math.sqrt(0.0)
+        assert(result == 0.0)
+    }
+
+    test "fold math.sqrt of 1" {
+        let math = import "std:math"
+        let result = math.sqrt(1.0)
+        assert(result == 1.0)
+    }
+
+    test "fold math.abs with constant f64" {
+        let math = import "std:math"
+        let result = math.abs(-5.0)
+        assert(result == 5.0)
+    }
+
+    test "fold math.abs positive value unchanged" {
+        let math = import "std:math"
+        let result = math.abs(3.0)
+        assert(result == 3.0)
+    }
+
+    test "fold math.ceil with constant f64" {
+        let math = import "std:math"
+        let result = math.ceil(3.2)
+        assert(result == 4.0)
+    }
+
+    test "fold math.ceil negative" {
+        let math = import "std:math"
+        let result = math.ceil(-3.8)
+        assert(result == -3.0)
+    }
+
+    test "fold math.floor with constant f64" {
+        let math = import "std:math"
+        let result = math.floor(3.9)
+        assert(result == 3.0)
+    }
+
+    test "fold math.floor negative" {
+        let math = import "std:math"
+        let result = math.floor(-3.2)
+        assert(result == -4.0)
+    }
+
+    test "fold math.trunc with constant f64" {
+        let math = import "std:math"
+        let result = math.trunc(3.9)
+        assert(result == 3.0)
+    }
+
+    test "fold math.trunc negative" {
+        let math = import "std:math"
+        let result = math.trunc(-3.9)
+        assert(result == -3.0)
+    }
+
+    test "fold math.round with constant f64" {
+        let math = import "std:math"
+        let result = math.round(3.6)
+        assert(result == 4.0)
+    }
+
+    test "fold math.round down" {
+        let math = import "std:math"
+        let result = math.round(3.4)
+        assert(result == 3.0)
+    }
+
+    test "fold math.min with constant f64" {
+        let math = import "std:math"
+        let result = math.min(3.0, 5.0)
+        assert(result == 3.0)
+    }
+
+    test "fold math.max with constant f64" {
+        let math = import "std:math"
+        let result = math.max(3.0, 5.0)
+        assert(result == 5.0)
+    }
+
+    test "fold destructured sqrt with constant" {
+        // Test the direct Call path (destructured import)
+        let { sqrt } = import "std:math"
+        let result = sqrt(9.0)
+        assert(result == 3.0)
+    }
+
+    test "fold destructured abs with constant" {
+        let { abs } = import "std:math"
+        let result = abs(-7.0)
+        assert(result == 7.0)
+    }
+
+    test "fold destructured min with constants" {
+        let { min } = import "std:math"
+        let result = min(10.0, 3.0)
+        assert(result == 3.0)
+    }
+
+    test "fold destructured max with constants" {
+        let { max } = import "std:math"
+        let result = max(10.0, 3.0)
+        assert(result == 10.0)
+    }
+
+    test "fold intrinsic with propagated constant" {
+        let math = import "std:math"
+        let x = 16.0
+        let result = math.sqrt(x)
+        assert(result == 4.0)
+    }
+
+    test "fold chained intrinsic calls" {
+        let math = import "std:math"
+        // sqrt(abs(-16.0)) = sqrt(16.0) = 4.0
+        // Each step should fold independently
+        let inner = math.abs(-16.0)
+        let result = math.sqrt(inner)
+        assert(result == 4.0)
+    }
+
+    test "fold integer abs via std:math" {
+        let math = import "std:math"
+        let x: i64 = -42
+        let result = math.abs(x)
+        assert(result == 42)
+    }
+
+    test "fold lowlevel clz" {
+        let ll = import "std:lowlevel"
+        let x: u64 = 1
+        let result = ll.clz(x)
+        assert(result == 63)
+    }
+
+    test "fold lowlevel ctz" {
+        let ll = import "std:lowlevel"
+        let x: u64 = 16
+        let result = ll.ctz(x)
+        assert(result == 4)
+    }
+
+    test "fold lowlevel popcnt" {
+        let ll = import "std:lowlevel"
+        let x: u64 = 0b10110111
+        let result = ll.popcnt(x)
+        assert(result == 6)
+    }
 }

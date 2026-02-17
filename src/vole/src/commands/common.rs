@@ -269,6 +269,7 @@ pub fn compile_source(
             constants_folded = stats.constants_folded,
             div_to_mul = stats.div_to_mul,
             div_to_shift = stats.div_to_shift,
+            intrinsics_folded = stats.intrinsics_folded,
             "optimization complete"
         );
     }

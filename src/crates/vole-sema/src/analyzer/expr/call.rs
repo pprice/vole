@@ -1,7 +1,8 @@
 use super::super::*;
 use crate::expression_data::LambdaDefaults;
+use crate::implement_registry::TypeMappingKind;
 use crate::type_arena::TypeId as ArenaTypeId;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{NameId, Namer};
 
 impl Analyzer {
@@ -369,6 +370,27 @@ impl Analyzer {
                 // Record the call -> monomorph key mapping for codegen
                 self.results.generic_calls.insert(expr.id, key);
 
+                // Resolve intrinsic key for constant folding.
+                // If this is a generic external with compiler intrinsic mappings
+                // (e.g., math.sqrt maps to "f64_sqrt"), record the concrete key
+                // so the optimizer can fold calls with constant arguments.
+                {
+                    let callee_name = interner.resolve(*sym);
+                    let ext_info = self
+                        .implement_registry()
+                        .get_generic_external(callee_name)
+                        .cloned();
+                    if let Some(ext_info) = ext_info {
+                        let sub_types: FxHashSet<ArenaTypeId> =
+                            inferred_id.values().copied().collect();
+                        if let Some(ikey) =
+                            resolve_intrinsic_key_from_mappings(&ext_info.type_mappings, &sub_types)
+                        {
+                            self.results.intrinsic_keys.insert(expr.id, ikey);
+                        }
+                    }
+                }
+
                 return Ok(concrete_return_id);
             }
 
@@ -442,4 +464,30 @@ impl Analyzer {
         }
         Ok(ArenaTypeId::INVALID)
     }
+}
+
+/// Resolve an intrinsic key from type mappings and concrete substitutions.
+///
+/// Used during sema to tag call-site NodeIds with their concrete intrinsic key
+/// (e.g., `"f64_sqrt"`) so the optimizer can fold pure intrinsic calls.
+pub(super) fn resolve_intrinsic_key_from_mappings(
+    type_mappings: &[TypeMappingEntry],
+    sub_types: &FxHashSet<ArenaTypeId>,
+) -> Option<String> {
+    let mut default_key = None;
+    let mut exact_match = None;
+
+    for mapping in type_mappings {
+        match &mapping.kind {
+            TypeMappingKind::Exact(type_id) if sub_types.contains(type_id) => {
+                exact_match = Some(mapping.intrinsic_key.clone());
+            }
+            TypeMappingKind::Default => {
+                default_key = Some(mapping.intrinsic_key.clone());
+            }
+            _ => {}
+        }
+    }
+
+    exact_match.or(default_key)
 }
