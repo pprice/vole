@@ -311,3 +311,27 @@ struct Timestamp {
         return self.nanos == other.nanos
     }
 }
+
+implement Bounded for Duration {
+    statics {
+        func min_value() -> Duration {
+            return Duration { nanos: -9223372036854775807 - 1 }
+        }
+
+        func max_value() -> Duration {
+            return Duration { nanos: 9223372036854775807 }
+        }
+    }
+}
+
+implement Bounded for Timestamp {
+    statics {
+        func min_value() -> Timestamp {
+            return Timestamp { nanos: -9223372036854775807 - 1, offset_mins: 0 }
+        }
+
+        func max_value() -> Timestamp {
+            return Timestamp { nanos: 9223372036854775807, offset_mins: 0 }
+        }
+    }
+}

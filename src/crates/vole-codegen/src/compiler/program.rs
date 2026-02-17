@@ -606,7 +606,6 @@ impl Compiler<'_> {
                     impl_block,
                     module_interner,
                     module_id,
-                    Some(module_path),
                 )?;
             }
         }

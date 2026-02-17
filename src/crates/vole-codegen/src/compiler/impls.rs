@@ -12,7 +12,7 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
 use vole_frontend::ast::{ClassDecl, ImplementBlock, InterfaceMethod, StaticsBlock, StructDecl};
 use vole_frontend::{Expr, FuncDecl, Interner, Symbol, TypeExpr, TypeExprKind};
-use vole_identity::ModuleId;
+use vole_identity::{ModuleId, TypeDefId};
 use vole_sema::type_arena::TypeId;
 
 /// Get the canonical name for an AST primitive type
@@ -634,25 +634,10 @@ impl Compiler<'_> {
 
         // Register static methods from statics block (if present)
         if let Some(ref statics) = impl_block.statics {
-            // Get TypeDefId for this type
-            let type_def_id = {
-                let name_table = self.analyzed.name_table();
-                match &impl_block.target_type.kind {
-                    TypeExprKind::Primitive(p) => {
-                        let name_id = name_table.primitives.from_ast(*p);
-                        self.query().try_type_def_id(name_id)
-                    }
-                    TypeExprKind::Handle => {
-                        let name_id = name_table.primitives.handle;
-                        self.query().try_type_def_id(name_id)
-                    }
-                    TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                        let name_id = name_table.name_id(self.program_module(), &[*sym], interner);
-                        name_id.and_then(|id| self.query().try_type_def_id(id))
-                    }
-                    _ => None,
-                }
-            };
+            // Reuse the already-resolved impl type identity.
+            // This works for module-local types and avoids program_module()-only lookup.
+            let type_def_id =
+                impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
 
             for method in &statics.methods {
                 // Only register methods with bodies
@@ -822,7 +807,7 @@ impl Compiler<'_> {
         // Compile static methods from statics block (if present)
         if let Some(ref statics) = impl_block.statics {
             let interner = self.analyzed.interner.clone();
-            self.compile_implement_statics(statics, &type_name, None, &interner)?;
+            self.compile_implement_statics(statics, &type_name, type_def_id, None, &interner)?;
         }
 
         Ok(())
@@ -835,7 +820,6 @@ impl Compiler<'_> {
         impl_block: &ImplementBlock,
         interner: &Interner,
         module_id: ModuleId,
-        module_path: Option<&str>,
     ) -> CodegenResult<()> {
         // Use module-specific interner for symbol resolution
         let Some(type_name) =
@@ -905,7 +889,13 @@ impl Compiler<'_> {
 
         // Compile static methods
         if let Some(ref statics) = impl_block.statics {
-            self.compile_implement_statics(statics, &type_name, module_path, interner)?;
+            self.compile_implement_statics(
+                statics,
+                &type_name,
+                type_def_id,
+                Some(module_id),
+                interner,
+            )?;
         }
 
         Ok(())
@@ -1032,13 +1022,10 @@ impl Compiler<'_> {
         &mut self,
         statics: &StaticsBlock,
         type_name: &str,
-        module_path: Option<&str>,
+        type_def_id: Option<TypeDefId>,
+        module_id: Option<ModuleId>,
         interner: &Interner,
     ) -> CodegenResult<()> {
-        let module_id = self.program_module();
-        // Try to get TypeDefId for looking up pre-resolved method signatures
-        let type_def_id = self.query().resolve_type_def_by_str(module_id, type_name);
-
         for method in &statics.methods {
             // Only compile methods with bodies
             let body = match &method.body {
@@ -1098,10 +1085,7 @@ impl Compiler<'_> {
 
             // Get source file pointer and module_id
             let source_file_ptr = self.source_file_ptr();
-            let resolved_module_id = module_path.and_then(|path| {
-                let name_table = self.analyzed.name_table();
-                name_table.module_id_if_known(path)
-            });
+            let resolved_module_id = module_id;
 
             // Create function builder and compile
             let no_global_inits = FxHashMap::default();

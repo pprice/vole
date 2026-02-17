@@ -420,3 +420,25 @@ tests "Timestamp struct equality" {
         assert(ts1 != ts2)
     }
 }
+
+tests "Bounded implementations" {
+    test "Duration bounded min and max values" {
+        let min_d = time.Duration.min_value()
+        let max_d = time.Duration.max_value()
+
+        assert(min_d.as_nanos() == -9223372036854775807 - 1)
+        assert(max_d.as_nanos() == 9223372036854775807)
+        assert(min_d.as_nanos() < max_d.as_nanos())
+    }
+
+    test "Timestamp bounded min and max values" {
+        let min_ts = time.Timestamp.min_value()
+        let max_ts = time.Timestamp.max_value()
+
+        assert(min_ts.unix_nanos() == -9223372036854775807 - 1)
+        assert(max_ts.unix_nanos() == 9223372036854775807)
+        assert(min_ts.offset() == 0)
+        assert(max_ts.offset() == 0)
+        assert(min_ts.unix_nanos() < max_ts.unix_nanos())
+    }
+}
