@@ -249,10 +249,15 @@ impl Analyzer {
                 if let Some(expected_id) = expected
                     && self.types_compatible_id(lambda_ty_id, expected_id, interner)
                 {
-                    // Preserve the caller's expected function type identity (e.g. closure
-                    // array literals passed directly to [() -> T] params), instead of
-                    // propagating a closure-flavored inferred type that only prints the same.
-                    return Ok(expected_id);
+                    if self.type_arena().unwrap_function(expected_id).is_some() {
+                        // Preserve the caller's expected function type identity (e.g. closure
+                        // array literals passed directly to [() -> T] params), instead of
+                        // propagating a closure-flavored inferred type that only prints the same.
+                        return Ok(expected_id);
+                    }
+                    // For functional interface expectations, keep the lambda's closure
+                    // function type so codegen can perform interface boxing at assignment/
+                    // argument sites.
                 }
                 Ok(lambda_ty_id)
             }
