@@ -471,4 +471,184 @@ tests {
         assert(a == "hello world")
         assert(b == "goodbye world")
     }
+
+    // ============ Dead branch elimination tests ============
+
+    test "eliminate if true statement with else" {
+        // if true { a } else { b } => a
+        let mut result = 0
+        if true {
+            result = 42
+        } else {
+            result = 99
+        }
+        assert(result == 42)
+    }
+
+    test "eliminate if false statement with else branch" {
+        // if false { a } else { b } => b
+        let mut result = 0
+        if false {
+            result = 42
+        } else {
+            result = 99
+        }
+        assert(result == 99)
+    }
+
+    test "eliminate if true no else" {
+        // if true { a } => a (value is the then branch)
+        let mut x = 0
+        if true {
+            x = 42
+        }
+        assert(x == 42)
+    }
+
+    test "eliminate if false no else" {
+        // if false { a } => removed (dead code)
+        let mut x = 10
+        if false {
+            x = 42
+        }
+        assert(x == 10)
+    }
+
+    test "eliminate if statement with propagated true constant" {
+        // Constant propagation feeds into dead branch elimination
+        let debug = true
+        let mut result = "release mode"
+        if debug {
+            result = "debug mode"
+        }
+        assert(result == "debug mode")
+    }
+
+    test "eliminate if statement with propagated false constant" {
+        let debug = false
+        let mut result = "release mode"
+        if debug {
+            result = "debug mode"
+        }
+        assert(result == "release mode")
+    }
+
+    test "eliminate if statement with propagated false and else" {
+        let verbose = false
+        let mut output = "unknown"
+        if verbose {
+            output = "loud"
+        } else {
+            output = "quiet"
+        }
+        assert(output == "quiet")
+    }
+
+    test "eliminate nested if statements" {
+        // Both levels should be eliminated
+        let a = true
+        let b = false
+        let mut result = 0
+        if a {
+            if b {
+                result = 1
+            } else {
+                result = 2
+            }
+        } else {
+            result = 3
+        }
+        assert(result == 2)
+    }
+
+    test "eliminate when expression with true condition" {
+        // when with constant true arm eliminates to that arm's body
+        let result = when {
+            true => 42,
+            _ => 99,
+        }
+        assert(result == 42)
+    }
+
+    test "eliminate when expression with false condition" {
+        // when with constant false arm falls through to wildcard
+        let result = when {
+            false => 42,
+            _ => 99,
+        }
+        assert(result == 99)
+    }
+
+    test "eliminate when with propagated constant" {
+        let debug = true
+        let result = when {
+            debug => "debug mode",
+            _ => "release mode",
+        }
+        assert(result == "debug mode")
+    }
+
+    test "eliminate if with computed constant condition" {
+        // Condition is a constant expression: 5 > 3 folds to true
+        let mut result = "no"
+        if 5 > 3 {
+            result = "yes"
+        }
+        assert(result == "yes")
+    }
+
+    test "eliminate if with constant boolean expression" {
+        // true && false folds to false, so the else branch is taken
+        let mut result = 0
+        if true && false {
+            result = 100
+        } else {
+            result = 200
+        }
+        assert(result == 200)
+    }
+
+    test "eliminate if false statement with else" {
+        let mode = false
+        let mut result = "unknown"
+        if mode {
+            result = "on"
+        } else {
+            result = "off"
+        }
+        assert(result == "off")
+    }
+
+    test "eliminate dead branch preserves side effects in taken branch" {
+        // The taken branch should still execute correctly
+        let mut counter = 0
+        if true {
+            counter = counter + 1
+            counter = counter + 1
+            counter = counter + 1
+        }
+        assert(counter == 3)
+    }
+
+    test "eliminate dead branch with multiple statements" {
+        // The dead branch has multiple statements that should all be eliminated
+        let mut x = 0
+        if false {
+            x = 1
+            x = x + 1
+            x = x * 2
+        }
+        assert(x == 0)
+    }
+
+    test "chained constant propagation into statement if elimination" {
+        // a = 10, b = a > 5 = true, if b { ... } => taken
+        let a = 10
+        let b = a > 5
+        let mut result = "small"
+        if b {
+            result = "big"
+        }
+        assert(result == "big")
+    }
 }

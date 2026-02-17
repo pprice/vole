@@ -21,7 +21,7 @@
 
 use crate::ExpressionData;
 use std::collections::HashMap;
-use vole_frontend::ast::{NumericSuffix, StringPart, UnaryExpr};
+use vole_frontend::ast::{BlockExpr, NumericSuffix, StringPart, UnaryExpr};
 use vole_frontend::{
     BinaryExpr, BinaryOp, Block, Decl, Expr, ExprKind, FuncBody, FuncDecl, Program, Stmt, Symbol,
 };
@@ -37,6 +37,8 @@ pub struct FoldingStats {
     pub div_to_shift: usize,
     /// Number of constant propagations (variable references replaced with literals)
     pub constants_propagated: usize,
+    /// Number of dead branches eliminated (if/when with constant conditions)
+    pub branches_eliminated: usize,
 }
 
 /// A constant value that can be computed at compile time.
@@ -191,9 +193,54 @@ impl<'a> ConstantFolder<'a> {
     }
 
     /// Fold constants in a block.
+    ///
+    /// After folding each statement, eliminates dead if-branches by inlining
+    /// the taken branch's statements or removing the if entirely.
     fn fold_block(&mut self, block: &mut Block) {
         for stmt in &mut block.stmts {
             self.fold_stmt(stmt);
+        }
+
+        // Eliminate dead if-statements by replacing them with inlined branches.
+        // We collect replacements first, then apply them (since inlining a block
+        // may produce multiple statements, changing the Vec length).
+        let mut replacements: Vec<(usize, Vec<Stmt>)> = Vec::new();
+
+        for (i, stmt) in block.stmts.iter().enumerate() {
+            if let Some(stmts) = self.try_eliminate_if_stmt(stmt) {
+                replacements.push((i, stmts));
+            }
+        }
+
+        // Apply replacements in reverse order to preserve indices
+        for (i, replacement) in replacements.into_iter().rev() {
+            block.stmts.splice(i..=i, replacement);
+        }
+    }
+
+    /// Check if a Stmt::If has a constant condition and return the replacement statements.
+    ///
+    /// Returns `Some(stmts)` if the if-statement should be replaced (may be empty vec
+    /// for `if false` with no else branch).
+    fn try_eliminate_if_stmt(&mut self, stmt: &Stmt) -> Option<Vec<Stmt>> {
+        let Stmt::If(if_stmt) = stmt else {
+            return None;
+        };
+        let Some(ConstValue::Bool(cond)) = self.get_const_value(&if_stmt.condition) else {
+            return None;
+        };
+
+        self.stats.branches_eliminated += 1;
+
+        if cond {
+            // Condition is true: inline the then_branch statements
+            Some(if_stmt.then_branch.stmts.clone())
+        } else if let Some(else_branch) = &if_stmt.else_branch {
+            // Condition is false with else: inline the else_branch statements
+            Some(else_branch.stmts.clone())
+        } else {
+            // Condition is false with no else: remove entirely
+            Some(vec![])
         }
     }
 
@@ -271,6 +318,11 @@ impl<'a> ConstantFolder<'a> {
         // Then, recursively fold sub-expressions
         self.fold_expr_children(expr);
 
+        // Try dead branch elimination for if/when expressions
+        if self.try_eliminate_dead_branch(expr) {
+            return;
+        }
+
         // Then try to fold this expression
         if let Some(folded) = self.try_fold_expr(expr) {
             // Update the expression in place
@@ -280,6 +332,134 @@ impl<'a> ConstantFolder<'a> {
             // Try algebraic optimizations (division -> multiplication)
             self.try_optimize_division(expr);
         }
+    }
+
+    /// Try to eliminate dead branches in if/when expressions with constant conditions.
+    ///
+    /// Returns `true` if the expression was replaced (dead branch eliminated).
+    fn try_eliminate_dead_branch(&mut self, expr: &mut Expr) -> bool {
+        match &expr.kind {
+            ExprKind::If(if_expr) => self.try_eliminate_if(expr, if_expr.span),
+            ExprKind::When(_) => self.try_eliminate_when(expr),
+            _ => false,
+        }
+    }
+
+    /// Eliminate dead branches in an if-expression with a constant bool condition.
+    ///
+    /// - `if true  { a } else { b }` => `a`
+    /// - `if false { a } else { b }` => `b`
+    /// - `if false { a }` (no else)  => empty block (void)
+    fn try_eliminate_if(&mut self, expr: &mut Expr, span: vole_frontend::Span) -> bool {
+        let ExprKind::If(ref if_expr) = expr.kind else {
+            return false;
+        };
+        let Some(ConstValue::Bool(cond)) = self.get_const_value(&if_expr.condition) else {
+            return false;
+        };
+
+        // Take ownership of the if-expression to extract the taken branch
+        let ExprKind::If(if_expr) = std::mem::replace(&mut expr.kind, ExprKind::Unreachable) else {
+            unreachable!();
+        };
+
+        expr.kind = if cond {
+            // Condition is true: replace with then_branch
+            if_expr.then_branch.kind
+        } else if let Some(else_branch) = if_expr.else_branch {
+            // Condition is false with else branch: replace with else_branch
+            else_branch.kind
+        } else {
+            // Condition is false with no else: replace with empty block (void)
+            ExprKind::Block(Box::new(BlockExpr {
+                stmts: vec![],
+                trailing_expr: None,
+                span,
+            }))
+        };
+
+        self.stats.branches_eliminated += 1;
+        true
+    }
+
+    /// Eliminate dead arms in when-expressions where the condition is a constant bool.
+    ///
+    /// If a `true` arm is found, replaces the entire when with that arm's body.
+    /// Removes arms with `false` conditions (they're dead code).
+    /// Only replaces the wildcard arm if all prior arms are constant-false.
+    fn try_eliminate_when(&mut self, expr: &mut Expr) -> bool {
+        let ExprKind::When(ref when) = expr.kind else {
+            return false;
+        };
+
+        // Walk arms in order. Track whether all prior arms are known-false.
+        let mut all_prior_dead = true;
+
+        for (i, arm) in when.arms.iter().enumerate() {
+            match &arm.condition {
+                Some(cond) => match self.get_const_value(cond) {
+                    Some(ConstValue::Bool(true)) => {
+                        // This arm always matches; replace the whole when
+                        let ExprKind::When(mut when) =
+                            std::mem::replace(&mut expr.kind, ExprKind::Unreachable)
+                        else {
+                            unreachable!();
+                        };
+                        let arm = when.arms.swap_remove(i);
+                        expr.kind = arm.body.kind;
+                        self.stats.branches_eliminated += 1;
+                        return true;
+                    }
+                    Some(ConstValue::Bool(false)) => {
+                        // This arm is dead; continue checking
+                    }
+                    _ => {
+                        // Non-constant condition; can't eliminate
+                        all_prior_dead = false;
+                    }
+                },
+                None if all_prior_dead => {
+                    // Wildcard arm and all prior arms are dead -- only this fires
+                    let ExprKind::When(mut when) =
+                        std::mem::replace(&mut expr.kind, ExprKind::Unreachable)
+                    else {
+                        unreachable!();
+                    };
+                    let arm = when.arms.swap_remove(i);
+                    expr.kind = arm.body.kind;
+                    self.stats.branches_eliminated += 1;
+                    return true;
+                }
+                None => {
+                    // Wildcard but prior arms have unknown conditions; stop
+                    all_prior_dead = false;
+                }
+            }
+        }
+
+        // Remove dead (false-condition) arms even if we can't eliminate the whole when
+        let ExprKind::When(ref when) = expr.kind else {
+            return false;
+        };
+        let has_dead_arms = when.arms.iter().any(|arm| {
+            arm.condition.as_ref().is_some_and(|cond| {
+                matches!(self.get_const_value(cond), Some(ConstValue::Bool(false)))
+            })
+        });
+
+        if has_dead_arms {
+            let ExprKind::When(ref mut when) = expr.kind else {
+                unreachable!();
+            };
+            when.arms.retain(|arm| {
+                !arm.condition.as_ref().is_some_and(|cond| {
+                    matches!(self.get_const_value(cond), Some(ConstValue::Bool(false)))
+                })
+            });
+            self.stats.branches_eliminated += 1;
+        }
+
+        false
     }
 
     /// Recursively fold children of an expression.
