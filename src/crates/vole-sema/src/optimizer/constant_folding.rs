@@ -1004,12 +1004,8 @@ fn fold_intrinsic_unary(key: &str, arg: ConstValue) -> Option<ConstValue> {
             fold_int_unary(key, arg, |v, _| v.wrapping_abs())
         }
         // Leading/trailing zeros and popcount (all integer types)
-        k if k.ends_with("_clz") => {
-            fold_int_unary(key, arg, count_leading_zeros)
-        }
-        k if k.ends_with("_ctz") => {
-            fold_int_unary(key, arg, count_trailing_zeros)
-        }
+        k if k.ends_with("_clz") => fold_int_unary(key, arg, count_leading_zeros),
+        k if k.ends_with("_ctz") => fold_int_unary(key, arg, count_trailing_zeros),
         k if k.ends_with("_popcnt") => fold_int_unary(key, arg, popcount),
         _ => None,
     }

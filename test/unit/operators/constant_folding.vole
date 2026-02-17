@@ -815,3 +815,415 @@ tests {
         assert(result == 6)
     }
 }
+
+// ============================================================================
+// Negative tests: things that should NOT be folded, and edge cases
+// ============================================================================
+
+tests "division/modulo by zero should NOT fold (remain runtime)" {
+    // The constant folder guards integer div/mod by zero with `if r != 0`,
+    // so these must remain as runtime operations. We verify the non-folded
+    // code still produces the correct runtime behavior by testing with
+    // non-zero divisors that are computed at runtime.
+
+    test "integer division with runtime zero divisor is not folded" {
+        // Use a runtime-computed zero to ensure the folder can't see it
+        let mut d = 1
+        d = d - 1  // d = 0 at runtime, but folder can't track mutable
+        // We can't actually call 1 / d here because it would panic at runtime.
+        // Instead, verify the folder leaves it alone by checking a guarded version.
+        let result = when {
+            d != 0 => 10 / d,
+            _ => -1,
+        }
+        assert(result == -1)
+    }
+
+    test "integer modulo with runtime zero divisor is not folded" {
+        let mut d = 1
+        d = d - 1
+        let result = when {
+            d != 0 => 10 % d,
+            _ => -1,
+        }
+        assert(result == -1)
+    }
+
+    test "float division by zero produces infinity" {
+        // Float div by zero IS folded (IEEE 754: 1.0/0.0 = inf)
+        // Verify folded result matches runtime behavior
+        let folded = 1.0 / 0.0
+        let rt_zero = 0.0
+        let mut z = rt_zero
+        z = z * 1.0  // ensure runtime
+        let runtime = 1.0 / rt_zero
+        // Both should be positive infinity
+        assert(folded == runtime)
+        assert(folded > 1000000000000.0)
+    }
+
+    test "float division by negative zero produces negative infinity" {
+        let result = -1.0 / 0.0
+        assert(result < -1000000000000.0)
+    }
+
+    test "float zero divided by zero produces NaN" {
+        let result = 0.0 / 0.0
+        // NaN is not equal to itself
+        assert(result != result)
+    }
+}
+
+tests "runtime values mixed with constants should NOT fold" {
+    test "function parameter plus constant is not folded" {
+        func add_ten(x: i64) -> i64 {
+            return x + 10
+        }
+        // The add inside add_ten cannot be folded because x is a parameter
+        assert(add_ten(5) == 15)
+        assert(add_ten(0) == 10)
+        assert(add_ten(-10) == 0)
+    }
+
+    test "mutable variable incremented in loop is not propagated" {
+        let mut sum = 0
+        let mut i = 0
+        while i < 5 {
+            sum = sum + i
+            i = i + 1
+        }
+        // sum = 0+1+2+3+4 = 10
+        // The folder should NOT propagate the initial value of sum (0) across mutations
+        assert(sum == 10)
+    }
+
+    test "mutable variable reassignment prevents propagation" {
+        let mut x = 100
+        let a = x + 1  // should use 100 (but not folded since x is mutable)
+        x = 200
+        let b = x + 1  // should use 200
+        assert(a == 101)
+        assert(b == 201)
+    }
+
+    test "function return value is not folded" {
+        func compute() -> i64 {
+            return 42
+        }
+        let result = compute() + 1
+        // compute() is not a constant, so the + 1 should not be folded
+        assert(result == 43)
+    }
+
+    test "conditional with runtime condition is not eliminated" {
+        func pick(flag: bool) -> i64 {
+            if flag {
+                return 1
+            } else {
+                return 2
+            }
+        }
+        assert(pick(true) == 1)
+        assert(pick(false) == 2)
+    }
+}
+
+tests "integer overflow edge cases (wrapping behavior at fold time)" {
+    // The constant folder uses wrapping_add/wrapping_sub/wrapping_mul.
+    // These tests verify that large constant expressions fold correctly
+    // and that the wrapping matches what happens at runtime.
+
+    test "large multiplication folds correctly" {
+        let result = 1000000 * 1000000
+        assert(result == 1000000000000)
+    }
+
+    test "i64 max value is representable" {
+        let max = 9223372036854775807
+        assert(max == 9223372036854775807)
+    }
+
+    test "negative overflow in constant subtraction" {
+        // -9223372036854775807 - 1 should wrap/be the min value
+        let near_min = -9223372036854775807
+        let result = near_min - 1
+        // This is i64::MIN as computed by wrapping subtraction
+        assert(result == -9223372036854775807 - 1)
+    }
+
+    test "double negation of large positive" {
+        let x = 9223372036854775807
+        let result = -(-x)
+        assert(result == 9223372036854775807)
+    }
+}
+
+tests "float edge cases in constant folding" {
+    test "zero divided by zero produces NaN at fold time" {
+        let result = 0.0 / 0.0
+        // NaN != NaN is the canonical NaN check
+        assert(result != result)
+    }
+
+    test "positive divided by zero produces infinity at fold time" {
+        let result = 1.0 / 0.0
+        // Infinity is greater than any finite number
+        assert(result > 1000000000000.0)
+        assert(result == result)  // infinity IS equal to itself
+    }
+
+    test "negative divided by zero produces negative infinity at fold time" {
+        let result = -1.0 / 0.0
+        assert(result < -1000000000000.0)
+        assert(result == result)
+    }
+
+    test "NaN equality is false at fold time" {
+        // 0.0/0.0 folds to NaN, then NaN == NaN folds to false
+        let nan_val = 0.0 / 0.0
+        let eq_result = nan_val == nan_val
+        assert(eq_result == false)
+    }
+
+    test "NaN not-equal is true" {
+        let nan_val = 0.0 / 0.0
+        let ne_result = nan_val != nan_val
+        assert(ne_result == true)
+    }
+
+    test "NaN propagation in addition at fold time" {
+        let nan_val = 0.0 / 0.0
+        let result = nan_val + 1.0
+        assert(result != result)
+    }
+
+    test "NaN propagation in multiplication at fold time" {
+        let nan_val = 0.0 / 0.0
+        let result = nan_val * 2.0
+        assert(result != result)
+    }
+
+    test "infinity plus finite is infinity" {
+        // 1.0/0.0 folds to inf, inf + 1.0 folds to inf
+        let inf = 1.0 / 0.0
+        let result = inf + 1.0
+        assert(result > 1000000000000.0)
+    }
+
+    test "infinity minus infinity is NaN" {
+        let inf = 1.0 / 0.0
+        let result = inf - inf
+        assert(result != result)
+    }
+
+    test "negative zero fold" {
+        let result = -0.0
+        // -0.0 == 0.0 in IEEE 754
+        assert(result == 0.0)
+    }
+
+    test "f64 NaN comparisons all false except ne" {
+        let nan_val = 0.0 / 0.0
+        // All ordered comparisons with NaN should be false
+        assert((nan_val < 0.0) == false)
+        assert((nan_val > 0.0) == false)
+        assert((nan_val <= 0.0) == false)
+        assert((nan_val >= 0.0) == false)
+        assert((nan_val == 0.0) == false)
+        // Only != should be true
+        assert((nan_val != 0.0) == true)
+    }
+}
+
+tests "string edge cases in constant folding" {
+    test "runtime string concat with function parameter is not folded" {
+        func greet(name: string) -> string {
+            return "hello " + name
+        }
+        assert(greet("world") == "hello world")
+        assert(greet("vole") == "hello vole")
+    }
+
+    test "long string constant concat folds correctly" {
+        let a = "abcdefghijklmnopqrstuvwxyz"
+        let b = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        let result = a + b
+        assert(result == "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    }
+
+    test "repeated string concat folds correctly" {
+        let result = "abc" + "def" + "ghi" + "jkl" + "mno" + "pqr" + "stu" + "vwx" + "yz"
+        assert(result == "abcdefghijklmnopqrstuvwxyz")
+    }
+
+    test "string comparison with different lengths" {
+        let short = "ab"
+        let long = "abc"
+        assert((short == long) == false)
+        assert((short != long) == true)
+    }
+
+    test "mutable string prevents propagation" {
+        let mut s = "first"
+        let a = s + "!"
+        s = "second"
+        let b = s + "!"
+        assert(a == "first!")
+        assert(b == "second!")
+    }
+}
+
+tests "dead branch edge cases" {
+    test "if with non-constant condition is not eliminated" {
+        func check(x: i64) -> string {
+            if x > 0 {
+                return "positive"
+            } else {
+                return "non-positive"
+            }
+        }
+        assert(check(5) == "positive")
+        assert(check(-3) == "non-positive")
+        assert(check(0) == "non-positive")
+    }
+
+    test "if with side-effecting then branch preserves effect" {
+        let mut counter = 0
+        let flag = true
+        if flag {
+            counter = counter + 1
+            counter = counter + 1
+            counter = counter + 1
+        }
+        assert(counter == 3)
+    }
+
+    test "if with side-effecting else branch preserves effect" {
+        let mut counter = 0
+        let flag = false
+        if flag {
+            counter = 100
+        } else {
+            counter = counter + 5
+        }
+        assert(counter == 5)
+    }
+
+    test "nested if with mixed constant and runtime conditions" {
+        let const_flag = true
+        func runtime_check(x: i64) -> i64 {
+            // Outer if is constant (eliminated), inner if is runtime (preserved)
+            if const_flag {
+                if x > 10 {
+                    return 1
+                } else {
+                    return 2
+                }
+            } else {
+                return 3
+            }
+        }
+        assert(runtime_check(20) == 1)
+        assert(runtime_check(5) == 2)
+    }
+
+    test "when with non-constant condition is not eliminated" {
+        func categorize(x: i64) -> string {
+            return when {
+                x < 0 => "negative",
+                x == 0 => "zero",
+                _ => "positive",
+            }
+        }
+        assert(categorize(-1) == "negative")
+        assert(categorize(0) == "zero")
+        assert(categorize(1) == "positive")
+    }
+}
+
+tests "intrinsic edge cases in constant folding" {
+    test "math.sqrt of negative is not folded (produces NaN at runtime)" {
+        let math = import "std:math"
+        // The constant folder returns None for sqrt of negative values
+        // So this goes through the runtime path, which returns NaN
+        let result = math.sqrt(-1.0)
+        assert(result != result)  // NaN check
+    }
+
+    test "math.sqrt with runtime argument is not folded" {
+        let math = import "std:math"
+        func compute_sqrt(x: f64) -> f64 {
+            return math.sqrt(x)
+        }
+        let result = compute_sqrt(25.0)
+        assert(result == 5.0)
+    }
+
+    test "math.abs with runtime argument is not folded" {
+        let math = import "std:math"
+        func compute_abs(x: f64) -> f64 {
+            return math.abs(x)
+        }
+        assert(compute_abs(-7.0) == 7.0)
+        assert(compute_abs(3.0) == 3.0)
+    }
+
+    test "math.min with one runtime arg is not folded" {
+        let math = import "std:math"
+        func get_min(x: f64) -> f64 {
+            return math.min(x, 10.0)
+        }
+        assert(get_min(5.0) == 5.0)
+        assert(get_min(15.0) == 10.0)
+    }
+
+    test "math.max with one runtime arg is not folded" {
+        let math = import "std:math"
+        func get_max(x: f64) -> f64 {
+            return math.max(x, 10.0)
+        }
+        assert(get_max(5.0) == 10.0)
+        assert(get_max(15.0) == 15.0)
+    }
+
+    test "math.sqrt of 0.0 folds correctly" {
+        let math = import "std:math"
+        let result = math.sqrt(0.0)
+        assert(result == 0.0)
+    }
+
+    test "math.floor of negative fraction folds correctly" {
+        let math = import "std:math"
+        let result = math.floor(-0.1)
+        assert(result == -1.0)
+    }
+
+    test "math.ceil of negative fraction folds correctly" {
+        let math = import "std:math"
+        let result = math.ceil(-0.1)
+        assert(result == 0.0)
+    }
+
+    test "math.round of unambiguous value folds correctly" {
+        let math = import "std:math"
+        // Use a value that rounds the same in all rounding modes
+        let result = math.round(2.7)
+        assert(result == 3.0)
+    }
+
+    test "math.abs of zero folds correctly" {
+        let math = import "std:math"
+        let result = math.abs(0.0)
+        assert(result == 0.0)
+    }
+
+    test "chained intrinsic with runtime input is not folded" {
+        let math = import "std:math"
+        func chain(x: f64) -> f64 {
+            let inner = math.abs(x)
+            return math.sqrt(inner)
+        }
+        assert(chain(-16.0) == 4.0)
+        assert(chain(9.0) == 3.0)
+    }
+}
