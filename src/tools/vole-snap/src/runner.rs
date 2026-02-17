@@ -13,7 +13,7 @@ use crate::ReportMode;
 use crate::diff::{unified_diff, unified_diff_colored};
 use crate::snapshot::Snapshot;
 use vole::cli::ColorMode;
-use vole::commands::common::{check_captured, inspect_ast_captured, run_captured};
+use vole::commands::common::{check_captured, fmt_captured, inspect_ast_captured, run_captured};
 
 /// Result of running a single test
 #[derive(Debug)]
@@ -229,6 +229,9 @@ fn execute_test(test_path: &Path) -> Result<CapturedOutput, String> {
                 Some(other) => return Err(format!("Unknown inspect subcommand: {}", other)),
                 None => return Err("inspect command requires subcommand (ast)".to_string()),
             }
+        }
+        "fmt" => {
+            let _ = fmt_captured(&source, stdout_buf.clone(), stderr_buf.clone());
         }
         _ => return Err(format!("Unknown command: {}", cmd)),
     }

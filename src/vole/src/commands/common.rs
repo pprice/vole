@@ -597,6 +597,27 @@ pub fn inspect_ast_captured<W: Write>(
     Ok(())
 }
 
+/// Format source with captured stdout/stderr.
+///
+/// On success writes formatted source to `stdout`.
+/// On format error writes the diagnostic to `stderr` and returns an error string.
+pub fn fmt_captured<W: Write>(
+    source: &str,
+    mut stdout: W,
+    mut stderr: W,
+) -> Result<(), String> {
+    match crate::fmt::format(source, crate::fmt::CANONICAL) {
+        Ok(result) => {
+            let _ = write!(stdout, "{}", result.output);
+            Ok(())
+        }
+        Err(e) => {
+            let _ = writeln!(stderr, "{}", e);
+            Err(e.to_string())
+        }
+    }
+}
+
 /// Unicode box-drawing characters (matching miette's style).
 pub mod box_chars {
     pub const TOP_LEFT: char = '╭';
