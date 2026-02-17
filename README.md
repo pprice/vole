@@ -4,7 +4,7 @@ A fast little scripting language, with fancy types.
 
 Vole is a statically typed, JIT-compiled language built on [Cranelift](https://cranelift.dev/). It has structural typing, generics, first-class functions, iterators, generators, async tasks, and a module system with a standard library.
 
-> **Note:** This is an experimental project exploring what it looks like to build a programming language primarily through collaboration with AI coding assistants (specifically [Claude](https://claude.ai/) via [Claude Code](https://docs.anthropic.com/en/docs/claude-code)). The vast majority of the code has been written by Claude, with human direction and review.
+⚠️⚠️⚠️ This is an experimental project exploring what it looks like to build a programming language primarily through collaboration with AI coding assistants (specifically [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and [Codex](https://chatgpt.com/codex)). The vast majority of the code has been written by and reviewed by coding assistants, with human direction for features and guardrails.
 
 ## Quick look
 
