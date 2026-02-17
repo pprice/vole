@@ -514,7 +514,7 @@ pub extern "C" fn vole_panic(
 
     // If a test jmp_buf is set, longjmp back to the test harness.
     // This handles both unit test mode (set_test_jmp_buf) and capture mode.
-    use crate::assert::{ASSERT_FAILURE, ASSERT_JMP_BUF, AssertFailure, siglongjmp};
+    use crate::assert::{ASSERT_FAILURE, ASSERT_JMP_BUF, AssertFailure};
     ASSERT_JMP_BUF.with(|jb| {
         let buf = jb.get();
         if !buf.is_null() {
@@ -524,8 +524,9 @@ pub extern "C" fn vole_panic(
                     line,
                 }));
             });
+            #[cfg(unix)]
             unsafe {
-                siglongjmp(buf, 2); // Use value 2 to distinguish from assert failure
+                crate::assert::siglongjmp(buf, 2);
             }
         }
     });
