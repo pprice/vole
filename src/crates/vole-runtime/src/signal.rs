@@ -229,11 +229,7 @@ mod platform {
                         let mut sigset: libc::sigset_t = std::mem::zeroed();
                         libc::sigemptyset(&mut sigset);
                         libc::sigaddset(&mut sigset, libc::SIGSEGV);
-                        libc::pthread_sigmask(
-                            libc::SIG_UNBLOCK,
-                            &sigset,
-                            std::ptr::null_mut(),
-                        );
+                        libc::pthread_sigmask(libc::SIG_UNBLOCK, &sigset, std::ptr::null_mut());
 
                         siglongjmp(buf, 2);
                     }

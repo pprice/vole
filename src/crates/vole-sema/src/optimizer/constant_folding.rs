@@ -45,6 +45,7 @@ enum ConstValue {
     Int(i64, Option<NumericSuffix>),
     Float(f64, Option<NumericSuffix>),
     Bool(bool),
+    String(String),
 }
 
 impl ConstValue {
@@ -54,6 +55,7 @@ impl ConstValue {
             ConstValue::Int(v, suffix) => ExprKind::IntLiteral(*v, *suffix),
             ConstValue::Float(v, suffix) => ExprKind::FloatLiteral(*v, *suffix),
             ConstValue::Bool(v) => ExprKind::BoolLiteral(*v),
+            ConstValue::String(s) => ExprKind::StringLiteral(s.clone()),
         }
     }
 }
@@ -472,6 +474,13 @@ impl<'a> ConstantFolder<'a> {
                 BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
                 _ => None,
             },
+            // String operations
+            (ConstValue::String(l), ConstValue::String(r)) => match bin.op {
+                BinaryOp::Add => Some(ConstValue::String(l + &r)),
+                BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
+                BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
+                _ => None,
+            },
             // Mismatched types
             _ => None,
         }
@@ -502,6 +511,7 @@ impl<'a> ConstantFolder<'a> {
             ExprKind::IntLiteral(v, suffix) => Some(ConstValue::Int(*v, *suffix)),
             ExprKind::FloatLiteral(v, suffix) => Some(ConstValue::Float(*v, *suffix)),
             ExprKind::BoolLiteral(v) => Some(ConstValue::Bool(*v)),
+            ExprKind::StringLiteral(s) => Some(ConstValue::String(s.clone())),
             ExprKind::Grouping(inner) => self.get_const_value(inner),
             // Recurse into binary/unary for nested constant expressions
             ExprKind::Binary(bin) => self.try_fold_binary(bin),

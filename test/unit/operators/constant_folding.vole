@@ -392,4 +392,83 @@ tests {
         let result = value * 2  // Propagated as 5 * 2 = 10
         assert(result == 10)
     }
+
+    // ============ String constant folding tests ============
+
+    test "fold string concatenation" {
+        // "hello" + " " + "world" should fold to "hello world"
+        let result = "hello" + " " + "world"
+        assert(result == "hello world")
+    }
+
+    test "fold empty string concatenation left" {
+        // "" + "hello" should fold to "hello"
+        let result = "" + "hello"
+        assert(result == "hello")
+    }
+
+    test "fold empty string concatenation right" {
+        // "hello" + "" should fold to "hello"
+        let result = "hello" + ""
+        assert(result == "hello")
+    }
+
+    test "fold two empty strings" {
+        let result = "" + ""
+        assert(result == "")
+    }
+
+    test "fold string equality true" {
+        let result = "abc" == "abc"
+        assert(result == true)
+    }
+
+    test "fold string equality false" {
+        let result = "abc" == "def"
+        assert(result == false)
+    }
+
+    test "fold string inequality true" {
+        let result = "abc" != "def"
+        assert(result == true)
+    }
+
+    test "fold string inequality false" {
+        let result = "abc" != "abc"
+        assert(result == false)
+    }
+
+    test "fold chained string concatenation" {
+        // "a" + "b" + "c" + "d" should fold to "abcd"
+        let result = "a" + "b" + "c" + "d"
+        assert(result == "abcd")
+    }
+
+    test "propagate string constant" {
+        let greeting = "hello"
+        let result = greeting + " world"
+        assert(result == "hello world")
+    }
+
+    test "propagate string constant to comparison" {
+        let expected = "hello"
+        let result = expected == "hello"
+        assert(result == true)
+    }
+
+    test "chained string constant propagation" {
+        let a = "hello"
+        let b = a + " "
+        let c = b + "world"
+        assert(c == "hello world")
+    }
+
+    test "no propagation for mutable string" {
+        let mut s = "hello"
+        let a = s + " world"
+        s = "goodbye"
+        let b = s + " world"
+        assert(a == "hello world")
+        assert(b == "goodbye world")
+    }
 }
