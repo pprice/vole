@@ -3,6 +3,10 @@
 // Tests exercise closure capture of strings, arrays, and other RC types,
 // as well as closures passed to higher-order functions.
 
+class Box {
+    value: i64,
+}
+
 tests "closure capturing string" {
     test "capture string and use it" {
         let greeting = "hello"
@@ -111,5 +115,19 @@ tests "mutable capture with rc" {
         }
         assert(incAndDescribe() == "count=1")
         assert(incAndDescribe() == "count=2")
+    }
+}
+
+tests "closure capturing optional class" {
+    test "coalesce with captured optional class value" {
+        let b: Box? = Box { value: 42 }
+        let getVal = () -> i64 => (b ?? Box { value: 0 }).value
+        assert(getVal() == 42)
+    }
+
+    test "coalesce with captured optional class nil" {
+        let b: Box? = nil
+        let getVal = () -> i64 => (b ?? Box { value: 0 }).value
+        assert(getVal() == 0)
     }
 }
