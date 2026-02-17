@@ -3,7 +3,7 @@
 use crate::closure::Closure;
 use crate::string::RcString;
 use crate::value::RuntimeTypeId;
-use std::alloc::{Layout, alloc, dealloc};
+use std::alloc::{Layout, alloc};
 use std::ptr;
 
 use super::types::*;
@@ -126,9 +126,9 @@ iter_next_fn!(
             let payload_ptr = result_ptr.add(8) as *const i64;
             let payload = ptr::read(payload_ptr);
 
-            // Free the result (it was allocated by the generator)
-            let layout = Layout::from_size_align(16, 8).expect("valid layout");
-            dealloc(result_ptr, layout);
+            // Optional/union returns use a pointer ABI from JIT codegen. The
+            // pointed storage is not heap-owned by runtime iterators, so we
+            // must not deallocate it here.
 
             // Tag 0 = I64 (value), Tag 1 = Nil
             if tag == 0 {

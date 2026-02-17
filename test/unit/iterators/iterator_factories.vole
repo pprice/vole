@@ -144,8 +144,39 @@ tests "iterator factories" {
 
     // =========================================================================
     // from_fn() tests - iterator from a generator function
-    // TODO: from_fn causes double-free corruption at runtime (closure lifetime bug)
     // =========================================================================
+
+    test "from_fn collect sequence" {
+        let mut n = 0
+        let result = from_fn(() -> i64? => {
+            n = n + 1
+            if n <= 3 {
+                return n
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+        assert(result[1] == 2)
+        assert(result[2] == 3)
+    }
+
+    test "from_fn immediate nil" {
+        let result = from_fn(() -> i64? => nil).collect()
+        assert(result.length() == 0)
+    }
+
+    test "from_fn with sum" {
+        let mut n = 0
+        let result = from_fn(() -> i64? => {
+            n = n + 1
+            if n <= 4 {
+                return n
+            }
+            return nil
+        }).sum()
+        assert(result == 10)
+    }
 
     // =========================================================================
     // Combined factory tests
