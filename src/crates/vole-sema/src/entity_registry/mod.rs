@@ -561,19 +561,25 @@ impl EntityRegistry {
                     existing_type.implements.push(new_impl);
                 } else {
                     // Merge method bindings for existing interface implementation
-                    for binding in &other_impl.method_bindings {
-                        let existing_impl = existing_type
-                            .implements
-                            .iter_mut()
-                            .find(|i| i.interface == mapped_interface)
-                            .expect("interface found per prior exists check");
-                        let binding_exists = existing_impl
-                            .method_bindings
-                            .iter()
-                            .any(|b| b.method_name == binding.method_name);
-                        if !binding_exists {
-                            existing_impl.method_bindings.push(binding.clone());
+                    if let Some(existing_impl) = existing_type
+                        .implements
+                        .iter_mut()
+                        .find(|i| i.interface == mapped_interface)
+                    {
+                        for binding in &other_impl.method_bindings {
+                            let binding_exists = existing_impl
+                                .method_bindings
+                                .iter()
+                                .any(|b| b.method_name == binding.method_name);
+                            if !binding_exists {
+                                existing_impl.method_bindings.push(binding.clone());
+                            }
                         }
+                    } else {
+                        // Be defensive if the implementation list changes unexpectedly.
+                        let mut new_impl = other_impl.clone();
+                        new_impl.interface = mapped_interface;
+                        existing_type.implements.push(new_impl);
                     }
                 }
             }
