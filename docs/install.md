@@ -13,15 +13,6 @@ export PATH="$PWD/vole-linux-x86_64:$PATH"
 vole version
 ```
 
-### Linux (ARM64)
-
-```bash
-curl -LO https://github.com/pprice/vole/releases/latest/download/vole-linux-arm64.tar.gz
-tar xzf vole-linux-arm64.tar.gz
-export PATH="$PWD/vole-linux-arm64:$PATH"
-vole version
-```
-
 ### macOS (Apple Silicon)
 
 ```bash

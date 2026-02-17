@@ -47,9 +47,10 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: vole-nightly-linux-x86_64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm64
-            artifact: vole-nightly-linux-arm64
+          # TODO: re-enable when ARM64 Linux runners are available (requires public repo or paid plan)
+          # - target: aarch64-unknown-linux-gnu
+          #   os: ubuntu-24.04-arm64
+          #   artifact: vole-nightly-linux-arm64
           - target: aarch64-apple-darwin
             os: macos-14
             artifact: vole-nightly-macos-arm64
