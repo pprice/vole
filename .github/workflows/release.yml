@@ -56,9 +56,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm64
             artifact: vole-$VERSION-linux-arm64
-          - target: x86_64-apple-darwin
-            os: macos-13
-            artifact: vole-$VERSION-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-14
             artifact: vole-$VERSION-macos-arm64

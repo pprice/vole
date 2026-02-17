@@ -31,15 +31,6 @@ export PATH="$PWD/vole-macos-arm64:$PATH"
 vole version
 ```
 
-### macOS (Intel)
-
-```bash
-curl -LO https://github.com/pprice/vole/releases/latest/download/vole-macos-x86_64.tar.gz
-tar xzf vole-macos-x86_64.tar.gz
-export PATH="$PWD/vole-macos-x86_64:$PATH"
-vole version
-```
-
 ### Windows (x86_64)
 
 1. Download `vole-windows-x86_64.zip` from [GitHub Releases](https://github.com/pprice/vole/releases/latest)

@@ -4,7 +4,7 @@
 //! 1. $VOLE_STDLIB_PATH environment variable
 //! 2. <exe_dir>/stdlib (release tarball layout — stdlib next to binary)
 //! 3. <exe_dir>/../share/vole/stdlib (installed layout)
-//! 4. <exe_dir>/../../stdlib (development layout)
+//! 4. <exe_dir>/../../stdlib or <exe_dir>/../../../stdlib (development layout)
 //! 5. ./stdlib (current directory fallback)
 
 use std::path::{Path, PathBuf};
@@ -72,12 +72,19 @@ impl StdlibLocator {
             }
 
             // 4. Check development layout: <exe_dir>/../../stdlib
-            let dev_path = exe_dir.join("..").join("..").join("stdlib");
-            if Self::is_valid_stdlib(&dev_path) {
-                return Some(StdlibLocation {
-                    path: dev_path,
-                    source: LocationSource::Development,
-                });
+            //    Handles both `target/<profile>/vole` and `target/<triple>/<profile>/vole`
+            for depth in [2, 3] {
+                let mut dev_path = exe_dir.to_path_buf();
+                for _ in 0..depth {
+                    dev_path = dev_path.join("..");
+                }
+                dev_path = dev_path.join("stdlib");
+                if Self::is_valid_stdlib(&dev_path) {
+                    return Some(StdlibLocation {
+                        path: dev_path,
+                        source: LocationSource::Development,
+                    });
+                }
             }
         }
 

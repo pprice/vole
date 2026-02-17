@@ -3,6 +3,8 @@
 // Tests that `vole file.vole` works without the `run` subcommand,
 // which is required for shebang scripts (`#!/usr/bin/env vole`).
 
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;

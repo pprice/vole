@@ -21,6 +21,7 @@ impl JmpBuf {
     }
 }
 
+#[cfg(unix)]
 unsafe extern "C" {
     // sigsetjmp returns 0 on direct call, non-zero when returning via siglongjmp
     // Use __sigsetjmp on Linux which is the actual implementation
@@ -69,9 +70,18 @@ pub fn take_assert_failure() -> Option<AssertFailure> {
 /// The caller must ensure the JmpBuf remains valid until siglongjmp or clear.
 /// IMPORTANT: This must always be inlined - if called through a wrapper function,
 /// the longjmp will return to a corrupted stack frame.
+#[cfg(unix)]
 #[inline(always)]
 pub unsafe fn call_setjmp(buf: *mut JmpBuf) -> i32 {
     unsafe { sigsetjmp(buf, 0) }
+}
+
+/// On non-Unix platforms, longjmp recovery is not available.
+/// Always returns 0 (the "first call" path).
+#[cfg(not(unix))]
+#[inline(always)]
+pub unsafe fn call_setjmp(_buf: *mut JmpBuf) -> i32 {
+    0
 }
 
 /// Runtime function called when a Vole `assert(...)` expression fails.
@@ -109,8 +119,14 @@ pub extern "C" fn vole_assert_fail(file: *const u8, file_len: usize, line: u32) 
                     line,
                 }));
             });
+            #[cfg(unix)]
             unsafe {
                 siglongjmp(buf, 1);
+            }
+            #[cfg(not(unix))]
+            {
+                eprintln!("assertion failed at {}:{}", file_str, line);
+                std::process::abort();
             }
         } else {
             // Not in test context - abort
@@ -125,6 +141,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(unix)]
     fn test_assert_failure_in_test_context() {
         let mut jmp_buf = JmpBuf::zeroed();
 
