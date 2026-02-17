@@ -1,5 +1,5 @@
 # CLAUDE.md
-Vole is a Type-space JIT Programming language
+Vole is a fast little scripting language, with fancy types
 
 This project uses a CLI ticket system for task management. Run `tk help` when you need to use it.
 
