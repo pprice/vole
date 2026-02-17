@@ -114,6 +114,19 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut RcIterator {
 /// Returns pointer to heap-allocated iterator.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut RcIterator {
+    // Fast path: some call sites pass a raw RcIterator pointer when an
+    // Iterator<T> interface value was represented as RuntimeIterator<T>.
+    // In that case, retain and return the iterator directly.
+    if !boxed_interface.is_null() {
+        unsafe {
+            let header = boxed_interface as *const RcHeader;
+            if (*header).type_id == RuntimeTypeId::Iterator as u32 {
+                rc_inc(boxed_interface as *mut u8);
+                return boxed_interface as *mut RcIterator;
+            }
+        }
+    }
+
     // rc_inc the data_ptr so the iterator owns its own reference.
     // The JIT scope cleanup will independently rc_dec via the boxed interface,
     // so both sides need their own reference.
@@ -149,6 +162,19 @@ pub extern "C" fn vole_interface_iter_tagged(
     boxed_interface: *const u8,
     elem_tag: u64,
 ) -> *mut RcIterator {
+    // Fast path: raw RcIterator pointer passed instead of boxed interface.
+    if !boxed_interface.is_null() {
+        unsafe {
+            let header = boxed_interface as *const RcHeader;
+            if (*header).type_id == RuntimeTypeId::Iterator as u32 {
+                rc_inc(boxed_interface as *mut u8);
+                let iter_ptr = boxed_interface as *mut RcIterator;
+                RcIterator::set_elem_tag(iter_ptr, elem_tag);
+                return iter_ptr;
+            }
+        }
+    }
+
     // rc_inc the data_ptr so the iterator owns its own reference.
     if !boxed_interface.is_null() {
         unsafe {

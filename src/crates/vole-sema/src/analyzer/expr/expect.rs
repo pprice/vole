@@ -245,7 +245,16 @@ impl Analyzer {
                         None
                     }
                 });
-                Ok(self.analyze_lambda(lambda, expr.id, expected_fn.as_ref(), interner))
+                let lambda_ty_id = self.analyze_lambda(lambda, expr.id, expected_fn.as_ref(), interner);
+                if let Some(expected_id) = expected
+                    && self.types_compatible_id(lambda_ty_id, expected_id, interner)
+                {
+                    // Preserve the caller's expected function type identity (e.g. closure
+                    // array literals passed directly to [() -> T] params), instead of
+                    // propagating a closure-flavored inferred type that only prints the same.
+                    return Ok(expected_id);
+                }
+                Ok(lambda_ty_id)
             }
             // Match expressions: propagate expected type for bidirectional inference
             ExprKind::Match(match_expr) => self.check_match_expr(match_expr, expected, interner),
@@ -477,15 +486,10 @@ impl Analyzer {
                 if elements.is_empty() {
                     return Ok(exp_id);
                 }
-                let mut elem_ids = Vec::with_capacity(elements.len());
                 for e in elements {
-                    elem_ids.push(self.check_expr_expecting_id(
-                        e,
-                        Some(elem_expected),
-                        interner,
-                    )?);
+                    self.check_expr_expecting_id(e, Some(elem_expected), interner)?;
                 }
-                return Ok(self.ty_array_id(elem_ids[0]));
+                return Ok(exp_id);
             }
         }
 

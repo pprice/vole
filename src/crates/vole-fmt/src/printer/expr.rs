@@ -148,6 +148,8 @@ fn escape_string_chars(s: &str) -> String {
             '\n' => result.push_str("\\n"),
             '\r' => result.push_str("\\r"),
             '\t' => result.push_str("\\t"),
+            '{' => result.push_str("\\{"),
+            '}' => result.push_str("\\}"),
             c => result.push(c),
         }
     }

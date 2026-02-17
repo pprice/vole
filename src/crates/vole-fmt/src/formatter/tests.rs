@@ -51,6 +51,17 @@ fn test_let_string() {
     assert_eq!(fmt(r#"let s = "hello""#), "let s = \"hello\"\n");
 }
 
+#[test]
+fn test_string_literal_escapes_braces() {
+    assert_eq!(fmt(r#"let s = "\{x\}""#), r#"let s = "\{x\}""#.to_string() + "\n");
+}
+
+#[test]
+fn test_interpolated_string_keeps_escaped_literal_braces() {
+    let source = r#"let s = "a \{ b {x} c \}""#;
+    assert_eq!(fmt(source), source.to_string() + "\n");
+}
+
 // === Function declarations ===
 
 #[test]

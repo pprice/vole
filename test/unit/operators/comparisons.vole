@@ -40,4 +40,15 @@ tests "comparisons" {
         assert(0 <= 0)
         assert(-1 <= 0)
     }
+
+    test "comparison with operator trailing newline" {
+        let lhs = "abc"
+        let rhs = "abc"
+        if lhs ==
+            rhs {
+            assert(true)
+        } else {
+            assert(false)
+        }
+    }
 }

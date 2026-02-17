@@ -166,6 +166,7 @@ impl<'src> Parser<'src> {
 
             let prec = op_ty.precedence();
             self.advance();
+            self.skip_newlines();
             let right = self.expression(prec)?;
             let span = left.span.merge(right.span);
 

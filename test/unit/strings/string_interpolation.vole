@@ -78,6 +78,11 @@ tests "string interpolation" {
         assert(s == "literal {{braces}}")
     }
 
+    test "backslash escaped braces are literal" {
+        let s = "literal \{braces\}"
+        assert(s == "literal \{braces\}")
+    }
+
     test "method call in interpolation" {
         let arr = [1, 2, 3, 4, 5]
         let s = "length: {arr.length()}"

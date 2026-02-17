@@ -15,6 +15,17 @@ implement Transferable for Token {
     }
 }
 
+func sum_in_task(src: Iterator<i64>) -> i64 {
+    let t = Task.run(() -> i64 => {
+        let mut total = 0
+        for item in src {
+            total = total + item
+        }
+        return total
+    })
+    return t.join()
+}
+
 tests {
     test "channel<string> buffered send and receive" {
         let ch = Channel.buffered<string>(4)
@@ -136,6 +147,7 @@ tests {
         assert(out[2] == "c")
     }
 
+
     test "task<bool> run and join" {
         let t = Task.run(() -> bool => {
             return true
@@ -165,5 +177,9 @@ tests {
         assert(out[0] == "ax!")
         assert(out[1] == "by!")
         assert(out[2] == "cz!")
+    }
+
+    test "iterator parameter captured in task closure" {
+        assert(sum_in_task([1, 2, 3].iter()) == 6)
     }
 }

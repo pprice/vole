@@ -93,12 +93,31 @@ func applyFn(fn: (i32) -> i32, x: i32) -> i32 {
     return fn(x)
 }
 
+func sum_closure_array(fns: [() -> i64]) -> i64 {
+    let mut total = 0
+    let mut i = 0
+    while i < fns.length() {
+        total = total + fns[i]()
+        i = i + 1
+    }
+    return total
+}
+
 tests "lambda inference" {
     test "bidirectional inference" {
         // Lambda infers x is i32 from function parameter type
         // Use x + x to avoid type widening from literal
         let result = applyFn((x) => x + x, 5)
         assert(result == 10)
+    }
+
+    test "closure array literal passed directly to typed parameter" {
+        let total = sum_closure_array([
+            () -> i64 => { return 1 },
+            () -> i64 => { return 2 },
+            () -> i64 => { return 3 },
+        ])
+        assert(total == 6)
     }
 }
 

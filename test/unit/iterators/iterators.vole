@@ -1,5 +1,13 @@
 // Iterator method tests
 
+func sum_iterator_param(iter: Iterator<i64>) -> i64 {
+    let mut total = 0
+    for v in iter {
+        total = total + v
+    }
+    return total
+}
+
 tests "iterators" {
     test "array iter returns iterator" {
         let arr = [1, 2, 3]
@@ -17,6 +25,10 @@ tests "iterators" {
         let arr = ["a", "b", "c"]
         let iter = arr.iter()
         assert(true)
+    }
+
+    test "iterator parameter works in for loop" {
+        assert(sum_iterator_param([1, 2, 3].iter()) == 6)
     }
 
     test "multiple iter calls on same array" {

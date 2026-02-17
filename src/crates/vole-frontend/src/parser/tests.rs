@@ -188,6 +188,16 @@ fn parse_comparison_operators() {
 }
 
 #[test]
+fn parse_binary_operator_with_newline_after_operator() {
+    let mut parser = Parser::new("1 ==\n2");
+    let expr = parser.parse_expression().unwrap();
+    match expr.kind {
+        ExprKind::Binary(bin) => assert_eq!(bin.op, BinaryOp::Eq),
+        _ => panic!("expected binary expression"),
+    }
+}
+
+#[test]
 fn parse_function_call_multiple_args() {
     let mut parser = Parser::new("add(1, 2, 3)");
     let expr = parser.parse_expression().unwrap();
