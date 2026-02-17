@@ -166,6 +166,24 @@ pub enum BenchCommands {
         #[arg(long)]
         detailed: bool,
     },
+    /// Run benchmarks in debug-friendly mode (forces debug builds)
+    Debug {
+        /// Paths to benchmark (files, directories, or glob patterns)
+        #[arg(value_name = "PATHS", required = true)]
+        paths: Vec<String>,
+
+        /// Number of runtime iterations (default: 1)
+        #[arg(short = 'n', long, default_value_t = 1)]
+        iterations: u32,
+
+        /// Warmup iterations before measuring (default: 0)
+        #[arg(short, long, default_value_t = 0)]
+        warmup: u32,
+
+        /// Save JSON results to file
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
     /// Compare benchmark results against a baseline
     Compare {
         /// Baseline JSON file to compare against
