@@ -42,7 +42,15 @@ pub struct FoldingStats {
     pub branches_eliminated: usize,
 }
 
-/// A constant value that can be computed at compile time.
+/// A constant value computed at compile time, with optional numeric suffix metadata.
+///
+/// This is the optimizer-internal counterpart to [`ConstantValue`]. The extra
+/// `Option<NumericSuffix>` on `Int` and `Float` preserves type annotations through
+/// constant folds (e.g., `1u8 + 2u8` folds to `3u8`, not just `3`).
+///
+/// `From` conversions exist between this type and `ConstantValue`:
+/// - `ConstantValue::from(&ConstValue)` — drops the suffix (for module exports)
+/// - `ConstValue::from(&ConstantValue)` — sets suffix to `None`
 #[derive(Debug, Clone)]
 enum ConstValue {
     Int(i64, Option<NumericSuffix>),
@@ -52,7 +60,7 @@ enum ConstValue {
 }
 
 impl ConstValue {
-    /// Convert to an expression kind
+    /// Convert to an expression kind.
     fn to_expr_kind(&self) -> ExprKind {
         match self {
             ConstValue::Int(v, suffix) => ExprKind::IntLiteral(*v, *suffix),
@@ -61,19 +69,27 @@ impl ConstValue {
             ConstValue::String(s) => ExprKind::StringLiteral(s.clone()),
         }
     }
+}
 
-    /// Convert to a module-level ConstantValue (drops numeric suffix info).
-    fn to_constant_value(&self) -> ConstantValue {
-        match self {
+/// Convert from optimizer's ConstValue to module-level ConstantValue.
+///
+/// Drops the numeric suffix metadata since module constants don't need it.
+impl From<&ConstValue> for ConstantValue {
+    fn from(cv: &ConstValue) -> Self {
+        match cv {
             ConstValue::Int(v, _) => ConstantValue::I64(*v),
             ConstValue::Float(v, _) => ConstantValue::F64(*v),
             ConstValue::Bool(v) => ConstantValue::Bool(*v),
             ConstValue::String(s) => ConstantValue::String(s.clone()),
         }
     }
+}
 
-    /// Create from a module-level ConstantValue.
-    fn from_constant_value(cv: &ConstantValue) -> Self {
+/// Convert from module-level ConstantValue to optimizer's ConstValue.
+///
+/// The numeric suffix is set to `None` since module constants don't carry suffix info.
+impl From<&ConstantValue> for ConstValue {
+    fn from(cv: &ConstantValue) -> Self {
         match cv {
             ConstantValue::I64(v) => ConstValue::Int(*v, None),
             ConstantValue::F64(v) => ConstValue::Float(*v, None),
@@ -104,7 +120,7 @@ pub fn eval_const_expr(
     expr: &Expr,
     known_constants: &HashMap<Symbol, ConstantValue>,
 ) -> Option<ConstantValue> {
-    eval_const_value(expr, known_constants).map(|cv| cv.to_constant_value())
+    eval_const_value(expr, known_constants).map(|cv| ConstantValue::from(&cv))
 }
 
 /// Internal: evaluate an expression to ConstValue (preserves suffix info).
@@ -118,9 +134,7 @@ fn eval_const_value(
         ExprKind::BoolLiteral(v) => Some(ConstValue::Bool(*v)),
         ExprKind::StringLiteral(s) => Some(ConstValue::String(s.clone())),
         ExprKind::Grouping(inner) => eval_const_value(inner, known_constants),
-        ExprKind::Identifier(sym) => known_constants
-            .get(sym)
-            .map(ConstValue::from_constant_value),
+        ExprKind::Identifier(sym) => known_constants.get(sym).map(ConstValue::from),
         ExprKind::Binary(bin) => eval_binary(bin, known_constants),
         ExprKind::Unary(unary) => eval_unary(unary, known_constants),
         _ => None,

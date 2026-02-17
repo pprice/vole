@@ -190,7 +190,13 @@ impl std::fmt::Display for PlaceholderKind {
 
 /// A constant value that can be stored in a module.
 ///
-/// Used to track compile-time constant exports:
+/// This is the public-facing constant type used by the module system and codegen.
+/// It stores the raw value without numeric suffix metadata.
+///
+/// The optimizer internally uses a richer `ConstValue` type (in `optimizer::constant_folding`)
+/// that carries an optional `NumericSuffix` for type-preserving folds. `From` conversions
+/// exist between the two types.
+///
 /// ```ignore
 /// // In math.vole:
 /// let PI = 3.14159
