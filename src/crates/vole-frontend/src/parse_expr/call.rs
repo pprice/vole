@@ -54,109 +54,7 @@ impl<'src> Parser<'src> {
                     span,
                 };
             } else if self.match_token(TokenType::Dot) {
-                // Field access, method call, or module-qualified struct literal
-                let field_span = self.current.span;
-                self.consume(TokenType::Identifier, "expected field name after '.'")?;
-                let field = self.interner.intern(&self.previous.lexeme);
-
-                // Check for type args: expr.method<T, U>(...) or direct call: expr.method(...)
-                // or module.Type<T> { ... } for qualified generic struct literals
-                let type_args = if self.check(TokenType::Lt) {
-                    // Try to parse type args with lookahead
-                    self.try_parse_call_type_args()?
-                } else {
-                    Vec::new()
-                };
-
-                if self.check(TokenType::LParen) {
-                    // Method call: expr.method(args) or expr.method<T>(args)
-                    self.advance(); // consume '('
-                    self.skip_newlines();
-                    let mut args = Vec::new();
-                    if !self.check(TokenType::RParen) {
-                        loop {
-                            args.push(self.expression(0)?);
-                            self.skip_newlines();
-                            if !self.match_token(TokenType::Comma) {
-                                break;
-                            }
-                            self.skip_newlines();
-                            // Allow trailing comma
-                            if self.check(TokenType::RParen) {
-                                break;
-                            }
-                        }
-                    }
-                    let end_span = self.current.span;
-                    self.consume(TokenType::RParen, "expected ')' after arguments")?;
-
-                    let span = expr.span.merge(end_span);
-                    expr = Expr {
-                        id: self.next_id(),
-                        kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
-                            object: expr,
-                            method: field,
-                            type_args,
-                            args,
-                            method_span: field_span,
-                        })),
-                        span,
-                    };
-                } else if self.check(TokenType::LBrace) && self.looks_like_struct_literal() {
-                    // Check for module-qualified struct literal: mod.Type { field: value }
-                    // Try to extract a path of identifiers from the left-hand expression
-                    if let Some(mut path) = Self::expr_to_identifier_path(&expr) {
-                        path.push(field);
-                        let start_span = expr.span;
-                        // Parse the struct literal and continue the loop to handle
-                        // chained operations like `mod.Type { f: 1 }.field`
-                        expr = self.struct_literal(path, type_args, start_span)?;
-                    } else if !type_args.is_empty() {
-                        // Had type args but LHS wasn't an identifier path - syntax error
-                        return Err(ParseError::new(
-                            crate::errors::ParserError::ExpectedToken {
-                                expected: "'(' after type arguments".to_string(),
-                                found: self.current.ty.as_str().to_string(),
-                                span: self.current.span.into(),
-                            },
-                            self.current.span,
-                        ));
-                    } else {
-                        // Not an identifier path - fall through to field access
-                        let span = expr.span.merge(field_span);
-                        expr = Expr {
-                            id: self.next_id(),
-                            kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
-                                object: expr,
-                                field,
-                                field_span,
-                            })),
-                            span,
-                        };
-                    }
-                } else if !type_args.is_empty() {
-                    // Had type args but no parens or struct literal - syntax error
-                    return Err(ParseError::new(
-                        crate::errors::ParserError::ExpectedToken {
-                            expected: "'(' or '{' after type arguments".to_string(),
-                            found: self.current.ty.as_str().to_string(),
-                            span: self.current.span.into(),
-                        },
-                        self.current.span,
-                    ));
-                } else {
-                    // Field access: expr.field
-                    let span = expr.span.merge(field_span);
-                    expr = Expr {
-                        id: self.next_id(),
-                        kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
-                            object: expr,
-                            field,
-                            field_span,
-                        })),
-                        span,
-                    };
-                }
+                expr = self.parse_dot_postfix(expr)?;
             } else if self.match_token(TokenType::QuestionDot) {
                 // Optional chaining: expr?.field
                 let field_span = self.current.span;
@@ -179,6 +77,113 @@ impl<'src> Parser<'src> {
         }
 
         Ok(expr)
+    }
+
+    /// Parse a dot-postfix expression: field access, method call, or module-qualified struct literal.
+    /// Called after the '.' token has been consumed.
+    fn parse_dot_postfix(&mut self, expr: Expr) -> Result<Expr, ParseError> {
+        let field_span = self.current.span;
+        self.consume(TokenType::Identifier, "expected field name after '.'")?;
+        let field = self.interner.intern(&self.previous.lexeme);
+
+        // Check for type args: expr.method<T, U>(...) or direct call: expr.method(...)
+        // or module.Type<T> { ... } for qualified generic struct literals
+        let type_args = if self.check(TokenType::Lt) {
+            // Try to parse type args with lookahead
+            self.try_parse_call_type_args()?
+        } else {
+            Vec::new()
+        };
+
+        if self.check(TokenType::LParen) {
+            // Method call: expr.method(args) or expr.method<T>(args)
+            self.advance(); // consume '('
+            self.skip_newlines();
+            let mut args = Vec::new();
+            if !self.check(TokenType::RParen) {
+                loop {
+                    args.push(self.expression(0)?);
+                    self.skip_newlines();
+                    if !self.match_token(TokenType::Comma) {
+                        break;
+                    }
+                    self.skip_newlines();
+                    // Allow trailing comma
+                    if self.check(TokenType::RParen) {
+                        break;
+                    }
+                }
+            }
+            let end_span = self.current.span;
+            self.consume(TokenType::RParen, "expected ')' after arguments")?;
+
+            let span = expr.span.merge(end_span);
+            Ok(Expr {
+                id: self.next_id(),
+                kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
+                    object: expr,
+                    method: field,
+                    type_args,
+                    args,
+                    method_span: field_span,
+                })),
+                span,
+            })
+        } else if self.check(TokenType::LBrace) && self.looks_like_struct_literal() {
+            // Check for module-qualified struct literal: mod.Type { field: value }
+            // Try to extract a path of identifiers from the left-hand expression
+            if let Some(mut path) = Self::expr_to_identifier_path(&expr) {
+                path.push(field);
+                let start_span = expr.span;
+                // Parse the struct literal and continue the loop to handle
+                // chained operations like `mod.Type { f: 1 }.field`
+                self.struct_literal(path, type_args, start_span)
+            } else if !type_args.is_empty() {
+                // Had type args but LHS wasn't an identifier path - syntax error
+                Err(ParseError::new(
+                    crate::errors::ParserError::ExpectedToken {
+                        expected: "'(' after type arguments".to_string(),
+                        found: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ))
+            } else {
+                // Not an identifier path - fall through to field access
+                let span = expr.span.merge(field_span);
+                Ok(Expr {
+                    id: self.next_id(),
+                    kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                        object: expr,
+                        field,
+                        field_span,
+                    })),
+                    span,
+                })
+            }
+        } else if !type_args.is_empty() {
+            // Had type args but no parens or struct literal - syntax error
+            Err(ParseError::new(
+                crate::errors::ParserError::ExpectedToken {
+                    expected: "'(' or '{' after type arguments".to_string(),
+                    found: self.current.ty.as_str().to_string(),
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            ))
+        } else {
+            // Field access: expr.field
+            let span = expr.span.merge(field_span);
+            Ok(Expr {
+                id: self.next_id(),
+                kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                    object: expr,
+                    field,
+                    field_span,
+                })),
+                span,
+            })
+        }
     }
 
     /// Finish parsing a function call (after the opening paren)
