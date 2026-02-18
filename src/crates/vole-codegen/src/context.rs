@@ -15,7 +15,6 @@ use crate::callable_registry::CallableBackendPreference;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
-use smallvec::SmallVec;
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId};
 use vole_sema::implement_registry::ExternalMethodInfo;
@@ -112,9 +111,6 @@ pub(crate) struct Captures<'a> {
     pub closure_var: Variable,
 }
 
-/// Key for caching pure runtime function calls
-pub type CallCacheKey = (RuntimeKey, SmallVec<[Value; 4]>);
-
 // Re-export ModuleExportBinding from types module
 pub use crate::types::ModuleExportBinding;
 
@@ -145,8 +141,6 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub captures: Option<Captures<'a>>,
     /// For recursive lambdas: the binding name that captures itself
     pub self_capture: Option<Symbol>,
-    /// Cache for pure runtime function calls: (func, args) -> result
-    pub call_cache: FxHashMap<CallCacheKey, Value>,
     /// Cache for field access: (instance_ptr, slot) -> field_value
     pub field_cache: FxHashMap<(Value, u32), Value>,
     /// Return type of the current function
@@ -195,7 +189,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             cf: ControlFlow::new(),
             captures: None,
             self_capture: None,
-            call_cache: FxHashMap::default(),
             field_cache: FxHashMap::default(),
             return_type: None,
             current_module: None,
@@ -717,22 +710,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Call a pure runtime function with caching (CSE)
-    #[allow(dead_code)]
-    pub fn call_runtime_cached(
-        &mut self,
-        func: RuntimeKey,
-        args: &[Value],
-    ) -> CodegenResult<Value> {
-        let key = (func, SmallVec::from_slice(args));
-        if let Some(&cached) = self.call_cache.get(&key) {
-            return Ok(cached);
-        }
-        let result = self.call_runtime(func, args)?;
-        self.call_cache.insert(key, result);
-        Ok(result)
-    }
-
     /// Get cached field value or call runtime and cache result
     pub fn get_field_cached(&mut self, instance: Value, slot: u32) -> CodegenResult<Value> {
         let key = (instance, slot);
@@ -784,7 +761,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Invalidate value caches when entering a control flow branch.
     ///
-    /// The `field_cache` and `call_cache` store Cranelift SSA `Value`s that are
+    /// The `field_cache` stores Cranelift SSA `Value`s that are
     /// defined in a particular basic block.  When the builder switches to a
     /// sibling block (e.g., the next arm of a `when`/`match`/`if` expression),
     /// values cached from a previous arm do **not** dominate the new block,
@@ -794,7 +771,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call this at the start of each arm body in any branching construct.
     pub fn invalidate_value_caches(&mut self) {
         self.field_cache.clear();
-        self.call_cache.clear();
     }
 
     /// Call a runtime function that returns void
