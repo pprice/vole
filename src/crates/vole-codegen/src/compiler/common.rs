@@ -304,7 +304,7 @@ fn emit_implicit_return(
 ///
 /// # Returns
 /// Ok(()) on success, Err with message on failure
-pub fn compile_function_body_with_cg(
+pub(crate) fn compile_function_body_with_cg(
     cg: &mut Cg,
     body: &FuncBody,
     default_return: DefaultReturn,
@@ -390,7 +390,7 @@ pub fn compile_function_body_with_cg(
 ///
 /// # Returns
 /// Ok(()) on success, Err with message on failure
-pub fn compile_function_inner_with_params<'ctx>(
+pub(crate) fn compile_function_inner_with_params<'ctx>(
     mut builder: FunctionBuilder,
     codegen_ctx: &mut CodegenCtx<'ctx>,
     env: &CompileEnv<'ctx>,
@@ -456,7 +456,7 @@ pub fn compile_function_inner_with_params<'ctx>(
 /// * `expr_value` - Optional compiled expression value to return
 /// * `terminated` - Whether the function body already terminated (return/break)
 /// * `default_return` - What to return when not terminated (Empty or Zero)
-pub fn finalize_function_body(
+pub(crate) fn finalize_function_body(
     mut builder: FunctionBuilder,
     expr_value: Option<&CompiledValue>,
     terminated: bool,
