@@ -87,6 +87,7 @@ mod last_elem_access;
 mod length_comparison;
 mod literal_method;
 mod manual_minmax;
+mod many_params_call;
 mod map_tostring_reduce;
 mod match_array;
 mod match_array_elem;
@@ -354,6 +355,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(early_return::EarlyReturn),
         Box::new(break_continue::BreakContinue),
         Box::new(fn_param_call::FnParamCall),
+        Box::new(many_params_call::ManyParamsCall),
         Box::new(bool_match_let::BoolMatchLet),
         // -- Match/when expression rules (batch 14) --------------------------------
         Box::new(match_iter_terminal::MatchIterTerminal),
