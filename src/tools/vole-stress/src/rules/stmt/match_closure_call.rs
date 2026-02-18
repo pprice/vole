@@ -181,7 +181,7 @@ fn build_string_closure_body(emit: &mut Emit, captured_var: &str, variant: usize
         0 => format!("\"{{{}}}: {{tag}}\"", captured_var),
         1 => format!("\"{{tag}} (\" + {} + \")\"", captured_var),
         2 => format!("\"{{{}}}-{{tag}}\"", captured_var),
-        _ => format!("{{tag}} + \"-\" + {}", captured_var),
+        _ => format!("tag + \"-\" + {}", captured_var),
     }
 }
 
