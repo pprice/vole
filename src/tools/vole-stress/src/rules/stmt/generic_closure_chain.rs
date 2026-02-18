@@ -175,6 +175,10 @@ fn collect_iface_candidates(
     for (var_name, _tp_name, constraints) in constrained_vars {
         let methods = crate::expr::get_type_param_constraint_methods(scope.table, constraints);
         for (_iface_info, method) in methods {
+            // Skip void methods — they can't be used in let bindings or filter predicates
+            if matches!(method.return_type, TypeInfo::Void) {
+                continue;
+            }
             candidates.push(IfaceCandidate {
                 var_name: var_name.clone(),
                 method_name: method.name.clone(),
