@@ -700,7 +700,7 @@ impl Emit<'_> {
     fn dispatch_stmt(&mut self, scope: &mut Scope) -> String {
         let rule_count = self.stmt_rules.len();
         if rule_count == 0 {
-            return "// skip".to_string();
+            return "let _ = 0".to_string();
         }
 
         // Build a shuffled index list.
@@ -756,7 +756,7 @@ impl Emit<'_> {
         }
 
         // Fallback: no rule fired.
-        "// skip".to_string()
+        "let _ = 0".to_string()
     }
 
     /// Core expression dispatch loop.
@@ -1173,7 +1173,7 @@ mod tests {
         let table = empty_table();
         let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
-        assert_eq!(emit.sub_stmt(&mut scope), "// skip");
+        assert_eq!(emit.sub_stmt(&mut scope), "let _ = 0");
     }
 
     #[test]
@@ -1289,7 +1289,7 @@ mod tests {
         let table = empty_table();
         let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
-        assert_eq!(emit.sub_stmt(&mut scope), "// skip");
+        assert_eq!(emit.sub_stmt(&mut scope), "let _ = 0");
     }
 
     /// A rule whose precondition always fails.
@@ -1325,7 +1325,7 @@ mod tests {
         let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
         // Gated rule won't fire, so we get fallback.
-        assert_eq!(emit.sub_stmt(&mut scope), "// skip");
+        assert_eq!(emit.sub_stmt(&mut scope), "let _ = 0");
     }
 
     // -- Block generation ---------------------------------------------------
@@ -1343,7 +1343,7 @@ mod tests {
         let lines: Vec<&str> = block.lines().collect();
         assert_eq!(lines.len(), 3);
         for line in &lines {
-            assert!(line.contains("// skip"), "line was: {line}");
+            assert!(line.contains("let _ = 0"), "line was: {line}");
             // Should be indented one level.
             assert!(line.starts_with("    "), "line was: {line}");
         }
