@@ -70,6 +70,7 @@ mod interpolation_concat;
 mod interpolation_expr;
 mod interpolation_with_iter;
 mod iter_chunks_windows;
+mod iter_enumerate_collect;
 mod iter_in_when_arms;
 mod iter_map_filter_let;
 mod iter_method_map;
@@ -308,6 +309,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(sorted_collect::SortedCollect),
         Box::new(reverse_collect::ReverseCollect),
         Box::new(iter_take_skip_collect::IterTakeSkipCollect),
+        Box::new(iter_enumerate_collect::IterEnumerateCollect),
         Box::new(array_length_guard::ArrayLengthGuard),
         Box::new(array_length_zero_check::ArrayLengthZeroCheck),
         Box::new(match_sorted_length::MatchSortedLength),
