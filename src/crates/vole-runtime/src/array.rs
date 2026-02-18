@@ -24,6 +24,8 @@ impl RcArray {
     pub fn with_capacity(capacity: usize) -> *mut Self {
         let layout = Layout::new::<RcArray>();
 
+        // SAFETY: Layout is valid (fixed-size RcArray). All fields are initialized
+        // via ptr::write before the pointer is returned.
         unsafe {
             let ptr = alloc(layout) as *mut Self;
             if ptr.is_null() {
@@ -108,6 +110,7 @@ impl RcArray {
     /// `index` must be less than the array length
     #[inline]
     pub unsafe fn get(arr: *const Self, index: usize) -> TaggedValue {
+        // SAFETY: Caller guarantees arr is valid and index < len (asserted in debug).
         unsafe {
             debug_assert!(index < (*arr).len);
             ptr::read((*arr).data.add(index))
@@ -121,6 +124,8 @@ impl RcArray {
     /// `index` must be less than the array length
     #[inline]
     pub unsafe fn set(arr: *mut Self, index: usize, value: TaggedValue) {
+        // SAFETY: Caller guarantees arr is valid and index < len (asserted in debug).
+        // Old value is read and RC-decremented before being overwritten.
         unsafe {
             debug_assert!(index < (*arr).len);
             // Dec the old value being overwritten
@@ -136,6 +141,7 @@ impl RcArray {
     /// `arr` must be a valid pointer to an initialized `RcArray`
     #[inline]
     pub unsafe fn len(arr: *const Self) -> usize {
+        // SAFETY: Caller guarantees arr is a valid, initialized RcArray pointer.
         unsafe { (*arr).len }
     }
 
@@ -166,6 +172,9 @@ impl RcArray {
 /// `ptr` must point to a valid `RcArray` allocation with refcount already at zero.
 unsafe extern "C" fn array_drop(ptr: *mut u8) {
     alloc_track::track_dealloc(RuntimeTypeId::Array as u32);
+    // SAFETY: Called only by rc_dec when refcount reaches zero. ptr is a valid
+    // RcArray allocation. All contained elements are RC-decremented before
+    // the data buffer and header are freed.
     unsafe {
         let arr = ptr as *mut RcArray;
         let len = (*arr).len;
