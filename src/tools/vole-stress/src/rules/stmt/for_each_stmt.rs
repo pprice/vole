@@ -91,7 +91,13 @@ mod tests {
     fn test_emit<'a>(rng: &'a mut dyn rand::RngCore, resolved: &'a ResolvedParams) -> Emit<'a> {
         static EMPTY_STMT: &[Box<dyn StmtRule>] = &[];
         static EMPTY_EXPR: &[Box<dyn ExprRule>] = &[];
-        Emit::new(rng, EMPTY_STMT, EMPTY_EXPR, resolved)
+        Emit::new(
+            rng,
+            EMPTY_STMT,
+            EMPTY_EXPR,
+            resolved,
+            crate::symbols::SymbolTable::empty_ref(),
+        )
     }
 
     #[test]

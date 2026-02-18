@@ -337,7 +337,13 @@ mod tests {
         // No rules needed -- tests only check trait-object plumbing.
         static EMPTY_STMT: &[Box<dyn StmtRule>] = &[];
         static EMPTY_EXPR: &[Box<dyn ExprRule>] = &[];
-        Emit::new(rng, EMPTY_STMT, EMPTY_EXPR, resolved)
+        Emit::new(
+            rng,
+            EMPTY_STMT,
+            EMPTY_EXPR,
+            resolved,
+            crate::symbols::SymbolTable::empty_ref(),
+        )
     }
 
     /// Minimal statement rule used only for trait-object tests.

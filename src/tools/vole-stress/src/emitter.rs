@@ -625,6 +625,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                     self.stmt_rules,
                     self.expr_rules,
                     self.resolved_params,
+                    self.table,
                 );
                 emit.sub_expr(ty, &scope)
             }
@@ -1131,6 +1132,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.stmt_rules,
             self.expr_rules,
             self.resolved_params,
+            self.table,
         );
         emit.generate_return_expr(return_type, &scope)
     }
@@ -1187,6 +1189,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.stmt_rules,
             self.expr_rules,
             self.resolved_params,
+            self.table,
         );
         emit.set_indent(self.indent);
 
@@ -1246,6 +1249,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.stmt_rules,
             self.expr_rules,
             self.resolved_params,
+            self.table,
         );
         emit.set_indent(self.indent);
 
@@ -1647,6 +1651,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.stmt_rules,
             self.expr_rules,
             self.resolved_params,
+            self.table,
         );
         emit.set_indent(self.indent);
 
@@ -1683,6 +1688,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.stmt_rules,
             self.expr_rules,
             self.resolved_params,
+            self.table,
         );
         emit.literal(type_info)
     }
@@ -1696,6 +1702,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.stmt_rules,
             self.expr_rules,
             self.resolved_params,
+            self.table,
         );
         emit.constant_literal(type_info)
     }

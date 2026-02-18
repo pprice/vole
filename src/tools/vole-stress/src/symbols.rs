@@ -779,6 +779,16 @@ impl SymbolTable {
         Self::default()
     }
 
+    /// Return a reference to a lazily-initialized empty `SymbolTable`.
+    ///
+    /// Useful for test code where a `&SymbolTable` reference is required
+    /// but no symbols are needed.
+    #[cfg(test)]
+    pub fn empty_ref() -> &'static Self {
+        static INSTANCE: std::sync::OnceLock<SymbolTable> = std::sync::OnceLock::new();
+        INSTANCE.get_or_init(Self::new)
+    }
+
     /// Add a new module to the symbol table.
     pub fn add_module(&mut self, name: String, path: String) -> ModuleId {
         let id = ModuleId(self.modules.len());

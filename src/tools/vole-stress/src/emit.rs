@@ -13,7 +13,7 @@ use rand::{Rng, RngCore};
 use crate::resolver::ResolvedParams;
 use crate::rule::{ExprRule, Params, StmtRule};
 use crate::scope::Scope;
-use crate::symbols::{PrimitiveType, TypeInfo};
+use crate::symbols::{PrimitiveType, SymbolKind, SymbolTable, TypeInfo};
 
 // ---------------------------------------------------------------------------
 // Emit
@@ -33,6 +33,9 @@ pub struct Emit<'a> {
     expr_rules: &'a [Box<dyn ExprRule>],
     /// Resolved parameters keyed by rule name.
     resolved_params: &'a ResolvedParams,
+    /// Symbol table for looking up class/struct field information when
+    /// generating literals for class/struct types.
+    table: &'a SymbolTable,
     /// Current indentation level (number of indent units, not spaces).
     indent: usize,
     /// Current expression nesting depth (prevents infinite recursion).
@@ -66,12 +69,14 @@ impl<'a> Emit<'a> {
         stmt_rules: &'a [Box<dyn StmtRule>],
         expr_rules: &'a [Box<dyn ExprRule>],
         resolved_params: &'a ResolvedParams,
+        table: &'a SymbolTable,
     ) -> Self {
         Self {
             rng,
             stmt_rules,
             expr_rules,
             resolved_params,
+            table,
             indent: 0,
             expr_depth: 0,
             type_param_exprs: HashMap::new(),
@@ -158,6 +163,31 @@ impl Emit<'_> {
             TypeInfo::Tuple(elems) => {
                 let parts: Vec<String> = elems.iter().map(|e| self.literal(e)).collect();
                 format!("[{}]", parts.join(", "))
+            }
+            TypeInfo::Class(mod_id, sym_id) | TypeInfo::Struct(mod_id, sym_id) => {
+                // Look up the class/struct fields and generate a proper
+                // construction expression: `ClassName { f1: v1, f2: v2 }`.
+                if let Some(sym) = self.table.get_symbol(*mod_id, *sym_id) {
+                    let fields = match &sym.kind {
+                        SymbolKind::Class(info) if info.type_params.is_empty() => {
+                            Some((sym.name.clone(), info.fields.clone()))
+                        }
+                        SymbolKind::Struct(info) => Some((sym.name.clone(), info.fields.clone())),
+                        _ => None,
+                    };
+                    if let Some((type_name, fields)) = fields {
+                        let field_values: Vec<String> = fields
+                            .iter()
+                            .map(|f| {
+                                let value = self.literal(&f.field_type);
+                                format!("{}: {}", f.name, value)
+                            })
+                            .collect();
+                        return format!("{} {{ {} }}", type_name, field_values.join(", "));
+                    }
+                }
+                // Fallback for generic classes or missing symbols.
+                self.literal_for_primitive(PrimitiveType::I64)
             }
             TypeInfo::TypeParam(name) => {
                 // Look up registered expressions for this type parameter
@@ -743,7 +773,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         assert_eq!(emit.indent, 0);
     }
 
@@ -755,7 +786,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         // prob=1.0 should always be true
         for _ in 0..20 {
             assert!(emit.gen_bool(1.0));
@@ -768,7 +800,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         // prob=0.0 should always be false
         for _ in 0..20 {
             assert!(!emit.gen_bool(0.0));
@@ -781,7 +814,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         // Empty range returns start.
         assert_eq!(emit.gen_range(5..5), 5);
     }
@@ -792,7 +826,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         for _ in 0..50 {
             let val = emit.gen_range(0..10);
             assert!(val < 10);
@@ -805,7 +840,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         for _ in 0..50 {
             let val = emit.random_in(3, 7);
             assert!((3..=7).contains(&val));
@@ -818,7 +854,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         assert_eq!(emit.random_in(5, 5), 5);
     }
 
@@ -828,7 +865,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
 
         let mut data = vec![1, 2, 3, 4, 5, 6, 7, 8];
         let original = data.clone();
@@ -847,7 +885,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         assert_eq!(emit.indent_str(), "");
     }
 
@@ -857,7 +896,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         assert_eq!(emit.indent, 0);
 
         let inner_indent = emit.indented(|e| {
@@ -875,7 +915,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
 
         emit.indented(|e| {
             assert_eq!(e.indent_str(), "    ");
@@ -895,7 +936,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         // Should not panic; returns empty params.
         let _ = emit.params_for("nonexistent_rule");
     }
@@ -910,7 +952,8 @@ mod tests {
         );
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let emit = Emit::new(&mut rng, &stmts, &exprs, &resolved);
+        let table = empty_table();
+        let emit = Emit::new(&mut rng, &stmts, &exprs, &resolved, &table);
         let p = emit.params_for("my_rule");
         assert!((p.prob("fire_rate") - 0.8).abs() < f64::EPSILON);
     }
@@ -923,7 +966,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let lit = emit.literal(&TypeInfo::Primitive(PrimitiveType::I32));
         assert!(lit.ends_with("_i32"), "got: {lit}");
     }
@@ -934,7 +978,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let lit = emit.literal(&TypeInfo::Primitive(PrimitiveType::Bool));
         assert!(lit == "true" || lit == "false", "got: {lit}");
     }
@@ -945,7 +990,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let lit = emit.literal(&TypeInfo::Primitive(PrimitiveType::String));
         assert!(lit.starts_with('"') && lit.ends_with('"'), "got: {lit}");
     }
@@ -956,7 +1002,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         assert_eq!(emit.literal(&TypeInfo::Void), "nil");
     }
 
@@ -966,7 +1013,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let ty = TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64)));
         let lit = emit.literal(&ty);
         assert!(lit == "nil" || lit.ends_with("_i64"), "got: {lit}");
@@ -978,7 +1026,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let ty = TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I32)));
         let lit = emit.literal(&ty);
         assert!(lit.starts_with('[') && lit.ends_with(']'), "got: {lit}");
@@ -990,7 +1039,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let ty = TypeInfo::FixedArray(Box::new(TypeInfo::Primitive(PrimitiveType::Bool)), 3);
         let lit = emit.literal(&ty);
         assert!(lit.contains("; 3]"), "got: {lit}");
@@ -1002,7 +1052,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let ty = TypeInfo::Tuple(vec![
             TypeInfo::Primitive(PrimitiveType::I32),
             TypeInfo::Primitive(PrimitiveType::Bool),
@@ -1018,7 +1069,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let ty = TypeInfo::Never;
         let lit = emit.literal(&ty);
         assert!(lit.ends_with("_i64"), "got: {lit}");
@@ -1032,8 +1084,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
         assert_eq!(emit.sub_stmt(&mut scope), "// skip");
     }
@@ -1044,8 +1096,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let scope = Scope::new(&[], &table);
         let result = emit.sub_expr(&TypeInfo::Primitive(PrimitiveType::Bool), &scope);
         assert!(result == "true" || result == "false", "got: {result}");
@@ -1103,8 +1155,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![Box::new(AlwaysLetRule)];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
         assert_eq!(emit.sub_stmt(&mut scope), "let x = 1");
     }
@@ -1115,8 +1167,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![Box::new(AlwaysTrueRule)];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let scope = Scope::new(&[], &table);
         let result = emit.sub_expr(&TypeInfo::Primitive(PrimitiveType::Bool), &scope);
         assert_eq!(result, "true");
@@ -1148,8 +1200,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![Box::new(NeverFiresRule)];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
         assert_eq!(emit.sub_stmt(&mut scope), "// skip");
     }
@@ -1183,8 +1235,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![Box::new(GatedStmtRule)];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
         // Gated rule won't fire, so we get fallback.
         assert_eq!(emit.sub_stmt(&mut scope), "// skip");
@@ -1198,8 +1250,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
         let block = emit.block(&mut scope, 3);
         let lines: Vec<&str> = block.lines().collect();
@@ -1217,8 +1269,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
         let block = emit.block(&mut scope, 0);
         assert!(block.is_empty());
@@ -1230,8 +1282,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![Box::new(AlwaysLetRule)];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
 
         // A block at indent level 0 should have 1 level of indent.
@@ -1268,8 +1320,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![Box::new(RecursiveStmtRule)];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
         let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
         let mut scope = Scope::new(&[], &table);
         let result = emit.sub_stmt(&mut scope);
         assert!(result.starts_with("let y = "), "got: {result}");
@@ -1284,7 +1336,8 @@ mod tests {
         let params = no_params();
         let stmts: Vec<Box<dyn StmtRule>> = vec![];
         let exprs: Vec<Box<dyn ExprRule>> = vec![];
-        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params);
+        let table = empty_table();
+        let mut emit = Emit::new(&mut rng, &stmts, &exprs, &params, &table);
 
         let cases = [
             (PrimitiveType::I8, "_i8"),
