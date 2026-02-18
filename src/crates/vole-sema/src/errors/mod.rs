@@ -801,7 +801,7 @@ pub enum SemanticWarning {
 /// - `char`, `Char` -> note about no char type
 /// - `void`, `Void` -> note about using () or no return type
 /// - `array`, `Array` -> `[T]`
-pub fn unknown_type_hint(name: &str) -> String {
+pub(crate) fn unknown_type_hint(name: &str) -> String {
     match name {
         "int" | "Int" | "INT" | "integer" | "Integer" => "did you mean 'i64'?".to_string(),
         "str" | "Str" => "did you mean 'string'?".to_string(),
