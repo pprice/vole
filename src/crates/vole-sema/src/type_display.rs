@@ -25,13 +25,16 @@ pub fn display_structural_constraint(
     names: &NameTable,
     entity_registry: &EntityRegistry,
 ) -> String {
-    let mut parts = Vec::new();
-    for (name_id, type_id) in &structural.fields {
-        let name = names.last_segment_str(*name_id).unwrap_or_default();
-        let ty = display_sema_type(*type_id, arena, names, entity_registry);
-        parts.push(format!("{}: {}", name, ty));
-    }
-    for method in &structural.methods {
+    let mut parts: Vec<String> = structural
+        .fields
+        .iter()
+        .map(|(name_id, type_id)| {
+            let name = names.last_segment_str(*name_id).unwrap_or_default();
+            let ty = display_sema_type(*type_id, arena, names, entity_registry);
+            format!("{}: {}", name, ty)
+        })
+        .collect();
+    parts.extend(structural.methods.iter().map(|method| {
         let name = names.last_segment_str(method.name).unwrap_or_default();
         let params: Vec<String> = method
             .params
@@ -39,8 +42,8 @@ pub fn display_structural_constraint(
             .map(|&p| display_sema_type(p, arena, names, entity_registry))
             .collect();
         let ret = display_sema_type(method.return_type, arena, names, entity_registry);
-        parts.push(format!("func {}({}) -> {}", name, params.join(", "), ret));
-    }
+        format!("func {}({}) -> {}", name, params.join(", "), ret)
+    }));
     format!("{{ {} }}", parts.join(", "))
 }
 
@@ -164,13 +167,16 @@ fn display_sema_type(
         }
 
         SemaType::Structural(structural) => {
-            let mut parts = Vec::new();
-            for (name_id, type_id) in &structural.fields {
-                let name = names.last_segment_str(*name_id).unwrap_or_default();
-                let ty = display_sema_type(*type_id, arena, names, entity_registry);
-                parts.push(format!("{}: {}", name, ty));
-            }
-            for method in &structural.methods {
+            let mut parts: Vec<String> = structural
+                .fields
+                .iter()
+                .map(|(name_id, type_id)| {
+                    let name = names.last_segment_str(*name_id).unwrap_or_default();
+                    let ty = display_sema_type(*type_id, arena, names, entity_registry);
+                    format!("{}: {}", name, ty)
+                })
+                .collect();
+            parts.extend(structural.methods.iter().map(|method| {
                 let name = names.last_segment_str(method.name).unwrap_or_default();
                 let params: Vec<String> = method
                     .params
@@ -178,8 +184,8 @@ fn display_sema_type(
                     .map(|&p| display_sema_type(p, arena, names, entity_registry))
                     .collect();
                 let ret = display_sema_type(method.return_type, arena, names, entity_registry);
-                parts.push(format!("func {}({}) -> {}", name, params.join(", "), ret));
-            }
+                format!("func {}({}) -> {}", name, params.join(", "), ret)
+            }));
             format!("{{ {} }}", parts.join(", "))
         }
 
