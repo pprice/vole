@@ -1,0 +1,14 @@
+// Module that uses panic() -> never from the prelude.
+// Regression test: panic() must resolve to `never` even when
+// this file is analyzed as a sub-module (imported by another file).
+
+func diverge(msg: string) -> never {
+    return panic(msg)
+}
+
+func checked_divide(a: i64, b: i64) -> i64 {
+    if b == 0 {
+        panic("division by zero")
+    }
+    return a / b
+}

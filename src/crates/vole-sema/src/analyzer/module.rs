@@ -828,6 +828,12 @@ impl Analyzer {
 
     /// Fork for analyzing an imported module.
     /// Shares the `AnalyzerContext` so TypeIds remain valid across analyzers.
+    ///
+    /// `loading_prelude` is set to `true` to prevent redundant prelude loading
+    /// (prelude definitions are already in the shared context). However, we must
+    /// propagate `functions_by_name` and `generic_prelude_functions` so that
+    /// prelude functions (e.g., `panic -> never`) are available for cross-interner
+    /// lookup in the sub-module.
     fn fork_for_module(&self, module_id: ModuleId, module_file_path: Option<PathBuf>) -> Analyzer {
         Analyzer {
             ctx: Rc::clone(&self.ctx),
@@ -836,6 +842,11 @@ impl Analyzer {
                 current_file_path: module_file_path,
                 loading_prelude: true,
                 module_loader: self.module.module_loader.new_child(),
+                ..Default::default()
+            },
+            symbols: SymbolTables {
+                functions_by_name: self.symbols.functions_by_name.clone(),
+                generic_prelude_functions: self.symbols.generic_prelude_functions.clone(),
                 ..Default::default()
             },
             ..Default::default()

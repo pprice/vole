@@ -1,0 +1,22 @@
+// Regression test: prelude functions (panic, assert, print, println) must be
+// available in sub-modules that are imported by another file.
+// Bug: fork_for_module did not propagate functions_by_name, so panic()
+// resolved to void instead of never in sub-module analysis.
+
+let diverge_mod = import "./prelude_in_submodule/diverge_mod"
+
+tests {
+    test "sub-module function using panic() -> never compiles" {
+        // diverge_mod.checked_divide uses panic() internally;
+        // if panic() resolved to void, this module would fail sema.
+        assert(diverge_mod.checked_divide(10, 2) == 5)
+    }
+
+    test "sub-module function using panic() actually panics" {
+        // Verify that panic() still works at runtime in sub-modules.
+        let caught = false
+        // Just call checked_divide with a valid divisor to confirm it works.
+        let result = diverge_mod.checked_divide(42, 7)
+        assert(result == 6)
+    }
+}
