@@ -37,103 +37,18 @@ impl Analyzer {
 
             // For generic external functions, set up type param scope and register with GenericFuncInfo
             if !func.type_params.is_empty() {
-                // Build type params with resolved constraints
-                let type_param_scope =
-                    self.build_type_params_with_constraints(&func.type_params, interner);
-
-                // Resolve with type params in scope
-                let module_id = self.module.current_module;
-                let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.ctx.db,
-                    interner,
-                    module_id,
-                    &type_param_scope,
-                );
-                // Resolve directly to TypeId
-                let param_type_ids: Vec<ArenaTypeId> = func
-                    .params
-                    .iter()
-                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                    .collect();
-                let return_type_id = func
-                    .return_type
-                    .as_ref()
-                    .map(|t| resolve_type_to_id(t, &mut ctx))
-                    .unwrap_or_else(|| self.type_arena().void());
-
-                // Create signature from TypeIds
-                let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
-
-                // Type-check parameter default expressions so their types are recorded for codegen
-                if let Err(errs) =
-                    self.check_param_defaults(&func.params, &signature.params_id, interner)
-                {
-                    self.diagnostics.errors.extend(errs);
-                }
-
-                // Register in EntityRegistry with default expressions (like regular generic functions)
-                let func_id = self.entity_registry_mut().register_function_full(
+                let reg_data = FuncRegistrationData {
                     name_id,
-                    name_id,
-                    self.module.current_module,
-                    signature.clone(),
                     required_params,
                     param_defaults,
+                };
+                self.collect_generic_external_func(
+                    func,
+                    &ext_block.module_path,
+                    builtin_mod,
+                    reg_data,
+                    interner,
                 );
-                // Extract type params from scope (consumes scope, avoids clone)
-                let type_params = type_param_scope.into_params();
-                self.entity_registry_mut().set_function_generic_info(
-                    func_id,
-                    GenericFuncInfo {
-                        type_params,
-                        param_types: param_type_ids,
-                        return_type: return_type_id,
-                    },
-                );
-
-                // NOTE: Don't register in self.symbols.functions for generic externals!
-                // The call handler checks self.symbols.functions first without doing type inference.
-                // Generic functions must go through EntityRegistry's generic_info path.
-
-                // Store external info for codegen
-                let name_str = interner.resolve(func.vole_name).to_string();
-
-                // If the function has type_mappings, register as GenericExternalInfo
-                if let Some(ref mappings) = func.type_mappings {
-                    let module_path = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[&ext_block.module_path]);
-
-                    // Resolve each type mapping to TypeId
-                    let type_mappings = self.resolve_type_mappings(mappings, interner);
-
-                    self.implement_registry_mut().register_generic_external(
-                        name_str,
-                        GenericExternalInfo {
-                            module_path,
-                            type_mappings,
-                        },
-                    );
-                } else {
-                    // No type mappings, use the native_name as before
-                    let native_name_str =
-                        func.native_name.clone().unwrap_or_else(|| name_str.clone());
-                    // Extract name IDs before calling implement_registry_mut to avoid overlapping borrows
-                    let (module_path, native_name) = {
-                        let mut name_table = self.name_table_mut();
-                        (
-                            name_table.intern_raw(builtin_mod, &[&ext_block.module_path]),
-                            name_table.intern_raw(builtin_mod, &[&native_name_str]),
-                        )
-                    };
-                    self.implement_registry_mut().register_external_func(
-                        name_str,
-                        ExternalMethodInfo {
-                            module_path,
-                            native_name,
-                        },
-                    );
-                }
             } else {
                 // Non-generic external function
                 let params_id: Vec<ArenaTypeId> = func
@@ -195,6 +110,112 @@ impl Analyzer {
                     },
                 );
             }
+        }
+    }
+
+    /// Register a generic external function from an external block.
+    /// Handles type param resolution, constraint checking, EntityRegistry registration,
+    /// and external info storage for codegen.
+    fn collect_generic_external_func(
+        &mut self,
+        func: &ExternalFunc,
+        module_path: &str,
+        builtin_mod: ModuleId,
+        reg_data: FuncRegistrationData,
+        interner: &Interner,
+    ) {
+        // Build type params with resolved constraints
+        let type_param_scope = self.build_type_params_with_constraints(&func.type_params, interner);
+
+        // Resolve with type params in scope
+        let module_id = self.module.current_module;
+        let mut ctx = TypeResolutionContext::with_type_params(
+            &self.ctx.db,
+            interner,
+            module_id,
+            &type_param_scope,
+        );
+        // Resolve directly to TypeId
+        let param_type_ids: Vec<ArenaTypeId> = func
+            .params
+            .iter()
+            .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
+            .collect();
+        let return_type_id = func
+            .return_type
+            .as_ref()
+            .map(|t| resolve_type_to_id(t, &mut ctx))
+            .unwrap_or_else(|| self.type_arena().void());
+
+        // Create signature from TypeIds
+        let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
+
+        // Type-check parameter default expressions so their types are recorded for codegen
+        if let Err(errs) = self.check_param_defaults(&func.params, &signature.params_id, interner) {
+            self.diagnostics.errors.extend(errs);
+        }
+
+        // Register in EntityRegistry with default expressions (like regular generic functions)
+        let func_id = self.entity_registry_mut().register_function_full(
+            reg_data.name_id,
+            reg_data.name_id,
+            self.module.current_module,
+            signature.clone(),
+            reg_data.required_params,
+            reg_data.param_defaults,
+        );
+        // Extract type params from scope (consumes scope, avoids clone)
+        let type_params = type_param_scope.into_params();
+        self.entity_registry_mut().set_function_generic_info(
+            func_id,
+            GenericFuncInfo {
+                type_params,
+                param_types: param_type_ids,
+                return_type: return_type_id,
+            },
+        );
+
+        // NOTE: Don't register in self.symbols.functions for generic externals!
+        // The call handler checks self.symbols.functions first without doing type inference.
+        // Generic functions must go through EntityRegistry's generic_info path.
+
+        // Store external info for codegen
+        let name_str = interner.resolve(func.vole_name).to_string();
+
+        // If the function has type_mappings, register as GenericExternalInfo
+        if let Some(ref mappings) = func.type_mappings {
+            let module_path_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[module_path]);
+
+            // Resolve each type mapping to TypeId
+            let type_mappings = self.resolve_type_mappings(mappings, interner);
+
+            self.implement_registry_mut().register_generic_external(
+                name_str,
+                GenericExternalInfo {
+                    module_path: module_path_id,
+                    type_mappings,
+                },
+            );
+        } else {
+            // No type mappings, use the native_name as before
+            let native_name_str = func.native_name.clone().unwrap_or_else(|| name_str.clone());
+            // Extract name IDs before calling implement_registry_mut to avoid overlapping borrows
+            let (module_path_id, native_name) = {
+                let mut name_table = self.name_table_mut();
+                (
+                    name_table.intern_raw(builtin_mod, &[module_path]),
+                    name_table.intern_raw(builtin_mod, &[&native_name_str]),
+                )
+            };
+            self.implement_registry_mut().register_external_func(
+                name_str,
+                ExternalMethodInfo {
+                    module_path: module_path_id,
+                    native_name,
+                },
+            );
         }
     }
 
