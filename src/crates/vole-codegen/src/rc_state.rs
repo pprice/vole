@@ -26,7 +26,7 @@ use vole_sema::type_arena::{SemaType, TypeArena, TypeId};
 /// - `Composite`: Type contains RC fields at specific byte offsets (struct, tuple, fixed array)
 /// - `Union`: Type is a union where some variants are RC-managed
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RcState {
+pub(crate) enum RcState {
     /// Type is not reference-counted.
     None,
 
