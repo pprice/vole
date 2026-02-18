@@ -36,7 +36,6 @@ use crate::implement_registry::{
     TypeMappingEntry,
 };
 use crate::resolution::ResolvedMethod;
-pub use crate::resolve::ResolverEntityExt;
 use crate::resolve::resolve_type_to_id;
 use crate::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::types::ConstantValue;

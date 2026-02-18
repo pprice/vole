@@ -13,7 +13,7 @@ use vole_identity::{ModuleId, NameTable, Resolver, TypeDefId};
 /// Extension trait for Resolver that adds entity resolution methods.
 /// These methods require access to EntityRegistry, so they're defined here in sema
 /// rather than in the identity crate.
-pub trait ResolverEntityExt {
+pub(crate) trait ResolverEntityExt {
     /// Resolve a Symbol to a TypeDefId through the resolution chain.
     fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId>;
 
