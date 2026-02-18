@@ -89,24 +89,24 @@ impl ResolverEntityExt for Resolver<'_> {
 }
 
 /// Context needed for type resolution
-pub struct TypeResolutionContext<'a> {
+pub(crate) struct TypeResolutionContext<'a> {
     /// Shared compilation database (each field independently borrowable)
-    pub db: &'a CompilationDb,
-    pub interner: &'a Interner,
-    pub module_id: ModuleId,
+    pub(crate) db: &'a CompilationDb,
+    pub(crate) interner: &'a Interner,
+    pub(crate) module_id: ModuleId,
     /// Type parameters in scope (for generic contexts)
-    pub type_params: Option<&'a TypeParamScope>,
+    pub(crate) type_params: Option<&'a TypeParamScope>,
     /// The concrete type that `Self` resolves to (for method signatures), as interned TypeId
-    pub self_type: Option<TypeId>,
+    pub(crate) self_type: Option<TypeId>,
     /// Parent module IDs for hierarchical resolution (virtual test modules).
-    pub imports: &'a [ModuleId],
+    pub(crate) imports: &'a [ModuleId],
     /// Priority module checked before module_id during resolution (for type shadowing).
-    pub priority_module: Option<ModuleId>,
+    pub(crate) priority_module: Option<ModuleId>,
 }
 
 impl<'a> TypeResolutionContext<'a> {
     /// Create a context with type parameters in scope
-    pub fn with_type_params(
+    pub(crate) fn with_type_params(
         db: &'a CompilationDb,
         interner: &'a Interner,
         module_id: ModuleId,
@@ -124,7 +124,7 @@ impl<'a> TypeResolutionContext<'a> {
     }
 
     /// Create a context without type parameters
-    pub fn new(db: &'a CompilationDb, interner: &'a Interner, module_id: ModuleId) -> Self {
+    pub(crate) fn new(db: &'a CompilationDb, interner: &'a Interner, module_id: ModuleId) -> Self {
         Self {
             db,
             interner,
@@ -137,27 +137,27 @@ impl<'a> TypeResolutionContext<'a> {
     }
 
     /// Get the entity registry (read access)
-    pub fn entity_registry(&self) -> std::cell::Ref<'_, EntityRegistry> {
+    pub(crate) fn entity_registry(&self) -> std::cell::Ref<'_, EntityRegistry> {
         self.db.entities()
     }
 
     /// Get the name table (write access) - uses Rc::make_mut for copy-on-write
-    pub fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
+    pub(crate) fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
         self.db.names_mut()
     }
 
     /// Get the type arena (read access)
-    pub fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
+    pub(crate) fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
         self.db.types()
     }
 
     /// Get the type arena (write access) - uses Rc::make_mut for copy-on-write
-    pub fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
+    pub(crate) fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
         self.db.types_mut()
     }
 
     /// Resolve a type or interface by symbol.
-    pub fn resolve_type_or_interface(&self, sym: Symbol) -> Option<TypeDefId> {
+    pub(crate) fn resolve_type_or_interface(&self, sym: Symbol) -> Option<TypeDefId> {
         let names = self.db.names();
         let entities = self.db.entities();
         let resolver = Resolver::new(self.interner, &names, self.module_id, self.imports)
