@@ -40,12 +40,16 @@ impl RcTask {
     /// Allocate a new RcTask wrapping a scheduler task.
     pub fn new(task_id: TaskId) -> *mut Self {
         let layout = Layout::new::<RcTask>();
+        // SAFETY: Layout::new::<RcTask>() is non-zero-sized; handle_alloc_error
+        // is called if alloc returns null.
         let ptr = unsafe { alloc(layout) };
         if ptr.is_null() {
             std::alloc::handle_alloc_error(layout);
         }
 
         let task = ptr as *mut RcTask;
+        // SAFETY: `ptr` was just allocated with the correct layout and is non-null
+        // (checked above). Writing header and Cell fields initializes the allocation.
         unsafe {
             std::ptr::write(
                 &raw mut (*task).header,
@@ -65,6 +69,8 @@ impl RcTask {
     /// The task will rc_dec this pointer when it is dropped.
     #[expect(clippy::not_unsafe_ptr_arg_deref)]
     pub fn set_closure(task: *mut Self, closure: *const u8) {
+        // SAFETY: Caller guarantees `task` points to a valid RcTask allocation.
+        // Cell::set is safe to call through a raw pointer dereference.
         unsafe {
             (*task).closure_ptr.set(closure);
         }
@@ -80,7 +86,10 @@ extern "C" fn task_drop(ptr: *mut u8) {
     let task = ptr as *mut RcTask;
 
     // Cancel the underlying scheduler task if still running.
+    // SAFETY: `task` points to a valid RcTask — called only by rc_dec when
+    // refcount reaches zero, so the allocation is still live.
     let task_id = unsafe { (*task).task_id.get() };
+    // SAFETY: Same valid RcTask pointer; reading the completed flag.
     if !unsafe { (*task).completed.get() } {
         scheduler::with_scheduler(|sched| {
             let tid = TaskId::from_raw(task_id);
@@ -91,6 +100,7 @@ extern "C" fn task_drop(ptr: *mut u8) {
     }
 
     // RC-dec the closure if the task owns a reference.
+    // SAFETY: Same valid RcTask pointer; reading the closure_ptr field.
     let closure = unsafe { (*task).closure_ptr.get() };
     if !closure.is_null() {
         rc_dec(closure as *mut u8);
@@ -111,6 +121,8 @@ extern "C" fn task_drop(ptr: *mut u8) {
 
     // Free the allocation.
     let layout = Layout::new::<RcTask>();
+    // SAFETY: `ptr` points to the start of the RcTask allocation with the
+    // same layout used in `new`. All fields have been read; no further access.
     unsafe { dealloc(ptr, layout) };
     alloc_track::track_dealloc(RuntimeTypeId::Task as u32);
 }
@@ -156,6 +168,8 @@ pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> TaggedValue {
         return TaggedValue::from_i64(0);
     }
 
+    // SAFETY: Null check above ensures `task_ptr` is valid. The RcTask
+    // allocation is live because the caller holds an RC reference.
     let task_id = unsafe { (*task_ptr).task_id.get() };
     let tid = TaskId::from_raw(task_id);
 
@@ -177,6 +191,8 @@ pub extern "C" fn vole_rctask_join(task_ptr: *mut RcTask) -> TaggedValue {
     }
 
     // Mark the handle as completed.
+    // SAFETY: `task_ptr` is non-null (checked above) and points to a live
+    // RcTask. Setting the completed flag via Cell is a single-threaded update.
     unsafe {
         (*task_ptr).completed.set(true);
     }
@@ -194,6 +210,7 @@ pub extern "C" fn vole_rctask_cancel(task_ptr: *mut RcTask) {
         return;
     }
 
+    // SAFETY: Null check above ensures `task_ptr` is valid and live.
     let task_id = unsafe { (*task_ptr).task_id.get() };
     let tid = TaskId::from_raw(task_id);
 
@@ -201,6 +218,7 @@ pub extern "C" fn vole_rctask_cancel(task_ptr: *mut RcTask) {
         sched.cancel(tid);
     });
 
+    // SAFETY: `task_ptr` is non-null (checked above) and points to a live RcTask.
     unsafe {
         (*task_ptr).completed.set(true);
     }
@@ -217,15 +235,18 @@ pub extern "C" fn vole_rctask_is_done(task_ptr: *const RcTask) -> i64 {
     }
 
     // Check cached completed flag first.
+    // SAFETY: Null check above ensures `task_ptr` is valid and live.
     if unsafe { (*task_ptr).completed.get() } {
         return 1;
     }
 
     // Check with the scheduler.
+    // SAFETY: `task_ptr` is non-null (checked above) and points to a live RcTask.
     let task_id = unsafe { (*task_ptr).task_id.get() };
     let done = scheduler::with_scheduler(|sched| sched.is_done(TaskId::from_raw(task_id)));
 
     if done {
+        // SAFETY: `task_ptr` is non-null and live; updating the cached completed flag.
         unsafe { (*task_ptr).completed.set(true) };
     }
 
