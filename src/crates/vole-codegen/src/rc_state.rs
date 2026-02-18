@@ -134,7 +134,11 @@ impl RcState {
 /// * `arena` - The type arena for type lookups
 /// * `registry` - The entity registry for type definitions (structs, classes, etc.)
 /// * `type_id` - The type to analyze
-pub fn compute_rc_state(arena: &TypeArena, registry: &EntityRegistry, type_id: TypeId) -> RcState {
+pub(crate) fn compute_rc_state(
+    arena: &TypeArena,
+    registry: &EntityRegistry,
+    type_id: TypeId,
+) -> RcState {
     // Check for simple RC types first (most common case for RC values)
     if is_simple_rc_type(arena, type_id) {
         let is_capture = is_capture_rc_type(arena, type_id);
