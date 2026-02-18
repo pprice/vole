@@ -1112,7 +1112,7 @@ pub enum PatternKind {
 //
 // These assertions verify that AST types can be safely shared across threads,
 // enabling future parallel compilation pipelines.
-#[allow(dead_code)]
+#[expect(dead_code)]
 const _: () = {
     fn assert_send<T: Send>() {}
     fn assert_sync<T: Sync>() {}
