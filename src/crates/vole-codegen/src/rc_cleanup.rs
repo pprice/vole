@@ -10,6 +10,8 @@
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags, Variable, types};
 use vole_sema::type_arena::TypeId;
 
+use crate::ops::try_constant_value;
+
 /// A single RC local variable with its drop flag.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RcLocal {
@@ -264,6 +266,21 @@ pub(crate) fn emit_rc_cleanup(
             continue;
         }
         let flag_val = builder.use_var(local.drop_flag);
+
+        // Constant-fold: skip the branch diamond when the drop flag is known.
+        if let Some(const_val) = try_constant_value(builder.func, flag_val) {
+            if const_val == 0 {
+                // Flag is known-dead: skip cleanup entirely.
+                continue;
+            }
+            // Flag is known-live: emit cleanup unconditionally (no branch).
+            emit_single_rc_dec(builder, local, rc_dec_ref);
+            let zero = builder.ins().iconst(types::I8, 0);
+            builder.def_var(local.drop_flag, zero);
+            continue;
+        }
+
+        // Unknown flag: emit the full conditional diamond.
         let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
 
         let cleanup_block = builder.create_block();
@@ -275,15 +292,7 @@ pub(crate) fn emit_rc_cleanup(
 
         builder.switch_to_block(cleanup_block);
         builder.seal_block(cleanup_block);
-        let val = builder.use_var(local.variable);
-        if local.is_interface {
-            // Interface locals are fat pointers: [data_word, vtable_ptr].
-            // The RC-managed value is the data word at offset 0.
-            let data_word = builder.ins().load(types::I64, MemFlags::new(), val, 0);
-            builder.ins().call(rc_dec_ref, &[data_word]);
-        } else {
-            builder.ins().call(rc_dec_ref, &[val]);
-        }
+        emit_single_rc_dec(builder, local, rc_dec_ref);
         // Reset drop flag to 0 after cleanup. This prevents double-free when
         // the variable is conditionally initialized inside a loop: without
         // this, the stale flag=1 propagates via SSA phi nodes to the next
@@ -294,6 +303,23 @@ pub(crate) fn emit_rc_cleanup(
 
         builder.switch_to_block(after_block);
         builder.seal_block(after_block);
+    }
+}
+
+/// Emit a single rc_dec call for an RC local (handles interface fat pointers).
+fn emit_single_rc_dec(
+    builder: &mut FunctionBuilder,
+    local: &RcLocal,
+    rc_dec_ref: cranelift::codegen::ir::FuncRef,
+) {
+    let val = builder.use_var(local.variable);
+    if local.is_interface {
+        // Interface locals are fat pointers: [data_word, vtable_ptr].
+        // The RC-managed value is the data word at offset 0.
+        let data_word = builder.ins().load(types::I64, MemFlags::new(), val, 0);
+        builder.ins().call(rc_dec_ref, &[data_word]);
+    } else {
+        builder.ins().call(rc_dec_ref, &[val]);
     }
 }
 
@@ -328,6 +354,20 @@ pub(crate) fn emit_union_rc_cleanup(
             continue;
         }
         let flag_val = builder.use_var(union_local.drop_flag);
+
+        // Constant-fold: skip the branch diamond when the drop flag is known.
+        if let Some(const_val) = try_constant_value(builder.func, flag_val) {
+            if const_val == 0 {
+                continue;
+            }
+            // Flag is known-live: emit tag checks unconditionally (no outer branch).
+            emit_union_tag_checks(builder, union_local, rc_dec_ref);
+            let zero = builder.ins().iconst(types::I8, 0);
+            builder.def_var(union_local.drop_flag, zero);
+            continue;
+        }
+
+        // Unknown flag: emit the full conditional diamond.
         let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
 
         let cleanup_block = builder.create_block();
@@ -340,40 +380,7 @@ pub(crate) fn emit_union_rc_cleanup(
         builder.switch_to_block(cleanup_block);
         builder.seal_block(cleanup_block);
 
-        let base_ptr = builder.use_var(union_local.variable);
-        let tag = builder.ins().load(types::I8, MemFlags::new(), base_ptr, 0);
-
-        // For each RC variant, emit: if tag == variant_tag { rc_dec(payload) }
-        for &(variant_tag, is_interface) in &union_local.rc_variant_tags {
-            let is_match = builder
-                .ins()
-                .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
-            let dec_block = builder.create_block();
-            let next_block = builder.create_block();
-
-            builder
-                .ins()
-                .brif(is_match, dec_block, &[], next_block, &[]);
-
-            builder.switch_to_block(dec_block);
-            builder.seal_block(dec_block);
-            let payload = builder.ins().load(
-                types::I64,
-                MemFlags::new(),
-                base_ptr,
-                crate::union_layout::PAYLOAD_OFFSET,
-            );
-            if is_interface {
-                let data_word = builder.ins().load(types::I64, MemFlags::new(), payload, 0);
-                builder.ins().call(rc_dec_ref, &[data_word]);
-            } else {
-                builder.ins().call(rc_dec_ref, &[payload]);
-            }
-            builder.ins().jump(next_block, &[]);
-
-            builder.switch_to_block(next_block);
-            builder.seal_block(next_block);
-        }
+        emit_union_tag_checks(builder, union_local, rc_dec_ref);
 
         // Reset drop flag after cleanup (same reason as emit_rc_cleanup).
         let zero = builder.ins().iconst(types::I8, 0);
@@ -382,6 +389,49 @@ pub(crate) fn emit_union_rc_cleanup(
 
         builder.switch_to_block(after_block);
         builder.seal_block(after_block);
+    }
+}
+
+/// Emit the tag-check cascade for a single union's RC variants.
+///
+/// Loads the tag, then for each RC variant emits a conditional rc_dec of the payload.
+fn emit_union_tag_checks(
+    builder: &mut FunctionBuilder,
+    union_local: &UnionRcLocal,
+    rc_dec_ref: cranelift::codegen::ir::FuncRef,
+) {
+    let base_ptr = builder.use_var(union_local.variable);
+    let tag = builder.ins().load(types::I8, MemFlags::new(), base_ptr, 0);
+
+    for &(variant_tag, is_interface) in &union_local.rc_variant_tags {
+        let is_match = builder
+            .ins()
+            .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
+        let dec_block = builder.create_block();
+        let next_block = builder.create_block();
+
+        builder
+            .ins()
+            .brif(is_match, dec_block, &[], next_block, &[]);
+
+        builder.switch_to_block(dec_block);
+        builder.seal_block(dec_block);
+        let payload = builder.ins().load(
+            types::I64,
+            MemFlags::new(),
+            base_ptr,
+            crate::union_layout::PAYLOAD_OFFSET,
+        );
+        if is_interface {
+            let data_word = builder.ins().load(types::I64, MemFlags::new(), payload, 0);
+            builder.ins().call(rc_dec_ref, &[data_word]);
+        } else {
+            builder.ins().call(rc_dec_ref, &[payload]);
+        }
+        builder.ins().jump(next_block, &[]);
+
+        builder.switch_to_block(next_block);
+        builder.seal_block(next_block);
     }
 }
 
@@ -401,6 +451,20 @@ pub(crate) fn emit_composite_rc_cleanup(
             continue;
         }
         let flag_val = builder.use_var(composite.drop_flag);
+
+        // Constant-fold: skip the branch diamond when the drop flag is known.
+        if let Some(const_val) = try_constant_value(builder.func, flag_val) {
+            if const_val == 0 {
+                continue;
+            }
+            // Flag is known-live: emit field cleanup unconditionally (no branch).
+            emit_composite_field_cleanup(builder, composite, rc_dec_ref);
+            let zero = builder.ins().iconst(types::I8, 0);
+            builder.def_var(composite.drop_flag, zero);
+            continue;
+        }
+
+        // Unknown flag: emit the full conditional diamond.
         let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
 
         let cleanup_block = builder.create_block();
@@ -413,13 +477,7 @@ pub(crate) fn emit_composite_rc_cleanup(
         builder.switch_to_block(cleanup_block);
         builder.seal_block(cleanup_block);
 
-        let base_ptr = builder.use_var(composite.variable);
-        for &offset in &composite.rc_field_offsets {
-            let field_val = builder
-                .ins()
-                .load(types::I64, MemFlags::new(), base_ptr, offset);
-            builder.ins().call(rc_dec_ref, &[field_val]);
-        }
+        emit_composite_field_cleanup(builder, composite, rc_dec_ref);
         // Reset drop flag after cleanup (same reason as emit_rc_cleanup).
         let zero = builder.ins().iconst(types::I8, 0);
         builder.def_var(composite.drop_flag, zero);
@@ -427,5 +485,20 @@ pub(crate) fn emit_composite_rc_cleanup(
 
         builder.switch_to_block(after_block);
         builder.seal_block(after_block);
+    }
+}
+
+/// Emit rc_dec calls for each RC field of a composite at its byte offset.
+fn emit_composite_field_cleanup(
+    builder: &mut FunctionBuilder,
+    composite: &CompositeRcLocal,
+    rc_dec_ref: cranelift::codegen::ir::FuncRef,
+) {
+    let base_ptr = builder.use_var(composite.variable);
+    for &offset in &composite.rc_field_offsets {
+        let field_val = builder
+            .ins()
+            .load(types::I64, MemFlags::new(), base_ptr, offset);
+        builder.ins().call(rc_dec_ref, &[field_val]);
     }
 }
