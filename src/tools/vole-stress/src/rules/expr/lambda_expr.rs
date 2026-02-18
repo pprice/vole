@@ -52,14 +52,27 @@ impl ExprRule for LambdaExpr {
             _ => format!(" -> {}", return_type.to_vole_syntax(scope.table)),
         };
 
-        // Expression body: generate sub-expression of return type
+        // Generate body: either an expression body or a block body with a
+        // trailing expression (exercises codegen's implicit return path).
         let body = emit.sub_expr(return_type, scope);
-        Some(format!(
-            "({}){} => {}",
-            params.join(", "),
-            return_annotation,
-            body
-        ))
+        let use_block_body = emit.gen_range(0..5) == 0; // 20% chance
+
+        if use_block_body {
+            let indent = emit.indent_str();
+            Some(format!(
+                "({}){} => {{\n{indent}    let _tmp = {}\n{indent}    _tmp\n{indent}}}",
+                params.join(", "),
+                return_annotation,
+                body,
+            ))
+        } else {
+            Some(format!(
+                "({}){} => {}",
+                params.join(", "),
+                return_annotation,
+                body
+            ))
+        }
     }
 }
 
