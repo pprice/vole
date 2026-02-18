@@ -20,10 +20,15 @@ impl StmtRule for VariableShadow {
     }
 
     fn generate(&self, scope: &mut Scope, emit: &mut Emit, _params: &Params) -> Option<String> {
+        // Only shadow immutable variables — shadowing a mutable variable
+        // with an immutable let breaks subsequent mutations (e.g. loop counters).
         let prim_locals: Vec<(String, PrimitiveType)> = scope
             .locals
             .iter()
-            .filter_map(|(name, ty, _)| {
+            .filter_map(|(name, ty, is_mut)| {
+                if *is_mut {
+                    return None;
+                }
                 if let TypeInfo::Primitive(p) = ty {
                     Some((name.clone(), *p))
                 } else {
