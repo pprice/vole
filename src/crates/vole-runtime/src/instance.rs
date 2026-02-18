@@ -22,6 +22,10 @@ impl RcInstance {
     pub fn new(type_id: u32, field_count: u32, runtime_type_id: u32) -> *mut Self {
         let layout = Self::layout_for_fields(field_count as usize);
 
+        // SAFETY: `layout` from `layout_for_fields` guarantees valid size/alignment.
+        // After the null check, `ptr` is a valid allocation. `ptr::write` initializes
+        // each field without dropping uninitialized memory. The allocation includes
+        // space for `field_count` u64 field slots.
         unsafe {
             let ptr = alloc(layout) as *mut Self;
             if ptr.is_null() {
@@ -57,6 +61,8 @@ impl RcInstance {
     /// # Safety
     /// The pointer must point to a valid, properly initialized `RcInstance`.
     pub unsafe fn fields_ptr(ptr: *mut Self) -> *mut u64 {
+        // SAFETY: Caller guarantees `ptr` is a valid `RcInstance`. Fields start at
+        // offset `size_of::<RcInstance>()`, within the allocation from `layout_for_fields`.
         unsafe { (ptr as *mut u8).add(size_of::<RcInstance>()) as *mut u64 }
     }
 
@@ -65,6 +71,8 @@ impl RcInstance {
     /// # Safety
     /// The pointer must point to a valid, properly initialized `RcInstance`.
     unsafe fn fields_ptr_const(ptr: *const Self) -> *const u64 {
+        // SAFETY: Caller guarantees `ptr` is a valid `RcInstance`. Fields start at
+        // a fixed offset after the struct header, within the allocation bounds.
         unsafe { (ptr as *const u8).add(size_of::<RcInstance>()) as *const u64 }
     }
 
@@ -75,6 +83,8 @@ impl RcInstance {
     /// and `slot` must be less than `field_count`.
     #[inline]
     pub unsafe fn get_field(ptr: *const Self, slot: usize) -> u64 {
+        // SAFETY: Caller guarantees `ptr` is valid and `slot < field_count`.
+        // `fields_ptr_const` returns a valid pointer; `add(slot)` stays in bounds.
         unsafe {
             let fields = Self::fields_ptr_const(ptr);
             *fields.add(slot)
@@ -88,6 +98,8 @@ impl RcInstance {
     /// and `slot` must be less than `field_count`.
     #[inline]
     pub unsafe fn set_field(ptr: *mut Self, slot: usize, value: u64) {
+        // SAFETY: Caller guarantees `ptr` is valid and `slot < field_count`.
+        // `fields_ptr` returns a valid pointer; `add(slot)` stays in bounds.
         unsafe {
             let fields = Self::fields_ptr(ptr);
             *fields.add(slot) = value;
@@ -121,6 +133,9 @@ impl RcInstance {
 /// `ptr` must point to a valid `RcInstance` allocation with refcount already at zero.
 unsafe extern "C" fn instance_drop(ptr: *mut u8) {
     alloc_track::track_dealloc(RuntimeTypeId::Instance as u32);
+    // SAFETY: Called by `rc_dec` when refcount reaches zero, so `ptr` is a valid
+    // `RcInstance` with no other live references. Field reads, RC cleanup of
+    // field values, and final `dealloc` are all valid on the live allocation.
     unsafe {
         let inst = ptr as *mut RcInstance;
         let type_id = (*inst).type_id;
@@ -247,6 +262,8 @@ pub extern "C" fn vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> 
     if ptr.is_null() {
         return 0;
     }
+    // SAFETY: Null check above guarantees `ptr` is non-null. Per JIT contract,
+    // non-null `ptr` is a valid `RcInstance` and `slot` is within bounds.
     unsafe { RcInstance::get_field(ptr, slot as usize) }
 }
 
@@ -264,6 +281,8 @@ pub extern "C" fn vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value
     if ptr.is_null() {
         return;
     }
+    // SAFETY: Null check above guarantees `ptr` is non-null. Per JIT contract,
+    // non-null `ptr` is a valid `RcInstance` and `slot` is within bounds.
     unsafe { RcInstance::set_field(ptr, slot as usize, value) };
 }
 
