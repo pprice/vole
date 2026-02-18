@@ -235,203 +235,8 @@ impl<'src> Parser<'src> {
                     span: token_span,
                 })
             }
-            TokenType::LParen => {
-                let start_span = token_span;
-                self.advance(); // consume '('
-
-                // Case 1: () - empty parens, must be lambda
-                if self.check(TokenType::RParen) {
-                    // Zero-param lambda: () => body
-                    return self.lambda_expr(start_span);
-                }
-
-                // Case 2: Check if first token after '(' is an identifier
-                if self.check(TokenType::Identifier) {
-                    // Save the identifier token and consume it
-                    let ident_token = self.current.clone();
-                    self.advance();
-
-                    // Check what follows the identifier
-                    match self.current.ty {
-                        // (ident: ...) - type annotation means lambda
-                        TokenType::Colon => {
-                            // Definitely a lambda with typed parameter - parse all params
-                            return self.lambda_expr_after_first_ident(
-                                start_span,
-                                ident_token,
-                                true,
-                            );
-                        }
-                        // (ident, ...) - comma means multi-param lambda
-                        TokenType::Comma => {
-                            // Definitely a lambda with multiple params
-                            return self.lambda_expr_after_first_ident(
-                                start_span,
-                                ident_token,
-                                false,
-                            );
-                        }
-                        // (ident) - could be grouping or single-param lambda
-                        TokenType::RParen => {
-                            let ident_span = ident_token.span;
-                            // Consume the ')'
-                            self.advance();
-
-                            // Now check for => or -> to determine if lambda
-                            if self.check(TokenType::FatArrow) || self.check(TokenType::Arrow) {
-                                // It's a lambda: (x) => body or (x) -> T => body
-                                let name = self.interner.intern(&ident_token.lexeme);
-
-                                // Optional return type
-                                let return_type = if self.match_token(TokenType::Arrow) {
-                                    Some(self.parse_type()?)
-                                } else {
-                                    None
-                                };
-
-                                self.consume(
-                                    TokenType::FatArrow,
-                                    "expected '=>' after lambda parameters",
-                                )?;
-
-                                // Parse body - block or expression
-                                let body = if self.check(TokenType::LBrace) {
-                                    FuncBody::Block(self.block()?)
-                                } else {
-                                    FuncBody::Expr(Box::new(self.expression(0)?))
-                                };
-
-                                let end_span = match &body {
-                                    FuncBody::Block(b) => b.span,
-                                    FuncBody::Expr(e) => e.span,
-                                };
-
-                                return Ok(Expr {
-                                    id: self.next_id(),
-                                    kind: ExprKind::Lambda(Box::new(LambdaExpr {
-                                        type_params: Vec::new(),
-                                        params: vec![LambdaParam {
-                                            name,
-                                            ty: None,
-                                            default_value: None,
-                                            span: ident_span,
-                                        }],
-                                        return_type,
-                                        body,
-                                        span: start_span.merge(end_span),
-                                    })),
-                                    span: start_span.merge(end_span),
-                                });
-                            } else {
-                                // It's grouping: (identifier)
-                                let name = self.interner.intern(&ident_token.lexeme);
-                                let inner_expr = Expr {
-                                    id: self.next_id(),
-                                    kind: ExprKind::Identifier(name),
-                                    span: ident_span,
-                                };
-                                let span = start_span.merge(ident_span);
-                                return Ok(Expr {
-                                    id: self.next_id(),
-                                    kind: ExprKind::Grouping(Box::new(inner_expr)),
-                                    span,
-                                });
-                            }
-                        }
-                        // Anything else after identifier means it's part of an expression
-                        // We already consumed the identifier, need to handle this
-                        _ => {
-                            // Build the identifier expression and continue parsing
-                            let name = self.interner.intern(&ident_token.lexeme);
-                            let left = Expr {
-                                id: self.next_id(),
-                                kind: ExprKind::Identifier(name),
-                                span: ident_token.span,
-                            };
-                            // Parse the rest of the expression with the identifier as left side
-                            let expr = self.continue_expression(left, 0)?;
-                            let end_span = self.current.span;
-                            self.consume(TokenType::RParen, "expected ')' after expression")?;
-                            let span = start_span.merge(end_span);
-                            return Ok(Expr {
-                                id: self.next_id(),
-                                kind: ExprKind::Grouping(Box::new(expr)),
-                                span,
-                            });
-                        }
-                    }
-                }
-
-                // Case 3: Expression that doesn't start with identifier (e.g., (1 + 2))
-                let expr = self.expression(0)?;
-                let end_span = self.current.span;
-                self.consume(TokenType::RParen, "expected ')' after expression")?;
-                let span = start_span.merge(end_span);
-                Ok(Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Grouping(Box::new(expr)),
-                    span,
-                })
-            }
-            TokenType::LBracket => {
-                let start_span = self.current.span;
-                self.advance(); // consume '['
-                self.skip_newlines();
-
-                // Empty array: []
-                if self.check(TokenType::RBracket) {
-                    let end_span = self.current.span;
-                    self.advance(); // consume ']'
-                    return Ok(Expr {
-                        id: self.next_id(),
-                        kind: ExprKind::ArrayLiteral(Vec::new()),
-                        span: start_span.merge(end_span),
-                    });
-                }
-
-                // Parse first element
-                let first = self.expression(0)?;
-                self.skip_newlines();
-
-                // Check what follows the first element
-                if self.check(TokenType::Semicolon) {
-                    // [expr; N] - repeat literal
-                    self.advance(); // consume ';'
-                    let count = self.parse_repeat_count()?;
-                    let end_span = self.current.span;
-                    self.consume(TokenType::RBracket, "expected ']' after repeat count")?;
-
-                    return Ok(Expr {
-                        id: self.next_id(),
-                        kind: ExprKind::RepeatLiteral {
-                            element: Box::new(first),
-                            count,
-                        },
-                        span: start_span.merge(end_span),
-                    });
-                }
-
-                // [expr, ...] - array/tuple literal
-                let mut elements = vec![first];
-
-                while self.match_token(TokenType::Comma) {
-                    self.skip_newlines();
-                    if self.check(TokenType::RBracket) {
-                        break; // trailing comma allowed
-                    }
-                    elements.push(self.expression(0)?);
-                    self.skip_newlines();
-                }
-
-                let end_span = self.current.span;
-                self.consume(TokenType::RBracket, "expected ']' after array elements")?;
-
-                Ok(Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::ArrayLiteral(elements),
-                    span: start_span.merge(end_span),
-                })
-            }
+            TokenType::LParen => self.paren_expr(token_span),
+            TokenType::LBracket => self.bracket_expr(),
             TokenType::KwMatch => self.match_expr(),
             TokenType::KwWhen => self.when_expr(),
             TokenType::KwIf => self.if_expr(),
@@ -479,6 +284,203 @@ impl<'src> Parser<'src> {
                 token_span,
             )),
         }
+    }
+
+    /// Parse a parenthesized expression or lambda: `(expr)`, `() => body`, `(x) => body`, etc.
+    ///
+    /// Extracted from `primary()` to give it its own stack frame, reducing the
+    /// aggregate stack footprint of the dispatch function.
+    #[inline(never)]
+    fn paren_expr(&mut self, start_span: Span) -> Result<Expr, ParseError> {
+        self.advance(); // consume '('
+
+        // Case 1: () - empty parens, must be lambda
+        if self.check(TokenType::RParen) {
+            // Zero-param lambda: () => body
+            return self.lambda_expr(start_span);
+        }
+
+        // Case 2: Check if first token after '(' is an identifier
+        if self.check(TokenType::Identifier) {
+            // Save the identifier token and consume it
+            let ident_token = self.current.clone();
+            self.advance();
+
+            // Check what follows the identifier
+            match self.current.ty {
+                // (ident: ...) - type annotation means lambda
+                TokenType::Colon => {
+                    // Definitely a lambda with typed parameter - parse all params
+                    return self.lambda_expr_after_first_ident(start_span, ident_token, true);
+                }
+                // (ident, ...) - comma means multi-param lambda
+                TokenType::Comma => {
+                    // Definitely a lambda with multiple params
+                    return self.lambda_expr_after_first_ident(start_span, ident_token, false);
+                }
+                // (ident) - could be grouping or single-param lambda
+                TokenType::RParen => {
+                    let ident_span = ident_token.span;
+                    // Consume the ')'
+                    self.advance();
+
+                    // Now check for => or -> to determine if lambda
+                    if self.check(TokenType::FatArrow) || self.check(TokenType::Arrow) {
+                        // It's a lambda: (x) => body or (x) -> T => body
+                        let name = self.interner.intern(&ident_token.lexeme);
+
+                        // Optional return type
+                        let return_type = if self.match_token(TokenType::Arrow) {
+                            Some(self.parse_type()?)
+                        } else {
+                            None
+                        };
+
+                        self.consume(TokenType::FatArrow, "expected '=>' after lambda parameters")?;
+
+                        // Parse body - block or expression
+                        let body = if self.check(TokenType::LBrace) {
+                            FuncBody::Block(self.block()?)
+                        } else {
+                            FuncBody::Expr(Box::new(self.expression(0)?))
+                        };
+
+                        let end_span = match &body {
+                            FuncBody::Block(b) => b.span,
+                            FuncBody::Expr(e) => e.span,
+                        };
+
+                        return Ok(Expr {
+                            id: self.next_id(),
+                            kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                                type_params: Vec::new(),
+                                params: vec![LambdaParam {
+                                    name,
+                                    ty: None,
+                                    default_value: None,
+                                    span: ident_span,
+                                }],
+                                return_type,
+                                body,
+                                span: start_span.merge(end_span),
+                            })),
+                            span: start_span.merge(end_span),
+                        });
+                    } else {
+                        // It's grouping: (identifier)
+                        let name = self.interner.intern(&ident_token.lexeme);
+                        let inner_expr = Expr {
+                            id: self.next_id(),
+                            kind: ExprKind::Identifier(name),
+                            span: ident_span,
+                        };
+                        let span = start_span.merge(ident_span);
+                        return Ok(Expr {
+                            id: self.next_id(),
+                            kind: ExprKind::Grouping(Box::new(inner_expr)),
+                            span,
+                        });
+                    }
+                }
+                // Anything else after identifier means it's part of an expression
+                // We already consumed the identifier, need to handle this
+                _ => {
+                    // Build the identifier expression and continue parsing
+                    let name = self.interner.intern(&ident_token.lexeme);
+                    let left = Expr {
+                        id: self.next_id(),
+                        kind: ExprKind::Identifier(name),
+                        span: ident_token.span,
+                    };
+                    // Parse the rest of the expression with the identifier as left side
+                    let expr = self.continue_expression(left, 0)?;
+                    let end_span = self.current.span;
+                    self.consume(TokenType::RParen, "expected ')' after expression")?;
+                    let span = start_span.merge(end_span);
+                    return Ok(Expr {
+                        id: self.next_id(),
+                        kind: ExprKind::Grouping(Box::new(expr)),
+                        span,
+                    });
+                }
+            }
+        }
+
+        // Case 3: Expression that doesn't start with identifier (e.g., (1 + 2))
+        let expr = self.expression(0)?;
+        let end_span = self.current.span;
+        self.consume(TokenType::RParen, "expected ')' after expression")?;
+        let span = start_span.merge(end_span);
+        Ok(Expr {
+            id: self.next_id(),
+            kind: ExprKind::Grouping(Box::new(expr)),
+            span,
+        })
+    }
+
+    /// Parse an array/tuple/repeat literal: `[1, 2, 3]`, `[0; 10]`, `[]`.
+    ///
+    /// Extracted from `primary()` to give it its own stack frame, reducing the
+    /// aggregate stack footprint of the dispatch function.
+    #[inline(never)]
+    fn bracket_expr(&mut self) -> Result<Expr, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume '['
+        self.skip_newlines();
+
+        // Empty array: []
+        if self.check(TokenType::RBracket) {
+            let end_span = self.current.span;
+            self.advance(); // consume ']'
+            return Ok(Expr {
+                id: self.next_id(),
+                kind: ExprKind::ArrayLiteral(Vec::new()),
+                span: start_span.merge(end_span),
+            });
+        }
+
+        // Parse first element
+        let first = self.expression(0)?;
+        self.skip_newlines();
+
+        // Check what follows the first element
+        if self.check(TokenType::Semicolon) {
+            // [expr; N] - repeat literal
+            self.advance(); // consume ';'
+            let count = self.parse_repeat_count()?;
+            let end_span = self.current.span;
+            self.consume(TokenType::RBracket, "expected ']' after repeat count")?;
+
+            return Ok(Expr {
+                id: self.next_id(),
+                kind: ExprKind::RepeatLiteral {
+                    element: Box::new(first),
+                    count,
+                },
+                span: start_span.merge(end_span),
+            });
+        }
+
+        // [expr, ...] - array/tuple literal
+        let mut elements = vec![first];
+
+        while self.match_token(TokenType::Comma) {
+            self.skip_newlines();
+            if self.check(TokenType::RBracket) {
+                break; // trailing comma allowed
+            }
+            elements.push(self.expression(0)?);
+            self.skip_newlines();
+        }
+
+        let end_span = self.current.span;
+        self.consume(TokenType::RBracket, "expected ']' after array elements")?;
+
+        Ok(Expr {
+            id: self.next_id(),
+            kind: ExprKind::ArrayLiteral(elements),
+            span: start_span.merge(end_span),
+        })
     }
 
     /// Parse the count in a repeat literal [expr; N]
