@@ -188,6 +188,53 @@ tests "void and nil returns" {
     }
 }
 
+// Regression: closure capture inside when-expression branches (vol-0d5w).
+// Constant folding was replacing when-expressions with the taken arm's body
+// but preserving the when-expression's NodeId, causing codegen to fail to
+// find the lambda's capture analysis.
+func closure_in_when() -> () -> i64 {
+    let items = "a,b,c".split(",").collect()
+    return when {
+        false => () -> i64 => 0
+        _ => () -> i64 => items.iter().count()
+    }
+}
+
+func closure_in_when_true_arm() -> () -> i64 {
+    let x = 42
+    return when {
+        true => () -> i64 => x
+        _ => () -> i64 => 0
+    }
+}
+
+func closure_in_when_runtime_cond(flag: bool) -> () -> i64 {
+    let captured = 99
+    return when {
+        flag => () -> i64 => captured
+        _ => () -> i64 => 0
+    }
+}
+
+tests "closure capture in when" {
+    test "captures local in when wildcard branch" {
+        let f = closure_in_when()
+        assert(f() == 3)
+    }
+
+    test "captures local in when true branch" {
+        let f = closure_in_when_true_arm()
+        assert(f() == 42)
+    }
+
+    test "captures local in when runtime condition" {
+        let f = closure_in_when_runtime_cond(true)
+        assert(f() == 99)
+        let g = closure_in_when_runtime_cond(false)
+        assert(g() == 0)
+    }
+}
+
 tests "fallible lambda returns" {
     test "lambda returning optional" {
         let maybe = (x: i64) -> i64? => {

@@ -538,20 +538,22 @@ impl<'a> ConstantFolder<'a> {
             unreachable!();
         };
 
-        expr.kind = if cond {
+        if cond {
             // Condition is true: replace with then_branch
-            if_expr.then_branch.kind
+            expr.id = if_expr.then_branch.id;
+            expr.kind = if_expr.then_branch.kind;
         } else if let Some(else_branch) = if_expr.else_branch {
             // Condition is false with else branch: replace with else_branch
-            else_branch.kind
+            expr.id = else_branch.id;
+            expr.kind = else_branch.kind;
         } else {
             // Condition is false with no else: replace with empty block (void)
-            ExprKind::Block(Box::new(BlockExpr {
+            expr.kind = ExprKind::Block(Box::new(BlockExpr {
                 stmts: vec![],
                 trailing_expr: None,
                 span,
-            }))
-        };
+            }));
+        }
 
         self.stats.branches_eliminated += 1;
         true
@@ -581,6 +583,7 @@ impl<'a> ConstantFolder<'a> {
                             unreachable!();
                         };
                         let arm = when.arms.swap_remove(i);
+                        expr.id = arm.body.id;
                         expr.kind = arm.body.kind;
                         self.stats.branches_eliminated += 1;
                         return true;
@@ -601,6 +604,7 @@ impl<'a> ConstantFolder<'a> {
                         unreachable!();
                     };
                     let arm = when.arms.swap_remove(i);
+                    expr.id = arm.body.id;
                     expr.kind = arm.body.kind;
                     self.stats.branches_eliminated += 1;
                     return true;
