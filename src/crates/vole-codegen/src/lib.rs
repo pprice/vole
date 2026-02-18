@@ -29,6 +29,7 @@ mod value_builders;
 
 // Organized submodules
 mod control_flow;
+mod for_loop;
 mod interfaces;
 
 pub use callable_registry::{
