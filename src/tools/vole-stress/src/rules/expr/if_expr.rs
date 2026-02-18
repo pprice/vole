@@ -8,6 +8,15 @@ use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
 
+/// Strip Optional wrappers so that when arms produce a consistent concrete
+/// type.  See [`super::when_expr::strip_optional_type`] for rationale.
+fn strip_optional_type(ty: &TypeInfo) -> &TypeInfo {
+    match ty {
+        TypeInfo::Optional(inner) => strip_optional_type(inner),
+        _ => ty,
+    }
+}
+
 pub struct IfExpr;
 
 impl ExprRule for IfExpr {
@@ -30,10 +39,15 @@ impl ExprRule for IfExpr {
         _params: &Params,
         expected_type: &TypeInfo,
     ) -> Option<String> {
+        // Strip Optional wrappers so both arms produce the same concrete type.
+        // literal(Optional(T)) randomly returns nil or T, which would cause
+        // a type mismatch between arms.
+        let arm_type = strip_optional_type(expected_type);
+
         let bool_ty = TypeInfo::Primitive(PrimitiveType::Bool);
         let cond = emit.sub_expr(&bool_ty, scope);
-        let then_expr = emit.sub_expr(expected_type, scope);
-        let else_expr = emit.sub_expr(expected_type, scope);
+        let then_expr = emit.sub_expr(arm_type, scope);
+        let else_expr = emit.sub_expr(arm_type, scope);
 
         Some(format!(
             "when {{ {} => {}, _ => {} }}",

@@ -189,6 +189,93 @@ impl Emit<'_> {
                 // Fallback for generic classes or missing symbols.
                 self.literal_for_primitive(PrimitiveType::I64)
             }
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => {
+                // Generate a lambda: (p0: T0, p1: T1) -> R => literal(R)
+                let params: Vec<String> = param_types
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ty)| format!("_p{}: {}", i, ty.to_vole_syntax(self.table)))
+                    .collect();
+                let ret_annotation = match return_type.as_ref() {
+                    TypeInfo::Void => String::new(),
+                    rt => format!(" -> {}", rt.to_vole_syntax(self.table)),
+                };
+                let body = self.literal(return_type);
+                format!("({}){} => {}", params.join(", "), ret_annotation, body)
+            }
+            TypeInfo::Union(variants) => {
+                // Pick a random non-Void variant and generate a literal for it.
+                let concrete: Vec<&TypeInfo> = variants
+                    .iter()
+                    .filter(|v| !matches!(v, TypeInfo::Void))
+                    .collect();
+                if let Some(&variant) = concrete.first() {
+                    self.literal(variant)
+                } else {
+                    "nil".to_string()
+                }
+            }
+            TypeInfo::Interface(mod_id, sym_id) => {
+                // Find a non-generic class implementing this interface.
+                if let Some(module) = self.table.get_module(*mod_id) {
+                    for sym in module.classes() {
+                        if let SymbolKind::Class(ref info) = sym.kind {
+                            if !info.type_params.is_empty() {
+                                continue;
+                            }
+                            if info
+                                .implements
+                                .iter()
+                                .any(|&(m, s)| m == *mod_id && s == *sym_id)
+                            {
+                                let field_values: Vec<String> = info
+                                    .fields
+                                    .iter()
+                                    .map(|f| {
+                                        let value = self.literal(&f.field_type);
+                                        format!("{}: {}", f.name, value)
+                                    })
+                                    .collect();
+                                return format!("{} {{ {} }}", sym.name, field_values.join(", "));
+                            }
+                        }
+                    }
+                }
+                // No implementing class found; fall back.
+                self.literal_for_primitive(PrimitiveType::I64)
+            }
+            TypeInfo::Sentinel(mod_id, sym_id) => {
+                // Sentinels are constructed by name.
+                if let Some(sym) = self.table.get_symbol(*mod_id, *sym_id) {
+                    sym.name.clone()
+                } else {
+                    self.literal_for_primitive(PrimitiveType::I64)
+                }
+            }
+            TypeInfo::Error(mod_id, sym_id) => {
+                // Construct error: ErrName { f1: v1, f2: v2 }
+                if let Some(sym) = self.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Error(ref info) = sym.kind {
+                        let field_values: Vec<String> = info
+                            .fields
+                            .iter()
+                            .map(|f| {
+                                let value = self.literal(&f.field_type);
+                                format!("{}: {}", f.name, value)
+                            })
+                            .collect();
+                        return format!("{} {{ {} }}", sym.name, field_values.join(", "));
+                    }
+                }
+                self.literal_for_primitive(PrimitiveType::I64)
+            }
+            TypeInfo::Fallible { success, .. } => {
+                // For fallible types, generate a literal of the success type.
+                self.literal(success)
+            }
             TypeInfo::TypeParam(name) => {
                 // Look up registered expressions for this type parameter
                 // (e.g. `self.field8` when inside a generic class method).
@@ -204,8 +291,7 @@ impl Emit<'_> {
                 self.literal_for_primitive(PrimitiveType::I64)
             }
             _ => {
-                // For types that don't have a natural literal form,
-                // fall back to a default primitive.
+                // Remaining: Iterator, Never -- no natural literal form.
                 self.literal_for_primitive(PrimitiveType::I64)
             }
         }

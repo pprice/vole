@@ -9,6 +9,15 @@ use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
 
+/// Strip Optional wrappers so that match arms produce a consistent concrete
+/// type.  See [`super::when_expr`] for rationale.
+fn strip_optional_type(ty: &TypeInfo) -> &TypeInfo {
+    match ty {
+        TypeInfo::Optional(inner) => strip_optional_type(inner),
+        _ => ty,
+    }
+}
+
 pub struct MatchExpr;
 
 impl ExprRule for MatchExpr {
@@ -39,6 +48,11 @@ impl ExprRule for MatchExpr {
         let max_arms = params.count("max_arms").max(2);
         let use_unreachable = emit.gen_bool(unreachable_prob);
 
+        // Strip Optional wrappers so all match arms produce the same concrete
+        // type.  literal(Optional(T)) randomly returns nil or T, causing a
+        // type mismatch between arms.
+        let arm_type = strip_optional_type(expected_type);
+
         // Pick a subject type for matching
         let subject_prim = match emit.gen_range(0..3_usize) {
             0 => PrimitiveType::I32,
@@ -53,12 +67,12 @@ impl ExprRule for MatchExpr {
         if use_unreachable {
             // Generate a known literal subject and match it
             let subject_literal = emit.literal(&subject_ty);
-            let first_value = emit.sub_expr(expected_type, scope);
+            let first_value = emit.sub_expr(arm_type, scope);
             arms.push(format!("{} => {}", subject_literal, first_value));
 
             for _ in 1..arm_count - 1 {
                 let pattern = emit.literal(&subject_ty);
-                let value = emit.sub_expr(expected_type, scope);
+                let value = emit.sub_expr(arm_type, scope);
                 arms.push(format!("{} => {}", pattern, value));
             }
 
@@ -76,11 +90,11 @@ impl ExprRule for MatchExpr {
 
         for _ in 0..arm_count - 1 {
             let pattern = emit.literal(&subject_ty);
-            let value = emit.sub_expr(expected_type, scope);
+            let value = emit.sub_expr(arm_type, scope);
             arms.push(format!("{} => {}", pattern, value));
         }
 
-        let default_value = emit.sub_expr(expected_type, scope);
+        let default_value = emit.sub_expr(arm_type, scope);
         arms.push(format!("_ => {}", default_value));
 
         Some(format!("match {} {{ {} }}", subject, arms.join(", ")))

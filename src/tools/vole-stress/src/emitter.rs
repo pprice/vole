@@ -1225,6 +1225,24 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             }
         }
 
+        // For standalone generic functions (not inside a class), map type
+        // parameter names to function parameters of that type so literal()
+        // can produce type-correct values.
+        if self.current_class.is_none() && !type_params.is_empty() {
+            let mut tp_map = std::collections::HashMap::new();
+            for param in params {
+                if let TypeInfo::TypeParam(ref tp_name) = param.param_type {
+                    tp_map
+                        .entry(tp_name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(param.name.clone());
+                }
+            }
+            if !tp_map.is_empty() {
+                emit.set_type_param_exprs(tp_map);
+            }
+        }
+
         let lines = emit.generate_body(return_type, &mut scope, stmt_count);
 
         for line in lines {

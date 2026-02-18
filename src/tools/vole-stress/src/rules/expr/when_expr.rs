@@ -9,6 +9,20 @@ use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
 
+/// Strip Optional wrappers so that when/match arms produce a consistent
+/// concrete type.
+///
+/// `Optional(T)` is the main offender: `literal(Optional(T))` randomly returns
+/// either `nil` or a value of type `T`, so two independent calls can disagree.
+/// Since Vole requires all when/match arms to return the **same** type, we peel
+/// off Optional so every arm generates a consistent concrete type.
+fn strip_optional_type(ty: &TypeInfo) -> &TypeInfo {
+    match ty {
+        TypeInfo::Optional(inner) => strip_optional_type(inner),
+        _ => ty,
+    }
+}
+
 pub struct WhenExpr;
 
 impl ExprRule for WhenExpr {
@@ -45,16 +59,21 @@ impl ExprRule for WhenExpr {
             2
         };
 
+        // Strip Optional/Void wrappers so all when arms produce the same
+        // concrete type.  Vole does NOT auto-create union/optional types
+        // from when arms -- every arm must return the exact same type.
+        let arm_type = strip_optional_type(expected_type);
+
         let bool_ty = TypeInfo::Primitive(PrimitiveType::Bool);
         let mut arms = Vec::new();
 
         if use_unreachable {
-            let value = emit.sub_expr(expected_type, scope);
+            let value = emit.sub_expr(arm_type, scope);
             arms.push(format!("true => {}", value));
 
             for _ in 1..arm_count - 1 {
                 let cond = emit.sub_expr(&bool_ty, scope);
-                let arm_value = emit.sub_expr(expected_type, scope);
+                let arm_value = emit.sub_expr(arm_type, scope);
                 arms.push(format!("{} => {}", cond, arm_value));
             }
 
@@ -62,11 +81,11 @@ impl ExprRule for WhenExpr {
         } else {
             for _ in 0..arm_count - 1 {
                 let cond = emit.sub_expr(&bool_ty, scope);
-                let value = emit.sub_expr(expected_type, scope);
+                let value = emit.sub_expr(arm_type, scope);
                 arms.push(format!("{} => {}", cond, value));
             }
 
-            let default_value = emit.sub_expr(expected_type, scope);
+            let default_value = emit.sub_expr(arm_type, scope);
             arms.push(format!("_ => {}", default_value));
         }
 
