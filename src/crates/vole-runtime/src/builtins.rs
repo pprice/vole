@@ -228,6 +228,8 @@ struct RcWide128 {
 #[inline]
 fn alloc_wide128(bits: i128) -> *mut RcWide128 {
     let layout = Layout::new::<RcWide128>();
+    // SAFETY: Layout is valid (fixed-size type). All fields initialized via
+    // ptr::write before returning.
     unsafe {
         let ptr = alloc(layout) as *mut RcWide128;
         if ptr.is_null() {
@@ -245,6 +247,7 @@ fn alloc_wide128(bits: i128) -> *mut RcWide128 {
 
 unsafe extern "C" fn wide128_drop(ptr: *mut u8) {
     crate::alloc_track::track_dealloc(RuntimeTypeId::Wide128 as u32);
+    // SAFETY: Called only when refcount reaches zero; layout matches allocation.
     unsafe {
         dealloc(ptr, Layout::new::<RcWide128>());
     }
@@ -262,6 +265,8 @@ pub extern "C" fn vole_wide128_unbox(ptr: *const u8) -> i128 {
     if ptr.is_null() {
         return 0;
     }
+    // SAFETY: Null case handled above; JIT guarantees non-null ptrs are valid
+    // RcWide128 allocations.
     unsafe { (*(ptr as *const RcWide128)).bits }
 }
 
@@ -397,6 +402,8 @@ print_fns!(string, *const RcString, |ptr| {
     if ptr.is_null() {
         std::borrow::Cow::Borrowed("")
     } else {
+        // SAFETY: Null case handled above; JIT guarantees non-null ptrs are valid
+        // RcString allocations.
         std::borrow::Cow::Owned(unsafe { (*ptr).as_str() }.to_string())
     }
 });
@@ -418,6 +425,8 @@ print_fns!(bool, i8, |v| {
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString {
+    // SAFETY: Null cases handled inline; JIT guarantees non-null ptrs are valid
+    // RcString allocations.
     unsafe {
         let bytes_a: &[u8] = if a.is_null() { &[] } else { (*a).data() };
         let bytes_b: &[u8] = if b.is_null() { &[] } else { (*b).data() };
@@ -433,6 +442,8 @@ pub extern "C" fn vole_array_i64_to_string(ptr: *const RcArray) -> *mut RcString
     if ptr.is_null() {
         return RcString::new("[]");
     }
+    // SAFETY: Null case handled above; JIT guarantees non-null ptrs are valid
+    // RcArray allocations. Indices are bounded by `show_count <= len`.
     unsafe {
         let len = (*ptr).len;
         let mut result = String::from("[");
@@ -488,6 +499,7 @@ pub extern "C" fn vole_panic(
     // Extract the message into an owned String so we can free the RcString
     // before diverging (longjmp or exit). msg_str borrows from the RcString,
     // so we must copy it first.
+    // SAFETY: Null case handled; JIT guarantees non-null msg is a valid RcString.
     let msg_owned = unsafe {
         if msg.is_null() {
             String::new()
@@ -501,6 +513,8 @@ pub extern "C" fn vole_panic(
         crate::value::rc_dec(msg as *mut u8);
     }
 
+    // SAFETY: Null/empty case handled; callers pass valid UTF-8 byte slices
+    // (static byte-string literals embedded in JIT code or runtime constants).
     let file_str = unsafe {
         if file.is_null() || file_len == 0 {
             "<unknown>"
@@ -525,6 +539,8 @@ pub extern "C" fn vole_panic(
                 }));
             });
             #[cfg(unix)]
+            // SAFETY: `buf` is a valid jmp_buf set by sigsetjmp in the test
+            // harness; stack frames between setjmp and here are C-compatible.
             unsafe {
                 crate::assert::siglongjmp(buf, 2);
             }
@@ -573,6 +589,7 @@ pub extern "C" fn vole_array_with_capacity(capacity: usize) -> *mut RcArray {
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
+    // SAFETY: JIT guarantees `arr` is a valid, non-null RcArray allocation.
     unsafe {
         RcArray::push(arr, TaggedValue { tag, value });
     }
@@ -586,10 +603,13 @@ pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
     if arr.is_null() {
         return 0;
     }
+    // SAFETY: Null case handled above; JIT guarantees non-null ptrs are valid
+    // RcArray allocations.
     let len = unsafe { (*arr).len };
     if index >= len {
         array_index_oob(index, len);
     }
+    // SAFETY: Bounds checked above.
     unsafe { RcArray::get(arr, index).tag }
 }
 
@@ -601,10 +621,13 @@ pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64
     if arr.is_null() {
         return 0;
     }
+    // SAFETY: Null case handled above; JIT guarantees non-null ptrs are valid
+    // RcArray allocations.
     let len = unsafe { (*arr).len };
     if index >= len {
         array_index_oob(index, len);
     }
+    // SAFETY: Bounds checked above.
     unsafe { RcArray::get(arr, index).value }
 }
 
@@ -616,10 +639,13 @@ pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, valu
     if arr.is_null() {
         return;
     }
+    // SAFETY: Null case handled above; JIT guarantees non-null ptrs are valid
+    // RcArray allocations.
     let len = unsafe { (*arr).len };
     if index >= len {
         array_index_oob(index, len);
     }
+    // SAFETY: Bounds checked above.
     unsafe {
         RcArray::set(arr, index, TaggedValue { tag, value });
     }
@@ -632,6 +658,8 @@ pub extern "C" fn vole_array_len(arr: *const RcArray) -> usize {
     if arr.is_null() {
         return 0;
     }
+    // SAFETY: Null case handled above; JIT guarantees non-null ptrs are valid
+    // RcArray allocations.
     unsafe { RcArray::len(arr) }
 }
 
@@ -665,6 +693,8 @@ pub extern "C" fn vole_array_filled(count: i64, tag: u64, value: u64) -> *mut Rc
     let n = count as usize;
     let arr = RcArray::with_capacity(n);
     let tv = TaggedValue { tag, value };
+    // SAFETY: `arr` was just allocated above via `RcArray::with_capacity(n)`;
+    // indices are bounded by `n`. ptr::write initializes each slot exactly once.
     unsafe {
         if tag == RuntimeTypeId::UnionHeap as u64 && value != 0 {
             // Union heap buffers: each slot needs its own clone of the buffer
@@ -698,6 +728,8 @@ pub extern "C" fn vole_array_filled(count: i64, tag: u64, value: u64) -> *mut Rc
 /// # Safety
 /// `src` must point to a valid union heap buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
 unsafe fn clone_union_heap_buffer(src: *const u8) -> *mut u8 {
+    // SAFETY: Caller guarantees `src` is a valid 16-byte union heap buffer.
+    // Layout is fixed (16 bytes, 8-align). RC payload incremented if present.
     unsafe {
         const UNION_HEAP_LAYOUT: Layout = match Layout::from_size_align(16, 8) {
             Ok(l) => l,
