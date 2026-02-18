@@ -71,17 +71,16 @@ impl Cg<'_, '_, '_> {
             let dec_block = self.builder.create_block();
             let cont_block = self.builder.create_block();
 
-            let cond = self.cond_to_i32(is_success);
             if success_rc {
                 // rc_dec only on success path
                 self.builder
                     .ins()
-                    .brif(cond, dec_block, &[], cont_block, &[]);
+                    .brif(is_success, dec_block, &[], cont_block, &[]);
             } else {
                 // rc_dec only on error path
                 self.builder
                     .ins()
-                    .brif(cond, cont_block, &[], dec_block, &[]);
+                    .brif(is_success, cont_block, &[], dec_block, &[]);
             }
 
             self.builder.switch_to_block(dec_block);

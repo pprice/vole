@@ -668,14 +668,13 @@ impl Cg<'_, '_, '_> {
         }
 
         let cond = self.expr(&call.args[0])?;
-        let cond_i32 = self.cond_to_i32(cond.value);
 
         let pass_block = self.builder.create_block();
         let fail_block = self.builder.create_block();
 
         self.builder
             .ins()
-            .brif(cond_i32, pass_block, &[], fail_block, &[]);
+            .brif(cond.value, pass_block, &[], fail_block, &[]);
 
         self.switch_and_seal(fail_block);
 

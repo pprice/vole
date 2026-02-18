@@ -226,11 +226,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.seal_block(block);
     }
 
-    /// Extend a boolean condition to I32 for use with brif
-    pub fn cond_to_i32(&mut self, cond: Value) -> Value {
-        self.builder.ins().uextend(types::I32, cond)
-    }
-
     /// Compile a loop body with proper loop context setup.
     ///
     /// - Registers the loop with exit_block and continue_block

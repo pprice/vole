@@ -149,10 +149,9 @@ impl Cg<'_, '_, '_> {
 
                 self.builder.switch_to_block(header_block);
                 let cond = self.expr(&while_stmt.condition)?;
-                let cond_i32 = self.cond_to_i32(cond.value);
                 self.builder
                     .ins()
-                    .brif(cond_i32, body_block, &[], exit_block, &[]);
+                    .brif(cond.value, body_block, &[], exit_block, &[]);
 
                 self.builder.switch_to_block(body_block);
                 self.compile_loop_body(&while_stmt.body, exit_block, header_block)?;
@@ -191,7 +190,6 @@ impl Cg<'_, '_, '_> {
                 }
 
                 let cond = self.expr(&if_stmt.condition)?;
-                let cond_i32 = self.cond_to_i32(cond.value);
 
                 let then_block = self.builder.create_block();
                 let else_block = self.builder.create_block();
@@ -199,7 +197,7 @@ impl Cg<'_, '_, '_> {
 
                 self.builder
                     .ins()
-                    .brif(cond_i32, then_block, &[], else_block, &[]);
+                    .brif(cond.value, then_block, &[], else_block, &[]);
 
                 self.builder.switch_to_block(then_block);
                 self.invalidate_value_caches();
