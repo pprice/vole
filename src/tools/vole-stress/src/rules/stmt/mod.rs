@@ -79,6 +79,7 @@ mod iter_reduce_let;
 mod iter_take_skip_collect;
 mod iter_terminal_chain;
 mod iter_while_accum;
+mod iter_zip_collect;
 mod lambda_let;
 mod last_elem_access;
 mod length_comparison;
@@ -310,6 +311,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(reverse_collect::ReverseCollect),
         Box::new(iter_take_skip_collect::IterTakeSkipCollect),
         Box::new(iter_enumerate_collect::IterEnumerateCollect),
+        Box::new(iter_zip_collect::IterZipCollect),
         Box::new(array_length_guard::ArrayLengthGuard),
         Box::new(array_length_zero_check::ArrayLengthZeroCheck),
         Box::new(match_sorted_length::MatchSortedLength),
