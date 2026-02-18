@@ -69,6 +69,8 @@ impl RcString {
         // Calculate layout: header + data
         let layout = Self::layout_for_len(len);
 
+        // SAFETY: Layout is valid (computed from str len + header size). We
+        // initialize every field via ptr::write before returning.
         unsafe {
             let ptr = alloc(layout) as *mut Self;
             if ptr.is_null() {
@@ -130,6 +132,7 @@ impl RcString {
         let total_len = a.len() + b.len();
 
         // Count characters from both UTF-8 byte slices.
+        // SAFETY: Callers guarantee both slices contain valid UTF-8 bytes.
         let char_count = unsafe {
             str::from_utf8_unchecked(a).chars().count()
                 + str::from_utf8_unchecked(b).chars().count()
@@ -144,6 +147,8 @@ impl RcString {
 
         let layout = Self::layout_for_len(total_len);
 
+        // SAFETY: Layout is valid (computed from combined len + header size).
+        // Every field is initialized via ptr::write; data is copied from valid slices.
         unsafe {
             let ptr = alloc(layout) as *mut Self;
             if ptr.is_null() {
@@ -193,6 +198,8 @@ impl RcString {
 /// `ptr` must point to a valid `RcString` allocation with refcount already at zero.
 unsafe extern "C" fn string_drop(ptr: *mut u8) {
     alloc_track::track_dealloc(RuntimeTypeId::String as u32);
+    // SAFETY: Called only by rc_dec when refcount reaches zero, so ptr is a
+    // valid RcString allocation. Layout matches the one used at allocation.
     unsafe {
         let s = ptr as *mut RcString;
         let len = (*s).len;
@@ -222,6 +229,7 @@ unsafe extern "C" fn string_drop(ptr: *mut u8) {
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_string_new(data: *const u8, len: usize) -> *mut RcString {
+    // SAFETY: JIT contract guarantees `data` points to `len` bytes of valid UTF-8.
     let s = unsafe {
         let slice = slice::from_raw_parts(data, len);
         str::from_utf8_unchecked(slice)
@@ -251,6 +259,7 @@ pub extern "C" fn vole_string_len(ptr: *const RcString) -> usize {
         return 0;
     }
     // Return cached character count (O(1), computed at construction time)
+    // SAFETY: Null case handled above; JIT guarantees non-null ptrs are valid RcStrings.
     unsafe { (*ptr).char_count }
 }
 
@@ -261,6 +270,7 @@ pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
     if ptr.is_null() {
         return ptr::null();
     }
+    // SAFETY: Null case handled above; inline data immediately follows the header.
     unsafe { (ptr as *const u8).add(size_of::<RcString>()) }
 }
 
@@ -275,6 +285,8 @@ pub extern "C" fn vole_string_eq(a: *const RcString, b: *const RcString) -> i8 {
     if a.is_null() || b.is_null() {
         return 0;
     }
+    // SAFETY: Both null cases handled above; JIT guarantees non-null ptrs are
+    // valid RcStrings containing UTF-8 data.
     unsafe {
         let a_str = (*a).as_str();
         let b_str = (*b).as_str();
