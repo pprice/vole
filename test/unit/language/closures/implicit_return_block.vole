@@ -1,0 +1,82 @@
+// Regression: lambda block bodies should use the trailing expression
+// as the implicit return value (like expression bodies do).
+// Bug: codegen returned zero/null for FuncBody::Block trailing expressions.
+
+tests "implicit return from lambda block body" {
+    test "trailing i64 expression" {
+        let f = (x: i64) -> i64 => {
+            let y = x + 1
+            y
+        }
+        assert(f(5) == 6)
+        assert(f(0) == 1)
+    }
+
+    test "trailing string expression" {
+        let f = (x: string) -> string => {
+            let result = x + "!"
+            result
+        }
+        assert(f("hello") == "hello!")
+    }
+
+    test "trailing bool expression" {
+        let f = (x: i64) -> bool => {
+            let ok = x > 0
+            ok
+        }
+        assert(f(1) == true)
+        assert(f(-1) == false)
+    }
+
+    test "trailing computed expression (not just a variable)" {
+        let f = (a: i64, b: i64) -> i64 => {
+            let sum = a + b
+            sum * 2
+        }
+        assert(f(3, 4) == 14)
+    }
+
+    test "closure returning closure (higher-order function)" {
+        let make_adder = (x: i64) -> (i64) -> i64 => {
+            let result = (y: i64) -> i64 => x + y
+            result
+        }
+        let add5 = make_adder(5)
+        assert(add5(3) == 8)
+        assert(add5(0) == 5)
+    }
+
+    test "closure returning closure with capture" {
+        let make_multiplier = (factor: i64) -> (i64) -> i64 => {
+            let result = (x: i64) -> i64 => x * factor
+            result
+        }
+        let double = make_multiplier(2)
+        let triple = make_multiplier(3)
+        assert(double(5) == 10)
+        assert(triple(5) == 15)
+    }
+
+    test "block body with explicit return still works" {
+        let f = (x: i64) -> i64 => {
+            if x > 0 {
+                return x * 2
+            }
+            return 0
+        }
+        assert(f(5) == 10)
+        assert(f(-1) == 0)
+    }
+
+    test "block body with early return and trailing expression" {
+        let f = (x: i64) -> i64 => {
+            if x < 0 {
+                return -1
+            }
+            x * 10
+        }
+        assert(f(3) == 30)
+        assert(f(-1) == -1)
+    }
+}

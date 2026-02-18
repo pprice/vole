@@ -7,7 +7,7 @@
 use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
-use vole_frontend::{ExprKind, FuncBody, Symbol};
+use vole_frontend::{ExprKind, FuncBody, Stmt, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use crate::context::{Captures, Cg};
@@ -315,8 +315,58 @@ pub(crate) fn compile_function_body_with_cg(
     // Compile function body
     let (terminated, expr_value) = match body {
         FuncBody::Block(block) => {
-            let terminated = cg.block(block)?;
-            (terminated, None)
+            // Check if the block ends with an expression statement and the
+            // function has a non-void return type. If so, treat the trailing
+            // expression as an implicit return value (like Rust blocks).
+            let has_trailing_expr = cg.return_type.is_some_and(|ret| !cg.arena().is_void(ret))
+                && matches!(block.stmts.last(), Some(Stmt::Expr(_)));
+
+            if has_trailing_expr {
+                // Compile all statements except the trailing expression
+                let mut terminated = false;
+                for stmt in &block.stmts[..block.stmts.len() - 1] {
+                    if terminated {
+                        break;
+                    }
+                    terminated = cg.stmt(stmt)?;
+                }
+                if terminated {
+                    (true, None)
+                } else {
+                    // Compile the trailing expression and use as implicit return
+                    let trailing = match block.stmts.last() {
+                        Some(Stmt::Expr(expr_stmt)) => &expr_stmt.expr,
+                        _ => unreachable!(),
+                    };
+                    let mut value = cg.expr(trailing)?;
+
+                    // RC bookkeeping (same as FuncBody::Expr path)
+                    let skip_var = if let ExprKind::Identifier(sym) = &trailing.kind
+                        && let Some((var, _)) = cg.vars.get(sym)
+                        && (cg.rc_scopes.is_rc_local(*var)
+                            || cg.rc_scopes.is_composite_rc_local(*var)
+                            || cg.rc_scopes.is_union_rc_local(*var))
+                    {
+                        Some(*var)
+                    } else {
+                        None
+                    };
+                    if skip_var.is_none() && value.is_borrowed() {
+                        if cg.rc_state(value.type_id).needs_cleanup() {
+                            cg.emit_rc_inc_for_type(value.value, value.type_id)?;
+                        } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
+                            cg.emit_union_rc_inc(value.value, rc_tags)?;
+                        }
+                    }
+
+                    value.mark_consumed();
+                    value.debug_assert_rc_handled("implicit block return");
+                    (false, Some((value, skip_var)))
+                }
+            } else {
+                let terminated = cg.block(block)?;
+                (terminated, None)
+            }
         }
         FuncBody::Expr(expr) => {
             let mut value = cg.expr(expr)?;
