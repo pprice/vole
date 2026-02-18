@@ -170,7 +170,7 @@ impl<'a> TypeResolutionContext<'a> {
 ///
 /// This is the TypeId-based version of resolve_type. It returns an interned TypeId
 /// for O(1) equality and reduced allocations. Uses ctx.type_arena for interning.
-pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> TypeId {
+pub(crate) fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) -> TypeId {
     match &ty.kind {
         TypeExprKind::Primitive(p) => {
             let prim_type = crate::types::PrimitiveType::from_ast(*p);
