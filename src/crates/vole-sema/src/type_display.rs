@@ -8,7 +8,7 @@ use vole_identity::NameTable;
 
 /// Display a TypeId by matching on SemaType.
 /// This is the canonical way to format types for error messages.
-pub fn display_type_id(
+pub(crate) fn display_type_id(
     type_id: TypeId,
     arena: &TypeArena,
     names: &NameTable,
