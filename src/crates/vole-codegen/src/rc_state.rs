@@ -207,14 +207,12 @@ fn is_capture_rc_type(arena: &TypeArena, type_id: TypeId) -> bool {
 
 /// Compute which union variant tags correspond to RC types.
 fn compute_union_rc_variants(arena: &TypeArena, variants: &[TypeId]) -> Vec<(u8, bool)> {
-    let mut rc_tags = Vec::new();
-    for (i, &variant_type_id) in variants.iter().enumerate() {
-        if is_simple_rc_type(arena, variant_type_id) {
-            let is_interface = arena.is_interface(variant_type_id);
-            rc_tags.push((i as u8, is_interface));
-        }
-    }
-    rc_tags
+    variants
+        .iter()
+        .enumerate()
+        .filter(|(_, variant_type_id)| is_simple_rc_type(arena, **variant_type_id))
+        .map(|(i, variant_type_id)| (i as u8, arena.is_interface(*variant_type_id)))
+        .collect()
 }
 
 /// Compute the byte offsets of RC fields within a composite type.
@@ -294,13 +292,12 @@ fn compute_composite_rc_offsets(
     // Tuple: compute offsets based on element sizes, then filter RC elements
     if let Some(elem_types) = arena.unwrap_tuple(type_id) {
         let all_offsets = compute_tuple_offsets(arena, registry, elem_types);
-        let mut rc_offsets = Vec::new();
-
-        for (i, elem_type) in elem_types.iter().enumerate() {
-            if is_simple_rc_type(arena, *elem_type) {
-                rc_offsets.push(all_offsets[i]);
-            }
-        }
+        let rc_offsets: Vec<i32> = elem_types
+            .iter()
+            .enumerate()
+            .filter(|(_, elem_type)| is_simple_rc_type(arena, **elem_type))
+            .map(|(i, _)| all_offsets[i])
+            .collect();
 
         if rc_offsets.is_empty() {
             return None;
