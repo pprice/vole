@@ -70,6 +70,9 @@ impl RcChannel {
     pub fn new(capacity: usize) -> *mut Self {
         let layout = Layout::new::<RcChannel>();
 
+        // SAFETY: `alloc` returns a valid pointer (null check follows). `ptr::write`
+        // initializes each field exactly once on the fresh allocation; no double-free
+        // or use-after-free.
         unsafe {
             let ptr = alloc(layout) as *mut Self;
             if ptr.is_null() {
@@ -106,6 +109,8 @@ impl RcChannel {
 /// `ptr` must point to a valid `RcChannel` allocation with refcount already at zero.
 unsafe extern "C" fn channel_drop(ptr: *mut u8) {
     alloc_track::track_dealloc(RuntimeTypeId::Channel as u32);
+    // SAFETY: Caller (`rc_dec`) guarantees `ptr` is a valid `RcChannel` with refcount
+    // zero. `Box::from_raw` reclaims the inner allocation; `dealloc` frees the outer struct.
     unsafe {
         let ch = ptr as *mut RcChannel;
         let inner = &mut *(*ch).inner;
@@ -382,6 +387,8 @@ fn channel_close_impl(inner: &mut ChannelInner) {
 /// if a sender is waiting with a value, or if the channel is closed.
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub fn channel_has_data(ch: *mut RcChannel) -> bool {
+    // SAFETY: Caller guarantees `ch` is a valid, live `RcChannel` pointer.
+    // Dereferencing `inner` for read-only access is safe while no mutable alias exists.
     unsafe {
         let inner = &*(*ch).inner;
         let capacity = (*ch).capacity;
@@ -397,6 +404,8 @@ pub fn channel_has_data(ch: *mut RcChannel) -> bool {
 /// on this channel.
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub fn channel_add_select_waiter(ch: *mut RcChannel, task_id: u64, channel_index: usize) {
+    // SAFETY: Caller guarantees `ch` is a valid, live `RcChannel` pointer. Exclusive
+    // access to `inner` is safe as channel operations are single-threaded (cooperative scheduler).
     unsafe {
         let inner = &mut *(*ch).inner;
         inner.select_waiters.push(SelectWaiter {
@@ -412,6 +421,8 @@ pub fn channel_add_select_waiter(ch: *mut RcChannel, task_id: u64, channel_index
 /// channels that were NOT the wakeup source.
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub fn channel_remove_select_waiter(ch: *mut RcChannel, task_id: u64) {
+    // SAFETY: Caller guarantees `ch` is a valid, live `RcChannel` pointer. Exclusive
+    // access to `inner` is safe as channel operations are single-threaded.
     unsafe {
         let inner = &mut *(*ch).inner;
         inner.select_waiters.retain(|w| w.task_id != task_id);
@@ -442,6 +453,9 @@ pub extern "C" fn vole_channel_send(ch: *mut RcChannel, tag: i64, value: i64) ->
         value: value as u64,
     };
 
+    // SAFETY: JIT contract guarantees `ch` is a valid, live `RcChannel` pointer. Exclusive
+    // access to `inner` is safe as channel operations run on the cooperative scheduler's
+    // single thread.
     unsafe {
         let inner = &mut *(*ch).inner;
         let capacity = (*ch).capacity;
@@ -466,6 +480,8 @@ pub extern "C" fn vole_channel_send(ch: *mut RcChannel, tag: i64, value: i64) ->
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_channel_recv(ch: *mut RcChannel, out: *mut i64) -> i64 {
+    // SAFETY: JIT contract guarantees `ch` is a valid `RcChannel` and `out` points to a
+    // 2-element i64 buffer. Exclusive `inner` access is safe under cooperative scheduling.
     unsafe {
         let inner = &mut *(*ch).inner;
         let capacity = (*ch).capacity;
@@ -501,6 +517,9 @@ fn main_thread_recv_loop(ch: *mut RcChannel, out: *mut i64) -> i64 {
         let has_runnable = scheduler::with_scheduler(|sched| sched.pump_one());
 
         // Re-check channel state after scheduler step.
+        // SAFETY: `ch` is a valid `RcChannel` (passed from `vole_channel_recv`). `out`
+        // points to a 2-element i64 buffer. Re-borrowing `inner` after dropping the
+        // previous reference is safe.
         unsafe {
             let inner = &mut *(*ch).inner;
             let capacity = (*ch).capacity;
@@ -540,6 +559,8 @@ fn main_thread_recv_loop(ch: *mut RcChannel, out: *mut i64) -> i64 {
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_channel_close(ch: *mut RcChannel) {
+    // SAFETY: JIT contract guarantees `ch` is a valid, live `RcChannel` pointer. Exclusive
+    // `inner` access is safe under cooperative scheduling.
     unsafe {
         let inner = &mut *(*ch).inner;
         channel_close_impl(inner);
@@ -552,6 +573,8 @@ pub extern "C" fn vole_channel_close(ch: *mut RcChannel) {
 #[unsafe(no_mangle)]
 #[expect(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_channel_is_closed(ch: *const RcChannel) -> i8 {
+    // SAFETY: JIT contract guarantees `ch` is a valid, live `RcChannel` pointer. Read-only
+    // access to `inner.closed` requires no exclusive borrow.
     unsafe {
         let inner = &*(*ch).inner;
         i8::from(inner.closed)
