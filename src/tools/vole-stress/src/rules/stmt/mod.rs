@@ -94,6 +94,7 @@ mod match_array;
 mod match_array_elem;
 mod match_array_length;
 mod match_closure;
+mod match_closure_call;
 mod match_computation;
 mod match_interpolation_length;
 mod match_iter;
@@ -222,6 +223,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(generic_closure_chain::GenericClosureChain),
         Box::new(closure_class_call::ClosureClassCall),
         Box::new(closure_when_capture::ClosureWhenCapture),
+        Box::new(match_closure_call::MatchClosureCall),
         // -- Match rules --------------------------------------------------------
         Box::new(match_let::MatchLet),
         Box::new(match_method::MatchMethod),
