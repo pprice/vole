@@ -62,6 +62,10 @@ pub struct AnalysisOutput {
     pub db: Rc<CompilationDb>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
     pub module_id: ModuleId,
+    /// Module paths that had sema errors during analysis.
+    /// Codegen should skip compiling function bodies for these modules to avoid
+    /// encountering INVALID type IDs from failed type checking.
+    pub modules_with_errors: HashSet<String>,
 }
 
 /// Analysis results collected during type checking for codegen.

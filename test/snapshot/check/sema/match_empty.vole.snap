@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2109]: match expression must have at least one arm
+   ╭─[<path>/match_empty.vole:4:12]
+ 3 │     func check_empty_match() -> i64 {
+ 4 │ ╭─▶     return match false {
+ 5 │ ├─▶     }
+   · ╰──── empty match expression
+ 6 │     }
+   ╰────

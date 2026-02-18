@@ -96,6 +96,10 @@ pub(crate) struct AnalyzerContext {
     /// Shared across all sub-analyzers via Rc<AnalyzerContext> so that cycles
     /// are detected even across nested module imports.
     pub(crate) modules_in_progress: RefCell<FxHashSet<String>>,
+    /// Module paths that had sema errors during sub-analysis.
+    /// Codegen should skip compiling function bodies for these modules
+    /// to avoid encountering INVALID type IDs from failed type checking.
+    pub(crate) modules_with_errors: RefCell<FxHashSet<String>>,
 }
 
 impl AnalyzerContext {
@@ -108,6 +112,7 @@ impl AnalyzerContext {
             module_data: RefCell::new(FxHashMap::default()),
             module_cache: cache,
             modules_in_progress: RefCell::new(FxHashSet::default()),
+            modules_with_errors: RefCell::new(FxHashSet::default()),
         }
     }
 

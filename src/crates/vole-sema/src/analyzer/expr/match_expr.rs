@@ -29,6 +29,17 @@ impl Analyzer {
         expected: Option<ArenaTypeId>,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        // Match expressions must have at least one arm
+        if match_expr.arms.is_empty() {
+            self.add_error(
+                SemanticError::MatchExprEmpty {
+                    span: match_expr.span.into(),
+                },
+                match_expr.span,
+            );
+            return Ok(ArenaTypeId::INVALID);
+        }
+
         // Check scrutinee type
         let scrutinee_type_id = self.check_expr(&match_expr.scrutinee, interner)?;
 

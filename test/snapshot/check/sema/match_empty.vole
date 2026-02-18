@@ -1,0 +1,6 @@
+// Error: empty match expression (no arms)
+
+func check_empty_match() -> i64 {
+    return match false {
+    }
+}

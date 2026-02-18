@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2090]: when expression must have at least one arm
+   ╭─[<path>/when_empty.vole:4:12]
+ 3 │     func check_empty_when() -> i64 {
+ 4 │ ╭─▶     return when {
+ 5 │ ├─▶     }
+   · ╰──── empty when expression
+ 6 │     }
+   ╰────

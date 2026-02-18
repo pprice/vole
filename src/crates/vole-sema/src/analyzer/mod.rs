@@ -168,23 +168,27 @@ impl Analyzer {
 
         // Try to take ownership of the shared context to avoid cloning AST trees.
         // By this point all sub-analyzers should be dropped, so Rc strong count is 1.
-        let (module_data, module_programs, db) = match Rc::try_unwrap(self.ctx) {
+        let (module_data, module_programs, db, modules_with_errors) = match Rc::try_unwrap(self.ctx)
+        {
             Ok(ctx) => {
                 // Sole owner: move data out of RefCells without cloning
                 let data = ExtractedModuleData {
                     data: ctx.module_data.into_inner(),
                 };
-                (data, ctx.module_programs.into_inner(), ctx.db)
+                let errored = ctx.modules_with_errors.into_inner();
+                (data, ctx.module_programs.into_inner(), ctx.db, errored)
             }
             Err(ctx) => {
                 // Other references exist: fall back to cloning (should not happen in practice)
                 let data = ExtractedModuleData {
                     data: ctx.module_data.borrow().clone(),
                 };
+                let errored = ctx.modules_with_errors.borrow().clone();
                 (
                     data,
                     ctx.module_programs.borrow().clone(),
                     Rc::clone(&ctx.db),
+                    errored,
                 )
             }
         };
@@ -211,6 +215,7 @@ impl Analyzer {
             module_programs,
             db,
             module_id: current_module,
+            modules_with_errors: modules_with_errors.into_iter().collect(),
         }
     }
 

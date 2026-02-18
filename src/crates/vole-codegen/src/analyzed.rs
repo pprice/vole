@@ -2,6 +2,7 @@
 //! Result of parsing and analyzing a source file.
 
 use rustc_hash::FxHashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use vole_frontend::{Interner, Program};
@@ -23,6 +24,9 @@ pub struct AnalyzedProgram {
     pub db: CodegenDb,
     /// The module ID for the main program (may differ from main_module when using shared cache)
     pub module_id: ModuleId,
+    /// Module paths that had sema errors. Codegen should skip compiling
+    /// function bodies for these modules to avoid INVALID type IDs.
+    pub modules_with_errors: HashSet<String>,
 }
 
 impl AnalyzedProgram {
@@ -45,6 +49,7 @@ impl AnalyzedProgram {
             module_programs: output.module_programs,
             db,
             module_id: output.module_id,
+            modules_with_errors: output.modules_with_errors,
         }
     }
 

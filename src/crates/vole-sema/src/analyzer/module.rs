@@ -298,6 +298,11 @@ impl Analyzer {
                     self.diagnostics.errors.push(err.clone());
                 }
             }
+            // Track this module as having errors so codegen can skip its function bodies.
+            self.ctx
+                .modules_with_errors
+                .borrow_mut()
+                .insert(module_key.clone());
         }
         self.store_sub_analyzer_results(&module_key, sub_analyzer);
 

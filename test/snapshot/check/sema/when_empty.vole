@@ -1,0 +1,6 @@
+// Error: empty when expression (no arms)
+
+func check_empty_when() -> i64 {
+    return when {
+    }
+}

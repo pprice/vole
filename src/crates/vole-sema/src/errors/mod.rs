@@ -735,6 +735,13 @@ pub enum SemanticError {
         #[label("first default mapping is here")]
         first: SourceSpan,
     },
+
+    #[error("match expression must have at least one arm")]
+    #[diagnostic(code(E2109))]
+    MatchExprEmpty {
+        #[label("empty match expression")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

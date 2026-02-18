@@ -182,6 +182,15 @@ impl Compiler<'_> {
     /// Compile only module functions (prelude, imports).
     /// Call this once before compile_program_only for batched compilation.
     pub fn compile_modules_only(&mut self) -> CodegenResult<()> {
+        // Bail early if any modules had sema errors - their expression data may
+        // contain INVALID type IDs that would cause panics in codegen.
+        if !self.analyzed.modules_with_errors.is_empty() {
+            let module_list: Vec<_> = self.analyzed.modules_with_errors.iter().cloned().collect();
+            return Err(CodegenError::internal_with_context(
+                "module(s) with type errors",
+                module_list.join(", "),
+            ));
+        }
         self.compile_module_functions()
     }
 
