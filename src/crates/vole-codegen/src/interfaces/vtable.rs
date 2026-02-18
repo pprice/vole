@@ -1287,25 +1287,9 @@ fn build_union_tag_remap(
                     pending_type_params.push(callee_tag);
                     remap.push(0); // placeholder
                 } else if let Some(concrete_variant) = resolved {
-                    if let Some(pos) = concrete_variants
+                    let pos = concrete_variants
                         .iter()
-                        .position(|&v| v == concrete_variant)
-                    {
-                        used_concrete[pos] = true;
-                        if callee_tag != pos {
-                            is_identity = false;
-                        }
-                        remap.push(pos as u8);
-                    } else {
-                        return None;
-                    }
-                } else {
-                    return None;
-                }
-            }
-            _ => {
-                // Match by TypeId identity
-                if let Some(pos) = concrete_variants.iter().position(|&v| v == callee_variant) {
+                        .position(|&v| v == concrete_variant)?;
                     used_concrete[pos] = true;
                     if callee_tag != pos {
                         is_identity = false;
@@ -1314,6 +1298,17 @@ fn build_union_tag_remap(
                 } else {
                     return None;
                 }
+            }
+            _ => {
+                // Match by TypeId identity
+                let pos = concrete_variants
+                    .iter()
+                    .position(|&v| v == callee_variant)?;
+                used_concrete[pos] = true;
+                if callee_tag != pos {
+                    is_identity = false;
+                }
+                remap.push(pos as u8);
             }
         }
     }
