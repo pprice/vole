@@ -3,7 +3,7 @@ use std::rc::Rc;
 use rustc_hash::FxHashMap;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
-use super::{Compiler, SelfParam};
+use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{
     CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, type_id_to_cranelift,
@@ -162,6 +162,30 @@ impl Compiler<'_> {
             return Ok(());
         }
         self.compile_type_methods(TypeMethodsData::from_decl(class), program, module_id)
+    }
+
+    /// Register a method in the JIT function registry if not already registered.
+    ///
+    /// Returns the function key for downstream use (method_func_keys, compilation).
+    /// If the method is already registered (e.g. from overlapping implement blocks),
+    /// returns the existing key without re-declaring.
+    fn register_method_func(
+        &mut self,
+        method_id: vole_identity::MethodId,
+        sig: &cranelift::prelude::Signature,
+        mode: DeclareMode,
+    ) -> crate::function_registry::FunctionKey {
+        let full_name_id = self.registry().get_method(method_id).full_name_id;
+        let func_key = self.func_registry.intern_name_id(full_name_id);
+        if self.func_registry.func_id(func_key).is_none() {
+            let display_name = self.func_registry.display(func_key);
+            let jit_func_id = match mode {
+                DeclareMode::Declare => self.jit.declare_function(&display_name, sig),
+                DeclareMode::Import => self.jit.import_function(&display_name, sig),
+            };
+            self.func_registry.set_func_id(func_key, jit_func_id);
+        }
+        func_key
     }
 
     /// Core implementation for compiling methods of a class or struct
@@ -388,17 +412,7 @@ impl Compiler<'_> {
                     self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
                 (sig, method_id)
             };
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
-            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-            // Skip if already imported (overlapping implement blocks)
-            if self.func_registry.func_id(func_key).is_none() {
-                let display_name = self.func_registry.display(func_key);
-                let jit_func_id = self.jit.import_function(&display_name, &sig);
-                self.func_registry.set_func_id(func_key, jit_func_id);
-            }
+            let func_key = self.register_method_func(semantic_method_id, &sig, DeclareMode::Import);
 
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
@@ -460,17 +474,7 @@ impl Compiler<'_> {
                 let sig = self.build_signature_for_method(method_id, SelfParam::None);
                 (sig, method_id)
             };
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
-            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-            // Skip if already imported (overlapping implement blocks)
-            if self.func_registry.func_id(func_key).is_none() {
-                let display_name = self.func_registry.display(func_key);
-                let jit_func_id = self.jit.import_function(&display_name, &sig);
-                self.func_registry.set_func_id(func_key, jit_func_id);
-            }
+            let func_key = self.register_method_func(semantic_method_id, &sig, DeclareMode::Import);
 
             let type_name_id =
                 self.query()
@@ -609,18 +613,8 @@ impl Compiler<'_> {
                 );
                 (sig, semantic_method_id)
             };
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
-            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-            // Skip if this method was already declared (e.g., from an overlapping
-            // implement block where a child interface re-declares a parent method)
-            if self.func_registry.func_id(func_key).is_none() {
-                let display_name = self.func_registry.display(func_key);
-                let jit_func_id = self.jit.declare_function(&display_name, &sig);
-                self.func_registry.set_func_id(func_key, jit_func_id);
-            }
+            let func_key =
+                self.register_method_func(semantic_method_id, &sig, DeclareMode::Declare);
             // Populate method_func_keys for method lookup using type's NameId for stable lookup
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
@@ -682,18 +676,8 @@ impl Compiler<'_> {
                     (sig, method_id)
                 };
 
-                // Function key via entity registry full_name_id
-                let method_def = self
-                    .analyzed
-                    .entity_registry()
-                    .get_method(semantic_method_id);
-                let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-                // Skip if already declared (overlapping implement blocks)
-                if self.func_registry.func_id(func_key).is_none() {
-                    let display_name = self.func_registry.display(func_key);
-                    let func_id = self.jit.declare_function(&display_name, &sig);
-                    self.func_registry.set_func_id(func_key, func_id);
-                }
+                let func_key =
+                    self.register_method_func(semantic_method_id, &sig, DeclareMode::Declare);
 
                 // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
                 let type_name_id = self
