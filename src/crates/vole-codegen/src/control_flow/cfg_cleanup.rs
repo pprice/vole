@@ -21,7 +21,7 @@ use rustc_hash::FxHashMap;
 ///
 /// After this pass, Cranelift's normal unreachable code elimination will
 /// remove the now-unreferenced trampoline blocks.
-pub fn cleanup_cfg(func: &mut Function) {
+pub(crate) fn cleanup_cfg(func: &mut Function) {
     // Step 1: Find all trampoline blocks and their targets
     let trampolines = find_trampolines(func);
     if trampolines.is_empty() {
