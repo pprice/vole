@@ -229,87 +229,13 @@ impl Analyzer {
 
         // Register static methods from statics block (if present)
         if let Some(ref statics_block) = interface_decl.statics {
-            // Collect static method names with default external bindings
-            let default_static_external_methods: HashSet<Symbol> = statics_block
-                .external_blocks
-                .iter()
-                .filter(|ext| ext.is_default)
-                .flat_map(|ext| ext.functions.iter().map(|f| f.vole_name))
-                .collect();
-
-            // Build external methods map for static methods
-            let mut static_external_methods: FxHashMap<String, ExternalMethodInfo> =
-                FxHashMap::default();
-            for external in &statics_block.external_blocks {
-                for func in &external.functions {
-                    let native_name_str = func
-                        .native_name
-                        .clone()
-                        .unwrap_or_else(|| interner.resolve(func.vole_name).to_string());
-                    let method_name_str = interner.resolve(func.vole_name).to_string();
-                    let builtin_mod = self.name_table_mut().builtin_module();
-                    static_external_methods.insert(
-                        method_name_str,
-                        ExternalMethodInfo {
-                            module_path: self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[&external.module_path]),
-                            native_name: self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[&native_name_str]),
-                        },
-                    );
-                }
-            }
-
-            // Register static methods
-            for method in &statics_block.methods {
-                let method_name_str = interner.resolve(method.name).to_string();
-                let builtin_mod = self.name_table_mut().builtin_module();
-                let method_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[&method_name_str]);
-                let full_method_name_id = self
-                    .name_table_mut()
-                    .intern_raw(self.module.current_module, &[&name_str, &method_name_str]);
-
-                // Create a fresh type context for each static method
-                let mut static_type_ctx = TypeResolutionContext::with_type_params(
-                    &self.ctx.db,
-                    interner,
-                    module_id,
-                    &type_param_scope,
-                );
-
-                let params_id: Vec<ArenaTypeId> = method
-                    .params
-                    .iter()
-                    .map(|p| resolve_type_to_id(&p.ty, &mut static_type_ctx))
-                    .collect();
-                let return_type_id = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| resolve_type_to_id(t, &mut static_type_ctx))
-                    .unwrap_or_else(|| self.type_arena().void());
-                let has_default = method.is_default
-                    || method.body.is_some()
-                    || default_static_external_methods.contains(&method.name);
-
-                let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                    .intern(&mut self.type_arena_mut());
-
-                let external_binding = static_external_methods.get(&method_name_str).copied();
-                MethodDefBuilder::new(
-                    entity_type_id,
-                    method_name_id,
-                    full_method_name_id,
-                    signature_id,
-                )
-                .is_static(true)
-                .has_default(has_default)
-                .external_binding(external_binding)
-                .register(&mut self.entity_registry_mut());
-            }
+            self.register_interface_statics(
+                statics_block,
+                entity_type_id,
+                &name_str,
+                &type_param_scope,
+                interner,
+            );
         }
 
         // Register fields in EntityRegistry (for interface field requirements)
@@ -329,6 +255,100 @@ impl Analyzer {
                 *field_type_id,
                 i,
             );
+        }
+    }
+
+    /// Register static methods from an interface's `statics` block.
+    fn register_interface_statics(
+        &mut self,
+        statics_block: &StaticsBlock,
+        entity_type_id: TypeDefId,
+        name_str: &str,
+        type_param_scope: &TypeParamScope,
+        interner: &Interner,
+    ) {
+        let module_id = self.module.current_module;
+
+        // Collect static method names with default external bindings
+        let default_static_external_methods: HashSet<Symbol> = statics_block
+            .external_blocks
+            .iter()
+            .filter(|ext| ext.is_default)
+            .flat_map(|ext| ext.functions.iter().map(|f| f.vole_name))
+            .collect();
+
+        // Build external methods map for static methods
+        let mut static_external_methods: FxHashMap<String, ExternalMethodInfo> =
+            FxHashMap::default();
+        for external in &statics_block.external_blocks {
+            for func in &external.functions {
+                let native_name_str = func
+                    .native_name
+                    .clone()
+                    .unwrap_or_else(|| interner.resolve(func.vole_name).to_string());
+                let method_name_str = interner.resolve(func.vole_name).to_string();
+                let builtin_mod = self.name_table_mut().builtin_module();
+                static_external_methods.insert(
+                    method_name_str,
+                    ExternalMethodInfo {
+                        module_path: self
+                            .name_table_mut()
+                            .intern_raw(builtin_mod, &[&external.module_path]),
+                        native_name: self
+                            .name_table_mut()
+                            .intern_raw(builtin_mod, &[&native_name_str]),
+                    },
+                );
+            }
+        }
+
+        // Register static methods
+        for method in &statics_block.methods {
+            let method_name_str = interner.resolve(method.name).to_string();
+            let builtin_mod = self.name_table_mut().builtin_module();
+            let method_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[&method_name_str]);
+            let full_method_name_id = self
+                .name_table_mut()
+                .intern_raw(self.module.current_module, &[name_str, &method_name_str]);
+
+            // Create a fresh type context for each static method
+            let mut static_type_ctx = TypeResolutionContext::with_type_params(
+                &self.ctx.db,
+                interner,
+                module_id,
+                type_param_scope,
+            );
+
+            let params_id: Vec<ArenaTypeId> = method
+                .params
+                .iter()
+                .map(|p| resolve_type_to_id(&p.ty, &mut static_type_ctx))
+                .collect();
+            let return_type_id = method
+                .return_type
+                .as_ref()
+                .map(|t| resolve_type_to_id(t, &mut static_type_ctx))
+                .unwrap_or_else(|| self.type_arena().void());
+            let has_default = method.is_default
+                || method.body.is_some()
+                || default_static_external_methods.contains(&method.name);
+
+            let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
+                .intern(&mut self.type_arena_mut());
+
+            let external_binding = static_external_methods.get(&method_name_str).copied();
+            MethodDefBuilder::new(
+                entity_type_id,
+                method_name_id,
+                full_method_name_id,
+                signature_id,
+            )
+            .is_static(true)
+            .has_default(has_default)
+            .external_binding(external_binding)
+            .register(&mut self.entity_registry_mut());
         }
     }
 
