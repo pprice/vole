@@ -29,19 +29,19 @@ use vole_frontend::{
 
 /// Statistics from constant folding.
 #[derive(Debug, Clone, Default)]
-pub struct FoldingStats {
+pub(crate) struct FoldingStats {
     /// Number of constant expressions folded to literals
-    pub constants_folded: usize,
+    pub(crate) constants_folded: usize,
     /// Number of divisions replaced with multiplication
-    pub div_to_mul: usize,
+    pub(crate) div_to_mul: usize,
     /// Number of divisions replaced with bit shifts
-    pub div_to_shift: usize,
+    pub(crate) div_to_shift: usize,
     /// Number of constant propagations (variable references replaced with literals)
-    pub constants_propagated: usize,
+    pub(crate) constants_propagated: usize,
     /// Number of dead branches eliminated (if/when with constant conditions)
-    pub branches_eliminated: usize,
+    pub(crate) branches_eliminated: usize,
     /// Number of pure intrinsic calls folded (e.g., f64.sqrt(4.0) -> 2.0)
-    pub intrinsics_folded: usize,
+    pub(crate) intrinsics_folded: usize,
 }
 
 /// A constant value computed at compile time, with optional numeric suffix metadata.
@@ -102,7 +102,10 @@ impl From<&ConstantValue> for ConstValue {
 }
 
 /// Run constant folding on the program.
-pub fn fold_constants(program: &mut Program, expr_data: &mut ExpressionData) -> FoldingStats {
+pub(crate) fn fold_constants(
+    program: &mut Program,
+    expr_data: &mut ExpressionData,
+) -> FoldingStats {
     let mut folder = ConstantFolder::new(expr_data);
     folder.fold_program(program);
     folder.stats
@@ -118,7 +121,7 @@ pub fn fold_constants(program: &mut Program, expr_data: &mut ExpressionData) -> 
 /// - References to already-known constants via the `known_constants` map
 ///
 /// Returns `None` if the expression cannot be evaluated at compile time.
-pub fn eval_const_expr(
+pub(crate) fn eval_const_expr(
     expr: &Expr,
     known_constants: &HashMap<Symbol, ConstantValue>,
 ) -> Option<ConstantValue> {
