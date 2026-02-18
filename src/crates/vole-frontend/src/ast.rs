@@ -738,7 +738,10 @@ pub enum ExprKind {
 
     /// Type value expression: i32, f64, string, etc.
     /// Types are first-class values with type `type`
-    TypeLiteral(TypeExpr),
+    ///
+    /// Boxed to keep `ExprKind` small: `TypeExpr` is 88 bytes inline,
+    /// which would bloat every `Expr` copy on the parser stack.
+    TypeLiteral(Box<TypeExpr>),
 
     /// Import expression: import "std:math"
     Import(String),
@@ -1169,5 +1172,23 @@ mod tests {
             span: Span::default(),
         };
         assert!(ef.native_name.is_none());
+    }
+
+    /// Guard against accidental Expr size regressions.
+    ///
+    /// ExprKind::TypeLiteral is boxed specifically to keep this small;
+    /// if another variant grows past 24 bytes, ExprKind will bloat again.
+    #[test]
+    fn expr_size_budget() {
+        assert!(
+            std::mem::size_of::<Expr>() <= 72,
+            "Expr grew past 72 bytes ({} bytes); check ExprKind for unboxed large variants",
+            std::mem::size_of::<Expr>(),
+        );
+        assert!(
+            std::mem::size_of::<ExprKind>() <= 32,
+            "ExprKind grew past 32 bytes ({} bytes); box large variants to keep Expr copies cheap",
+            std::mem::size_of::<ExprKind>(),
+        );
     }
 }

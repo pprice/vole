@@ -457,7 +457,7 @@ impl<'src> Parser<'src> {
                 let type_expr = self.parse_type()?;
                 Ok(Expr {
                     id: self.next_id(),
-                    kind: ExprKind::TypeLiteral(type_expr),
+                    kind: ExprKind::TypeLiteral(Box::new(type_expr)),
                     span: start_span.merge(self.previous.span),
                 })
             }
