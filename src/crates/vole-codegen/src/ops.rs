@@ -475,9 +475,7 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I8);
 
-        self.builder
-            .ins()
-            .brif(left.value, then_block, &[], else_block, &[]);
+        self.emit_brif(left.value, then_block, else_block);
 
         // Then block: left was true, evaluate right
         self.switch_and_seal(then_block);
@@ -531,9 +529,7 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I8);
 
-        self.builder
-            .ins()
-            .brif(left.value, then_block, &[], else_block, &[]);
+        self.emit_brif(left.value, then_block, else_block);
 
         // Then block: left was true, short-circuit with true
         self.switch_and_seal(then_block);
@@ -1087,9 +1083,7 @@ impl Cg<'_, '_, '_> {
         let panic_block = self.builder.create_block();
         let continue_block = self.builder.create_block();
 
-        self.builder
-            .ins()
-            .brif(is_zero, panic_block, &[], continue_block, &[]);
+        self.emit_brif(is_zero, panic_block, continue_block);
 
         // Panic block
         self.switch_and_seal(panic_block);
@@ -1132,9 +1126,7 @@ impl Cg<'_, '_, '_> {
         let panic_block = self.builder.create_block();
         let continue_block = self.builder.create_block();
 
-        self.builder
-            .ins()
-            .brif(would_overflow, panic_block, &[], continue_block, &[]);
+        self.emit_brif(would_overflow, panic_block, continue_block);
 
         // Panic block
         self.switch_and_seal(panic_block);

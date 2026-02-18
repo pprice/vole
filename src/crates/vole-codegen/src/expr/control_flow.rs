@@ -277,9 +277,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Branch based on condition
-        self.builder
-            .ins()
-            .brif(condition.value, then_block, &[], else_block, &[]);
+        self.emit_brif(condition.value, then_block, else_block);
 
         let result_needs_rc = !is_void && self.rc_state(result_type_id).needs_cleanup();
 
@@ -506,9 +504,7 @@ impl Cg<'_, '_, '_> {
             };
 
             // Branch to body or next condition
-            self.builder
-                .ins()
-                .brif(cond_result.value, body_blocks[i], &[], else_target, &[]);
+            self.emit_brif(cond_result.value, body_blocks[i], else_target);
 
             // If next arm has a condition, switch to its evaluation block
             if i + 1 < when_expr.arms.len() && when_expr.arms[i + 1].condition.is_some() {

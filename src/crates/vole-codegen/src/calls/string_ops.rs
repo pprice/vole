@@ -220,9 +220,7 @@ impl Cg<'_, '_, '_> {
         self.builder
             .append_block_param(merge_block, self.ptr_type());
 
-        self.builder
-            .ins()
-            .brif(is_nil, nil_block, &[], some_block, &[]);
+        self.emit_brif(is_nil, nil_block, some_block);
 
         // Nil case: return "nil"
         self.builder.switch_to_block(nil_block);
@@ -287,9 +285,7 @@ impl Cg<'_, '_, '_> {
                 let expected = self.builder.ins().iconst(types::I8, i as i64);
                 let is_match = self.builder.ins().icmp(IntCC::Equal, tag, expected);
                 let next_check = self.builder.create_block();
-                self.builder
-                    .ins()
-                    .brif(is_match, block, &[], next_check, &[]);
+                self.emit_brif(is_match, block, next_check);
                 self.builder.switch_to_block(next_check);
             }
         }

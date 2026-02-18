@@ -110,9 +110,7 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .icmp(IntCC::SignedLessThan, current, end_val)
         };
-        self.builder
-            .ins()
-            .brif(cmp, body_block, &[], exit_block, &[]);
+        self.emit_brif(cmp, body_block, exit_block);
 
         // Body: compile loop body, then increment and loop back
         self.builder.switch_to_block(body_block);
@@ -176,9 +174,7 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .icmp(IntCC::SignedLessThan, current, end_val)
         };
-        self.builder
-            .ins()
-            .brif(cmp, body_block, &[], exit_block, &[]);
+        self.emit_brif(cmp, body_block, exit_block);
 
         // Body: compile loop body
         self.builder.switch_to_block(body_block);
@@ -274,9 +270,7 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .icmp(IntCC::SignedLessThan, current_idx, len_val);
-        self.builder
-            .ins()
-            .brif(cmp, body_block, &[], exit_block, &[]);
+        self.emit_brif(cmp, body_block, exit_block);
 
         self.builder.switch_to_block(body_block);
 
@@ -444,9 +438,7 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(header);
         let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter.value, slot_addr])?;
         let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
-        self.builder
-            .ins()
-            .brif(is_done, exit_block, &[], body_block, &[]);
+        self.emit_brif(is_done, exit_block, body_block);
 
         // Body: load value from stack slot, narrow to element type, run body
         self.builder.switch_to_block(body_block);
@@ -548,9 +540,7 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(header);
         let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter_val, slot_addr])?;
         let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
-        self.builder
-            .ins()
-            .brif(is_done, exit_block, &[], body_block, &[]);
+        self.emit_brif(is_done, exit_block, body_block);
 
         // Body: load value from stack slot, run body
         self.builder.switch_to_block(body_block);

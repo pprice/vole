@@ -551,9 +551,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder
             .append_block_param(merge_block, self.ptr_type());
 
-        self.builder
-            .ins()
-            .brif(cond, done_block, &[], value_block, &[]);
+        self.emit_brif(cond, done_block, value_block);
 
         self.builder.switch_to_block(done_block);
         let done_value = CompiledValue::new(
@@ -662,9 +660,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let nonnull_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I64);
-        self.builder
-            .ins()
-            .brif(is_null, null_block, &[], nonnull_block, &[]);
+        self.emit_brif(is_null, null_block, nonnull_block);
 
         self.builder.switch_to_block(null_block);
         self.builder.ins().jump(merge_block, &[zero_i64.into()]);
@@ -696,9 +692,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let nonnull_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
         self.builder.append_block_param(merge_block, types::I64);
-        self.builder
-            .ins()
-            .brif(is_null, null_block, &[], nonnull_block, &[]);
+        self.emit_brif(is_null, null_block, nonnull_block);
 
         self.builder.switch_to_block(null_block);
         self.builder.ins().jump(merge_block, &[zero_i64.into()]);

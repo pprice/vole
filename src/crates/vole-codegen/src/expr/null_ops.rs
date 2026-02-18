@@ -44,9 +44,7 @@ impl Cg<'_, '_, '_> {
         let result_needs_rc =
             self.rc_scopes.has_active_scope() && self.rc_state(inner_type_id).needs_cleanup();
 
-        self.builder
-            .ins()
-            .brif(is_nil, nil_block, &[], not_nil_block, &[]);
+        self.emit_brif(is_nil, nil_block, not_nil_block);
 
         self.switch_and_seal(nil_block);
         let default_val = self.expr(&nc.default)?;
@@ -146,9 +144,7 @@ impl Cg<'_, '_, '_> {
         self.builder.append_block_param(merge_block, payload_ty);
 
         // Branch based on tag
-        self.builder
-            .ins()
-            .brif(is_success, success_block, &[], error_block, &[]);
+        self.emit_brif(is_success, success_block, error_block);
 
         // Error block: propagate by returning (tag, payload) for multi-value return
         // Payload is stored as i64 in the stack slot

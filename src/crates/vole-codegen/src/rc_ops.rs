@@ -317,9 +317,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let op_block = self.builder.create_block();
             let next_block = self.builder.create_block();
 
-            self.builder
-                .ins()
-                .brif(is_match, op_block, &[], next_block, &[]);
+            self.emit_brif(is_match, op_block, next_block);
 
             self.builder.switch_to_block(op_block);
             self.builder.seal_block(op_block);

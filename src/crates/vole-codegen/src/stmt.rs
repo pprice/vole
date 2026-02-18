@@ -149,9 +149,7 @@ impl Cg<'_, '_, '_> {
 
                 self.builder.switch_to_block(header_block);
                 let cond = self.expr(&while_stmt.condition)?;
-                self.builder
-                    .ins()
-                    .brif(cond.value, body_block, &[], exit_block, &[]);
+                self.emit_brif(cond.value, body_block, exit_block);
 
                 self.builder.switch_to_block(body_block);
                 self.compile_loop_body(&while_stmt.body, exit_block, header_block)?;
@@ -195,9 +193,7 @@ impl Cg<'_, '_, '_> {
                 let else_block = self.builder.create_block();
                 let merge_block = self.builder.create_block();
 
-                self.builder
-                    .ins()
-                    .brif(cond.value, then_block, &[], else_block, &[]);
+                self.emit_brif(cond.value, then_block, else_block);
 
                 self.builder.switch_to_block(then_block);
                 self.invalidate_value_caches();

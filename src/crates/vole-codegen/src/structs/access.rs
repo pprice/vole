@@ -210,9 +210,7 @@ impl Cg<'_, '_, '_> {
         };
         self.builder.append_block_param(merge_block, cranelift_type);
 
-        self.builder
-            .ins()
-            .brif(is_nil, nil_block, &[], not_nil_block, &[]);
+        self.emit_brif(is_nil, nil_block, not_nil_block);
 
         // Nil block: return nil wrapped in the optional type
         self.switch_and_seal(nil_block);

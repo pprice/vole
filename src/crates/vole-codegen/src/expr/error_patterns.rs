@@ -73,14 +73,10 @@ impl Cg<'_, '_, '_> {
 
             if success_rc {
                 // rc_dec only on success path
-                self.builder
-                    .ins()
-                    .brif(is_success, dec_block, &[], cont_block, &[]);
+                self.emit_brif(is_success, dec_block, cont_block);
             } else {
                 // rc_dec only on error path
-                self.builder
-                    .ins()
-                    .brif(is_success, cont_block, &[], dec_block, &[]);
+                self.emit_brif(is_success, cont_block, dec_block);
             }
 
             self.builder.switch_to_block(dec_block);

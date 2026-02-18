@@ -517,9 +517,7 @@ impl Cg<'_, '_, '_> {
 
             let cond =
                 pattern_check.expect("INTERNAL: match pattern: missing pattern_check condition");
-            self.builder
-                .ins()
-                .brif(cond, extract_block, &[], next_block, &[]);
+            self.emit_brif(cond, extract_block, next_block);
             self.builder.seal_block(arm_block);
             *effective_arm_block = extract_block;
 
@@ -697,9 +695,7 @@ impl Cg<'_, '_, '_> {
             let body_block = self.builder.create_block();
 
             if let Some(cond) = should_execute {
-                self.builder
-                    .ins()
-                    .brif(cond, body_block, &[], next_block, &[]);
+                self.emit_brif(cond, body_block, next_block);
             } else {
                 self.builder.ins().jump(body_block, &[]);
             }

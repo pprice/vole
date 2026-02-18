@@ -525,9 +525,7 @@ impl Cg<'_, '_, '_> {
 
         let then_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
-        self.builder
-            .ins()
-            .brif(needs_inc, then_block, &[], merge_block, &[]);
+        self.emit_brif(needs_inc, then_block, merge_block);
 
         self.builder.switch_to_block(then_block);
         self.builder.seal_block(then_block);

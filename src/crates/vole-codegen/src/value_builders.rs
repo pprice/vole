@@ -220,6 +220,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Control flow helpers ==========
 
+    /// Emit a conditional branch, or a direct jump when the condition is a known constant.
+    ///
+    /// When `cond` is defined by an `iconst` instruction (known at compile time),
+    /// this emits a `jump` to the taken block instead of a `brif`, eliminating
+    /// dead branches from the generated code.
+    pub fn emit_brif(
+        &mut self,
+        cond: Value,
+        true_block: cranelift::prelude::Block,
+        false_block: cranelift::prelude::Block,
+    ) {
+        if let Some(val) = crate::ops::try_constant_value(self.builder.func, cond) {
+            if val != 0 {
+                self.builder.ins().jump(true_block, &[]);
+            } else {
+                self.builder.ins().jump(false_block, &[]);
+            }
+        } else {
+            self.builder
+                .ins()
+                .brif(cond, true_block, &[], false_block, &[]);
+        }
+    }
+
     /// Switch to a block and seal it (common pattern for sequential control flow)
     pub fn switch_and_seal(&mut self, block: cranelift::prelude::Block) {
         self.builder.switch_to_block(block);

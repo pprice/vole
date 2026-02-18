@@ -672,9 +672,7 @@ impl Cg<'_, '_, '_> {
         let pass_block = self.builder.create_block();
         let fail_block = self.builder.create_block();
 
-        self.builder
-            .ins()
-            .brif(cond.value, pass_block, &[], fail_block, &[]);
+        self.emit_brif(cond.value, pass_block, fail_block);
 
         self.switch_and_seal(fail_block);
 
