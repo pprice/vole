@@ -267,6 +267,10 @@ impl Analyzer {
             }
             // Match expressions: propagate expected type for bidirectional inference
             ExprKind::Match(match_expr) => self.check_match_expr(match_expr, expected, interner),
+            // When expressions: propagate expected type for bidirectional inference
+            ExprKind::When(when_expr) => {
+                self.check_when_expr_expecting(when_expr, expected, interner)
+            }
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred_id = self.check_expr_with_ctx(expr, interner, ctx)?;

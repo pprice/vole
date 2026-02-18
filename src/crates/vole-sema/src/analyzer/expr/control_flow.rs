@@ -137,6 +137,16 @@ impl Analyzer {
         when_expr: &WhenExpr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        self.check_when_expr_expecting(when_expr, None, interner)
+    }
+
+    /// Check when expression with an optional expected type for bidirectional inference.
+    pub(super) fn check_when_expr_expecting(
+        &mut self,
+        when_expr: &WhenExpr,
+        expected: Option<ArenaTypeId>,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // When expressions must have at least one arm
         if when_expr.arms.is_empty() {
             self.add_error(
@@ -191,8 +201,16 @@ impl Analyzer {
                 self.env.type_overrides.insert(*sym, *narrowed_type_id);
             }
 
-            // Check body with narrowed type (arm bodies allow trailing expressions)
-            let body_ty = self.check_expr_in_arm(&arm.body, interner)?;
+            // Check body with narrowed type (arm bodies allow trailing expressions).
+            // Propagate expected type hint for bidirectional inference (e.g. lambdas).
+            let hint = expected
+                .or(if result_type != ArenaTypeId::INVALID {
+                    Some(result_type)
+                } else {
+                    None
+                })
+                .filter(|id| !id.is_never());
+            let body_ty = self.check_expr_expecting_id_in_arm(&arm.body, hint, interner)?;
 
             // Restore overrides for next arm
             self.env.type_overrides = saved_overrides.clone();

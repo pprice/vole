@@ -172,19 +172,23 @@ impl Analyzer {
                 None => {
                     result_type_id = Some(body_type_id);
                 }
-                Some(expected_id) if expected_id != body_type_id => {
+                Some(prev_id) if prev_id != body_type_id => {
                     // Handle never type (bottom): never unifies with any type
-                    if expected_id.is_never() {
+                    if prev_id.is_never() {
                         result_type_id = Some(body_type_id);
                     } else if body_type_id.is_never() {
                         // This arm is never, keep previous result (do nothing)
-                    } else if expected_id.is_unknown() || body_type_id.is_unknown() {
+                    } else if prev_id.is_unknown() || body_type_id.is_unknown() {
                         // Either is unknown, result is unknown
                         result_type_id = Some(ArenaTypeId::UNKNOWN);
+                    } else if self.types_compatible_id(prev_id, body_type_id, interner) {
+                        // Types are semantically compatible (e.g. two identical
+                        // function types with different TypeIds) — keep the
+                        // previous result type, no union needed.
                     } else {
-                        // Arms have different types — construct a union
+                        // Arms have genuinely different types — construct a union
                         result_type_id =
-                            Some(self.type_arena_mut().union(vec![expected_id, body_type_id]));
+                            Some(self.type_arena_mut().union(vec![prev_id, body_type_id]));
                     }
                 }
                 _ => {}

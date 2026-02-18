@@ -1,0 +1,90 @@
+// Regression: match with when-arm producing lambdas used directly as function argument.
+// Previously, the type checker created a union `(bool) -> string | (bool) -> string`
+// instead of unifying to `(bool) -> string` because the when expression did not
+// propagate the expected type from the enclosing match/call context.
+
+func takes_fn(f: (bool) -> string) -> string {
+    return f(true)
+}
+
+func takes_int_fn(f: (i64) -> i64) -> i64 {
+    return f(10)
+}
+
+tests "match with when-arm lambda as direct argument" {
+    test "match with when producing lambdas as arg" {
+        let s = takes_fn(match 1 {
+            0 => when {
+                false => (x: bool) -> string => "a"
+                _ => (x: bool) -> string => "b"
+            }
+            _ => (x: bool) -> string => "c"
+        })
+        assert(s == "c")
+    }
+
+    test "match with when producing lambdas picks correct when arm" {
+        let s = takes_fn(match 0 {
+            0 => when {
+                false => (x: bool) -> string => "a"
+                _ => (x: bool) -> string => "b"
+            }
+            _ => (x: bool) -> string => "c"
+        })
+        assert(s == "b")
+    }
+
+    test "match with multiple when arms as arg" {
+        let s = takes_fn(match 1 {
+            0 => when {
+                false => (x: bool) -> string => "a"
+                _ => (x: bool) -> string => "b"
+            }
+            1 => when {
+                true => (x: bool) -> string => "c"
+                _ => (x: bool) -> string => "d"
+            }
+            _ => (x: bool) -> string => "e"
+        })
+        assert(s == "c")
+    }
+
+    test "match without when still works as arg" {
+        let s = takes_fn(match 1 {
+            0 => (x: bool) -> string => "a"
+            _ => (x: bool) -> string => "b"
+        })
+        assert(s == "b")
+    }
+
+    test "when alone as direct arg" {
+        let s = takes_fn(when {
+            false => (x: bool) -> string => "a"
+            _ => (x: bool) -> string => "b"
+        })
+        assert(s == "b")
+    }
+
+    test "non-lambda match-when as arg" {
+        let r = takes_int_fn(match 1 {
+            0 => when {
+                false => (x: i64) -> i64 => x + 1
+                _ => (x: i64) -> i64 => x + 2
+            }
+            _ => (x: i64) -> i64 => x * 3
+        })
+        assert(r == 30)
+    }
+
+    test "bound to let first still works" {
+        let f = match 1 {
+            0 => when {
+                false => (x: bool) -> string => "a"
+                _ => (x: bool) -> string => "b"
+            }
+            _ => (x: bool) -> string => "c"
+        }
+        let s = takes_fn(f)
+        assert(s == "c")
+    }
+}
