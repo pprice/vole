@@ -4,6 +4,7 @@
 
 use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
+use cranelift_codegen::ir::{Function, InstructionData};
 
 use crate::RuntimeKey;
 use vole_frontend::{BinaryExpr, BinaryOp, ExprKind};
@@ -13,6 +14,19 @@ use vole_sema::type_arena::TypeId;
 use super::context::Cg;
 use super::types::{CompiledValue, convert_to_type};
 use crate::errors::{CodegenError, CodegenResult};
+
+/// If `val` is defined by an `iconst` instruction, return its immediate value.
+///
+/// Used for constant folding boolean NOT, AND, and OR at codegen time so that
+/// compile-time-constant operands avoid emitting unnecessary control-flow blocks.
+pub(crate) fn try_constant_value(func: &Function, val: Value) -> Option<i64> {
+    let inst = func.dfg.value_def(val).inst()?;
+    if let InstructionData::UnaryImm { imm, .. } = func.dfg.insts[inst] {
+        Some(imm.bits())
+    } else {
+        None
+    }
+}
 
 /// Convert a numeric TypeId to its corresponding Cranelift type.
 /// Only handles numeric types; other types will default to I64.
@@ -440,6 +454,22 @@ impl Cg<'_, '_, '_> {
     fn binary_and(&mut self, bin: &BinaryExpr) -> CodegenResult<CompiledValue> {
         let left = self.expr(&bin.left)?;
 
+        // Constant-fold: if left is a known constant, skip control flow.
+        if let Some(c) = try_constant_value(self.builder.func, left.value) {
+            if c == 0 {
+                // false && _ => false (skip evaluating right)
+                return Ok(self.bool_const(false));
+            }
+            // true && right => right
+            let right = self.expr(&bin.right)?;
+            let right_val = if self.builder.func.dfg.value_type(right.value) != types::I8 {
+                self.builder.ins().ireduce(types::I8, right.value)
+            } else {
+                right.value
+            };
+            return Ok(self.bool_value(right_val));
+        }
+
         let then_block = self.builder.create_block();
         let else_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
@@ -479,6 +509,22 @@ impl Cg<'_, '_, '_> {
     /// Short-circuit OR evaluation
     fn binary_or(&mut self, bin: &BinaryExpr) -> CodegenResult<CompiledValue> {
         let left = self.expr(&bin.left)?;
+
+        // Constant-fold: if left is a known constant, skip control flow.
+        if let Some(c) = try_constant_value(self.builder.func, left.value) {
+            if c != 0 {
+                // true || _ => true (skip evaluating right)
+                return Ok(self.bool_const(true));
+            }
+            // false || right => right
+            let right = self.expr(&bin.right)?;
+            let right_val = if self.builder.func.dfg.value_type(right.value) != types::I8 {
+                self.builder.ins().ireduce(types::I8, right.value)
+            } else {
+                right.value
+            };
+            return Ok(self.bool_value(right_val));
+        }
 
         let then_block = self.builder.create_block();
         let else_block = self.builder.create_block();

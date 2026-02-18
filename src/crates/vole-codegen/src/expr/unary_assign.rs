@@ -6,6 +6,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
+use crate::ops::try_constant_value;
 use crate::types::CompiledValue;
 
 use vole_frontend::{AssignTarget, Expr, Symbol, UnaryOp};
@@ -42,8 +43,16 @@ impl Cg<'_, '_, '_> {
                 } else {
                     operand.value
                 };
-                let one = self.builder.ins().iconst(types::I8, 1);
-                self.builder.ins().isub(one, op_val)
+                // Constant-fold: if operand is a known constant, emit the
+                // negated constant directly instead of `iconst 1; isub`.
+                if let Some(c) = try_constant_value(self.builder.func, op_val) {
+                    self.builder
+                        .ins()
+                        .iconst(types::I8, if c == 0 { 1 } else { 0 })
+                } else {
+                    let one = self.builder.ins().iconst(types::I8, 1);
+                    self.builder.ins().isub(one, op_val)
+                }
             }
             UnaryOp::BitNot => self.builder.ins().bnot(operand.value),
         };
