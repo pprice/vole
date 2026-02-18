@@ -2,16 +2,23 @@
 //
 // CFG cleanup pass to eliminate trampoline blocks.
 //
-// Handles two kinds of trampolines — blocks with no parameters and a single jump:
+// Handles three kinds of trampolines:
 //
-// 1. Simple trampolines: jump passes no args (e.g. `block5: jump block6`)
+// 1. Simple trampolines: no params, jump passes no args (e.g. `block5: jump block6`)
 //    - Chains are resolved (A->B->C becomes A->C)
 //
-// 2. Forward-arg trampolines: jump passes args (e.g. `block5: jump block6(v3)`)
+// 2. Forward-arg trampolines: no params, jump passes args (e.g. `block5: jump block6(v3)`)
 //    - Common in optional/nil-check paths where brif branches to a block that
 //      forwards a default value to a merge block
 //
-// Both are eliminated by rewriting references to jump directly to the final
+// 3. Pass-through trampolines: has params, jump forwards them unchanged
+//    (e.g. `block38(v1, v2, v3): jump block18(v1, v2, v3)`)
+//    - Common in when/match merge chains where control flow funnels through
+//      intermediate merge blocks. Callers already provide the right args,
+//      so we just redirect them to the final target.
+//    - Chains are resolved (A->B->C becomes A->C)
+//
+// All are eliminated by rewriting references to jump directly to the final
 // target. Dead blocks are cleaned up by Cranelift's unreachable code elimination.
 
 use cranelift_codegen::ir::{Block, Function, Opcode, Value};
@@ -24,6 +31,9 @@ use rustc_hash::FxHashMap;
 ///
 /// Phase 2: Rewrites branch targets to bypass forward-arg trampolines (no
 /// params, jump that passes args to its target).
+///
+/// Phase 3: Rewrites branch targets to bypass pass-through trampolines (has
+/// params, jump forwards them unchanged to another block), resolving chains.
 ///
 /// After this pass, Cranelift's normal unreachable code elimination will
 /// remove the now-unreferenced trampoline blocks.
@@ -39,6 +49,13 @@ pub(crate) fn cleanup_cfg(func: &mut Function) {
     let fwd_trampolines = find_forward_arg_trampolines(func);
     if !fwd_trampolines.is_empty() {
         rewrite_forward_arg_terminators(func, &fwd_trampolines);
+    }
+
+    // Phase 3: Eliminate pass-through trampolines (has params, jump forwards them)
+    let passthrough = find_passthrough_trampolines(func);
+    if !passthrough.is_empty() {
+        let resolved = resolve_trampoline_chains(&passthrough);
+        rewrite_terminators(func, &resolved);
     }
 }
 
@@ -146,6 +163,65 @@ fn find_forward_arg_trampolines(func: &Function) -> FxHashMap<Block, (Block, Vec
             .collect();
 
         trampolines.insert(block, (target, args));
+    }
+
+    trampolines
+}
+
+/// Find pass-through trampoline blocks in the function.
+///
+/// A pass-through trampoline is a block that:
+/// - Has one or more block parameters
+/// - Contains exactly one instruction (an unconditional jump)
+/// - The jump passes exactly those block parameters as arguments, in the same order
+///
+/// These arise from when/match merge chains where control flow funnels through
+/// intermediate merge blocks. Since callers already supply the right argument
+/// values, we can redirect them to the jump target directly.
+fn find_passthrough_trampolines(func: &Function) -> FxHashMap<Block, Block> {
+    let mut trampolines = FxHashMap::default();
+
+    for block in func.layout.blocks() {
+        let params = func.dfg.block_params(block);
+        if params.is_empty() {
+            continue;
+        }
+
+        // Check if block has exactly one instruction
+        let first_inst = func.layout.first_inst(block);
+        let last_inst = func.layout.last_inst(block);
+        if first_inst != last_inst {
+            continue;
+        }
+
+        let Some(inst) = first_inst else {
+            continue;
+        };
+
+        if func.dfg.insts[inst].opcode() != Opcode::Jump {
+            continue;
+        }
+
+        let destinations = func.dfg.insts[inst]
+            .branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables);
+        if destinations.len() != 1 {
+            continue;
+        }
+
+        // Check that the jump args are exactly the block params in the same order
+        let args: Vec<Value> = destinations[0]
+            .args(&func.dfg.value_lists)
+            .filter_map(|arg| arg.as_value())
+            .collect();
+
+        if args.len() != params.len() {
+            continue;
+        }
+
+        if args.iter().zip(params).all(|(&arg, &param)| arg == param) {
+            let target = destinations[0].block(&func.dfg.value_lists);
+            trampolines.insert(block, target);
+        }
     }
 
     trampolines
@@ -451,5 +527,269 @@ mod tests {
         assert_eq!(dests.len(), 1);
         assert_eq!(dests[0].block(&func.dfg.value_lists), target);
         assert_eq!(dests[0].len(&func.dfg.value_lists), 1);
+    }
+
+    /// Build IR with a pass-through trampoline (brif -> trampoline -> target):
+    ///
+    ///   entry:
+    ///       v0 = iconst 1
+    ///       v1 = iconst 42
+    ///       v2 = iconst 7
+    ///       brif v0, passthrough, [v1, v2], exit, []
+    ///   passthrough(v3: i64, v4: i64):
+    ///       jump target(v3, v4)     // forwards params unchanged
+    ///   exit:
+    ///       v5 = iconst 0
+    ///       return v5
+    ///   target(v6: i64, v7: i64):
+    ///       return v6
+    ///
+    /// After cleanup, entry should branch directly to target:
+    ///       brif v0, target, [v1, v2], exit, []
+    #[test]
+    fn test_passthrough_trampoline_brif() {
+        use cranelift::codegen::ir::BlockArg;
+
+        let mut func = create_test_function();
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+
+        let entry = builder.create_block();
+        let passthrough = builder.create_block();
+        let exit = builder.create_block();
+        let target = builder.create_block();
+
+        // entry: brif v0, passthrough, [v1, v2], exit, []
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+        let cond = builder.ins().iconst(types::I64, 1);
+        let val1 = builder.ins().iconst(types::I64, 42);
+        let val2 = builder.ins().iconst(types::I64, 7);
+        builder.ins().brif(
+            cond,
+            passthrough,
+            &[BlockArg::from(val1), BlockArg::from(val2)],
+            exit,
+            &[],
+        );
+
+        // passthrough(v3, v4): jump target(v3, v4)
+        builder.switch_to_block(passthrough);
+        builder.append_block_param(passthrough, types::I64);
+        builder.append_block_param(passthrough, types::I64);
+        builder.seal_block(passthrough);
+        let p0 = builder.block_params(passthrough)[0];
+        let p1 = builder.block_params(passthrough)[1];
+        builder
+            .ins()
+            .jump(target, &[BlockArg::from(p0), BlockArg::from(p1)]);
+
+        // exit: return 0
+        builder.switch_to_block(exit);
+        builder.seal_block(exit);
+        let zero = builder.ins().iconst(types::I64, 0);
+        builder.ins().return_(&[zero]);
+
+        // target(v6, v7): return v6
+        builder.switch_to_block(target);
+        builder.append_block_param(target, types::I64);
+        builder.append_block_param(target, types::I64);
+        builder.seal_block(target);
+        let target_p0 = builder.block_params(target)[0];
+        builder.ins().return_(&[target_p0]);
+
+        builder.finalize();
+
+        // Verify detection
+        let pt = find_passthrough_trampolines(&func);
+        assert_eq!(pt.len(), 1);
+        assert!(pt.contains_key(&passthrough));
+        assert_eq!(pt[&passthrough], target);
+
+        // Run full cleanup
+        cleanup_cfg(&mut func);
+
+        // Verify: entry's brif now targets target directly with same args
+        let entry_last = func.layout.last_inst(entry).unwrap();
+        let dests = func.dfg.insts[entry_last]
+            .branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables);
+        let then_dest = &dests[0];
+        assert_eq!(then_dest.block(&func.dfg.value_lists), target);
+        assert_eq!(then_dest.len(&func.dfg.value_lists), 2);
+    }
+
+    /// Test pass-through trampoline chain resolution:
+    ///
+    ///   entry:
+    ///       v0 = iconst 10
+    ///       jump pt1(v0)
+    ///   pt1(v1: i64):
+    ///       jump pt2(v1)
+    ///   pt2(v2: i64):
+    ///       jump final(v2)
+    ///   final(v3: i64):
+    ///       return v3
+    ///
+    /// After cleanup, entry should jump directly to final:
+    ///       jump final(v0)
+    #[test]
+    fn test_passthrough_trampoline_chain() {
+        use cranelift::codegen::ir::BlockArg;
+
+        let mut func = create_test_function();
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+
+        let entry = builder.create_block();
+        let pt1 = builder.create_block();
+        let pt2 = builder.create_block();
+        let final_block = builder.create_block();
+
+        // entry: jump pt1(v0)
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+        let val = builder.ins().iconst(types::I64, 10);
+        builder.ins().jump(pt1, &[BlockArg::from(val)]);
+
+        // pt1(v1): jump pt2(v1)
+        builder.switch_to_block(pt1);
+        builder.append_block_param(pt1, types::I64);
+        builder.seal_block(pt1);
+        let pt1_p = builder.block_params(pt1)[0];
+        builder.ins().jump(pt2, &[BlockArg::from(pt1_p)]);
+
+        // pt2(v2): jump final(v2)
+        builder.switch_to_block(pt2);
+        builder.append_block_param(pt2, types::I64);
+        builder.seal_block(pt2);
+        let pt2_p = builder.block_params(pt2)[0];
+        builder.ins().jump(final_block, &[BlockArg::from(pt2_p)]);
+
+        // final(v3): return v3
+        builder.switch_to_block(final_block);
+        builder.append_block_param(final_block, types::I64);
+        builder.seal_block(final_block);
+        let final_p = builder.block_params(final_block)[0];
+        builder.ins().return_(&[final_p]);
+
+        builder.finalize();
+
+        // Verify chain detection
+        let pt = find_passthrough_trampolines(&func);
+        assert_eq!(pt.len(), 2);
+        assert_eq!(pt[&pt1], pt2);
+        assert_eq!(pt[&pt2], final_block);
+
+        // Chain resolution
+        let resolved = resolve_trampoline_chains(&pt);
+        assert_eq!(resolved[&pt1], final_block);
+        assert_eq!(resolved[&pt2], final_block);
+
+        // Run full cleanup
+        cleanup_cfg(&mut func);
+
+        // Verify: entry now jumps directly to final_block
+        let entry_last = func.layout.last_inst(entry).unwrap();
+        let dests = func.dfg.insts[entry_last]
+            .branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables);
+        assert_eq!(dests.len(), 1);
+        assert_eq!(dests[0].block(&func.dfg.value_lists), final_block);
+        assert_eq!(dests[0].len(&func.dfg.value_lists), 1);
+    }
+
+    /// Test that a block with params but reordered args is NOT a pass-through trampoline:
+    ///
+    ///   block(v1: i64, v2: i64):
+    ///       jump target(v2, v1)     // swapped — not a pass-through
+    #[test]
+    fn test_reordered_args_not_passthrough() {
+        use cranelift::codegen::ir::BlockArg;
+
+        let mut func = create_test_function();
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+
+        let entry = builder.create_block();
+        let reorder = builder.create_block();
+        let target = builder.create_block();
+
+        // entry: jump reorder(v0, v1)
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+        let v0 = builder.ins().iconst(types::I64, 1);
+        let v1 = builder.ins().iconst(types::I64, 2);
+        builder
+            .ins()
+            .jump(reorder, &[BlockArg::from(v0), BlockArg::from(v1)]);
+
+        // reorder(p0, p1): jump target(p1, p0) — swapped
+        builder.switch_to_block(reorder);
+        builder.append_block_param(reorder, types::I64);
+        builder.append_block_param(reorder, types::I64);
+        builder.seal_block(reorder);
+        let rp0 = builder.block_params(reorder)[0];
+        let rp1 = builder.block_params(reorder)[1];
+        builder
+            .ins()
+            .jump(target, &[BlockArg::from(rp1), BlockArg::from(rp0)]);
+
+        // target(t0, t1): return t0
+        builder.switch_to_block(target);
+        builder.append_block_param(target, types::I64);
+        builder.append_block_param(target, types::I64);
+        builder.seal_block(target);
+        let tp0 = builder.block_params(target)[0];
+        builder.ins().return_(&[tp0]);
+
+        builder.finalize();
+
+        let pt = find_passthrough_trampolines(&func);
+        assert!(pt.is_empty(), "reordered args should not be detected");
+    }
+
+    /// Test that a block with params that drops one is NOT a pass-through trampoline:
+    ///
+    ///   block(v1: i64, v2: i64):
+    ///       jump target(v1)     // drops v2 — not a pass-through
+    #[test]
+    fn test_fewer_args_not_passthrough() {
+        use cranelift::codegen::ir::BlockArg;
+
+        let mut func = create_test_function();
+        let mut builder_ctx = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut func, &mut builder_ctx);
+
+        let entry = builder.create_block();
+        let dropper = builder.create_block();
+        let target = builder.create_block();
+
+        // entry: jump dropper(v0, v1)
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+        let v0 = builder.ins().iconst(types::I64, 1);
+        let v1 = builder.ins().iconst(types::I64, 2);
+        builder
+            .ins()
+            .jump(dropper, &[BlockArg::from(v0), BlockArg::from(v1)]);
+
+        // dropper(p0, p1): jump target(p0) — drops p1
+        builder.switch_to_block(dropper);
+        builder.append_block_param(dropper, types::I64);
+        builder.append_block_param(dropper, types::I64);
+        builder.seal_block(dropper);
+        let dp0 = builder.block_params(dropper)[0];
+        builder.ins().jump(target, &[BlockArg::from(dp0)]);
+
+        // target(t0): return t0
+        builder.switch_to_block(target);
+        builder.append_block_param(target, types::I64);
+        builder.seal_block(target);
+        let tp0 = builder.block_params(target)[0];
+        builder.ins().return_(&[tp0]);
+
+        builder.finalize();
+
+        let pt = find_passthrough_trampolines(&func);
+        assert!(pt.is_empty(), "dropping args should not be detected");
     }
 }
