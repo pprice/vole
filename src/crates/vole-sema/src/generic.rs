@@ -447,34 +447,24 @@ impl TypeParamScopeStack {
 
     /// Look up a type parameter by Symbol in any scope (innermost first)
     pub fn get(&self, name: Symbol) -> Option<&TypeParamInfo> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(info) = scope.get(name) {
-                return Some(info);
-            }
-        }
-        None
+        self.scopes.iter().rev().find_map(|scope| scope.get(name))
     }
 
     /// Look up a type parameter by NameId in any scope (innermost first)
     pub fn get_by_name_id(&self, name_id: NameId) -> Option<&TypeParamInfo> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(info) = scope.get_by_name_id(name_id) {
-                return Some(info);
-            }
-        }
-        None
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get_by_name_id(name_id))
     }
 
     /// Look up a type parameter by TypeParamId in any scope (innermost first)
     pub fn get_by_type_param_id(&self, type_param_id: TypeParamId) -> Option<&TypeParamInfo> {
-        for scope in self.scopes.iter().rev() {
-            for param in scope.params() {
-                if param.type_param_id == Some(type_param_id) {
-                    return Some(param);
-                }
-            }
-        }
-        None
+        self.scopes
+            .iter()
+            .rev()
+            .flat_map(|scope| scope.params())
+            .find(|param| param.type_param_id == Some(type_param_id))
     }
 
     /// Check if a symbol refers to a type parameter in any scope
