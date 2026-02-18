@@ -19,7 +19,7 @@ pub(crate) fn display_type_id(
 
 /// Display an InternedStructural constraint for error messages.
 /// Returns a string like `{ name: string, age: i64 }`.
-pub fn display_structural_constraint(
+pub(crate) fn display_structural_constraint(
     structural: &InternedStructural,
     arena: &TypeArena,
     names: &NameTable,
