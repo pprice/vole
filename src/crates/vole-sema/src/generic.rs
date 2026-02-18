@@ -280,7 +280,7 @@ impl Clone for TypeParamRegistry {
 
 /// Merge two type parameter lists into one.
 /// This is useful for combining class type params with method type params.
-pub fn merge_type_params(
+pub(crate) fn merge_type_params(
     base: &[TypeParamInfo],
     additional: &[TypeParamInfo],
 ) -> Vec<TypeParamInfo> {
