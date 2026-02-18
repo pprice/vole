@@ -238,19 +238,20 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
         ArenaType::Primitive(PrimitiveType::F64) => types::F64,
         ArenaType::Primitive(PrimitiveType::F128) => types::F128,
         ArenaType::Primitive(PrimitiveType::Bool) => types::I8,
-        ArenaType::Primitive(PrimitiveType::String) => pointer_type,
-        ArenaType::Handle => pointer_type,
-        ArenaType::Interface { .. } => pointer_type,
-        ArenaType::Union(_) => pointer_type,
-        ArenaType::Fallible { .. } => pointer_type,
-        ArenaType::Function { .. } => pointer_type,
-        ArenaType::Range => pointer_type,
-        ArenaType::Tuple(_) => pointer_type,
-        ArenaType::FixedArray { .. } => pointer_type,
-        // Struct types are stack-allocated, represented as pointers
-        ArenaType::Struct { .. } => pointer_type,
-        // Unknown type uses TaggedValue (16 bytes: tag + value), stored via pointer
-        ArenaType::Unknown => pointer_type,
+        // Pointer-sized types: heap-allocated (String, Handle, Interface, Union, etc.),
+        // stack-allocated via pointer (Struct, FixedArray, Tuple, Fallible, Range),
+        // or boxed (Unknown as TaggedValue).
+        ArenaType::Primitive(PrimitiveType::String)
+        | ArenaType::Handle
+        | ArenaType::Interface { .. }
+        | ArenaType::Union(_)
+        | ArenaType::Fallible { .. }
+        | ArenaType::Function { .. }
+        | ArenaType::Range
+        | ArenaType::Tuple(_)
+        | ArenaType::FixedArray { .. }
+        | ArenaType::Struct { .. }
+        | ArenaType::Unknown => pointer_type,
         _ => types::I64,
     }
 }
