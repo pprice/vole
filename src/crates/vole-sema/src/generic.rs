@@ -172,7 +172,8 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
 /// - Invariant: F<T> and F<U> are unrelated unless T = U
 /// - Bivariant: F<T> is both a subtype and supertype of F<U> (rare, usually error)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TypeParamVariance {
+#[expect(dead_code)]
+pub(crate) enum TypeParamVariance {
     /// Type can vary in the same direction as its container.
     /// Used for return types, read-only fields, iterators.
     #[default]
@@ -191,6 +192,7 @@ pub enum TypeParamVariance {
 impl TypeParamVariance {
     /// Combine two variance positions.
     /// Used when a type param appears in multiple positions.
+    #[expect(dead_code)]
     pub fn combine(self, other: TypeParamVariance) -> TypeParamVariance {
         use TypeParamVariance::*;
         match (self, other) {
@@ -205,6 +207,7 @@ impl TypeParamVariance {
     }
 
     /// Flip variance (used when entering contravariant position like function params).
+    #[expect(dead_code)]
     pub fn flip(self) -> TypeParamVariance {
         use TypeParamVariance::*;
         match self {
@@ -231,7 +234,8 @@ pub struct TypeParamInfo {
     pub type_param_id: Option<TypeParamId>,
     /// Variance of this type parameter (computed from usage positions).
     /// Defaults to Covariant for simple cases.
-    pub variance: TypeParamVariance,
+    #[expect(dead_code)]
+    pub(crate) variance: TypeParamVariance,
 }
 
 /// Registry for allocating and looking up TypeParamIds.
