@@ -153,11 +153,27 @@ fn eval_binary(
 ) -> Option<ConstValue> {
     let left = eval_const_value(&bin.left, known_constants)?;
     let right = eval_const_value(&bin.right, known_constants)?;
+    fold_binary_values(left, right, bin.op)
+}
 
+/// Evaluate a unary expression on a constant operand.
+fn eval_unary(
+    unary: &UnaryExpr,
+    known_constants: &HashMap<Symbol, ConstantValue>,
+) -> Option<ConstValue> {
+    let operand = eval_const_value(&unary.operand, known_constants)?;
+    fold_unary_value(unary.op, operand)
+}
+
+/// Fold a binary operation on two pre-resolved constant values.
+///
+/// This is the shared core logic used by both `eval_binary` (module-scanning path)
+/// and `ConstantFolder::try_fold_binary` (optimizer path).
+fn fold_binary_values(left: ConstValue, right: ConstValue, op: BinaryOp) -> Option<ConstValue> {
     match (left, right) {
         (ConstValue::Int(l, l_suffix), ConstValue::Int(r, r_suffix)) => {
             let s = l_suffix.or(r_suffix);
-            match bin.op {
+            match op {
                 BinaryOp::Add => Some(ConstValue::Int(l.wrapping_add(r), s)),
                 BinaryOp::Sub => Some(ConstValue::Int(l.wrapping_sub(r), s)),
                 BinaryOp::Mul => Some(ConstValue::Int(l.wrapping_mul(r), s)),
@@ -178,22 +194,22 @@ fn eval_binary(
             }
         }
         (ConstValue::Float(l, l_suffix), ConstValue::Float(r, r_suffix)) => {
-            fold_float_binary(l, r, l_suffix.or(r_suffix), bin.op)
+            fold_float_binary(l, r, l_suffix.or(r_suffix), op)
         }
         (ConstValue::Int(l, _), ConstValue::Float(r, suffix)) => {
-            fold_float_binary(l as f64, r, suffix, bin.op)
+            fold_float_binary(l as f64, r, suffix, op)
         }
         (ConstValue::Float(l, suffix), ConstValue::Int(r, _)) => {
-            fold_float_binary(l, r as f64, suffix, bin.op)
+            fold_float_binary(l, r as f64, suffix, op)
         }
-        (ConstValue::Bool(l), ConstValue::Bool(r)) => match bin.op {
+        (ConstValue::Bool(l), ConstValue::Bool(r)) => match op {
             BinaryOp::And => Some(ConstValue::Bool(l && r)),
             BinaryOp::Or => Some(ConstValue::Bool(l || r)),
             BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
             BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
             _ => None,
         },
-        (ConstValue::String(l), ConstValue::String(r)) => match bin.op {
+        (ConstValue::String(l), ConstValue::String(r)) => match op {
             BinaryOp::Add => Some(ConstValue::String(l + &r)),
             BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
             BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
@@ -203,13 +219,12 @@ fn eval_binary(
     }
 }
 
-/// Evaluate a unary expression on a constant operand.
-fn eval_unary(
-    unary: &UnaryExpr,
-    known_constants: &HashMap<Symbol, ConstantValue>,
-) -> Option<ConstValue> {
-    let operand = eval_const_value(&unary.operand, known_constants)?;
-    match (unary.op, operand) {
+/// Fold a unary operation on a pre-resolved constant value.
+///
+/// This is the shared core logic used by both `eval_unary` (module-scanning path)
+/// and `ConstantFolder::try_fold_unary` (optimizer path).
+fn fold_unary_value(op: vole_frontend::UnaryOp, operand: ConstValue) -> Option<ConstValue> {
+    match (op, operand) {
         (vole_frontend::UnaryOp::Neg, ConstValue::Int(v, suffix)) => {
             Some(ConstValue::Int(-v, suffix))
         }
@@ -771,79 +786,13 @@ impl<'a> ConstantFolder<'a> {
     fn try_fold_binary(&self, bin: &BinaryExpr) -> Option<ConstValue> {
         let left = self.get_const_value(&bin.left)?;
         let right = self.get_const_value(&bin.right)?;
-
-        match (left, right) {
-            // Integer operations
-            (ConstValue::Int(l, l_suffix), ConstValue::Int(r, r_suffix)) => {
-                let result_suffix = l_suffix.or(r_suffix);
-                match bin.op {
-                    BinaryOp::Add => Some(ConstValue::Int(l.wrapping_add(r), result_suffix)),
-                    BinaryOp::Sub => Some(ConstValue::Int(l.wrapping_sub(r), result_suffix)),
-                    BinaryOp::Mul => Some(ConstValue::Int(l.wrapping_mul(r), result_suffix)),
-                    BinaryOp::Div if r != 0 => Some(ConstValue::Int(l / r, result_suffix)),
-                    BinaryOp::Mod if r != 0 => Some(ConstValue::Int(l % r, result_suffix)),
-                    BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
-                    BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
-                    BinaryOp::Lt => Some(ConstValue::Bool(l < r)),
-                    BinaryOp::Gt => Some(ConstValue::Bool(l > r)),
-                    BinaryOp::Le => Some(ConstValue::Bool(l <= r)),
-                    BinaryOp::Ge => Some(ConstValue::Bool(l >= r)),
-                    BinaryOp::BitAnd => Some(ConstValue::Int(l & r, result_suffix)),
-                    BinaryOp::BitOr => Some(ConstValue::Int(l | r, result_suffix)),
-                    BinaryOp::BitXor => Some(ConstValue::Int(l ^ r, result_suffix)),
-                    BinaryOp::Shl => Some(ConstValue::Int(l << (r & 63), result_suffix)),
-                    BinaryOp::Shr => Some(ConstValue::Int(l >> (r & 63), result_suffix)),
-                    _ => None,
-                }
-            }
-            // Float operations
-            (ConstValue::Float(l, l_suffix), ConstValue::Float(r, r_suffix)) => {
-                fold_float_binary(l, r, l_suffix.or(r_suffix), bin.op)
-            }
-            // Mixed int/float (promote to float)
-            (ConstValue::Int(l, _), ConstValue::Float(r, suffix)) => {
-                fold_float_binary(l as f64, r, suffix, bin.op)
-            }
-            (ConstValue::Float(l, suffix), ConstValue::Int(r, _)) => {
-                fold_float_binary(l, r as f64, suffix, bin.op)
-            }
-            // Boolean operations
-            (ConstValue::Bool(l), ConstValue::Bool(r)) => match bin.op {
-                BinaryOp::And => Some(ConstValue::Bool(l && r)),
-                BinaryOp::Or => Some(ConstValue::Bool(l || r)),
-                BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
-                BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
-                _ => None,
-            },
-            // String operations
-            (ConstValue::String(l), ConstValue::String(r)) => match bin.op {
-                BinaryOp::Add => Some(ConstValue::String(l + &r)),
-                BinaryOp::Eq => Some(ConstValue::Bool(l == r)),
-                BinaryOp::Ne => Some(ConstValue::Bool(l != r)),
-                _ => None,
-            },
-            // Mismatched types
-            _ => None,
-        }
+        fold_binary_values(left, right, bin.op)
     }
 
     /// Try to fold a unary expression.
     fn try_fold_unary(&self, unary: &UnaryExpr) -> Option<ConstValue> {
         let operand = self.get_const_value(&unary.operand)?;
-
-        match (unary.op, operand) {
-            (vole_frontend::UnaryOp::Neg, ConstValue::Int(v, suffix)) => {
-                Some(ConstValue::Int(-v, suffix))
-            }
-            (vole_frontend::UnaryOp::Neg, ConstValue::Float(v, suffix)) => {
-                Some(ConstValue::Float(-v, suffix))
-            }
-            (vole_frontend::UnaryOp::Not, ConstValue::Bool(v)) => Some(ConstValue::Bool(!v)),
-            (vole_frontend::UnaryOp::BitNot, ConstValue::Int(v, suffix)) => {
-                Some(ConstValue::Int(!v, suffix))
-            }
-            _ => None,
-        }
+        fold_unary_value(unary.op, operand)
     }
 
     /// Try to fold a pure intrinsic method call with all-constant arguments.
