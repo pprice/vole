@@ -71,6 +71,9 @@ pub extern "C" fn rc_inc(ptr: *mut u8) {
     if ptr.is_null() {
         return;
     }
+    // SAFETY: Null check above guarantees `ptr` is valid. Cast to `*const RcHeader`
+    // is valid per the function's safety contract. Atomic operations on `ref_count`
+    // are lock-free and don't create shared references that could alias.
     unsafe {
         let header = ptr as *const RcHeader;
         // Relaxed is fine for the pinned check: RC_PINNED is a permanent
@@ -97,6 +100,9 @@ pub extern "C" fn rc_dec(ptr: *mut u8) {
     if ptr.is_null() {
         return;
     }
+    // SAFETY: Null check above guarantees `ptr` is valid. Cast to `*const RcHeader`
+    // is valid per the function's safety contract. Reading `drop_fn` through a raw
+    // pointer avoids aliasing issues after the atomic decrement.
     unsafe {
         let header = ptr as *const RcHeader;
         // Relaxed is fine for the pinned check: see comment in rc_inc.
@@ -316,6 +322,9 @@ pub fn union_heap_cleanup(ptr: *mut u8) {
     if ptr.is_null() {
         return;
     }
+    // SAFETY: Null check above guarantees `ptr` is valid per the function's safety
+    // contract (16-byte union heap buffer). Byte offsets 1 (is_rc) and 8 (payload)
+    // are within the allocation bounds. `dealloc` uses the matching layout.
     unsafe {
         let is_rc = *ptr.add(1);
         let payload = *(ptr.add(8) as *const u64);
