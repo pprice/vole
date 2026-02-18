@@ -115,6 +115,7 @@ mod multi_arm_when;
 mod multi_push;
 mod nested_closure;
 mod nested_for_loop;
+mod nested_func_def;
 mod nested_match;
 mod nested_tostring;
 mod nested_when;
@@ -356,6 +357,7 @@ pub fn all() -> Vec<Box<dyn StmtRule>> {
         Box::new(break_continue::BreakContinue),
         Box::new(fn_param_call::FnParamCall),
         Box::new(many_params_call::ManyParamsCall),
+        Box::new(nested_func_def::NestedFuncDef),
         Box::new(bool_match_let::BoolMatchLet),
         // -- Match/when expression rules (batch 14) --------------------------------
         Box::new(match_iter_terminal::MatchIterTerminal),
