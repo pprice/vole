@@ -80,7 +80,7 @@ pub fn resolve_callable_with_preference(
     }
 }
 
-pub fn strategy_for_callable(key: &CallableKey) -> CallableStrategy {
+fn strategy_for_callable(key: &CallableKey) -> CallableStrategy {
     match key {
         CallableKey::Runtime(_) => CallableStrategy::RuntimeOnly,
         CallableKey::Intrinsic(intrinsic) => strategy_for_intrinsic(intrinsic),
