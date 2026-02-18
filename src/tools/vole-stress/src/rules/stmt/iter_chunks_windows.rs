@@ -1,6 +1,6 @@
 //! Rule: iterator chunks/windows let-binding.
 //!
-//! Generates `.chunks(N).count()` or `.windows(N).flatten().collect()` on arrays.
+//! Generates `.chunks(N).count()` on arrays.
 
 use crate::emit::Emit;
 use crate::rule::{Param, Params, StmtRule};
@@ -72,18 +72,10 @@ impl StmtRule for IterChunksWindows {
             String::new()
         };
 
-        // Terminal: count (50%) or flatten().collect() (50%)
-        let (terminal, result_type) = if emit.gen_bool(0.5) {
-            (
-                ".count()".to_string(),
-                TypeInfo::Primitive(PrimitiveType::I64),
-            )
-        } else {
-            (
-                ".flatten().collect()".to_string(),
-                TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
-            )
-        };
+        // Terminal: count — flatten().collect() doesn't actually flatten
+        // Iterator<[T]> to Iterator<T> in Vole, so we only use .count().
+        let terminal = ".count()".to_string();
+        let result_type = TypeInfo::Primitive(PrimitiveType::I64);
 
         scope.add_local(result_name.clone(), result_type, false);
         Some(format!(

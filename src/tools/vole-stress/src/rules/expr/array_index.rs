@@ -1,7 +1,8 @@
 //! Rule: array index expression.
 //!
-//! Generates `arrVar[0_i64]` when an array-typed variable with a matching
-//! element type is in scope. Uses index 0 to stay within bounds.
+//! Generates `arrVar[0_i64]` on parameter arrays (guaranteed non-empty).
+//! Uses index 0 to stay within bounds. Only parameters are used because
+//! local arrays from `.iter().collect()` or similar may be empty.
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
@@ -20,7 +21,11 @@ impl ExprRule for ArrayIndex {
     }
 
     fn precondition(&self, scope: &Scope, _params: &Params) -> bool {
-        !scope.array_vars().is_empty()
+        // Only use parameter arrays (guaranteed non-empty by the test harness).
+        scope
+            .params
+            .iter()
+            .any(|p| matches!(p.param_type, TypeInfo::Array(_)))
     }
 
     fn generate(
@@ -35,11 +40,18 @@ impl ExprRule for ArrayIndex {
             _ => return None,
         };
 
-        let array_vars = scope.array_vars();
+        // Only use parameter arrays (guaranteed non-empty).
         let target = TypeInfo::Primitive(prim);
-        let candidates: Vec<_> = array_vars
+        let candidates: Vec<_> = scope
+            .params
             .iter()
-            .filter(|(_, elem_ty)| *elem_ty == target)
+            .filter(|p| {
+                if let TypeInfo::Array(elem) = &p.param_type {
+                    **elem == target
+                } else {
+                    false
+                }
+            })
             .collect();
 
         if candidates.is_empty() {
@@ -47,7 +59,7 @@ impl ExprRule for ArrayIndex {
         }
 
         let idx = emit.gen_range(0..candidates.len());
-        let (var_name, _) = &candidates[idx];
+        let var_name = &candidates[idx].name;
 
         // Use index 0 to stay within bounds
         let suffix = match prim {
@@ -102,14 +114,14 @@ mod tests {
     }
 
     #[test]
-    fn generates_index_with_matching_array() {
+    fn generates_index_with_matching_param_array() {
+        use crate::symbols::ParamInfo;
         let table = SymbolTable::new();
-        let mut scope = Scope::new(&[], &table);
-        scope.add_local(
-            "arr".into(),
-            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
-            false,
-        );
+        let param_infos = vec![ParamInfo {
+            name: "arr".into(),
+            param_type: TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+        }];
+        let scope = Scope::new(&param_infos, &table);
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let resolved = ResolvedParams::new();
@@ -125,5 +137,30 @@ mod tests {
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(text.contains("arr["), "expected array index, got: {text}");
+    }
+
+    #[test]
+    fn returns_none_for_local_array_only() {
+        let table = SymbolTable::new();
+        let mut scope = Scope::new(&[], &table);
+        scope.add_local(
+            "arr".into(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            false,
+        );
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let resolved = ResolvedParams::new();
+        let mut emit = test_emit(&mut rng, &resolved);
+        let params = Params::from_iter([("probability", ParamValue::Probability(1.0))]);
+
+        // Local arrays should be skipped (might be empty)
+        let result = ArrayIndex.generate(
+            &scope,
+            &mut emit,
+            &params,
+            &TypeInfo::Primitive(PrimitiveType::I64),
+        );
+        assert!(result.is_none());
     }
 }
