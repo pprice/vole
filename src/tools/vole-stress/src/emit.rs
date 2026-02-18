@@ -5,6 +5,8 @@
 //! expressions. It is the glue between the rule system (trait objects) and the
 //! generated Vole source text.
 
+use std::collections::HashMap;
+
 use rand::seq::SliceRandom;
 use rand::{Rng, RngCore};
 
@@ -35,6 +37,11 @@ pub struct Emit<'a> {
     indent: usize,
     /// Current expression nesting depth (prevents infinite recursion).
     expr_depth: usize,
+    /// Mapping from type parameter names to expressions that produce a value
+    /// of that type. Populated when emitting method bodies for generic classes,
+    /// so that `literal(TypeParam("T"))` can return e.g. `self.field8` instead
+    /// of falling back to an incorrect concrete literal.
+    type_param_exprs: HashMap<String, Vec<String>>,
 }
 
 /// Number of spaces per indentation level.
@@ -67,7 +74,23 @@ impl<'a> Emit<'a> {
             resolved_params,
             indent: 0,
             expr_depth: 0,
+            type_param_exprs: HashMap::new(),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+impl Emit<'_> {
+    /// Register expressions that produce values of generic type parameters.
+    ///
+    /// When emitting method bodies for generic classes, this mapping lets
+    /// [`literal`](Emit::literal) return e.g. `self.field8` for a type
+    /// parameter `T2` instead of falling back to a concrete `i64` literal.
+    pub fn set_type_param_exprs(&mut self, map: HashMap<String, Vec<String>>) {
+        self.type_param_exprs = map;
     }
 }
 
@@ -135,6 +158,20 @@ impl Emit<'_> {
             TypeInfo::Tuple(elems) => {
                 let parts: Vec<String> = elems.iter().map(|e| self.literal(e)).collect();
                 format!("[{}]", parts.join(", "))
+            }
+            TypeInfo::TypeParam(name) => {
+                // Look up registered expressions for this type parameter
+                // (e.g. `self.field8` when inside a generic class method).
+                if let Some(exprs) = self.type_param_exprs.get(name) {
+                    if !exprs.is_empty() {
+                        let idx = self.rng.gen_range(0..exprs.len());
+                        return exprs[idx].clone();
+                    }
+                }
+                // No known expression for this type param; fall back to
+                // a default primitive (will be type-incorrect but avoids
+                // a panic -- the planner should ensure this path is rare).
+                self.literal_for_primitive(PrimitiveType::I64)
             }
             _ => {
                 // For types that don't have a natural literal form,

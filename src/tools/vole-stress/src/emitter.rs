@@ -1190,6 +1190,38 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         );
         emit.set_indent(self.indent);
 
+        // When emitting a method body inside a generic class, build a mapping
+        // from type parameter names to `self.fieldName` expressions so that
+        // literal generation for TypeParam types produces valid code instead
+        // of falling back to an incorrect concrete type like i64.
+        if let Some((cls_mod, cls_sym)) = self.current_class {
+            if let Some(symbol) = self.table.get_symbol(cls_mod, cls_sym) {
+                if let SymbolKind::Class(ref info) = symbol.kind {
+                    if !info.type_params.is_empty() {
+                        let mut tp_map = std::collections::HashMap::new();
+                        for field in &info.fields {
+                            if let TypeInfo::TypeParam(ref tp_name) = field.field_type {
+                                tp_map
+                                    .entry(tp_name.clone())
+                                    .or_insert_with(Vec::new)
+                                    .push(format!("self.{}", field.name));
+                            }
+                        }
+                        // Also consider method parameters of type-param type
+                        for param in params {
+                            if let TypeInfo::TypeParam(ref tp_name) = param.param_type {
+                                tp_map
+                                    .entry(tp_name.clone())
+                                    .or_insert_with(Vec::new)
+                                    .push(param.name.clone());
+                            }
+                        }
+                        emit.set_type_param_exprs(tp_map);
+                    }
+                }
+            }
+        }
+
         let lines = emit.generate_body(return_type, &mut scope, stmt_count);
 
         for line in lines {

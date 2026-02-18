@@ -1130,6 +1130,28 @@ fn plan_method_signature_with_type_params<R: Rng>(
     }
 
     let return_type = plan_return_type_with_type_params(rng, type_params);
+
+    // When the return type is a type parameter, ensure at least one parameter
+    // has the same type so the method body can produce a valid return value
+    // (e.g. `return paramN` instead of a concrete literal).
+    if let TypeInfo::TypeParam(ref tp_name) = return_type {
+        let has_matching_param = params
+            .iter()
+            .any(|p| matches!(&p.param_type, TypeInfo::TypeParam(n) if n == tp_name));
+        if !has_matching_param {
+            // Replace a random parameter's type with the type param, or add one
+            if params.is_empty() {
+                params.push(ParamInfo {
+                    name: names.next("param"),
+                    param_type: TypeInfo::TypeParam(tp_name.clone()),
+                });
+            } else {
+                let idx = rng.gen_range(0..params.len());
+                params[idx].param_type = TypeInfo::TypeParam(tp_name.clone());
+            }
+        }
+    }
+
     MethodInfo {
         name,
         params,
