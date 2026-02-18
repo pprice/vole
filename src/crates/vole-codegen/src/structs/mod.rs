@@ -6,6 +6,7 @@ mod access;
 pub(crate) mod helpers;
 mod literals;
 mod methods;
+mod static_methods;
 
 pub(crate) use helpers::{
     convert_field_value_id, convert_to_i64_for_storage, field_flat_slots,
