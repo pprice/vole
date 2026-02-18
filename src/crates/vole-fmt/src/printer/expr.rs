@@ -602,11 +602,17 @@ fn print_lambda_param<'a>(
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
     let name = arena.text(interner.resolve(param.name).to_string());
-    if let Some(ty) = &param.ty {
+    let base = if let Some(ty) = &param.ty {
         name.append(arena.text(": "))
             .append(print_type_expr(arena, ty, interner))
     } else {
         name
+    };
+    if let Some(default) = &param.default_value {
+        base.append(arena.text(" = "))
+            .append(print_expr(arena, default, interner))
+    } else {
+        base
     }
 }
 

@@ -1,0 +1,49 @@
+func call_with_defaults() -> i64 {
+    let add = (a: i64, b: i64 = 10) -> i64 => a + b
+    return add(5)
+}
+
+func call_all_args() -> i64 {
+    let add = (a: i64, b: i64 = 10) -> i64 => a + b
+    return add(5, 20)
+}
+
+func multiple_defaults() -> i64 {
+    let f = (a: i64, b: i64 = 10, c: i64 = 100) -> i64 => a + b + c
+    return f(1)
+}
+
+func multiple_defaults_partial() -> i64 {
+    let f = (a: i64, b: i64 = 10, c: i64 = 100) -> i64 => a + b + c
+    return f(1, 2)
+}
+
+func block_body_lambda() -> i64 {
+    let compute = (x: i64, factor: i64 = 2) -> i64 => {
+        let result = x * factor
+        return result
+    }
+    return compute(21)
+}
+
+tests "lambda parameter defaults" {
+    test "lambda with default, omitted arg" {
+        assert(call_with_defaults() == 15)
+    }
+
+    test "lambda with default, all args provided" {
+        assert(call_all_args() == 25)
+    }
+
+    test "lambda with multiple defaults, all omitted" {
+        assert(multiple_defaults() == 111)
+    }
+
+    test "lambda with multiple defaults, partial" {
+        assert(multiple_defaults_partial() == 103)
+    }
+
+    test "block body lambda with default" {
+        assert(block_body_lambda() == 42)
+    }
+}
