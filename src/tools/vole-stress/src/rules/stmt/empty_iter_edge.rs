@@ -59,11 +59,8 @@ impl StmtRule for EmptyIterEdge {
         match emit.gen_range(0..4) {
             0 => {
                 // .take(0).collect() -> empty array
-                scope.add_local(
-                    result_name.clone(),
-                    TypeInfo::Array(Box::new(TypeInfo::Primitive(*elem_prim))),
-                    false,
-                );
+                // Don't register in scope — this is an empty array and later
+                // rules (array_index) would OOB-panic indexing into it.
                 Some(format!(
                     "let {} = {}.iter().take(0).collect()",
                     result_name, arr_name
@@ -83,11 +80,8 @@ impl StmtRule for EmptyIterEdge {
             }
             2 => {
                 // .skip(999).collect() -> empty array
-                scope.add_local(
-                    result_name.clone(),
-                    TypeInfo::Array(Box::new(TypeInfo::Primitive(*elem_prim))),
-                    false,
-                );
+                // Don't register in scope — this is an empty array and later
+                // rules (array_index) would OOB-panic indexing into it.
                 Some(format!(
                     "let {} = {}.iter().skip(999).collect()",
                     result_name, arr_name

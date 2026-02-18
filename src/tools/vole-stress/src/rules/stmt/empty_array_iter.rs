@@ -30,11 +30,8 @@ impl StmtRule for EmptyArrayIter {
             _ => (PrimitiveType::String, "string"),
         };
 
-        scope.add_local(
-            arr_name.clone(),
-            TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_type))),
-            false,
-        );
+        // Don't register the empty array in scope — later rules (array_index)
+        // would OOB-panic indexing into it.
 
         let terminal = match emit.gen_range(0..3) {
             0 => {
@@ -50,11 +47,7 @@ impl StmtRule for EmptyArrayIter {
                 format!("let {} = {}.iter().sum()", result_name, arr_name)
             }
             _ => {
-                scope.add_local(
-                    result_name.clone(),
-                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_type))),
-                    false,
-                );
+                // Don't register in scope — filter on empty array yields empty array.
                 format!(
                     "let {} = {}.iter().filter((x) => x == x).collect()",
                     result_name, arr_name

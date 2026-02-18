@@ -24,11 +24,8 @@ impl StmtRule for EmptyRange {
 
         match emit.gen_range(0..3) {
             0 => {
-                scope.add_local(
-                    name.clone(),
-                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
-                    false,
-                );
+                // Don't register in scope — this is an empty array and later
+                // rules (array_index) would OOB-panic indexing into it.
                 Some(format!("let {} = ({}..{}).iter().collect()", name, n, n))
             }
             1 => {
