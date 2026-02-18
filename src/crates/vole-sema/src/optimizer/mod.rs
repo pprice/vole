@@ -90,14 +90,14 @@ use vole_frontend::Program;
 
 /// Configuration for the optimizer.
 #[derive(Debug, Clone, Default)]
-pub struct OptimizerConfig {
+struct OptimizerConfig {
     /// Enable constant folding pass
-    pub constant_folding: bool,
+    constant_folding: bool,
 }
 
 impl OptimizerConfig {
     /// Create a new config with all optimizations enabled
-    pub fn all() -> Self {
+    fn all() -> Self {
         Self {
             constant_folding: true,
         }
@@ -134,7 +134,7 @@ pub struct OptimizerStats {
 /// # Returns
 ///
 /// Statistics about what optimizations were applied.
-pub fn optimize(
+fn optimize(
     program: &mut Program,
     expr_data: &mut ExpressionData,
     config: &OptimizerConfig,

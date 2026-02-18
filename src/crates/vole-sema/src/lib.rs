@@ -41,7 +41,7 @@ pub use implement_registry::{
 };
 pub use memory_kind::MemoryKind;
 pub use module::{LoadError, ModuleInfo, ModuleLoader};
-pub use optimizer::{OptimizerConfig, OptimizerStats, optimize, optimize_all};
+pub use optimizer::{OptimizerStats, optimize_all};
 pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use type_arena::{SemaType, TypeArena};
