@@ -30,6 +30,8 @@ impl Cg<'_, '_, '_> {
                         .bitcast(types::F128, MemFlags::new(), bits)
                 } else if operand.ty.is_float() {
                     self.builder.ins().fneg(operand.value)
+                } else if let Some(c) = try_constant_value(self.builder.func, operand.value) {
+                    self.builder.ins().iconst(operand.ty, -c)
                 } else {
                     self.builder.ins().ineg(operand.value)
                 }
