@@ -372,6 +372,73 @@ pub(crate) fn field_flat_slots(
     crate::types::field_slot_count(type_id, arena)
 }
 
+/// Map a leaf TypeId to its Cranelift type for equality comparison.
+/// Wide types (i128, f128) map to their 128-bit Cranelift types.
+/// Float types map to F32/F64/F128 so callers can use fcmp instead of icmp.
+fn leaf_cranelift_type(type_id: TypeId, arena: &TypeArena) -> Type {
+    match arena.get(type_id) {
+        ArenaType::Primitive(PrimitiveType::F32) => types::F32,
+        ArenaType::Primitive(PrimitiveType::F64) => types::F64,
+        ArenaType::Primitive(PrimitiveType::F128) => types::F128,
+        ArenaType::Primitive(PrimitiveType::I128) => types::I128,
+        _ => types::I64,
+    }
+}
+
+/// Collect (byte_offset, cranelift_type) for every leaf slot in a struct,
+/// recursively flattening nested struct fields.
+///
+/// Wide types (i128, f128) occupy 16 bytes but produce a single entry so
+/// callers can issue one wide load+compare rather than two i64 compares.
+/// Returns None if `type_id` is not a struct type.
+pub(crate) fn struct_flat_field_cranelift_types(
+    type_id: TypeId,
+    arena: &TypeArena,
+    entities: &EntityRegistry,
+) -> Option<Vec<(i32, Type)>> {
+    let (type_def_id, type_args) = arena.unwrap_struct(type_id)?;
+    let type_def = entities.get_type(type_def_id);
+    let generic_info = type_def.generic_info.as_ref()?;
+
+    let subs = build_type_arg_subs(type_def_id, type_args, entities);
+
+    let mut result = Vec::new();
+    let mut offset = 0i32;
+    for field_type in &generic_info.field_types {
+        let concrete = substitute_field_type(*field_type, &subs, arena);
+        collect_leaf_slots(concrete, arena, entities, &mut offset, &mut result);
+    }
+    Some(result)
+}
+
+/// Recursively collect leaf (offset, cranelift_type) entries for a field type.
+/// Nested structs are flattened; leaf types produce a single entry.
+fn collect_leaf_slots(
+    type_id: TypeId,
+    arena: &TypeArena,
+    entities: &EntityRegistry,
+    offset: &mut i32,
+    out: &mut Vec<(i32, Type)>,
+) {
+    // Recursively flatten nested structs
+    if let Some((nested_def, nested_args)) = arena.unwrap_struct(type_id) {
+        let nested_def_data = entities.get_type(nested_def);
+        if let Some(nested_info) = nested_def_data.generic_info.as_ref() {
+            let nested_subs = build_type_arg_subs(nested_def, nested_args, entities);
+            for field_type in &nested_info.field_types {
+                let concrete = substitute_field_type(*field_type, &nested_subs, arena);
+                collect_leaf_slots(concrete, arena, entities, offset, out);
+            }
+            return;
+        }
+    }
+    // Leaf field: emit one entry and advance offset by the field's byte size
+    let cl_type = leaf_cranelift_type(type_id, arena);
+    out.push((*offset, cl_type));
+    let byte_size = crate::types::field_byte_size(type_id, arena) as i32;
+    *offset += byte_size;
+}
+
 /// Compute the byte offset of field `slot` within a struct, accounting
 /// for nested struct fields that occupy more than one 8-byte slot.
 /// Returns None if the type is not a struct or `slot` is out of range.

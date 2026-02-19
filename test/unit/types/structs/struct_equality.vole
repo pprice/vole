@@ -1,7 +1,11 @@
 // Struct equality tests
 
+let { sqrt } = import "std:math"
+
 struct Point { x: i64, y: i64 }
 struct Single { value: i64 }
+struct FPoint { x: f64, y: f64 }
+struct Mixed { n: i64, v: f64 }
 
 tests {
     test "equal structs" {
@@ -37,5 +41,45 @@ tests {
         let p1 = Point { x: 1, y: 2 }
         let p2 = p1
         assert(p1 == p2)
+    }
+
+    test "f64 fields equal" {
+        let a = FPoint { x: 1.5, y: 2.5 }
+        let b = FPoint { x: 1.5, y: 2.5 }
+        assert(a == b)
+    }
+
+    test "f64 fields not equal" {
+        let a = FPoint { x: 1.5, y: 2.5 }
+        let b = FPoint { x: 1.5, y: 3.5 }
+        assert(a != b)
+    }
+
+    test "f64 NaN field not equal to itself" {
+        // IEEE 754: NaN != NaN — bitwise comparison would give wrong result
+        let nan: f64 = sqrt(-1.0)
+        let a = FPoint { x: nan, y: 0.0 }
+        let b = FPoint { x: nan, y: 0.0 }
+        assert(!(a == b))
+        assert(a != b)
+    }
+
+    test "mixed i64 and f64 fields equal" {
+        let a = Mixed { n: 42, v: 3.14 }
+        let b = Mixed { n: 42, v: 3.14 }
+        assert(a == b)
+    }
+
+    test "mixed i64 and f64 fields not equal when f64 differs" {
+        let a = Mixed { n: 42, v: 3.14 }
+        let b = Mixed { n: 42, v: 2.72 }
+        assert(a != b)
+    }
+
+    test "mixed i64 and f64 NaN not equal" {
+        let nan: f64 = sqrt(-1.0)
+        let a = Mixed { n: 1, v: nan }
+        let b = Mixed { n: 1, v: nan }
+        assert(!(a == b))
     }
 }

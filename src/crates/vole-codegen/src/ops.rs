@@ -983,30 +983,50 @@ impl Cg<'_, '_, '_> {
 
     /// Struct equality: compare all flat slots field-by-field.
     /// For Eq, returns true iff all slots are equal; for Ne, returns true iff any slot differs.
+    /// Float fields use IEEE 754 fcmp so that NaN != NaN (correct), not bitwise icmp.
     fn struct_equality(
         &mut self,
         left: CompiledValue,
         right: CompiledValue,
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
-        let flat_count = self.struct_flat_slot_count(left.type_id).ok_or_else(|| {
+        let field_slots = crate::structs::struct_flat_field_cranelift_types(
+            left.type_id,
+            self.arena(),
+            self.registry(),
+        )
+        .ok_or_else(|| {
             CodegenError::type_mismatch("struct_equality", "struct type", "non-struct")
         })?;
 
         // Start with true (1) - all fields equal so far
         let mut result = self.iconst_cached(types::I8, 1);
 
-        for i in 0..flat_count {
-            let offset = (i as i32) * 8;
-            let left_slot =
+        for (offset, slot_type) in field_slots {
+            let eq = if slot_type.is_float() {
+                let left_slot =
+                    self.builder
+                        .ins()
+                        .load(slot_type, MemFlags::new(), left.value, offset);
+                let right_slot =
+                    self.builder
+                        .ins()
+                        .load(slot_type, MemFlags::new(), right.value, offset);
                 self.builder
                     .ins()
-                    .load(types::I64, MemFlags::new(), left.value, offset);
-            let right_slot =
-                self.builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), right.value, offset);
-            let eq = self.builder.ins().icmp(IntCC::Equal, left_slot, right_slot);
+                    .fcmp(FloatCC::Equal, left_slot, right_slot)
+            } else {
+                // Use slot_type directly so wide integers (i128) load 16 bytes
+                let left_slot =
+                    self.builder
+                        .ins()
+                        .load(slot_type, MemFlags::new(), left.value, offset);
+                let right_slot =
+                    self.builder
+                        .ins()
+                        .load(slot_type, MemFlags::new(), right.value, offset);
+                self.builder.ins().icmp(IntCC::Equal, left_slot, right_slot)
+            };
             result = self.builder.ins().band(result, eq);
         }
 
