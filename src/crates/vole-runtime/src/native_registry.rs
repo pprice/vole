@@ -110,6 +110,26 @@ impl NativeRegistry {
     pub fn module_exists(&self, path: &str) -> bool {
         self.modules.contains_key(path)
     }
+
+    /// Iterate over all registered native function pointers with unique symbol names.
+    ///
+    /// Yields `(symbol_name, ptr)` pairs where the symbol name is derived from the
+    /// module path and function name (e.g., `"std:math::sin"` becomes `"native_std_math__sin"`).
+    /// Used to register all native functions as JIT symbols for devirtualization.
+    pub fn all_function_ptrs(&self) -> Vec<(String, *const u8)> {
+        let mut result = Vec::new();
+        for (module_path, module) in &self.modules {
+            // Convert module path separators for a safe symbol name
+            let safe_module = module_path.replace([':', '/'], "_");
+            for func_name in module.function_names() {
+                if let Some(func) = module.get(func_name) {
+                    let symbol = format!("native_{safe_module}__{func_name}");
+                    result.push((symbol, func.ptr));
+                }
+            }
+        }
+        result
+    }
 }
 
 #[cfg(test)]

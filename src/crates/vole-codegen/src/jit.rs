@@ -100,6 +100,8 @@ pub struct JitOptions {
     pub disasm: bool,
     /// Enable loop parameter optimization (removes invariant block params from loops)
     pub loop_param_opt: bool,
+    /// Capture CLIF IR text for each compiled function (for `inspect ir`)
+    pub capture_ir: bool,
 }
 
 impl JitOptions {
@@ -109,6 +111,7 @@ impl JitOptions {
             release: false,
             disasm: false,
             loop_param_opt: true, // Enable loop optimization in all modes
+            capture_ir: false,
         }
     }
 
@@ -118,6 +121,7 @@ impl JitOptions {
             release: true,
             disasm: false,
             loop_param_opt: true,
+            capture_ir: false,
         }
     }
 
@@ -127,6 +131,7 @@ impl JitOptions {
             release: false,
             disasm: true,
             loop_param_opt: true, // Enable loop optimization for IR inspection
+            capture_ir: false,
         }
     }
 }
@@ -148,6 +153,10 @@ pub struct JitContext {
     disasm_output: Vec<(String, String)>,
     /// Enable loop parameter optimization
     loop_param_opt: bool,
+    /// Capture CLIF IR text for each compiled function
+    capture_ir: bool,
+    /// Collected IR output from compiled functions (func_name, ir_text)
+    ir_output: Vec<(String, String)>,
 }
 
 impl JitContext {
@@ -209,6 +218,15 @@ impl JitContext {
         // Register runtime functions
         Self::register_runtime_symbols(&mut builder);
 
+        // Register all native stdlib function pointers as JIT symbols so they
+        // can be called via direct `call` instead of `call_indirect`. This
+        // creates a temporary NativeRegistry just for symbol registration.
+        let mut tmp_registry = vole_runtime::NativeRegistry::new();
+        vole_runtime::stdlib::register_stdlib(&mut tmp_registry);
+        for (symbol_name, ptr) in tmp_registry.all_function_ptrs() {
+            builder.symbol(&symbol_name, ptr);
+        }
+
         // Register pre-compiled module functions as external symbols
         if let Some(functions) = precompiled {
             for (name, &ptr) in functions {
@@ -228,6 +246,8 @@ impl JitContext {
             disasm: options.disasm,
             disasm_output: Vec::new(),
             loop_param_opt: options.loop_param_opt,
+            capture_ir: options.capture_ir,
+            ir_output: Vec::new(),
         };
 
         // Import runtime functions so they can be called
@@ -350,6 +370,18 @@ impl JitContext {
             crate::control_flow::optimize_loop_params(&mut self.ctx.func);
         }
 
+        // Capture CLIF IR if requested (after optimization, before Cranelift compilation)
+        if self.capture_ir {
+            let func_name = self
+                .func_ids
+                .iter()
+                .find(|(_, id)| **id == func_id)
+                .map(|(name, _)| name.clone())
+                .unwrap_or_else(|| format!("func_{:?}", func_id));
+            self.ir_output
+                .push((func_name, format!("{}", self.ctx.func)));
+        }
+
         // Enable disassembly if requested
         if self.disasm {
             self.ctx.set_disasm(true);
@@ -380,6 +412,11 @@ impl JitContext {
     /// Get collected disassembly output
     pub fn get_disasm(&self) -> &[(String, String)] {
         &self.disasm_output
+    }
+
+    /// Get collected CLIF IR output
+    pub fn get_ir(&self) -> &[(String, String)] {
+        &self.ir_output
     }
 
     /// Check if loop parameter optimization is enabled

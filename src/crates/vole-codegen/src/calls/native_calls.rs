@@ -114,7 +114,6 @@ impl Cg<'_, '_, '_> {
             )));
         }
 
-        // Import the signature and emit an indirect call.
         // Coerce args to match signature types -- boolean values from when/match
         // block params can be i64 while the native signature expects i8.
         let coerced_args: Vec<Value> = args
@@ -126,13 +125,20 @@ impl Cg<'_, '_, '_> {
                 self.coerce_cranelift_value(arg, actual_ty, expected_ty)
             })
             .collect();
-        let sig_ref = self.builder.import_signature(sig);
-        let ptr_type = self.ptr_type();
-        let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
-        let inst = self
-            .builder
-            .ins()
-            .call_indirect(sig_ref, func_ptr_val, &coerced_args);
+
+        // Try to devirtualize: if we know the symbol name for this function
+        // pointer, import it and emit a direct `call` instead of `call_indirect`.
+        let inst = if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
+            let coerced = self.coerce_call_args(func_ref, &coerced_args);
+            self.builder.ins().call(func_ref, &coerced)
+        } else {
+            let sig_ref = self.builder.import_signature(sig);
+            let ptr_type = self.ptr_type();
+            let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
+            self.builder
+                .ins()
+                .call_indirect(sig_ref, func_ptr_val, &coerced_args)
+        };
         self.field_cache.clear(); // Native calls may mutate instance fields
         inst
     }
@@ -166,12 +172,16 @@ impl Cg<'_, '_, '_> {
                 sig.returns.push(AbiParam::new(types::I64));
             }
 
-            let sig_ref = self.builder.import_signature(sig);
-            let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
-            let inst = self
-                .builder
-                .ins()
-                .call_indirect(sig_ref, func_ptr_val, args);
+            let inst = if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
+                let coerced = self.coerce_call_args(func_ref, args);
+                self.builder.ins().call(func_ref, &coerced)
+            } else {
+                let sig_ref = self.builder.import_signature(sig);
+                let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
+                self.builder
+                    .ins()
+                    .call_indirect(sig_ref, func_ptr_val, args)
+            };
             self.field_cache.clear(); // Native calls may mutate instance fields
             inst
         } else {
@@ -195,12 +205,16 @@ impl Cg<'_, '_, '_> {
             sret_args.push(sret_ptr);
             sret_args.extend_from_slice(args);
 
-            let sig_ref = self.builder.import_signature(sig);
-            let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
-            let inst = self
-                .builder
-                .ins()
-                .call_indirect(sig_ref, func_ptr_val, &sret_args);
+            let inst = if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
+                let coerced = self.coerce_call_args(func_ref, &sret_args);
+                self.builder.ins().call(func_ref, &coerced)
+            } else {
+                let sig_ref = self.builder.import_signature(sig);
+                let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
+                self.builder
+                    .ins()
+                    .call_indirect(sig_ref, func_ptr_val, &sret_args)
+            };
             self.field_cache.clear(); // Native calls may mutate instance fields
             inst
         }

@@ -65,12 +65,7 @@ impl ControlFlow {
         }
     }
 
-    pub fn push_loop(
-        &mut self,
-        exit: Block,
-        cont: Block,
-        rc_scope_depth: usize,
-    ) {
+    pub fn push_loop(&mut self, exit: Block, cont: Block, rc_scope_depth: usize) {
         self.loop_exits.push(exit);
         self.loop_continues.push(cont);
         self.loop_rc_depths.push(rc_scope_depth);
@@ -518,6 +513,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.codegen_ctx.funcs_ref()
     }
 
+    /// Try to import a native function by its pointer and return a FuncRef for direct calls.
+    ///
+    /// If the pointer is found in the `ptr_to_symbol` reverse map, the function is
+    /// imported into the JIT module (or the existing import is reused) and a FuncRef
+    /// suitable for `call` is returned. Returns `None` if the pointer is unknown.
+    pub fn try_import_native_func(
+        &mut self,
+        native_ptr: *const u8,
+        sig: &cranelift::prelude::Signature,
+    ) -> Option<cranelift::codegen::ir::FuncRef> {
+        let symbol_name = self.env.state.ptr_to_symbol.get(&(native_ptr as usize))?;
+        let module = self.codegen_ctx.jit_module();
+        let func_id = module
+            .declare_function(symbol_name, cranelift_module::Linkage::Import, sig)
+            .ok()?;
+        Some(module.declare_func_in_func(func_id, self.builder.func))
+    }
+
     /// Compute a pointer to the `idx`-th `TaggedValue` slot in a dynamic array,
     /// without any bounds check.  The caller must guarantee `idx < len`.
     pub fn dynamic_array_elem_ptr_unchecked(&mut self, arr_ptr: Value, idx: Value) -> Value {
@@ -871,6 +884,10 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
 
     fn method_func_keys(&self) -> &FxHashMap<(NameId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
+    }
+
+    fn ptr_to_symbol(&self) -> &FxHashMap<usize, String> {
+        &self.env.state.ptr_to_symbol
     }
 }
 

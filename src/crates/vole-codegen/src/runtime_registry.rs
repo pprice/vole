@@ -894,6 +894,21 @@ pub fn all_linkable_symbols() -> &'static [LinkableRuntimeSymbol] {
     LINKABLE_RUNTIME_SYMBOLS
 }
 
+/// Build a reverse mapping from function pointer to symbol name.
+///
+/// Used by the devirtualizer to convert `call_indirect` through constant
+/// function pointers into direct `call` instructions. When the codegen
+/// knows a native function pointer at compile time, this map lets it
+/// look up the JIT symbol name so it can import the function and emit
+/// a direct call.
+pub fn build_ptr_to_symbol_map() -> rustc_hash::FxHashMap<usize, String> {
+    let mut map = rustc_hash::FxHashMap::default();
+    for sym in LINKABLE_RUNTIME_SYMBOLS {
+        map.insert(sym.ptr as usize, sym.c_name.to_string());
+    }
+    map
+}
+
 /// Linkable runtime symbols intentionally not exposed through `RuntimeKey` imports.
 ///
 /// These are currently invoked via NativeRegistry external dispatch or runtime-internal

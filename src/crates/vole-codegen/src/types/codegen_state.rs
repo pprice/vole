@@ -99,11 +99,24 @@ pub(crate) struct CodegenState {
     /// a new runtime type_id with field type tags based on the concrete types,
     /// so that instance_drop can properly rc_dec RC-typed fields.
     pub mono_type_ids: RefCell<FxHashMap<MonoTypeKey, u32>>,
+    /// Reverse mapping from native function pointer address to JIT symbol name.
+    /// Used to devirtualize `call_indirect` with constant function pointers into
+    /// direct `call` instructions. Built from both `LINKABLE_RUNTIME_SYMBOLS` and
+    /// native stdlib functions registered in the `NativeRegistry`.
+    pub ptr_to_symbol: FxHashMap<usize, String>,
 }
 
 impl CodegenState {
     /// Create a new CodegenState with empty lookup tables.
     pub fn new(native_registry: NativeRegistry) -> Self {
+        // Build the reverse map from function pointer to symbol name.
+        // Start with LINKABLE_RUNTIME_SYMBOLS (static names), then add
+        // native stdlib functions (generated names like "native_std_math__sin").
+        let mut ptr_to_symbol = crate::runtime_registry::build_ptr_to_symbol_map();
+        for (symbol_name, ptr) in native_registry.all_function_ptrs() {
+            ptr_to_symbol.entry(ptr as usize).or_insert(symbol_name);
+        }
+
         Self {
             type_metadata: TypeMetadataMap::new(),
             method_func_keys: FxHashMap::default(),
@@ -112,6 +125,7 @@ impl CodegenState {
             intrinsics_registry: IntrinsicsRegistry::new(),
             lambda_counter: Cell::new(0),
             mono_type_ids: RefCell::new(FxHashMap::default()),
+            ptr_to_symbol,
         }
     }
 }

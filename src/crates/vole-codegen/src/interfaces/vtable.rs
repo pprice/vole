@@ -667,6 +667,26 @@ fn compile_method_wrapper<C: VtableCtx>(
     Ok(builder.inst_results(call).to_vec())
 }
 
+/// Try to import a native function by pointer in the vtable context.
+///
+/// Returns a `FuncRef` for a direct `call` if the function pointer is found
+/// in the `ptr_to_symbol` reverse map, or `None` to fall back to `call_indirect`.
+fn try_import_native_in_vtable<C: VtableCtx>(
+    builder: &mut FunctionBuilder,
+    ctx: &mut C,
+    native_ptr: *const u8,
+    sig: &Signature,
+) -> Option<FuncRef> {
+    // Clone the symbol name to release the immutable borrow on ctx
+    // before calling jit_module() which requires a mutable borrow.
+    let symbol_name = ctx.ptr_to_symbol().get(&(native_ptr as usize))?.clone();
+    let module = ctx.jit_module();
+    let func_id = module
+        .declare_function(&symbol_name, Linkage::Import, sig)
+        .ok()?;
+    Some(module.declare_func_in_func(func_id, builder.func))
+}
+
 /// Compile wrapper body for External target (native/external function calls)
 #[expect(clippy::too_many_arguments)]
 fn compile_external_wrapper<C: VtableCtx>(
@@ -707,19 +727,34 @@ fn compile_external_wrapper<C: VtableCtx>(
             iter_sig.params.push(AbiParam::new(types::I64));
         }
         iter_sig.returns.push(AbiParam::new(ctx.ptr_type()));
-        let iter_sig_ref = builder.import_signature(iter_sig);
-        let iter_fn_ptr = builder
-            .ins()
-            .iconst(ctx.ptr_type(), interface_iter_ptr as i64);
+
         let iter_call = if use_tag {
             let tag_val = builder.ins().iconst(
                 types::I64,
                 iter_elem_tag.expect("tagged iterator requires known element type") as i64,
             );
-            builder
-                .ins()
-                .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr, tag_val])
+            if let Some(func_ref) =
+                try_import_native_in_vtable(builder, ctx, interface_iter_ptr, &iter_sig)
+            {
+                builder.ins().call(func_ref, &[box_ptr, tag_val])
+            } else {
+                let iter_sig_ref = builder.import_signature(iter_sig);
+                let iter_fn_ptr = builder
+                    .ins()
+                    .iconst(ctx.ptr_type(), interface_iter_ptr as i64);
+                builder
+                    .ins()
+                    .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr, tag_val])
+            }
+        } else if let Some(func_ref) =
+            try_import_native_in_vtable(builder, ctx, interface_iter_ptr, &iter_sig)
+        {
+            builder.ins().call(func_ref, &[box_ptr])
         } else {
+            let iter_sig_ref = builder.import_signature(iter_sig);
+            let iter_fn_ptr = builder
+                .ins()
+                .iconst(ctx.ptr_type(), interface_iter_ptr as i64);
             builder
                 .ins()
                 .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr])
@@ -791,11 +826,17 @@ fn compile_external_wrapper<C: VtableCtx>(
         )));
     }
 
-    let sig_ref = builder.import_signature(native_sig);
-    let func_ptr_val = builder.ins().iconst(ctx.ptr_type(), native_func_ptr as i64);
-    let call = builder
-        .ins()
-        .call_indirect(sig_ref, func_ptr_val, &call_args);
+    let call = if let Some(func_ref) =
+        try_import_native_in_vtable(builder, ctx, native_func_ptr, &native_sig)
+    {
+        builder.ins().call(func_ref, &call_args)
+    } else {
+        let sig_ref = builder.import_signature(native_sig);
+        let func_ptr_val = builder.ins().iconst(ctx.ptr_type(), native_func_ptr as i64);
+        builder
+            .ins()
+            .call_indirect(sig_ref, func_ptr_val, &call_args)
+    };
     Ok(builder.inst_results(call).to_vec())
 }
 

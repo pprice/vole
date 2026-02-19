@@ -55,6 +55,9 @@ pub trait VtableCtx {
     /// Get unified method function key map
     /// Keyed by (type_name_id, method_name_id) for stable lookup across analyzer instances
     fn method_func_keys(&self) -> &FxHashMap<(NameId, NameId), FunctionKey>;
+
+    /// Get the pointer-to-symbol reverse map for devirtualizing native calls.
+    fn ptr_to_symbol(&self) -> &FxHashMap<usize, String>;
 }
 
 /// A view that combines CodegenCtx and CompileEnv to implement VtableCtx.
@@ -115,5 +118,9 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
 
     fn method_func_keys(&self) -> &FxHashMap<(NameId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
+    }
+
+    fn ptr_to_symbol(&self) -> &FxHashMap<usize, String> {
+        &self.env.state.ptr_to_symbol
     }
 }
