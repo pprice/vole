@@ -1,13 +1,16 @@
 // src/commands/inspect.rs
 
+use std::cell::RefCell;
 use std::fs;
 use std::process::ExitCode;
+use std::rc::Rc;
 
 use crate::cli::{ColorMode, InspectType, expand_paths_flat};
 use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::commands::common::{PipelineOptions, compile_source, render_pipeline_error};
 use crate::commands::mir_format::format_mir;
 use crate::frontend::{AstPrinter, Parser};
+use crate::sema::ModuleCache;
 
 /// Inspect compilation output for the given files
 pub fn inspect_files(
@@ -31,6 +34,16 @@ pub fn inspect_files(
         eprintln!("error: no .vole files found");
         return ExitCode::FAILURE;
     }
+
+    // Derive project root from the first file's parent directory so that
+    // module imports resolve correctly when inspecting multi-module projects.
+    let project_root = files
+        .first()
+        .and_then(|f| f.parent())
+        .map(|p| p.to_path_buf());
+
+    // Shared module cache so imported modules are resolved once across files.
+    let module_cache = Rc::new(RefCell::new(ModuleCache::new()));
 
     let mut had_error = false;
 
@@ -90,9 +103,9 @@ pub fn inspect_files(
                     PipelineOptions {
                         source: &source,
                         file_path: &file_path,
-                        skip_tests: false,
-                        project_root: None,
-                        module_cache: None,
+                        skip_tests: no_tests,
+                        project_root: project_root.as_deref(),
+                        module_cache: Some(module_cache.clone()),
                         color_mode,
                     },
                     &mut std::io::stderr(),
@@ -112,21 +125,36 @@ pub fn inspect_files(
                         continue;
                     }
                 };
-                // For IR inspection, always enable loop optimization to show optimized IR
-                let options = if release {
+                let mut options = if release {
                     JitOptions::release()
                 } else {
-                    JitOptions::disasm() // Use disasm options to enable loop optimization
+                    JitOptions::default()
                 };
+                options.capture_ir = true;
                 let mut jit = JitContext::with_options(options);
                 let mut compiler = Compiler::new(&mut jit, &analyzed);
-                let include_tests = !no_tests;
+                compiler.set_skip_tests(no_tests);
 
-                if let Err(e) =
-                    compiler.compile_to_ir(&analyzed.program, &mut std::io::stdout(), include_tests)
-                {
+                if let Err(e) = compiler.compile_program(&analyzed.program) {
                     eprintln!("error: {}", e);
                     had_error = true;
+                    continue;
+                }
+
+                let include_tests = !no_tests;
+                for (func_name, ir_text) in jit.get_ir() {
+                    // Skip prelude/std functions unless --all is specified
+                    if !show_all && is_prelude_function(func_name) {
+                        continue;
+                    }
+
+                    // Skip test functions when --no-tests is specified
+                    if !include_tests && is_test_function(func_name) {
+                        continue;
+                    }
+
+                    println!("// func {}", func_name);
+                    println!("{}", ir_text);
                 }
             }
             InspectType::Mir => {
@@ -135,8 +163,8 @@ pub fn inspect_files(
                         source: &source,
                         file_path: &file_path,
                         skip_tests: false,
-                        project_root: None,
-                        module_cache: None,
+                        project_root: project_root.as_deref(),
+                        module_cache: Some(module_cache.clone()),
                         color_mode,
                     },
                     &mut std::io::stderr(),
