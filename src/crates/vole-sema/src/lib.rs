@@ -16,6 +16,7 @@ pub mod query;
 pub mod resolution;
 pub mod transforms;
 pub mod type_arena;
+pub mod type_utils;
 pub mod types;
 
 // Internal modules (not part of the public API)
@@ -45,4 +46,5 @@ pub use optimizer::{OptimizerStats, optimize_all};
 pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use type_arena::{SemaType, TypeArena};
+pub use type_utils::{integer_result_type, numeric_result_type};
 pub use types::{ClassType, ErrorTypeInfo, FunctionType, PrimitiveType};

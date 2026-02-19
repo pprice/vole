@@ -534,58 +534,15 @@ impl Analyzer {
         }
     }
 
-    /// Get the result type for numeric operations (wider type wins)
-    /// Float > int, wider > narrower
+    /// Get the result type for numeric operations (wider type wins).
+    /// Delegates to the free function in type_utils.
     pub(crate) fn numeric_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
-        // Float types take precedence, wider float wins
-        if left == ArenaTypeId::F128 || right == ArenaTypeId::F128 {
-            ArenaTypeId::F128
-        } else if left == ArenaTypeId::F64 || right == ArenaTypeId::F64 {
-            ArenaTypeId::F64
-        } else if left == ArenaTypeId::F32 || right == ArenaTypeId::F32 {
-            ArenaTypeId::F32
-        } else {
-            // Both are integers - use integer promotion rules
-            self.integer_result_type(left, right)
-        }
+        crate::type_utils::numeric_result_type(left, right)
     }
 
-    /// Get the result type for integer operations (wider type wins)
-    /// Follows C-like promotion: smaller types widen to larger types
+    /// Get the result type for integer operations (wider type wins).
+    /// Delegates to the free function in type_utils.
     pub(crate) fn integer_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
-        // i128 is widest
-        if left == ArenaTypeId::I128 || right == ArenaTypeId::I128 {
-            ArenaTypeId::I128
-        }
-        // 64-bit types
-        else if left == ArenaTypeId::I64
-            || right == ArenaTypeId::I64
-            || left == ArenaTypeId::U64
-            || right == ArenaTypeId::U64
-        {
-            // If mixing signed/unsigned 64-bit, result is i64
-            ArenaTypeId::I64
-        }
-        // 32-bit types
-        else if left == ArenaTypeId::I32
-            || right == ArenaTypeId::I32
-            || left == ArenaTypeId::U32
-            || right == ArenaTypeId::U32
-        {
-            ArenaTypeId::I32
-        }
-        // 16-bit types
-        else if left == ArenaTypeId::I16
-            || right == ArenaTypeId::I16
-            || left == ArenaTypeId::U16
-            || right == ArenaTypeId::U16
-        {
-            // Promote to i32 (standard integer promotion)
-            ArenaTypeId::I32
-        }
-        // 8-bit types - promote to i32
-        else {
-            ArenaTypeId::I32
-        }
+        crate::type_utils::integer_result_type(left, right)
     }
 }

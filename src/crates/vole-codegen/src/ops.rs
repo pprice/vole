@@ -10,6 +10,7 @@ use crate::RuntimeKey;
 use vole_frontend::{BinaryExpr, BinaryOp, ExprKind};
 use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
+use vole_sema::type_utils::numeric_result_type;
 
 use super::context::Cg;
 use super::types::{CompiledValue, convert_to_type};
@@ -76,71 +77,6 @@ fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
         TypeId::F64 => types::F64,
         TypeId::F128 => types::F128,
         _ => types::I64, // Default for other types
-    }
-}
-
-/// Compute the result TypeId for numeric binary operations.
-/// Mirrors sema's numeric_result_type/integer_result_type logic to ensure consistency.
-fn numeric_result_type_id(left: TypeId, right: TypeId) -> TypeId {
-    // Float types take precedence, wider float wins
-    if left == TypeId::F128 || right == TypeId::F128 {
-        TypeId::F128
-    } else if left == TypeId::F64 || right == TypeId::F64 {
-        TypeId::F64
-    } else if left == TypeId::F32 || right == TypeId::F32 {
-        TypeId::F32
-    } else {
-        // Both are integers - use integer promotion rules (wider type wins)
-        integer_result_type_id(left, right)
-    }
-}
-
-/// Compute the result TypeId for integer binary operations.
-/// Follows sema's integer promotion: wider type wins.
-fn integer_result_type_id(left: TypeId, right: TypeId) -> TypeId {
-    // i128 is widest
-    if left == TypeId::I128 || right == TypeId::I128 {
-        TypeId::I128
-    }
-    // 64-bit types
-    else if left == TypeId::I64
-        || right == TypeId::I64
-        || left == TypeId::U64
-        || right == TypeId::U64
-    {
-        // If mixing signed/unsigned 64-bit, result is i64
-        TypeId::I64
-    }
-    // 32-bit types
-    else if left == TypeId::I32
-        || right == TypeId::I32
-        || left == TypeId::U32
-        || right == TypeId::U32
-    {
-        if left == TypeId::U32 && right == TypeId::U32 {
-            TypeId::U32
-        } else {
-            TypeId::I32
-        }
-    }
-    // 16-bit types
-    else if left == TypeId::I16
-        || right == TypeId::I16
-        || left == TypeId::U16
-        || right == TypeId::U16
-    {
-        if left == TypeId::U16 && right == TypeId::U16 {
-            TypeId::U16
-        } else {
-            TypeId::I16
-        }
-    }
-    // 8-bit types
-    else if left == TypeId::U8 && right == TypeId::U8 {
-        TypeId::U8
-    } else {
-        // Default: i8 or mixed 8-bit
-        TypeId::I8
     }
 }
 
@@ -344,7 +280,7 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or(TypeId::I64);
 
             // Apply type promotion to match sema's behavior
-            let result_type_id = numeric_result_type_id(left.type_id, literal_type_id);
+            let result_type_id = numeric_result_type(left.type_id, literal_type_id);
             let result_ty = type_id_to_cranelift_type(result_type_id);
 
             // Convert left operand to result type if needed
@@ -400,7 +336,7 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or(TypeId::I64);
 
             // Apply type promotion to match sema's behavior
-            let result_type_id = numeric_result_type_id(literal_type_id, right.type_id);
+            let result_type_id = numeric_result_type(literal_type_id, right.type_id);
             let result_ty = type_id_to_cranelift_type(result_type_id);
 
             // Convert right operand to result type if needed
@@ -654,11 +590,11 @@ impl Cg<'_, '_, '_> {
         let left_is_string = left_type_id == TypeId::STRING;
 
         // Determine result type using type promotion rules.
-        // For numeric types, use sema's numeric_result_type logic.
+        // For numeric types, delegate to the canonical sema type_utils function.
         // For non-numeric types (like strings), use left's type directly.
         let (result_type_id, result_ty) = if left_type_id.is_numeric() && right.type_id.is_numeric()
         {
-            let promoted = numeric_result_type_id(left_type_id, right.type_id);
+            let promoted = numeric_result_type(left_type_id, right.type_id);
             (promoted, type_id_to_cranelift_type(promoted))
         } else {
             (left_type_id, left.ty)
