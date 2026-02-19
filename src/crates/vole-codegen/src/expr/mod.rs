@@ -107,7 +107,7 @@ impl Cg<'_, '_, '_> {
                     .get_expr_type(&expr.id)
                     .unwrap_or(self.arena().primitives.i64);
                 Ok(CompiledValue::new(
-                    self.builder.ins().iconst(types::I64, 0),
+                    self.iconst_cached(types::I64, 0),
                     types::I64,
                     type_id,
                 ))
@@ -144,7 +144,7 @@ impl Cg<'_, '_, '_> {
                     }
                 });
             if let Some(type_id) = sentinel_type_id {
-                let value = self.builder.ins().iconst(types::I8, 0);
+                let value = self.iconst_cached(types::I8, 0);
                 return Ok(CompiledValue::new(value, types::I8, type_id));
             }
         }
@@ -255,7 +255,7 @@ impl Cg<'_, '_, '_> {
             && self.arena().is_sentinel(sentinel_type_id)
         {
             // Bare identifier refers to a sentinel type - emit i8(0)
-            let value = self.builder.ins().iconst(types::I8, 0);
+            let value = self.iconst_cached(types::I8, 0);
             Ok(CompiledValue::new(value, types::I8, sentinel_type_id))
         } else {
             Err(CodegenError::not_found(
@@ -300,11 +300,11 @@ impl Cg<'_, '_, '_> {
                     Ok(CompiledValue::new(val, types::F64, f64_id))
                 }
                 vole_sema::types::ConstantValue::I64(v) => {
-                    let val = self.builder.ins().iconst(types::I64, v);
+                    let val = self.iconst_cached(types::I64, v);
                     Ok(CompiledValue::new(val, types::I64, i64_id))
                 }
                 vole_sema::types::ConstantValue::Bool(v) => {
-                    let val = self.builder.ins().iconst(types::I8, if v { 1 } else { 0 });
+                    let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
                     Ok(CompiledValue::new(val, types::I8, bool_id))
                 }
                 vole_sema::types::ConstantValue::String(s) => self.string_literal(&s),
@@ -317,7 +317,7 @@ impl Cg<'_, '_, '_> {
             ))
         } else if self.arena().is_sentinel(export_type_id) {
             // Sentinel exports are zero-field structs - emit i8(0)
-            let value = self.builder.ins().iconst(types::I8, 0);
+            let value = self.iconst_cached(types::I8, 0);
             Ok(CompiledValue::new(value, types::I8, export_type_id))
         } else {
             Err(CodegenError::not_found(
@@ -459,7 +459,7 @@ impl Cg<'_, '_, '_> {
 
         // Wrap in a closure struct with zero captures
         let alloc_ref = self.runtime_func_ref(RuntimeKey::ClosureAlloc)?;
-        let zero_captures = self.builder.ins().iconst(types::I64, 0);
+        let zero_captures = self.iconst_cached(types::I64, 0);
         let alloc_call = self
             .builder
             .ins()
@@ -498,7 +498,7 @@ impl Cg<'_, '_, '_> {
         // Yield is a statement-like expression; return a void/zero value.
         // The type doesn't matter since yield is used in statement position.
         Ok(CompiledValue::new(
-            self.builder.ins().iconst(types::I64, 0),
+            self.iconst_cached(types::I64, 0),
             types::I64,
             self.arena().primitives.i64,
         ))

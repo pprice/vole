@@ -31,7 +31,7 @@ impl Cg<'_, '_, '_> {
                 } else if operand.ty.is_float() {
                     self.builder.ins().fneg(operand.value)
                 } else if let Some(c) = try_constant_value(self.builder.func, operand.value) {
-                    self.builder.ins().iconst(operand.ty, -c)
+                    self.iconst_cached(operand.ty, -c)
                 } else {
                     self.builder.ins().ineg(operand.value)
                 }
@@ -48,11 +48,9 @@ impl Cg<'_, '_, '_> {
                 // Constant-fold: if operand is a known constant, emit the
                 // negated constant directly instead of `iconst 1; isub`.
                 if let Some(c) = try_constant_value(self.builder.func, op_val) {
-                    self.builder
-                        .ins()
-                        .iconst(types::I8, if c == 0 { 1 } else { 0 })
+                    self.iconst_cached(types::I8, if c == 0 { 1 } else { 0 })
                 } else {
-                    let one = self.builder.ins().iconst(types::I8, 1);
+                    let one = self.iconst_cached(types::I8, 1);
                     self.builder.ins().isub(one, op_val)
                 }
             }
@@ -75,7 +73,7 @@ impl Cg<'_, '_, '_> {
                 self.consume_rc_value(&mut value)?;
                 // Return a void value
                 Ok(CompiledValue::new(
-                    self.builder.ins().iconst(types::I64, 0),
+                    self.iconst_cached(types::I64, 0),
                     types::I64,
                     TypeId::VOID,
                 ))

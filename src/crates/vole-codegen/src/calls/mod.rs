@@ -680,9 +680,9 @@ impl Cg<'_, '_, '_> {
         // vole_assert_fail(file_ptr, file_len, line)
         let (file_ptr, file_len) = self.source_file();
         let ptr_type = self.ptr_type();
-        let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
-        let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
-        let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
+        let file_ptr_val = self.iconst_cached(ptr_type, file_ptr as i64);
+        let file_len_val = self.iconst_cached(ptr_type, file_len as i64);
+        let line_val = self.iconst_cached(types::I32, call_line as i64);
 
         self.call_runtime_void(
             RuntimeKey::AssertFail,
@@ -706,9 +706,9 @@ impl Cg<'_, '_, '_> {
         // vole_panic(msg, file_ptr, file_len, line)
         let (file_ptr, file_len) = self.source_file();
         let ptr_type = self.ptr_type();
-        let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
-        let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
-        let line_val = self.builder.ins().iconst(types::I32, line as i64);
+        let file_ptr_val = self.iconst_cached(ptr_type, file_ptr as i64);
+        let file_len_val = self.iconst_cached(ptr_type, file_len as i64);
+        let line_val = self.iconst_cached(types::I32, line as i64);
 
         self.call_runtime_void(
             RuntimeKey::Panic,

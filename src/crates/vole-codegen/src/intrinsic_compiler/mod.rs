@@ -113,7 +113,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect();
 
         // Load the function pointer as a constant
-        let func_ptr_val = self.builder.ins().iconst(ptr_type, func_ptr as i64);
+        let func_ptr_val = self.iconst_cached(ptr_type, func_ptr as i64);
 
         // Emit the indirect call
         let call_inst = self
@@ -482,7 +482,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let arena = self.arena();
             array_element_tag_id(payload.type_id, arena)
         };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
+        let tag_val = self.iconst_cached(types::I64, tag);
         // Function-call semantics may clean up temporary RC args after return;
         // hand channel_send its own retained reference up front.
         //
@@ -542,7 +542,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         let (tag, raw_value) =
             self.call_std_task_tagged_native("channel_recv", typed_args[0].value)?;
-        let minus_one = self.builder.ins().iconst(types::I64, -1);
+        let minus_one = self.iconst_cached(types::I64, -1);
         let is_done = self.builder.ins().icmp(IntCC::Equal, tag, minus_one);
         let cond = uextend_const(self.builder, types::I32, is_done);
 
@@ -554,19 +554,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         self.emit_brif(cond, done_block, value_block);
 
-        self.builder.switch_to_block(done_block);
-        let done_value = CompiledValue::new(
-            self.builder.ins().iconst(types::I8, 0),
-            types::I8,
-            TypeId::DONE,
-        );
+        self.switch_to_block(done_block);
+        let done_value =
+            CompiledValue::new(self.iconst_cached(types::I8, 0), types::I8, TypeId::DONE);
         let done_union = self.construct_union_id(done_value, return_type_id)?;
         self.builder
             .ins()
             .jump(merge_block, &[done_union.value.into()]);
         self.builder.seal_block(done_block);
 
-        self.builder.switch_to_block(value_block);
+        self.switch_to_block(value_block);
         let typed_value = self.convert_field_value(raw_value, elem_type_id);
         let value_union = self.construct_union_id(typed_value, return_type_id)?;
         self.builder
@@ -574,7 +571,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .jump(merge_block, &[value_union.value.into()]);
         self.builder.seal_block(value_block);
 
-        self.builder.switch_to_block(merge_block);
+        self.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
         let union_ptr = self.builder.block_params(merge_block)[0];
         Ok(CompiledValue::new(
@@ -614,7 +611,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let arena = self.arena();
             array_element_tag_id(closure_return_type, arena)
         };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
+        let tag_val = self.iconst_cached(types::I64, tag);
         self.call_runtime_void(RuntimeKey::TaskSetSpawnTag, &[tag_val])?;
 
         let native_func = self
@@ -635,9 +632,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let msg = args[0];
         let (file_ptr, file_len) = self.source_file();
         let ptr_type = self.ptr_type();
-        let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
-        let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
-        let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
+        let file_ptr_val = self.iconst_cached(ptr_type, file_ptr as i64);
+        let file_len_val = self.iconst_cached(ptr_type, file_len as i64);
+        let line_val = self.iconst_cached(types::I32, call_line as i64);
 
         self.call_runtime_void(
             RuntimeKey::Panic,
@@ -653,8 +650,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     fn emit_inline_array_len(&mut self, arr_ptr: Value) -> Value {
         let ptr_type = self.ptr_type();
-        let zero_i64 = self.builder.ins().iconst(types::I64, 0);
-        let null_ptr = self.builder.ins().iconst(ptr_type, 0);
+        let zero_i64 = self.iconst_cached(types::I64, 0);
+        let null_ptr = self.iconst_cached(ptr_type, 0);
         let is_null = self.builder.ins().icmp(IntCC::Equal, arr_ptr, null_ptr);
 
         let null_block = self.builder.create_block();
@@ -663,10 +660,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.append_block_param(merge_block, types::I64);
         self.emit_brif(is_null, null_block, nonnull_block);
 
-        self.builder.switch_to_block(null_block);
+        self.switch_to_block(null_block);
         self.builder.ins().jump(merge_block, &[zero_i64.into()]);
 
-        self.builder.switch_to_block(nonnull_block);
+        self.switch_to_block(nonnull_block);
         let len_offset = std::mem::offset_of!(vole_runtime::array::RcArray, len) as i32;
         let raw_len = self
             .builder
@@ -679,14 +676,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
         self.builder.ins().jump(merge_block, &[len_i64.into()]);
 
-        self.builder.switch_to_block(merge_block);
+        self.switch_to_block(merge_block);
         self.builder.block_params(merge_block)[0]
     }
 
     fn emit_inline_string_len(&mut self, str_ptr: Value) -> Value {
         let ptr_type = self.ptr_type();
-        let zero_i64 = self.builder.ins().iconst(types::I64, 0);
-        let null_ptr = self.builder.ins().iconst(ptr_type, 0);
+        let zero_i64 = self.iconst_cached(types::I64, 0);
+        let null_ptr = self.iconst_cached(ptr_type, 0);
         let is_null = self.builder.ins().icmp(IntCC::Equal, str_ptr, null_ptr);
 
         let null_block = self.builder.create_block();
@@ -695,11 +692,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.append_block_param(merge_block, types::I64);
         self.emit_brif(is_null, null_block, nonnull_block);
 
-        self.builder.switch_to_block(null_block);
+        self.switch_to_block(null_block);
         self.builder.ins().jump(merge_block, &[zero_i64.into()]);
 
         // Load cached char_count directly (O(1) instead of O(n) UTF-8 loop)
-        self.builder.switch_to_block(nonnull_block);
+        self.switch_to_block(nonnull_block);
         let char_count_offset =
             std::mem::offset_of!(vole_runtime::string::RcString, char_count) as i32;
         let raw_count =
@@ -713,7 +710,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
         self.builder.ins().jump(merge_block, &[count_i64.into()]);
 
-        self.builder.switch_to_block(merge_block);
+        self.switch_to_block(merge_block);
         self.builder.block_params(merge_block)[0]
     }
 }

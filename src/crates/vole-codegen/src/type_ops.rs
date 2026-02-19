@@ -251,12 +251,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .collect()
         };
         let default_tag = variant_tags[0];
-        let mut runtime_tag = self.builder.ins().iconst(types::I64, default_tag);
+        let mut runtime_tag = self.iconst_cached(types::I64, default_tag);
 
         for (idx, &tag) in variant_tags.iter().enumerate().skip(1) {
-            let idx_val = self.builder.ins().iconst(types::I8, idx as i64);
+            let idx_val = self.iconst_cached(types::I8, idx as i64);
             let is_match = self.builder.ins().icmp(IntCC::Equal, variant_idx, idx_val);
-            let tag_val = self.builder.ins().iconst(types::I64, tag);
+            let tag_val = self.iconst_cached(types::I64, tag);
             runtime_tag = self.builder.ins().select(is_match, tag_val, runtime_tag);
         }
 
@@ -275,7 +275,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .map(|&variant| crate::types::array_element_tag_id(variant, arena))
                 .collect()
         };
-        let mut variant_idx = self.builder.ins().iconst(types::I8, 0);
+        let mut variant_idx = self.iconst_cached(types::I8, 0);
         let first_match = self
             .builder
             .ins()
@@ -287,7 +287,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .builder
                 .ins()
                 .icmp_imm(IntCC::Equal, array_tag, runtime_tag);
-            let idx_val = self.builder.ins().iconst(types::I8, idx as i64);
+            let idx_val = self.iconst_cached(types::I8, idx as i64);
             variant_idx = self.builder.ins().select(is_match, idx_val, variant_idx);
             matched_any = self.builder.ins().bor(matched_any, is_match);
         }

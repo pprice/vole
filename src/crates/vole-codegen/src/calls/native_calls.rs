@@ -128,7 +128,7 @@ impl Cg<'_, '_, '_> {
             .collect();
         let sig_ref = self.builder.import_signature(sig);
         let ptr_type = self.ptr_type();
-        let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
+        let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
         let inst = self
             .builder
             .ins()
@@ -167,7 +167,7 @@ impl Cg<'_, '_, '_> {
             }
 
             let sig_ref = self.builder.import_signature(sig);
-            let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
+            let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
             let inst = self
                 .builder
                 .ins()
@@ -196,7 +196,7 @@ impl Cg<'_, '_, '_> {
             sret_args.extend_from_slice(args);
 
             let sig_ref = self.builder.import_signature(sig);
-            let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
+            let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
             let inst = self
                 .builder
                 .ins()

@@ -100,7 +100,7 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(header, &[]);
 
         // Header: check loop condition
-        self.builder.switch_to_block(header);
+        self.switch_to_block(header);
         let current = self.builder.use_var(var);
         let cmp = if range.inclusive {
             self.builder
@@ -114,7 +114,7 @@ impl Cg<'_, '_, '_> {
         self.emit_brif(cmp, body_block, exit_block);
 
         // Body: compile loop body, then increment and loop back
-        self.builder.switch_to_block(body_block);
+        self.switch_to_block(body_block);
         // Register loop context - continue jumps to header (but there's no continue in this path)
         let rc_depth = self.rc_scope_depth();
         self.cf.push_loop(exit_block, header, rc_depth);
@@ -138,7 +138,7 @@ impl Cg<'_, '_, '_> {
 
         // Seal header and body now that their predecessors are known.
         // Exit block is NOT sealed - see finalize_for_loop for explanation.
-        self.builder.switch_to_block(exit_block);
+        self.switch_to_block(exit_block);
         self.builder.seal_block(header);
         self.builder.seal_block(body_block);
 
@@ -164,7 +164,7 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(header, &[]);
 
         // Header: check loop condition
-        self.builder.switch_to_block(header);
+        self.switch_to_block(header);
         let current = self.builder.use_var(var);
         let cmp = if range.inclusive {
             self.builder
@@ -178,11 +178,11 @@ impl Cg<'_, '_, '_> {
         self.emit_brif(cmp, body_block, exit_block);
 
         // Body: compile loop body
-        self.builder.switch_to_block(body_block);
+        self.switch_to_block(body_block);
         self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
         // Continue: increment counter and jump to header
-        self.builder.switch_to_block(continue_block);
+        self.switch_to_block(continue_block);
         let current = self.builder.use_var(var);
         let next = self.builder.ins().iadd_imm(current, 1);
         self.builder.def_var(var, next);
@@ -230,7 +230,7 @@ impl Cg<'_, '_, '_> {
             .value;
 
         let idx_var = self.builder.declare_var(types::I64);
-        let zero = self.builder.ins().iconst(types::I64, 0);
+        let zero = self.iconst_cached(types::I64, 0);
         self.builder.def_var(idx_var, zero);
 
         // Declare the element variable with its correct Cranelift type.
@@ -250,7 +250,7 @@ impl Cg<'_, '_, '_> {
         } else if elem_cr_type == types::I128 {
             sextend_const(self.builder, types::I128, zero)
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
-            self.builder.ins().iconst(elem_cr_type, 0)
+            self.iconst_cached(elem_cr_type, 0)
         } else {
             zero
         };
@@ -265,7 +265,7 @@ impl Cg<'_, '_, '_> {
 
         self.builder.ins().jump(header, &[]);
 
-        self.builder.switch_to_block(header);
+        self.switch_to_block(header);
         let current_idx = self.builder.use_var(idx_var);
         let cmp = self
             .builder
@@ -273,7 +273,7 @@ impl Cg<'_, '_, '_> {
             .icmp(IntCC::SignedLessThan, current_idx, len_val);
         self.emit_brif(cmp, body_block, exit_block);
 
-        self.builder.switch_to_block(body_block);
+        self.switch_to_block(body_block);
 
         let current_idx = self.builder.use_var(idx_var);
         let elem_ptr = self.dynamic_array_elem_ptr_unchecked(arr.value, current_idx);
@@ -322,7 +322,7 @@ impl Cg<'_, '_, '_> {
 
         self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
-        self.builder.switch_to_block(continue_block);
+        self.switch_to_block(continue_block);
         let current_idx = self.builder.use_var(idx_var);
         let next_idx = self.builder.ins().iadd_imm(current_idx, 1);
         self.builder.def_var(idx_var, next_idx);
@@ -407,7 +407,7 @@ impl Cg<'_, '_, '_> {
         // matching what for_array does.
         let elem_cr_type = self.cranelift_type(elem_type_id);
         let elem_var = self.builder.declare_var(elem_cr_type);
-        let zero_i64 = self.builder.ins().iconst(types::I64, 0);
+        let zero_i64 = self.iconst_cached(types::I64, 0);
         let elem_zero = if elem_cr_type == types::F64 {
             self.builder.ins().f64const(0.0)
         } else if elem_cr_type == types::F32 {
@@ -420,7 +420,7 @@ impl Cg<'_, '_, '_> {
         } else if elem_cr_type == types::I128 {
             sextend_const(self.builder, types::I128, zero_i64)
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
-            self.builder.ins().iconst(elem_cr_type, 0)
+            self.iconst_cached(elem_cr_type, 0)
         } else {
             zero_i64
         };
@@ -436,13 +436,13 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(header, &[]);
 
         // Header: call iter_next, check result
-        self.builder.switch_to_block(header);
+        self.switch_to_block(header);
         let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter.value, slot_addr])?;
         let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
         self.emit_brif(is_done, exit_block, body_block);
 
         // Body: load value from stack slot, narrow to element type, run body
-        self.builder.switch_to_block(body_block);
+        self.switch_to_block(body_block);
         let raw_val = self
             .builder
             .ins()
@@ -477,7 +477,7 @@ impl Cg<'_, '_, '_> {
         self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
         // Continue: jump back to header
-        self.builder.switch_to_block(continue_block);
+        self.switch_to_block(continue_block);
         self.builder.ins().jump(header, &[]);
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
@@ -525,7 +525,7 @@ impl Cg<'_, '_, '_> {
 
         // Initialize element variable (each character is returned as a string)
         let elem_var = self.builder.declare_var(types::I64);
-        let zero = self.builder.ins().iconst(types::I64, 0);
+        let zero = self.iconst_cached(types::I64, 0);
         self.builder.def_var(elem_var, zero);
         self.vars
             .insert(for_stmt.var_name, (elem_var, TypeId::STRING));
@@ -538,13 +538,13 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(header, &[]);
 
         // Header: call iter_next, check result
-        self.builder.switch_to_block(header);
+        self.switch_to_block(header);
         let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter_val, slot_addr])?;
         let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
         self.emit_brif(is_done, exit_block, body_block);
 
         // Body: load value from stack slot, run body
-        self.builder.switch_to_block(body_block);
+        self.switch_to_block(body_block);
         let elem_val = self
             .builder
             .ins()
@@ -555,7 +555,7 @@ impl Cg<'_, '_, '_> {
 
         // Continue: free the current iteration's char string before looping back.
         // Each iteration produces a new owned string from string_chars_next.
-        self.builder.switch_to_block(continue_block);
+        self.switch_to_block(continue_block);
         let cur_elem = self.builder.use_var(elem_var);
         self.call_runtime_void(RuntimeKey::RcDec, &[cur_elem])?;
         self.builder.ins().jump(header, &[]);

@@ -337,7 +337,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let slot = self.alloc_stack(union_layout::STANDARD_SIZE);
 
         // Store the tag at offset 0
-        let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+        let tag_val = self.iconst_cached(types::I64, tag as i64);
         self.builder.ins().stack_store(tag_val, slot, 0);
 
         // Store the value at offset 8

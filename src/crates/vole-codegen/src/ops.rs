@@ -351,7 +351,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.env.analyzed.type_arena();
             let left_val = convert_to_type(self.builder, left, result_ty, arena);
 
-            let shift_val = self.builder.ins().iconst(result_ty, shift_amount);
+            let shift_val = self.iconst_cached(result_ty, shift_amount);
 
             let result = match bin.op {
                 BinaryOp::Mul => {
@@ -370,7 +370,7 @@ impl Cg<'_, '_, '_> {
                 BinaryOp::Mod => {
                     // Only safe for unsigned: x % 2^n → x & (2^n - 1)
                     if result_type_id.is_unsigned_int() {
-                        let mask = self.builder.ins().iconst(result_ty, value - 1);
+                        let mask = self.iconst_cached(result_ty, value - 1);
                         self.builder.ins().band(left_val, mask)
                     } else {
                         return Ok(None); // Don't optimize signed modulo
@@ -407,7 +407,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.env.analyzed.type_arena();
             let right_val = convert_to_type(self.builder, right, result_ty, arena);
 
-            let shift_val = self.builder.ins().iconst(result_ty, shift_amount);
+            let shift_val = self.iconst_cached(result_ty, shift_amount);
             // 2^n * x → x << n
             let result = self.builder.ins().ishl(right_val, shift_val);
 
@@ -544,7 +544,7 @@ impl Cg<'_, '_, '_> {
 
         // Else block: left was false, short-circuit with false
         self.switch_and_seal(else_block);
-        let false_val = self.builder.ins().iconst(types::I8, 0);
+        let false_val = self.iconst_cached(types::I8, 0);
         let false_arg = BlockArg::from(false_val);
         self.builder.ins().jump(merge_block, &[false_arg]);
 
@@ -585,7 +585,7 @@ impl Cg<'_, '_, '_> {
 
         // Then block: left was true, short-circuit with true
         self.switch_and_seal(then_block);
-        let true_val = self.builder.ins().iconst(types::I8, 1);
+        let true_val = self.iconst_cached(types::I8, 1);
         let true_arg = BlockArg::from(true_val);
         self.builder.ins().jump(merge_block, &[true_arg]);
 
@@ -758,9 +758,7 @@ impl Cg<'_, '_, '_> {
                     try_constant_value(self.builder.func, left_val),
                     try_constant_value(self.builder.func, right_val),
                 ) {
-                    self.builder
-                        .ins()
-                        .iconst(types::I8, i64::from(eval_int_cc(IntCC::Equal, a, b)))
+                    self.iconst_cached(types::I8, i64::from(eval_int_cc(IntCC::Equal, a, b)))
                 } else {
                     self.builder.ins().icmp(IntCC::Equal, left_val, right_val)
                 }
@@ -768,11 +766,11 @@ impl Cg<'_, '_, '_> {
             BinaryOp::Ne => {
                 if left_is_string {
                     let eq = self.string_eq(left_val, right_val)?;
-                    let one = self.builder.ins().iconst(types::I8, 1);
+                    let one = self.iconst_cached(types::I8, 1);
                     self.builder.ins().isub(one, eq)
                 } else if result_ty == types::F128 {
                     let eq = self.call_f128_cmp(RuntimeKey::F128Eq, left_val, right_val)?;
-                    let one = self.builder.ins().iconst(types::I8, 1);
+                    let one = self.iconst_cached(types::I8, 1);
                     self.builder.ins().isub(one, eq)
                 } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder
@@ -782,9 +780,7 @@ impl Cg<'_, '_, '_> {
                     try_constant_value(self.builder.func, left_val),
                     try_constant_value(self.builder.func, right_val),
                 ) {
-                    self.builder
-                        .ins()
-                        .iconst(types::I8, i64::from(eval_int_cc(IntCC::NotEqual, a, b)))
+                    self.iconst_cached(types::I8, i64::from(eval_int_cc(IntCC::NotEqual, a, b)))
                 } else {
                     self.builder
                         .ins()
@@ -998,7 +994,7 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // Start with true (1) - all fields equal so far
-        let mut result = self.builder.ins().iconst(types::I8, 1);
+        let mut result = self.iconst_cached(types::I8, 1);
 
         for i in 0..flat_count {
             let offset = (i as i32) * 8;
@@ -1016,7 +1012,7 @@ impl Cg<'_, '_, '_> {
 
         // For NotEq, negate the result
         if op == BinaryOp::Ne {
-            let one = self.builder.ins().iconst(types::I8, 1);
+            let one = self.iconst_cached(types::I8, 1);
             result = self.builder.ins().bxor(result, one);
         }
 
@@ -1110,7 +1106,7 @@ impl Cg<'_, '_, '_> {
             BinaryOp::Ne => {
                 // NOT ((not nil) AND (values equal)) = is_nil OR (values not equal)
                 let equal = self.builder.ins().band(is_not_nil, values_equal);
-                let one = self.builder.ins().iconst(types::I8, 1);
+                let one = self.iconst_cached(types::I8, 1);
                 self.builder.ins().isub(one, equal)
             }
             _ => unreachable!("optional_value_compare only handles Eq and Ne"),
@@ -1140,9 +1136,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 codes.signed
             };
-            self.builder
-                .ins()
-                .iconst(types::I8, i64::from(eval_int_cc(cc, a, b)))
+            self.iconst_cached(types::I8, i64::from(eval_int_cc(cc, a, b)))
         } else if left_type_id.is_unsigned_int() {
             self.builder.ins().icmp(codes.unsigned, left_val, right_val)
         } else {

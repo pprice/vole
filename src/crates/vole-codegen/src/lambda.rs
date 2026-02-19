@@ -213,7 +213,7 @@ impl Cg<'_, '_, '_> {
 
         // Allocate closure
         let alloc_ref = self.runtime_func_ref(RuntimeKey::ClosureAlloc)?;
-        let num_captures_val = self.builder.ins().iconst(types::I64, num_captures as i64);
+        let num_captures_val = self.iconst_cached(types::I64, num_captures as i64);
         let alloc_call = self
             .builder
             .ins()
@@ -259,7 +259,7 @@ impl Cg<'_, '_, '_> {
             }
 
             let size = self.type_size(vole_type_id);
-            let size_val = self.builder.ins().iconst(types::I64, size as i64);
+            let size_val = self.iconst_cached(types::I64, size as i64);
 
             let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
             let heap_ptr = self.builder.inst_results(alloc_call)[0];
@@ -269,19 +269,19 @@ impl Cg<'_, '_, '_> {
             // which would dangle after the creating function returns).
             self.copy_value_to_heap(current_value, heap_ptr, vole_type_id);
 
-            let index_val = self.builder.ins().iconst(types::I64, i as i64);
+            let index_val = self.iconst_cached(types::I64, i as i64);
             self.builder
                 .ins()
                 .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
 
             // Set the capture kind so closure_drop knows which captures need rc_dec
-            let kind_val = self.builder.ins().iconst(types::I8, is_rc as i64);
+            let kind_val = self.iconst_cached(types::I8, is_rc as i64);
             self.builder
                 .ins()
                 .call(set_kind_ref, &[closure_ptr, index_val, kind_val]);
 
             // Store the allocation size so closure_drop can free with correct layout
-            let size_i32 = self.builder.ins().iconst(types::I32, size as i64);
+            let size_i32 = self.iconst_cached(types::I32, size as i64);
             self.builder
                 .ins()
                 .call(set_size_ref, &[closure_ptr, index_val, size_i32]);

@@ -79,12 +79,12 @@ impl Cg<'_, '_, '_> {
                 self.emit_brif(is_success, cont_block, dec_block);
             }
 
-            self.builder.switch_to_block(dec_block);
+            self.switch_to_block(dec_block);
             self.builder.seal_block(dec_block);
             self.emit_rc_dec(payload)?;
             self.builder.ins().jump(cont_block, &[]);
 
-            self.builder.switch_to_block(cont_block);
+            self.switch_to_block(cont_block);
             self.builder.seal_block(cont_block);
         }
 
@@ -275,7 +275,7 @@ impl Cg<'_, '_, '_> {
         let Some((_success_type_id, error_type_id)) = arena.unwrap_fallible(scrutinee.type_id)
         else {
             // Not matching on a fallible type
-            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+            return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
 
         let name_table = self.name_table();
@@ -288,7 +288,7 @@ impl Cg<'_, '_, '_> {
             self.registry(),
         ) else {
             // Error type not found in fallible - will never match
-            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+            return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
@@ -478,14 +478,14 @@ impl Cg<'_, '_, '_> {
 
         let Some(error_type_def_id) = error_type_id else {
             // Unknown error type
-            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+            return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
 
         let arena = self.arena();
         let Some((_success_type_id, fallible_error_type_id)) =
             arena.unwrap_fallible(scrutinee.type_id)
         else {
-            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+            return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
 
         let name_table = self.name_table();
@@ -498,7 +498,7 @@ impl Cg<'_, '_, '_> {
             self.registry(),
         ) else {
             // Error type not found in fallible
-            return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
+            return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);

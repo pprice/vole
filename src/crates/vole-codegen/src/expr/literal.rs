@@ -99,7 +99,7 @@ impl Cg<'_, '_, '_> {
                     let arena = self.arena();
                     array_element_tag_id(compiled.type_id, arena)
                 };
-                let tag_val = self.builder.ins().iconst(types::I64, tag);
+                let tag_val = self.iconst_cached(types::I64, tag);
                 let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
                 (tag_val, value_bits, compiled)
             };

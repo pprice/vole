@@ -224,12 +224,12 @@ impl Cg<'_, '_, '_> {
         self.emit_brif(is_nil, nil_block, some_block);
 
         // Nil case: return "nil"
-        self.builder.switch_to_block(nil_block);
+        self.switch_to_block(nil_block);
         let nil_str = self.call_runtime(RuntimeKey::NilToString, &[])?;
         self.builder.ins().jump(merge_block, &[nil_str.into()]);
 
         // Some case: extract inner value and convert to string
-        self.builder.switch_to_block(some_block);
+        self.switch_to_block(some_block);
         // Find the non-nil variant using arena
         let arena = self.arena();
         let inner_type_id = variants
@@ -250,7 +250,7 @@ impl Cg<'_, '_, '_> {
                 union_layout::PAYLOAD_OFFSET,
             )
         } else {
-            self.builder.ins().iconst(inner_cr_type, 0)
+            self.iconst_cached(inner_cr_type, 0)
         };
 
         let inner_compiled = CompiledValue::new(inner_val, inner_cr_type, inner_type_id);
@@ -258,7 +258,7 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(merge_block, &[some_str.into()]);
 
         // Merge and return result
-        self.builder.switch_to_block(merge_block);
+        self.switch_to_block(merge_block);
         Ok(self.builder.block_params(merge_block)[0])
     }
 
@@ -283,17 +283,17 @@ impl Cg<'_, '_, '_> {
                 // Last variant: unconditional jump
                 self.builder.ins().jump(block, &[]);
             } else {
-                let expected = self.builder.ins().iconst(types::I8, i as i64);
+                let expected = self.iconst_cached(types::I8, i as i64);
                 let is_match = self.builder.ins().icmp(IntCC::Equal, tag, expected);
                 let next_check = self.builder.create_block();
                 self.emit_brif(is_match, block, next_check);
-                self.builder.switch_to_block(next_check);
+                self.switch_to_block(next_check);
             }
         }
 
         // For each variant block, extract the payload and convert to string
         for (i, &block) in variant_blocks.iter().enumerate() {
-            self.builder.switch_to_block(block);
+            self.switch_to_block(block);
             let variant_type_id = variants[i];
             let arena = self.arena();
             let inner_cr_type = type_id_to_cranelift(variant_type_id, arena, self.ptr_type());
@@ -307,7 +307,7 @@ impl Cg<'_, '_, '_> {
                     union_layout::PAYLOAD_OFFSET,
                 )
             } else {
-                self.builder.ins().iconst(inner_cr_type, 0)
+                self.iconst_cached(inner_cr_type, 0)
             };
 
             let inner_compiled = CompiledValue::new(inner_val, inner_cr_type, variant_type_id);
@@ -315,7 +315,7 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().jump(merge_block, &[str_val.into()]);
         }
 
-        self.builder.switch_to_block(merge_block);
+        self.switch_to_block(merge_block);
         Ok(self.builder.block_params(merge_block)[0])
     }
 }

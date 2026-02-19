@@ -319,7 +319,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             self.emit_brif(is_match, op_block, next_block);
 
-            self.builder.switch_to_block(op_block);
+            self.switch_to_block(op_block);
             self.builder.seal_block(op_block);
             let payload = self.builder.ins().load(
                 types::I64,
@@ -338,7 +338,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             self.builder.ins().jump(next_block, &[]);
 
-            self.builder.switch_to_block(next_block);
+            self.switch_to_block(next_block);
             self.builder.seal_block(next_block);
         }
         Ok(())

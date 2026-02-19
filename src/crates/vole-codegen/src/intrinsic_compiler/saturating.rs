@@ -19,8 +19,8 @@ macro_rules! impl_sat_widen_narrow {
             let a_wide = sextend_const(&mut self.builder, $wide_ty, a);
             let b_wide = sextend_const(&mut self.builder, $wide_ty, b);
             let sum = self.builder.ins().iadd(a_wide, b_wide);
-            let min = self.builder.ins().iconst($wide_ty, $min);
-            let max = self.builder.ins().iconst($wide_ty, $max);
+            let min = self.iconst_cached($wide_ty, $min);
+            let max = self.iconst_cached($wide_ty, $max);
             let clamped = self.builder.ins().smax(sum, min);
             let clamped = self.builder.ins().smin(clamped, max);
             self.builder.ins().ireduce($src_ty, clamped)
@@ -32,7 +32,7 @@ macro_rules! impl_sat_widen_narrow {
             let a_wide = uextend_const(&mut self.builder, $wide_ty, a);
             let b_wide = uextend_const(&mut self.builder, $wide_ty, b);
             let sum = self.builder.ins().iadd(a_wide, b_wide);
-            let max = self.builder.ins().iconst($wide_ty, $max);
+            let max = self.iconst_cached($wide_ty, $max);
             let clamped = self.builder.ins().umin(sum, max);
             self.builder.ins().ireduce($src_ty, clamped)
         }
@@ -43,8 +43,8 @@ macro_rules! impl_sat_widen_narrow {
             let a_wide = sextend_const(&mut self.builder, $wide_ty, a);
             let b_wide = sextend_const(&mut self.builder, $wide_ty, b);
             let diff = self.builder.ins().isub(a_wide, b_wide);
-            let min = self.builder.ins().iconst($wide_ty, $min);
-            let max = self.builder.ins().iconst($wide_ty, $max);
+            let min = self.iconst_cached($wide_ty, $min);
+            let max = self.iconst_cached($wide_ty, $max);
             let clamped = self.builder.ins().smax(diff, min);
             let clamped = self.builder.ins().smin(clamped, max);
             self.builder.ins().ireduce($src_ty, clamped)
@@ -56,7 +56,7 @@ macro_rules! impl_sat_widen_narrow {
             let a_wide = uextend_const(&mut self.builder, $wide_ty, a);
             let b_wide = uextend_const(&mut self.builder, $wide_ty, b);
             let diff = self.builder.ins().isub(a_wide, b_wide);
-            let zero = self.builder.ins().iconst($wide_ty, 0);
+            let zero = self.iconst_cached($wide_ty, 0);
             let clamped = self.builder.ins().smax(diff, zero);
             self.builder.ins().ireduce($src_ty, clamped)
         }
@@ -72,9 +72,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Compute min and max for this type
         let bits = ty.bits();
         let (min_val, max_val) = signed_min_max(bits);
-        let max = self.builder.ins().iconst(ty, max_val);
-        let min = self.builder.ins().iconst(ty, min_val);
-        let zero = self.builder.ins().iconst(ty, 0);
+        let max = self.iconst_cached(ty, max_val);
+        let min = self.iconst_cached(ty, min_val);
+        let zero = self.iconst_cached(ty, 0);
 
         // Perform multiplication with overflow detection
         let (result, overflow) = self.builder.ins().smul_overflow(a, b);
@@ -104,7 +104,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             (1i64 << bits) - 1
         };
-        let max = self.builder.ins().iconst(ty, max_val);
+        let max = self.iconst_cached(ty, max_val);
 
         // Perform multiplication with overflow detection
         let (result, overflow) = self.builder.ins().umul_overflow(a, b);
@@ -119,9 +119,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Compute min and max for this type
         let bits = ty.bits();
         let (min_val, max_val) = signed_min_max(bits);
-        let max = self.builder.ins().iconst(ty, max_val);
-        let min = self.builder.ins().iconst(ty, min_val);
-        let zero = self.builder.ins().iconst(ty, 0);
+        let max = self.iconst_cached(ty, max_val);
+        let min = self.iconst_cached(ty, min_val);
+        let zero = self.iconst_cached(ty, 0);
 
         // Perform addition with overflow detection
         let (result, overflow) = self.builder.ins().sadd_overflow(a, b);
@@ -147,7 +147,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             (1i64 << bits) - 1
         };
-        let max = self.builder.ins().iconst(ty, max_val);
+        let max = self.iconst_cached(ty, max_val);
 
         // Perform addition with overflow detection
         let (result, overflow) = self.builder.ins().uadd_overflow(a, b);
@@ -162,9 +162,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Compute min and max for this type
         let bits = ty.bits();
         let (min_val, max_val) = signed_min_max(bits);
-        let max = self.builder.ins().iconst(ty, max_val);
-        let min = self.builder.ins().iconst(ty, min_val);
-        let zero = self.builder.ins().iconst(ty, 0);
+        let max = self.iconst_cached(ty, max_val);
+        let min = self.iconst_cached(ty, min_val);
+        let zero = self.iconst_cached(ty, 0);
 
         // Perform subtraction with overflow detection
         let (result, overflow) = self.builder.ins().ssub_overflow(a, b);
@@ -180,7 +180,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Unsigned saturating subtraction using overflow detection.
     /// If overflow occurs, clamp to 0.
     pub fn unsigned_saturating_sub(&mut self, a: Value, b: Value, ty: Type) -> Value {
-        let zero = self.builder.ins().iconst(ty, 0);
+        let zero = self.iconst_cached(ty, 0);
 
         // Perform subtraction with overflow detection
         let (result, overflow) = self.builder.ins().usub_overflow(a, b);

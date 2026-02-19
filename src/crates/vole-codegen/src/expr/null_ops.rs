@@ -91,7 +91,7 @@ impl Cg<'_, '_, '_> {
             }
             loaded
         } else {
-            self.builder.ins().iconst(cranelift_type, 0)
+            self.iconst_cached(cranelift_type, 0)
         };
         let payload_arg = BlockArg::from(payload);
         self.builder.ins().jump(merge_block, &[payload_arg]);
@@ -178,7 +178,7 @@ impl Cg<'_, '_, '_> {
         })?;
         let closure_ptr = self.builder.use_var(closure_var);
 
-        let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
+        let index_val = self.iconst_cached(types::I64, binding.index as i64);
         let heap_ptr =
             self.call_runtime(RuntimeKey::ClosureGetCapture, &[closure_ptr, index_val])?;
 
@@ -216,7 +216,7 @@ impl Cg<'_, '_, '_> {
         })?;
         let closure_ptr = self.builder.use_var(closure_var);
 
-        let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
+        let index_val = self.iconst_cached(types::I64, binding.index as i64);
         let heap_ptr =
             self.call_runtime(RuntimeKey::ClosureGetCapture, &[closure_ptr, index_val])?;
 

@@ -54,11 +54,11 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue::new(val, types::F64, f64_id))
                     }
                     ConstantValue::I64(v) => {
-                        let val = self.builder.ins().iconst(types::I64, v);
+                        let val = self.iconst_cached(types::I64, v);
                         Ok(CompiledValue::new(val, types::I64, i64_id))
                     }
                     ConstantValue::Bool(v) => {
-                        let val = self.builder.ins().iconst(types::I8, if v { 1 } else { 0 });
+                        let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
                         Ok(CompiledValue::new(val, types::I8, bool_id))
                     }
                     ConstantValue::String(s) => self.string_literal(&s),
@@ -79,7 +79,7 @@ impl Cg<'_, '_, '_> {
 
                 // Sentinel exports are zero-field structs - emit i8(0)
                 if self.arena().is_sentinel(export_type_id) {
-                    let value = self.builder.ins().iconst(types::I8, 0);
+                    let value = self.iconst_cached(types::I8, 0);
                     return Ok(CompiledValue::new(value, types::I8, export_type_id));
                 }
 
@@ -377,7 +377,7 @@ impl Cg<'_, '_, '_> {
         let rc_old =
             if self.rc_scopes.has_active_scope() && self.rc_state(field_type_id).needs_cleanup() {
                 let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
-                let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+                let slot_val = self.iconst_cached(types::I32, slot as i64);
                 let call = self
                     .builder
                     .ins()

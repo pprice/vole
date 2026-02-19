@@ -7,7 +7,9 @@ use std::cell::RefCell;
 use std::mem::size_of;
 use std::rc::Rc;
 
-use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Value, Variable, types};
+use cranelift::prelude::{
+    Block, FunctionBuilder, InstBuilder, MemFlags, Type, Value, Variable, types,
+};
 use cranelift_module::{FuncId, Module};
 use rustc_hash::FxHashMap;
 
@@ -47,9 +49,9 @@ pub(crate) fn deref_expr_ptr(ptr: *const Expr) -> &'static Expr {
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
     /// Stack of loop exit blocks for break statements
-    loop_exits: Vec<cranelift::prelude::Block>,
+    loop_exits: Vec<Block>,
     /// Stack of loop continue blocks for continue statements
-    loop_continues: Vec<cranelift::prelude::Block>,
+    loop_continues: Vec<Block>,
     /// RC scope depth at loop entry, for break/continue cleanup
     loop_rc_depths: Vec<usize>,
 }
@@ -65,8 +67,8 @@ impl ControlFlow {
 
     pub fn push_loop(
         &mut self,
-        exit: cranelift::prelude::Block,
-        cont: cranelift::prelude::Block,
+        exit: Block,
+        cont: Block,
         rc_scope_depth: usize,
     ) {
         self.loop_exits.push(exit);
@@ -80,11 +82,11 @@ impl ControlFlow {
         self.loop_rc_depths.pop();
     }
 
-    pub fn loop_exit(&self) -> Option<cranelift::prelude::Block> {
+    pub fn loop_exit(&self) -> Option<Block> {
         self.loop_exits.last().copied()
     }
 
-    pub fn loop_continue(&self) -> Option<cranelift::prelude::Block> {
+    pub fn loop_continue(&self) -> Option<Block> {
         self.loop_continues.last().copied()
     }
 
@@ -166,6 +168,12 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Reused by every `void_value()` call to avoid emitting thousands of
     /// dead iconst instructions (previously ~18,951 per compilation).
     pub(crate) cached_void_val: Value,
+    /// Per-block iconst cache: `(Type, i64) -> Value`.
+    ///
+    /// Avoids emitting duplicate `iconst` instructions within the same basic
+    /// block.  Cleared on every block switch (`switch_to_block`) because SSA
+    /// values defined in one block may not dominate a sibling block.
+    iconst_cache: FxHashMap<(Type, i64), Value>,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -210,6 +218,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
             cached_void_val,
+            iconst_cache: FxHashMap::default(),
             codegen_ctx,
             env,
         }
@@ -524,7 +533,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             self.builder.ins().ireduce(ptr_type, idx)
         };
-        let stride = self.builder.ins().iconst(ptr_type, tagged_value_size);
+        let stride = self.iconst_cached(ptr_type, tagged_value_size);
         let elem_offset = self.builder.ins().imul(idx_ptr, stride);
         self.builder.ins().iadd(data_ptr, elem_offset)
     }
@@ -559,14 +568,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     let arena = self.arena();
                     crate::types::array_element_tag_id(value.type_id, arena)
                 };
-                let tag_val = self.builder.ins().iconst(types::I64, tag);
+                let tag_val = self.iconst_cached(types::I64, tag);
                 return Ok((tag_val, boxed, value));
             }
             let tag = {
                 let arena = self.arena();
                 crate::types::array_element_tag_id(value.type_id, arena)
             };
-            let tag_val = self.builder.ins().iconst(types::I64, tag);
+            let tag_val = self.iconst_cached(types::I64, tag);
             let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
             return Ok((tag_val, payload_bits, value));
         }
@@ -600,7 +609,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     union_layout::PAYLOAD_OFFSET,
                 )
             } else {
-                self.builder.ins().iconst(types::I64, 0)
+                self.iconst_cached(types::I64, 0)
             };
             return Ok((runtime_tag, payload_bits, value));
         }
@@ -625,7 +634,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let arena = self.arena();
             crate::types::array_element_tag_id(value.type_id, arena)
         };
-        let tag_val = self.builder.ins().iconst(types::I64, tag);
+        let tag_val = self.iconst_cached(types::I64, tag);
         let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
         Ok((tag_val, payload_bits, value))
     }
@@ -726,7 +735,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some(&cached) = self.field_cache.get(&key) {
             return Ok(cached);
         }
-        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+        let slot_val = self.iconst_cached(types::I32, slot as i64);
         let result = self.call_runtime(RuntimeKey::InstanceGetField, &[instance, slot_val])?;
         self.field_cache.insert(key, result);
         Ok(result)
@@ -762,17 +771,43 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 Ok(CompiledValue::new(wide_i128, types::I128, field_type_id))
             }
         } else {
-            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+            let slot_val = self.iconst_cached(types::I32, slot as i64);
             let result_raw =
                 self.call_runtime(RuntimeKey::InstanceGetField, &[instance, slot_val])?;
             Ok(self.convert_field_value(result_raw, field_type_id))
         }
     }
 
+    /// Emit or reuse a cached `iconst` instruction in the current basic block.
+    ///
+    /// Looks up `(ty, val)` in the per-block cache. On a miss, emits
+    /// `builder.ins().iconst(ty, val)` and stores the result. On a hit,
+    /// returns the previously emitted `Value`, eliminating a redundant
+    /// instruction.
+    #[inline]
+    pub fn iconst_cached(&mut self, ty: Type, val: i64) -> Value {
+        if let Some(&v) = self.iconst_cache.get(&(ty, val)) {
+            return v;
+        }
+        let v = self.builder.ins().iconst(ty, val);
+        self.iconst_cache.insert((ty, val), v);
+        v
+    }
+
+    /// Switch the builder to a new basic block, clearing per-block caches.
+    ///
+    /// All `self.builder.switch_to_block(block)` calls inside `Cg` methods
+    /// should go through this wrapper so that the iconst cache (and any future
+    /// per-block caches) are automatically invalidated.
+    pub fn switch_to_block(&mut self, block: Block) {
+        self.builder.switch_to_block(block);
+        self.iconst_cache.clear();
+    }
+
     /// Invalidate value caches when entering a control flow branch.
     ///
-    /// The `field_cache` stores Cranelift SSA `Value`s that are
-    /// defined in a particular basic block.  When the builder switches to a
+    /// The `field_cache` and `iconst_cache` store Cranelift SSA `Value`s that
+    /// are defined in a particular basic block.  When the builder switches to a
     /// sibling block (e.g., the next arm of a `when`/`match`/`if` expression),
     /// values cached from a previous arm do **not** dominate the new block,
     /// so reusing them would produce a Cranelift verifier error
@@ -781,6 +816,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call this at the start of each arm body in any branching construct.
     pub fn invalidate_value_caches(&mut self) {
         self.field_cache.clear();
+        self.iconst_cache.clear();
     }
 
     /// Call a runtime function that returns void

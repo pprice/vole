@@ -252,7 +252,7 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), value.value, 0);
                 let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
-                let expected_val = self.builder.ins().iconst(types::I64, expected_tag as i64);
+                let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
                 let result = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
                 Ok(self.bool_value(result))
             }
@@ -279,7 +279,7 @@ impl Cg<'_, '_, '_> {
             IsCheckResult::AlwaysTrue => Ok(None), // Always matches
             IsCheckResult::AlwaysFalse => {
                 // Never matches
-                let never_match = self.builder.ins().iconst(types::I8, 0);
+                let never_match = self.iconst_cached(types::I8, 0);
                 Ok(Some(never_match))
             }
             IsCheckResult::CheckTag(tag_index) => {
@@ -294,7 +294,7 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), scrutinee.value, 0);
                 let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
-                let expected_val = self.builder.ins().iconst(types::I64, expected_tag as i64);
+                let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
                 let result = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
                 Ok(Some(result))
             }
@@ -521,7 +521,7 @@ impl Cg<'_, '_, '_> {
             self.builder.seal_block(arm_block);
             *effective_arm_block = extract_block;
 
-            self.builder.switch_to_block(extract_block);
+            self.switch_to_block(extract_block);
 
             let (field_source, field_source_type_id) = if let Some(pt_id) = pattern_type_id {
                 let payload =
@@ -659,7 +659,7 @@ impl Cg<'_, '_, '_> {
             // For the last arm, if pattern fails, go to trap (should be unreachable)
             let next_block = arm_blocks.get(i + 1).copied().unwrap_or(trap_block);
 
-            self.builder.switch_to_block(arm_block);
+            self.switch_to_block(arm_block);
             self.invalidate_value_caches();
 
             let mut arm_variables = self.vars.clone();
@@ -703,7 +703,7 @@ impl Cg<'_, '_, '_> {
             // Seal the effective arm block (may be extract_block for conditional patterns)
             self.builder.seal_block(effective_arm_block);
 
-            self.builder.switch_to_block(body_block);
+            self.switch_to_block(body_block);
 
             // Compile body with the arm's variables
             let saved_vars = std::mem::replace(&mut self.vars, arm_variables);
@@ -806,7 +806,7 @@ impl Cg<'_, '_, '_> {
 
         // Compile each arm body
         for (i, arm) in match_expr.arms.iter().enumerate() {
-            self.builder.switch_to_block(body_blocks[i]);
+            self.switch_to_block(body_blocks[i]);
             self.builder.seal_block(body_blocks[i]);
             self.invalidate_value_caches();
 

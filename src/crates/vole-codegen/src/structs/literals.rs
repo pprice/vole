@@ -66,7 +66,7 @@ impl Cg<'_, '_, '_> {
                         .or_else(|| self.type_metadata().get(&type_def_id).map(|m| m.vole_type))
                         .unwrap_or(TypeId::NIL)
                 });
-                let value = self.builder.ins().iconst(types::I8, 0);
+                let value = self.iconst_cached(types::I8, 0);
                 return Ok(CompiledValue::new(value, types::I8, sentinel_type_id));
             }
         }
@@ -149,8 +149,8 @@ impl Cg<'_, '_, '_> {
             self.mono_instance_type_id(base_type_id, result_type_id)
         };
 
-        let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);
-        let field_count_val = self.builder.ins().iconst(types::I32, field_count as i64);
+        let type_id_val = self.iconst_cached(types::I32, type_id as i64);
+        let field_count_val = self.iconst_cached(types::I32, field_count as i64);
         let runtime_type = self
             .builder
             .ins()
@@ -438,12 +438,12 @@ impl Cg<'_, '_, '_> {
         // Allocate union storage on the heap
         let ptr_type = self.ptr_type();
         let union_size = self.type_size(union_type_id);
-        let size_val = self.builder.ins().iconst(ptr_type, union_size as i64);
+        let size_val = self.iconst_cached(ptr_type, union_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
 
         // Store tag at offset 0
-        let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
+        let tag_val = self.iconst_cached(types::I8, tag as i64);
         self.builder
             .ins()
             .store(MemFlags::new(), tag_val, heap_ptr, 0);
@@ -451,7 +451,7 @@ impl Cg<'_, '_, '_> {
         // Store is_rc flag at offset 1: 1 if the variant is RC-managed, 0 otherwise.
         // This flag is used by union_heap_cleanup to know whether to rc_dec the payload.
         let is_rc = self.rc_state(actual_type_id).needs_cleanup();
-        let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
+        let is_rc_val = self.iconst_cached(types::I8, is_rc as i64);
         self.builder.ins().store(
             MemFlags::new(),
             is_rc_val,
@@ -484,7 +484,7 @@ impl Cg<'_, '_, '_> {
         let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
         let ptr_type = self.ptr_type();
         let union_size = self.type_size(value.type_id);
-        let size_val = self.builder.ins().iconst(ptr_type, union_size as i64);
+        let size_val = self.iconst_cached(ptr_type, union_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
 
@@ -527,7 +527,7 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
         self.emit_brif(needs_inc, then_block, merge_block);
 
-        self.builder.switch_to_block(then_block);
+        self.switch_to_block(then_block);
         self.builder.seal_block(then_block);
         let rc_inc_ref = self.runtime_func_ref(RuntimeKey::RcInc)?;
         let payload_ptr = self
@@ -537,7 +537,7 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().call(rc_inc_ref, &[payload_ptr]);
         self.builder.ins().jump(merge_block, &[]);
 
-        self.builder.switch_to_block(merge_block);
+        self.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
 
         Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
@@ -562,7 +562,7 @@ impl Cg<'_, '_, '_> {
         let word_bytes = ptr_type.bytes() as i64;
 
         // Allocate 16 bytes for [data_word, vtable_ptr]
-        let size_val = self.builder.ins().iconst(ptr_type, word_bytes * 2);
+        let size_val = self.iconst_cached(ptr_type, word_bytes * 2);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
 

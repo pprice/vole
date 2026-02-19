@@ -100,13 +100,11 @@ impl Cg<'_, '_, '_> {
                     format!("index {} for array of size {}", i, size),
                 ));
             }
-            self.builder
-                .ins()
-                .iconst(types::I64, (i as i64) * (elem_size as i64))
+            self.iconst_cached(types::I64, (i as i64) * (elem_size as i64))
         } else {
             // Runtime index - add bounds check
             let idx = self.expr(index)?;
-            let size_val = self.builder.ins().iconst(types::I64, size as i64);
+            let size_val = self.iconst_cached(types::I64, size as i64);
 
             // Check if index < 0 or index >= size
             // We treat index as unsigned, so negative becomes very large
@@ -120,7 +118,7 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .trapz(in_bounds, crate::trap_codes::BOUNDS_CHECK);
 
-            let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
+            let elem_size_val = self.iconst_cached(types::I64, elem_size as i64);
             self.builder.ins().imul(idx.value, elem_size_val)
         };
 
@@ -220,13 +218,11 @@ impl Cg<'_, '_, '_> {
                     format!("index {} for array of size {}", i, size),
                 ));
             }
-            self.builder
-                .ins()
-                .iconst(types::I64, (i as i64) * (elem_size as i64))
+            self.iconst_cached(types::I64, (i as i64) * (elem_size as i64))
         } else {
             // Runtime index - add bounds check
             let idx = self.expr(index)?;
-            let size_val = self.builder.ins().iconst(types::I64, size as i64);
+            let size_val = self.iconst_cached(types::I64, size as i64);
 
             // Check if index < 0 or index >= size
             let in_bounds = self
@@ -239,7 +235,7 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .trapz(in_bounds, crate::trap_codes::BOUNDS_CHECK);
 
-            let elem_size_val = self.builder.ins().iconst(types::I64, elem_size as i64);
+            let elem_size_val = self.iconst_cached(types::I64, elem_size as i64);
             self.builder.ins().imul(idx.value, elem_size_val)
         };
 
@@ -341,7 +337,7 @@ impl Cg<'_, '_, '_> {
                 let arena = self.arena();
                 array_element_tag_id(val.type_id, arena)
             };
-            let tag_val = self.builder.ins().iconst(types::I64, tag);
+            let tag_val = self.iconst_cached(types::I64, tag);
             let value_bits = convert_to_i64_for_storage(self.builder, &val);
             (tag_val, value_bits, val)
         };

@@ -44,12 +44,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else if ty == types::F32 {
             self.builder.ins().f32const(0.0)
         } else if ty == types::F128 {
-            let zero_bits = self.builder.ins().iconst(types::I128, 0);
+            let zero_bits = self.iconst_cached(types::I128, 0);
             self.builder
                 .ins()
                 .bitcast(types::F128, MemFlags::new(), zero_bits)
         } else {
-            self.builder.ins().iconst(ty, 0)
+            self.iconst_cached(ty, 0)
         }
     }
 
@@ -62,7 +62,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a boolean constant (true or false)
     pub fn bool_const(&mut self, b: bool) -> CompiledValue {
-        let value = self.builder.ins().iconst(types::I8, if b { 1 } else { 0 });
+        let value = self.iconst_cached(types::I8, if b { 1 } else { 0 });
         self.bool_value(value)
     }
 
@@ -93,19 +93,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // an i64 constant and sign-extend it to i128.
         // For f128, use the runtime software representation (f64 payload in low 64 bits).
         let value = if ty == types::I128 {
-            let i64_val = self.builder.ins().iconst(types::I64, n);
+            let i64_val = self.iconst_cached(types::I64, n);
             sextend_const(self.builder, types::I128, i64_val)
         } else if ty == types::F128 {
-            let low = self
-                .builder
-                .ins()
-                .iconst(types::I64, (n as f64).to_bits() as i64);
+            let low = self.iconst_cached(types::I64, (n as f64).to_bits() as i64);
             let wide = uextend_const(self.builder, types::I128, low);
             self.builder
                 .ins()
                 .bitcast(types::F128, MemFlags::new(), wide)
         } else {
-            self.builder.ins().iconst(ty, n)
+            self.iconst_cached(ty, n)
         };
         CompiledValue::new(value, ty, type_id)
     }
@@ -125,7 +122,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ArenaType::Primitive(PrimitiveType::F128) => {
                 // Runtime f128 currently uses a compact software representation:
                 // low 64 bits = f64 payload, high 64 bits = 0.
-                let low = self.builder.ins().iconst(types::I64, n.to_bits() as i64);
+                let low = self.iconst_cached(types::I64, n.to_bits() as i64);
                 let wide = uextend_const(self.builder, types::I128, low);
                 let v = self
                     .builder
@@ -144,7 +141,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a nil value
     pub fn nil_value(&mut self) -> CompiledValue {
-        let value = self.builder.ins().iconst(types::I8, 0);
+        let value = self.iconst_cached(types::I8, 0);
         CompiledValue::new(value, types::I8, TypeId::NIL)
     }
 
@@ -154,7 +151,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Returns an i8 value (1 if equal, 0 if not).
     pub fn tag_eq(&mut self, ptr: Value, expected_tag: i64) -> Value {
         let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
-        let expected = self.builder.ins().iconst(types::I8, expected_tag);
+        let expected = self.iconst_cached(types::I8, expected_tag);
         self.builder.ins().icmp(IntCC::Equal, tag, expected)
     }
 
@@ -162,7 +159,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Returns an i8 value (1 if not equal, 0 if equal).
     pub fn tag_ne(&mut self, ptr: Value, expected_tag: i64) -> Value {
         let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
-        let expected = self.builder.ins().iconst(types::I8, expected_tag);
+        let expected = self.iconst_cached(types::I8, expected_tag);
         self.builder.ins().icmp(IntCC::NotEqual, tag, expected)
     }
 
@@ -250,7 +247,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Switch to a block and seal it (common pattern for sequential control flow)
     pub fn switch_and_seal(&mut self, block: cranelift::prelude::Block) {
-        self.builder.switch_to_block(block);
+        self.switch_to_block(block);
         self.builder.seal_block(block);
     }
 
@@ -304,7 +301,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         continue_block: cranelift::prelude::Block,
         exit_block: cranelift::prelude::Block,
     ) {
-        self.builder.switch_to_block(exit_block);
+        self.switch_to_block(exit_block);
         self.builder.seal_block(header);
         self.builder.seal_block(body_block);
         self.builder.seal_block(continue_block);
@@ -410,7 +407,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return_vals.push(val);
         }
         while return_vals.len() < crate::MAX_SMALL_STRUCT_FIELDS {
-            return_vals.push(self.builder.ins().iconst(types::I64, 0));
+            return_vals.push(self.iconst_cached(types::I64, 0));
         }
         self.builder.ins().return_(&return_vals);
     }
@@ -503,7 +500,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Heap-allocate storage
         let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
-        let size_val = self.builder.ins().iconst(ptr_type, total_size as i64);
+        let size_val = self.iconst_cached(ptr_type, total_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
 
@@ -669,7 +666,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 union_layout::PAYLOAD_OFFSET,
             )
         } else {
-            self.builder.ins().iconst(payload_type, 0)
+            self.iconst_cached(payload_type, 0)
         }
     }
 }

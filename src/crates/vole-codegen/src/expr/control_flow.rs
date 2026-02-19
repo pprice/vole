@@ -26,7 +26,7 @@ impl Cg<'_, '_, '_> {
         // Return a dummy value with the never type
         // The actual value doesn't matter since control never reaches here
         Ok(CompiledValue::new(
-            self.builder.ins().iconst(types::I64, 0),
+            self.iconst_cached(types::I64, 0),
             types::I64,
             TypeId::NEVER,
         ))

@@ -979,7 +979,7 @@ impl Cg<'_, '_, '_> {
                     // can properly manage RC values
                     let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
                     if tag != 0 {
-                        let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+                        let tag_val = self.iconst_cached(types::I64, tag as i64);
                         self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
                     }
                     Ok(Some(CompiledValue::owned(
@@ -1020,7 +1020,7 @@ impl Cg<'_, '_, '_> {
                     // free owned char strings produced by the string chars iterator.
                     let string_tag = crate::types::unknown_type_tag(TypeId::STRING, self.arena());
                     if string_tag != 0 {
-                        let tag_val = self.builder.ins().iconst(types::I64, string_tag as i64);
+                        let tag_val = self.iconst_cached(types::I64, string_tag as i64);
                         self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
                     }
                     Ok(Some(CompiledValue::owned(
@@ -1096,7 +1096,7 @@ impl Cg<'_, '_, '_> {
                 let arena = self.arena();
                 array_element_tag_id(value.type_id, arena)
             };
-            let tag_val = self.builder.ins().iconst(types::I64, tag);
+            let tag_val = self.iconst_cached(types::I64, tag);
             let value_bits = convert_to_i64_for_storage(self.builder, &value);
             (tag_val, value_bits, value)
         };
@@ -1111,7 +1111,7 @@ impl Cg<'_, '_, '_> {
         // Return void
         let void_type_id = self.arena().void();
         Ok(CompiledValue::new(
-            self.builder.ins().iconst(types::I64, 0),
+            self.iconst_cached(types::I64, 0),
             types::I64,
             void_type_id,
         ))
@@ -1229,7 +1229,7 @@ impl Cg<'_, '_, '_> {
         // can dispatch between integer and floating-point operations.
         let mut result = if method_name == "reduce" {
             let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
-            let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+            let tag_val = self.iconst_cached(types::I64, tag as i64);
             args.push(tag_val); // acc_tag
             args.push(tag_val); // elem_tag
             let result_val = self.call_runtime(RuntimeKey::IterReduceTagged, &args)?;
@@ -1318,7 +1318,7 @@ impl Cg<'_, '_, '_> {
             let tag = crate::types::unknown_type_tag(result_elem_id, self.arena());
             if tag != 0 {
                 // Only set tag for non-default types (RC types, etc.)
-                let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+                let tag_val = self.iconst_cached(types::I64, tag as i64);
                 self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result.value, tag_val])?;
             }
         }

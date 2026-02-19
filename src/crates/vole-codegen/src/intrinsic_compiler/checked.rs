@@ -234,8 +234,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Determine tag based on overflow flag:
         // if overflow => nil_tag, else => value_tag
-        let nil_tag_val = self.builder.ins().iconst(types::I8, nil_tag as i64);
-        let value_tag_val = self.builder.ins().iconst(types::I8, value_tag as i64);
+        let nil_tag_val = self.iconst_cached(types::I8, nil_tag as i64);
+        let value_tag_val = self.iconst_cached(types::I8, value_tag as i64);
         let tag = self
             .builder
             .ins()
@@ -277,10 +277,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let bits = ty.bits();
         let (min_val, _) = signed_min_max(bits);
 
-        let zero = self.builder.ins().iconst(ty, 0);
-        let one = self.builder.ins().iconst(ty, 1);
-        let neg_one = self.builder.ins().iconst(ty, -1);
-        let min = self.builder.ins().iconst(ty, min_val);
+        let zero = self.iconst_cached(ty, 0);
+        let one = self.iconst_cached(ty, 1);
+        let neg_one = self.iconst_cached(ty, -1);
+        let min = self.iconst_cached(ty, min_val);
 
         // Check for div-by-zero: divisor == 0
         let is_zero = self.builder.ins().icmp(IntCC::Equal, divisor, zero);
@@ -317,8 +317,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         value_type_id: TypeId,
         return_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let zero = self.builder.ins().iconst(ty, 0);
-        let one = self.builder.ins().iconst(ty, 1);
+        let zero = self.iconst_cached(ty, 0);
+        let one = self.iconst_cached(ty, 1);
 
         // Check for div-by-zero
         let is_zero = self.builder.ins().icmp(IntCC::Equal, divisor, zero);

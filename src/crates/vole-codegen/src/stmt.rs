@@ -148,14 +148,14 @@ impl Cg<'_, '_, '_> {
 
                 self.builder.ins().jump(header_block, &[]);
 
-                self.builder.switch_to_block(header_block);
+                self.switch_to_block(header_block);
                 let cond = self.expr(&while_stmt.condition)?;
                 self.emit_brif(cond.value, body_block, exit_block);
 
-                self.builder.switch_to_block(body_block);
+                self.switch_to_block(body_block);
                 self.compile_loop_body(&while_stmt.body, exit_block, header_block)?;
 
-                self.builder.switch_to_block(exit_block);
+                self.switch_to_block(exit_block);
 
                 // Seal the header and body blocks now that their predecessors are known.
                 // The exit block is NOT sealed - see finalize_for_loop for explanation.
@@ -196,14 +196,14 @@ impl Cg<'_, '_, '_> {
 
                 self.emit_brif(cond.value, then_block, else_block);
 
-                self.builder.switch_to_block(then_block);
+                self.switch_to_block(then_block);
                 self.invalidate_value_caches();
                 let then_terminated = self.block(&if_stmt.then_branch)?;
                 if !then_terminated {
                     self.builder.ins().jump(merge_block, &[]);
                 }
 
-                self.builder.switch_to_block(else_block);
+                self.switch_to_block(else_block);
                 self.invalidate_value_caches();
                 let else_terminated = if let Some(else_branch) = &if_stmt.else_branch {
                     self.block(else_branch)?
@@ -214,7 +214,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().jump(merge_block, &[]);
                 }
 
-                self.builder.switch_to_block(merge_block);
+                self.switch_to_block(merge_block);
                 self.invalidate_value_caches();
 
                 // If both branches terminated, the merge block is unreachable.
@@ -268,7 +268,7 @@ impl Cg<'_, '_, '_> {
                     }
                     self.builder.ins().jump(continue_block, &[]);
                     let unreachable = self.builder.create_block();
-                    self.builder.switch_to_block(unreachable);
+                    self.switch_to_block(unreachable);
                     self.builder.seal_block(unreachable);
                 }
                 Ok(true)
@@ -537,7 +537,7 @@ impl Cg<'_, '_, '_> {
             {
                 // For fallible functions, return (tag, payload) directly in registers
                 // Both tag and payload are i64 for uniform representation
-                let tag_val = self.builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
+                let tag_val = self.iconst_cached(types::I64, FALLIBLE_SUCCESS_TAG);
 
                 if is_wide_fallible(ret_type_id, self.arena()) {
                     // i128 success: return (tag, low, high) in 3 registers
@@ -695,14 +695,14 @@ impl Cg<'_, '_, '_> {
         let union_size = self.type_size(union_type_id);
         let slot = self.alloc_stack(union_size);
 
-        let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
+        let tag_val = self.iconst_cached(types::I8, tag as i64);
         self.builder.ins().stack_store(tag_val, slot, 0);
 
         // Store is_rc flag at offset 1 (matches heap union layout used by
         // construct_union_heap_id). copy_union_to_heap reads this byte to
         // decide whether to rc_inc the payload when promoting to the heap.
         let is_rc = self.rc_state(actual_type_id).needs_cleanup();
-        let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
+        let is_rc_val = self.iconst_cached(types::I8, is_rc as i64);
         self.builder
             .ins()
             .stack_store(is_rc_val, slot, union_layout::IS_RC_OFFSET);
@@ -712,7 +712,7 @@ impl Cg<'_, '_, '_> {
             // don't carry data, but zeroing avoids undefined behavior when generic
             // cleanup/copy paths read the payload word.
             let payload = if self.arena().is_sentinel(actual_type_id) {
-                self.builder.ins().iconst(types::I64, 0)
+                self.iconst_cached(types::I64, 0)
             } else {
                 actual_value
             };
@@ -908,7 +908,7 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         // Create the tag value
-        let tag_val = self.builder.ins().iconst(types::I64, error_tag);
+        let tag_val = self.iconst_cached(types::I64, error_tag);
 
         // Build the error payload from field definitions and initializers
         let payload_val = self.build_raise_payload(&error_fields, &raise_stmt.fields)?;
@@ -920,7 +920,7 @@ impl Cg<'_, '_, '_> {
         if is_wide_fallible(return_type_id, self.arena()) {
             // Wide fallible: return 3 values (tag, payload, 0) for consistency
             // with the 3-register convention for i128 success values
-            let zero = self.builder.ins().iconst(types::I64, 0);
+            let zero = self.iconst_cached(types::I64, 0);
             self.builder.ins().return_(&[tag_val, payload_val, zero]);
         } else {
             self.builder.ins().return_(&[tag_val, payload_val]);
@@ -983,7 +983,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Value> {
         if error_fields.is_empty() {
             // No fields - payload is 0
-            return Ok(self.builder.ins().iconst(types::I64, 0));
+            return Ok(self.iconst_cached(types::I64, 0));
         }
 
         if error_fields.len() == 1 && !crate::types::is_wide_type(error_fields[0].ty, self.arena())
