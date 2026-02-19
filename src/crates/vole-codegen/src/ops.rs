@@ -65,7 +65,12 @@ pub(crate) fn sextend_const(builder: &mut FunctionBuilder, target_ty: Type, val:
 }
 
 /// Convert a numeric TypeId to its corresponding Cranelift type.
-/// Only handles numeric types; other types will default to I64.
+///
+/// # Panics
+///
+/// Panics in debug builds if `type_id` is not a numeric type.  Non-numeric types
+/// must never reach the binary-operator path (sema should have rejected them
+/// before codegen).
 fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
     match type_id {
         TypeId::I8 | TypeId::U8 => types::I8,
@@ -76,7 +81,11 @@ fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
         TypeId::F32 => types::F32,
         TypeId::F64 => types::F64,
         TypeId::F128 => types::F128,
-        _ => types::I64, // Default for other types
+        _ => unreachable!(
+            "INTERNAL: type_id_to_cranelift_type called with non-numeric type {:?}; \
+             this is a sema bug — only numeric types should reach binary-op codegen",
+            type_id
+        ),
     }
 }
 

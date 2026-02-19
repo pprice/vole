@@ -60,9 +60,10 @@ fn find_lambda_in_decl(decl: &Decl, node_id: NodeId) -> Option<&LambdaExpr> {
                 }
             }
             if let Some(statics) = &class.statics
-                && let Some(lambda) = find_lambda_in_statics(statics, node_id) {
-                    return Some(lambda);
-                }
+                && let Some(lambda) = find_lambda_in_statics(statics, node_id)
+            {
+                return Some(lambda);
+            }
             None
         }
         Decl::Struct(struct_decl) => {
@@ -72,22 +73,25 @@ fn find_lambda_in_decl(decl: &Decl, node_id: NodeId) -> Option<&LambdaExpr> {
                 }
             }
             if let Some(statics) = &struct_decl.statics
-                && let Some(lambda) = find_lambda_in_statics(statics, node_id) {
-                    return Some(lambda);
-                }
+                && let Some(lambda) = find_lambda_in_statics(statics, node_id)
+            {
+                return Some(lambda);
+            }
             None
         }
         Decl::Interface(iface) => {
             for method in &iface.methods {
                 if let Some(body) = &method.body
-                    && let Some(lambda) = find_lambda_in_func_body(body, node_id) {
-                        return Some(lambda);
-                    }
-            }
-            if let Some(statics) = &iface.statics
-                && let Some(lambda) = find_lambda_in_statics(statics, node_id) {
+                    && let Some(lambda) = find_lambda_in_func_body(body, node_id)
+                {
                     return Some(lambda);
                 }
+            }
+            if let Some(statics) = &iface.statics
+                && let Some(lambda) = find_lambda_in_statics(statics, node_id)
+            {
+                return Some(lambda);
+            }
             None
         }
         Decl::Implement(impl_block) => {
@@ -97,9 +101,10 @@ fn find_lambda_in_decl(decl: &Decl, node_id: NodeId) -> Option<&LambdaExpr> {
                 }
             }
             if let Some(statics) = &impl_block.statics
-                && let Some(lambda) = find_lambda_in_statics(statics, node_id) {
-                    return Some(lambda);
-                }
+                && let Some(lambda) = find_lambda_in_statics(statics, node_id)
+            {
+                return Some(lambda);
+            }
             None
         }
         // LetTuple, Error, Sentinel, External have no lambda bodies
@@ -114,9 +119,10 @@ fn find_lambda_in_statics(
 ) -> Option<&LambdaExpr> {
     for method in &statics.methods {
         if let Some(body) = &method.body
-            && let Some(lambda) = find_lambda_in_func_body(body, node_id) {
-                return Some(lambda);
-            }
+            && let Some(lambda) = find_lambda_in_func_body(body, node_id)
+        {
+            return Some(lambda);
+        }
     }
     None
 }

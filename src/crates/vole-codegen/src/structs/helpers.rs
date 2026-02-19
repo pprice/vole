@@ -375,13 +375,31 @@ pub(crate) fn field_flat_slots(
 /// Map a leaf TypeId to its Cranelift type for equality comparison.
 /// Wide types (i128, f128) map to their 128-bit Cranelift types.
 /// Float types map to F32/F64/F128 so callers can use fcmp instead of icmp.
+/// All other primitive/pointer types (integers, bool, string, handles, etc.)
+/// are compared as I64 after zero-extension to a uniform slot width.
 fn leaf_cranelift_type(type_id: TypeId, arena: &TypeArena) -> Type {
     match arena.get(type_id) {
         ArenaType::Primitive(PrimitiveType::F32) => types::F32,
         ArenaType::Primitive(PrimitiveType::F64) => types::F64,
         ArenaType::Primitive(PrimitiveType::F128) => types::F128,
         ArenaType::Primitive(PrimitiveType::I128) => types::I128,
-        _ => types::I64,
+        ty => {
+            debug_assert!(
+                matches!(
+                    ty,
+                    ArenaType::Primitive(_)
+                        | ArenaType::Handle
+                        | ArenaType::Void
+                        | ArenaType::Struct { .. }
+                        | ArenaType::Unknown
+                ),
+                "INTERNAL: leaf_cranelift_type called with unexpected SemaType {:?} for TypeId {:?}; \
+                 only primitive/pointer types are valid struct field leaf types",
+                ty,
+                type_id
+            );
+            types::I64
+        }
     }
 }
 

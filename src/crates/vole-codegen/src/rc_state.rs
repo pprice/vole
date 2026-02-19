@@ -356,7 +356,7 @@ fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_
         SemaType::Primitive(PrimitiveType::I64)
         | SemaType::Primitive(PrimitiveType::U64)
         | SemaType::Primitive(PrimitiveType::F64) => 8,
-        SemaType::Primitive(PrimitiveType::I128) => 16,
+        SemaType::Primitive(PrimitiveType::I128) | SemaType::Primitive(PrimitiveType::F128) => 16,
         SemaType::Primitive(PrimitiveType::String) | SemaType::Array(_) => 8, // pointer
         SemaType::Handle => 8,                                                // pointer
         SemaType::Interface { .. } => 8,                                      // pointer
@@ -388,7 +388,21 @@ fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_
                 .expect("INTERNAL: valid struct must have computable size") as i32
         }
         SemaType::Unknown => 16, // TaggedValue: 8-byte tag + 8-byte value
-        _ => 8,                  // Default to pointer size for other types
+        // Heap-allocated nominal types and function pointers — pointer-sized.
+        SemaType::Class { .. }
+        | SemaType::RuntimeIterator(_)
+        | SemaType::Function { .. }
+        | SemaType::Error { .. }
+        | SemaType::Fallible { .. } => 8,
+        // Erased generic type parameters in uninstantiated generic function bodies.
+        SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => 8, // pointer-erased
+        // Unresolved inference placeholders and sema-internal types: pointer-erased.
+        SemaType::Placeholder(_)
+        | SemaType::Never
+        | SemaType::MetaType
+        | SemaType::Module(_)
+        | SemaType::Structural(_)
+        | SemaType::Invalid { .. } => 8,
     };
 
     // Align to 8 bytes

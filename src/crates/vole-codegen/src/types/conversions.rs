@@ -252,8 +252,28 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
         | ArenaType::Tuple(_)
         | ArenaType::FixedArray { .. }
         | ArenaType::Struct { .. }
-        | ArenaType::Unknown => pointer_type,
-        _ => types::I64,
+        | ArenaType::Unknown
+        // Heap-allocated nominal types passed by reference:
+        | ArenaType::Class { .. }
+        | ArenaType::Error { .. }
+        | ArenaType::Array(_)
+        | ArenaType::RuntimeIterator(_) => pointer_type,
+        // Erased generic type parameters: appear in uninstantiated generic function
+        // signatures and bodies before monomorphization.  Use pointer_type as the
+        // erased representation so the signature is consistent with monomorphized
+        // call sites that pass any value type.
+        ArenaType::TypeParam(_) | ArenaType::TypeParamRef(_) => pointer_type,
+        // Void: a zero-return type.  Callers typically check is_void() separately and
+        // avoid emitting a value; this arm provides a harmless I64 placeholder for
+        // call sites that query the Cranelift type unconditionally before branching.
+        ArenaType::Void => types::I64,
+        // Unresolved inference placeholders that escaped sema: treat as pointer-erased.
+        // Ideally sema would resolve all placeholders before codegen; this is a safety net.
+        ArenaType::Placeholder(_) => pointer_type,
+        // Bottom type and sema-internal types.  These should not appear as value types
+        // in codegen; treat as pointer-erased to preserve prior behaviour.
+        // Note: `Never` appears in unreachable branches; `MetaType` is the type of types.
+        ArenaType::Never | ArenaType::MetaType | ArenaType::Module(_) | ArenaType::Structural(_) | ArenaType::Invalid { .. } => pointer_type,
     }
 }
 
@@ -404,7 +424,23 @@ pub(crate) fn type_id_size(
         }
         // Unknown type uses TaggedValue representation: 8-byte tag + 8-byte value = 16 bytes
         ArenaType::Unknown => 16,
-        _ => 8,
+        // Heap-allocated nominal types passed by reference (pointer-sized).
+        ArenaType::Class { .. }
+        | ArenaType::RuntimeIterator(_)
+        // Closures/functions are fat-pointer-like objects stored as a pointer.
+        | ArenaType::Function { .. } => pointer_type.bytes(),
+        // Erased generic type parameters: appear in uninstantiated generic function
+        // bodies before monomorphization.  Use pointer_type as the erased size.
+        ArenaType::TypeParam(_) | ArenaType::TypeParamRef(_) => pointer_type.bytes(),
+        // Unresolved inference placeholders, bottom type, and sema-internal types.
+        // These should not appear as sized value types, but treat as pointer-erased
+        // to preserve prior behaviour and avoid a hard crash.
+        ArenaType::Placeholder(_)
+        | ArenaType::Never
+        | ArenaType::MetaType
+        | ArenaType::Module(_)
+        | ArenaType::Structural(_)
+        | ArenaType::Invalid { .. } => pointer_type.bytes(),
     }
 }
 

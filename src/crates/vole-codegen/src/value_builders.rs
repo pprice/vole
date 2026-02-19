@@ -119,6 +119,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let v = self.builder.ins().f32const(n as f32);
                 (types::F32, v)
             }
+            ArenaType::Primitive(PrimitiveType::F64) => {
+                let v = self.builder.ins().f64const(n);
+                (types::F64, v)
+            }
             ArenaType::Primitive(PrimitiveType::F128) => {
                 // Runtime f128 currently uses a compact software representation:
                 // low 64 bits = f64 payload, high 64 bits = 0.
@@ -130,11 +134,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     .bitcast(types::F128, MemFlags::new(), wide);
                 (types::F128, v)
             }
-            _ => {
-                // Default to F64
-                let v = self.builder.ins().f64const(n);
-                (types::F64, v)
-            }
+            _ => unreachable!(
+                "INTERNAL: float_const called with non-float type {:?}; \
+                 float literals must have a float TypeId by the time codegen runs \
+                 (union dispatch is handled above)",
+                type_id
+            ),
         };
         CompiledValue::new(value, ty, type_id)
     }
