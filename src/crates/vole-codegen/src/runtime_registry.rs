@@ -64,14 +64,16 @@ macro_rules! sig_ret {
 }
 
 /// Generates the `RuntimeKey` enum, `RuntimeKey::ALL`, `RuntimeKey::name()`,
-/// `RUNTIME_SYMBOLS`, and `signature_for()` from a single declaration table.
+/// `RUNTIME_SYMBOLS`, `KEYED_LINKABLE_SYMBOLS`, and `signature_for()` from a
+/// single declaration table.
 ///
 /// Each entry has the form:
-///     Variant => "c_name" : (Param, ...) -> Ret
+///     Variant => "c_name" : (Param, ...) -> Ret = path::to::fn,
 ///
-/// where `Ret` is either a type token or `Void` (no return value).
+/// where `Ret` is either a type token or `Void` (no return value), and
+/// `path::to::fn` is the Rust function path used to build the linkable symbol.
 macro_rules! runtime_keys {
-    ( $( $variant:ident => $c_name:literal : ( $($param:ident),* ) -> $ret:ident ),+ $(,)? ) => {
+    ( $( $variant:ident => $c_name:literal : ( $($param:ident),* ) -> $ret:ident = $fn_path:path ),+ $(,)? ) => {
         /// Typed key for a runtime callable exposed to codegen.
         ///
         /// This avoids ad-hoc string literals in Rust call sites.
@@ -96,6 +98,13 @@ macro_rules! runtime_keys {
             $( RuntimeSymbol { key: RuntimeKey::$variant, c_name: $c_name }, )+
         ];
 
+        /// Linkable symbols for all `RuntimeKey` variants, auto-generated from
+        /// the macro table. The JIT linker combines this with the hand-written
+        /// non-keyed list to form the full linkable symbol set.
+        const KEYED_LINKABLE_SYMBOLS: &[LinkableRuntimeSymbol] = &[
+            $( LinkableRuntimeSymbol { c_name: $c_name, ptr: $fn_path as *const u8 }, )+
+        ];
+
         pub fn signature_for(key: RuntimeKey) -> SigSpec {
             match key {
                 $( RuntimeKey::$variant => SigSpec {
@@ -109,168 +118,168 @@ macro_rules! runtime_keys {
 
 runtime_keys! {
     // ── Strings ──────────────────────────────────────────────────────
-    StringNew              => "vole_string_new"              : (Ptr, Ptr) -> Ptr,
-    StringConcat           => "vole_string_concat"           : (Ptr, Ptr) -> Ptr,
-    StringEq               => "vole_string_eq"               : (Ptr, Ptr) -> I8,
-    StringLen              => "vole_string_len"              : (Ptr) -> I64,
+    StringNew              => "vole_string_new"              : (Ptr, Ptr) -> Ptr     = vole_runtime::string::vole_string_new,
+    StringConcat           => "vole_string_concat"           : (Ptr, Ptr) -> Ptr     = vole_runtime::builtins::vole_string_concat,
+    StringEq               => "vole_string_eq"               : (Ptr, Ptr) -> I8      = vole_runtime::string::vole_string_eq,
+    StringLen              => "vole_string_len"              : (Ptr) -> I64           = vole_runtime::string::vole_string_len,
 
     // ── Printing ─────────────────────────────────────────────────────
-    PrintlnString          => "vole_println_string"          : (Ptr) -> Void,
-    PrintlnI64             => "vole_println_i64"             : (I64) -> Void,
-    PrintlnF64             => "vole_println_f64"             : (F64) -> Void,
-    PrintlnBool            => "vole_println_bool"            : (I8) -> Void,
-    PrintString            => "vole_print_string"            : (Ptr) -> Void,
-    PrintI64               => "vole_print_i64"               : (I64) -> Void,
-    PrintF64               => "vole_print_f64"               : (F64) -> Void,
-    PrintBool              => "vole_print_bool"              : (I8) -> Void,
-    PrintChar              => "vole_print_char"              : (I8) -> Void,
+    PrintlnString          => "vole_println_string"          : (Ptr) -> Void          = vole_runtime::builtins::vole_println_string,
+    PrintlnI64             => "vole_println_i64"             : (I64) -> Void          = vole_runtime::builtins::vole_println_i64,
+    PrintlnF64             => "vole_println_f64"             : (F64) -> Void          = vole_runtime::builtins::vole_println_f64,
+    PrintlnBool            => "vole_println_bool"            : (I8) -> Void           = vole_runtime::builtins::vole_println_bool,
+    PrintString            => "vole_print_string"            : (Ptr) -> Void          = vole_runtime::builtins::vole_print_string,
+    PrintI64               => "vole_print_i64"               : (I64) -> Void          = vole_runtime::builtins::vole_print_i64,
+    PrintF64               => "vole_print_f64"               : (F64) -> Void          = vole_runtime::builtins::vole_print_f64,
+    PrintBool              => "vole_print_bool"              : (I8) -> Void           = vole_runtime::builtins::vole_print_bool,
+    PrintChar              => "vole_print_char"              : (I8) -> Void           = vole_runtime::builtins::vole_print_char,
 
     // ── Conversions ──────────────────────────────────────────────────
-    I64ToString            => "vole_i64_to_string"           : (I64) -> Ptr,
-    I128ToString           => "vole_i128_to_string"          : (I128) -> Ptr,
-    I128Sdiv               => "vole_i128_sdiv"               : (I128, I128) -> I128,
-    I128Srem               => "vole_i128_srem"               : (I128, I128) -> I128,
-    F64ToString            => "vole_f64_to_string"           : (F64) -> Ptr,
-    F32ToString            => "vole_f32_to_string"           : (F32) -> Ptr,
-    F128ToString           => "vole_f128_to_string"          : (I128) -> Ptr,
-    BoolToString           => "vole_bool_to_string"          : (I8) -> Ptr,
-    NilToString            => "vole_nil_to_string"           : () -> Ptr,
-    ArrayI64ToString       => "vole_array_i64_to_string"     : (Ptr) -> Ptr,
+    I64ToString            => "vole_i64_to_string"           : (I64) -> Ptr           = vole_runtime::builtins::vole_i64_to_string,
+    I128ToString           => "vole_i128_to_string"          : (I128) -> Ptr          = vole_runtime::builtins::vole_i128_to_string,
+    I128Sdiv               => "vole_i128_sdiv"               : (I128, I128) -> I128   = vole_runtime::builtins::vole_i128_sdiv,
+    I128Srem               => "vole_i128_srem"               : (I128, I128) -> I128   = vole_runtime::builtins::vole_i128_srem,
+    F64ToString            => "vole_f64_to_string"           : (F64) -> Ptr           = vole_runtime::builtins::vole_f64_to_string,
+    F32ToString            => "vole_f32_to_string"           : (F32) -> Ptr           = vole_runtime::builtins::vole_f32_to_string,
+    F128ToString           => "vole_f128_to_string"          : (I128) -> Ptr          = vole_runtime::builtins::vole_f128_to_string,
+    BoolToString           => "vole_bool_to_string"          : (I8) -> Ptr            = vole_runtime::builtins::vole_bool_to_string,
+    NilToString            => "vole_nil_to_string"           : () -> Ptr              = vole_runtime::builtins::vole_nil_to_string,
+    ArrayI64ToString       => "vole_array_i64_to_string"     : (Ptr) -> Ptr           = vole_runtime::builtins::vole_array_i64_to_string,
 
     // ── f128 ops/conversions ────────────────────────────────────────
-    F128Add                => "vole_f128_add"                : (I128, I128) -> I128,
-    F128Sub                => "vole_f128_sub"                : (I128, I128) -> I128,
-    F128Mul                => "vole_f128_mul"                : (I128, I128) -> I128,
-    F128Div                => "vole_f128_div"                : (I128, I128) -> I128,
-    F128Rem                => "vole_f128_rem"                : (I128, I128) -> I128,
-    F128Neg                => "vole_f128_neg"                : (I128) -> I128,
-    F128Eq                 => "vole_f128_eq"                 : (I128, I128) -> I8,
-    F128Lt                 => "vole_f128_lt"                 : (I128, I128) -> I8,
-    F128Le                 => "vole_f128_le"                 : (I128, I128) -> I8,
-    F128Gt                 => "vole_f128_gt"                 : (I128, I128) -> I8,
-    F128Ge                 => "vole_f128_ge"                 : (I128, I128) -> I8,
-    F64ToF128              => "vole_f64_to_f128"             : (F64) -> I128,
-    F32ToF128              => "vole_f32_to_f128"             : (F32) -> I128,
-    I64ToF128              => "vole_i64_to_f128"             : (I64) -> I128,
-    I128ToF128             => "vole_i128_to_f128"            : (I128) -> I128,
-    F128ToF64              => "vole_f128_to_f64"             : (I128) -> F64,
-    F128ToF32              => "vole_f128_to_f32"             : (I128) -> F32,
-    F128ToI64              => "vole_f128_to_i64"             : (I128) -> I64,
-    F128ToI128             => "vole_f128_to_i128"            : (I128) -> I128,
-    Wide128Box             => "vole_wide128_box"             : (I128) -> Ptr,
-    Wide128Unbox           => "vole_wide128_unbox"           : (Ptr) -> I128,
+    F128Add                => "vole_f128_add"                : (I128, I128) -> I128   = vole_runtime::builtins::vole_f128_add,
+    F128Sub                => "vole_f128_sub"                : (I128, I128) -> I128   = vole_runtime::builtins::vole_f128_sub,
+    F128Mul                => "vole_f128_mul"                : (I128, I128) -> I128   = vole_runtime::builtins::vole_f128_mul,
+    F128Div                => "vole_f128_div"                : (I128, I128) -> I128   = vole_runtime::builtins::vole_f128_div,
+    F128Rem                => "vole_f128_rem"                : (I128, I128) -> I128   = vole_runtime::builtins::vole_f128_rem,
+    F128Neg                => "vole_f128_neg"                : (I128) -> I128         = vole_runtime::builtins::vole_f128_neg,
+    F128Eq                 => "vole_f128_eq"                 : (I128, I128) -> I8     = vole_runtime::builtins::vole_f128_eq,
+    F128Lt                 => "vole_f128_lt"                 : (I128, I128) -> I8     = vole_runtime::builtins::vole_f128_lt,
+    F128Le                 => "vole_f128_le"                 : (I128, I128) -> I8     = vole_runtime::builtins::vole_f128_le,
+    F128Gt                 => "vole_f128_gt"                 : (I128, I128) -> I8     = vole_runtime::builtins::vole_f128_gt,
+    F128Ge                 => "vole_f128_ge"                 : (I128, I128) -> I8     = vole_runtime::builtins::vole_f128_ge,
+    F64ToF128              => "vole_f64_to_f128"             : (F64) -> I128          = vole_runtime::builtins::vole_f64_to_f128,
+    F32ToF128              => "vole_f32_to_f128"             : (F32) -> I128          = vole_runtime::builtins::vole_f32_to_f128,
+    I64ToF128              => "vole_i64_to_f128"             : (I64) -> I128          = vole_runtime::builtins::vole_i64_to_f128,
+    I128ToF128             => "vole_i128_to_f128"            : (I128) -> I128         = vole_runtime::builtins::vole_i128_to_f128,
+    F128ToF64              => "vole_f128_to_f64"             : (I128) -> F64          = vole_runtime::builtins::vole_f128_to_f64,
+    F128ToF32              => "vole_f128_to_f32"             : (I128) -> F32          = vole_runtime::builtins::vole_f128_to_f32,
+    F128ToI64              => "vole_f128_to_i64"             : (I128) -> I64          = vole_runtime::builtins::vole_f128_to_i64,
+    F128ToI128             => "vole_f128_to_i128"            : (I128) -> I128         = vole_runtime::builtins::vole_f128_to_i128,
+    Wide128Box             => "vole_wide128_box"             : (I128) -> Ptr          = vole_runtime::builtins::vole_wide128_box,
+    Wide128Unbox           => "vole_wide128_unbox"           : (Ptr) -> I128          = vole_runtime::builtins::vole_wide128_unbox,
 
     // ── IO ───────────────────────────────────────────────────────────
-    Flush                  => "vole_flush"                   : () -> Void,
+    Flush                  => "vole_flush"                   : () -> Void             = vole_runtime::builtins::vole_flush,
 
     // ── Diagnostics ──────────────────────────────────────────────────
-    AssertFail             => "vole_assert_fail"             : (Ptr, I64, I32) -> Void,
-    Panic                  => "vole_panic"                   : (Ptr, Ptr, I64, I32) -> Void,
+    AssertFail             => "vole_assert_fail"             : (Ptr, I64, I32) -> Void = vole_runtime::assert::vole_assert_fail,
+    Panic                  => "vole_panic"                   : (Ptr, Ptr, I64, I32) -> Void = vole_runtime::builtins::vole_panic,
 
     // ── Arrays ───────────────────────────────────────────────────────
-    ArrayNew               => "vole_array_new"               : () -> Ptr,
-    ArrayPush              => "vole_array_push"              : (Ptr, I64, I64) -> Void,
-    ArrayGetTag            => "vole_array_get_tag"           : (Ptr, I64) -> I64,
-    ArrayGetValue          => "vole_array_get_value"         : (Ptr, I64) -> I64,
-    ArrayLen               => "vole_array_len"               : (Ptr) -> I64,
-    ArrayIter              => "vole_array_iter"              : (Ptr) -> Ptr,
-    ArrayIterNext          => "vole_array_iter_next"         : (Ptr, Ptr) -> I64,
-    ArrayIterCollect       => "vole_array_iter_collect"      : (Ptr) -> Ptr,
-    ArraySet               => "vole_array_set"               : (Ptr, I64, I64, I64) -> Void,
-    ArrayFilled            => "vole_array_filled"            : (I64, I64, I64) -> Ptr,
+    ArrayNew               => "vole_array_new"               : () -> Ptr              = vole_runtime::builtins::vole_array_new,
+    ArrayPush              => "vole_array_push"              : (Ptr, I64, I64) -> Void = vole_runtime::builtins::vole_array_push,
+    ArrayGetTag            => "vole_array_get_tag"           : (Ptr, I64) -> I64      = vole_runtime::builtins::vole_array_get_tag,
+    ArrayGetValue          => "vole_array_get_value"         : (Ptr, I64) -> I64      = vole_runtime::builtins::vole_array_get_value,
+    ArrayLen               => "vole_array_len"               : (Ptr) -> I64           = vole_runtime::builtins::vole_array_len,
+    ArrayIter              => "vole_array_iter"              : (Ptr) -> Ptr           = vole_runtime::iterator::vole_array_iter,
+    ArrayIterNext          => "vole_array_iter_next"         : (Ptr, Ptr) -> I64      = vole_runtime::iterator::vole_array_iter_next,
+    ArrayIterCollect       => "vole_array_iter_collect"      : (Ptr) -> Ptr           = vole_runtime::iterator::vole_array_iter_collect,
+    ArraySet               => "vole_array_set"               : (Ptr, I64, I64, I64) -> Void = vole_runtime::builtins::vole_array_set,
+    ArrayFilled            => "vole_array_filled"            : (I64, I64, I64) -> Ptr = vole_runtime::builtins::vole_array_filled,
 
     // ── Map iterator ─────────────────────────────────────────────────
-    MapIter                => "vole_map_iter"                : (Ptr, Ptr) -> Ptr,
-    MapIterNext            => "vole_map_iter_next"           : (Ptr, Ptr) -> I64,
-    MapIterCollect         => "vole_map_iter_collect"        : (Ptr) -> Ptr,
+    MapIter                => "vole_map_iter"                : (Ptr, Ptr) -> Ptr      = vole_runtime::iterator::vole_map_iter,
+    MapIterNext            => "vole_map_iter_next"           : (Ptr, Ptr) -> I64      = vole_runtime::iterator::vole_map_iter_next,
+    MapIterCollect         => "vole_map_iter_collect"        : (Ptr) -> Ptr           = vole_runtime::iterator::vole_map_iter_collect,
 
     // ── Filter iterator ──────────────────────────────────────────────
-    FilterIter             => "vole_filter_iter"             : (Ptr, Ptr) -> Ptr,
-    FilterIterNext         => "vole_filter_iter_next"        : (Ptr, Ptr) -> I64,
-    FilterIterCollect      => "vole_filter_iter_collect"     : (Ptr) -> Ptr,
+    FilterIter             => "vole_filter_iter"             : (Ptr, Ptr) -> Ptr      = vole_runtime::iterator::vole_filter_iter,
+    FilterIterNext         => "vole_filter_iter_next"        : (Ptr, Ptr) -> I64      = vole_runtime::iterator::vole_filter_iter_next,
+    FilterIterCollect      => "vole_filter_iter_collect"     : (Ptr) -> Ptr           = vole_runtime::iterator::vole_filter_iter_collect,
 
     // ── Take iterator ────────────────────────────────────────────────
-    TakeIter               => "vole_take_iter"               : (Ptr, I64) -> Ptr,
-    TakeIterNext           => "vole_take_iter_next"          : (Ptr, Ptr) -> I64,
-    TakeIterCollect        => "vole_take_iter_collect"       : (Ptr) -> Ptr,
+    TakeIter               => "vole_take_iter"               : (Ptr, I64) -> Ptr      = vole_runtime::iterator::vole_take_iter,
+    TakeIterNext           => "vole_take_iter_next"          : (Ptr, Ptr) -> I64      = vole_runtime::iterator::vole_take_iter_next,
+    TakeIterCollect        => "vole_take_iter_collect"       : (Ptr) -> Ptr           = vole_runtime::iterator::vole_take_iter_collect,
 
     // ── Skip iterator ────────────────────────────────────────────────
-    SkipIter               => "vole_skip_iter"               : (Ptr, I64) -> Ptr,
-    SkipIterNext           => "vole_skip_iter_next"          : (Ptr, Ptr) -> I64,
-    SkipIterCollect        => "vole_skip_iter_collect"       : (Ptr) -> Ptr,
+    SkipIter               => "vole_skip_iter"               : (Ptr, I64) -> Ptr      = vole_runtime::iterator::vole_skip_iter,
+    SkipIterNext           => "vole_skip_iter_next"          : (Ptr, Ptr) -> I64      = vole_runtime::iterator::vole_skip_iter_next,
+    SkipIterCollect        => "vole_skip_iter_collect"       : (Ptr) -> Ptr           = vole_runtime::iterator::vole_skip_iter_collect,
 
     // ── Iterator consumers ───────────────────────────────────────────
-    IterCount              => "vole_iter_count"              : (Ptr) -> I64,
-    IterSum                => "vole_iter_sum"                : (Ptr) -> I64,
-    IterForEach            => "vole_iter_for_each"           : (Ptr, Ptr) -> Void,
-    IterReduce             => "vole_iter_reduce"             : (Ptr, I64, Ptr) -> I64,
-    IterReduceTagged       => "vole_iter_reduce_tagged"      : (Ptr, I64, Ptr, I64, I64) -> I64,
-    IterSetElemTag         => "vole_iter_set_elem_tag"       : (Ptr, I64) -> Void,
-    IterSetProducesOwned   => "vole_iter_set_produces_owned" : (Ptr) -> Void,
-    IterFirst              => "vole_iter_first"              : (Ptr) -> Ptr,
-    IterLast               => "vole_iter_last"               : (Ptr) -> Ptr,
-    IterNth                => "vole_iter_nth"                : (Ptr, I64) -> Ptr,
+    IterCount              => "vole_iter_count"              : (Ptr) -> I64           = vole_runtime::iterator::vole_iter_count,
+    IterSum                => "vole_iter_sum"                : (Ptr) -> I64           = vole_runtime::iterator::vole_iter_sum,
+    IterForEach            => "vole_iter_for_each"           : (Ptr, Ptr) -> Void     = vole_runtime::iterator::vole_iter_for_each,
+    IterReduce             => "vole_iter_reduce"             : (Ptr, I64, Ptr) -> I64 = vole_runtime::iterator::vole_iter_reduce,
+    IterReduceTagged       => "vole_iter_reduce_tagged"      : (Ptr, I64, Ptr, I64, I64) -> I64 = vole_runtime::iterator::vole_iter_reduce_tagged,
+    IterSetElemTag         => "vole_iter_set_elem_tag"       : (Ptr, I64) -> Void     = vole_runtime::iterator::vole_iter_set_elem_tag,
+    IterSetProducesOwned   => "vole_iter_set_produces_owned" : (Ptr) -> Void          = vole_runtime::iterator::vole_iter_set_produces_owned,
+    IterFirst              => "vole_iter_first"              : (Ptr) -> Ptr           = vole_runtime::iterator::vole_iter_first,
+    IterLast               => "vole_iter_last"               : (Ptr) -> Ptr           = vole_runtime::iterator::vole_iter_last,
+    IterNth                => "vole_iter_nth"                : (Ptr, I64) -> Ptr      = vole_runtime::iterator::vole_iter_nth,
 
     // ── Range / string char iterators ────────────────────────────────
-    RangeIter              => "vole_range_iter"              : (I64, I64) -> Ptr,
-    StringCharsIter        => "vole_string_chars_iter"       : (Ptr) -> Ptr,
+    RangeIter              => "vole_range_iter"              : (I64, I64) -> Ptr      = vole_runtime::iterator::vole_range_iter,
+    StringCharsIter        => "vole_string_chars_iter"       : (Ptr) -> Ptr           = vole_runtime::iterator::vole_string_chars_iter,
 
     // ── Closures ─────────────────────────────────────────────────────
-    ClosureAlloc           => "vole_closure_alloc"           : (Ptr, I64) -> Ptr,
-    ClosureSetCapture      => "vole_closure_set_capture"     : (Ptr, I64, Ptr) -> Void,
-    ClosureSetCaptureKind  => "vole_closure_set_capture_kind": (Ptr, I64, I8) -> Void,
-    ClosureSetCaptureSize  => "vole_closure_set_capture_size": (Ptr, I64, I32) -> Void,
-    ClosureGetCapture      => "vole_closure_get_capture"     : (Ptr, I64) -> Ptr,
-    ClosureGetFunc         => "vole_closure_get_func"        : (Ptr) -> Ptr,
+    ClosureAlloc           => "vole_closure_alloc"           : (Ptr, I64) -> Ptr      = vole_runtime::closure::vole_closure_alloc,
+    ClosureSetCapture      => "vole_closure_set_capture"     : (Ptr, I64, Ptr) -> Void = vole_runtime::closure::vole_closure_set_capture,
+    ClosureSetCaptureKind  => "vole_closure_set_capture_kind": (Ptr, I64, I8) -> Void = vole_runtime::closure::vole_closure_set_capture_kind,
+    ClosureSetCaptureSize  => "vole_closure_set_capture_size": (Ptr, I64, I32) -> Void = vole_runtime::closure::vole_closure_set_capture_size,
+    ClosureGetCapture      => "vole_closure_get_capture"     : (Ptr, I64) -> Ptr      = vole_runtime::closure::vole_closure_get_capture,
+    ClosureGetFunc         => "vole_closure_get_func"        : (Ptr) -> Ptr           = vole_runtime::closure::vole_closure_get_func,
 
     // ── Heap ─────────────────────────────────────────────────────────
-    HeapAlloc              => "vole_heap_alloc"              : (I64) -> Ptr,
+    HeapAlloc              => "vole_heap_alloc"              : (I64) -> Ptr           = vole_runtime::closure::vole_heap_alloc,
 
     // ── Instances ────────────────────────────────────────────────────
-    InstanceNew            => "vole_instance_new"            : (I32, I32, I32) -> Ptr,
-    InstanceGetField       => "vole_instance_get_field"      : (Ptr, I32) -> I64,
-    InstanceSetField       => "vole_instance_set_field"      : (Ptr, I32, I64) -> Void,
+    InstanceNew            => "vole_instance_new"            : (I32, I32, I32) -> Ptr = vole_runtime::instance::vole_instance_new,
+    InstanceGetField       => "vole_instance_get_field"      : (Ptr, I32) -> I64      = vole_runtime::instance::vole_instance_get_field,
+    InstanceSetField       => "vole_instance_set_field"      : (Ptr, I32, I64) -> Void = vole_runtime::instance::vole_instance_set_field,
 
     // ── String builder ───────────────────────────────────────────────
-    SbNew                  => "vole_sb_new"                  : () -> Ptr,
-    SbPushString           => "vole_sb_push_string"          : (Ptr, Ptr) -> Void,
-    SbFinish               => "vole_sb_finish"               : (Ptr) -> Ptr,
+    SbNew                  => "vole_sb_new"                  : () -> Ptr              = vole_runtime::string_builder::vole_sb_new,
+    SbPushString           => "vole_sb_push_string"          : (Ptr, Ptr) -> Void     = vole_runtime::string_builder::vole_sb_push_string,
+    SbFinish               => "vole_sb_finish"               : (Ptr) -> Ptr           = vole_runtime::string_builder::vole_sb_finish,
 
     // ── Interface ────────────────────────────────────────────────────
-    InterfaceIter          => "vole_interface_iter"          : (Ptr) -> Ptr,
+    InterfaceIter          => "vole_interface_iter"          : (Ptr) -> Ptr           = vole_runtime::iterator::vole_interface_iter,
 
     // ── Generator coroutines ────────────────────────────────────────────
-    GeneratorNew           => "vole_generator_new"           : (Ptr, Ptr, I64) -> Ptr,
-    GeneratorYield         => "vole_generator_yield"         : (Ptr, I64) -> Void,
+    GeneratorNew           => "vole_generator_new"           : (Ptr, Ptr, I64) -> Ptr = vole_runtime::coroutine::vole_generator_new,
+    GeneratorYield         => "vole_generator_yield"         : (Ptr, I64) -> Void     = vole_runtime::coroutine::vole_generator_yield,
 
     // ── Reference counting ───────────────────────────────────────────
-    RcInc                  => "rc_inc"                       : (Ptr) -> Void,
-    RcDec                  => "rc_dec"                       : (Ptr) -> Void,
+    RcInc                  => "rc_inc"                       : (Ptr) -> Void          = vole_runtime::value::rc_inc,
+    RcDec                  => "rc_dec"                       : (Ptr) -> Void          = vole_runtime::value::rc_dec,
 
     // ── Task scheduler ─────────────────────────────────────────────────
-    TaskSpawn              => "vole_task_spawn"              : (Ptr, Ptr) -> I64,
-    TaskYield              => "vole_task_yield"              : () -> Void,
-    TaskBlock              => "vole_task_block"              : () -> I64,
-    TaskUnblock            => "vole_task_unblock"            : (I64) -> Void,
-    TaskJoin               => "vole_task_join"               : (I64) -> I64,
-    TaskCancel             => "vole_task_cancel"             : (I64) -> Void,
-    TaskIsDone             => "vole_task_is_done"            : (I64) -> I64,
-    SchedulerRun           => "vole_scheduler_run"           : () -> Void,
+    TaskSpawn              => "vole_task_spawn"              : (Ptr, Ptr) -> I64      = vole_runtime::scheduler::vole_task_spawn,
+    TaskYield              => "vole_task_yield"              : () -> Void             = vole_runtime::scheduler::vole_task_yield,
+    TaskBlock              => "vole_task_block"              : () -> I64              = vole_runtime::scheduler::vole_task_block,
+    TaskUnblock            => "vole_task_unblock"            : (I64) -> Void          = vole_runtime::scheduler::vole_task_unblock,
+    TaskJoin               => "vole_task_join"               : (I64) -> I64           = vole_runtime::scheduler::vole_task_join,
+    TaskCancel             => "vole_task_cancel"             : (I64) -> Void          = vole_runtime::scheduler::vole_task_cancel,
+    TaskIsDone             => "vole_task_is_done"            : (I64) -> I64           = vole_runtime::scheduler::vole_task_is_done,
+    SchedulerRun           => "vole_scheduler_run"           : () -> Void             = vole_runtime::scheduler::vole_scheduler_run,
 
     // ── Task spawn tag ──────────────────────────────────────────────────
-    TaskSetSpawnTag        => "vole_task_set_spawn_tag"      : (I64) -> Void,
+    TaskSetSpawnTag        => "vole_task_set_spawn_tag"      : (I64) -> Void          = vole_runtime::scheduler::vole_task_set_spawn_tag,
 
     // ── Task handles (RcTask) ───────────────────────────────────────────
-    RcTaskRun              => "vole_rctask_run"              : (Ptr, Ptr, I64) -> Ptr,
-    RcTaskCancel           => "vole_rctask_cancel"           : (Ptr) -> Void,
-    RcTaskIsDone           => "vole_rctask_is_done"          : (Ptr) -> I64,
+    RcTaskRun              => "vole_rctask_run"              : (Ptr, Ptr, I64) -> Ptr = vole_runtime::task::vole_rctask_run,
+    RcTaskCancel           => "vole_rctask_cancel"           : (Ptr) -> Void          = vole_runtime::task::vole_rctask_cancel,
+    RcTaskIsDone           => "vole_rctask_is_done"          : (Ptr) -> I64           = vole_runtime::task::vole_rctask_is_done,
 
     // ── Channels ──────────────────────────────────────────────────────
-    ChannelNew             => "vole_channel_new"             : (I64) -> Ptr,
-    ChannelSend            => "vole_channel_send"            : (Ptr, I64, I64) -> I64,
-    ChannelRecv            => "vole_channel_recv"            : (Ptr, Ptr) -> I64,
-    ChannelClose           => "vole_channel_close"           : (Ptr) -> Void,
-    ChannelIsClosed        => "vole_channel_is_closed"       : (Ptr) -> I8,
+    ChannelNew             => "vole_channel_new"             : (I64) -> Ptr           = vole_runtime::channel::vole_channel_new,
+    ChannelSend            => "vole_channel_send"            : (Ptr, I64, I64) -> I64 = vole_runtime::channel::vole_channel_send,
+    ChannelRecv            => "vole_channel_recv"            : (Ptr, Ptr) -> I64      = vole_runtime::channel::vole_channel_recv,
+    ChannelClose           => "vole_channel_close"           : (Ptr) -> Void          = vole_runtime::channel::vole_channel_close,
+    ChannelIsClosed        => "vole_channel_is_closed"       : (Ptr) -> I8            = vole_runtime::channel::vole_channel_is_closed,
 }
 
 pub fn all_symbols() -> &'static [RuntimeSymbol] {
@@ -288,19 +297,11 @@ pub struct LinkableRuntimeSymbol {
     pub ptr: *const u8,
 }
 
-const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
-    LinkableRuntimeSymbol {
-        c_name: "rc_inc",
-        ptr: vole_runtime::value::rc_inc as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "rc_dec",
-        ptr: vole_runtime::value::rc_dec as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_string_new",
-        ptr: vole_runtime::string::vole_string_new as *const u8,
-    },
+/// Non-keyed linkable symbols: runtime functions that have no `RuntimeKey`
+/// variant. These are invoked via NativeRegistry or runtime-internal pathways
+/// rather than through typed `RuntimeKey` call sites in codegen.
+const NON_KEYED_LINKABLE_SYMBOLS: &[LinkableRuntimeSymbol] = &[
+    // ── String internals ─────────────────────────────────────────────
     LinkableRuntimeSymbol {
         c_name: "vole_string_inc",
         ptr: vole_runtime::string::vole_string_inc as *const u8,
@@ -310,317 +311,19 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
         ptr: vole_runtime::string::vole_string_dec as *const u8,
     },
     LinkableRuntimeSymbol {
-        c_name: "vole_string_len",
-        ptr: vole_runtime::string::vole_string_len as *const u8,
-    },
-    LinkableRuntimeSymbol {
         c_name: "vole_string_data",
         ptr: vole_runtime::string::vole_string_data as *const u8,
     },
+    // ── Instance internals ───────────────────────────────────────────
     LinkableRuntimeSymbol {
-        c_name: "vole_string_eq",
-        ptr: vole_runtime::string::vole_string_eq as *const u8,
+        c_name: "vole_instance_inc",
+        ptr: vole_runtime::instance::vole_instance_inc as *const u8,
     },
     LinkableRuntimeSymbol {
-        c_name: "vole_string_concat",
-        ptr: vole_runtime::builtins::vole_string_concat as *const u8,
+        c_name: "vole_instance_dec",
+        ptr: vole_runtime::instance::vole_instance_dec as *const u8,
     },
-    LinkableRuntimeSymbol {
-        c_name: "vole_println_string",
-        ptr: vole_runtime::builtins::vole_println_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_println_i64",
-        ptr: vole_runtime::builtins::vole_println_i64 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_println_f64",
-        ptr: vole_runtime::builtins::vole_println_f64 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_println_bool",
-        ptr: vole_runtime::builtins::vole_println_bool as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_print_string",
-        ptr: vole_runtime::builtins::vole_print_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_print_i64",
-        ptr: vole_runtime::builtins::vole_print_i64 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_print_f64",
-        ptr: vole_runtime::builtins::vole_print_f64 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_print_bool",
-        ptr: vole_runtime::builtins::vole_print_bool as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_print_char",
-        ptr: vole_runtime::builtins::vole_print_char as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_flush",
-        ptr: vole_runtime::builtins::vole_flush as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_i64_to_string",
-        ptr: vole_runtime::builtins::vole_i64_to_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f64_to_string",
-        ptr: vole_runtime::builtins::vole_f64_to_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f32_to_string",
-        ptr: vole_runtime::builtins::vole_f32_to_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_to_string",
-        ptr: vole_runtime::builtins::vole_f128_to_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_i128_to_string",
-        ptr: vole_runtime::builtins::vole_i128_to_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_i128_sdiv",
-        ptr: vole_runtime::builtins::vole_i128_sdiv as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_i128_srem",
-        ptr: vole_runtime::builtins::vole_i128_srem as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_add",
-        ptr: vole_runtime::builtins::vole_f128_add as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_sub",
-        ptr: vole_runtime::builtins::vole_f128_sub as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_mul",
-        ptr: vole_runtime::builtins::vole_f128_mul as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_div",
-        ptr: vole_runtime::builtins::vole_f128_div as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_rem",
-        ptr: vole_runtime::builtins::vole_f128_rem as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_neg",
-        ptr: vole_runtime::builtins::vole_f128_neg as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_eq",
-        ptr: vole_runtime::builtins::vole_f128_eq as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_lt",
-        ptr: vole_runtime::builtins::vole_f128_lt as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_le",
-        ptr: vole_runtime::builtins::vole_f128_le as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_gt",
-        ptr: vole_runtime::builtins::vole_f128_gt as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_ge",
-        ptr: vole_runtime::builtins::vole_f128_ge as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f64_to_f128",
-        ptr: vole_runtime::builtins::vole_f64_to_f128 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f32_to_f128",
-        ptr: vole_runtime::builtins::vole_f32_to_f128 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_i64_to_f128",
-        ptr: vole_runtime::builtins::vole_i64_to_f128 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_i128_to_f128",
-        ptr: vole_runtime::builtins::vole_i128_to_f128 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_to_f64",
-        ptr: vole_runtime::builtins::vole_f128_to_f64 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_to_f32",
-        ptr: vole_runtime::builtins::vole_f128_to_f32 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_to_i64",
-        ptr: vole_runtime::builtins::vole_f128_to_i64 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_f128_to_i128",
-        ptr: vole_runtime::builtins::vole_f128_to_i128 as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_wide128_box",
-        ptr: vole_runtime::builtins::vole_wide128_box as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_wide128_unbox",
-        ptr: vole_runtime::builtins::vole_wide128_unbox as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_bool_to_string",
-        ptr: vole_runtime::builtins::vole_bool_to_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_nil_to_string",
-        ptr: vole_runtime::builtins::vole_nil_to_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_i64_to_string",
-        ptr: vole_runtime::builtins::vole_array_i64_to_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_assert_fail",
-        ptr: vole_runtime::assert::vole_assert_fail as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_panic",
-        ptr: vole_runtime::builtins::vole_panic as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_new",
-        ptr: vole_runtime::builtins::vole_array_new as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_push",
-        ptr: vole_runtime::builtins::vole_array_push as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_get_tag",
-        ptr: vole_runtime::builtins::vole_array_get_tag as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_get_value",
-        ptr: vole_runtime::builtins::vole_array_get_value as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_len",
-        ptr: vole_runtime::builtins::vole_array_len as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_iter",
-        ptr: vole_runtime::iterator::vole_array_iter as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_interface_iter",
-        ptr: vole_runtime::iterator::vole_interface_iter as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_iter_next",
-        ptr: vole_runtime::iterator::vole_array_iter_next as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_iter_collect",
-        ptr: vole_runtime::iterator::vole_array_iter_collect as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_map_iter",
-        ptr: vole_runtime::iterator::vole_map_iter as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_map_iter_next",
-        ptr: vole_runtime::iterator::vole_map_iter_next as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_map_iter_collect",
-        ptr: vole_runtime::iterator::vole_map_iter_collect as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_filter_iter",
-        ptr: vole_runtime::iterator::vole_filter_iter as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_filter_iter_next",
-        ptr: vole_runtime::iterator::vole_filter_iter_next as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_filter_iter_collect",
-        ptr: vole_runtime::iterator::vole_filter_iter_collect as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_count",
-        ptr: vole_runtime::iterator::vole_iter_count as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_sum",
-        ptr: vole_runtime::iterator::vole_iter_sum as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_set_elem_tag",
-        ptr: vole_runtime::iterator::vole_iter_set_elem_tag as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_set_produces_owned",
-        ptr: vole_runtime::iterator::vole_iter_set_produces_owned as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_for_each",
-        ptr: vole_runtime::iterator::vole_iter_for_each as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_reduce",
-        ptr: vole_runtime::iterator::vole_iter_reduce as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_reduce_tagged",
-        ptr: vole_runtime::iterator::vole_iter_reduce_tagged as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_first",
-        ptr: vole_runtime::iterator::vole_iter_first as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_last",
-        ptr: vole_runtime::iterator::vole_iter_last as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_iter_nth",
-        ptr: vole_runtime::iterator::vole_iter_nth as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_take_iter",
-        ptr: vole_runtime::iterator::vole_take_iter as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_take_iter_next",
-        ptr: vole_runtime::iterator::vole_take_iter_next as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_take_iter_collect",
-        ptr: vole_runtime::iterator::vole_take_iter_collect as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_skip_iter",
-        ptr: vole_runtime::iterator::vole_skip_iter as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_skip_iter_next",
-        ptr: vole_runtime::iterator::vole_skip_iter_next as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_skip_iter_collect",
-        ptr: vole_runtime::iterator::vole_skip_iter_collect as *const u8,
-    },
+    // ── Non-keyed iterators ──────────────────────────────────────────
     LinkableRuntimeSymbol {
         c_name: "vole_chain_iter",
         ptr: vole_runtime::iterator::vole_chain_iter as *const u8,
@@ -726,172 +429,19 @@ const LINKABLE_RUNTIME_SYMBOLS: &[LinkableRuntimeSymbol] = &[
         ptr: vole_runtime::iterator::vole_from_fn_iter_next as *const u8,
     },
     LinkableRuntimeSymbol {
-        c_name: "vole_range_iter",
-        ptr: vole_runtime::iterator::vole_range_iter as *const u8,
-    },
-    LinkableRuntimeSymbol {
         c_name: "vole_range_iter_next",
         ptr: vole_runtime::iterator::vole_range_iter_next as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_string_chars_iter",
-        ptr: vole_runtime::iterator::vole_string_chars_iter as *const u8,
     },
     LinkableRuntimeSymbol {
         c_name: "vole_string_chars_iter_next",
         ptr: vole_runtime::iterator::vole_string_chars_iter_next as *const u8,
     },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_set",
-        ptr: vole_runtime::builtins::vole_array_set as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_array_filled",
-        ptr: vole_runtime::builtins::vole_array_filled as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_closure_alloc",
-        ptr: vole_runtime::closure::vole_closure_alloc as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_closure_get_capture",
-        ptr: vole_runtime::closure::vole_closure_get_capture as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_closure_set_capture",
-        ptr: vole_runtime::closure::vole_closure_set_capture as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_closure_set_capture_kind",
-        ptr: vole_runtime::closure::vole_closure_set_capture_kind as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_closure_set_capture_size",
-        ptr: vole_runtime::closure::vole_closure_set_capture_size as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_closure_get_func",
-        ptr: vole_runtime::closure::vole_closure_get_func as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_heap_alloc",
-        ptr: vole_runtime::closure::vole_heap_alloc as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_sb_new",
-        ptr: vole_runtime::string_builder::vole_sb_new as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_sb_push_string",
-        ptr: vole_runtime::string_builder::vole_sb_push_string as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_sb_finish",
-        ptr: vole_runtime::string_builder::vole_sb_finish as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_generator_new",
-        ptr: vole_runtime::coroutine::vole_generator_new as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_generator_yield",
-        ptr: vole_runtime::coroutine::vole_generator_yield as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_instance_new",
-        ptr: vole_runtime::instance::vole_instance_new as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_instance_inc",
-        ptr: vole_runtime::instance::vole_instance_inc as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_instance_dec",
-        ptr: vole_runtime::instance::vole_instance_dec as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_instance_get_field",
-        ptr: vole_runtime::instance::vole_instance_get_field as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_instance_set_field",
-        ptr: vole_runtime::instance::vole_instance_set_field as *const u8,
-    },
-    // ── Task scheduler ─────────────────────────────────────────────────
-    LinkableRuntimeSymbol {
-        c_name: "vole_task_spawn",
-        ptr: vole_runtime::scheduler::vole_task_spawn as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_task_yield",
-        ptr: vole_runtime::scheduler::vole_task_yield as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_task_block",
-        ptr: vole_runtime::scheduler::vole_task_block as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_task_unblock",
-        ptr: vole_runtime::scheduler::vole_task_unblock as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_task_join",
-        ptr: vole_runtime::scheduler::vole_task_join as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_task_cancel",
-        ptr: vole_runtime::scheduler::vole_task_cancel as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_task_is_done",
-        ptr: vole_runtime::scheduler::vole_task_is_done as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_scheduler_run",
-        ptr: vole_runtime::scheduler::vole_scheduler_run as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_task_set_spawn_tag",
-        ptr: vole_runtime::scheduler::vole_task_set_spawn_tag as *const u8,
-    },
-    // ── Task handles (RcTask) ───────────────────────────────────────────
-    LinkableRuntimeSymbol {
-        c_name: "vole_rctask_run",
-        ptr: vole_runtime::task::vole_rctask_run as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_rctask_cancel",
-        ptr: vole_runtime::task::vole_rctask_cancel as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_rctask_is_done",
-        ptr: vole_runtime::task::vole_rctask_is_done as *const u8,
-    },
-    // ── Channels ──────────────────────────────────────────────────────
-    LinkableRuntimeSymbol {
-        c_name: "vole_channel_new",
-        ptr: vole_runtime::channel::vole_channel_new as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_channel_send",
-        ptr: vole_runtime::channel::vole_channel_send as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_channel_recv",
-        ptr: vole_runtime::channel::vole_channel_recv as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_channel_close",
-        ptr: vole_runtime::channel::vole_channel_close as *const u8,
-    },
-    LinkableRuntimeSymbol {
-        c_name: "vole_channel_is_closed",
-        ptr: vole_runtime::channel::vole_channel_is_closed as *const u8,
-    },
 ];
 
-pub fn all_linkable_symbols() -> &'static [LinkableRuntimeSymbol] {
-    LINKABLE_RUNTIME_SYMBOLS
+pub fn all_linkable_symbols() -> impl Iterator<Item = &'static LinkableRuntimeSymbol> {
+    KEYED_LINKABLE_SYMBOLS
+        .iter()
+        .chain(NON_KEYED_LINKABLE_SYMBOLS.iter())
 }
 
 /// Build a reverse mapping from function pointer to symbol name.
@@ -903,52 +453,11 @@ pub fn all_linkable_symbols() -> &'static [LinkableRuntimeSymbol] {
 /// a direct call.
 pub fn build_ptr_to_symbol_map() -> rustc_hash::FxHashMap<usize, String> {
     let mut map = rustc_hash::FxHashMap::default();
-    for sym in LINKABLE_RUNTIME_SYMBOLS {
+    for sym in all_linkable_symbols() {
         map.insert(sym.ptr as usize, sym.c_name.to_string());
     }
     map
 }
-
-/// Linkable runtime symbols intentionally not exposed through `RuntimeKey` imports.
-///
-/// These are currently invoked via NativeRegistry external dispatch or runtime-internal
-/// pathways rather than `RuntimeKey`-typed call sites.
-#[cfg(test)]
-const NON_CODEGEN_LINKABLE_SYMBOLS: &[&str] = &[
-    "vole_string_inc",
-    "vole_string_dec",
-    "vole_string_data",
-    "vole_chain_iter",
-    "vole_chain_iter_next",
-    "vole_chain_iter_collect",
-    "vole_flatten_iter",
-    "vole_flatten_iter_next",
-    "vole_flatten_iter_collect",
-    "vole_flat_map_iter",
-    "vole_flat_map_iter_next",
-    "vole_flat_map_iter_collect",
-    "vole_reverse_iter",
-    "vole_sorted_iter",
-    "vole_unique_iter",
-    "vole_unique_iter_next",
-    "vole_chunks_iter",
-    "vole_chunks_iter_next",
-    "vole_chunks_iter_collect",
-    "vole_windows_iter",
-    "vole_windows_iter_next",
-    "vole_windows_iter_collect",
-    "vole_repeat_iter",
-    "vole_repeat_iter_next",
-    "vole_once_iter",
-    "vole_once_iter_next",
-    "vole_empty_iter",
-    "vole_from_fn_iter",
-    "vole_from_fn_iter_next",
-    "vole_range_iter_next",
-    "vole_string_chars_iter_next",
-    "vole_instance_inc",
-    "vole_instance_dec",
-];
 
 #[cfg(test)]
 mod tests {
@@ -1006,10 +515,8 @@ mod tests {
 
     #[test]
     fn every_codegen_symbol_has_linkable_pointer() {
-        let linkable_names: FxHashSet<_> = all_linkable_symbols()
-            .iter()
-            .map(|symbol| symbol.c_name)
-            .collect();
+        let linkable_names: FxHashSet<_> =
+            all_linkable_symbols().map(|symbol| symbol.c_name).collect();
 
         for symbol in codegen_symbols() {
             assert!(
@@ -1023,24 +530,16 @@ mod tests {
     #[test]
     fn linkables_are_either_codegen_or_explicit_non_codegen() {
         let codegen_names: FxHashSet<_> = codegen_symbols().map(|symbol| symbol.c_name).collect();
-        let allowed_non_codegen: FxHashSet<_> =
-            NON_CODEGEN_LINKABLE_SYMBOLS.iter().copied().collect();
+        let non_keyed_names: FxHashSet<_> = NON_KEYED_LINKABLE_SYMBOLS
+            .iter()
+            .map(|s| s.c_name)
+            .collect();
 
         for symbol in all_linkable_symbols() {
             assert!(
-                codegen_names.contains(symbol.c_name)
-                    || allowed_non_codegen.contains(symbol.c_name),
+                codegen_names.contains(symbol.c_name) || non_keyed_names.contains(symbol.c_name),
                 "unclassified non-codegen linkable symbol: {}",
                 symbol.c_name
-            );
-        }
-
-        for &name in NON_CODEGEN_LINKABLE_SYMBOLS {
-            assert!(
-                all_linkable_symbols()
-                    .iter()
-                    .any(|symbol| symbol.c_name == name),
-                "stale non-codegen linkable symbol entry: {name}"
             );
         }
     }
@@ -1095,7 +594,7 @@ mod tests {
         let runtime_literals: FxHashSet<&'static str> = all_symbols()
             .iter()
             .map(|symbol| symbol.c_name)
-            .chain(all_linkable_symbols().iter().map(|symbol| symbol.c_name))
+            .chain(all_linkable_symbols().map(|symbol| symbol.c_name))
             .collect();
 
         for literal in string_literals(src) {
