@@ -122,8 +122,7 @@ impl Cg<'_, '_, '_> {
         let is_wide = crate::types::is_wide_type(field_type_id, self.arena());
         let mut cv = if is_wide {
             let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
-            let wide_i128 =
-                super::helpers::load_wide_field(self.builder, get_func_ref, obj.value, slot);
+            let wide_i128 = super::helpers::load_wide_field(self, get_func_ref, obj.value, slot);
             if field_type_id == self.arena().f128() {
                 let value = self
                     .builder
@@ -392,7 +391,7 @@ impl Cg<'_, '_, '_> {
 
         // Store field value, handling i128 which needs 2 slots
         let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
-        super::helpers::store_field_value(self.builder, set_func_ref, obj.value, slot, &value);
+        super::helpers::store_field_value(self, set_func_ref, obj.value, slot, &value);
         self.field_cache.clear(); // Invalidate cached field reads
 
         if let Some(old_val) = rc_old {

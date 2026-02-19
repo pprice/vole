@@ -150,13 +150,7 @@ impl Cg<'_, '_, '_> {
 
         // Store back (i128 uses 2 slots)
         let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
-        crate::structs::helpers::store_field_value(
-            self.builder,
-            set_func_ref,
-            obj.value,
-            slot,
-            &result,
-        );
+        crate::structs::helpers::store_field_value(self, set_func_ref, obj.value, slot, &result);
         self.field_cache.clear(); // Invalidate cached field reads
 
         Ok(result)

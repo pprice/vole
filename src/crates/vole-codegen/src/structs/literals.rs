@@ -151,10 +151,7 @@ impl Cg<'_, '_, '_> {
 
         let type_id_val = self.iconst_cached(types::I32, type_id as i64);
         let field_count_val = self.iconst_cached(types::I32, field_count as i64);
-        let runtime_type = self
-            .builder
-            .ins()
-            .iconst(types::I32, RuntimeTypeId::Instance as i64);
+        let runtime_type = self.iconst_cached(types::I32, RuntimeTypeId::Instance as i64);
 
         let instance_ptr = self.call_runtime(
             RuntimeKey::InstanceNew,
@@ -220,7 +217,7 @@ impl Cg<'_, '_, '_> {
                 value
             };
 
-            store_field_value(self.builder, set_func_ref, instance_ptr, slot, &final_value);
+            store_field_value(self, set_func_ref, instance_ptr, slot, &final_value);
         }
 
         // Handle omitted fields with default values
@@ -257,7 +254,7 @@ impl Cg<'_, '_, '_> {
                 value
             };
 
-            store_field_value(self.builder, set_func_ref, instance_ptr, slot, &final_value);
+            store_field_value(self, set_func_ref, instance_ptr, slot, &final_value);
         }
 
         Ok(CompiledValue::new(

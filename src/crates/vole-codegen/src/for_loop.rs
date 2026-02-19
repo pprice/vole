@@ -207,7 +207,7 @@ impl Cg<'_, '_, '_> {
             let tracked_var = self.builder.declare_var(self.cranelift_type(arr.type_id));
             self.builder.def_var(tracked_var, arr.value);
             let drop_flag = self.register_rc_local(tracked_var, arr.type_id);
-            crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
 
         // Get element type using arena method
@@ -393,7 +393,7 @@ impl Cg<'_, '_, '_> {
             let tracked_var = self.builder.declare_var(self.cranelift_type(iter.type_id));
             self.builder.def_var(tracked_var, iter.value);
             let drop_flag = self.register_rc_local(tracked_var, iter.type_id);
-            crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
 
         // Create a stack slot for the out_value parameter
@@ -508,7 +508,7 @@ impl Cg<'_, '_, '_> {
                 .declare_var(self.cranelift_type(string_val.type_id));
             self.builder.def_var(tracked_string, string_val.value);
             let drop_flag = self.register_rc_local(tracked_string, string_val.type_id);
-            crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
         let iter_type_id = self
             .arena()
@@ -517,7 +517,7 @@ impl Cg<'_, '_, '_> {
         let tracked_iter = self.builder.declare_var(self.cranelift_type(iter_type_id));
         self.builder.def_var(tracked_iter, iter_val);
         let iter_drop_flag = self.register_rc_local(tracked_iter, iter_type_id);
-        crate::rc_cleanup::set_drop_flag_live(self.builder, iter_drop_flag);
+        crate::rc_cleanup::set_drop_flag_live(self, iter_drop_flag);
 
         // Create a stack slot for the out_value parameter
         let slot_data = self.alloc_stack(8);

@@ -226,7 +226,7 @@ fn emit_implicit_return(
                         .load(types::I64, MemFlags::new(), value.value, 16);
                     (low, high)
                 } else {
-                    let zero = cg.builder.ins().iconst(types::I64, 0);
+                    let zero = cg.iconst_cached(types::I64, 0);
                     (zero, zero)
                 };
                 cg.builder.ins().return_(&[tag, low, high]);
@@ -275,12 +275,12 @@ fn emit_implicit_return(
                 } else if ret_type == types::F32 {
                     cg.builder.ins().f32const(0.0)
                 } else if ret_type == types::F128 {
-                    let zero_bits = cg.builder.ins().iconst(types::I128, 0);
+                    let zero_bits = cg.iconst_cached(types::I128, 0);
                     cg.builder
                         .ins()
                         .bitcast(types::F128, MemFlags::new(), zero_bits)
                 } else {
-                    cg.builder.ins().iconst(ret_type, 0)
+                    cg.iconst_cached(ret_type, 0)
                 };
                 cg.builder.ins().return_(&[zero]);
             }

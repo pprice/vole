@@ -219,18 +219,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let rc_dec_ref = self.runtime_func_ref(RuntimeKey::RcDec)?;
 
         // 1. Unions first: payloads may reference container-owned values.
-        super::rc_cleanup::emit_union_rc_cleanup(self.builder, unions, rc_dec_ref, skip_var);
+        super::rc_cleanup::emit_union_rc_cleanup(self, unions, rc_dec_ref, skip_var);
 
         // 2. Locals.
-        super::rc_cleanup::emit_rc_cleanup(self.builder, locals, rc_dec_ref, skip_var);
+        super::rc_cleanup::emit_rc_cleanup(self, locals, rc_dec_ref, skip_var);
 
         // 3. Composites last.
-        super::rc_cleanup::emit_composite_rc_cleanup(
-            self.builder,
-            composites,
-            rc_dec_ref,
-            skip_var,
-        );
+        super::rc_cleanup::emit_composite_rc_cleanup(self, composites, rc_dec_ref, skip_var);
 
         Ok(())
     }
@@ -410,7 +405,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// initializes it to 0, and adds it to the current scope.
     /// Returns the drop flag Variable so the caller can set it to 1 after assignment.
     pub fn register_rc_local(&mut self, variable: Variable, type_id: TypeId) -> Variable {
-        let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
+        let drop_flag = super::rc_cleanup::alloc_drop_flag(self);
         let is_interface = self.arena().is_interface(type_id);
         self.rc_scopes
             .register_rc_local(variable, drop_flag, type_id, is_interface);
@@ -424,7 +419,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         variable: Variable,
         rc_field_offsets: Vec<i32>,
     ) -> Variable {
-        let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
+        let drop_flag = super::rc_cleanup::alloc_drop_flag(self);
         self.rc_scopes
             .register_composite(variable, drop_flag, rc_field_offsets);
         drop_flag
@@ -436,7 +431,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         variable: Variable,
         rc_variant_tags: Vec<(u8, bool)>,
     ) -> Variable {
-        let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
+        let drop_flag = super::rc_cleanup::alloc_drop_flag(self);
         self.rc_scopes
             .register_union(variable, drop_flag, rc_variant_tags);
         drop_flag

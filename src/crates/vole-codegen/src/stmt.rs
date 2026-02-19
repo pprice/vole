@@ -110,7 +110,7 @@ impl Cg<'_, '_, '_> {
                     let temp_var = self.builder.declare_var(cr_type);
                     self.builder.def_var(temp_var, init.value);
                     let drop_flag = self.register_composite_rc_local(temp_var, offsets.to_vec());
-                    crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                    crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
                 }
 
                 // Recursively compile the destructuring pattern
@@ -355,7 +355,7 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_inc_for_type(final_value, final_type_id)?;
                 }
                 let drop_flag = self.register_rc_local(var, final_type_id);
-                crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
             }
         } else if self.rc_scopes.has_active_scope() {
             // Check for composite types (struct, fixed array, tuple) with RC fields.
@@ -385,7 +385,7 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 let drop_flag = self.register_composite_rc_local(var, offsets.to_vec());
-                crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
             } else if is_stack_union || self.arena().is_union(final_type_id) {
                 // Register union RC cleanup for any union-typed value. This
                 // includes both locally constructed unions (construct_union_id)
@@ -399,7 +399,7 @@ impl Cg<'_, '_, '_> {
                         self.emit_union_rc_inc(final_value, rc_tags)?;
                     }
                     let drop_flag = self.register_union_rc_local(var, rc_tags.to_vec());
-                    crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                    crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
                 }
             }
         }
@@ -745,7 +745,7 @@ impl Cg<'_, '_, '_> {
                 if self.rc_scopes.has_active_scope() && self.rc_state(ty_id).needs_cleanup() {
                     self.emit_rc_inc_for_type(value, ty_id)?;
                     let drop_flag = self.register_rc_local(var, ty_id);
-                    crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                    crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
                 }
             }
             PatternKind::Wildcard => {

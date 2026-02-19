@@ -10,6 +10,7 @@
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags, Variable, types};
 use vole_sema::type_arena::TypeId;
 
+use crate::context::Cg;
 use crate::ops::try_constant_value;
 
 /// A single RC local variable with its drop flag.
@@ -252,7 +253,7 @@ impl RcScopeStack {
 ///
 /// Each conditional requires its own Cranelift block pair.
 pub(crate) fn emit_rc_cleanup(
-    builder: &mut FunctionBuilder,
+    cg: &mut Cg,
     locals: &[RcLocal],
     rc_dec_ref: cranelift::codegen::ir::FuncRef,
     skip_var: Option<Variable>,
@@ -265,44 +266,44 @@ pub(crate) fn emit_rc_cleanup(
         if skip_var == Some(local.variable) {
             continue;
         }
-        let flag_val = builder.use_var(local.drop_flag);
+        let flag_val = cg.builder.use_var(local.drop_flag);
 
         // Constant-fold: skip the branch diamond when the drop flag is known.
-        if let Some(const_val) = try_constant_value(builder.func, flag_val) {
+        if let Some(const_val) = try_constant_value(cg.builder.func, flag_val) {
             if const_val == 0 {
                 // Flag is known-dead: skip cleanup entirely.
                 continue;
             }
             // Flag is known-live: emit cleanup unconditionally (no branch).
-            emit_single_rc_dec(builder, local, rc_dec_ref);
-            let zero = builder.ins().iconst(types::I8, 0);
-            builder.def_var(local.drop_flag, zero);
+            emit_single_rc_dec(cg.builder, local, rc_dec_ref);
+            let zero = cg.iconst_cached(types::I8, 0);
+            cg.builder.def_var(local.drop_flag, zero);
             continue;
         }
 
         // Unknown flag: emit the full conditional diamond.
         // `flag_val` is an i8 boolean (0 = dead, nonzero = live); `brif` already
         // treats nonzero as true, so no icmp_imm needed.
-        let cleanup_block = builder.create_block();
-        let after_block = builder.create_block();
+        let cleanup_block = cg.builder.create_block();
+        let after_block = cg.builder.create_block();
 
-        builder
+        cg.builder
             .ins()
             .brif(flag_val, cleanup_block, &[], after_block, &[]);
 
-        builder.switch_to_block(cleanup_block);
-        builder.seal_block(cleanup_block);
-        emit_single_rc_dec(builder, local, rc_dec_ref);
+        cg.switch_to_block(cleanup_block);
+        cg.builder.seal_block(cleanup_block);
+        emit_single_rc_dec(cg.builder, local, rc_dec_ref);
         // Reset drop flag to 0 after cleanup. This prevents double-free when
         // the variable is conditionally initialized inside a loop: without
         // this, the stale flag=1 propagates via SSA phi nodes to the next
         // iteration, causing rc_dec on already-freed memory.
-        let zero = builder.ins().iconst(types::I8, 0);
-        builder.def_var(local.drop_flag, zero);
-        builder.ins().jump(after_block, &[]);
+        let zero = cg.iconst_cached(types::I8, 0);
+        cg.builder.def_var(local.drop_flag, zero);
+        cg.builder.ins().jump(after_block, &[]);
 
-        builder.switch_to_block(after_block);
-        builder.seal_block(after_block);
+        cg.switch_to_block(after_block);
+        cg.builder.seal_block(after_block);
     }
 }
 
@@ -325,17 +326,17 @@ fn emit_single_rc_dec(
 
 /// Allocate and initialize a drop flag variable to 0 (not yet initialized).
 /// Returns the new Variable.
-pub(crate) fn alloc_drop_flag(builder: &mut FunctionBuilder) -> Variable {
-    let drop_flag = builder.declare_var(types::I8);
-    let zero = builder.ins().iconst(types::I8, 0);
-    builder.def_var(drop_flag, zero);
+pub(crate) fn alloc_drop_flag(cg: &mut Cg) -> Variable {
+    let drop_flag = cg.builder.declare_var(types::I8);
+    let zero = cg.iconst_cached(types::I8, 0);
+    cg.builder.def_var(drop_flag, zero);
     drop_flag
 }
 
 /// Set a drop flag to 1 (variable is now live and needs cleanup).
-pub(crate) fn set_drop_flag_live(builder: &mut FunctionBuilder, drop_flag: Variable) {
-    let one = builder.ins().iconst(types::I8, 1);
-    builder.def_var(drop_flag, one);
+pub(crate) fn set_drop_flag_live(cg: &mut Cg, drop_flag: Variable) {
+    let one = cg.iconst_cached(types::I8, 1);
+    cg.builder.def_var(drop_flag, one);
 }
 
 /// Emit cleanup code for union RC locals.
@@ -344,7 +345,7 @@ pub(crate) fn set_drop_flag_live(builder: &mut FunctionBuilder, drop_flag: Varia
 /// For each RC variant, checks if the tag matches and if so, rc_dec's the
 /// payload at offset 8.
 pub(crate) fn emit_union_rc_cleanup(
-    builder: &mut FunctionBuilder,
+    cg: &mut Cg,
     unions: &[UnionRcLocal],
     rc_dec_ref: cranelift::codegen::ir::FuncRef,
     skip_var: Option<Variable>,
@@ -353,41 +354,41 @@ pub(crate) fn emit_union_rc_cleanup(
         if skip_var == Some(union_local.variable) {
             continue;
         }
-        let flag_val = builder.use_var(union_local.drop_flag);
+        let flag_val = cg.builder.use_var(union_local.drop_flag);
 
         // Constant-fold: skip the branch diamond when the drop flag is known.
-        if let Some(const_val) = try_constant_value(builder.func, flag_val) {
+        if let Some(const_val) = try_constant_value(cg.builder.func, flag_val) {
             if const_val == 0 {
                 continue;
             }
             // Flag is known-live: emit tag checks unconditionally (no outer branch).
-            emit_union_tag_checks(builder, union_local, rc_dec_ref);
-            let zero = builder.ins().iconst(types::I8, 0);
-            builder.def_var(union_local.drop_flag, zero);
+            emit_union_tag_checks(cg, union_local, rc_dec_ref);
+            let zero = cg.iconst_cached(types::I8, 0);
+            cg.builder.def_var(union_local.drop_flag, zero);
             continue;
         }
 
         // Unknown flag: emit the full conditional diamond.
         // `flag_val` is an i8 boolean; `brif` treats nonzero as true directly.
-        let cleanup_block = builder.create_block();
-        let after_block = builder.create_block();
+        let cleanup_block = cg.builder.create_block();
+        let after_block = cg.builder.create_block();
 
-        builder
+        cg.builder
             .ins()
             .brif(flag_val, cleanup_block, &[], after_block, &[]);
 
-        builder.switch_to_block(cleanup_block);
-        builder.seal_block(cleanup_block);
+        cg.switch_to_block(cleanup_block);
+        cg.builder.seal_block(cleanup_block);
 
-        emit_union_tag_checks(builder, union_local, rc_dec_ref);
+        emit_union_tag_checks(cg, union_local, rc_dec_ref);
 
         // Reset drop flag after cleanup (same reason as emit_rc_cleanup).
-        let zero = builder.ins().iconst(types::I8, 0);
-        builder.def_var(union_local.drop_flag, zero);
-        builder.ins().jump(after_block, &[]);
+        let zero = cg.iconst_cached(types::I8, 0);
+        cg.builder.def_var(union_local.drop_flag, zero);
+        cg.builder.ins().jump(after_block, &[]);
 
-        builder.switch_to_block(after_block);
-        builder.seal_block(after_block);
+        cg.switch_to_block(after_block);
+        cg.builder.seal_block(after_block);
     }
 }
 
@@ -395,42 +396,49 @@ pub(crate) fn emit_union_rc_cleanup(
 ///
 /// Loads the tag, then for each RC variant emits a conditional rc_dec of the payload.
 fn emit_union_tag_checks(
-    builder: &mut FunctionBuilder,
+    cg: &mut Cg,
     union_local: &UnionRcLocal,
     rc_dec_ref: cranelift::codegen::ir::FuncRef,
 ) {
-    let base_ptr = builder.use_var(union_local.variable);
-    let tag = builder.ins().load(types::I8, MemFlags::new(), base_ptr, 0);
+    let base_ptr = cg.builder.use_var(union_local.variable);
+    let tag = cg
+        .builder
+        .ins()
+        .load(types::I8, MemFlags::new(), base_ptr, 0);
 
     for &(variant_tag, is_interface) in &union_local.rc_variant_tags {
-        let is_match = builder
+        let is_match = cg
+            .builder
             .ins()
             .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
-        let dec_block = builder.create_block();
-        let next_block = builder.create_block();
+        let dec_block = cg.builder.create_block();
+        let next_block = cg.builder.create_block();
 
-        builder
+        cg.builder
             .ins()
             .brif(is_match, dec_block, &[], next_block, &[]);
 
-        builder.switch_to_block(dec_block);
-        builder.seal_block(dec_block);
-        let payload = builder.ins().load(
+        cg.switch_to_block(dec_block);
+        cg.builder.seal_block(dec_block);
+        let payload = cg.builder.ins().load(
             types::I64,
             MemFlags::new(),
             base_ptr,
             crate::union_layout::PAYLOAD_OFFSET,
         );
         if is_interface {
-            let data_word = builder.ins().load(types::I64, MemFlags::new(), payload, 0);
-            builder.ins().call(rc_dec_ref, &[data_word]);
+            let data_word = cg
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), payload, 0);
+            cg.builder.ins().call(rc_dec_ref, &[data_word]);
         } else {
-            builder.ins().call(rc_dec_ref, &[payload]);
+            cg.builder.ins().call(rc_dec_ref, &[payload]);
         }
-        builder.ins().jump(next_block, &[]);
+        cg.builder.ins().jump(next_block, &[]);
 
-        builder.switch_to_block(next_block);
-        builder.seal_block(next_block);
+        cg.switch_to_block(next_block);
+        cg.builder.seal_block(next_block);
     }
 }
 
@@ -439,7 +447,7 @@ fn emit_union_tag_checks(
 /// For each composite, checks the drop flag, then loads and rc_dec's each
 /// RC field at its byte offset from the base pointer.
 pub(crate) fn emit_composite_rc_cleanup(
-    builder: &mut FunctionBuilder,
+    cg: &mut Cg,
     composites: &[CompositeRcLocal],
     rc_dec_ref: cranelift::codegen::ir::FuncRef,
     skip_var: Option<Variable>,
@@ -449,40 +457,40 @@ pub(crate) fn emit_composite_rc_cleanup(
         if skip_var == Some(composite.variable) {
             continue;
         }
-        let flag_val = builder.use_var(composite.drop_flag);
+        let flag_val = cg.builder.use_var(composite.drop_flag);
 
         // Constant-fold: skip the branch diamond when the drop flag is known.
-        if let Some(const_val) = try_constant_value(builder.func, flag_val) {
+        if let Some(const_val) = try_constant_value(cg.builder.func, flag_val) {
             if const_val == 0 {
                 continue;
             }
             // Flag is known-live: emit field cleanup unconditionally (no branch).
-            emit_composite_field_cleanup(builder, composite, rc_dec_ref);
-            let zero = builder.ins().iconst(types::I8, 0);
-            builder.def_var(composite.drop_flag, zero);
+            emit_composite_field_cleanup(cg.builder, composite, rc_dec_ref);
+            let zero = cg.iconst_cached(types::I8, 0);
+            cg.builder.def_var(composite.drop_flag, zero);
             continue;
         }
 
         // Unknown flag: emit the full conditional diamond.
         // `flag_val` is an i8 boolean; `brif` treats nonzero as true directly.
-        let cleanup_block = builder.create_block();
-        let after_block = builder.create_block();
+        let cleanup_block = cg.builder.create_block();
+        let after_block = cg.builder.create_block();
 
-        builder
+        cg.builder
             .ins()
             .brif(flag_val, cleanup_block, &[], after_block, &[]);
 
-        builder.switch_to_block(cleanup_block);
-        builder.seal_block(cleanup_block);
+        cg.switch_to_block(cleanup_block);
+        cg.builder.seal_block(cleanup_block);
 
-        emit_composite_field_cleanup(builder, composite, rc_dec_ref);
+        emit_composite_field_cleanup(cg.builder, composite, rc_dec_ref);
         // Reset drop flag after cleanup (same reason as emit_rc_cleanup).
-        let zero = builder.ins().iconst(types::I8, 0);
-        builder.def_var(composite.drop_flag, zero);
-        builder.ins().jump(after_block, &[]);
+        let zero = cg.iconst_cached(types::I8, 0);
+        cg.builder.def_var(composite.drop_flag, zero);
+        cg.builder.ins().jump(after_block, &[]);
 
-        builder.switch_to_block(after_block);
-        builder.seal_block(after_block);
+        cg.switch_to_block(after_block);
+        cg.builder.seal_block(after_block);
     }
 }
 

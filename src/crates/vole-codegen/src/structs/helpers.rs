@@ -261,34 +261,34 @@ pub(crate) fn store_value_to_stack(
 /// For i128: stores low 64 bits in `slot`, high 64 bits in `slot+1`.
 /// For all other types: stores via convert_to_i64_for_storage in a single slot.
 pub(crate) fn store_field_value(
-    builder: &mut FunctionBuilder,
+    cg: &mut crate::context::Cg,
     set_func_ref: codegen::ir::FuncRef,
     instance_ptr: Value,
     slot: usize,
     value: &CompiledValue,
 ) {
-    let slot_val = builder.ins().iconst(types::I32, slot as i64);
+    let slot_val = cg.iconst_cached(types::I32, slot as i64);
 
     if value.ty == types::I128 || value.ty == types::F128 {
         // Split wide values into low/high halves and store in 2 consecutive slots.
         let wide = if value.ty == types::F128 {
-            builder
+            cg.builder
                 .ins()
                 .bitcast(types::I128, MemFlags::new(), value.value)
         } else {
             value.value
         };
-        let (low, high) = split_i128_for_storage(builder, wide);
-        builder
+        let (low, high) = split_i128_for_storage(cg.builder, wide);
+        cg.builder
             .ins()
             .call(set_func_ref, &[instance_ptr, slot_val, low]);
-        let high_slot = builder.ins().iconst(types::I32, (slot + 1) as i64);
-        builder
+        let high_slot = cg.iconst_cached(types::I32, (slot + 1) as i64);
+        cg.builder
             .ins()
             .call(set_func_ref, &[instance_ptr, high_slot, high]);
     } else {
-        let store_value = convert_to_i64_for_storage(builder, value);
-        builder
+        let store_value = convert_to_i64_for_storage(cg.builder, value);
+        cg.builder
             .ins()
             .call(set_func_ref, &[instance_ptr, slot_val, store_value]);
     }
@@ -298,20 +298,26 @@ pub(crate) fn store_field_value(
 /// For i128: loads low 64 bits from `slot` and high 64 bits from `slot+1`, reconstructs i128.
 /// For all other types: loads from a single slot via convert_field_value_id.
 pub(crate) fn load_wide_field(
-    builder: &mut FunctionBuilder,
+    cg: &mut crate::context::Cg,
     get_func_ref: codegen::ir::FuncRef,
     instance_ptr: Value,
     slot: usize,
 ) -> Value {
-    let slot_val = builder.ins().iconst(types::I32, slot as i64);
-    let low_raw = builder.ins().call(get_func_ref, &[instance_ptr, slot_val]);
-    let low = builder.func.dfg.inst_results(low_raw)[0];
+    let slot_val = cg.iconst_cached(types::I32, slot as i64);
+    let low_raw = cg
+        .builder
+        .ins()
+        .call(get_func_ref, &[instance_ptr, slot_val]);
+    let low = cg.builder.func.dfg.inst_results(low_raw)[0];
 
-    let high_slot = builder.ins().iconst(types::I32, (slot + 1) as i64);
-    let high_raw = builder.ins().call(get_func_ref, &[instance_ptr, high_slot]);
-    let high = builder.func.dfg.inst_results(high_raw)[0];
+    let high_slot = cg.iconst_cached(types::I32, (slot + 1) as i64);
+    let high_raw = cg
+        .builder
+        .ins()
+        .call(get_func_ref, &[instance_ptr, high_slot]);
+    let high = cg.builder.func.dfg.inst_results(high_raw)[0];
 
-    reconstruct_i128(builder, low, high)
+    reconstruct_i128(cg.builder, low, high)
 }
 
 // ============================================================================

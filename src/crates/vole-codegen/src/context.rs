@@ -195,6 +195,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // block, this value can be reused by all subsequent `void_value()` calls
         // without violating SSA dominance.
         let cached_void_val = builder.ins().iconst(types::I64, 0);
+        // Seed the per-block cache so that subsequent `iconst_cached(I64, 0)`
+        // calls in the entry block reuse `cached_void_val` instead of emitting
+        // a duplicate instruction.
+        let mut iconst_cache = FxHashMap::default();
+        iconst_cache.insert((types::I64, 0i64), cached_void_val);
         Self {
             builder,
             vars: FxHashMap::default(),
@@ -213,7 +218,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
             cached_void_val,
-            iconst_cache: FxHashMap::default(),
+            iconst_cache,
             codegen_ctx,
             env,
         }
@@ -767,12 +772,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CodegenResult<CompiledValue> {
         if crate::types::is_wide_type(field_type_id, self.arena()) {
             let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
-            let wide_i128 = crate::structs::helpers::load_wide_field(
-                self.builder,
-                get_func_ref,
-                instance,
-                slot,
-            );
+            let wide_i128 =
+                crate::structs::helpers::load_wide_field(self, get_func_ref, instance, slot);
             let arena = self.arena();
             if field_type_id == arena.f128() {
                 let value = self
