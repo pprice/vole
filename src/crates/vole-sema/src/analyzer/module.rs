@@ -9,7 +9,8 @@ use crate::optimizer::constant_folding::eval_const_expr;
 /// Replaces the `bail_module!` macro so extracted helper functions don't need the macro.
 struct ModuleInProgressGuard {
     ctx: Rc<AnalyzerContext>,
-    canonical_path: String,
+    /// None after `defuse()` — the Drop impl skips removal when this is None.
+    canonical_path: Option<String>,
 }
 
 impl ModuleInProgressGuard {
@@ -19,23 +20,29 @@ impl ModuleInProgressGuard {
             .insert(canonical_path.clone());
         Self {
             ctx: Rc::clone(ctx),
-            canonical_path,
+            canonical_path: Some(canonical_path),
         }
     }
 
-    /// Consume the guard without removing from in-progress (used on success path
-    /// where we explicitly remove it ourselves after caching).
-    fn defuse(self) {
-        std::mem::forget(self);
+    /// Disarm the guard so it won't remove the path from in-progress on drop,
+    /// while still dropping the `Rc<AnalyzerContext>` normally.
+    ///
+    /// Previously this used `mem::forget`, which leaked the Rc reference count
+    /// and caused `Rc::try_unwrap` in `into_analysis_results` to always fail,
+    /// falling back to an expensive clone of all module AST trees.
+    fn defuse(&mut self) {
+        self.canonical_path = None;
     }
 }
 
 impl Drop for ModuleInProgressGuard {
     fn drop(&mut self) {
-        self.ctx
-            .modules_in_progress
-            .borrow_mut()
-            .remove(&self.canonical_path);
+        if let Some(ref canonical_path) = self.canonical_path {
+            self.ctx
+                .modules_in_progress
+                .borrow_mut()
+                .remove(canonical_path);
+        }
     }
 }
 
@@ -264,7 +271,7 @@ impl Analyzer {
             );
             return Err(());
         }
-        let guard = ModuleInProgressGuard::new(&self.ctx, canonical_path.clone());
+        let mut guard = ModuleInProgressGuard::new(&self.ctx, canonical_path.clone());
 
         // Phase 3: Load, parse, and transform the module
         let parsed = self.load_and_parse_module(import_path, span)?;
