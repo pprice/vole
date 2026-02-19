@@ -109,6 +109,23 @@ fn integer_result_type_id(left: TypeId, right: TypeId) -> TypeId {
     }
 }
 
+/// Evaluate an `IntCC` comparison on two known i64 constants.
+/// Returns `true` (1) or `false` (0) as a boolean.
+fn eval_int_cc(cc: IntCC, a: i64, b: i64) -> bool {
+    match cc {
+        IntCC::Equal => a == b,
+        IntCC::NotEqual => a != b,
+        IntCC::SignedLessThan => a < b,
+        IntCC::SignedLessThanOrEqual => a <= b,
+        IntCC::SignedGreaterThan => a > b,
+        IntCC::SignedGreaterThanOrEqual => a >= b,
+        IntCC::UnsignedLessThan => (a as u64) < (b as u64),
+        IntCC::UnsignedLessThanOrEqual => (a as u64) <= (b as u64),
+        IntCC::UnsignedGreaterThan => (a as u64) > (b as u64),
+        IntCC::UnsignedGreaterThanOrEqual => (a as u64) >= (b as u64),
+    }
+}
+
 /// Comparison condition codes for float, unsigned int, and signed int operations.
 struct CmpCodes {
     float: FloatCC,
@@ -702,6 +719,13 @@ impl Cg<'_, '_, '_> {
                     self.call_f128_cmp(RuntimeKey::F128Eq, left_val, right_val)?
                 } else if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fcmp(FloatCC::Equal, left_val, right_val)
+                } else if let (Some(a), Some(b)) = (
+                    try_constant_value(self.builder.func, left_val),
+                    try_constant_value(self.builder.func, right_val),
+                ) {
+                    self.builder
+                        .ins()
+                        .iconst(types::I8, i64::from(eval_int_cc(IntCC::Equal, a, b)))
                 } else {
                     self.builder.ins().icmp(IntCC::Equal, left_val, right_val)
                 }
@@ -719,6 +743,13 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .fcmp(FloatCC::NotEqual, left_val, right_val)
+                } else if let (Some(a), Some(b)) = (
+                    try_constant_value(self.builder.func, left_val),
+                    try_constant_value(self.builder.func, right_val),
+                ) {
+                    self.builder
+                        .ins()
+                        .iconst(types::I8, i64::from(eval_int_cc(IntCC::NotEqual, a, b)))
                 } else {
                     self.builder
                         .ins()
@@ -1057,6 +1088,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Emit a comparison instruction, dispatching based on type (float vs int, signed vs unsigned).
+    /// When both operands are known integer constants, the result is computed at compile time.
     fn emit_cmp(
         &mut self,
         result_ty: Type,
@@ -1067,6 +1099,18 @@ impl Cg<'_, '_, '_> {
     ) -> Value {
         if result_ty == types::F64 || result_ty == types::F32 {
             self.builder.ins().fcmp(codes.float, left_val, right_val)
+        } else if let (Some(a), Some(b)) = (
+            try_constant_value(self.builder.func, left_val),
+            try_constant_value(self.builder.func, right_val),
+        ) {
+            let cc = if left_type_id.is_unsigned_int() {
+                codes.unsigned
+            } else {
+                codes.signed
+            };
+            self.builder
+                .ins()
+                .iconst(types::I8, i64::from(eval_int_cc(cc, a, b)))
         } else if left_type_id.is_unsigned_int() {
             self.builder.ins().icmp(codes.unsigned, left_val, right_val)
         } else {
@@ -1078,6 +1122,20 @@ impl Cg<'_, '_, '_> {
     /// Creates a branch: if divisor == 0, panic; else continue.
     /// Returns the continue block that should be used for subsequent code.
     fn emit_div_by_zero_check(&mut self, divisor: Value, line: u32) -> CodegenResult<Block> {
+        // Constant-fold: if divisor is a known constant, skip the branch.
+        if let Some(d) = try_constant_value(self.builder.func, divisor) {
+            if d == 0 {
+                // Divisor is known to be zero — always panic.
+                self.emit_panic_static("division by zero", line)?;
+                // Unreachable, but Cranelift needs a valid block to continue building.
+                let unreachable_block = self.builder.create_block();
+                self.switch_and_seal(unreachable_block);
+                return Ok(unreachable_block);
+            }
+            // Divisor is known non-zero — no check needed, continue in current block.
+            return Ok(self.builder.current_block().unwrap());
+        }
+
         let is_zero = self.builder.ins().icmp_imm(IntCC::Equal, divisor, 0);
 
         let panic_block = self.builder.create_block();
@@ -1113,6 +1171,21 @@ impl Cg<'_, '_, '_> {
             types::I64 => i64::MIN,
             _ => return Ok(()), // Not a standard signed integer type
         };
+
+        // Constant-fold: if both operands are known, evaluate at compile time.
+        if let (Some(d), Some(v)) = (
+            try_constant_value(self.builder.func, dividend),
+            try_constant_value(self.builder.func, divisor),
+        ) {
+            if d == min_val && v == -1 {
+                // Known overflow — always panic.
+                self.emit_panic_static("integer overflow in division", line)?;
+                let continue_block = self.builder.create_block();
+                self.switch_and_seal(continue_block);
+            }
+            // Otherwise no overflow — skip the check entirely.
+            return Ok(());
+        }
 
         // Check if dividend == MIN
         let is_min = self.builder.ins().icmp_imm(IntCC::Equal, dividend, min_val);
