@@ -12,6 +12,8 @@ use vole_frontend::{ExprKind, NodeId};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 
+use crate::ops::try_constant_value;
+
 use super::super::context::Cg;
 
 impl Cg<'_, '_, '_> {
@@ -162,8 +164,13 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().ireduce(types::I8, condition.value)
         };
 
-        // Use select instruction: select(cond, if_true, if_false)
-        let result = self.builder.ins().select(cond_val, then_val, else_val);
+        // Constant-fold: if the condition is a known constant, pick the
+        // appropriate branch directly without emitting a select instruction.
+        let result = if let Some(c) = try_constant_value(self.builder.func, cond_val) {
+            if c != 0 { then_val } else { else_val }
+        } else {
+            self.builder.ins().select(cond_val, then_val, else_val)
+        };
 
         Ok(CompiledValue::new(
             result,
@@ -424,8 +431,13 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().ireduce(types::I8, condition.value)
         };
 
-        // Use select instruction
-        let result = self.builder.ins().select(cond_val, then_val, else_val);
+        // Constant-fold: if the condition is a known constant, pick the
+        // appropriate branch directly without emitting a select instruction.
+        let result = if let Some(c) = try_constant_value(self.builder.func, cond_val) {
+            if c != 0 { then_val } else { else_val }
+        } else {
+            self.builder.ins().select(cond_val, then_val, else_val)
+        };
 
         Ok(CompiledValue::new(
             result,
