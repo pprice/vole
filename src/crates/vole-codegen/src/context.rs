@@ -8,8 +8,9 @@ use std::mem::size_of;
 use std::rc::Rc;
 
 use cranelift::prelude::{
-    Block, FunctionBuilder, InstBuilder, MemFlags, Type, Value, Variable, types,
+    Block, FunctionBuilder, Imm64, InstBuilder, MemFlags, Type, Value, Variable, types,
 };
+use cranelift_codegen::ir::{InstructionData, Opcode};
 use cranelift_module::{FuncId, Module};
 use rustc_hash::FxHashMap;
 
@@ -163,17 +164,18 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Reused by every `void_value()` call to avoid emitting thousands of
     /// dead iconst instructions (previously ~18,951 per compilation).
     pub(crate) cached_void_val: Value,
-    /// Constants pre-created in the entry block that dominate all other blocks.
+    /// The entry block of the current function.
     ///
-    /// Because the entry block dominates every block in SSA form, these values
-    /// can be reused everywhere. On block switches, `iconst_cache` is reset to
-    /// this set instead of being cleared entirely.
-    entry_constants: FxHashMap<(Type, i64), Value>,
-    /// Per-block iconst cache: `(Type, i64) -> Value`.
+    /// Stored so that `iconst_cached()` can lazily insert constant
+    /// instructions here on first use. Because the entry block dominates
+    /// every other block in SSA form, entry-block values are usable
+    /// everywhere without violating dominance.
+    entry_block: Block,
+    /// Function-wide iconst cache: `(Type, i64) -> Value`.
     ///
-    /// Avoids emitting duplicate `iconst` instructions within the same basic
-    /// block.  Reset to `entry_constants` on every block switch
-    /// (`switch_to_block`) so entry-block values remain available.
+    /// All cached constants are placed in the entry block so they dominate
+    /// every use. The cache is never cleared on block switches — every value
+    /// created once and reused everywhere.
     iconst_cache: FxHashMap<(Type, i64), Value>,
 
     // ========== Shared context fields ==========
@@ -196,12 +198,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         codegen_ctx: &'a mut CodegenCtx<'ctx>,
         env: &'a CompileEnv<'ctx>,
     ) -> Self {
-        // Pre-create common constants in the entry block. Because the entry
-        // block dominates every other block in SSA form, these values can be
-        // reused everywhere without violating dominance.
-        let entry_constants = Self::emit_entry_constants(builder);
-        let cached_void_val = entry_constants[&(types::I64, 0i64)];
-        let iconst_cache = entry_constants.clone();
+        // Create the void constant eagerly — we're still in the entry block
+        // so `ins().iconst()` places it there naturally.  This also ensures
+        // the entry block is inserted into the layout (via ensure_inserted_block).
+        let cached_void_val = builder.ins().iconst(types::I64, 0);
+        let mut iconst_cache = FxHashMap::default();
+        iconst_cache.insert((types::I64, 0i64), cached_void_val);
+
+        // Now the entry block is in the layout; grab it for later lazy insertion.
+        let entry_block = builder
+            .func
+            .layout
+            .entry_block()
+            .expect("entry block must exist after emitting void constant");
+
         Self {
             builder,
             vars: FxHashMap::default(),
@@ -220,33 +230,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
             cached_void_val,
-            entry_constants,
+            entry_block,
             iconst_cache,
             codegen_ctx,
             env,
         }
-    }
-
-    /// Emit common constants in the entry block and return them as a map.
-    ///
-    /// These constants dominate all blocks and can be reused everywhere.
-    /// The set covers the most frequent `iconst` values observed in practice:
-    /// `i8 0/1`, `i32 0/1`, `i64 0/1`.
-    fn emit_entry_constants(builder: &mut FunctionBuilder<'b>) -> FxHashMap<(Type, i64), Value> {
-        let pairs: [(Type, i64); 6] = [
-            (types::I8, 0),
-            (types::I8, 1),
-            (types::I32, 0),
-            (types::I32, 1),
-            (types::I64, 0),
-            (types::I64, 1),
-        ];
-        let mut map = FxHashMap::default();
-        for (ty, val) in pairs {
-            let v = builder.ins().iconst(ty, val);
-            map.insert((ty, val), v);
-        }
-        map
     }
 
     /// Set closure captures (None = no captures).
@@ -817,52 +805,82 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Emit or reuse a cached `iconst` instruction in the current basic block.
+    /// Return a cached `iconst` value, creating it in the entry block on first use.
     ///
-    /// Looks up `(ty, val)` in the per-block cache. On a miss, emits
-    /// `builder.ins().iconst(ty, val)` and stores the result. On a hit,
-    /// returns the previously emitted `Value`, eliminating a redundant
-    /// instruction.
+    /// On a hit, returns the previously created `Value`. On a miss, inserts a
+    /// new `iconst` instruction into the **entry block** (before its
+    /// terminator) via the low-level DFG/layout API, then caches the result.
+    ///
+    /// Because the entry block dominates every other block, the returned
+    /// `Value` is valid at any program point.
     #[inline]
     pub fn iconst_cached(&mut self, ty: Type, val: i64) -> Value {
         if let Some(&v) = self.iconst_cache.get(&(ty, val)) {
             return v;
         }
-        let v = self.builder.ins().iconst(ty, val);
+        let v = self.insert_iconst_in_entry(ty, val);
         self.iconst_cache.insert((ty, val), v);
         v
+    }
+
+    /// Insert an `iconst` instruction into the entry block using the
+    /// low-level DFG + layout API (bypasses `FunctionBuilder` cursor).
+    fn insert_iconst_in_entry(&mut self, ty: Type, val: i64) -> Value {
+        // Mask the immediate to the type's bit width, matching the
+        // normalization that `InstBuilder::iconst` performs internally
+        // via `InstructionData::mask_immediates` (which is pub(crate)).
+        let masked = mask_imm_to_type(val, ty);
+
+        let func = &mut self.builder.func;
+        let inst = func.dfg.make_inst(InstructionData::UnaryImm {
+            opcode: Opcode::Iconst,
+            imm: Imm64::new(masked),
+        });
+        func.dfg.make_inst_results(inst, ty);
+
+        // Place before the entry block's terminator if one exists,
+        // otherwise append (we're still building the entry block).
+        let entry = self.entry_block;
+        if let Some(last) = func.layout.last_inst(entry) {
+            if func.dfg.insts[last].opcode().is_branch() {
+                func.layout.insert_inst(inst, last);
+            } else {
+                func.layout.append_inst(inst, entry);
+            }
+        } else {
+            func.layout.append_inst(inst, entry);
+        }
+
+        func.dfg.first_result(inst)
     }
 
     /// Switch the builder to a new basic block, resetting per-block caches.
     ///
     /// All `self.builder.switch_to_block(block)` calls inside `Cg` methods
-    /// should go through this wrapper so that the iconst cache (and any future
-    /// per-block caches) are automatically invalidated.
+    /// should go through this wrapper so that per-block caches are
+    /// automatically invalidated.
     ///
-    /// The `iconst_cache` is reset to the entry-block constants rather than
-    /// fully cleared, so values hoisted into the entry block remain available
-    /// in every block (safe because the entry block dominates all others).
+    /// The `iconst_cache` is **not** cleared — all cached constants live in
+    /// the entry block and dominate every other block.
     pub fn switch_to_block(&mut self, block: Block) {
         self.builder.switch_to_block(block);
-        self.iconst_cache.clone_from(&self.entry_constants);
     }
 
     /// Invalidate value caches when entering a control flow branch.
     ///
-    /// The `field_cache` and `iconst_cache` store Cranelift SSA `Value`s that
-    /// are defined in a particular basic block.  When the builder switches to a
-    /// sibling block (e.g., the next arm of a `when`/`match`/`if` expression),
-    /// values cached from a previous arm do **not** dominate the new block,
-    /// so reusing them would produce a Cranelift verifier error
+    /// The `field_cache` stores Cranelift SSA `Value`s that are defined in a
+    /// particular basic block. When the builder switches to a sibling block
+    /// (e.g., the next arm of a `when`/`match`/`if` expression), values
+    /// cached from a previous arm do **not** dominate the new block, so
+    /// reusing them would produce a Cranelift verifier error
     /// ("uses value from non-dominating inst").
     ///
-    /// The `iconst_cache` is reset to entry-block constants (which dominate
-    /// all blocks) rather than fully cleared.
+    /// The `iconst_cache` is **not** cleared — all cached constants live in
+    /// the entry block and dominate every block.
     ///
     /// Call this at the start of each arm body in any branching construct.
     pub fn invalidate_value_caches(&mut self) {
         self.field_cache.clear();
-        self.iconst_cache.clone_from(&self.entry_constants);
     }
 
     /// Call a runtime function that returns void
@@ -922,6 +940,20 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
     fn ptr_to_symbol(&self) -> &FxHashMap<usize, String> {
         &self.env.state.ptr_to_symbol
     }
+}
+
+/// Mask an `i64` immediate to the bit width of a Cranelift integer type.
+///
+/// Reproduces the normalization that `InstructionData::mask_immediates`
+/// (pub(crate) in cranelift-codegen) performs so that the verifier sees a
+/// zero-extended bit pattern when the type is narrower than 64 bits.
+fn mask_imm_to_type(val: i64, ty: Type) -> i64 {
+    let bits = ty.bits();
+    if bits >= 64 {
+        return val;
+    }
+    let mask = (1i64 << bits) - 1;
+    val & mask
 }
 
 /// Resolve the module path and native function name strings from an ExternalMethodInfo.
