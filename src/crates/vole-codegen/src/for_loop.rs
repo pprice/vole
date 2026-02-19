@@ -438,8 +438,9 @@ impl Cg<'_, '_, '_> {
         // Header: call iter_next, check result
         self.switch_to_block(header);
         let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter.value, slot_addr])?;
-        let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
-        self.emit_brif(is_done, exit_block, body_block);
+        // `has_value` is nonzero when the iterator produced a value;
+        // `brif` treats nonzero as true, so branch directly without icmp_imm.
+        self.emit_brif(has_value, body_block, exit_block);
 
         // Body: load value from stack slot, narrow to element type, run body
         self.switch_to_block(body_block);
@@ -540,8 +541,9 @@ impl Cg<'_, '_, '_> {
         // Header: call iter_next, check result
         self.switch_to_block(header);
         let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter_val, slot_addr])?;
-        let is_done = self.builder.ins().icmp_imm(IntCC::Equal, has_value, 0);
-        self.emit_brif(is_done, exit_block, body_block);
+        // `has_value` is nonzero when the iterator produced a value;
+        // `brif` treats nonzero as true, so branch directly without icmp_imm.
+        self.emit_brif(has_value, body_block, exit_block);
 
         // Body: load value from stack slot, run body
         self.switch_to_block(body_block);

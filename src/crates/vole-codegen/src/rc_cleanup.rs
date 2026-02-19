@@ -281,14 +281,14 @@ pub(crate) fn emit_rc_cleanup(
         }
 
         // Unknown flag: emit the full conditional diamond.
-        let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
-
+        // `flag_val` is an i8 boolean (0 = dead, nonzero = live); `brif` already
+        // treats nonzero as true, so no icmp_imm needed.
         let cleanup_block = builder.create_block();
         let after_block = builder.create_block();
 
         builder
             .ins()
-            .brif(is_live, cleanup_block, &[], after_block, &[]);
+            .brif(flag_val, cleanup_block, &[], after_block, &[]);
 
         builder.switch_to_block(cleanup_block);
         builder.seal_block(cleanup_block);
@@ -368,14 +368,13 @@ pub(crate) fn emit_union_rc_cleanup(
         }
 
         // Unknown flag: emit the full conditional diamond.
-        let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
-
+        // `flag_val` is an i8 boolean; `brif` treats nonzero as true directly.
         let cleanup_block = builder.create_block();
         let after_block = builder.create_block();
 
         builder
             .ins()
-            .brif(is_live, cleanup_block, &[], after_block, &[]);
+            .brif(flag_val, cleanup_block, &[], after_block, &[]);
 
         builder.switch_to_block(cleanup_block);
         builder.seal_block(cleanup_block);
@@ -465,14 +464,13 @@ pub(crate) fn emit_composite_rc_cleanup(
         }
 
         // Unknown flag: emit the full conditional diamond.
-        let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
-
+        // `flag_val` is an i8 boolean; `brif` treats nonzero as true directly.
         let cleanup_block = builder.create_block();
         let after_block = builder.create_block();
 
         builder
             .ins()
-            .brif(is_live, cleanup_block, &[], after_block, &[]);
+            .brif(flag_val, cleanup_block, &[], after_block, &[]);
 
         builder.switch_to_block(cleanup_block);
         builder.seal_block(cleanup_block);

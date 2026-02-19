@@ -519,9 +519,10 @@ impl Cg<'_, '_, '_> {
             value.value,
             union_layout::IS_RC_OFFSET,
         );
-        let is_rc_nonzero = self.builder.ins().icmp_imm(IntCC::NotEqual, is_rc, 0);
+        // `is_rc` is already an i8 boolean (0 or 1), so skip the icmp_imm for it.
+        // `payload` is i64, so icmp_imm is needed to produce an i8 boolean for `band`.
         let payload_nonzero = self.builder.ins().icmp_imm(IntCC::NotEqual, payload, 0);
-        let needs_inc = self.builder.ins().band(is_rc_nonzero, payload_nonzero);
+        let needs_inc = self.builder.ins().band(is_rc, payload_nonzero);
 
         let then_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
