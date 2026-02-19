@@ -373,7 +373,11 @@ impl Compiler<'_> {
                 let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
                 (metadata.vole_type, impl_id)
             }
-            _ => unreachable!(),
+            _ => {
+                return Err(CodegenError::internal(
+                    "import_module_implement_block: target type was not Primitive, Handle, Named, or Generic",
+                ));
+            }
         };
 
         // Import instance methods
@@ -557,10 +561,9 @@ impl Compiler<'_> {
                 (metadata.vole_type, impl_id)
             }
             _ => {
-                unreachable!(
-                    "target_type was neither Primitive, Handle, Named, nor Generic, \
-                         but passed get_type_name_from_expr check"
-                )
+                return Err(CodegenError::internal(
+                    "register_implement_block: target type was not Primitive, Handle, Named, or Generic, but passed get_type_name_from_expr check",
+                ));
             }
         };
 
@@ -758,10 +761,9 @@ impl Compiler<'_> {
                     })?
             }
             _ => {
-                unreachable!(
-                    "target_type was neither Primitive, Handle, Named, nor Generic, \
-                     but passed get_type_name_from_expr check"
-                )
+                return Err(CodegenError::internal(
+                    "compile_implement_block: self type was not Primitive, Handle, Named, or Generic, but passed get_type_name_from_expr check",
+                ));
             }
         };
         // Get TypeDefId for method lookup via method_func_keys
@@ -837,7 +839,11 @@ impl Compiler<'_> {
                         )
                     })?
             }
-            _ => unreachable!("target_type was neither Primitive, Handle, Named, nor Generic"),
+            _ => {
+                return Err(CodegenError::internal(
+                    "compile_implement_block: target type was not Primitive, Handle, Named, or Generic",
+                ));
+            }
         };
 
         let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
