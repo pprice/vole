@@ -955,7 +955,8 @@ impl Cg<'_, '_, '_> {
     /// Dispatches on `slot_type` (the Cranelift type from `leaf_cranelift_type`):
     /// - F32: stored as zero-extended I64; load I64, ireduce to I32, bitcast to F32, fcmp
     /// - F64: stored directly as F64 (8 bytes); load F64, fcmp
-    /// - F128: stored as two I64 halves (16 bytes); load I128, call_f128_cmp (no native fcmp)
+    /// - F128: stored as two independent 8-byte slots (low at offset, high at offset+8);
+    ///   load two I64 halves, reconstruct_i128, bitcast to F128, call_f128_cmp
     /// - I64/I128/other: load with slot_type, icmp
     fn struct_slot_eq(
         &mut self,
@@ -987,16 +988,29 @@ impl Cg<'_, '_, '_> {
                 .bitcast(types::F32, MemFlags::new(), right_i32);
             Ok(self.builder.ins().fcmp(FloatCC::Equal, left_f32, right_f32))
         } else if slot_type == types::F128 {
-            // F128 fields occupy 16 bytes. Cranelift has no native fcmp for F128;
-            // use the runtime call instead (same as compare_optional_payload_eq).
-            let left_i128 = self
+            // F128 fields occupy 16 bytes stored as two independent 8-byte slots:
+            // low half at `offset`, high half at `offset + 8` (written by store_value_to_stack).
+            // A single I128 load would assume 16-byte alignment, but struct fields are only
+            // guaranteed 8-byte aligned. Use the paired I64 + reconstruct_i128 pattern.
+            // Cranelift has no native fcmp for F128; use the runtime call instead.
+            let left_low = self
                 .builder
                 .ins()
-                .load(types::I128, MemFlags::new(), left_ptr, offset);
-            let right_i128 =
+                .load(types::I64, MemFlags::new(), left_ptr, offset);
+            let left_high =
                 self.builder
                     .ins()
-                    .load(types::I128, MemFlags::new(), right_ptr, offset);
+                    .load(types::I64, MemFlags::new(), left_ptr, offset + 8);
+            let right_low = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), right_ptr, offset);
+            let right_high =
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), right_ptr, offset + 8);
+            let left_i128 = crate::structs::reconstruct_i128(self.builder, left_low, left_high);
+            let right_i128 = crate::structs::reconstruct_i128(self.builder, right_low, right_high);
             let left_f128 = self
                 .builder
                 .ins()
