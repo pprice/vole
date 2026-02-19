@@ -40,7 +40,9 @@ pub use implement_registry::{
 };
 pub use memory_kind::MemoryKind;
 pub use module::{LoadError, ModuleInfo, ModuleLoader};
-pub use numeric_model::{integer_result_type, numeric_result_type};
+pub use numeric_model::{
+    NumericCoercion, integer_result_type, numeric_coercion, numeric_result_type,
+};
 pub use optimizer::{OptimizerStats, optimize_all};
 pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
