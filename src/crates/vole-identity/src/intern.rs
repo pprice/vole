@@ -2,14 +2,25 @@
 //
 // String interning for Symbol IDs.
 
+use std::hash::BuildHasher;
+
 use crate::Symbol;
-use rustc_hash::FxHashMap;
+use rustc_hash::FxBuildHasher;
 
 /// Interns strings to unique Symbol IDs
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Interner {
-    map: FxHashMap<String, Symbol>,
+    map: hashbrown::HashMap<String, Symbol, FxBuildHasher>,
     strings: Vec<String>,
+}
+
+impl Default for Interner {
+    fn default() -> Self {
+        Self {
+            map: hashbrown::HashMap::with_hasher(FxBuildHasher),
+            strings: Vec::new(),
+        }
+    }
 }
 
 impl Interner {
@@ -18,14 +29,23 @@ impl Interner {
     }
 
     pub fn intern(&mut self, s: &str) -> Symbol {
-        if let Some(&sym) = self.map.get(s) {
-            return sym;
-        }
+        use hashbrown::hash_map::RawEntryMut;
 
-        let sym = Symbol::new(self.strings.len() as u32);
-        self.strings.push(s.to_string());
-        self.map.insert(s.to_string(), sym);
-        sym
+        // Hash once, reuse for both lookup and insert.
+        let hash = self.map.hasher().hash_one(s);
+
+        let entry = self.map.raw_entry_mut().from_hash(hash, |k| k == s);
+
+        match entry {
+            RawEntryMut::Occupied(e) => *e.get(),
+            RawEntryMut::Vacant(e) => {
+                let sym = Symbol::new(self.strings.len() as u32);
+                let owned = s.to_string();
+                self.strings.push(owned.clone());
+                e.insert_hashed_nocheck(hash, owned, sym);
+                sym
+            }
+        }
     }
 
     pub fn resolve(&self, sym: Symbol) -> &str {
