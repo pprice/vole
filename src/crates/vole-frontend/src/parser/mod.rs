@@ -9,6 +9,8 @@ pub struct Parser<'src> {
     pub(super) previous: Token<'src>,
     pub(super) interner: Interner,
     next_node_id: u32,
+    /// The module this parser is generating nodes for.
+    module_id: ModuleId,
     /// Tracks when we've consumed half of a '>>' token while parsing generics.
     /// When true, the next check/consume for '>' should succeed without advancing.
     pending_gt: bool,
@@ -32,7 +34,11 @@ impl ParseError {
 }
 
 impl<'src> Parser<'src> {
-    pub fn new(source: &'src str) -> Self {
+    /// Create a parser for the given source, assigning `module_id` to all generated NodeIds.
+    ///
+    /// Pass `ModuleId::new(0)` (the main module sentinel) when parsing the main program.
+    /// Module loads should pass the ModuleId they already compute from the NameTable.
+    pub fn new(source: &'src str, module_id: ModuleId) -> Self {
         let mut lexer = Lexer::new(source);
         let current = lexer.next_token();
         let mut interner = Interner::new();
@@ -44,6 +50,7 @@ impl<'src> Parser<'src> {
             previous: Token::new(TokenType::Eof, "", Span::default()),
             interner,
             next_node_id: 0,
+            module_id,
             pending_gt: false,
             skip_tests: false,
         }
@@ -55,9 +62,9 @@ impl<'src> Parser<'src> {
         self.skip_tests = skip;
     }
 
-    /// Generate a unique node ID
+    /// Generate a unique node ID (globally unique via embedded ModuleId).
     pub(super) fn next_id(&mut self) -> NodeId {
-        let id = NodeId::new(self.next_node_id);
+        let id = NodeId::new(self.module_id, self.next_node_id);
         self.next_node_id += 1;
         id
     }

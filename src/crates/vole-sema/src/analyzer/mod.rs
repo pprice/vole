@@ -52,8 +52,6 @@ use vole_frontend::ast::*;
 use vole_frontend::{Interner, Parser, Span};
 use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, TypeDefId};
 
-// Re-export extracted types to preserve the existing API.
-use context::ExtractedModuleData;
 pub(crate) use context::{AnalyzerContext, ResolverGuard};
 pub(crate) use output::MethodLookup;
 pub use output::{AnalysisOutput, AnalyzerBuilder, TypeError, TypeWarning};
@@ -168,39 +166,38 @@ impl Analyzer {
 
         // Try to take ownership of the shared context to avoid cloning AST trees.
         // By this point all sub-analyzers should be dropped, so Rc strong count is 1.
-        let (module_data, module_programs, db, modules_with_errors) = match Rc::try_unwrap(self.ctx)
-        {
-            Ok(ctx) => {
-                // Sole owner: move data out of RefCells without cloning
-                let data = ExtractedModuleData {
-                    data: ctx.module_data.into_inner(),
-                };
-                let errored = ctx.modules_with_errors.into_inner();
-                (data, ctx.module_programs.into_inner(), ctx.db, errored)
-            }
-            Err(ctx) => {
-                // Other references exist: fall back to cloning (should not happen in practice)
-                let data = ExtractedModuleData {
-                    data: ctx.module_data.borrow().clone(),
-                };
-                let errored = ctx.modules_with_errors.borrow().clone();
-                (
-                    data,
-                    ctx.module_programs.borrow().clone(),
-                    Rc::clone(&ctx.db),
-                    errored,
-                )
-            }
-        };
+        let (merged_expr_data, module_programs, db, modules_with_errors) =
+            match Rc::try_unwrap(self.ctx) {
+                Ok(ctx) => {
+                    // Sole owner: move data out of RefCells without cloning
+                    let errored = ctx.modules_with_errors.into_inner();
+                    (
+                        ctx.merged_expr_data.into_inner(),
+                        ctx.module_programs.into_inner(),
+                        ctx.db,
+                        errored,
+                    )
+                }
+                Err(ctx) => {
+                    // Other references exist: fall back to cloning (should not happen in practice)
+                    let errored = ctx.modules_with_errors.borrow().clone();
+                    (
+                        ctx.merged_expr_data.borrow().clone(),
+                        ctx.module_programs.borrow().clone(),
+                        Rc::clone(&ctx.db),
+                        errored,
+                    )
+                }
+            };
 
         let intrinsic_keys = results.intrinsic_keys;
-        let expression_data = ExpressionData::builder()
+        // Build main-program expression data, then merge in module data
+        let mut expression_data = ExpressionData::builder()
             .types(expr_types)
             .methods(method_resolutions)
             .generics(generic_calls)
             .class_method_generics(class_method_calls)
             .static_method_generics(static_method_calls)
-            .module_data(module_data.data)
             .substituted_return_types(substituted_return_types)
             .lambda_defaults(lambda_defaults)
             .tests_virtual_modules(tests_virtual_modules)
@@ -209,6 +206,8 @@ impl Analyzer {
             .lambda_analysis(lambda_analysis)
             .intrinsic_keys(intrinsic_keys)
             .build();
+        // Merge module analysis data (globally unique NodeIds, no collisions)
+        expression_data.merge(merged_expr_data);
 
         AnalysisOutput {
             expression_data,

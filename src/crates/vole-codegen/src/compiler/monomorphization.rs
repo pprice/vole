@@ -263,13 +263,7 @@ impl Compiler<'_> {
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = compile_env!(
-                    self,
-                    module_interner,
-                    &no_global_inits,
-                    source_file_ptr,
-                    module_id
-                );
+                let env = compile_env!(self, module_interner, &no_global_inits, source_file_ptr);
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -667,9 +661,7 @@ impl Compiler<'_> {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = if let Some(path) = module_path {
                     let (_, interner) = &self.analyzed.module_programs[path];
-                    let module_id =
-                        cg_module_id.expect("cg_module_id set when module_path is Some");
-                    compile_env!(self, interner, &empty_inits, source_file_ptr, module_id)
+                    compile_env!(self, interner, &empty_inits, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
                 };
@@ -871,9 +863,7 @@ impl Compiler<'_> {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = if let Some(path) = module_path {
                     let (_, interner) = &self.analyzed.module_programs[path];
-                    let module_id =
-                        cg_module_id.expect("cg_module_id set when module_path is Some");
-                    compile_env!(self, interner, &empty_inits, source_file_ptr, module_id)
+                    compile_env!(self, interner, &empty_inits, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
                 };

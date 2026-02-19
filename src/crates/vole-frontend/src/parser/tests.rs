@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn parse_int_literal() {
-    let mut parser = Parser::new("42");
+    let mut parser = Parser::new("42", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::IntLiteral(n, _) => assert_eq!(n, 42),
@@ -12,7 +12,7 @@ fn parse_int_literal() {
 
 #[test]
 fn parse_float_literal() {
-    let mut parser = Parser::new("3.25");
+    let mut parser = Parser::new("3.25", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::FloatLiteral(n, _) => assert!((n - 3.25).abs() < 0.001),
@@ -22,7 +22,7 @@ fn parse_float_literal() {
 
 #[test]
 fn parse_float_literal_f128_suffix() {
-    let mut parser = Parser::new("3.25_f128");
+    let mut parser = Parser::new("3.25_f128", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::FloatLiteral(n, Some(NumericSuffix::F128)) => assert!((n - 3.25).abs() < 0.001),
@@ -32,7 +32,7 @@ fn parse_float_literal_f128_suffix() {
 
 #[test]
 fn parse_binary_add() {
-    let mut parser = Parser::new("1 + 2");
+    let mut parser = Parser::new("1 + 2", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Binary(bin) => {
@@ -45,7 +45,7 @@ fn parse_binary_add() {
 #[test]
 fn parse_precedence() {
     // 1 + 2 * 3 should be 1 + (2 * 3)
-    let mut parser = Parser::new("1 + 2 * 3");
+    let mut parser = Parser::new("1 + 2 * 3", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Binary(bin) => {
@@ -63,7 +63,7 @@ fn parse_precedence() {
 
 #[test]
 fn parse_function_call() {
-    let mut parser = Parser::new("println(x)");
+    let mut parser = Parser::new("println(x)", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Call(call) => {
@@ -75,14 +75,14 @@ fn parse_function_call() {
 
 #[test]
 fn parse_bool_literals() {
-    let mut parser = Parser::new("true");
+    let mut parser = Parser::new("true", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::BoolLiteral(b) => assert!(b),
         _ => panic!("expected bool literal"),
     }
 
-    let mut parser = Parser::new("false");
+    let mut parser = Parser::new("false", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::BoolLiteral(b) => assert!(!b),
@@ -92,7 +92,7 @@ fn parse_bool_literals() {
 
 #[test]
 fn parse_string_literal() {
-    let mut parser = Parser::new("\"hello world\"");
+    let mut parser = Parser::new("\"hello world\"", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::StringLiteral(s) => assert_eq!(s, "hello world"),
@@ -102,7 +102,7 @@ fn parse_string_literal() {
 
 #[test]
 fn parse_grouping() {
-    let mut parser = Parser::new("(1 + 2) * 3");
+    let mut parser = Parser::new("(1 + 2) * 3", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Binary(bin) => {
@@ -123,7 +123,7 @@ fn parse_grouping() {
 
 #[test]
 fn parse_unary_neg() {
-    let mut parser = Parser::new("-42");
+    let mut parser = Parser::new("-42", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Unary(unary) => {
@@ -139,7 +139,7 @@ fn parse_unary_neg() {
 
 #[test]
 fn parse_assignment() {
-    let mut parser = Parser::new("x = 42");
+    let mut parser = Parser::new("x = 42", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Assign(assign) => match assign.value.kind {
@@ -152,7 +152,7 @@ fn parse_assignment() {
 
 #[test]
 fn parse_interpolated_string() {
-    let mut parser = Parser::new("\"hello {name}!\"");
+    let mut parser = Parser::new("\"hello {name}!\"", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::InterpolatedString(parts) => {
@@ -186,7 +186,7 @@ fn parse_comparison_operators() {
     ];
 
     for (input, expected_op) in test_cases {
-        let mut parser = Parser::new(input);
+        let mut parser = Parser::new(input, ModuleId::new(0));
         let expr = parser.parse_expression().unwrap();
         match expr.kind {
             ExprKind::Binary(bin) => {
@@ -199,7 +199,7 @@ fn parse_comparison_operators() {
 
 #[test]
 fn parse_binary_operator_with_newline_after_operator() {
-    let mut parser = Parser::new("1 ==\n2");
+    let mut parser = Parser::new("1 ==\n2", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Binary(bin) => assert_eq!(bin.op, BinaryOp::Eq),
@@ -209,7 +209,7 @@ fn parse_binary_operator_with_newline_after_operator() {
 
 #[test]
 fn parse_function_call_multiple_args() {
-    let mut parser = Parser::new("add(1, 2, 3)");
+    let mut parser = Parser::new("add(1, 2, 3)", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Call(call) => {
@@ -221,7 +221,7 @@ fn parse_function_call_multiple_args() {
 
 #[test]
 fn parse_function_call_no_args() {
-    let mut parser = Parser::new("foo()");
+    let mut parser = Parser::new("foo()", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Call(call) => {
@@ -238,7 +238,7 @@ func main() {
     let x = 42
 }
 "#;
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 1);
 }
@@ -262,7 +262,7 @@ func main() {
     println("done")
 }
 "#;
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 1);
 }
@@ -270,7 +270,7 @@ func main() {
 #[test]
 fn parse_left_associativity() {
     // 1 - 2 - 3 should be (1 - 2) - 3, not 1 - (2 - 3)
-    let mut parser = Parser::new("1 - 2 - 3");
+    let mut parser = Parser::new("1 - 2 - 3", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
 
     // Should be: (left: (1 - 2), op: Sub, right: 3)
@@ -314,7 +314,7 @@ tests {
     }
 }
 "#;
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 1);
     match &program.declarations[0] {
@@ -330,7 +330,7 @@ tests {
 // Tests for miette error integration
 #[test]
 fn parse_error_contains_parser_error() {
-    let mut parser = Parser::new("@");
+    let mut parser = Parser::new("@", ModuleId::new(0));
     let result = parser.parse_expression();
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -340,7 +340,7 @@ fn parse_error_contains_parser_error() {
 
 #[test]
 fn expected_expression_has_correct_error_type() {
-    let mut parser = Parser::new("func");
+    let mut parser = Parser::new("func", ModuleId::new(0));
     let result = parser.parse_expression();
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -350,7 +350,7 @@ fn expected_expression_has_correct_error_type() {
 #[test]
 fn expected_token_has_correct_error_type() {
     let source = "func main( {}";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -360,7 +360,7 @@ fn expected_token_has_correct_error_type() {
 #[test]
 fn expected_type_has_correct_error_type() {
     let source = "func main(x: +) {}";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -370,7 +370,7 @@ fn expected_type_has_correct_error_type() {
 
 #[test]
 fn parse_error_has_span() {
-    let mut parser = Parser::new("@");
+    let mut parser = Parser::new("@", ModuleId::new(0));
     let result = parser.parse_expression();
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -379,7 +379,7 @@ fn parse_error_has_span() {
 
 #[test]
 fn parse_unary_not() {
-    let mut parser = Parser::new("!true");
+    let mut parser = Parser::new("!true", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Unary(un) => {
@@ -391,7 +391,7 @@ fn parse_unary_not() {
 
 #[test]
 fn parse_double_not() {
-    let mut parser = Parser::new("!!false");
+    let mut parser = Parser::new("!!false", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Unary(un) => {
@@ -409,7 +409,7 @@ fn parse_double_not() {
 
 #[test]
 fn parse_logical_and() {
-    let mut parser = Parser::new("true && false");
+    let mut parser = Parser::new("true && false", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -421,7 +421,7 @@ fn parse_logical_and() {
 
 #[test]
 fn parse_logical_or() {
-    let mut parser = Parser::new("true || false");
+    let mut parser = Parser::new("true || false", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -434,7 +434,7 @@ fn parse_logical_or() {
 #[test]
 fn parse_logical_precedence() {
     // a || b && c should be a || (b && c) because && binds tighter
-    let mut parser = Parser::new("a || b && c");
+    let mut parser = Parser::new("a || b && c", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -452,7 +452,7 @@ fn parse_logical_precedence() {
 
 #[test]
 fn parse_bitwise_and() {
-    let mut parser = Parser::new("a & b");
+    let mut parser = Parser::new("a & b", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -464,7 +464,7 @@ fn parse_bitwise_and() {
 
 #[test]
 fn parse_bitwise_or() {
-    let mut parser = Parser::new("a | b");
+    let mut parser = Parser::new("a | b", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -476,7 +476,7 @@ fn parse_bitwise_or() {
 
 #[test]
 fn parse_bitwise_xor() {
-    let mut parser = Parser::new("a ^ b");
+    let mut parser = Parser::new("a ^ b", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -488,7 +488,7 @@ fn parse_bitwise_xor() {
 
 #[test]
 fn parse_shift_left() {
-    let mut parser = Parser::new("a << b");
+    let mut parser = Parser::new("a << b", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -500,7 +500,7 @@ fn parse_shift_left() {
 
 #[test]
 fn parse_shift_right() {
-    let mut parser = Parser::new("a >> b");
+    let mut parser = Parser::new("a >> b", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -512,7 +512,7 @@ fn parse_shift_right() {
 
 #[test]
 fn parse_bitwise_not() {
-    let mut parser = Parser::new("~a");
+    let mut parser = Parser::new("~a", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Unary(un) => {
@@ -526,7 +526,7 @@ fn parse_bitwise_not() {
 fn parse_bitwise_precedence() {
     // a | b ^ c & d should be a | (b ^ (c & d))
     // because & > ^ > |
-    let mut parser = Parser::new("a | b ^ c & d");
+    let mut parser = Parser::new("a | b ^ c & d", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -552,7 +552,7 @@ fn parse_bitwise_precedence() {
 fn parse_shift_vs_additive_precedence() {
     // a + b << c should be (a + b) << c
     // because + > << in precedence
-    let mut parser = Parser::new("a + b << c");
+    let mut parser = Parser::new("a + b << c", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -572,7 +572,7 @@ fn parse_shift_vs_additive_precedence() {
 fn parse_bitwise_vs_logical_precedence() {
     // a && b | c should be a && (b | c)
     // because | > && in precedence
-    let mut parser = Parser::new("a && b | c");
+    let mut parser = Parser::new("a && b | c", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Binary(bin) => {
@@ -592,14 +592,14 @@ fn parse_bitwise_vs_logical_precedence() {
 fn parse_nil_literal() {
     // nil is no longer a keyword; it parses as an identifier
     // (resolved to the prelude sentinel during semantic analysis)
-    let mut parser = Parser::new("nil");
+    let mut parser = Parser::new("nil", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     assert!(matches!(expr.kind, ExprKind::Identifier(_)));
 }
 
 #[test]
 fn parse_optional_type() {
-    let mut parser = Parser::new("func foo(x: i32?) {}");
+    let mut parser = Parser::new("func foo(x: i32?) {}", ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
         assert!(matches!(&f.params[0].ty.kind, TypeExprKind::Optional(_)));
@@ -610,7 +610,7 @@ fn parse_optional_type() {
 
 #[test]
 fn parse_union_type() {
-    let mut parser = Parser::new("func foo(x: i32 | string | nil) {}");
+    let mut parser = Parser::new("func foo(x: i32 | string | nil) {}", ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
         assert!(matches!(&f.params[0].ty.kind, TypeExprKind::Union(v) if v.len() == 3));
@@ -621,14 +621,14 @@ fn parse_union_type() {
 
 #[test]
 fn parse_null_coalesce() {
-    let mut parser = Parser::new("x ?? 0");
+    let mut parser = Parser::new("x ?? 0", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     assert!(matches!(expr.kind, ExprKind::NullCoalesce(_)));
 }
 
 #[test]
 fn parse_is_expression() {
-    let mut parser = Parser::new("x is i32");
+    let mut parser = Parser::new("x is i32", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     assert!(matches!(expr.kind, ExprKind::Is(_)));
 }
@@ -637,7 +637,7 @@ fn parse_is_expression() {
 fn parse_nil_type() {
     // nil is no longer a keyword; it parses as a Named type
     // (resolved to the prelude sentinel during semantic analysis)
-    let mut parser = Parser::new("func foo(x: nil) {}");
+    let mut parser = Parser::new("func foo(x: nil) {}", ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
         assert!(matches!(&f.params[0].ty.kind, TypeExprKind::Named(_)));
@@ -649,7 +649,7 @@ fn parse_nil_type() {
 #[test]
 fn parse_chained_optional() {
     // i32? ? should be (i32?)? (space needed because lexer tokenizes ?? as QuestionQuestion)
-    let mut parser = Parser::new("func foo(x: i32? ?) {}");
+    let mut parser = Parser::new("func foo(x: i32? ?) {}", ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
         if let TypeExprKind::Optional(inner) = &f.params[0].ty.kind {
@@ -665,7 +665,7 @@ fn parse_chained_optional() {
 #[test]
 fn parse_null_coalesce_right_associative() {
     // a ?? b ?? c should be a ?? (b ?? c)
-    let mut parser = Parser::new("a ?? b ?? c");
+    let mut parser = Parser::new("a ?? b ?? c", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::NullCoalesce(nc) => {
@@ -679,7 +679,7 @@ fn parse_null_coalesce_right_associative() {
 
 #[test]
 fn parse_is_with_optional_type() {
-    let mut parser = Parser::new("x is i32?");
+    let mut parser = Parser::new("x is i32?", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Is(is_expr) => {
@@ -691,7 +691,7 @@ fn parse_is_with_optional_type() {
 
 #[test]
 fn parse_is_with_union_type() {
-    let mut parser = Parser::new("x is i32 | string");
+    let mut parser = Parser::new("x is i32 | string", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match &expr.kind {
         ExprKind::Is(is_expr) => {
@@ -703,7 +703,7 @@ fn parse_is_with_union_type() {
 
 #[test]
 fn parse_function_type() {
-    let mut parser = Parser::new("let f: (i64, i64) -> i64 = x");
+    let mut parser = Parser::new("let f: (i64, i64) -> i64 = x", ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_ok());
     let program = result.unwrap();
@@ -726,7 +726,7 @@ fn parse_function_type() {
 
 #[test]
 fn parse_lambda_no_params() {
-    let mut parser = Parser::new("let f = () => 42");
+    let mut parser = Parser::new("let f = () => 42", ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
@@ -743,7 +743,7 @@ fn parse_lambda_no_params() {
 
 #[test]
 fn parse_lambda_one_param() {
-    let mut parser = Parser::new("let f = (x) => x");
+    let mut parser = Parser::new("let f = (x) => x", ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
@@ -761,7 +761,7 @@ fn parse_lambda_one_param() {
 
 #[test]
 fn parse_lambda_typed_param() {
-    let mut parser = Parser::new("let f = (x: i64) => x + 1");
+    let mut parser = Parser::new("let f = (x: i64) => x + 1", ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
@@ -779,7 +779,7 @@ fn parse_lambda_typed_param() {
 
 #[test]
 fn parse_lambda_multiple_params() {
-    let mut parser = Parser::new("let f = (a: i64, b: i64) => a + b");
+    let mut parser = Parser::new("let f = (a: i64, b: i64) => a + b", ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
@@ -796,7 +796,7 @@ fn parse_lambda_multiple_params() {
 
 #[test]
 fn parse_lambda_block_body() {
-    let mut parser = Parser::new("let f = (x: i64) => { return x + 1 }");
+    let mut parser = Parser::new("let f = (x: i64) => { return x + 1 }", ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
@@ -813,7 +813,7 @@ fn parse_lambda_block_body() {
 
 #[test]
 fn parse_grouping_not_lambda() {
-    let mut parser = Parser::new("let x = (1 + 2)");
+    let mut parser = Parser::new("let x = (1 + 2)", ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
@@ -833,7 +833,7 @@ fn parse_grouping_not_lambda() {
 
 #[test]
 fn parse_grouping_ident() {
-    let mut parser = Parser::new("let x = (y)");
+    let mut parser = Parser::new("let x = (y)", ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_ok(), "parse failed: {:?}", result.err());
     let program = result.unwrap();
@@ -864,7 +864,7 @@ class Point {
     }
 }
 "#;
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 1);
     match &program.declarations[0] {
@@ -878,7 +878,7 @@ class Point {
 
 #[test]
 fn parse_struct_literal() {
-    let mut parser = Parser::new("Point { x: 10, y: 20 }");
+    let mut parser = Parser::new("Point { x: 10, y: 20 }", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::StructLiteral(sl) => {
@@ -890,21 +890,21 @@ fn parse_struct_literal() {
 
 #[test]
 fn parse_field_access() {
-    let mut parser = Parser::new("p.x");
+    let mut parser = Parser::new("p.x", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     assert!(matches!(expr.kind, ExprKind::FieldAccess(_)));
 }
 
 #[test]
 fn parse_method_call() {
-    let mut parser = Parser::new("p.sum()");
+    let mut parser = Parser::new("p.sum()", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     assert!(matches!(expr.kind, ExprKind::MethodCall(_)));
 }
 
 #[test]
 fn parse_method_call_with_args() {
-    let mut parser = Parser::new("p.distance(other)");
+    let mut parser = Parser::new("p.distance(other)", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::MethodCall(mc) => {
@@ -916,7 +916,7 @@ fn parse_method_call_with_args() {
 
 #[test]
 fn parse_chained_field_access() {
-    let mut parser = Parser::new("a.b.c");
+    let mut parser = Parser::new("a.b.c", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     // Should parse as ((a.b).c)
     match expr.kind {
@@ -930,7 +930,7 @@ fn parse_chained_field_access() {
 
 #[test]
 fn parse_struct_literal_empty() {
-    let mut parser = Parser::new("Empty { }");
+    let mut parser = Parser::new("Empty { }", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::StructLiteral(sl) => {
@@ -942,7 +942,7 @@ fn parse_struct_literal_empty() {
 
 #[test]
 fn parse_struct_literal_trailing_comma() {
-    let mut parser = Parser::new("Point { x: 10, y: 20, }");
+    let mut parser = Parser::new("Point { x: 10, y: 20, }", ModuleId::new(0));
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::StructLiteral(sl) => {
@@ -954,7 +954,7 @@ fn parse_struct_literal_trailing_comma() {
 
 #[test]
 fn parse_import_expr() {
-    let mut parser = Parser::new(r#"let math = import "std:math""#);
+    let mut parser = Parser::new(r#"let math = import "std:math""#, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 1);
 
@@ -972,7 +972,7 @@ fn parse_import_expr() {
 #[test]
 fn test_parse_generic_function() {
     let source = "func identity<T>(x: T) -> T { return x }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Function(f) = &program.declarations[0] {
@@ -986,7 +986,7 @@ fn test_parse_generic_function() {
 #[test]
 fn test_parse_constrained_type_param() {
     let source = "func show<T: Stringable>(x: T) -> string { return x.to_string() }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Function(f) = &program.declarations[0] {
@@ -1000,7 +1000,7 @@ fn test_parse_constrained_type_param() {
 #[test]
 fn test_parse_generic_function_multiple_params() {
     let source = "func pair<A, B>(a: A, b: B) -> A { return a }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Function(f) = &program.declarations[0] {
@@ -1015,7 +1015,7 @@ fn test_parse_generic_function_multiple_params() {
 #[test]
 fn test_parse_generic_class() {
     let source = "class Container<T> { item: T }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Class(c) = &program.declarations[0] {
@@ -1032,7 +1032,7 @@ interface Iterable<T> {
     func next() -> T?
 }
 "#;
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Interface(i) = &program.declarations[0] {
@@ -1045,7 +1045,7 @@ interface Iterable<T> {
 #[test]
 fn test_parse_generic_type() {
     let source = "func foo(x: Box<i64>) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Function(f) = &program.declarations[0] {
@@ -1060,7 +1060,7 @@ fn test_parse_generic_type() {
 #[test]
 fn test_parse_nested_generic_type() {
     let source = "func foo(x: Map<string, i64>) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse");
 
     if let Decl::Function(f) = &program.declarations[0] {
@@ -1076,7 +1076,7 @@ fn test_parse_nested_generic_type() {
 fn test_parse_deeply_nested_generic_type() {
     // Tests >> token splitting: Box<i64>> must be parsed as Box<i64> >
     let source = "func foo(x: Map<string, Box<i64>>) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse nested generics with >>");
@@ -1103,7 +1103,7 @@ fn test_parse_deeply_nested_generic_type() {
 fn test_parse_triple_nested_generic() {
     // Tests >>> case: three levels of nesting
     let source = "func foo(x: Outer<Middle<Inner<i64>>>) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse triple nested generics");
@@ -1137,7 +1137,7 @@ fn test_parse_triple_nested_generic() {
 fn test_parse_tuple_type() {
     // Tuple type: [i32, string]
     let source = "func foo(x: [i32, string]) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse tuple type");
 
     if let Decl::Function(f) = &program.declarations[0] {
@@ -1161,7 +1161,7 @@ fn test_parse_tuple_type() {
 fn test_parse_tuple_type_three_elements() {
     // Tuple type with 3 elements
     let source = "func foo(x: [i64, bool, f64]) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse 3-element tuple");
@@ -1178,7 +1178,7 @@ fn test_parse_tuple_type_three_elements() {
 #[test]
 fn test_parse_f128_type() {
     let source = "func foo(x: f128) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse f128 type");
 
     if let Decl::Function(f) = &program.declarations[0] {
@@ -1195,7 +1195,7 @@ fn test_parse_f128_type() {
 fn test_parse_fixed_array_type() {
     // Fixed array type: [i32; 10]
     let source = "func foo(x: [i32; 10]) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse fixed array type");
@@ -1217,7 +1217,7 @@ fn test_parse_fixed_array_type() {
 fn test_parse_array_type_unchanged() {
     // Regular array type: [i32] - should still work
     let source = "func foo(x: [i32]) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse dynamic array type");
@@ -1238,7 +1238,7 @@ fn test_parse_array_type_unchanged() {
 fn test_parse_tuple_trailing_comma() {
     // Tuple with trailing comma
     let source = "func foo(x: [i32, string,]) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse tuple with trailing comma");
@@ -1256,7 +1256,7 @@ fn test_parse_tuple_trailing_comma() {
 fn test_parse_repeat_literal() {
     // Repeat literal: [0; 10]
     let source = "let arr = [0; 10]";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().expect("should parse repeat literal");
 
     if let Decl::Let(l) = &program.declarations[0] {
@@ -1277,7 +1277,7 @@ fn test_parse_repeat_literal() {
 fn test_parse_repeat_literal_with_expression() {
     // Repeat literal with expression: [1 + 2; 5]
     let source = "let arr = [1 + 2; 5]";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse repeat literal with expression");
@@ -1296,7 +1296,7 @@ fn test_parse_repeat_literal_with_expression() {
 fn test_parse_array_vs_repeat_disambiguation() {
     // [x] is array literal, [x; 5] is repeat literal
     let source1 = "let a = [x]";
-    let mut parser1 = Parser::new(source1);
+    let mut parser1 = Parser::new(source1, ModuleId::new(0));
     let program1 = parser1.parse_program().expect("should parse array literal");
 
     if let Decl::Let(l) = &program1.declarations[0] {
@@ -1307,7 +1307,7 @@ fn test_parse_array_vs_repeat_disambiguation() {
     }
 
     let source2 = "let b = [x; 5]";
-    let mut parser2 = Parser::new(source2);
+    let mut parser2 = Parser::new(source2, ModuleId::new(0));
     let program2 = parser2
         .parse_program()
         .expect("should parse repeat literal");
@@ -1324,7 +1324,7 @@ fn test_parse_array_vs_repeat_disambiguation() {
 fn test_parse_param_default_value() {
     // Parameter with default value: y: i64 = 10
     let source = "func foo(x: i64, y: i64 = 10) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse parameter with default value");
@@ -1348,7 +1348,7 @@ fn test_parse_param_default_value() {
 fn test_parse_param_default_value_expression() {
     // Parameter with expression as default value
     let source = "func foo(x: i64 = 1 + 2) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse parameter with expression default");
@@ -1369,7 +1369,7 @@ fn test_parse_param_default_value_expression() {
 fn test_parse_param_no_default_value() {
     // Parameter without default value (sanity check)
     let source = "func foo(x: i64) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse parameter without default");
@@ -1386,7 +1386,7 @@ fn test_parse_param_no_default_value() {
 fn test_parse_multiple_params_with_defaults() {
     // Multiple parameters with default values
     let source = "func foo(a: i64, b: i64 = 1, c: i64 = 2) { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse multiple params with defaults");
@@ -1404,7 +1404,7 @@ fn test_parse_multiple_params_with_defaults() {
 #[test]
 fn parse_sentinel_decl() {
     let source = "sentinel Done";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 1);
     match &program.declarations[0] {
@@ -1419,7 +1419,7 @@ fn parse_sentinel_decl() {
 #[test]
 fn parse_sentinel_decl_lowercase() {
     let source = "sentinel nil";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 1);
     match &program.declarations[0] {
@@ -1434,7 +1434,7 @@ fn parse_sentinel_decl_lowercase() {
 #[test]
 fn parse_sentinel_cannot_have_body() {
     let source = "sentinel Foo { }";
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -1450,7 +1450,7 @@ fn parse_sentinel_with_function() {
 sentinel Done
 func main() {}
 "#;
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 2);
     assert!(matches!(&program.declarations[0], Decl::Sentinel(_)));
@@ -1467,7 +1467,7 @@ external("vole:compiler_intrinsic") {
     }
 }
 "#;
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .expect("should parse where default arm");
@@ -1494,7 +1494,7 @@ external("vole:compiler_intrinsic") {
     }
 }
 "#;
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let result = parser.parse_program();
     assert!(result.is_err());
     let err = result.unwrap_err();

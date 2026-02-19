@@ -94,7 +94,7 @@ struct ImportInfo {
 ///
 /// Returns `None` if parsing fails (signals caller to use line-based fallback).
 fn parse_import_spans(source: &str) -> Option<Vec<ImportInfo>> {
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().ok()?;
 
     let mut imports = Vec::new();

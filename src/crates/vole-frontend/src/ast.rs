@@ -5,31 +5,57 @@ use crate::Span;
 // Re-export Symbol from vole-identity (canonical definition)
 pub use vole_identity::Symbol;
 
-/// Unique identifier for AST nodes (expressions, statements, declarations)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct NodeId(u32);
+// Re-export ModuleId from vole-identity for use in NodeId
+pub use vole_identity::ModuleId;
+
+/// Unique identifier for AST nodes (expressions, statements, declarations).
+///
+/// Globally unique across all parse units: the `module` field identifies which
+/// source file/module produced the node, and `local` is a per-module counter.
+/// This eliminates cross-file NodeId collisions that previously required
+/// duplicated lookup tables (e.g., `get_generic` vs `get_generic_in_module`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NodeId {
+    /// The module this node belongs to.
+    pub module: ModuleId,
+    /// Per-module sequential counter assigned by the parser.
+    pub local: u32,
+}
 
 impl NodeId {
-    /// Create a NodeId from a raw index. Only the parser and code generators should use this.
-    pub fn new(index: u32) -> Self {
-        Self(index)
+    /// Create a NodeId for a given module and local index.
+    /// Only the parser and code generators should use this.
+    pub fn new(module: ModuleId, local: u32) -> Self {
+        Self { module, local }
     }
 
-    /// Return the underlying index.
-    pub fn index(self) -> u32 {
-        self.0
+    /// Return the local (per-module) index.
+    pub fn local(self) -> u32 {
+        self.local
     }
 
-    /// Create a NodeId with an arbitrary index in test code.
+    /// Create a NodeId with an arbitrary index in test code (uses main module).
     #[cfg(any(test, feature = "testing"))]
     pub fn new_for_test(index: u32) -> Self {
-        Self(index)
+        Self {
+            module: ModuleId::new(0),
+            local: index,
+        }
+    }
+}
+
+impl Default for NodeId {
+    fn default() -> Self {
+        Self {
+            module: ModuleId::new(0),
+            local: 0,
+        }
     }
 }
 
 impl std::fmt::Display for NodeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "node#{}", self.0)
+        write!(f, "node#{}:{}", self.module.index(), self.local)
     }
 }
 

@@ -143,20 +143,17 @@ impl Analyzer {
                 (cached.program.clone(), cached.interner.clone()),
             );
             {
-                use crate::expression_data::ModuleAnalysisData;
-                self.ctx.module_data.borrow_mut().insert(
-                    import_path.to_string(),
-                    ModuleAnalysisData {
-                        types: cached.expr_types.clone(),
-                        methods: cached.method_resolutions.clone(),
-                        is_check_results: cached.is_check_results.clone(),
-                        generic_calls: cached.generic_calls.clone(),
-                        class_method_calls: cached.class_method_generics.clone(),
-                        static_method_calls: cached.static_method_generics.clone(),
-                        declared_var_types: cached.declared_var_types,
-                        ..ModuleAnalysisData::default()
-                    },
-                );
+                use crate::expression_data::ExpressionData;
+                let cached_data = ExpressionData::builder()
+                    .types(cached.expr_types.clone())
+                    .methods(cached.method_resolutions.clone())
+                    .generics(cached.generic_calls.clone())
+                    .class_method_generics(cached.class_method_generics.clone())
+                    .static_method_generics(cached.static_method_generics.clone())
+                    .is_check_results(cached.is_check_results.clone())
+                    .declared_var_types(cached.declared_var_types)
+                    .build();
+                self.ctx.merged_expr_data.borrow_mut().merge(cached_data);
             }
             return;
         }
@@ -173,8 +170,14 @@ impl Analyzer {
                 )
             });
 
-        // Parse the module
-        let mut parser = Parser::new(&module_info.source);
+        // For prelude files, use the symbolic import_path (like "std:prelude/traits")
+        // for module_id to maintain consistent type identity for interfaces.
+        // This ensures Iterator<T> comparisons work correctly across modules.
+        // Computed before parsing so NodeIds embed the correct ModuleId.
+        let prelude_module = self.name_table_mut().module_id(import_path);
+
+        // Parse the module (pass prelude_module so NodeIds are globally unique)
+        let mut parser = Parser::new(&module_info.source, prelude_module);
         let program = parser.parse_program().unwrap_or_else(|err| {
             panic!(
                 "Failed to parse prelude file '{import_path}': {err:?}\n\
@@ -184,11 +187,6 @@ impl Analyzer {
 
         let mut prelude_interner = parser.into_interner();
         prelude_interner.seed_builtin_symbols();
-
-        // For prelude files, use the symbolic import_path (like "std:prelude/traits")
-        // for module_id to maintain consistent type identity for interfaces.
-        // This ensures Iterator<T> comparisons work correctly across modules.
-        let prelude_module = self.name_table_mut().module_id(import_path);
 
         // Create a sub-analyzer that shares the same context
         let mut sub_analyzer = self.fork_for_prelude(prelude_module, module_info.path.clone());
@@ -290,20 +288,17 @@ impl Analyzer {
             .borrow_mut()
             .insert(import_path.to_string(), (program, prelude_interner));
         {
-            use crate::expression_data::ModuleAnalysisData;
-            self.ctx.module_data.borrow_mut().insert(
-                import_path.to_string(),
-                ModuleAnalysisData {
-                    types: sub_analyzer.results.expr_types.clone(),
-                    methods: sub_analyzer.results.method_resolutions.into_inner(),
-                    is_check_results: sub_analyzer.results.is_check_results.clone(),
-                    generic_calls: sub_analyzer.results.generic_calls.clone(),
-                    class_method_calls: sub_analyzer.results.class_method_calls.clone(),
-                    static_method_calls: sub_analyzer.results.static_method_calls.clone(),
-                    declared_var_types: sub_analyzer.results.declared_var_types.clone(),
-                    lambda_analysis: Default::default(),
-                },
-            );
+            use crate::expression_data::ExpressionData;
+            let prelude_data = ExpressionData::builder()
+                .types(sub_analyzer.results.expr_types)
+                .methods(sub_analyzer.results.method_resolutions.into_inner())
+                .generics(sub_analyzer.results.generic_calls)
+                .class_method_generics(sub_analyzer.results.class_method_calls)
+                .static_method_generics(sub_analyzer.results.static_method_calls)
+                .is_check_results(sub_analyzer.results.is_check_results)
+                .declared_var_types(sub_analyzer.results.declared_var_types)
+                .build();
+            self.ctx.merged_expr_data.borrow_mut().merge(prelude_data);
         }
     }
 
@@ -358,6 +353,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::rc::Rc;
     use tempfile::TempDir;
+    use vole_identity::ModuleId;
 
     fn copy_dir_recursive(src: &Path, dst: &Path) {
         fs::create_dir_all(dst).expect("create destination directory");
@@ -403,7 +399,7 @@ func partial_warning_probe() -> i64 {
     ) -> Vec<(String, usize)> {
         let file_path = project_root.join(file_name);
         let source = fs::read_to_string(&file_path).expect("read source");
-        let mut parser = Parser::new(&source);
+        let mut parser = Parser::new(&source, ModuleId::new(0));
         let program = parser.parse_program().expect("parse source");
         let mut interner = parser.into_interner();
         interner.seed_builtin_symbols();

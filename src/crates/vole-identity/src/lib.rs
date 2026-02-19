@@ -28,6 +28,10 @@ pub use resolver::Resolver;
 pub struct ModuleId(u32);
 
 impl ModuleId {
+    pub fn new(index: u32) -> Self {
+        Self(index)
+    }
+
     pub fn index(self) -> u32 {
         self.0
     }

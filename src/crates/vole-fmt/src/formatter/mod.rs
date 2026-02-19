@@ -7,7 +7,7 @@
 use super::config::FormatConfig;
 use super::printer;
 use pretty::Arena;
-use vole_frontend::Parser;
+use vole_frontend::{ModuleId, Parser};
 
 /// Error type for formatting operations.
 #[derive(Debug, Clone)]
@@ -40,7 +40,7 @@ pub struct FormatResult {
 /// Parses the source into an AST and renders it back with canonical style.
 pub fn format(source: &str, config: FormatConfig) -> Result<FormatResult, FormatError> {
     // Parse source into AST
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .map_err(|e| FormatError::ParseError(format!("{:?}", e.error)))?;

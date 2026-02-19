@@ -38,21 +38,33 @@ impl TypeArena {
             // TypeParamRef doesn't substitute based on NameId
             SemaType::TypeParamRef(_) => ty,
 
-            // Recursive substitution for compound types
+            // Recursive substitution for compound types.
+            // Each arm checks whether children actually changed and returns the
+            // original TypeId when they haven't, avoiding redundant intern() calls
+            // (which require hashing + structural SemaType::eq comparison).
             SemaType::Array(elem) => {
                 let new_elem = self.substitute(elem, subs);
+                if new_elem == elem {
+                    return ty;
+                }
                 self.array(new_elem)
             }
 
             SemaType::Union(variants) => {
                 let new_variants: TypeIdVec =
                     variants.iter().map(|&v| self.substitute(v, subs)).collect();
+                if new_variants == variants {
+                    return ty;
+                }
                 self.union(new_variants)
             }
 
             SemaType::Tuple(elements) => {
                 let new_elements: TypeIdVec =
                     elements.iter().map(|&e| self.substitute(e, subs)).collect();
+                if new_elements == elements {
+                    return ty;
+                }
                 self.tuple(new_elements)
             }
 
@@ -64,6 +76,9 @@ impl TypeArena {
                 let new_params: TypeIdVec =
                     params.iter().map(|&p| self.substitute(p, subs)).collect();
                 let new_ret = self.substitute(ret, subs);
+                if new_params == params && new_ret == ret {
+                    return ty;
+                }
                 self.function(new_params, new_ret, is_closure)
             }
 
@@ -75,6 +90,9 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute(a, subs))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.class(type_def_id, new_args)
             }
 
@@ -86,6 +104,9 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute(a, subs))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.struct_type(type_def_id, new_args)
             }
 
@@ -97,22 +118,34 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute(a, subs))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.interface(type_def_id, new_args)
             }
 
             SemaType::RuntimeIterator(elem) => {
                 let new_elem = self.substitute(elem, subs);
+                if new_elem == elem {
+                    return ty;
+                }
                 self.runtime_iterator(new_elem)
             }
 
             SemaType::FixedArray { element, size } => {
                 let new_elem = self.substitute(element, subs);
+                if new_elem == element {
+                    return ty;
+                }
                 self.fixed_array(new_elem, size)
             }
 
             SemaType::Fallible { success, error } => {
                 let new_success = self.substitute(success, subs);
                 let new_error = self.substitute(error, subs);
+                if new_success == success && new_error == error {
+                    return ty;
+                }
                 self.fallible(new_success, new_error)
             }
 
@@ -131,6 +164,9 @@ impl TypeArena {
                         return_type: self.substitute(m.return_type, subs),
                     })
                     .collect();
+                if new_fields == st.fields && new_methods == st.methods {
+                    return ty;
+                }
                 self.structural(new_fields, new_methods)
             }
 
@@ -412,9 +448,13 @@ impl TypeArena {
             // Substitute SelfType placeholder
             SemaType::Placeholder(PlaceholderKind::SelfType) => self_type,
 
-            // Recursive substitution for compound types
+            // Recursive substitution for compound types.
+            // Early-return when children unchanged to avoid redundant intern() calls.
             SemaType::Array(elem) => {
                 let new_elem = self.substitute_self(elem, self_type);
+                if new_elem == elem {
+                    return ty;
+                }
                 self.array(new_elem)
             }
 
@@ -423,6 +463,9 @@ impl TypeArena {
                     .iter()
                     .map(|&v| self.substitute_self(v, self_type))
                     .collect();
+                if new_variants == variants {
+                    return ty;
+                }
                 self.union(new_variants)
             }
 
@@ -431,6 +474,9 @@ impl TypeArena {
                     .iter()
                     .map(|&e| self.substitute_self(e, self_type))
                     .collect();
+                if new_elements == elements {
+                    return ty;
+                }
                 self.tuple(new_elements)
             }
 
@@ -444,6 +490,9 @@ impl TypeArena {
                     .map(|&p| self.substitute_self(p, self_type))
                     .collect();
                 let new_ret = self.substitute_self(ret, self_type);
+                if new_params == params && new_ret == ret {
+                    return ty;
+                }
                 self.function(new_params, new_ret, is_closure)
             }
 
@@ -455,6 +504,9 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute_self(a, self_type))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.class(type_def_id, new_args)
             }
 
@@ -466,6 +518,9 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute_self(a, self_type))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.struct_type(type_def_id, new_args)
             }
 
@@ -477,22 +532,34 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute_self(a, self_type))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.interface(type_def_id, new_args)
             }
 
             SemaType::RuntimeIterator(elem) => {
                 let new_elem = self.substitute_self(elem, self_type);
+                if new_elem == elem {
+                    return ty;
+                }
                 self.runtime_iterator(new_elem)
             }
 
             SemaType::FixedArray { element, size } => {
                 let new_elem = self.substitute_self(element, self_type);
+                if new_elem == element {
+                    return ty;
+                }
                 self.fixed_array(new_elem, size)
             }
 
             SemaType::Fallible { success, error } => {
                 let new_success = self.substitute_self(success, self_type);
                 let new_error = self.substitute_self(error, self_type);
+                if new_success == success && new_error == error {
+                    return ty;
+                }
                 self.fallible(new_success, new_error)
             }
 
@@ -526,6 +593,9 @@ impl TypeArena {
 
             SemaType::Array(elem) => {
                 let new_elem = self.substitute_inference(elem, concrete);
+                if new_elem == elem {
+                    return ty;
+                }
                 self.array(new_elem)
             }
 
@@ -534,6 +604,9 @@ impl TypeArena {
                     .iter()
                     .map(|&v| self.substitute_inference(v, concrete))
                     .collect();
+                if new_variants == variants {
+                    return ty;
+                }
                 self.union(new_variants)
             }
 
@@ -542,6 +615,9 @@ impl TypeArena {
                     .iter()
                     .map(|&e| self.substitute_inference(e, concrete))
                     .collect();
+                if new_elements == elements {
+                    return ty;
+                }
                 self.tuple(new_elements)
             }
 
@@ -555,6 +631,9 @@ impl TypeArena {
                     .map(|&p| self.substitute_inference(p, concrete))
                     .collect();
                 let new_ret = self.substitute_inference(ret, concrete);
+                if new_params == params && new_ret == ret {
+                    return ty;
+                }
                 self.function(new_params, new_ret, is_closure)
             }
 
@@ -566,6 +645,9 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute_inference(a, concrete))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.class(type_def_id, new_args)
             }
 
@@ -577,6 +659,9 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute_inference(a, concrete))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.struct_type(type_def_id, new_args)
             }
 
@@ -588,22 +673,34 @@ impl TypeArena {
                     .iter()
                     .map(|&a| self.substitute_inference(a, concrete))
                     .collect();
+                if new_args == type_args {
+                    return ty;
+                }
                 self.interface(type_def_id, new_args)
             }
 
             SemaType::RuntimeIterator(elem) => {
                 let new_elem = self.substitute_inference(elem, concrete);
+                if new_elem == elem {
+                    return ty;
+                }
                 self.runtime_iterator(new_elem)
             }
 
             SemaType::FixedArray { element, size } => {
                 let new_elem = self.substitute_inference(element, concrete);
+                if new_elem == element {
+                    return ty;
+                }
                 self.fixed_array(new_elem, size)
             }
 
             SemaType::Fallible { success, error } => {
                 let new_success = self.substitute_inference(success, concrete);
                 let new_error = self.substitute_inference(error, concrete);
+                if new_success == success && new_error == error {
+                    return ty;
+                }
                 self.fallible(new_success, new_error)
             }
 

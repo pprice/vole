@@ -524,13 +524,7 @@ impl Cg<'_, '_, '_> {
         _callee_sym: Symbol,
         callee_name: &str,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let current_module_path = self
-            .current_module()
-            .map(|mid| self.name_table().module_path(mid).to_string());
-        let Some(monomorph_key) = self
-            .query()
-            .monomorph_for_in_module(call_expr_id, current_module_path.as_deref())
-        else {
+        let Some(monomorph_key) = self.query().monomorph_for(call_expr_id) else {
             return Ok(None);
         };
 

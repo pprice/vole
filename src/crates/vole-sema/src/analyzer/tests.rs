@@ -3,7 +3,7 @@ use vole_frontend::Parser;
 use vole_frontend::ast::LambdaPurity;
 
 fn check(source: &str) -> Result<(), Vec<TypeError>> {
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
@@ -206,7 +206,7 @@ fn analyze_i64_to_i32_narrowing_error() {
 
 // Helper to parse and analyze, returning the AST and expression data for capture inspection
 fn parse_and_analyze(source: &str) -> (Program, Interner, ExpressionData) {
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
@@ -537,7 +537,7 @@ fn lambda_side_effects_take_precedence_over_captures() {
 
 // Helper for satisfies_interface tests
 fn analyze_and_check_interface(source: &str) -> Analyzer {
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
@@ -560,7 +560,7 @@ fn satisfies_interface_with_field() {
     let mut analyzer = analyze_and_check_interface(source);
 
     // Get the symbols for Person and Named
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let _ = parser.parse_program().unwrap();
     let mut interner = parser.into_interner();
     let person_sym = interner.intern("Person");
@@ -593,7 +593,7 @@ fn satisfies_interface_missing_field() {
     "#;
     let mut analyzer = analyze_and_check_interface(source);
 
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let _ = parser.parse_program().unwrap();
     let mut interner = parser.into_interner();
     let point_sym = interner.intern("Point");
@@ -628,7 +628,7 @@ fn satisfies_interface_with_method() {
     "#;
     let mut analyzer = analyze_and_check_interface(source);
 
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let _ = parser.parse_program().unwrap();
     let mut interner = parser.into_interner();
     let user_sym = interner.intern("User");

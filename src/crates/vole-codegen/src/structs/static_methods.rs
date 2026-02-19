@@ -159,15 +159,8 @@ impl Cg<'_, '_, '_> {
         type_def_id: TypeDefId,
         expr_id: NodeId,
     ) -> Option<StaticMethodMonomorphInstance> {
-        let current_module_path = self
-            .current_module()
-            .map(|module_id| self.name_table().module_path(module_id).to_string());
-
         // Try direct monomorph lookup with key rewriting
-        if let Some(mono_key) = self
-            .query()
-            .static_method_generic_at_in_module(expr_id, current_module_path.as_deref())
-        {
+        if let Some(mono_key) = self.query().static_method_generic_at(expr_id) {
             // Static method call sites inside generic class methods are often recorded
             // with abstract TypeParam keys. Rewrite those keys through the current
             // substitution map before looking in the monomorph cache.
@@ -219,7 +212,6 @@ impl Cg<'_, '_, '_> {
         // concrete instance that matches the current substitution map when available.
         let type_name_id = self.query().get_type(type_def_id).name_id;
         let subs = self.substitutions;
-        let module_prefix = current_module_path.as_deref();
         let arena = self.arena();
         self.registry()
             .static_method_monomorph_cache
@@ -251,11 +243,6 @@ impl Cg<'_, '_, '_> {
                 } else {
                     0
                 };
-                let module_match = module_prefix.is_some_and(|prefix| {
-                    self.query()
-                        .display_name(instance.mangled_name)
-                        .starts_with(prefix)
-                });
                 let concrete_key = key
                     .class_type_keys
                     .iter()
@@ -266,11 +253,9 @@ impl Cg<'_, '_, '_> {
                         .all(|&type_id| arena.unwrap_type_param(type_id).is_none());
 
                 // Prefer substitution-compatible concrete instances first.
-                // Module prefix is only a tie-breaker.
                 let score = (
                     substitution_matches,
                     concrete_key as usize,
-                    module_match as usize,
                     instance.substitutions.len(),
                 );
 

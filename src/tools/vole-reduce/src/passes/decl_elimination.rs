@@ -125,7 +125,7 @@ struct DeclInfo {
 /// Returns `None` if parsing fails (signals the caller to use line-based
 /// fallback). Returns an empty vec if there are no removable declarations.
 fn parse_decl_infos(source: &str, reducer: &Reducer<'_>) -> Option<Vec<DeclInfo>> {
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().ok()?;
     let interner = parser.interner();
 
@@ -405,7 +405,7 @@ fn try_remove_decls_by_span(
 
 /// Check whether source parses without errors.
 fn parses_ok(source: &str) -> bool {
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     parser.parse_program().is_ok()
 }
 

@@ -328,27 +328,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.type_arena()
     }
 
-    /// Get expression type by NodeId (checks module-specific types if in module context)
+    /// Get expression type by NodeId.
+    ///
+    /// NodeIds are globally unique (they embed a ModuleId), so a single flat
+    /// lookup covers both main-program and module nodes.
     #[inline]
     pub fn get_expr_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
-        // For module code, check module-specific expr_types first
-        if let Some(module_id) = self.current_module {
-            let name_table = self.name_table();
-            let module_path = name_table.module_path(module_id);
-            if let Some(module_types) = self
-                .env
-                .analyzed
-                .query()
-                .expr_data()
-                .module_types(module_path)
-            {
-                // Module has its own type map — use it exclusively.
-                // NodeIds are per-program, so falling through to the main program's
-                // types would return wrong types for coincidentally matching NodeIds.
-                return module_types.get(node_id).copied();
-            }
-        }
-        // Fall back to main program expr_types
         self.env.analyzed.query().expr_data().get_type(*node_id)
     }
 
@@ -357,9 +342,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// This is used when the expression type needs to be concrete (e.g., for return types,
     /// call results). Module code stores generic types (e.g., `V`) which must be substituted
     /// to concrete types (e.g., `i64`) in monomorphized contexts.
-    ///
-    /// Falls back to `lookup_substitute` which returns None if the substituted type
-    /// doesn't exist in the arena. In that case, returns the original type.
     #[inline]
     pub fn get_expr_type_substituted(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
         let ty = self.get_expr_type(node_id)?;
@@ -370,21 +352,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Get IsCheckResult for an is-expression or type pattern, checking module-specific results first
+    /// Get IsCheckResult for an is-expression or type pattern.
     #[inline]
     pub fn get_is_check_result(
         &self,
         node_id: vole_frontend::NodeId,
     ) -> Option<vole_sema::IsCheckResult> {
-        let module_path = self.current_module.map(|mid| {
-            let name_table = self.name_table();
-            name_table.module_path(mid).to_string()
-        });
         self.env
             .analyzed
             .query()
             .expr_data()
-            .get_is_check_result_in_module(node_id, module_path.as_deref())
+            .get_is_check_result(node_id)
     }
 
     /// Get lambda analysis results (captures and side effects) for a lambda expression
@@ -393,28 +371,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         node_id: vole_frontend::NodeId,
     ) -> Option<&vole_sema::LambdaAnalysis> {
-        let module_path = self.current_module.map(|mid| {
-            let name_table = self.name_table();
-            name_table.module_path(mid).to_string()
-        });
         self.env
             .analyzed
             .query()
             .expr_data()
-            .get_lambda_analysis_in_module(node_id, module_path.as_deref())
+            .get_lambda_analysis(node_id)
     }
 
-    /// Get substituted return type for generic method calls
+    /// Get substituted return type for generic method calls.
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
-        // Module NodeIds are file-local. The sema substituted_return_types map is currently
-        // global, so looking it up directly in module context can collide with unrelated
-        // main-program NodeIds and produce wrong return types. For module code, use the
-        // module-local expression type map (with substitution) instead.
-        if self.current_module.is_some() {
-            return self.get_expr_type_substituted(node_id);
-        }
-
         self.env
             .analyzed
             .query()
@@ -425,21 +391,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get declared variable type for let statements with explicit type annotations.
     /// Used for union wrapping, numeric widening, and interface boxing.
-    /// For module code, checks module-specific declared_var_types only.
     #[inline]
     pub fn get_declared_var_type(&self, init_node_id: &vole_frontend::NodeId) -> Option<TypeId> {
-        if let Some(module_id) = self.current_module {
-            let name_table = self.name_table();
-            let module_path = name_table.module_path(module_id);
-            // Only check module-specific map — NodeIds collide across modules,
-            // so falling through to main program's map would return wrong types.
-            return self
-                .env
-                .analyzed
-                .query()
-                .expr_data()
-                .get_module_declared_var_type(module_path, *init_node_id);
-        }
         self.env
             .analyzed
             .query()

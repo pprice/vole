@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::bench::{ResourceUsage, Stats, SystemInfo};
 use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::commands::common::AnalyzedProgram;
-use crate::frontend::{Lexer, Parser};
+use crate::frontend::{Lexer, ModuleId, Parser};
 use crate::sema::Analyzer;
 
 /// Timing breakdown for compilation phases (in nanoseconds)
@@ -131,7 +131,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 
     // Parse phase
     let parse_start = Instant::now();
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .map_err(|e| format!("parse error: {:?}", e.error))?;
@@ -188,7 +188,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 /// Compile source code and return the JIT context ready for execution
 fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     // Parse
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser
         .parse_program()
         .map_err(|e| format!("parse error: {:?}", e.error))?;

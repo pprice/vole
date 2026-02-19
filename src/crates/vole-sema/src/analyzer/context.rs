@@ -85,10 +85,10 @@ pub(crate) struct AnalyzerContext {
     pub(crate) module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
     /// Parsed module programs and their interners (for compiling pure Vole functions).
     pub(crate) module_programs: RefCell<FxHashMap<String, (Program, Interner)>>,
-    /// Per-module analysis data (module path -> ModuleAnalysisData).
-    /// NodeIds are file-local and collide across modules, so each module gets
-    /// its own set of NodeId-keyed maps. Uses ArenaTypeId (= TypeId) internally.
-    pub(crate) module_data: RefCell<FxHashMap<String, crate::expression_data::ModuleAnalysisData>>,
+    /// Merged expression data from all sub-analyzers (module analysis results).
+    /// Because NodeIds are now globally unique (they embed a ModuleId), results
+    /// from different modules can be merged into a single flat map without collision.
+    pub(crate) merged_expr_data: RefCell<crate::expression_data::ExpressionData>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub(crate) module_cache: Option<Rc<RefCell<ModuleCache>>>,
@@ -109,7 +109,7 @@ impl AnalyzerContext {
             db,
             module_type_ids: RefCell::new(FxHashMap::default()),
             module_programs: RefCell::new(FxHashMap::default()),
-            module_data: RefCell::new(FxHashMap::default()),
+            merged_expr_data: RefCell::new(crate::expression_data::ExpressionData::new()),
             module_cache: cache,
             modules_in_progress: RefCell::new(FxHashSet::default()),
             modules_with_errors: RefCell::new(FxHashSet::default()),
@@ -120,13 +120,4 @@ impl AnalyzerContext {
     pub(super) fn empty() -> Self {
         Self::new(Rc::new(CompilationDb::new()), None)
     }
-}
-
-/// Module-level data extracted from `AnalyzerContext` during `into_analysis_results`.
-///
-/// Both the `Ok` (sole owner, move) and `Err` (shared, clone) branches of
-/// `Rc::try_unwrap` populate this struct, letting the `ExpressionData` builder
-/// chain appear exactly once.
-pub(crate) struct ExtractedModuleData {
-    pub(crate) data: FxHashMap<String, crate::expression_data::ModuleAnalysisData>,
 }

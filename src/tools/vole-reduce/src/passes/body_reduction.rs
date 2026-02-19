@@ -104,7 +104,7 @@ struct RemovableItem {
 ///
 /// Returns `None` if parsing fails. Returns empty vec if nothing is removable.
 fn collect_removable_items(source: &str, reducer: &Reducer<'_>) -> Option<Vec<RemovableItem>> {
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().ok()?;
     let interner = parser.interner();
 
@@ -680,7 +680,7 @@ fn make_item(
 
 /// Check whether source parses without errors.
 fn parses_ok(source: &str) -> bool {
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     parser.parse_program().is_ok()
 }
 

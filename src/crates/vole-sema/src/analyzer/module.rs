@@ -273,10 +273,7 @@ impl Analyzer {
         }
         let mut guard = ModuleInProgressGuard::new(&self.ctx, canonical_path.clone());
 
-        // Phase 3: Load, parse, and transform the module
-        let parsed = self.load_and_parse_module(import_path, span)?;
-
-        // Compute module key for storing analysis results
+        // Compute module key and module_id before parsing so Parser gets the right ModuleId.
         let module_key = if import_path.starts_with("std:") {
             import_path.to_string()
         } else {
@@ -284,6 +281,9 @@ impl Analyzer {
         };
         tracing::debug!(import_path, %module_key, "analyze_module: creating module_id");
         let module_id = self.name_table_mut().module_id(&module_key);
+
+        // Phase 3: Load, parse, and transform the module
+        let parsed = self.load_and_parse_module(import_path, span, module_id)?;
 
         // Destructure ParsedModule so file_path can be moved independently
         let ParsedModule {
@@ -406,7 +406,12 @@ impl Analyzer {
     }
 
     /// Phase 3: Load the module file, parse it, and run generator transforms.
-    fn load_and_parse_module(&mut self, import_path: &str, span: Span) -> Result<ParsedModule, ()> {
+    fn load_and_parse_module(
+        &mut self,
+        import_path: &str,
+        span: Span,
+        module_id: ModuleId,
+    ) -> Result<ParsedModule, ()> {
         let is_relative = import_path.starts_with("./") || import_path.starts_with("../");
         let module_info = if is_relative {
             match &self.module.current_file_path {
@@ -451,8 +456,8 @@ impl Analyzer {
 
         let module_file_path = module_info.path.clone();
 
-        // Parse the module
-        let mut parser = Parser::new(&module_info.source);
+        // Parse the module (pass module_id so NodeIds are globally unique)
+        let mut parser = Parser::new(&module_info.source, module_id);
         let program = match parser.parse_program() {
             Ok(p) => p,
             Err(e) => {
@@ -592,22 +597,23 @@ impl Analyzer {
         decls
     }
 
-    /// Phase 5a (partial): Store sub-analyzer results into the shared context.
-    fn store_sub_analyzer_results(&mut self, module_key: &str, sub_analyzer: Analyzer) {
-        use crate::expression_data::ModuleAnalysisData;
-        self.ctx.module_data.borrow_mut().insert(
-            module_key.to_string(),
-            ModuleAnalysisData {
-                types: sub_analyzer.results.expr_types.clone(),
-                methods: sub_analyzer.results.method_resolutions.into_inner(),
-                is_check_results: sub_analyzer.results.is_check_results.clone(),
-                generic_calls: sub_analyzer.results.generic_calls.clone(),
-                class_method_calls: sub_analyzer.results.class_method_calls.clone(),
-                static_method_calls: sub_analyzer.results.static_method_calls.clone(),
-                declared_var_types: sub_analyzer.results.declared_var_types,
-                lambda_analysis: sub_analyzer.lambda.analysis,
-            },
-        );
+    /// Phase 5a (partial): Merge sub-analyzer results into the shared flat maps.
+    ///
+    /// Because NodeIds are now globally unique (they embed a ModuleId), there are
+    /// no collisions when merging results from different modules.
+    fn store_sub_analyzer_results(&mut self, _module_key: &str, sub_analyzer: Analyzer) {
+        use crate::expression_data::ExpressionData;
+        let module_data = ExpressionData::builder()
+            .types(sub_analyzer.results.expr_types)
+            .methods(sub_analyzer.results.method_resolutions.into_inner())
+            .generics(sub_analyzer.results.generic_calls)
+            .class_method_generics(sub_analyzer.results.class_method_calls)
+            .static_method_generics(sub_analyzer.results.static_method_calls)
+            .is_check_results(sub_analyzer.results.is_check_results)
+            .declared_var_types(sub_analyzer.results.declared_var_types)
+            .lambda_analysis(sub_analyzer.lambda.analysis)
+            .build();
+        self.ctx.merged_expr_data.borrow_mut().merge(module_data);
     }
 
     /// Resolve parameter and return types into a function ArenaTypeId.

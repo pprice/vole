@@ -1269,6 +1269,7 @@ impl<'a> AstPrinter<'a> {
 mod tests {
     use super::*;
     use crate::Parser;
+    use crate::ast::ModuleId;
 
     #[test]
     fn print_simple_function() {
@@ -1277,7 +1278,7 @@ func add(a: i64, b: i64) -> i64 {
     return a + b
 }
 "#;
-        let mut parser = Parser::new(source);
+        let mut parser = Parser::new(source, ModuleId::new(0));
         let program = parser.parse_program().unwrap();
         let interner = parser.into_interner();
 
@@ -1301,7 +1302,7 @@ tests {
     }
 }
 "#;
-        let mut parser = Parser::new(source);
+        let mut parser = Parser::new(source, ModuleId::new(0));
         let program = parser.parse_program().unwrap();
         let interner = parser.into_interner();
 

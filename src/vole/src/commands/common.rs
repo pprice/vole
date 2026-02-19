@@ -14,7 +14,7 @@ use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::errors::{
     CodegenError, LexerError, ParserError, WithExtraHelp, render_to_writer_terminal,
 };
-use crate::frontend::{AstPrinter, ParseError, Parser};
+use crate::frontend::{AstPrinter, ModuleId, ParseError, Parser};
 use crate::runtime::{
     JmpBuf, call_setjmp, clear_test_jmp_buf, recover_from_signal, set_capture_mode,
     set_stderr_capture, set_stdout_capture, set_test_jmp_buf, take_stack_overflow,
@@ -211,7 +211,7 @@ pub fn compile_source(
     // Parse phase
     let (mut program, interner) = {
         let _span = tracing::info_span!("parse", file = %file_path).entered();
-        let mut parser = Parser::new(source);
+        let mut parser = Parser::new(source, ModuleId::new(0));
         parser.set_skip_tests(skip_tests);
         let program = match parser.parse_program() {
             Ok(prog) => prog,
@@ -564,7 +564,7 @@ pub fn inspect_ast_captured<W: Write>(
     color_mode: ColorMode,
 ) -> Result<(), PipelineError> {
     // Parse
-    let mut parser = Parser::new(source);
+    let mut parser = Parser::new(source, ModuleId::new(0));
     let program = match parser.parse_program() {
         Ok(prog) => prog,
         Err(e) => {

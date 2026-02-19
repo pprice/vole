@@ -2,6 +2,9 @@
 //!
 //! ExpressionData encapsulates all metadata that is keyed by NodeId,
 //! including type information, method resolutions, and generic instantiations.
+//!
+//! Because NodeId is now globally unique (it embeds a ModuleId), all maps
+//! are flat FxHashMap<NodeId, T> — no per-module namespacing is required.
 
 use rustc_hash::FxHashMap;
 
@@ -56,34 +59,10 @@ pub struct LambdaDefaults {
     pub lambda_node_id: NodeId,
 }
 
-/// Per-module analysis data collected during multi-module compilation.
-///
-/// Each imported module gets its own set of NodeId-keyed maps because NodeIds
-/// are file-local (they restart at 0 per parse unit). Grouping them into a
-/// single struct replaces the 8 separate `FxHashMap<String, FxHashMap<NodeId, T>>`
-/// fields that previously existed in both `AnalyzerContext` and `ExpressionData`.
-#[derive(Debug, Clone, Default)]
-pub struct ModuleAnalysisData {
-    /// Expression types for this module's AST nodes.
-    pub types: FxHashMap<NodeId, TypeId>,
-    /// Resolved method information for method calls in this module.
-    pub methods: FxHashMap<NodeId, ResolvedMethod>,
-    /// Type check results for `is` expressions and type patterns.
-    pub is_check_results: FxHashMap<NodeId, IsCheckResult>,
-    /// Monomorphization keys for generic function calls.
-    pub generic_calls: FxHashMap<NodeId, MonomorphKey>,
-    /// Monomorphization keys for generic class method calls.
-    pub class_method_calls: FxHashMap<NodeId, ClassMethodMonomorphKey>,
-    /// Monomorphization keys for generic static method calls.
-    pub static_method_calls: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    /// Declared variable types for let statements with explicit type annotations.
-    pub declared_var_types: FxHashMap<NodeId, TypeId>,
-    /// Lambda analysis results (captures and side effects).
-    pub lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
-}
-
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
-/// This includes expression types, method resolutions, and generic instantiation info.
+///
+/// Because NodeId is globally unique (it embeds a ModuleId), all maps are
+/// flat FxHashMap<NodeId, T>. No per-module namespacing is required.
 #[derive(Debug, Clone, Default)]
 pub struct ExpressionData {
     /// Type of each expression node (stored as interned TypeId handles)
@@ -96,34 +75,19 @@ pub struct ExpressionData {
     class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
     /// Monomorphization key for generic static method calls
     static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    /// Per-module analysis data (for multi-module compilation).
-    /// Each module's NodeIds are file-local, so they need separate maps.
-    module_data: FxHashMap<String, ModuleAnalysisData>,
     /// Substituted return types for generic method calls.
-    /// When sema resolves a call like `list.head()` on `List<i32>`, the generic
-    /// return type `T` is substituted to `i32`. This map stores the concrete type
-    /// so codegen doesn't need to recompute the substitution.
     substituted_return_types: FxHashMap<NodeId, TypeId>,
     /// Lambda defaults for closure calls.
-    /// Maps a call site NodeId to the lambda's defaults info.
     lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    /// Used by codegen to compile scoped type declarations (records, classes) within tests blocks.
     tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Type check results for `is` expressions and type patterns.
-    /// Maps NodeId → IsCheckResult to eliminate runtime type lookups in codegen.
     is_check_results: FxHashMap<NodeId, IsCheckResult>,
     /// Declared variable types for let statements with explicit type annotations.
-    /// Maps init expression NodeId → declared TypeId, enabling codegen to handle
-    /// union wrapping, numeric widening, and interface boxing without re-resolving types.
     declared_var_types: FxHashMap<NodeId, TypeId>,
     /// Lambda analysis results (captures and side effects).
-    /// Keyed by lambda expression NodeId.
     lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
     /// Resolved intrinsic keys for compiler intrinsic calls.
-    /// Maps call-site NodeId to the resolved intrinsic key (e.g., "f64_sqrt").
-    /// Set by sema during generic external intrinsic resolution; consumed by
-    /// the optimizer for constant folding of pure intrinsic calls.
     intrinsic_keys: FxHashMap<NodeId, String>,
 }
 
@@ -147,7 +111,6 @@ pub struct ExpressionDataBuilder {
     generics: FxHashMap<NodeId, MonomorphKey>,
     class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
     static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    module_data: FxHashMap<String, ModuleAnalysisData>,
     substituted_return_types: FxHashMap<NodeId, TypeId>,
     lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
     tests_virtual_modules: FxHashMap<Span, ModuleId>,
@@ -196,12 +159,6 @@ impl ExpressionDataBuilder {
         static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
     ) -> Self {
         self.static_method_generics = static_method_generics;
-        self
-    }
-
-    /// Set per-module analysis data.
-    pub fn module_data(mut self, module_data: FxHashMap<String, ModuleAnalysisData>) -> Self {
-        self.module_data = module_data;
         self
     }
 
@@ -261,7 +218,6 @@ impl ExpressionDataBuilder {
             generics: self.generics,
             class_method_generics: self.class_method_generics,
             static_method_generics: self.static_method_generics,
-            module_data: self.module_data,
             substituted_return_types: self.substituted_return_types,
             lambda_defaults: self.lambda_defaults,
             tests_virtual_modules: self.tests_virtual_modules,
@@ -284,6 +240,30 @@ impl ExpressionData {
         ExpressionDataBuilder::new()
     }
 
+    /// Merge all entries from `other` into this ExpressionData.
+    ///
+    /// Used by `store_sub_analyzer_results` to fold module analysis results
+    /// into the top-level flat maps. Because NodeIds are globally unique
+    /// (they embed a ModuleId), there are no collisions.
+    pub fn merge(&mut self, other: ExpressionData) {
+        self.types.extend(other.types);
+        self.methods.extend(other.methods);
+        self.generics.extend(other.generics);
+        self.class_method_generics
+            .extend(other.class_method_generics);
+        self.static_method_generics
+            .extend(other.static_method_generics);
+        self.substituted_return_types
+            .extend(other.substituted_return_types);
+        self.lambda_defaults.extend(other.lambda_defaults);
+        self.tests_virtual_modules
+            .extend(other.tests_virtual_modules);
+        self.is_check_results.extend(other.is_check_results);
+        self.declared_var_types.extend(other.declared_var_types);
+        self.lambda_analysis.extend(other.lambda_analysis);
+        self.intrinsic_keys.extend(other.intrinsic_keys);
+    }
+
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
     pub fn get_type(&self, node: NodeId) -> Option<TypeId> {
         self.types.get(&node).copied()
@@ -299,35 +279,6 @@ impl ExpressionData {
         self.methods.get(&node)
     }
 
-    /// Get the resolved method for a method call, checking module-specific resolutions first
-    pub fn get_method_in_module(
-        &self,
-        node: NodeId,
-        current_module: Option<&str>,
-    ) -> Option<&ResolvedMethod> {
-        // First check module-specific resolutions
-        if let Some(module) = current_module {
-            tracing::trace!(module, ?node, "Looking up method in module");
-            if let Some(data) = self.module_data.get(module) {
-                let node_ids: Vec<_> = data.methods.keys().collect();
-                tracing::trace!(
-                    count = data.methods.len(),
-                    ?node_ids,
-                    "Found module methods"
-                );
-                if let Some(method) = data.methods.get(&node) {
-                    tracing::trace!(?method, "Found method resolution in module");
-                    return Some(method);
-                }
-                tracing::trace!(?node, "Method not found in module methods");
-            } else {
-                tracing::trace!("Module not found in module_data");
-            }
-        }
-        // Fall back to main program resolutions
-        self.methods.get(&node)
-    }
-
     /// Set the resolved method for a method call
     pub fn set_method(&mut self, node: NodeId, method: ResolvedMethod) {
         self.methods.insert(node, method);
@@ -335,26 +286,6 @@ impl ExpressionData {
 
     /// Get the monomorphization key for a generic function call
     pub fn get_generic(&self, node: NodeId) -> Option<&MonomorphKey> {
-        self.generics.get(&node)
-    }
-
-    /// Get the monomorphization key for a generic function call, using module-local
-    /// NodeId space when `current_module` is provided.
-    pub fn get_generic_in_module(
-        &self,
-        node: NodeId,
-        current_module: Option<&str>,
-    ) -> Option<&MonomorphKey> {
-        if let Some(module) = current_module {
-            // When compiling code from a specific module, ONLY look in that
-            // module's NodeId space.  Falling back to the top-level map would
-            // cause cross-file NodeId collisions (NodeIds restart at 0 per
-            // parse unit, so a test file NodeId can alias a module NodeId).
-            return self
-                .module_data
-                .get(module)
-                .and_then(|data| data.generic_calls.get(&node));
-        }
         self.generics.get(&node)
     }
 
@@ -398,26 +329,6 @@ impl ExpressionData {
         self.class_method_generics.get(&node)
     }
 
-    /// Get the monomorphization key for a generic class method call, using module-local
-    /// NodeId space when `current_module` is provided.
-    pub fn get_class_method_generic_in_module(
-        &self,
-        node: NodeId,
-        current_module: Option<&str>,
-    ) -> Option<&ClassMethodMonomorphKey> {
-        if let Some(module) = current_module {
-            // When compiling code from a specific module, ONLY look in that
-            // module's NodeId space.  Falling back to the top-level map would
-            // cause cross-file NodeId collisions (NodeIds restart at 0 per
-            // parse unit, so a test file NodeId can alias a module NodeId).
-            return self
-                .module_data
-                .get(module)
-                .and_then(|data| data.class_method_calls.get(&node));
-        }
-        self.class_method_generics.get(&node)
-    }
-
     /// Set the monomorphization key for a generic class method call
     pub fn set_class_method_generic(&mut self, node: NodeId, key: ClassMethodMonomorphKey) {
         self.class_method_generics.insert(node, key);
@@ -438,25 +349,6 @@ impl ExpressionData {
         self.static_method_generics.get(&node)
     }
 
-    /// Get the monomorphization key for a generic static method call, using module-local
-    /// NodeId space when `current_module` is provided.
-    pub fn get_static_method_generic_in_module(
-        &self,
-        node: NodeId,
-        current_module: Option<&str>,
-    ) -> Option<&StaticMethodMonomorphKey> {
-        if let Some(module) = current_module {
-            // Same rationale as get_class_method_generic_in_module: avoid
-            // cross-file NodeId collisions by never falling through to the
-            // top-level map when we know which module we are compiling.
-            return self
-                .module_data
-                .get(module)
-                .and_then(|data| data.static_method_calls.get(&node));
-        }
-        self.static_method_generics.get(&node)
-    }
-
     /// Set the monomorphization key for a generic static method call
     pub fn set_static_method_generic(&mut self, node: NodeId, key: StaticMethodMonomorphKey) {
         self.static_method_generics.insert(node, key);
@@ -474,28 +366,7 @@ impl ExpressionData {
         &mut self.static_method_generics
     }
 
-    /// Get types for a specific module (as TypeId handles)
-    pub fn module_types(&self, module: &str) -> Option<&FxHashMap<NodeId, TypeId>> {
-        self.module_data.get(module).map(|d| &d.types)
-    }
-
-    /// Get the per-module analysis data map.
-    pub fn module_data(&self) -> &FxHashMap<String, ModuleAnalysisData> {
-        &self.module_data
-    }
-
-    /// Get mutable per-module analysis data, inserting a default entry if absent.
-    pub fn module_data_entry(&mut self, module: String) -> &mut ModuleAnalysisData {
-        self.module_data.entry(module).or_default()
-    }
-
-    /// Get methods for a specific module
-    pub fn module_methods(&self, module: &str) -> Option<&FxHashMap<NodeId, ResolvedMethod>> {
-        self.module_data.get(module).map(|d| &d.methods)
-    }
-
     /// Get the substituted return type for a method call.
-    /// This is the concrete return type after generic substitution (e.g., `i32` instead of `T`).
     pub fn get_substituted_return_type(&self, node: NodeId) -> Option<TypeId> {
         self.substituted_return_types.get(&node).copied()
     }
@@ -550,21 +421,6 @@ impl ExpressionData {
         self.is_check_results.get(&node).copied()
     }
 
-    /// Get the IsCheckResult for a type check node, checking module-specific results first
-    pub fn get_is_check_result_in_module(
-        &self,
-        node: NodeId,
-        current_module: Option<&str>,
-    ) -> Option<IsCheckResult> {
-        if let Some(module) = current_module
-            && let Some(data) = self.module_data.get(module)
-            && let Some(result) = data.is_check_results.get(&node)
-        {
-            return Some(*result);
-        }
-        self.is_check_results.get(&node).copied()
-    }
-
     /// Set the IsCheckResult for a type check node
     pub fn set_is_check_result(&mut self, node: NodeId, result: IsCheckResult) {
         self.is_check_results.insert(node, result);
@@ -581,21 +437,8 @@ impl ExpressionData {
     }
 
     /// Get the declared type for a variable's init expression.
-    /// Used for let statements with explicit type annotations (e.g., `let x: SomeType = ...`).
     pub fn get_declared_var_type(&self, init_node: NodeId) -> Option<TypeId> {
         self.declared_var_types.get(&init_node).copied()
-    }
-
-    /// Get the declared type for a variable's init expression from a specific module's data.
-    /// Only checks the module-specific map (does NOT fall through to main program's map).
-    pub fn get_module_declared_var_type(
-        &self,
-        module_path: &str,
-        init_node: NodeId,
-    ) -> Option<TypeId> {
-        self.module_data
-            .get(module_path)
-            .and_then(|data| data.declared_var_types.get(&init_node).copied())
     }
 
     /// Set the declared type for a variable's init expression.
@@ -613,21 +456,6 @@ impl ExpressionData {
         self.lambda_analysis.get(&node)
     }
 
-    /// Get lambda analysis results, checking module-specific results first
-    pub fn get_lambda_analysis_in_module(
-        &self,
-        node: NodeId,
-        current_module: Option<&str>,
-    ) -> Option<&LambdaAnalysis> {
-        if let Some(module) = current_module
-            && let Some(data) = self.module_data.get(module)
-            && let Some(result) = data.lambda_analysis.get(&node)
-        {
-            return Some(result);
-        }
-        self.lambda_analysis.get(&node)
-    }
-
     /// Set lambda analysis results for a lambda expression
     pub fn set_lambda_analysis(&mut self, node: NodeId, analysis: LambdaAnalysis) {
         self.lambda_analysis.insert(node, analysis);
@@ -639,9 +467,6 @@ impl ExpressionData {
     }
 
     /// Look up the intrinsic key for a call-site expression.
-    ///
-    /// Returns the concrete intrinsic key (e.g., `"f64_sqrt"`) if this
-    /// call site was resolved as a compiler intrinsic.
     pub fn get_intrinsic_key(&self, node: NodeId) -> Option<&str> {
         self.intrinsic_keys.get(&node).map(|s| s.as_str())
     }

@@ -39,7 +39,7 @@ mod tests {
                 yield 2
             }
         "#;
-        let mut parser = Parser::new(source);
+        let mut parser = Parser::new(source, ModuleId::new(0));
         let program = parser.parse_program().expect("parse failed");
 
         if let Decl::Function(func) = &program.declarations[0] {
@@ -54,7 +54,7 @@ mod tests {
                 return 42
             }
         "#;
-        let mut parser = Parser::new(source);
+        let mut parser = Parser::new(source, ModuleId::new(0));
         let program = parser.parse_program().expect("parse failed");
 
         if let Decl::Function(func) = &program.declarations[0] {

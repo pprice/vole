@@ -9,7 +9,7 @@ use crate::cli::{ColorMode, InspectType, expand_paths_flat};
 use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::commands::common::{PipelineOptions, compile_source, render_pipeline_error};
 use crate::commands::mir_format::format_mir;
-use crate::frontend::{AstPrinter, Parser};
+use crate::frontend::{AstPrinter, ModuleId, Parser};
 use crate::sema::ModuleCache;
 
 /// Inspect compilation output for the given files
@@ -71,7 +71,7 @@ pub fn inspect_files(
         match inspect_type {
             InspectType::Ast => {
                 // Parse
-                let mut parser = Parser::new(&source);
+                let mut parser = Parser::new(&source, ModuleId::new(0));
                 let program = match parser.parse_program() {
                     Ok(p) => p,
                     Err(e) => {

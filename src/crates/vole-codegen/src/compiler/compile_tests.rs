@@ -379,7 +379,6 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 global_inits: &self.global_inits,
                 source_file_ptr,
-                current_module: None,
                 global_module_bindings: &self.global_module_bindings,
             };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -437,7 +436,6 @@ impl Compiler<'_> {
                 interner: &self.analyzed.interner,
                 global_inits: &self.global_inits,
                 source_file_ptr,
-                current_module: None,
                 global_module_bindings: &self.global_module_bindings,
             };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);

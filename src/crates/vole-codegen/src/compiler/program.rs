@@ -123,18 +123,15 @@ impl Compiler<'_> {
         analyzed: &crate::AnalyzedProgram,
         program: &Program,
         module_interner: &Interner,
-        module_path: &str,
     ) -> Vec<(Symbol, super::ModuleExportBinding)> {
         let mut bindings = Vec::new();
-        // Get the module-specific type map (module NodeIds are separate from main program)
-        let module_types = analyzed.expression_data.module_types(module_path);
+        // NodeIds are globally unique (they embed ModuleId), so look up directly in the flat map.
         for decl in &program.declarations {
             if let Decl::LetTuple(let_tuple) = decl
                 && let ExprKind::Import(_) = &let_tuple.init.kind
             {
-                // Look up the import expression's type in the module-specific type map
-                let module_type_id =
-                    module_types.and_then(|types| types.get(&let_tuple.init.id).copied());
+                // Look up the import expression's type directly (NodeId is globally unique)
+                let module_type_id = analyzed.expression_data.get_type(let_tuple.init.id);
                 let Some(module_type_id) = module_type_id else {
                     continue;
                 };
@@ -556,12 +553,8 @@ impl Compiler<'_> {
         // Register destructured import bindings for this module.
         // When a module uses `let { add } = import "./other"`, the binding must
         // be available during compilation of the module's function bodies.
-        let module_bindings = Self::extract_module_destructured_bindings(
-            self.analyzed,
-            program,
-            module_interner,
-            module_path,
-        );
+        let module_bindings =
+            Self::extract_module_destructured_bindings(self.analyzed, program, module_interner);
         let module_binding_keys: Vec<Symbol> = module_bindings.iter().map(|(k, _)| *k).collect();
         for (key, binding) in module_bindings {
             self.global_module_bindings.insert(key, binding);
@@ -780,13 +773,7 @@ impl Compiler<'_> {
 
         // Check if this is a generator function (returns Iterator<T> and body contains yield)
         let source_file_ptr = self.source_file_ptr();
-        let env = compile_env!(
-            self,
-            module_interner,
-            module_global_inits,
-            source_file_ptr,
-            module_id
-        );
+        let env = compile_env!(self, module_interner, module_global_inits, source_file_ptr);
         if let Some(elem_type_id) =
             crate::generator::extract_iterator_element_type(return_type_id, &env)
             && crate::generator::body_contains_yield(&func.body)
@@ -832,13 +819,7 @@ impl Compiler<'_> {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
             // Create split contexts
-            let env = compile_env!(
-                self,
-                module_interner,
-                module_global_inits,
-                source_file_ptr,
-                module_id
-            );
+            let env = compile_env!(self, module_interner, module_global_inits, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);

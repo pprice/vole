@@ -12,19 +12,17 @@ macro_rules! compile_env {
             interner: &$self.analyzed.interner,
             global_inits: &$self.global_inits,
             source_file_ptr: $source_file_ptr,
-            current_module: None,
             global_module_bindings: &$self.global_module_bindings,
         }
     };
-    // Module variant with custom interner, global_inits, and module_id
-    ($self:expr, $interner:expr, $global_inits:expr, $source_file_ptr:expr, $module_id:expr) => {
+    // Module variant with custom interner and global_inits
+    ($self:expr, $interner:expr, $global_inits:expr, $source_file_ptr:expr) => {
         crate::types::CompileEnv {
             analyzed: $self.analyzed,
             state: &$self.state,
             interner: $interner,
             global_inits: $global_inits,
             source_file_ptr: $source_file_ptr,
-            current_module: Some($module_id),
             global_module_bindings: &$self.global_module_bindings,
         }
     };
