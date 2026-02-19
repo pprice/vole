@@ -151,4 +151,13 @@ tests {
         let b = MixedF128 { n: 42, v: 2.0_f128 }
         assert(a != b)
     }
+
+    test "f128 NaN field not equal to itself" {
+        // IEEE 754: NaN != NaN — vole_f128_eq runtime must not use bitwise comparison
+        let nan: f128 = f128.nan()
+        let a = F128Point { x: nan, y: 0.0_f128 }
+        let b = F128Point { x: nan, y: 0.0_f128 }
+        assert(!(a == b))
+        assert(a != b)
+    }
 }
