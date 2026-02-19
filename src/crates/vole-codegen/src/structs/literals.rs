@@ -237,7 +237,7 @@ impl Cg<'_, '_, '_> {
                 CodegenError::not_found("field", format!("{} in {}", field_name, path_str))
             })?;
 
-            let default_expr = deref_expr_ptr(default_expr_ptr);
+            let default_expr = deref_expr_ptr(self.analyzed(), default_expr_ptr);
             let field_type_id = field_types.get(&field_name).copied();
 
             // Compile the default expression
@@ -668,7 +668,7 @@ impl Cg<'_, '_, '_> {
 
             let offset = self.struct_field_byte_offset(result_type_id, field_slot);
 
-            let default_expr = deref_expr_ptr(default_expr_ptr);
+            let default_expr = deref_expr_ptr(self.analyzed(), default_expr_ptr);
             let value = if let Some(&field_type_id) = field_types.get(&field_name) {
                 self.expr_with_expected_type(default_expr, field_type_id)?
             } else {

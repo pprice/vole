@@ -31,15 +31,21 @@ use super::types::{CodegenCtx, CompileEnv, CompiledValue, TypeMetadataMap};
 /// Dereference a raw `*const Expr` pointer from the AST.
 ///
 /// All such pointers originate from `EntityRegistry` or `Program` AST nodes,
-/// both owned by `AnalyzedProgram`. Because `AnalyzedProgram` outlives the
-/// entire compilation session and its data is never moved or modified, the
-/// pointer remains valid for the duration of compilation.
+/// both owned by `AnalyzedProgram`. The `_anchor` parameter ties the returned
+/// reference's lifetime to `AnalyzedProgram`'s lifetime `'ctx`, ensuring the
+/// borrow checker can verify validity without resorting to `'static`.
 ///
 /// This is a free function (rather than a method on `Cg`) so the returned
 /// reference does not borrow `self`, which would conflict with the `&mut self`
-/// needed by expression-compilation methods.
+/// needed by expression-compilation methods. Callers pass `self.analyzed()`
+/// which returns `&'ctx AnalyzedProgram` — a `'ctx`-lifetime reference not
+/// borrowed from `self` — so it does not conflict with subsequent `&mut self`
+/// borrows.
 #[inline]
-pub(crate) fn deref_expr_ptr(ptr: *const Expr) -> &'static Expr {
+pub(crate) fn deref_expr_ptr(
+    _anchor: &crate::AnalyzedProgram,
+    ptr: *const Expr,
+) -> &Expr {
     // SAFETY: All callers obtain these pointers from AnalyzedProgram's
     // EntityRegistry or Program AST, which outlive the Cg instance and
     // persist for the entire compilation session. The data is never

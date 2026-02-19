@@ -163,7 +163,7 @@ impl Cg<'_, '_, '_> {
                         "missing default expression for parameter in lambda call",
                     ));
                 };
-                let default_expr = deref_expr_ptr(*default_ptr);
+                let default_expr = deref_expr_ptr(self.analyzed(), *default_ptr);
                 let compiled = self.expr_with_expected_type(default_expr, param_type_id)?;
                 if compiled.is_owned() {
                     rc_temp_args.push(compiled);

@@ -426,7 +426,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         for (i, &param_type_id) in expected_type_ids.iter().enumerate() {
             let param_idx = start_index + i;
             if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
-                let default_expr = deref_expr_ptr(*default_ptr);
+                let default_expr = deref_expr_ptr(self.analyzed(), *default_ptr);
                 let compiled = self.expr_with_expected_type(default_expr, param_type_id)?;
 
                 // Track owned RC values for cleanup after the call

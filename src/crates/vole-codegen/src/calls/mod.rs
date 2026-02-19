@@ -588,7 +588,7 @@ impl Cg<'_, '_, '_> {
             .take(expected_param_count - start_index)
         {
             if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
-                let default_expr = deref_expr_ptr(*default_ptr);
+                let default_expr = deref_expr_ptr(self.analyzed(), *default_ptr);
                 let compiled = self.expr(default_expr)?;
 
                 // Narrow/extend integer types or promote/demote floats if needed
