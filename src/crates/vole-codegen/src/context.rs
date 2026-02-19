@@ -42,10 +42,7 @@ use super::types::{CodegenCtx, CompileEnv, CompiledValue, TypeMetadataMap};
 /// borrowed from `self` — so it does not conflict with subsequent `&mut self`
 /// borrows.
 #[inline]
-pub(crate) fn deref_expr_ptr(
-    _anchor: &crate::AnalyzedProgram,
-    ptr: *const Expr,
-) -> &Expr {
+pub(crate) fn deref_expr_ptr(_anchor: &crate::AnalyzedProgram, ptr: *const Expr) -> &Expr {
     // SAFETY: All callers obtain these pointers from AnalyzedProgram's
     // EntityRegistry or Program AST, which outlive the Cg instance and
     // persist for the entire compilation session. The data is never

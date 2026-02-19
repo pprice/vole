@@ -1,0 +1,106 @@
+// Tests for equality comparisons on optional types that previously panicked.
+// string? and struct? payloads have a Cranelift pointer type, so the old
+// Cranelift-type dispatch fell through to the unreachable panic! branch.
+
+struct Point { x: i64, y: i64 }
+
+tests "optional string equality" {
+    test "string? equals string value" {
+        let s: string? = "hello"
+        assert(s == "hello")
+    }
+
+    test "string? not equals different string" {
+        let s: string? = "hello"
+        assert(s != "world")
+    }
+
+    test "nil string? not equals string" {
+        let s: string? = nil
+        assert(s != "hello")
+    }
+
+    test "nil string? equals check is false" {
+        let s: string? = nil
+        assert(!(s == "hello"))
+    }
+
+    test "string? equals empty string" {
+        let s: string? = ""
+        assert(s == "")
+    }
+
+    test "string? not equals empty string when non-empty" {
+        let s: string? = "hi"
+        assert(s != "")
+    }
+
+    test "string? value not equals nil" {
+        let s: string? = "hello"
+        assert(s != nil)
+    }
+}
+
+tests "optional f128 equality" {
+    test "f128? equals value" {
+        let x: f128? = 3.14_f128
+        assert(x == 3.14_f128)
+    }
+
+    test "f128? not equals different value" {
+        let x: f128? = 3.14_f128
+        assert(x != 2.0_f128)
+    }
+
+    test "nil f128? not equals value" {
+        let x: f128? = nil
+        assert(x != 3.14_f128)
+    }
+
+    test "nil f128? equals check is false" {
+        let x: f128? = nil
+        assert(!(x == 1.0_f128))
+    }
+
+    test "f128? equals zero" {
+        let x: f128? = 0.0_f128
+        assert(x == 0.0_f128)
+    }
+}
+
+tests "optional struct equality" {
+    test "struct? equals struct value" {
+        let p: Point? = Point { x: 1, y: 2 }
+        let q = Point { x: 1, y: 2 }
+        assert(p == q)
+    }
+
+    test "struct? not equals different struct" {
+        let p: Point? = Point { x: 1, y: 2 }
+        let q = Point { x: 1, y: 3 }
+        assert(p != q)
+    }
+
+    test "nil struct? not equals struct value" {
+        let p: Point? = nil
+        let q = Point { x: 1, y: 2 }
+        assert(p != q)
+    }
+
+    test "nil struct? equals check is false" {
+        let p: Point? = nil
+        let q = Point { x: 0, y: 0 }
+        assert(!(p == q))
+    }
+
+    test "struct? equals zero-valued struct" {
+        let p: Point? = Point { x: 0, y: 0 }
+        let q = Point { x: 0, y: 0 }
+        assert(p == q)
+    }
+
+    test "struct? not equals nil" {
+        let p: Point? = Point { x: 1, y: 2 }
+        assert(p != nil)
+    }
+}

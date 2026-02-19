@@ -1057,8 +1057,7 @@ impl Cg<'_, '_, '_> {
         // Check if not nil (tag != nil_tag)
         let is_not_nil = self.tag_ne(optional.value, nil_tag as i64);
 
-        // Load the payload (at offset 8) with the correct type
-        // The payload type matches the inner (non-nil) type of the optional (using TypeId)
+        // Resolve the inner (non-nil) TypeId for dispatch
         let inner_type_id = {
             let arena = self.arena();
             arena
@@ -1066,36 +1065,25 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or_else(|| arena.i64())
         };
         let payload_cranelift_type = self.cranelift_type(inner_type_id);
+
+        // Struct payloads are pointers to stack data; loading fields from a nil optional's
+        // payload pointer causes a segfault. Use conditional branching to guard the load.
+        if self.arena().is_struct(inner_type_id) {
+            return self.optional_struct_compare(optional, value, op, is_not_nil, inner_type_id);
+        }
+
         let payload =
             self.load_union_payload(optional.value, optional.type_id, payload_cranelift_type);
 
-        // Compare payload with value (extend if necessary to match types)
-        let values_equal = if value.ty.is_float() {
-            self.builder
-                .ins()
-                .fcmp(FloatCC::Equal, payload, value.value)
-        } else if value.ty.is_int() {
-            // Ensure both values have the same type for comparison
-            let (cmp_payload, cmp_value) = if payload_cranelift_type.bytes() < value.ty.bytes() {
-                // Extend payload to match value's type
-                let extended = sextend_const(self.builder, value.ty, payload);
-                (extended, value.value)
-            } else if payload_cranelift_type.bytes() > value.ty.bytes() {
-                // Extend value to match payload's type
-                let extended = sextend_const(self.builder, payload_cranelift_type, value.value);
-                (payload, extended)
-            } else {
-                (payload, value.value)
-            };
-            self.builder
-                .ins()
-                .icmp(IntCC::Equal, cmp_payload, cmp_value)
-        } else {
-            panic!(
-                "optional_eq: unexpected Cranelift type {:?} for equality comparison",
-                value.ty
-            )
-        };
+        // Compare payload with value, dispatching on vole TypeId rather than Cranelift type.
+        // This correctly handles string (content equality), float, and integer/pointer types.
+        // Cranelift-type dispatch would incorrectly treat string pointers as plain integers.
+        let values_equal = self.compare_optional_payload_eq(
+            inner_type_id,
+            payload,
+            payload_cranelift_type,
+            value,
+        )?;
 
         // Result is: is_not_nil AND values_equal
         let result = match op {
@@ -1113,6 +1101,101 @@ impl Cg<'_, '_, '_> {
         };
 
         Ok(self.bool_value(result))
+    }
+
+    /// Compare a struct? optional against a struct value using conditional branching.
+    ///
+    /// Struct field loads must not execute when the optional is nil (payload pointer is 0).
+    /// Emits: if is_not_nil { struct_equality(payload, value) } else { false } then merges.
+    fn optional_struct_compare(
+        &mut self,
+        optional: CompiledValue,
+        value: CompiledValue,
+        op: BinaryOp,
+        is_not_nil: Value,
+        inner_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let payload_cranelift_type = self.cranelift_type(inner_type_id);
+        let not_nil_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder.append_block_param(merge_block, types::I8);
+
+        // When nil: Eq -> false (0), Ne -> true (1)
+        let nil_result: i64 = match op {
+            BinaryOp::Eq => 0,
+            BinaryOp::Ne => 1,
+            _ => unreachable!("optional_struct_compare only handles Eq and Ne"),
+        };
+        let nil_block = self.builder.create_block();
+        self.emit_brif(is_not_nil, not_nil_block, nil_block);
+
+        // Nil branch: return the nil_result without loading from the payload pointer
+        self.switch_and_seal(nil_block);
+        let nil_val = self.iconst_cached(types::I8, nil_result);
+        let nil_arg = BlockArg::from(nil_val);
+        self.builder.ins().jump(merge_block, &[nil_arg]);
+
+        // Non-nil branch: load payload and compare struct fields
+        self.switch_and_seal(not_nil_block);
+        let payload =
+            self.load_union_payload(optional.value, optional.type_id, payload_cranelift_type);
+        let payload_compiled = CompiledValue::new(payload, payload_cranelift_type, inner_type_id);
+        let eq_result = self.struct_equality(payload_compiled, value, op)?;
+        let eq_arg = BlockArg::from(eq_result.value);
+        self.builder.ins().jump(merge_block, &[eq_arg]);
+
+        // Merge
+        self.switch_and_seal(merge_block);
+        self.invalidate_value_caches();
+        let result = self.builder.block_params(merge_block)[0];
+
+        Ok(self.bool_value(result))
+    }
+
+    /// Compare an optional payload against a value, returning an I8 bool (1 = equal, 0 = not equal).
+    ///
+    /// Dispatches on `inner_type_id` (the vole TypeId of the unwrapped optional's inner type):
+    /// - f128                -> call_f128_cmp (Cranelift has no native fcmp for F128)
+    /// - f32 / f64           -> fcmp
+    /// - String              -> string_eq (content equality via RuntimeKey::StringEq)
+    /// - Everything else     -> icmp (int, bool, pointer, interface, handle, union)
+    ///
+    /// Note: Structs are handled before this function is called (see `optional_struct_compare`)
+    /// because struct field loads must be guarded by a nil check to avoid segfaults.
+    fn compare_optional_payload_eq(
+        &mut self,
+        inner_type_id: TypeId,
+        payload: Value,
+        payload_cranelift_type: Type,
+        value: CompiledValue,
+    ) -> CodegenResult<Value> {
+        if inner_type_id == TypeId::F128 {
+            // F128 requires a runtime call; Cranelift has no native fcmp for 128-bit floats.
+            self.call_f128_cmp(RuntimeKey::F128Eq, payload, value.value)
+        } else if self.arena().is_float(inner_type_id) {
+            // F32 / F64 use the native Cranelift fcmp instruction.
+            Ok(self
+                .builder
+                .ins()
+                .fcmp(FloatCC::Equal, payload, value.value))
+        } else if self.arena().is_string(inner_type_id) {
+            self.string_eq(payload, value.value)
+        } else {
+            // Integer, bool, pointer, interface, handle, union: compare by value/identity
+            let (cmp_payload, cmp_value) = if payload_cranelift_type.bytes() < value.ty.bytes() {
+                let extended = sextend_const(self.builder, value.ty, payload);
+                (extended, value.value)
+            } else if payload_cranelift_type.bytes() > value.ty.bytes() {
+                let extended = sextend_const(self.builder, payload_cranelift_type, value.value);
+                (payload, extended)
+            } else {
+                (payload, value.value)
+            };
+            Ok(self
+                .builder
+                .ins()
+                .icmp(IntCC::Equal, cmp_payload, cmp_value))
+        }
     }
 
     /// Emit a comparison instruction, dispatching based on type (float vs int, signed vs unsigned).
