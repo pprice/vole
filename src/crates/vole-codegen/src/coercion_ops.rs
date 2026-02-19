@@ -11,6 +11,7 @@ use cranelift::prelude::{InstBuilder, MemFlags, Type, Value, types};
 
 use smallvec::SmallVec;
 use vole_frontend::Expr;
+use vole_sema::numeric_model::{NumericCoercion, numeric_coercion};
 use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
@@ -204,112 +205,153 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         target_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let target_ty = self.cranelift_type(target_type_id);
+        // If the Cranelift representation is already the right type (e.g. u8 → i8,
+        // u32 → i32), no IR instruction is needed — just re-tag the value.
         if value.ty == target_ty {
             return Ok(CompiledValue::new(value.value, target_ty, target_type_id));
         }
+        let coercion = numeric_coercion(value.type_id, target_type_id);
 
-        let source_is_unsigned = self.arena().is_unsigned(value.type_id);
-        let target_is_unsigned = self.arena().is_unsigned(target_type_id);
+        let converted = match coercion {
+            NumericCoercion::Identity => {
+                return Ok(CompiledValue::new(value.value, target_ty, target_type_id));
+            }
+            NumericCoercion::IntWiden { signed: true } => {
+                sextend_const(self.builder, target_ty, value.value)
+            }
+            NumericCoercion::IntWiden { signed: false } => {
+                uextend_const(self.builder, target_ty, value.value)
+            }
+            NumericCoercion::IntNarrow { .. } => self.builder.ins().ireduce(target_ty, value.value),
+            NumericCoercion::FloatWiden => self.float_widen(value, target_type_id)?,
+            NumericCoercion::FloatNarrow => self.float_narrow(value, target_type_id)?,
+            NumericCoercion::IntToFloat { from_signed } => {
+                self.int_to_float(value, target_type_id, from_signed)?
+            }
+            NumericCoercion::FloatToInt { to_signed } => {
+                self.float_to_int(value, target_type_id, to_signed)?
+            }
+        };
+        Ok(CompiledValue::new(converted, target_ty, target_type_id))
+    }
 
-        let converted = if target_ty == types::F128 {
-            match value.ty {
-                ty if ty == types::F128 => value.value,
+    /// Float widening: F32→F64 (fpromote), or anything→F128 (runtime calls).
+    fn float_widen(&mut self, value: CompiledValue, to: TypeId) -> CodegenResult<Value> {
+        let target_ty = self.cranelift_type(to);
+        if target_ty == types::F128 {
+            // Anything→F128 goes through a runtime call, result is i128 bits → bitcast to f128.
+            let bits = match value.ty {
                 ty if ty == types::F64 => {
-                    let bits = self.call_runtime(RuntimeKey::F64ToF128, &[value.value])?;
-                    self.builder
-                        .ins()
-                        .bitcast(types::F128, MemFlags::new(), bits)
+                    self.call_runtime(RuntimeKey::F64ToF128, &[value.value])?
                 }
                 ty if ty == types::F32 => {
-                    let bits = self.call_runtime(RuntimeKey::F32ToF128, &[value.value])?;
-                    self.builder
-                        .ins()
-                        .bitcast(types::F128, MemFlags::new(), bits)
+                    self.call_runtime(RuntimeKey::F32ToF128, &[value.value])?
                 }
-                ty if ty == types::I128 => {
-                    let bits = self.call_runtime(RuntimeKey::I128ToF128, &[value.value])?;
-                    self.builder
-                        .ins()
-                        .bitcast(types::F128, MemFlags::new(), bits)
-                }
-                ty if ty.is_int() => {
-                    let i64_val = if ty == types::I64 {
-                        value.value
-                    } else if ty.bytes() < 8 {
-                        if source_is_unsigned {
-                            uextend_const(self.builder, types::I64, value.value)
-                        } else {
-                            sextend_const(self.builder, types::I64, value.value)
-                        }
-                    } else {
-                        self.builder.ins().ireduce(types::I64, value.value)
-                    };
-                    let bits = self.call_runtime(RuntimeKey::I64ToF128, &[i64_val])?;
-                    self.builder
-                        .ins()
-                        .bitcast(types::F128, MemFlags::new(), bits)
-                }
-                _ => value.value,
-            }
-        } else if value.ty == types::F128 {
+                _ => unreachable!("float_widen to F128: unexpected source type"),
+            };
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), bits))
+        } else {
+            // F32→F64: direct fpromote
+            Ok(self.builder.ins().fpromote(target_ty, value.value))
+        }
+    }
+
+    /// Float narrowing: F128→F64/F32 (runtime calls), F64→F32 (fdemote).
+    fn float_narrow(&mut self, value: CompiledValue, to: TypeId) -> CodegenResult<Value> {
+        let target_ty = self.cranelift_type(to);
+        if value.ty == types::F128 {
             let f128_bits = self
                 .builder
                 .ins()
                 .bitcast(types::I128, MemFlags::new(), value.value);
             match target_ty {
-                ty if ty == types::F64 => self.call_runtime(RuntimeKey::F128ToF64, &[f128_bits])?,
-                ty if ty == types::F32 => self.call_runtime(RuntimeKey::F128ToF32, &[f128_bits])?,
-                ty if ty == types::I128 => {
-                    self.call_runtime(RuntimeKey::F128ToI128, &[f128_bits])?
-                }
-                ty if ty.is_int() => {
-                    let i64_val = self.call_runtime(RuntimeKey::F128ToI64, &[f128_bits])?;
-                    if ty == types::I64 {
-                        i64_val
-                    } else if ty.bytes() < 8 {
-                        self.builder.ins().ireduce(ty, i64_val)
-                    } else {
-                        // i128 path is handled above; keep for defensive completeness.
-                        sextend_const(self.builder, ty, i64_val)
-                    }
-                }
-                _ => value.value,
-            }
-        } else if target_ty.is_int() && value.ty.is_int() {
-            if target_ty.bytes() > value.ty.bytes() {
-                if source_is_unsigned {
-                    uextend_const(self.builder, target_ty, value.value)
-                } else {
-                    sextend_const(self.builder, target_ty, value.value)
-                }
-            } else {
-                self.builder.ins().ireduce(target_ty, value.value)
-            }
-        } else if target_ty.is_float() && value.ty.is_float() {
-            if value.ty == types::F32 && target_ty == types::F64 {
-                self.builder.ins().fpromote(types::F64, value.value)
-            } else if value.ty == types::F64 && target_ty == types::F32 {
-                self.builder.ins().fdemote(types::F32, value.value)
-            } else {
-                value.value
-            }
-        } else if target_ty.is_float() && value.ty.is_int() {
-            if source_is_unsigned {
-                self.builder.ins().fcvt_from_uint(target_ty, value.value)
-            } else {
-                self.builder.ins().fcvt_from_sint(target_ty, value.value)
-            }
-        } else if target_ty.is_int() && value.ty.is_float() {
-            if target_is_unsigned {
-                self.builder.ins().fcvt_to_uint(target_ty, value.value)
-            } else {
-                self.builder.ins().fcvt_to_sint(target_ty, value.value)
+                ty if ty == types::F64 => self.call_runtime(RuntimeKey::F128ToF64, &[f128_bits]),
+                ty if ty == types::F32 => self.call_runtime(RuntimeKey::F128ToF32, &[f128_bits]),
+                _ => unreachable!("float_narrow from F128: unexpected target type"),
             }
         } else {
-            value.value
-        };
+            // F64→F32: direct fdemote
+            Ok(self.builder.ins().fdemote(target_ty, value.value))
+        }
+    }
 
-        Ok(CompiledValue::new(converted, target_ty, target_type_id))
+    /// Integer-to-float conversion.
+    /// Handles →F128 (runtime calls with intermediate i64), otherwise fcvt_from_sint/uint.
+    fn int_to_float(
+        &mut self,
+        value: CompiledValue,
+        to: TypeId,
+        from_signed: bool,
+    ) -> CodegenResult<Value> {
+        let target_ty = self.cranelift_type(to);
+        if target_ty == types::F128 {
+            // I128→F128 gets its own runtime call; all others route through i64.
+            if value.ty == types::I128 {
+                let bits = self.call_runtime(RuntimeKey::I128ToF128, &[value.value])?;
+                return Ok(self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), bits));
+            }
+            // Narrow or widen the source integer to i64 first.
+            let i64_val = if value.ty == types::I64 {
+                value.value
+            } else if value.ty.bytes() < 8 {
+                if from_signed {
+                    sextend_const(self.builder, types::I64, value.value)
+                } else {
+                    uextend_const(self.builder, types::I64, value.value)
+                }
+            } else {
+                self.builder.ins().ireduce(types::I64, value.value)
+            };
+            let bits = self.call_runtime(RuntimeKey::I64ToF128, &[i64_val])?;
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), bits))
+        } else if from_signed {
+            Ok(self.builder.ins().fcvt_from_sint(target_ty, value.value))
+        } else {
+            Ok(self.builder.ins().fcvt_from_uint(target_ty, value.value))
+        }
+    }
+
+    /// Float-to-integer conversion.
+    /// Handles F128→ (runtime calls: F128ToI128, F128ToI64 + narrow), otherwise fcvt_to_sint/uint.
+    fn float_to_int(
+        &mut self,
+        value: CompiledValue,
+        to: TypeId,
+        to_signed: bool,
+    ) -> CodegenResult<Value> {
+        let target_ty = self.cranelift_type(to);
+        if value.ty == types::F128 {
+            let f128_bits = self
+                .builder
+                .ins()
+                .bitcast(types::I128, MemFlags::new(), value.value);
+            if target_ty == types::I128 {
+                return self.call_runtime(RuntimeKey::F128ToI128, &[f128_bits]);
+            }
+            // All other integer targets go through i64 first, then narrow if needed.
+            let i64_val = self.call_runtime(RuntimeKey::F128ToI64, &[f128_bits])?;
+            if target_ty == types::I64 {
+                Ok(i64_val)
+            } else if target_ty.bytes() < 8 {
+                Ok(self.builder.ins().ireduce(target_ty, i64_val))
+            } else {
+                // Defensive: i128 is handled above; keep for completeness.
+                Ok(sextend_const(self.builder, target_ty, i64_val))
+            }
+        } else if to_signed {
+            Ok(self.builder.ins().fcvt_to_sint(target_ty, value.value))
+        } else {
+            Ok(self.builder.ins().fcvt_to_uint(target_ty, value.value))
+        }
     }
 
     /// Box a value into the unknown type (TaggedValue representation).
