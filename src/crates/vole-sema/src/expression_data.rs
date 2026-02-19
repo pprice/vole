@@ -66,178 +66,35 @@ pub struct LambdaDefaults {
 #[derive(Debug, Clone, Default)]
 pub struct ExpressionData {
     /// Type of each expression node (stored as interned TypeId handles)
-    types: FxHashMap<NodeId, TypeId>,
+    pub(crate) types: FxHashMap<NodeId, TypeId>,
     /// Resolved method information for method calls
-    methods: FxHashMap<NodeId, ResolvedMethod>,
+    pub(crate) methods: FxHashMap<NodeId, ResolvedMethod>,
     /// Monomorphization key for generic function calls
-    generics: FxHashMap<NodeId, MonomorphKey>,
+    pub(crate) generics: FxHashMap<NodeId, MonomorphKey>,
     /// Monomorphization key for generic class method calls
-    class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
+    pub(crate) class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
     /// Monomorphization key for generic static method calls
-    static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
+    pub(crate) static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
     /// Substituted return types for generic method calls.
-    substituted_return_types: FxHashMap<NodeId, TypeId>,
+    pub(crate) substituted_return_types: FxHashMap<NodeId, TypeId>,
     /// Lambda defaults for closure calls.
-    lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
+    pub(crate) lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    tests_virtual_modules: FxHashMap<Span, ModuleId>,
+    pub(crate) tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Type check results for `is` expressions and type patterns.
-    is_check_results: FxHashMap<NodeId, IsCheckResult>,
+    pub(crate) is_check_results: FxHashMap<NodeId, IsCheckResult>,
     /// Declared variable types for let statements with explicit type annotations.
-    declared_var_types: FxHashMap<NodeId, TypeId>,
+    pub(crate) declared_var_types: FxHashMap<NodeId, TypeId>,
     /// Lambda analysis results (captures and side effects).
-    lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
+    pub(crate) lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
     /// Resolved intrinsic keys for compiler intrinsic calls.
-    intrinsic_keys: FxHashMap<NodeId, String>,
-}
-
-/// Builder for `ExpressionData` to reduce construction boilerplate.
-///
-/// Provides a fluent API for setting analysis results, with all fields
-/// defaulting to empty collections.
-///
-/// # Example
-/// ```ignore
-/// let data = ExpressionDataBuilder::new()
-///     .types(expr_types)
-///     .methods(method_resolutions)
-///     .generics(generic_calls)
-///     .build();
-/// ```
-#[derive(Default)]
-pub struct ExpressionDataBuilder {
-    types: FxHashMap<NodeId, TypeId>,
-    methods: FxHashMap<NodeId, ResolvedMethod>,
-    generics: FxHashMap<NodeId, MonomorphKey>,
-    class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
-    static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    substituted_return_types: FxHashMap<NodeId, TypeId>,
-    lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
-    tests_virtual_modules: FxHashMap<Span, ModuleId>,
-    is_check_results: FxHashMap<NodeId, IsCheckResult>,
-    declared_var_types: FxHashMap<NodeId, TypeId>,
-    lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
-    intrinsic_keys: FxHashMap<NodeId, String>,
-}
-
-impl ExpressionDataBuilder {
-    /// Create a new builder with all fields set to empty defaults.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set expression types (NodeId -> TypeId mappings).
-    pub fn types(mut self, types: FxHashMap<NodeId, TypeId>) -> Self {
-        self.types = types;
-        self
-    }
-
-    /// Set method resolutions for method calls.
-    pub fn methods(mut self, methods: FxHashMap<NodeId, ResolvedMethod>) -> Self {
-        self.methods = methods;
-        self
-    }
-
-    /// Set monomorphization keys for generic function calls.
-    pub fn generics(mut self, generics: FxHashMap<NodeId, MonomorphKey>) -> Self {
-        self.generics = generics;
-        self
-    }
-
-    /// Set monomorphization keys for generic class method calls.
-    pub fn class_method_generics(
-        mut self,
-        class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
-    ) -> Self {
-        self.class_method_generics = class_method_generics;
-        self
-    }
-
-    /// Set monomorphization keys for generic static method calls.
-    pub fn static_method_generics(
-        mut self,
-        static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    ) -> Self {
-        self.static_method_generics = static_method_generics;
-        self
-    }
-
-    /// Set substituted return types for generic method calls.
-    pub fn substituted_return_types(
-        mut self,
-        substituted_return_types: FxHashMap<NodeId, TypeId>,
-    ) -> Self {
-        self.substituted_return_types = substituted_return_types;
-        self
-    }
-
-    /// Set lambda defaults for closure calls.
-    pub fn lambda_defaults(mut self, lambda_defaults: FxHashMap<NodeId, LambdaDefaults>) -> Self {
-        self.lambda_defaults = lambda_defaults;
-        self
-    }
-
-    /// Set virtual module IDs for tests blocks.
-    pub fn tests_virtual_modules(
-        mut self,
-        tests_virtual_modules: FxHashMap<Span, ModuleId>,
-    ) -> Self {
-        self.tests_virtual_modules = tests_virtual_modules;
-        self
-    }
-
-    /// Set type check results for `is` expressions and type patterns.
-    pub fn is_check_results(mut self, is_check_results: FxHashMap<NodeId, IsCheckResult>) -> Self {
-        self.is_check_results = is_check_results;
-        self
-    }
-
-    /// Set declared variable types for let statements with explicit type annotations.
-    pub fn declared_var_types(mut self, declared_var_types: FxHashMap<NodeId, TypeId>) -> Self {
-        self.declared_var_types = declared_var_types;
-        self
-    }
-
-    /// Set lambda analysis results (captures and side effects).
-    pub fn lambda_analysis(mut self, lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>) -> Self {
-        self.lambda_analysis = lambda_analysis;
-        self
-    }
-
-    /// Set resolved intrinsic keys for compiler intrinsic calls.
-    pub fn intrinsic_keys(mut self, intrinsic_keys: FxHashMap<NodeId, String>) -> Self {
-        self.intrinsic_keys = intrinsic_keys;
-        self
-    }
-
-    /// Build the `ExpressionData` from this builder.
-    pub fn build(self) -> ExpressionData {
-        ExpressionData {
-            types: self.types,
-            methods: self.methods,
-            generics: self.generics,
-            class_method_generics: self.class_method_generics,
-            static_method_generics: self.static_method_generics,
-            substituted_return_types: self.substituted_return_types,
-            lambda_defaults: self.lambda_defaults,
-            tests_virtual_modules: self.tests_virtual_modules,
-            is_check_results: self.is_check_results,
-            declared_var_types: self.declared_var_types,
-            lambda_analysis: self.lambda_analysis,
-            intrinsic_keys: self.intrinsic_keys,
-        }
-    }
+    pub(crate) intrinsic_keys: FxHashMap<NodeId, String>,
 }
 
 impl ExpressionData {
     /// Create a new empty ExpressionData
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Returns a builder for constructing `ExpressionData` with a fluent API.
-    pub fn builder() -> ExpressionDataBuilder {
-        ExpressionDataBuilder::new()
     }
 
     /// Merge all entries from `other` into this ExpressionData.

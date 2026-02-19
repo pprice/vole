@@ -144,15 +144,16 @@ impl Analyzer {
             );
             {
                 use crate::expression_data::ExpressionData;
-                let cached_data = ExpressionData::builder()
-                    .types(cached.expr_types.clone())
-                    .methods(cached.method_resolutions.clone())
-                    .generics(cached.generic_calls.clone())
-                    .class_method_generics(cached.class_method_generics.clone())
-                    .static_method_generics(cached.static_method_generics.clone())
-                    .is_check_results(cached.is_check_results.clone())
-                    .declared_var_types(cached.declared_var_types)
-                    .build();
+                let cached_data = ExpressionData {
+                    types: cached.expr_types.clone(),
+                    methods: cached.method_resolutions.clone(),
+                    generics: cached.generic_calls.clone(),
+                    class_method_generics: cached.class_method_generics.clone(),
+                    static_method_generics: cached.static_method_generics.clone(),
+                    is_check_results: cached.is_check_results.clone(),
+                    declared_var_types: cached.declared_var_types,
+                    ..Default::default()
+                };
                 self.ctx.merged_expr_data.borrow_mut().merge(cached_data);
             }
             return;
@@ -289,15 +290,16 @@ impl Analyzer {
             .insert(import_path.to_string(), (program, prelude_interner));
         {
             use crate::expression_data::ExpressionData;
-            let prelude_data = ExpressionData::builder()
-                .types(sub_analyzer.results.expr_types)
-                .methods(sub_analyzer.results.method_resolutions.into_inner())
-                .generics(sub_analyzer.results.generic_calls)
-                .class_method_generics(sub_analyzer.results.class_method_calls)
-                .static_method_generics(sub_analyzer.results.static_method_calls)
-                .is_check_results(sub_analyzer.results.is_check_results)
-                .declared_var_types(sub_analyzer.results.declared_var_types)
-                .build();
+            let prelude_data = ExpressionData {
+                types: sub_analyzer.results.expr_types,
+                methods: sub_analyzer.results.method_resolutions.into_inner(),
+                generics: sub_analyzer.results.generic_calls,
+                class_method_generics: sub_analyzer.results.class_method_calls,
+                static_method_generics: sub_analyzer.results.static_method_calls,
+                is_check_results: sub_analyzer.results.is_check_results,
+                declared_var_types: sub_analyzer.results.declared_var_types,
+                ..Default::default()
+            };
             self.ctx.merged_expr_data.borrow_mut().merge(prelude_data);
         }
     }

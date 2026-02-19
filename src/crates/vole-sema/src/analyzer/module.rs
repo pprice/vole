@@ -603,16 +603,17 @@ impl Analyzer {
     /// no collisions when merging results from different modules.
     fn store_sub_analyzer_results(&mut self, _module_key: &str, sub_analyzer: Analyzer) {
         use crate::expression_data::ExpressionData;
-        let module_data = ExpressionData::builder()
-            .types(sub_analyzer.results.expr_types)
-            .methods(sub_analyzer.results.method_resolutions.into_inner())
-            .generics(sub_analyzer.results.generic_calls)
-            .class_method_generics(sub_analyzer.results.class_method_calls)
-            .static_method_generics(sub_analyzer.results.static_method_calls)
-            .is_check_results(sub_analyzer.results.is_check_results)
-            .declared_var_types(sub_analyzer.results.declared_var_types)
-            .lambda_analysis(sub_analyzer.lambda.analysis)
-            .build();
+        let module_data = ExpressionData {
+            types: sub_analyzer.results.expr_types,
+            methods: sub_analyzer.results.method_resolutions.into_inner(),
+            generics: sub_analyzer.results.generic_calls,
+            class_method_generics: sub_analyzer.results.class_method_calls,
+            static_method_generics: sub_analyzer.results.static_method_calls,
+            is_check_results: sub_analyzer.results.is_check_results,
+            declared_var_types: sub_analyzer.results.declared_var_types,
+            lambda_analysis: sub_analyzer.lambda.analysis,
+            ..Default::default()
+        };
         self.ctx.merged_expr_data.borrow_mut().merge(module_data);
     }
 

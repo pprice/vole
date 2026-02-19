@@ -192,20 +192,20 @@ impl Analyzer {
 
         let intrinsic_keys = results.intrinsic_keys;
         // Build main-program expression data, then merge in module data
-        let mut expression_data = ExpressionData::builder()
-            .types(expr_types)
-            .methods(method_resolutions)
-            .generics(generic_calls)
-            .class_method_generics(class_method_calls)
-            .static_method_generics(static_method_calls)
-            .substituted_return_types(substituted_return_types)
-            .lambda_defaults(lambda_defaults)
-            .tests_virtual_modules(tests_virtual_modules)
-            .is_check_results(is_check_results)
-            .declared_var_types(declared_var_types)
-            .lambda_analysis(lambda_analysis)
-            .intrinsic_keys(intrinsic_keys)
-            .build();
+        let mut expression_data = ExpressionData {
+            types: expr_types,
+            methods: method_resolutions,
+            generics: generic_calls,
+            class_method_generics: class_method_calls,
+            static_method_generics: static_method_calls,
+            substituted_return_types,
+            lambda_defaults,
+            tests_virtual_modules,
+            is_check_results,
+            declared_var_types,
+            lambda_analysis,
+            intrinsic_keys,
+        };
         // Merge module analysis data (globally unique NodeIds, no collisions)
         expression_data.merge(merged_expr_data);
 
