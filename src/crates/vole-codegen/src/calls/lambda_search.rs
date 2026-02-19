@@ -30,15 +30,7 @@ fn find_lambda_in_program(program: &Program, node_id: NodeId) -> Option<&LambdaE
 /// Find a lambda in a declaration.
 fn find_lambda_in_decl(decl: &Decl, node_id: NodeId) -> Option<&LambdaExpr> {
     match decl {
-        Decl::Function(func) => {
-            // Search function body for lambdas
-            match &func.body {
-                vole_frontend::FuncBody::Expr(expr) => find_lambda_in_expr(expr, node_id),
-                vole_frontend::FuncBody::Block(block) => {
-                    find_lambda_in_stmts(&block.stmts, node_id)
-                }
-            }
-        }
+        Decl::Function(func) => find_lambda_in_func_body(&func.body, node_id),
         Decl::Let(let_stmt) => {
             if let vole_frontend::LetInit::Expr(expr) = &let_stmt.init {
                 find_lambda_in_expr(expr, node_id)
@@ -61,8 +53,72 @@ fn find_lambda_in_decl(decl: &Decl, node_id: NodeId) -> Option<&LambdaExpr> {
             }
             None
         }
+        Decl::Class(class) => {
+            for method in &class.methods {
+                if let Some(lambda) = find_lambda_in_func_body(&method.body, node_id) {
+                    return Some(lambda);
+                }
+            }
+            if let Some(statics) = &class.statics
+                && let Some(lambda) = find_lambda_in_statics(statics, node_id) {
+                    return Some(lambda);
+                }
+            None
+        }
+        Decl::Struct(struct_decl) => {
+            for method in &struct_decl.methods {
+                if let Some(lambda) = find_lambda_in_func_body(&method.body, node_id) {
+                    return Some(lambda);
+                }
+            }
+            if let Some(statics) = &struct_decl.statics
+                && let Some(lambda) = find_lambda_in_statics(statics, node_id) {
+                    return Some(lambda);
+                }
+            None
+        }
+        Decl::Interface(iface) => {
+            for method in &iface.methods {
+                if let Some(body) = &method.body
+                    && let Some(lambda) = find_lambda_in_func_body(body, node_id) {
+                        return Some(lambda);
+                    }
+            }
+            if let Some(statics) = &iface.statics
+                && let Some(lambda) = find_lambda_in_statics(statics, node_id) {
+                    return Some(lambda);
+                }
+            None
+        }
+        Decl::Implement(impl_block) => {
+            for method in &impl_block.methods {
+                if let Some(lambda) = find_lambda_in_func_body(&method.body, node_id) {
+                    return Some(lambda);
+                }
+            }
+            if let Some(statics) = &impl_block.statics
+                && let Some(lambda) = find_lambda_in_statics(statics, node_id) {
+                    return Some(lambda);
+                }
+            None
+        }
+        // LetTuple, Error, Sentinel, External have no lambda bodies
         _ => None,
     }
+}
+
+/// Find a lambda in a StaticsBlock (static methods with optional bodies).
+fn find_lambda_in_statics(
+    statics: &vole_frontend::ast::StaticsBlock,
+    node_id: NodeId,
+) -> Option<&LambdaExpr> {
+    for method in &statics.methods {
+        if let Some(body) = &method.body
+            && let Some(lambda) = find_lambda_in_func_body(body, node_id) {
+                return Some(lambda);
+            }
+    }
+    None
 }
 
 /// Find a lambda in a function body.

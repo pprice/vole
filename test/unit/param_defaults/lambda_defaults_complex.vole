@@ -1,0 +1,86 @@
+// Test default parameter values for lambda expressions in complex contexts
+
+class Box {
+    value: i64,
+    func with_offset(offset: i64 = 0) -> i64 {
+        let compute = (x: i64, scale: i64 = 1) -> i64 => x * scale + offset
+        return compute(self.value)
+    }
+    func scaled(scale: i64 = 2) -> i64 {
+        let compute = (x: i64, s: i64 = scale) -> i64 => x * s
+        return compute(self.value)
+    }
+}
+
+func make_adder(base: i64) -> (i64, i64) -> i64 {
+    return (x: i64, y: i64 = base) -> i64 => x + y
+}
+
+func apply_default(f: (i64, i64) -> i64, x: i64) -> i64 {
+    return f(x, 5)
+}
+
+func nested_defaults() -> i64 {
+    let outer = (x: i64, shift: i64 = 100) -> i64 => {
+        let inner = (y: i64, mul: i64 = 2) -> i64 => y * mul + shift
+        return inner(x)
+    }
+    return outer(10)
+}
+
+func lambda_default_in_loop() -> i64 {
+    let f = (x: i64, step: i64 = 1) -> i64 => x + step
+    let mut total = 0
+    let mut i = 0
+    while i < 5 {
+        total = total + f(i)
+        i = i + 1
+    }
+    return total
+}
+
+func capture_lambda_with_default() -> i64 {
+    let base = 10
+    let f = (x: i64, extra: i64 = base) -> i64 => x + extra
+    return f(5)
+}
+
+func lambda_default_passed_as_arg() -> i64 {
+    let add = (a: i64, b: i64 = 5) -> i64 => a + b
+    return apply_default(add, 3)
+}
+
+tests {
+    test "lambda with default inside closure" {
+        assert(nested_defaults() == 120)  // inner: 10*2 + 100 = 120
+    }
+
+    test "lambda with default in class method" {
+        let b = Box { value: 7 }
+        assert(b.with_offset() == 7)       // compute(7) = 7 * 1 + 0 = 7
+        assert(b.with_offset(3) == 10)     // compute(7) = 7 * 1 + 3 = 10
+    }
+
+    test "lambda with default capturing outer var" {
+        let b = Box { value: 5 }
+        assert(b.scaled() == 10)           // compute(5, 2) = 10
+        assert(b.scaled(3) == 15)          // compute(5, 3) = 15
+    }
+
+    test "lambda with default in loop" {
+        assert(lambda_default_in_loop() == 15)  // 0+1 + 1+1 + 2+1 + 3+1 + 4+1 = 15
+    }
+
+    test "lambda with default capturing local" {
+        assert(capture_lambda_with_default() == 15)  // 5 + 10 = 15
+    }
+
+    test "lambda with default passed as argument" {
+        assert(lambda_default_passed_as_arg() == 8)  // apply_default(add, 3) = add(3, 5) = 8
+    }
+
+    test "make_adder returns lambda with default" {
+        let adder = make_adder(20)
+        assert(adder(5, 20) == 25)  // explicit second arg
+    }
+}
