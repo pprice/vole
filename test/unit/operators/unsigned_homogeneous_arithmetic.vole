@@ -1,0 +1,297 @@
+// Tests for u8/u16/u32 homogeneous arithmetic
+//
+// When both operands are the same unsigned type, the result type must preserve
+// unsigned semantics so that subsequent comparisons, division, and shift-right
+// are correct. Homogeneous u32+u32 must not collapse to I32, because values
+// above 0x7FFF_FFFF would be treated as negative under signed comparison rules.
+
+tests "u8 homogeneous arithmetic" {
+    test "addition basic" {
+        let a: u8 = 100
+        let b: u8 = 50
+        let c: u8 = a + b
+        assert(c == 150)
+    }
+
+    test "subtraction basic" {
+        let a: u8 = 200
+        let b: u8 = 50
+        let c: u8 = a - b
+        assert(c == 150)
+    }
+
+    test "multiplication basic" {
+        let a: u8 = 10
+        let b: u8 = 15
+        let c: u8 = a * b
+        assert(c == 150)
+    }
+
+    test "division basic" {
+        let a: u8 = 200
+        let b: u8 = 4
+        let c: u8 = a / b
+        assert(c == 50)
+    }
+
+    test "modulo basic" {
+        let a: u8 = 200
+        let b: u8 = 7
+        let c: u8 = a % b
+        assert(c == 4)
+    }
+
+    test "high values stay unsigned on comparison" {
+        // 200 as u8 is above signed i8 max (127), so comparisons must use
+        // unsigned semantics to be correct
+        let a: u8 = 200
+        let b: u8 = 100
+        assert(a > b)
+        assert(b < a)
+        assert(a >= 200)
+        assert(b <= 100)
+    }
+
+    test "addition wraps at u8 boundary" {
+        let a: u8 = 255
+        let b: u8 = 1
+        let c: u8 = a + b
+        assert(c == 0)
+    }
+
+    test "subtraction wraps at u8 boundary" {
+        let a: u8 = 0
+        let b: u8 = 1
+        let c: u8 = a - b
+        assert(c == 255)
+    }
+}
+
+tests "u16 homogeneous arithmetic" {
+    test "addition basic" {
+        let a: u16 = 30000
+        let b: u16 = 10000
+        let c: u16 = a + b
+        assert(c == 40000)
+    }
+
+    test "subtraction basic" {
+        let a: u16 = 40000
+        let b: u16 = 10000
+        let c: u16 = a - b
+        assert(c == 30000)
+    }
+
+    test "multiplication basic" {
+        let a: u16 = 300
+        let b: u16 = 100
+        let c: u16 = a * b
+        assert(c == 30000)
+    }
+
+    test "division basic" {
+        let a: u16 = 40000
+        let b: u16 = 100
+        let c: u16 = a / b
+        assert(c == 400)
+    }
+
+    test "modulo basic" {
+        let a: u16 = 40001
+        let b: u16 = 100
+        let c: u16 = a % b
+        assert(c == 1)
+    }
+
+    test "high values stay unsigned on comparison" {
+        // 40000 as u16 is above signed i16 max (32767), must use unsigned cmp
+        let a: u16 = 40000
+        let b: u16 = 32767
+        assert(a > b)
+        assert(b < a)
+        assert(a >= 40000)
+        assert(b <= 32767)
+    }
+
+    test "addition wraps at u16 boundary" {
+        let a: u16 = 65535
+        let b: u16 = 1
+        let c: u16 = a + b
+        assert(c == 0)
+    }
+
+    test "subtraction wraps at u16 boundary" {
+        let a: u16 = 0
+        let b: u16 = 1
+        let c: u16 = a - b
+        assert(c == 65535)
+    }
+}
+
+tests "u32 homogeneous arithmetic" {
+    test "addition basic" {
+        let a: u32 = 2000000000
+        let b: u32 = 1000000000
+        let c: u32 = a + b
+        assert(c == 3000000000)
+    }
+
+    test "subtraction basic" {
+        let a: u32 = 3000000000
+        let b: u32 = 1000000000
+        let c: u32 = a - b
+        assert(c == 2000000000)
+    }
+
+    test "multiplication basic" {
+        let a: u32 = 100000
+        let b: u32 = 40000
+        let c: u32 = a * b
+        // 100000 * 40000 = 4,000,000,000 which fits in u32 (max 4,294,967,295)
+        assert(c == 4000000000)
+    }
+
+    test "division basic" {
+        let a: u32 = 3000000000
+        let b: u32 = 3
+        let c: u32 = a / b
+        assert(c == 1000000000)
+    }
+
+    test "modulo basic" {
+        let a: u32 = 3000000001
+        let b: u32 = 3
+        let c: u32 = a % b
+        assert(c == 1)
+    }
+
+    test "high values stay unsigned on comparison" {
+        // Values above 2^31 - 1 = 2147483647 are negative as i32,
+        // so comparison must use unsigned semantics
+        let a: u32 = 3000000000
+        let b: u32 = 2000000000
+        assert(a > b)
+        assert(b < a)
+        assert(a >= 3000000000)
+        assert(b <= 2000000000)
+    }
+
+    test "comparison with value above i32 max" {
+        // 3000000000 > 2147483647 (i32 max) -- both in u32 space
+        // As i32, 3000000000 would be -1294967296, so signed comparison would be wrong
+        let a: u32 = 3000000000
+        let b: u32 = 2147483647
+        assert(a > b)
+        assert(b < a)
+    }
+
+    test "addition wraps at u32 boundary" {
+        let a: u32 = 4294967295
+        let b: u32 = 1
+        let c: u32 = a + b
+        assert(c == 0)
+    }
+
+    test "subtraction wraps at u32 boundary" {
+        let a: u32 = 0
+        let b: u32 = 1
+        let c: u32 = a - b
+        assert(c == 4294967295)
+    }
+
+    test "division unsigned semantics" {
+        // 3000000000 / 2 = 1500000000 in unsigned arithmetic
+        // As signed i32, 3000000000 would be -1294967296; -1294967296 / 2 = -647483648 (wrong)
+        let a: u32 = 3000000000
+        let b: u32 = 2
+        let c: u32 = a / b
+        assert(c == 1500000000)
+    }
+
+    test "modulo unsigned semantics" {
+        let a: u32 = 3000000001
+        let b: u32 = 3
+        let c: u32 = a % b
+        assert(c == 1)
+    }
+}
+
+tests "u32 bitwise operations" {
+    test "bitwise AND high values" {
+        // 0xFFFFFF00 & 0x000000FF = 0
+        let a: u32 = 4294967040
+        let b: u32 = 255
+        assert((a & b) == 0)
+    }
+
+    test "bitwise OR high values" {
+        // 0xFFFFFF00 | 0x000000FF = 0xFFFFFFFF = 4294967295
+        // This tests that u32 | u32 produces a u32 result (not i32), so that
+        // the result 0xFFFFFFFF is zero-extended (not sign-extended) when
+        // compared to the i64 literal 4294967295.
+        let a: u32 = 4294967040
+        let b: u32 = 255
+        assert((a | b) == 4294967295)
+    }
+
+    test "bitwise XOR high values" {
+        // 0xFFFFFFFF ^ 0xFFFFFF00 = 0x000000FF = 255
+        let a: u32 = 4294967295
+        let b: u32 = 4294967040
+        assert((a ^ b) == 255)
+    }
+
+    test "left shift to high bit" {
+        let a: u32 = 1
+        let b: u32 = a << 31
+        assert(b == 2147483648)
+    }
+
+    test "right shift unsigned semantics" {
+        // For u32 with the high bit set, right shift must be logical (zero-fill),
+        // not arithmetic (sign-fill).
+        // 0x80000000 >> 1 = 0x40000000 = 1073741824 with logical shift
+        // As signed i32, 0x80000000 = -2147483648; arithmetic shift gives -1073741824 (wrong)
+        let a: u32 = 2147483648
+        assert((a >> 1) == 1073741824)
+    }
+}
+
+tests "u32 comparison with mixed expressions" {
+    test "compare sum to literal" {
+        // a + b produces an intermediate; if the result type is I32 instead of U32,
+        // comparisons against values above 2^31 - 1 will be wrong
+        let a: u32 = 2000000000
+        let b: u32 = 500000000
+        let sum: u32 = a + b
+        assert(sum == 2500000000)
+        assert(sum > 2000000000)
+        assert(sum < 3000000000)
+    }
+
+    test "equality of high u32 values" {
+        let a: u32 = 4000000000
+        let b: u32 = 4000000000
+        assert(a == b)
+        assert(!(a != b))
+    }
+
+    test "unsigned ordering at boundary" {
+        // i32::MIN as u32 is 2147483648; i32::MAX as u32 is 2147483647
+        // In unsigned arithmetic: 2147483648 > 2147483647
+        // In signed arithmetic: 2147483648 (= -2147483648 as i32) < 2147483647 (wrong)
+        let big: u32 = 2147483648
+        let small: u32 = 2147483647
+        assert(big > small)
+        assert(small < big)
+    }
+
+    test "bitwise OR result compared to unsigned max" {
+        // Produce a u32 value via bitwise OR that has all bits set (0xFFFFFFFF)
+        // then compare it to 4294967295 -- the result type must be U32 so the
+        // comparison zero-extends (not sign-extends) before comparing to I64.
+        let a: u32 = 4294967040
+        let b: u32 = 255
+        assert((a | b) == 4294967295)
+    }
+}

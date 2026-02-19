@@ -23,7 +23,9 @@ pub fn numeric_result_type(left: TypeId, right: TypeId) -> TypeId {
 
 /// Get the result type for integer binary operations (wider type wins).
 /// Follows C-like promotion: smaller types widen to larger types.
-/// Sub-32-bit types (i8, i16, u8, u16) always promote to i32.
+/// Homogeneous unsigned operations (u8+u8, u16+u16, u32+u32) preserve the
+/// unsigned type; mixed-sign or mixed-width operations widen to the signed
+/// equivalent of the larger width.
 pub fn integer_result_type(left: TypeId, right: TypeId) -> TypeId {
     // i128 is widest
     if left == TypeId::I128 || right == TypeId::I128 {
@@ -38,7 +40,37 @@ pub fn integer_result_type(left: TypeId, right: TypeId) -> TypeId {
         // If mixing signed/unsigned 64-bit, result is i64
         TypeId::I64
     }
-    // 32-bit and smaller types all promote to i32
+    // 32-bit types
+    else if left == TypeId::I32
+        || right == TypeId::I32
+        || left == TypeId::U32
+        || right == TypeId::U32
+    {
+        // Homogeneous u32 preserves unsigned; any other mix goes to i32
+        if left == TypeId::U32 && right == TypeId::U32 {
+            TypeId::U32
+        } else {
+            TypeId::I32
+        }
+    }
+    // 16-bit types
+    else if left == TypeId::I16
+        || right == TypeId::I16
+        || left == TypeId::U16
+        || right == TypeId::U16
+    {
+        // Homogeneous u16 preserves unsigned; mixed goes to i32 (integer promotion)
+        if left == TypeId::U16 && right == TypeId::U16 {
+            TypeId::U16
+        } else {
+            TypeId::I32
+        }
+    }
+    // 8-bit types
+    else if left == TypeId::U8 && right == TypeId::U8 {
+        TypeId::U8
+    }
+    // Default: i8 or mixed 8-bit → i32 (standard integer promotion)
     else {
         TypeId::I32
     }
