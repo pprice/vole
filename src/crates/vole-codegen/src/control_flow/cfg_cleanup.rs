@@ -24,6 +24,8 @@
 use cranelift_codegen::ir::{Block, Function, Opcode, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::block_fusion::fuse_single_predecessor_blocks;
+
 /// Clean up trampoline blocks in the function.
 ///
 /// Phase 1: Rewrites branch targets to bypass simple trampolines (no params,
@@ -35,7 +37,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// Phase 3: Rewrites branch targets to bypass pass-through trampolines (has
 /// params, jump forwards them unchanged to another block), resolving chains.
 ///
-/// After rewriting, unreachable blocks are removed from the layout.
+/// Phase 4: Remove unreachable blocks from the layout.
+///
+/// Phase 5: Fuse single-predecessor blocks — when block A ends with
+/// `jump blockB` and blockB has exactly one predecessor, merge B into A.
 pub(crate) fn cleanup_cfg(func: &mut Function) {
     // Phase 1: Eliminate simple trampolines (no params, jump with no args)
     let trampolines = find_trampolines(func);
@@ -59,6 +64,10 @@ pub(crate) fn cleanup_cfg(func: &mut Function) {
 
     // Phase 4: Remove unreachable blocks from the layout
     remove_unreachable_blocks(func);
+
+    // Phase 5: Fuse single-predecessor blocks (runs after trampoline elimination
+    // and dead block removal since those change predecessor counts)
+    fuse_single_predecessor_blocks(func);
 }
 
 /// Find all trampoline blocks in the function.
@@ -535,7 +544,9 @@ mod tests {
     ///   target(v1):
     ///       return v1
     ///
-    /// After cleanup, entry should jump directly to target with the arg.
+    /// After cleanup, trampoline elimination rewrites entry to jump to target,
+    /// then block fusion merges target into entry (single predecessor).
+    /// Final result: entry contains iconst + return.
     #[test]
     fn test_forward_arg_trampoline_jump() {
         use cranelift::codegen::ir::BlockArg;
@@ -568,15 +579,26 @@ mod tests {
 
         builder.finalize();
 
+        // Verify trampoline detection before full cleanup
+        let fwd = find_forward_arg_trampolines(&func);
+        assert_eq!(fwd.len(), 1);
+        assert!(fwd.contains_key(&trampoline));
+
         cleanup_cfg(&mut func);
 
-        // entry should now jump directly to target with args
+        // After trampoline elimination + block fusion, target (single pred from
+        // entry) gets merged into entry. Only entry remains.
+        let blocks: Vec<Block> = func.layout.blocks().collect();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], entry);
+
+        // entry's terminator should now be a return
         let entry_last = func.layout.last_inst(entry).unwrap();
-        let dests = func.dfg.insts[entry_last]
-            .branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables);
-        assert_eq!(dests.len(), 1);
-        assert_eq!(dests[0].block(&func.dfg.value_lists), target);
-        assert_eq!(dests[0].len(&func.dfg.value_lists), 1);
+        assert_eq!(func.dfg.insts[entry_last].opcode(), Opcode::Return);
+
+        // The return value should resolve to val (param aliased to val)
+        let ret_args = func.dfg.inst_args(entry_last);
+        assert_eq!(func.dfg.resolve_aliases(ret_args[0]), val);
     }
 
     /// Build IR with a pass-through trampoline (brif -> trampoline -> target):
@@ -680,8 +702,9 @@ mod tests {
     ///   final(v3: i64):
     ///       return v3
     ///
-    /// After cleanup, entry should jump directly to final:
-    ///       jump final(v0)
+    /// After cleanup, trampoline chain resolution redirects entry to final_block,
+    /// then block fusion merges final_block into entry (single predecessor).
+    /// Final result: entry contains iconst + return.
     #[test]
     fn test_passthrough_trampoline_chain() {
         use cranelift::codegen::ir::BlockArg;
@@ -738,13 +761,19 @@ mod tests {
         // Run full cleanup
         cleanup_cfg(&mut func);
 
-        // Verify: entry now jumps directly to final_block
+        // After trampoline elimination + block fusion, final_block (single pred
+        // from entry) gets merged into entry. Only entry remains.
+        let blocks: Vec<Block> = func.layout.blocks().collect();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], entry);
+
+        // entry's terminator should now be a return
         let entry_last = func.layout.last_inst(entry).unwrap();
-        let dests = func.dfg.insts[entry_last]
-            .branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables);
-        assert_eq!(dests.len(), 1);
-        assert_eq!(dests[0].block(&func.dfg.value_lists), final_block);
-        assert_eq!(dests[0].len(&func.dfg.value_lists), 1);
+        assert_eq!(func.dfg.insts[entry_last].opcode(), Opcode::Return);
+
+        // The return value should resolve to val (through the alias chain)
+        let ret_args = func.dfg.inst_args(entry_last);
+        assert_eq!(func.dfg.resolve_aliases(ret_args[0]), val);
     }
 
     /// Test that a block with params but reordered args is NOT a pass-through trampoline:

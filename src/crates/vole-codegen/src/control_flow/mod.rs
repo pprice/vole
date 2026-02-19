@@ -6,6 +6,7 @@
 //! - Loop parameter optimization (hoisting loop-invariant computations)
 //! - Match switch optimization (converting match expressions to jump tables)
 
+mod block_fusion;
 mod cfg_cleanup;
 pub mod loop_analysis;
 pub mod loop_param_opt;
