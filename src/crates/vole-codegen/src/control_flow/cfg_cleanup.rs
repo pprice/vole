@@ -22,7 +22,7 @@
 // target. Dead blocks are cleaned up by Cranelift's unreachable code elimination.
 
 use cranelift_codegen::ir::{Block, Function, Opcode, Value};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Clean up trampoline blocks in the function.
 ///
@@ -35,8 +35,7 @@ use rustc_hash::FxHashMap;
 /// Phase 3: Rewrites branch targets to bypass pass-through trampolines (has
 /// params, jump forwards them unchanged to another block), resolving chains.
 ///
-/// After this pass, Cranelift's normal unreachable code elimination will
-/// remove the now-unreferenced trampoline blocks.
+/// After rewriting, unreachable blocks are removed from the layout.
 pub(crate) fn cleanup_cfg(func: &mut Function) {
     // Phase 1: Eliminate simple trampolines (no params, jump with no args)
     let trampolines = find_trampolines(func);
@@ -57,6 +56,9 @@ pub(crate) fn cleanup_cfg(func: &mut Function) {
         let resolved = resolve_trampoline_chains(&passthrough);
         rewrite_terminators(func, &resolved);
     }
+
+    // Phase 4: Remove unreachable blocks from the layout
+    remove_unreachable_blocks(func);
 }
 
 /// Find all trampoline blocks in the function.
@@ -343,6 +345,54 @@ fn rewrite_forward_arg_terminators(
         for val in args {
             dest.append_argument(val, &mut dfg.value_lists);
         }
+    }
+}
+
+/// Remove blocks not reachable from the entry block.
+///
+/// After trampoline rewrites, many blocks become unreachable dead code.
+/// Removing them keeps the IR clean and avoids wasted work in Cranelift's
+/// later passes (legalization, register allocation, code emission).
+fn remove_unreachable_blocks(func: &mut Function) {
+    let entry = match func.layout.entry_block() {
+        Some(b) => b,
+        None => return,
+    };
+
+    // BFS from entry to find all reachable blocks
+    let mut reachable = FxHashSet::default();
+    let mut queue = vec![entry];
+    while let Some(block) = queue.pop() {
+        if !reachable.insert(block) {
+            continue;
+        }
+        // Follow all branch destinations from the block's terminator
+        if let Some(inst) = func.layout.last_inst(block) {
+            for dest in func.dfg.insts[inst]
+                .branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables)
+            {
+                let target = dest.block(&func.dfg.value_lists);
+                if !reachable.contains(&target) {
+                    queue.push(target);
+                }
+            }
+        }
+    }
+
+    // Collect unreachable blocks (can't modify layout while iterating)
+    let dead: Vec<Block> = func
+        .layout
+        .blocks()
+        .filter(|b| !reachable.contains(b))
+        .collect();
+
+    // Remove instructions then blocks
+    for block in dead {
+        // Drain all instructions from the block
+        while let Some(inst) = func.layout.first_inst(block) {
+            func.layout.remove_inst(inst);
+        }
+        func.layout.remove_block(block);
     }
 }
 
