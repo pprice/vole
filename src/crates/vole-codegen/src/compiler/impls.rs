@@ -306,7 +306,10 @@ impl Compiler<'_> {
     }
 
     /// Register implement block methods (first pass)
-    pub(super) fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
+    pub(super) fn register_implement_block(
+        &mut self,
+        impl_block: &ImplementBlock,
+    ) -> CodegenResult<()> {
         let module_id = self.program_module();
         self.register_implement_block_in_module(impl_block, module_id)
     }
@@ -316,7 +319,7 @@ impl Compiler<'_> {
         &mut self,
         impl_block: &ImplementBlock,
         module_id: ModuleId,
-    ) {
+    ) -> CodegenResult<()> {
         let interner = self.analyzed.interner.clone();
         self.register_implement_block_with_interner(impl_block, &interner, module_id)
     }
@@ -328,53 +331,50 @@ impl Compiler<'_> {
         impl_block: &ImplementBlock,
         interner: &Interner,
         module_id: ModuleId,
-    ) {
+    ) -> CodegenResult<()> {
         // Use module-specific interner for symbol resolution
         let Some(type_name) =
             self.get_type_name_from_expr_with_interner(&impl_block.target_type, interner)
         else {
-            return;
+            return Ok(());
         };
 
         // Get TypeId for self binding (same as register_implement_block_with_interner)
-        let (self_type_id, impl_type_id) =
-            match &impl_block.target_type.kind {
-                TypeExprKind::Primitive(p) => {
-                    let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                    let type_id = self.arena().primitive(prim_type);
-                    let impl_id = self.impl_type_id_from_type_id(type_id);
-                    (type_id, impl_id)
-                }
-                TypeExprKind::Handle => {
-                    let type_id = TypeId::HANDLE;
-                    let impl_id = self.impl_type_id_from_type_id(type_id);
-                    (type_id, impl_id)
-                }
-                TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                    // Use module-specific interner for symbol resolution
-                    let type_def_id = self
-                        .query()
-                        .try_name_id_with_interner(module_id, &[*sym], interner)
-                        .and_then(|name_id| self.query().try_type_def_id(name_id))
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "import_module_implement_block: type not found: {}",
-                                type_name
-                            )
-                        });
-                    let metadata = self.state.type_metadata.get(&type_def_id).unwrap_or_else(
-                        || {
-                            panic!(
-                                "import_module_implement_block: type not in type_metadata: {:?}",
-                                type_def_id
-                            )
-                        },
-                    );
-                    let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
-                    (metadata.vole_type, impl_id)
-                }
-                _ => unreachable!(),
-            };
+        let (self_type_id, impl_type_id) = match &impl_block.target_type.kind {
+            TypeExprKind::Primitive(p) => {
+                let prim_type = vole_sema::PrimitiveType::from_ast(*p);
+                let type_id = self.arena().primitive(prim_type);
+                let impl_id = self.impl_type_id_from_type_id(type_id);
+                (type_id, impl_id)
+            }
+            TypeExprKind::Handle => {
+                let type_id = TypeId::HANDLE;
+                let impl_id = self.impl_type_id_from_type_id(type_id);
+                (type_id, impl_id)
+            }
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
+                // Use module-specific interner for symbol resolution
+                let type_def_id = self
+                    .query()
+                    .try_name_id_with_interner(module_id, &[*sym], interner)
+                    .and_then(|name_id| self.query().try_type_def_id(name_id))
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "import_module_implement_block: type not found",
+                            type_name.clone(),
+                        )
+                    })?;
+                let metadata = self.state.type_metadata.get(&type_def_id).ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "import_module_implement_block: type not in type_metadata",
+                        format!("{:?}", type_def_id),
+                    )
+                })?;
+                let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
+                (metadata.vole_type, impl_id)
+            }
+            _ => unreachable!(),
+        };
 
         // Import instance methods
         for method in &impl_block.methods {
@@ -383,31 +383,28 @@ impl Compiler<'_> {
                 impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
 
             let (sig, semantic_method_id) = {
-                let tdef_id = type_def_id.unwrap_or_else(|| {
-                    panic!(
-                        "import: type_def_id missing for {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
+                let tdef_id = type_def_id.ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "import: type_def_id missing for instance method",
+                        format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
-                });
-                let name_id = method_name_id.unwrap_or_else(|| {
-                    panic!(
-                        "import: method_name_id missing for {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
+                })?;
+                let name_id = method_name_id.ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "import: method_name_id missing for instance method",
+                        format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
-                });
+                })?;
                 let method_id = self
                     .analyzed
                     .entity_registry()
                     .find_method_on_type(tdef_id, name_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "import: method {}.{} not in entity_registry",
-                            type_name,
-                            interner.resolve(method.name)
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "import: method not in entity_registry",
+                            format!("{}.{}", type_name, interner.resolve(method.name)),
                         )
-                    });
+                    })?;
                 let sig =
                     self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
                 (sig, method_id)
@@ -426,8 +423,10 @@ impl Compiler<'_> {
 
         // Import static methods
         if let Some(ref statics) = impl_block.statics {
-            self.import_implement_statics_block(statics, &type_name, interner, module_id);
+            self.import_implement_statics_block(statics, &type_name, interner, module_id)?;
         }
+
+        Ok(())
     }
 
     /// Import static methods from a statics block.
@@ -437,7 +436,7 @@ impl Compiler<'_> {
         type_name: &str,
         interner: &Interner,
         module_id: ModuleId,
-    ) {
+    ) -> CodegenResult<()> {
         let type_def_id = self.query().resolve_type_def_by_str(module_id, type_name);
 
         for method in &statics.methods {
@@ -446,31 +445,28 @@ impl Compiler<'_> {
             }
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
             let (sig, semantic_method_id) = {
-                let tdef_id = type_def_id.unwrap_or_else(|| {
-                    panic!(
-                        "import: type_def_id missing for static {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
+                let tdef_id = type_def_id.ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "import: type_def_id missing for static method",
+                        format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
-                });
-                let name_id = method_name_id.unwrap_or_else(|| {
-                    panic!(
-                        "import: method_name_id missing for static {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
+                })?;
+                let name_id = method_name_id.ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "import: method_name_id missing for static method",
+                        format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
-                });
+                })?;
                 let method_id = self
                     .query()
                     .registry()
                     .find_static_method_on_type(tdef_id, name_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "import: static method {}.{} not in entity_registry",
-                            type_name,
-                            interner.resolve(method.name)
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "import: static method not in entity_registry",
+                            format!("{}.{}", type_name, interner.resolve(method.name)),
                         )
-                    });
+                    })?;
                 let sig = self.build_signature_for_method(method_id, SelfParam::None);
                 (sig, method_id)
             };
@@ -478,20 +474,22 @@ impl Compiler<'_> {
 
             let type_name_id =
                 self.query()
-                    .get_type(type_def_id.expect(
-                        "INTERNAL: register_interface_default_methods: missing type_def_id",
-                    ))
+                    .get_type(type_def_id.ok_or_else(|| {
+                        CodegenError::internal("import statics: missing type_def_id")
+                    })?)
                     .name_id;
             self.state.method_func_keys.insert(
                 (
                     type_name_id,
-                    method_name_id.expect(
-                        "INTERNAL: register_interface_default_methods: missing method_name_id",
-                    ),
+                    method_name_id.ok_or_else(|| {
+                        CodegenError::internal("import statics: missing method_name_id")
+                    })?,
                 ),
                 func_key,
             );
         }
+
+        Ok(())
     }
 
     /// Register implement block methods with a specific interner and module (for module programs)
@@ -500,35 +498,34 @@ impl Compiler<'_> {
         impl_block: &ImplementBlock,
         interner: &Interner,
         module_id: ModuleId,
-    ) {
+    ) -> CodegenResult<()> {
         // Get type name string using module-specific interner
         let Some(type_name) =
             self.get_type_name_from_expr_with_interner(&impl_block.target_type, interner)
         else {
-            return; // Unsupported type for implement block
+            return Ok(()); // Unsupported type for implement block
         };
 
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
         // Get type_id directly from metadata to avoid to_type() conversion
-        let (self_type_id, impl_type_id) =
-            match &impl_block.target_type.kind {
-                TypeExprKind::Primitive(p) => {
-                    let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                    let type_id = self.arena().primitive(prim_type);
-                    let impl_id = self.impl_type_id_from_type_id(type_id);
-                    (type_id, impl_id)
-                }
-                TypeExprKind::Handle => {
-                    let type_id = TypeId::HANDLE;
-                    let impl_id = self.impl_type_id_from_type_id(type_id);
-                    (type_id, impl_id)
-                }
-                TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                    // Look up TypeDefId from Symbol (for Generic, uses the base class name)
-                    // Use the module-specific interner to resolve symbols from that module's AST
-                    // Try given module first, then fall back to program module
-                    // (implement blocks in tests blocks may target parent-scope types)
-                    let type_def_id = self
+        let (self_type_id, impl_type_id) = match &impl_block.target_type.kind {
+            TypeExprKind::Primitive(p) => {
+                let prim_type = vole_sema::PrimitiveType::from_ast(*p);
+                let type_id = self.arena().primitive(prim_type);
+                let impl_id = self.impl_type_id_from_type_id(type_id);
+                (type_id, impl_id)
+            }
+            TypeExprKind::Handle => {
+                let type_id = TypeId::HANDLE;
+                let impl_id = self.impl_type_id_from_type_id(type_id);
+                (type_id, impl_id)
+            }
+            TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
+                // Look up TypeDefId from Symbol (for Generic, uses the base class name)
+                // Use the module-specific interner to resolve symbols from that module's AST
+                // Try given module first, then fall back to program module
+                // (implement blocks in tests blocks may target parent-scope types)
+                let type_def_id = self
                     .query()
                     .try_name_id_with_interner(module_id, &[*sym], interner)
                     .and_then(|name_id| self.query().try_type_def_id(name_id))
@@ -543,33 +540,29 @@ impl Compiler<'_> {
                             None
                         }
                     })
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "INTERNAL ERROR: implement block target type not in entity registry\n\
-                             sym: {:?}",
-                            sym
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "implement block target type not in entity registry",
+                            format!("{:?}", sym),
                         )
-                    });
-                    let metadata = self.state.type_metadata.get(&type_def_id).unwrap_or_else(
-                        || {
-                            panic!(
-                                "INTERNAL ERROR: implement block target type not in type_metadata\n\
-                         type_def_id: {:?}",
-                                type_def_id
-                            )
-                        },
-                    );
-                    // Use TypeId directly
-                    let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
-                    (metadata.vole_type, impl_id)
-                }
-                _ => {
-                    unreachable!(
-                        "target_type was neither Primitive, Handle, Named, nor Generic, \
-                         but passed get_type_name_from_expr check"
+                    })?;
+                let metadata = self.state.type_metadata.get(&type_def_id).ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "implement block target type not in type_metadata",
+                        format!("{:?}", type_def_id),
                     )
-                }
-            };
+                })?;
+                // Use TypeId directly
+                let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
+                (metadata.vole_type, impl_id)
+            }
+            _ => {
+                unreachable!(
+                    "target_type was neither Primitive, Handle, Named, nor Generic, \
+                         but passed get_type_name_from_expr check"
+                )
+            }
+        };
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
@@ -580,33 +573,34 @@ impl Compiler<'_> {
 
             // Build signature from pre-resolved types via sema
             let (sig, semantic_method_id) = {
-                let tdef_id = type_def_id.unwrap_or_else(|| {
-                    panic!(
-                        "implement block instance method without TypeDefId: {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
+                let tdef_id = type_def_id.ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "implement block instance method without TypeDefId",
+                        format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
-                });
-                let name_id = method_name_id.unwrap_or_else(|| {
-                    panic!(
-                        "implement block instance method without NameId: {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
+                })?;
+                let name_id = method_name_id.ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "implement block instance method without NameId",
+                        format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
-                });
+                })?;
                 let semantic_method_id = self
                     .analyzed
                     .entity_registry()
                     .find_method_on_type(tdef_id, name_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "implement block instance method not in entity_registry: {}.{} (type_def_id={:?}, method_name_id={:?})",
-                            type_name,
-                            interner.resolve(method.name),
-                            tdef_id,
-                            name_id
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "implement block instance method not in entity_registry",
+                            format!(
+                                "{}.{} (type_def_id={:?}, method_name_id={:?})",
+                                type_name,
+                                interner.resolve(method.name),
+                                tdef_id,
+                                name_id
+                            ),
                         )
-                    });
+                    })?;
                 let sig = self.build_signature_for_method(
                     semantic_method_id,
                     SelfParam::TypedId(self_type_id),
@@ -645,33 +639,34 @@ impl Compiler<'_> {
 
                 // Build signature from pre-resolved types via sema
                 let (sig, semantic_method_id) = {
-                    let tdef_id = type_def_id.unwrap_or_else(|| {
-                        panic!(
-                            "implement statics method without TypeDefId: {}.{}",
-                            type_name,
-                            interner.resolve(method.name)
+                    let tdef_id = type_def_id.ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "implement statics method without TypeDefId",
+                            format!("{}.{}", type_name, interner.resolve(method.name)),
                         )
-                    });
-                    let name_id = method_name_id.unwrap_or_else(|| {
-                        panic!(
-                            "implement statics method without NameId: {}.{}",
-                            type_name,
-                            interner.resolve(method.name)
+                    })?;
+                    let name_id = method_name_id.ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "implement statics method without NameId",
+                            format!("{}.{}", type_name, interner.resolve(method.name)),
                         )
-                    });
+                    })?;
                     let method_id = self
                         .query()
                         .registry()
                         .find_static_method_on_type(tdef_id, name_id)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "implement statics method not in entity_registry: {}.{} (type_def_id={:?}, method_name_id={:?})",
-                                type_name,
-                                interner.resolve(method.name),
-                                tdef_id,
-                                name_id
+                        .ok_or_else(|| {
+                            CodegenError::internal_with_context(
+                                "implement statics method not in entity_registry",
+                                format!(
+                                    "{}.{} (type_def_id={:?}, method_name_id={:?})",
+                                    type_name,
+                                    interner.resolve(method.name),
+                                    tdef_id,
+                                    name_id
+                                ),
                             )
-                        });
+                        })?;
                     let sig = self.build_signature_for_method(method_id, SelfParam::None);
                     (sig, method_id)
                 };
@@ -680,23 +675,25 @@ impl Compiler<'_> {
                     self.register_method_func(semantic_method_id, &sig, DeclareMode::Declare);
 
                 // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
-                let type_name_id = self
-                    .query()
-                    .get_type(
-                        type_def_id
-                            .expect("INTERNAL: register_implement_block: missing type_def_id"),
-                    )
-                    .name_id;
+                let tdef_id = type_def_id.ok_or_else(|| {
+                    CodegenError::internal("register_implement_block statics: missing type_def_id")
+                })?;
+                let type_name_id = self.query().get_type(tdef_id).name_id;
                 self.state.method_func_keys.insert(
                     (
                         type_name_id,
-                        method_name_id
-                            .expect("INTERNAL: register_implement_block: missing method_name_id"),
+                        method_name_id.ok_or_else(|| {
+                            CodegenError::internal(
+                                "register_implement_block statics: missing method_name_id",
+                            )
+                        })?,
                     ),
                     func_key,
                 );
             }
         }
+
+        Ok(())
     }
 
     /// Compile implement block methods (second pass)
@@ -743,24 +740,22 @@ impl Compiler<'_> {
                             None
                         }
                     })
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "INTERNAL ERROR: implement block self type not in entity registry\n\
-                             sym: {:?}",
-                            sym
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "implement block self type not in entity registry",
+                            format!("{:?}", sym),
                         )
-                    });
+                    })?;
                 self.state
                     .type_metadata
                     .get(&type_def_id)
                     .map(|m| m.vole_type)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "INTERNAL ERROR: implement block self type not in type_metadata\n\
-                             type_def_id: {:?}",
-                            type_def_id
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "implement block self type not in type_metadata",
+                            format!("{:?}", type_def_id),
                         )
-                    })
+                    })?
             }
             _ => {
                 unreachable!(
@@ -825,22 +820,22 @@ impl Compiler<'_> {
                     .query()
                     .try_name_id_with_interner(module_id, &[*sym], interner)
                     .and_then(|name_id| self.query().try_type_def_id(name_id))
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "INTERNAL ERROR: implement block self type not in entity registry: {:?}",
-                            sym
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "implement block self type not in entity registry",
+                            format!("{:?}", sym),
                         )
-                    });
+                    })?;
                 self.state
                     .type_metadata
                     .get(&type_def_id)
                     .map(|m| m.vole_type)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "INTERNAL ERROR: implement block self type not in type_metadata: {:?}",
-                            type_def_id
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "implement block self type not in type_metadata",
+                            format!("{:?}", type_def_id),
                         )
-                    })
+                    })?
             }
             _ => unreachable!("target_type was neither Primitive, Handle, Named, nor Generic"),
         };
@@ -898,12 +893,12 @@ impl Compiler<'_> {
         let type_def_id =
             impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
         let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name)
-            .unwrap_or_else(|| {
-                panic!(
-                    "method name_id not found for '{}'",
-                    interner.resolve(method.name)
+            .ok_or_else(|| {
+                CodegenError::internal_with_context(
+                    "method name_id not found",
+                    interner.resolve(method.name).to_string(),
                 )
-            });
+            })?;
 
         let semantic_method_id = type_def_id
             .and_then(|tdef_id| {
@@ -911,13 +906,16 @@ impl Compiler<'_> {
                     .entity_registry()
                     .find_method_on_type(tdef_id, method_name_id)
             })
-            .unwrap_or_else(|| {
-                panic!(
-                    "implement block method not registered: {} (type_def_id={:?})",
-                    interner.resolve(method.name),
-                    type_def_id
+            .ok_or_else(|| {
+                CodegenError::internal_with_context(
+                    "implement block method not registered",
+                    format!(
+                        "{} (type_def_id={:?})",
+                        interner.resolve(method.name),
+                        type_def_id
+                    ),
                 )
-            });
+            })?;
 
         let func_key = if let Some(info) = method_info {
             info.func_key
@@ -941,9 +939,9 @@ impl Compiler<'_> {
 
         let source_file_ptr = self.source_file_ptr();
         // Use module interner to look up "self" since param names come from the module AST
-        let self_sym = interner
-            .lookup("self")
-            .expect("INTERNAL: 'self' keyword not interned in module interner");
+        let self_sym = interner.lookup("self").ok_or_else(|| {
+            CodegenError::internal("'self' keyword not interned in module interner")
+        })?;
 
         // Build params: skip explicit `self` params — they are handled via the separate self_binding.
         let params: Vec<(Symbol, TypeId, types::Type)> = {
@@ -951,7 +949,9 @@ impl Compiler<'_> {
             let arena = self.arena();
             let (param_type_ids, _, _) = arena
                 .unwrap_function(method_def.signature_id)
-                .expect("INTERNAL: method compilation: missing function signature");
+                .ok_or_else(|| {
+                    CodegenError::internal("method compilation: missing function signature")
+                })?;
             method
                 .params
                 .iter()
@@ -1028,13 +1028,13 @@ impl Compiler<'_> {
                             .find_static_method_on_type(tdef_id, name_id)
                     });
 
-            let method_id = semantic_method_id.unwrap_or_else(|| {
+            let method_id = semantic_method_id.ok_or_else(|| {
                 let method_name_str = interner.resolve(method.name);
-                panic!(
-                    "INTERNAL ERROR: static method {}::{} not found in entity registry",
-                    type_name, method_name_str
+                CodegenError::internal_with_context(
+                    "static method not found in entity registry",
+                    format!("{}::{}", type_name, method_name_str),
                 )
-            });
+            })?;
 
             // Look up the registered function via EntityRegistry full_name_id
             let method_def = self.registry().get_method(method_id);
@@ -1049,9 +1049,12 @@ impl Compiler<'_> {
             // Use pre-resolved signature from MethodDef
             let method_def = self.query().get_method(method_id);
             let arena = self.arena();
-            let (params, ret, _) = arena
-                .unwrap_function(method_def.signature_id)
-                .expect("INTERNAL: method compilation: missing function signature");
+            let (params, ret, _) =
+                arena
+                    .unwrap_function(method_def.signature_id)
+                    .ok_or_else(|| {
+                        CodegenError::internal("method compilation: missing function signature")
+                    })?;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
             let (param_type_ids, return_type_id) =
                 (params.to_vec(), Some(ret).filter(|r| !r.is_void()));
@@ -1124,13 +1127,16 @@ impl Compiler<'_> {
                     .entity_registry()
                     .find_method_on_type(tdef_id, method_name_id)
             })
-            .unwrap_or_else(|| {
+            .ok_or_else(|| {
                 let method_name_str = self.resolve_symbol(method.name);
-                panic!(
-                    "implement block method not registered in entity_registry: {} (type_def_id={:?}, method_name_id={:?})",
-                    method_name_str, type_def_id, method_name_id
+                CodegenError::internal_with_context(
+                    "implement block method not registered in entity_registry",
+                    format!(
+                        "{} (type_def_id={:?}, method_name_id={:?})",
+                        method_name_str, type_def_id, method_name_id
+                    ),
                 )
-            });
+            })?;
 
         let func_key = if let Some(info) = method_info {
             info.func_key
@@ -1165,7 +1171,9 @@ impl Compiler<'_> {
             let arena = self.arena();
             let (param_type_ids, _, _) = arena
                 .unwrap_function(method_def.signature_id)
-                .expect("INTERNAL: method compilation: missing function signature");
+                .ok_or_else(|| {
+                    CodegenError::internal("method compilation: missing function signature")
+                })?;
             method
                 .params
                 .iter()
@@ -1243,12 +1251,15 @@ impl Compiler<'_> {
             .analyzed
             .entity_registry()
             .find_method_on_type(metadata.type_def_id, method_name_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "class instance method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                    type_name_str, method_name_str, metadata.type_def_id, method_name_id
+            .ok_or_else(|| {
+                CodegenError::internal_with_context(
+                    "class instance method not registered in entity_registry",
+                    format!(
+                        "{}::{} (type_def_id={:?}, method_name_id={:?})",
+                        type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                    ),
                 )
-            });
+            })?;
 
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             CodegenError::not_found("method", self.func_registry.display(func_key))
@@ -1265,9 +1276,12 @@ impl Compiler<'_> {
         let method_def = self.query().get_method(semantic_method_id);
         let (param_type_ids, method_return_type_id) = {
             let arena = self.arena();
-            let (params, ret, _) = arena
-                .unwrap_function(method_def.signature_id)
-                .expect("INTERNAL: method signature: expected function type");
+            let (params, ret, _) =
+                arena
+                    .unwrap_function(method_def.signature_id)
+                    .ok_or_else(|| {
+                        CodegenError::internal("method signature: expected function type")
+                    })?;
             (params.to_vec(), Some(ret))
         };
 
@@ -1347,12 +1361,15 @@ impl Compiler<'_> {
             .analyzed
             .entity_registry()
             .find_method_on_type(metadata.type_def_id, method_name_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "interface default method not registered on implementing type: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                    type_name_str, method_name_str, metadata.type_def_id, method_name_id
+            .ok_or_else(|| {
+                CodegenError::internal_with_context(
+                    "interface default method not registered on implementing type",
+                    format!(
+                        "{}::{} (type_def_id={:?}, method_name_id={:?})",
+                        type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                    ),
                 )
-            });
+            })?;
 
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             CodegenError::not_found("default method", self.func_registry.display(func_key))
@@ -1366,9 +1383,12 @@ impl Compiler<'_> {
         let method_def = self.query().get_method(semantic_method_id);
         let (param_type_ids, return_type_id) = {
             let arena = self.arena();
-            let (params, ret, _) = arena
-                .unwrap_function(method_def.signature_id)
-                .expect("INTERNAL: method signature: expected function type");
+            let (params, ret, _) =
+                arena
+                    .unwrap_function(method_def.signature_id)
+                    .ok_or_else(|| {
+                        CodegenError::internal("method signature: expected function type")
+                    })?;
             (params.to_vec(), ret)
         };
 
@@ -1425,16 +1445,13 @@ impl Compiler<'_> {
     ) -> CodegenResult<()> {
         // Get the TypeDefId for looking up method info
         let type_name_id = self.query().name_id(module_id, &[type_name]);
-        let type_def_id = self
-            .query()
-            .try_type_def_id(type_name_id)
-            .unwrap_or_else(|| {
-                let type_name_str = self.resolve_symbol(type_name);
-                panic!(
-                    "static method type not registered in entity_registry: {} (type_name_id={:?})",
-                    type_name_str, type_name_id
-                )
-            });
+        let type_def_id = self.query().try_type_def_id(type_name_id).ok_or_else(|| {
+            let type_name_str = self.resolve_symbol(type_name);
+            CodegenError::internal_with_context(
+                "static method type not registered in entity_registry",
+                format!("{} (type_name_id={:?})", type_name_str, type_name_id),
+            )
+        })?;
 
         for method in &statics.methods {
             // Only compile methods with bodies
@@ -1449,14 +1466,17 @@ impl Compiler<'_> {
                 .analyzed
                 .entity_registry()
                 .find_static_method_on_type(type_def_id, method_name_id)
-                .unwrap_or_else(|| {
+                .ok_or_else(|| {
                     let type_name_str = self.resolve_symbol(type_name);
                     let method_name_str = self.resolve_symbol(method.name);
-                    panic!(
-                        "static method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                        type_name_str, method_name_str, type_def_id, method_name_id
+                    CodegenError::internal_with_context(
+                        "static method not registered in entity_registry",
+                        format!(
+                            "{}::{} (type_def_id={:?}, method_name_id={:?})",
+                            type_name_str, method_name_str, type_def_id, method_name_id
+                        ),
                     )
-                });
+                })?;
 
             // Function key from EntityRegistry full_name_id
             let method_def = self
@@ -1482,9 +1502,14 @@ impl Compiler<'_> {
             // Get param and return types from sema (pre-resolved signature)
             let (param_type_ids, return_type_id) = {
                 let arena = self.arena();
-                let (params, ret, _) = arena
-                    .unwrap_function(method_def.signature_id)
-                    .expect("INTERNAL: static method signature: expected function type");
+                let (params, ret, _) =
+                    arena
+                        .unwrap_function(method_def.signature_id)
+                        .ok_or_else(|| {
+                            CodegenError::internal(
+                                "static method signature: expected function type",
+                            )
+                        })?;
                 (params.to_vec(), ret)
             };
 
@@ -1623,23 +1648,30 @@ impl Compiler<'_> {
             // Look up MethodId from sema to get pre-computed signature
             let method_name_id =
                 method_name_id_with_interner(self.analyzed, module_info.interner, method.name)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "module {} method name not found in name_table: {}::{}",
-                            type_kind, type_name_str, method_name_str
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "module method name not found in name_table",
+                            format!("{}::{}::{}", type_kind, type_name_str, method_name_str),
                         )
-                    });
+                    })?;
 
             let semantic_method_id = self
                 .analyzed
                 .entity_registry()
                 .find_method_on_type(metadata.type_def_id, method_name_id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "module {} method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                        type_kind, type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                .ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "module method not registered in entity_registry",
+                        format!(
+                            "{}::{}::{} (type_def_id={:?}, method_name_id={:?})",
+                            type_kind,
+                            type_name_str,
+                            method_name_str,
+                            metadata.type_def_id,
+                            method_name_id
+                        ),
                     )
-                });
+                })?;
 
             let method_def = self
                 .analyzed
@@ -1658,16 +1690,19 @@ impl Compiler<'_> {
             let method_def = self.query().get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
                 let arena = self.arena();
-                let (params, ret, _) = arena
-                    .unwrap_function(method_def.signature_id)
-                    .expect("INTERNAL: method signature: expected function type");
+                let (params, ret, _) =
+                    arena
+                        .unwrap_function(method_def.signature_id)
+                        .ok_or_else(|| {
+                            CodegenError::internal("method signature: expected function type")
+                        })?;
                 (params.to_vec(), Some(ret))
             };
 
             let self_sym = module_info
                 .interner
                 .lookup("self")
-                .expect("INTERNAL: method compilation: 'self' not interned");
+                .ok_or_else(|| CodegenError::internal("method compilation: 'self' not interned"))?;
             // Skip explicit `self` params — they are handled via the separate self_binding.
             let param_types = self.type_ids_to_cranelift(&param_type_ids);
             let params: Vec<_> = method
@@ -1739,23 +1774,30 @@ impl Compiler<'_> {
             // Look up MethodId from sema to get pre-computed signature
             let method_name_id =
                 method_name_id_with_interner(self.analyzed, module_info.interner, method.name)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "module {} static method name not found in name_table: {}::{}",
-                            type_kind, type_name_str, method_name_str
+                    .ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "module static method name not found in name_table",
+                            format!("{}::{}::{}", type_kind, type_name_str, method_name_str),
                         )
-                    });
+                    })?;
 
             let semantic_method_id = self
                 .analyzed
                 .entity_registry()
                 .find_static_method_on_type(metadata.type_def_id, method_name_id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "module {} static method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                        type_kind, type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                .ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "module static method not registered in entity_registry",
+                        format!(
+                            "{}::{}::{} (type_def_id={:?}, method_name_id={:?})",
+                            type_kind,
+                            type_name_str,
+                            method_name_str,
+                            metadata.type_def_id,
+                            method_name_id
+                        ),
                     )
-                });
+                })?;
 
             let method_def = self
                 .analyzed
@@ -1777,9 +1819,14 @@ impl Compiler<'_> {
             let method_def = self.query().get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
                 let arena = self.arena();
-                let (params, ret, _) = arena
-                    .unwrap_function(method_def.signature_id)
-                    .expect("INTERNAL: static method signature: expected function type");
+                let (params, ret, _) =
+                    arena
+                        .unwrap_function(method_def.signature_id)
+                        .ok_or_else(|| {
+                            CodegenError::internal(
+                                "static method signature: expected function type",
+                            )
+                        })?;
                 (params.to_vec(), Some(ret))
             };
 

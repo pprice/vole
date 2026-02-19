@@ -138,7 +138,7 @@ impl Compiler<'_> {
         &mut self,
         tests_decl: &TestsDecl,
         test_count: &mut usize,
-    ) {
+    ) -> CodegenResult<()> {
         let interner = &self.analyzed.interner;
 
         // Look up the virtual module ID for scoped type declarations
@@ -157,20 +157,20 @@ impl Compiler<'_> {
                 Decl::Class(class) => {
                     // Scoped classes are registered under the virtual module
                     if let Some(vm_id) = virtual_module_id {
-                        self.finalize_module_class(class, interner, vm_id);
+                        self.finalize_module_class(class, interner, vm_id)?;
                     }
                 }
                 Decl::Implement(impl_block) => {
                     // Scoped implement blocks target types under the virtual module
                     if let Some(vm_id) = virtual_module_id {
-                        self.register_implement_block_in_module(impl_block, vm_id);
+                        self.register_implement_block_in_module(impl_block, vm_id)?;
                     } else {
-                        self.register_implement_block(impl_block);
+                        self.register_implement_block(impl_block)?;
                     }
                 }
                 Decl::Tests(nested_tests) => {
                     // Recursively declare nested tests block scoped decls
-                    self.declare_tests_scoped_decls(nested_tests, test_count);
+                    self.declare_tests_scoped_decls(nested_tests, test_count)?;
 
                     // Declare each nested test with a generated name and signature () -> i64
                     let i64_type_id = self.arena().primitives.i64;
@@ -189,6 +189,8 @@ impl Compiler<'_> {
                 }
             }
         }
+
+        Ok(())
     }
 
     /// Compile scoped function and method bodies within a tests block (pass 2).

@@ -18,7 +18,7 @@ use vole_identity::{ModuleId, NameId};
 use vole_sema::type_arena::TypeId;
 
 impl Compiler<'_> {
-    fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
+    fn main_function_key_and_name(&mut self, sym: Symbol) -> CodegenResult<(FunctionKey, String)> {
         // Collect info using query (immutable borrow)
         let (name_id, display_name) = {
             let query = self.query();
@@ -29,15 +29,14 @@ impl Compiler<'_> {
             )
         };
         // Mutable operations on func_registry
-        let key = self
-            .func_registry
-            .intern_name_id(name_id.unwrap_or_else(|| {
-            panic!(
-                "function '{}' not found in NameTable - all functions should be interned by sema",
-                display_name
+        let name_id = name_id.ok_or_else(|| {
+            CodegenError::internal_with_context(
+                "function not found in NameTable",
+                display_name.clone(),
             )
-        }));
-        (key, display_name)
+        })?;
+        let key = self.func_registry.intern_name_id(name_id);
+        Ok((key, display_name))
     }
 
     pub(super) fn test_function_key(&mut self, test_index: usize) -> FunctionKey {
@@ -228,7 +227,7 @@ impl Compiler<'_> {
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
                     // Declare scoped declarations within the tests block
-                    self.declare_tests_scoped_decls(tests_decl, &mut test_count);
+                    self.declare_tests_scoped_decls(tests_decl, &mut test_count)?;
 
                     // Declare each test with a generated name and signature () -> i64
                     let i64_type_id = self.arena().primitives.i64;
@@ -263,7 +262,7 @@ impl Compiler<'_> {
                     // Interface declarations don't generate code directly
                 }
                 Decl::Implement(impl_block) => {
-                    self.register_implement_block(impl_block);
+                    self.register_implement_block(impl_block)?;
                 }
                 Decl::Struct(s) => {
                     self.finalize_struct(s)?;
@@ -400,13 +399,13 @@ impl Compiler<'_> {
         for decl in &program.declarations {
             match decl {
                 Decl::Class(class) => {
-                    self.pre_register_class(class);
+                    self.pre_register_class(class)?;
                 }
                 Decl::Struct(s) => {
-                    self.pre_register_struct(s);
+                    self.pre_register_struct(s)?;
                 }
                 Decl::Sentinel(s) => {
-                    self.pre_register_sentinel(s);
+                    self.pre_register_sentinel(s)?;
                 }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(_) => {
@@ -435,7 +434,7 @@ impl Compiler<'_> {
     /// These are functions defined in module files (not external FFI functions).
     /// Declare all module functions, finalize types, and register implement blocks.
     /// Must run before compiling function bodies so cross-module calls can be resolved.
-    fn declare_module_types_and_functions(&mut self, module_paths: &[String]) {
+    fn declare_module_types_and_functions(&mut self, module_paths: &[String]) -> CodegenResult<()> {
         for module_path in module_paths {
             tracing::debug!(module_path, "compile_module_functions: declaring functions");
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
@@ -454,7 +453,9 @@ impl Compiler<'_> {
                         module_id,
                         func.name,
                     )
-                    .expect("INTERNAL: module function: name_id not registered");
+                    .ok_or_else(|| {
+                        CodegenError::internal("module function: name_id not registered")
+                    })?;
 
                     // Check for implicit generics (structural type params)
                     if self.has_implicit_generic_info(name_id) {
@@ -472,21 +473,21 @@ impl Compiler<'_> {
             // MUST happen before implement block registration, which needs type_metadata
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
-                    self.finalize_module_class(class, module_interner, module_id);
+                    self.finalize_module_class(class, module_interner, module_id)?;
                 }
             }
 
             // Finalize module structs (register type metadata, declare methods)
             for decl in &program.declarations {
                 if let Decl::Struct(struct_decl) = decl {
-                    self.finalize_module_struct(struct_decl, module_interner, module_id);
+                    self.finalize_module_struct(struct_decl, module_interner, module_id)?;
                 }
             }
 
             // Register module sentinels (zero-field struct types like Done, nil)
             for decl in &program.declarations {
                 if let Decl::Sentinel(sentinel_decl) = decl {
-                    self.finalize_module_sentinel(sentinel_decl, module_interner, module_id);
+                    self.finalize_module_sentinel(sentinel_decl, module_interner, module_id)?;
                 }
             }
 
@@ -498,10 +499,12 @@ impl Compiler<'_> {
                         impl_block,
                         module_interner,
                         module_id,
-                    );
+                    )?;
                 }
             }
         }
+
+        Ok(())
     }
 
     pub(super) fn compile_module_functions(&mut self) -> CodegenResult<()> {
@@ -513,7 +516,7 @@ impl Compiler<'_> {
         );
 
         // Pass 1: Declare all functions and finalize types across all modules
-        self.declare_module_types_and_functions(&module_paths);
+        self.declare_module_types_and_functions(&module_paths)?;
 
         // Pass 1.5: Declare and compile monomorphized generic instances used by modules.
         self.declare_monomorphized_instances(true)?;
@@ -578,7 +581,7 @@ impl Compiler<'_> {
                     module_id,
                     func.name,
                 )
-                .expect("INTERNAL: module function: name_id not registered");
+                .ok_or_else(|| CodegenError::internal("module function: name_id not registered"))?;
 
                 // Check for implicit generics (structural type params)
                 let has_implicit_generic_info = self
@@ -671,7 +674,9 @@ impl Compiler<'_> {
                         module_id,
                         func.name,
                     )
-                    .expect("INTERNAL: module function: name_id not registered");
+                    .ok_or_else(|| {
+                        CodegenError::internal("module function: name_id not registered")
+                    })?;
 
                     let display_name = self.query().display_name(name_id);
                     let func_key = self.declare_function_by_name_id(
@@ -691,14 +696,14 @@ impl Compiler<'_> {
             let module_id = self.query().module_id_or_main(module_path);
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
-                    self.import_module_class(class, module_interner, module_id);
+                    self.import_module_class(class, module_interner, module_id)?;
                 }
             }
 
             // Finalize module structs (register type metadata, import methods)
             for decl in &program.declarations {
                 if let Decl::Struct(struct_decl) = decl {
-                    self.import_module_struct(struct_decl, module_interner, module_id);
+                    self.import_module_struct(struct_decl, module_interner, module_id)?;
                 }
             }
 
@@ -706,7 +711,7 @@ impl Compiler<'_> {
             // MUST happen after class finalization so type_metadata is populated
             for decl in &program.declarations {
                 if let Decl::Implement(impl_block) = decl {
-                    self.import_module_implement_block(impl_block, module_interner, module_id);
+                    self.import_module_implement_block(impl_block, module_interner, module_id)?;
                 }
             }
         }
@@ -721,13 +726,14 @@ impl Compiler<'_> {
         class: &vole_frontend::ast::ClassDecl,
         module_interner: &Interner,
         module_id: ModuleId,
-    ) {
+    ) -> CodegenResult<()> {
         // First finalize to get type metadata registered
-        self.finalize_module_class(class, module_interner, module_id);
+        self.finalize_module_class(class, module_interner, module_id)?;
 
         // The methods are already compiled - they'll be linked via external symbols
         // No additional work needed here since method calls go through func_registry
         // which will find the imported function IDs
+        Ok(())
     }
 
     /// Import a module struct - register metadata and import methods.
@@ -737,8 +743,8 @@ impl Compiler<'_> {
         struct_decl: &vole_frontend::ast::StructDecl,
         module_interner: &Interner,
         module_id: ModuleId,
-    ) {
-        self.finalize_module_struct(struct_decl, module_interner, module_id);
+    ) -> CodegenResult<()> {
+        self.finalize_module_struct(struct_decl, module_interner, module_id)
     }
 
     /// Compile a single module function with its own interner
@@ -854,7 +860,7 @@ impl Compiler<'_> {
 
     pub(super) fn compile_function(&mut self, func: &FuncDecl) -> CodegenResult<()> {
         let program_module = self.program_module();
-        let (func_key, display_name) = self.main_function_key_and_name(func.name);
+        let (func_key, display_name) = self.main_function_key_and_name(func.name)?;
         let jit_func_id = self
             .func_registry
             .func_id(func_key)
