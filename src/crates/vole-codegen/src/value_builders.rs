@@ -26,10 +26,13 @@ use crate::ops::{sextend_const, uextend_const};
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Void / zero defaults ==========
 
-    /// Create a void return value
-    pub fn void_value(&mut self) -> CompiledValue {
-        let zero = self.builder.ins().iconst(types::I64, 0);
-        CompiledValue::new(zero, types::I64, TypeId::VOID)
+    /// Create a void return value.
+    ///
+    /// Reuses a single `iconst.i64 0` created in the entry block at `Cg`
+    /// construction, avoiding thousands of dead iconst instructions that were
+    /// previously emitted and never referenced.
+    pub fn void_value(&self) -> CompiledValue {
+        CompiledValue::new(self.cached_void_val, types::I64, TypeId::VOID)
     }
 
     /// Create a zero/default value of the given Cranelift type.

@@ -162,6 +162,10 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Yielder pointer variable for generator body functions.
     /// When set, `ExprKind::Yield` compiles to `vole_generator_yield(yielder, value)`.
     pub yielder_var: Option<Variable>,
+    /// Cached `iconst.i64 0` created in the entry block for void returns.
+    /// Reused by every `void_value()` call to avoid emitting thousands of
+    /// dead iconst instructions (previously ~18,951 per compilation).
+    pub(crate) cached_void_val: Value,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -183,6 +187,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         codegen_ctx: &'a mut CodegenCtx<'ctx>,
         env: &'a CompileEnv<'ctx>,
     ) -> Self {
+        // Emit a single `iconst.i64 0` in the entry block (where the cursor is
+        // at construction time). Because the entry block dominates every other
+        // block, this value can be reused by all subsequent `void_value()` calls
+        // without violating SSA dominance.
+        let cached_void_val = builder.ins().iconst(types::I64, 0);
         Self {
             builder,
             vars: FxHashMap::default(),
@@ -200,6 +209,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             module_bindings: env.global_module_bindings.clone(),
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
+            cached_void_val,
             codegen_ctx,
             env,
         }
