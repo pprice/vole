@@ -290,7 +290,6 @@ impl Cg<'_, '_, '_> {
 
         // Compile then branch
         self.switch_and_seal(then_block);
-        self.invalidate_value_caches();
         let then_result = self.expr(&if_expr.then_branch)?;
         if then_result.type_id == TypeId::NEVER {
             // Divergent branch (unreachable/panic) — terminate with trap
@@ -309,7 +308,6 @@ impl Cg<'_, '_, '_> {
 
         // Compile else branch
         self.switch_and_seal(else_block);
-        self.invalidate_value_caches();
         let else_result = if let Some(ref else_branch) = if_expr.else_branch {
             self.expr(else_branch)?
         } else {
@@ -333,7 +331,6 @@ impl Cg<'_, '_, '_> {
 
         // Continue in merge block
         self.switch_and_seal(merge_block);
-        self.invalidate_value_caches();
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }
@@ -521,7 +518,6 @@ impl Cg<'_, '_, '_> {
             // If next arm has a condition, switch to its evaluation block
             if i + 1 < when_expr.arms.len() && when_expr.arms[i + 1].condition.is_some() {
                 self.switch_and_seal(else_target);
-                self.invalidate_value_caches();
                 cond_block_idx += 1;
             }
         }
@@ -535,7 +531,6 @@ impl Cg<'_, '_, '_> {
         // Compile body blocks
         for (i, arm) in when_expr.arms.iter().enumerate() {
             self.switch_and_seal(body_blocks[i]);
-            self.invalidate_value_caches();
 
             let body_result = self.expr(&arm.body)?;
 
@@ -563,7 +558,6 @@ impl Cg<'_, '_, '_> {
 
         // Continue in merge block
         self.switch_and_seal(merge_block);
-        self.invalidate_value_caches();
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }

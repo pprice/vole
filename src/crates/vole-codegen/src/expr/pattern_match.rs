@@ -660,7 +660,6 @@ impl Cg<'_, '_, '_> {
             let next_block = arm_blocks.get(i + 1).copied().unwrap_or(trap_block);
 
             self.switch_to_block(arm_block);
-            self.invalidate_value_caches();
 
             let mut arm_variables = self.vars.clone();
             // Track the effective arm block (may change for conditional extraction)
@@ -738,7 +737,6 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
 
         self.switch_and_seal(merge_block);
-        self.invalidate_value_caches();
 
         // Clean up fallible scrutinee payload.
         // Fallible structs are stack-allocated (tag + payload) and never RC-tracked,
@@ -808,7 +806,6 @@ impl Cg<'_, '_, '_> {
         for (i, arm) in match_expr.arms.iter().enumerate() {
             self.switch_to_block(body_blocks[i]);
             self.builder.seal_block(body_blocks[i]);
-            self.invalidate_value_caches();
 
             let mut body_val = self.expr(&arm.body)?;
 
@@ -830,7 +827,6 @@ impl Cg<'_, '_, '_> {
         }
 
         self.switch_and_seal(merge_block);
-        self.invalidate_value_caches();
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }

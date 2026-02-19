@@ -816,26 +816,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// should go through this wrapper so that per-block caches are
     /// automatically invalidated.
     ///
-    /// The `iconst_cache` is **not** cleared — all cached constants live in
-    /// the entry block and dominate every other block.
-    pub fn switch_to_block(&mut self, block: Block) {
-        self.builder.switch_to_block(block);
-    }
-
-    /// Invalidate value caches when entering a control flow branch.
-    ///
-    /// The `field_cache` stores Cranelift SSA `Value`s that are defined in a
-    /// particular basic block. When the builder switches to a sibling block
-    /// (e.g., the next arm of a `when`/`match`/`if` expression), values
-    /// cached from a previous arm do **not** dominate the new block, so
-    /// reusing them would produce a Cranelift verifier error
+    /// `field_cache` is cleared here because its `Value`s are SSA-local to the
+    /// block they were defined in; a cached value from a sibling block does not
+    /// dominate the new block and would cause a Cranelift verifier error
     /// ("uses value from non-dominating inst").
     ///
-    /// The `iconst_cache` is **not** cleared — all cached constants live in
-    /// the entry block and dominate every block.
-    ///
-    /// Call this at the start of each arm body in any branching construct.
-    pub fn invalidate_value_caches(&mut self) {
+    /// `iconst_cache` is **not** cleared — all cached constants live in the
+    /// entry block and dominate every other block.
+    pub fn switch_to_block(&mut self, block: Block) {
+        self.builder.switch_to_block(block);
         self.field_cache.clear();
     }
 

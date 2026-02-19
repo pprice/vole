@@ -197,14 +197,12 @@ impl Cg<'_, '_, '_> {
                 self.emit_brif(cond.value, then_block, else_block);
 
                 self.switch_to_block(then_block);
-                self.invalidate_value_caches();
                 let then_terminated = self.block(&if_stmt.then_branch)?;
                 if !then_terminated {
                     self.builder.ins().jump(merge_block, &[]);
                 }
 
                 self.switch_to_block(else_block);
-                self.invalidate_value_caches();
                 let else_terminated = if let Some(else_branch) = &if_stmt.else_branch {
                     self.block(else_branch)?
                 } else {
@@ -215,7 +213,6 @@ impl Cg<'_, '_, '_> {
                 }
 
                 self.switch_to_block(merge_block);
-                self.invalidate_value_caches();
 
                 // If both branches terminated, the merge block is unreachable.
                 // Cranelift still requires it to be filled, so emit a trap.
