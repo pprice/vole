@@ -13,6 +13,7 @@ use vole_frontend::{self, Stmt};
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
+use crate::ops::sextend_const;
 
 /// Check if a block contains a `continue` statement (recursively).
 ///
@@ -242,12 +243,12 @@ impl Cg<'_, '_, '_> {
         } else if elem_cr_type == types::F32 {
             self.builder.ins().f32const(0.0)
         } else if elem_cr_type == types::F128 {
-            let zero_bits = self.builder.ins().sextend(types::I128, zero);
+            let zero_bits = sextend_const(self.builder, types::I128, zero);
             self.builder
                 .ins()
                 .bitcast(types::F128, MemFlags::new(), zero_bits)
         } else if elem_cr_type == types::I128 {
-            self.builder.ins().sextend(types::I128, zero)
+            sextend_const(self.builder, types::I128, zero)
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
             self.builder.ins().iconst(elem_cr_type, 0)
         } else {
@@ -412,12 +413,12 @@ impl Cg<'_, '_, '_> {
         } else if elem_cr_type == types::F32 {
             self.builder.ins().f32const(0.0)
         } else if elem_cr_type == types::F128 {
-            let zero_bits = self.builder.ins().sextend(types::I128, zero_i64);
+            let zero_bits = sextend_const(self.builder, types::I128, zero_i64);
             self.builder
                 .ins()
                 .bitcast(types::F128, MemFlags::new(), zero_bits)
         } else if elem_cr_type == types::I128 {
-            self.builder.ins().sextend(types::I128, zero_i64)
+            sextend_const(self.builder, types::I128, zero_i64)
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
             self.builder.ins().iconst(elem_cr_type, 0)
         } else {

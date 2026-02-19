@@ -12,7 +12,7 @@ use vole_frontend::{ExprKind, NodeId};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 
-use crate::ops::try_constant_value;
+use crate::ops::{sextend_const, try_constant_value};
 
 use super::super::context::Cg;
 
@@ -193,7 +193,7 @@ impl Cg<'_, '_, '_> {
             if to_ty.bits() < actual_ty.bits() {
                 return self.builder.ins().ireduce(to_ty, value);
             } else if to_ty.bits() > actual_ty.bits() {
-                return self.builder.ins().sextend(to_ty, value);
+                return sextend_const(self.builder, to_ty, value);
             }
         }
         // Handle float promotions/demotions

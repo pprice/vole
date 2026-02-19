@@ -4,6 +4,7 @@ use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::ops::uextend_const;
 use crate::types::CompiledValue;
 use vole_identity::{NameId, TypeDefId};
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId, TypeIdVec};
@@ -178,11 +179,11 @@ pub(crate) fn convert_to_i64_for_storage(
             let i32_val = builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
-            builder.ins().uextend(types::I64, i32_val)
+            uextend_const(builder, types::I64, i32_val)
         }
-        types::I8 => builder.ins().uextend(types::I64, value.value),
-        types::I16 => builder.ins().uextend(types::I64, value.value),
-        types::I32 => builder.ins().uextend(types::I64, value.value),
+        types::I8 => uextend_const(builder, types::I64, value.value),
+        types::I16 => uextend_const(builder, types::I64, value.value),
+        types::I32 => uextend_const(builder, types::I64, value.value),
         types::I64 => value.value,
         // i128 should not reach here - callers must use store_field_value,
         // split_i128_for_storage, or store_i128_to_stack instead
@@ -200,7 +201,7 @@ pub(crate) fn split_i128_for_storage(
 ) -> (Value, Value) {
     let low = builder.ins().ireduce(types::I64, value);
     let sixty_four_i64 = builder.ins().iconst(types::I64, 64);
-    let sixty_four = builder.ins().uextend(types::I128, sixty_four_i64);
+    let sixty_four = uextend_const(builder, types::I128, sixty_four_i64);
     let shifted = builder.ins().ushr(value, sixty_four);
     let high = builder.ins().ireduce(types::I64, shifted);
     (low, high)
@@ -209,10 +210,10 @@ pub(crate) fn split_i128_for_storage(
 /// Reconstruct an i128 from (low, high) i64 halves.
 /// Reverse of `split_i128_for_storage`.
 pub(crate) fn reconstruct_i128(builder: &mut FunctionBuilder, low: Value, high: Value) -> Value {
-    let low_ext = builder.ins().uextend(types::I128, low);
-    let high_ext = builder.ins().uextend(types::I128, high);
+    let low_ext = uextend_const(builder, types::I128, low);
+    let high_ext = uextend_const(builder, types::I128, high);
     let sixty_four_i64 = builder.ins().iconst(types::I64, 64);
-    let sixty_four = builder.ins().uextend(types::I128, sixty_four_i64);
+    let sixty_four = uextend_const(builder, types::I128, sixty_four_i64);
     let high_shifted = builder.ins().ishl(high_ext, sixty_four);
     builder.ins().bor(high_shifted, low_ext)
 }

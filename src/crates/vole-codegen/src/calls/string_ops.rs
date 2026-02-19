@@ -16,6 +16,7 @@ use crate::union_layout;
 
 use super::super::RuntimeKey;
 use super::super::context::Cg;
+use crate::ops::sextend_const;
 
 /// Compile a string literal as a static RcString baked into the JIT data section.
 /// Returns the raw Cranelift Value (pointer to the static RcString) - caller should
@@ -191,7 +192,7 @@ impl Cg<'_, '_, '_> {
             (RuntimeKey::BoolToString, val.value)
         } else {
             let extended = if val.ty.is_int() && val.ty != types::I64 {
-                self.builder.ins().sextend(types::I64, val.value)
+                sextend_const(self.builder, types::I64, val.value)
             } else {
                 val.value
             };

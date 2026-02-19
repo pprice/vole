@@ -10,6 +10,7 @@ use paste::paste;
 use vole_sema::type_arena::TypeId;
 
 use crate::context::Cg;
+use crate::ops::uextend_const;
 
 // =============================================================================
 // Dispatch macros for integer intrinsic operations
@@ -105,28 +106,28 @@ macro_rules! dispatch_binary_int_op {
             $(
                 $Enum::[<I8  $r_Op>] => ($self.builder.ins().$r_ins($a1, $a2), types::I8, TypeId::I8),
                 $Enum::[<I16 $r_Op>] => {
-                    let amt = $self.builder.ins().uextend(types::I16, $a2);
+                    let amt = uextend_const(&mut $self.builder, types::I16, $a2);
                     ($self.builder.ins().$r_ins($a1, amt), types::I16, TypeId::I16)
                 }
                 $Enum::[<I32 $r_Op>] => {
-                    let amt = $self.builder.ins().uextend(types::I32, $a2);
+                    let amt = uextend_const(&mut $self.builder, types::I32, $a2);
                     ($self.builder.ins().$r_ins($a1, amt), types::I32, TypeId::I32)
                 }
                 $Enum::[<I64 $r_Op>] => {
-                    let amt = $self.builder.ins().uextend(types::I64, $a2);
+                    let amt = uextend_const(&mut $self.builder, types::I64, $a2);
                     ($self.builder.ins().$r_ins($a1, amt), types::I64, TypeId::I64)
                 }
                 $Enum::[<U8  $r_Op>] => ($self.builder.ins().$r_ins($a1, $a2), types::I8, TypeId::U8),
                 $Enum::[<U16 $r_Op>] => {
-                    let amt = $self.builder.ins().uextend(types::I16, $a2);
+                    let amt = uextend_const(&mut $self.builder, types::I16, $a2);
                     ($self.builder.ins().$r_ins($a1, amt), types::I16, TypeId::U16)
                 }
                 $Enum::[<U32 $r_Op>] => {
-                    let amt = $self.builder.ins().uextend(types::I32, $a2);
+                    let amt = uextend_const(&mut $self.builder, types::I32, $a2);
                     ($self.builder.ins().$r_ins($a1, amt), types::I32, TypeId::U32)
                 }
                 $Enum::[<U64 $r_Op>] => {
-                    let amt = $self.builder.ins().uextend(types::I64, $a2);
+                    let amt = uextend_const(&mut $self.builder, types::I64, $a2);
                     ($self.builder.ins().$r_ins($a1, amt), types::I64, TypeId::U64)
                 }
             )*

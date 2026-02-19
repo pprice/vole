@@ -16,6 +16,7 @@ use vole_sema::type_arena::{TypeArena, TypeId};
 use vole_sema::{EntityRegistry, PrimitiveType};
 
 use super::codegen_state::TypeMetadataMap;
+use crate::ops::{sextend_const, uextend_const};
 
 /// Lifecycle state for reference-counted values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -513,7 +514,7 @@ pub(crate) fn convert_to_type(
         // Runtime f128 currently uses a compact software representation:
         // low 64 bits = f64 payload, high 64 bits = 0.
         let bits64 = builder.ins().bitcast(types::I64, MemFlags::new(), f64_val);
-        let bits128 = builder.ins().uextend(types::I128, bits64);
+        let bits128 = uextend_const(builder, types::I128, bits64);
         builder.ins().bitcast(types::F128, MemFlags::new(), bits128)
     }
 
@@ -579,9 +580,9 @@ pub(crate) fn convert_to_type(
     // Integer widening - use uextend for unsigned types, sextend for signed
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
         if arena.is_unsigned(val.type_id) {
-            return builder.ins().uextend(target, val.value);
+            return uextend_const(builder, target, val.value);
         } else {
-            return builder.ins().sextend(target, val.value);
+            return sextend_const(builder, target, val.value);
         }
     }
 
@@ -594,7 +595,7 @@ pub(crate) fn convert_to_type(
         let f64_val = unpack_f128_to_f64(builder, val.value);
         if target == types::I128 {
             let narrowed = builder.ins().fcvt_to_sint(types::I64, f64_val);
-            return builder.ins().sextend(types::I128, narrowed);
+            return sextend_const(builder, types::I128, narrowed);
         }
         return builder.ins().fcvt_to_sint(target, f64_val);
     }
@@ -648,7 +649,7 @@ pub(crate) fn value_to_word(
             let i32_val = builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
-            builder.ins().uextend(word_type, i32_val)
+            uextend_const(builder, word_type, i32_val)
         }
         ArenaType::Primitive(PrimitiveType::Bool)
         | ArenaType::Primitive(PrimitiveType::I8)
@@ -661,7 +662,7 @@ pub(crate) fn value_to_word(
             if value.ty == word_type {
                 value.value
             } else {
-                builder.ins().uextend(word_type, value.value)
+                uextend_const(builder, word_type, value.value)
             }
         }
         ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => {
@@ -672,7 +673,7 @@ pub(crate) fn value_to_word(
             if word_type == types::I64 {
                 low
             } else {
-                builder.ins().uextend(word_type, low)
+                uextend_const(builder, word_type, low)
             }
         }
         _ => value.value,
@@ -730,7 +731,7 @@ pub(crate) fn word_to_value_type_id(
             } else {
                 builder.ins().ireduce(types::I64, word)
             };
-            builder.ins().uextend(types::I128, low)
+            uextend_const(builder, types::I128, low)
         }
         _ => word,
     }

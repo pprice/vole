@@ -8,6 +8,7 @@ use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
 
 use super::signed_min_max;
 use crate::context::Cg;
+use crate::ops::{sextend_const, uextend_const};
 
 /// Macro to generate saturating arithmetic functions using widen-clamp-narrow approach.
 /// Cranelift's sadd_sat/uadd_sat/ssub_sat/usub_sat don't support i8/i16, so we widen first.
@@ -15,8 +16,8 @@ macro_rules! impl_sat_widen_narrow {
     // Signed add: sextend, iadd, smax(min), smin(max), ireduce
     (signed_add, $fn_name:ident, $src_ty:expr, $wide_ty:expr, $min:expr, $max:expr) => {
         pub fn $fn_name(&mut self, a: Value, b: Value) -> Value {
-            let a_wide = self.builder.ins().sextend($wide_ty, a);
-            let b_wide = self.builder.ins().sextend($wide_ty, b);
+            let a_wide = sextend_const(&mut self.builder, $wide_ty, a);
+            let b_wide = sextend_const(&mut self.builder, $wide_ty, b);
             let sum = self.builder.ins().iadd(a_wide, b_wide);
             let min = self.builder.ins().iconst($wide_ty, $min);
             let max = self.builder.ins().iconst($wide_ty, $max);
@@ -28,8 +29,8 @@ macro_rules! impl_sat_widen_narrow {
     // Unsigned add: uextend, iadd, umin(max), ireduce
     (unsigned_add, $fn_name:ident, $src_ty:expr, $wide_ty:expr, $max:expr) => {
         pub fn $fn_name(&mut self, a: Value, b: Value) -> Value {
-            let a_wide = self.builder.ins().uextend($wide_ty, a);
-            let b_wide = self.builder.ins().uextend($wide_ty, b);
+            let a_wide = uextend_const(&mut self.builder, $wide_ty, a);
+            let b_wide = uextend_const(&mut self.builder, $wide_ty, b);
             let sum = self.builder.ins().iadd(a_wide, b_wide);
             let max = self.builder.ins().iconst($wide_ty, $max);
             let clamped = self.builder.ins().umin(sum, max);
@@ -39,8 +40,8 @@ macro_rules! impl_sat_widen_narrow {
     // Signed sub: sextend, isub, smax(min), smin(max), ireduce
     (signed_sub, $fn_name:ident, $src_ty:expr, $wide_ty:expr, $min:expr, $max:expr) => {
         pub fn $fn_name(&mut self, a: Value, b: Value) -> Value {
-            let a_wide = self.builder.ins().sextend($wide_ty, a);
-            let b_wide = self.builder.ins().sextend($wide_ty, b);
+            let a_wide = sextend_const(&mut self.builder, $wide_ty, a);
+            let b_wide = sextend_const(&mut self.builder, $wide_ty, b);
             let diff = self.builder.ins().isub(a_wide, b_wide);
             let min = self.builder.ins().iconst($wide_ty, $min);
             let max = self.builder.ins().iconst($wide_ty, $max);
@@ -52,8 +53,8 @@ macro_rules! impl_sat_widen_narrow {
     // Unsigned sub: uextend, isub, smax(0), ireduce (result can go negative)
     (unsigned_sub, $fn_name:ident, $src_ty:expr, $wide_ty:expr) => {
         pub fn $fn_name(&mut self, a: Value, b: Value) -> Value {
-            let a_wide = self.builder.ins().uextend($wide_ty, a);
-            let b_wide = self.builder.ins().uextend($wide_ty, b);
+            let a_wide = uextend_const(&mut self.builder, $wide_ty, a);
+            let b_wide = uextend_const(&mut self.builder, $wide_ty, b);
             let diff = self.builder.ins().isub(a_wide, b_wide);
             let zero = self.builder.ins().iconst($wide_ty, 0);
             let clamped = self.builder.ins().smax(diff, zero);

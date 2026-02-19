@@ -28,6 +28,41 @@ pub(crate) fn try_constant_value(func: &Function, val: Value) -> Option<i64> {
     }
 }
 
+/// Zero-extend `val` to `target_ty`, folding to `iconst` when the operand is a
+/// known constant.  Falls back to `builder.ins().uextend()` for non-constant
+/// operands or when the target is `I128` (which `iconst` cannot represent
+/// directly).
+pub(crate) fn uextend_const(builder: &mut FunctionBuilder, target_ty: Type, val: Value) -> Value {
+    if target_ty != types::I128
+        && let Some(c) = try_constant_value(builder.func, val)
+    {
+        let src_bits = builder.func.dfg.value_type(val).bits();
+        let mask = if src_bits >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << src_bits) - 1
+        };
+        let folded = (c as u64 & mask) as i64;
+        return builder.ins().iconst(target_ty, folded);
+    }
+    builder.ins().uextend(target_ty, val)
+}
+
+/// Sign-extend `val` to `target_ty`, folding to `iconst` when the operand is a
+/// known constant.  Falls back to `builder.ins().sextend()` for non-constant
+/// operands or when the target is `I128`.
+pub(crate) fn sextend_const(builder: &mut FunctionBuilder, target_ty: Type, val: Value) -> Value {
+    if target_ty != types::I128
+        && let Some(c) = try_constant_value(builder.func, val)
+    {
+        let src_bits = builder.func.dfg.value_type(val).bits();
+        let shift = 64u32.saturating_sub(src_bits);
+        let folded = (c << shift) >> shift; // arithmetic right shift
+        return builder.ins().iconst(target_ty, folded);
+    }
+    builder.ins().sextend(target_ty, val)
+}
+
 /// Convert a numeric TypeId to its corresponding Cranelift type.
 /// Only handles numeric types; other types will default to I64.
 fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
@@ -887,7 +922,7 @@ impl Cg<'_, '_, '_> {
                 let v = if ty == types::I64 {
                     value.value
                 } else {
-                    self.builder.ins().sextend(types::I64, value.value)
+                    sextend_const(self.builder, types::I64, value.value)
                 };
                 let bits = self.call_runtime(RuntimeKey::I64ToF128, &[v])?;
                 Ok(self
@@ -1047,14 +1082,11 @@ impl Cg<'_, '_, '_> {
             // Ensure both values have the same type for comparison
             let (cmp_payload, cmp_value) = if payload_cranelift_type.bytes() < value.ty.bytes() {
                 // Extend payload to match value's type
-                let extended = self.builder.ins().sextend(value.ty, payload);
+                let extended = sextend_const(self.builder, value.ty, payload);
                 (extended, value.value)
             } else if payload_cranelift_type.bytes() > value.ty.bytes() {
                 // Extend value to match payload's type
-                let extended = self
-                    .builder
-                    .ins()
-                    .sextend(payload_cranelift_type, value.value);
+                let extended = sextend_const(self.builder, payload_cranelift_type, value.value);
                 (payload, extended)
             } else {
                 (payload, value.value)

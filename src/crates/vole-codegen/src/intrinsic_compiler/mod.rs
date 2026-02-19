@@ -28,6 +28,7 @@ use super::context::{Cg, resolve_external_names};
 use super::types::{
     CompiledValue, array_element_tag_id, native_type_to_cranelift, type_id_to_cranelift,
 };
+use crate::ops::uextend_const;
 
 /// Get signed integer min/max bounds for a given bit width.
 fn signed_min_max(bits: u32) -> (i64, i64) {
@@ -543,7 +544,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.call_std_task_tagged_native("channel_recv", typed_args[0].value)?;
         let minus_one = self.builder.ins().iconst(types::I64, -1);
         let is_done = self.builder.ins().icmp(IntCC::Equal, tag, minus_one);
-        let cond = self.builder.ins().uextend(types::I32, is_done);
+        let cond = uextend_const(self.builder, types::I32, is_done);
 
         let done_block = self.builder.create_block();
         let value_block = self.builder.create_block();
@@ -674,7 +675,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let len_i64 = if ptr_type == types::I64 {
             raw_len
         } else {
-            self.builder.ins().uextend(types::I64, raw_len)
+            uextend_const(self.builder, types::I64, raw_len)
         };
         self.builder.ins().jump(merge_block, &[len_i64.into()]);
 
@@ -708,7 +709,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let count_i64 = if ptr_type == types::I64 {
             raw_count
         } else {
-            self.builder.ins().uextend(types::I64, raw_count)
+            uextend_const(self.builder, types::I64, raw_count)
         };
         self.builder.ins().jump(merge_block, &[count_i64.into()]);
 

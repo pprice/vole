@@ -26,6 +26,7 @@ use vole_sema::type_arena::TypeId;
 use super::context::{Cg, deref_expr_ptr};
 use super::types::CompiledValue;
 use super::{FunctionKey, RuntimeKey};
+use crate::ops::sextend_const;
 
 use cranelift_module::FuncId;
 
@@ -426,7 +427,7 @@ impl Cg<'_, '_, '_> {
                     && expected.is_int()
                     && expected.bits() > compiled.ty.bits()
                 {
-                    self.builder.ins().sextend(expected, compiled.value)
+                    sextend_const(self.builder, expected, compiled.value)
                 } else if compiled.ty == types::F32 && expected == types::F64 {
                     self.builder.ins().fpromote(types::F64, compiled.value)
                 } else if compiled.ty == types::F64 && expected == types::F32 {
@@ -600,7 +601,7 @@ impl Cg<'_, '_, '_> {
                     && expected_ty.is_int()
                     && expected_ty.bits() > compiled.ty.bits()
                 {
-                    self.builder.ins().sextend(expected_ty, compiled.value)
+                    sextend_const(self.builder, expected_ty, compiled.value)
                 } else if compiled.ty == types::F32 && expected_ty == types::F64 {
                     self.builder.ins().fpromote(types::F64, compiled.value)
                 } else if compiled.ty == types::F64 && expected_ty == types::F32 {

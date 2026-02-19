@@ -20,6 +20,7 @@ use super::types::{
     CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, fallible_error_tag_by_id,
     is_wide_fallible, tuple_layout_id, type_id_to_cranelift,
 };
+use crate::ops::sextend_const;
 
 impl Cg<'_, '_, '_> {
     /// Pre-register a recursive lambda binding before compilation.
@@ -618,7 +619,7 @@ impl Cg<'_, '_, '_> {
                 let actual = if target_ty.bytes() < value.ty.bytes() {
                     self.builder.ins().ireduce(target_ty, value.value)
                 } else if target_ty.bytes() > value.ty.bytes() {
-                    self.builder.ins().sextend(target_ty, value.value)
+                    sextend_const(self.builder, target_ty, value.value)
                 } else {
                     value.value
                 };

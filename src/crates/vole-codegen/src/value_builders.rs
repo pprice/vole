@@ -21,6 +21,7 @@ use crate::union_layout;
 
 use super::context::Cg;
 use super::types::{CompiledValue, RcLifecycle};
+use crate::ops::{sextend_const, uextend_const};
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Void / zero defaults ==========
@@ -90,13 +91,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // For f128, use the runtime software representation (f64 payload in low 64 bits).
         let value = if ty == types::I128 {
             let i64_val = self.builder.ins().iconst(types::I64, n);
-            self.builder.ins().sextend(types::I128, i64_val)
+            sextend_const(self.builder, types::I128, i64_val)
         } else if ty == types::F128 {
             let low = self
                 .builder
                 .ins()
                 .iconst(types::I64, (n as f64).to_bits() as i64);
-            let wide = self.builder.ins().uextend(types::I128, low);
+            let wide = uextend_const(self.builder, types::I128, low);
             self.builder
                 .ins()
                 .bitcast(types::F128, MemFlags::new(), wide)
@@ -122,7 +123,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // Runtime f128 currently uses a compact software representation:
                 // low 64 bits = f64 payload, high 64 bits = 0.
                 let low = self.builder.ins().iconst(types::I64, n.to_bits() as i64);
-                let wide = self.builder.ins().uextend(types::I128, low);
+                let wide = uextend_const(self.builder, types::I128, low);
                 let v = self
                     .builder
                     .ins()

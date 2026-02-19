@@ -18,6 +18,7 @@ use crate::union_layout;
 
 use super::super::RuntimeKey;
 use super::super::context::{Cg, deref_expr_ptr};
+use crate::ops::sextend_const;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
@@ -230,7 +231,7 @@ impl Cg<'_, '_, '_> {
                     args[i] = if expected_ty.bits() < actual_ty.bits() {
                         self.builder.ins().ireduce(expected_ty, args[i])
                     } else {
-                        self.builder.ins().sextend(expected_ty, args[i])
+                        sextend_const(self.builder, expected_ty, args[i])
                     };
                 }
             }

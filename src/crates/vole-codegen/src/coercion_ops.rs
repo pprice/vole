@@ -19,6 +19,7 @@ use crate::union_layout;
 
 use super::context::{Cg, deref_expr_ptr};
 use super::types::CompiledValue;
+use crate::ops::{sextend_const, uextend_const};
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Cranelift IR value coercion ==========
@@ -39,7 +40,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         if actual_ty.is_int() && expected_ty.is_int() {
             if expected_ty.bytes() > actual_ty.bytes() {
-                self.builder.ins().sextend(expected_ty, value)
+                sextend_const(self.builder, expected_ty, value)
             } else {
                 self.builder.ins().ireduce(expected_ty, value)
             }
@@ -236,9 +237,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         value.value
                     } else if ty.bytes() < 8 {
                         if source_is_unsigned {
-                            self.builder.ins().uextend(types::I64, value.value)
+                            uextend_const(self.builder, types::I64, value.value)
                         } else {
-                            self.builder.ins().sextend(types::I64, value.value)
+                            sextend_const(self.builder, types::I64, value.value)
                         }
                     } else {
                         self.builder.ins().ireduce(types::I64, value.value)
@@ -269,7 +270,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         self.builder.ins().ireduce(ty, i64_val)
                     } else {
                         // i128 path is handled above; keep for defensive completeness.
-                        self.builder.ins().sextend(ty, i64_val)
+                        sextend_const(self.builder, ty, i64_val)
                     }
                 }
                 _ => value.value,
@@ -277,9 +278,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else if target_ty.is_int() && value.ty.is_int() {
             if target_ty.bytes() > value.ty.bytes() {
                 if source_is_unsigned {
-                    self.builder.ins().uextend(target_ty, value.value)
+                    uextend_const(self.builder, target_ty, value.value)
                 } else {
-                    self.builder.ins().sextend(target_ty, value.value)
+                    sextend_const(self.builder, target_ty, value.value)
                 }
             } else {
                 self.builder.ins().ireduce(target_ty, value.value)
@@ -354,13 +355,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
-            self.builder.ins().uextend(types::I64, i32_val)
+            uextend_const(self.builder, types::I64, i32_val)
         } else if value.ty.is_int() && value.ty.bytes() < 8 {
             // Extend smaller integers to i64
             if self.arena().is_unsigned(value.type_id) {
-                self.builder.ins().uextend(types::I64, value.value)
+                uextend_const(self.builder, types::I64, value.value)
             } else {
-                self.builder.ins().sextend(types::I64, value.value)
+                sextend_const(self.builder, types::I64, value.value)
             }
         } else {
             value.value
@@ -445,7 +446,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     let new_value = if expected_ty.bits() < compiled.ty.bits() {
                         self.builder.ins().ireduce(expected_ty, compiled.value)
                     } else {
-                        self.builder.ins().sextend(expected_ty, compiled.value)
+                        sextend_const(self.builder, expected_ty, compiled.value)
                     };
                     CompiledValue::new(new_value, expected_ty, param_type_id)
                 } else {

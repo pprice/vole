@@ -10,6 +10,7 @@ use vole_sema::type_arena::TypeId;
 use super::signed_min_max;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
+use crate::ops::{sextend_const, uextend_const};
 use crate::types::CompiledValue;
 use crate::union_layout;
 
@@ -247,9 +248,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Need to extend smaller types to i64 for storage
         let value_to_store = if ty.bytes() < 8 {
             if value_type_id.is_signed_int() {
-                self.builder.ins().sextend(types::I64, result)
+                sextend_const(self.builder, types::I64, result)
             } else {
-                self.builder.ins().uextend(types::I64, result)
+                uextend_const(self.builder, types::I64, result)
             }
         } else {
             result
