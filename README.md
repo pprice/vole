@@ -9,23 +9,39 @@ Vole is a statically typed, JIT-compiled language built on [Cranelift](https://c
 ## Quick look
 
 ```vole
-class Person {
-    name: string,
-    age: i64,
+interface Scorable {
+    func score() -> i64
+    func label() -> string
+}
 
-    func greet() -> string {
-        return "Hi, I'm {self.name}!"
-    }
+class Player {
+    name: string,
+    wins: i64,
+    losses: i64,
+}
+
+implement Scorable for Player {
+    func score() -> i64    { return self.wins * 3 - self.losses }
+    func label() -> string { return "{self.name}: {self.score()} pts" }
+}
+
+// Works with any type that implements Scorable
+func leaderboard<T: Scorable>(players: [T]) -> [string] {
+    return players.iter()
+        .filter((p) => p.score() > 0)
+        .map((p) => p.label())
+        .collect()
 }
 
 func main() {
-    let people = [
-        Person { name: "Alice", age: 30 },
-        Person { name: "Bob", age: 25 },
+    let squad = [
+        Player { name: "Alice", wins: 10, losses: 2 },
+        Player { name: "Bob",   wins: 4,  losses: 8 },
+        Player { name: "Carol", wins: 7,  losses: 1 },
     ]
 
-    for greeting in people.iter().map((p) => p.greet()) {
-        println(greeting)
+    for line in leaderboard(squad).iter() {
+        println(line)
     }
 }
 ```

@@ -61,63 +61,11 @@ Suffix type must match the literal kind: integer suffixes (`_u8`, `_i32`, etc.) 
 
 ### Integer Types
 
-Signed integers store positive and negative values:
-
-| Type | Range |
-|------|-------|
-| `i8` | -128 to 127 |
-| `i16` | -32,768 to 32,767 |
-| `i32` | -2,147,483,648 to 2,147,483,647 |
-| `i64` | -9,223,372,036,854,775,808 to 9,223,372,036,854,775,807 |
-| `i128` | -170,141,183,460,469,231,731,687,303,715,884,105,728 to 170,141,183,460,469,231,731,687,303,715,884,105,727 |
-
-Unsigned integers store only non-negative values:
-
-| Type | Range |
-|------|-------|
-| `u8` | 0 to 255 |
-| `u16` | 0 to 65,535 |
-| `u32` | 0 to 4,294,967,295 |
-| `u64` | 0 to 18,446,744,073,709,551,615 |
-
-```vole
-let small: i8 = 127
-let byte: u8 = 255
-let count: i32 = 1_000_000
-let big: i64 = 9_223_372_036_854_775_807
-let mask: u8 = 0xFF
-let bits: u8 = 0b1010_0101
-```
-
-Integer literals default to `i64`:
-
-```vole
-let x = 42          // x is i64
-let y: i64 = 42     // explicit i64
-let z = 42_u8       // u8 via suffix
-```
+Vole has signed (`i8`, `i16`, `i32`, `i64`, `i128`) and unsigned (`u8`, `u16`, `u32`, `u64`) integers. Integer literals default to `i64`. See [Primitives](primitives.md) for ranges, overflow behavior, and arithmetic methods.
 
 ### Floating Point Types
 
-| Type | Precision |
-|------|-----------|
-| `f32` | Single precision (32-bit) |
-| `f64` | Double precision (64-bit) |
-
-```vole
-let pi: f64 = 3.14159265358979
-let approx: f32 = 3.14
-let sci = 1.5e-3   // 0.0015, scientific notation
-```
-
-Float literals default to `f64`:
-
-```vole
-let x = 3.14        // x is f64
-let y: f32 = 3.14   // explicit f32
-let z = 3.14_f32    // f32 via suffix
-let w = 2.5e6_f64   // f64, scientific with suffix
-```
+`f32` (32-bit) and `f64` (64-bit) follow IEEE 754. Float literals default to `f64`. See [Primitives](primitives.md) for constants, NaN semantics, and division behavior.
 
 ### Booleans
 
@@ -126,54 +74,20 @@ let yes = true
 let no = false
 ```
 
-Used in conditionals and logical expressions. See [Operators](operators.md) for logical operators.
+Used in conditionals and logical expressions. See [Operators](operators.md) for logical operators and [Primitives](primitives.md) for bool traits.
 
 ### Strings
 
-Strings are UTF-8 encoded, reference-counted, immutable sequences of characters:
+Strings are UTF-8 encoded, reference-counted, and immutable. They support `{expression}` interpolation and `@"..."` raw string syntax:
 
 ```vole
 let greeting = "Hello, World!"
-let empty = ""
+let name = "Alice"
+let msg = "Hello, {name}!"
+let path = @"C:\Users\Alice"
 ```
 
-String methods use parentheses:
-
-```vole
-tests {
-    test "string methods" {
-        let s = "hello"
-        assert(s.length() == 5)
-
-        let combined = "Hello" + " " + "World"
-        assert(combined == "Hello World")
-    }
-}
-```
-
-String interpolation embeds expressions in strings using `{expression}`:
-
-```vole
-tests {
-    test "string interpolation" {
-        let name = "Alice"
-        let age = 30
-        let msg = "Name: {name}, Age: {age}"
-        assert(msg == "Name: Alice, Age: 30")
-    }
-}
-```
-
-Raw strings (prefixed with `@`) preserve backslashes and disable interpolation:
-
-```vole
-tests {
-    test "raw strings" {
-        let path = @"C:\Users\Alice"
-        assert(path.length() == 14)
-    }
-}
-```
+See [Primitives](primitives.md) for string methods, escape sequences, and concatenation rules.
 
 ### Nil
 

@@ -1,6 +1,6 @@
 # Primitive Types
 
-This document covers Vole's primitive types: their behavior, operations, and available methods.
+Detailed reference for Vole's primitive types: behavior, operations, and available methods. For the full type system including composite types (arrays, optionals, unions, and more), see [Types](types.md).
 
 ## Overview
 

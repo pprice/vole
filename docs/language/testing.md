@@ -16,7 +16,7 @@ Vole has built-in testing support with `test` blocks and assertions.
 
 **Running tests:**
 ```bash
-vole test test/unit
+vole test path/to/tests
 ```
 
 ## In Depth
@@ -174,13 +174,13 @@ Run tests with the `test` command:
 
 ```bash
 # Run all tests in a directory
-vole test test/unit
+vole test path/to/tests/
 
 # Run tests in a specific file
-vole test test/unit/math.vole
+vole test path/to/tests/math.vole
 
 # Run tests matching a pattern
-vole test test/unit/*.vole
+vole test path/to/tests/*.vole
 ```
 
 ### Test File Structure
@@ -349,26 +349,6 @@ tests "Iterator operations" {
         assert(sum == 15)
     }
 }
-```
-
-### Test Organization
-
-Recommended directory structure:
-
-```
-test/
-└── unit/           # Unit tests using assert()
-    ├── classes/    # Class and struct tests
-    ├── closures/   # Closure tests
-    ├── control_flow/ # Control flow tests
-    ├── functions/  # Function tests
-    ├── generics/   # Generic type tests
-    ├── imports/    # Import system tests
-    ├── interfaces/ # Interface tests
-    ├── iterators/  # Iterator tests
-    ├── modules/    # Module tests
-    ├── types/      # Type system tests
-    └── ...
 ```
 
 ### Best Practices
