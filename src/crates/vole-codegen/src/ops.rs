@@ -9,8 +9,8 @@ use cranelift_codegen::ir::{Function, InstructionData};
 use crate::RuntimeKey;
 use vole_frontend::{BinaryExpr, BinaryOp, ExprKind};
 use vole_sema::implement_registry::ImplTypeId;
+use vole_sema::numeric_model::numeric_result_type;
 use vole_sema::type_arena::TypeId;
-use vole_sema::type_utils::numeric_result_type;
 
 use super::context::Cg;
 use super::types::{CompiledValue, convert_to_type};
@@ -588,7 +588,7 @@ impl Cg<'_, '_, '_> {
         let left_is_string = left_type_id == TypeId::STRING;
 
         // Determine result type using type promotion rules.
-        // For numeric types, delegate to the canonical sema type_utils function.
+        // For numeric types, delegate to the canonical sema numeric_model function.
         // For non-numeric types (like strings), use left's type directly.
         let (result_type_id, result_ty) = if left_type_id.is_numeric() && right.type_id.is_numeric()
         {

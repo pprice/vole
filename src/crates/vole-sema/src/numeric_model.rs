@@ -1,6 +1,6 @@
-// type_utils.rs
+// numeric_model.rs
 //
-// Free functions for type promotion rules, shared between sema and codegen.
+// Numeric type promotion rules and related utilities, shared between sema and codegen.
 
 use crate::type_arena::TypeId;
 

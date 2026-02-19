@@ -535,14 +535,14 @@ impl Analyzer {
     }
 
     /// Get the result type for numeric operations (wider type wins).
-    /// Delegates to the free function in type_utils.
+    /// Delegates to the free function in numeric_model.
     pub(crate) fn numeric_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
-        crate::type_utils::numeric_result_type(left, right)
+        crate::numeric_model::numeric_result_type(left, right)
     }
 
     /// Get the result type for integer operations (wider type wins).
-    /// Delegates to the free function in type_utils.
+    /// Delegates to the free function in numeric_model.
     pub(crate) fn integer_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
-        crate::type_utils::integer_result_type(left, right)
+        crate::numeric_model::integer_result_type(left, right)
     }
 }
