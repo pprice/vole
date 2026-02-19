@@ -937,30 +937,7 @@ impl Cg<'_, '_, '_> {
         let mut result = self.iconst_cached(types::I8, 1);
 
         for (offset, slot_type) in field_slots {
-            let eq = if slot_type.is_float() {
-                let left_slot =
-                    self.builder
-                        .ins()
-                        .load(slot_type, MemFlags::new(), left.value, offset);
-                let right_slot =
-                    self.builder
-                        .ins()
-                        .load(slot_type, MemFlags::new(), right.value, offset);
-                self.builder
-                    .ins()
-                    .fcmp(FloatCC::Equal, left_slot, right_slot)
-            } else {
-                // Use slot_type directly so wide integers (i128) load 16 bytes
-                let left_slot =
-                    self.builder
-                        .ins()
-                        .load(slot_type, MemFlags::new(), left.value, offset);
-                let right_slot =
-                    self.builder
-                        .ins()
-                        .load(slot_type, MemFlags::new(), right.value, offset);
-                self.builder.ins().icmp(IntCC::Equal, left_slot, right_slot)
-            };
+            let eq = self.struct_slot_eq(left.value, right.value, offset, slot_type)?;
             result = self.builder.ins().band(result, eq);
         }
 
@@ -971,6 +948,87 @@ impl Cg<'_, '_, '_> {
         }
 
         Ok(self.bool_value(result))
+    }
+
+    /// Compare one flat struct slot for equality, returning an I8 bool (1 = equal).
+    ///
+    /// Dispatches on `slot_type` (the Cranelift type from `leaf_cranelift_type`):
+    /// - F32: stored as zero-extended I64; load I64, ireduce to I32, bitcast to F32, fcmp
+    /// - F64: stored directly as F64 (8 bytes); load F64, fcmp
+    /// - F128: stored as two I64 halves (16 bytes); load I128, call_f128_cmp (no native fcmp)
+    /// - I64/I128/other: load with slot_type, icmp
+    fn struct_slot_eq(
+        &mut self,
+        left_ptr: Value,
+        right_ptr: Value,
+        offset: i32,
+        slot_type: Type,
+    ) -> CodegenResult<Value> {
+        if slot_type == types::F32 {
+            // F32 fields are stored as zero-extended I64 (8 bytes).
+            // Loading as F32 (4 bytes) would be a type-size mismatch.
+            let left_i64 = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), left_ptr, offset);
+            let right_i64 = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), right_ptr, offset);
+            let left_i32 = self.builder.ins().ireduce(types::I32, left_i64);
+            let right_i32 = self.builder.ins().ireduce(types::I32, right_i64);
+            let left_f32 = self
+                .builder
+                .ins()
+                .bitcast(types::F32, MemFlags::new(), left_i32);
+            let right_f32 = self
+                .builder
+                .ins()
+                .bitcast(types::F32, MemFlags::new(), right_i32);
+            Ok(self.builder.ins().fcmp(FloatCC::Equal, left_f32, right_f32))
+        } else if slot_type == types::F128 {
+            // F128 fields occupy 16 bytes. Cranelift has no native fcmp for F128;
+            // use the runtime call instead (same as compare_optional_payload_eq).
+            let left_i128 = self
+                .builder
+                .ins()
+                .load(types::I128, MemFlags::new(), left_ptr, offset);
+            let right_i128 =
+                self.builder
+                    .ins()
+                    .load(types::I128, MemFlags::new(), right_ptr, offset);
+            let left_f128 = self
+                .builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), left_i128);
+            let right_f128 = self
+                .builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), right_i128);
+            self.call_f128_cmp(RuntimeKey::F128Eq, left_f128, right_f128)
+        } else if slot_type == types::F64 {
+            let left_f64 = self
+                .builder
+                .ins()
+                .load(types::F64, MemFlags::new(), left_ptr, offset);
+            let right_f64 = self
+                .builder
+                .ins()
+                .load(types::F64, MemFlags::new(), right_ptr, offset);
+            Ok(self.builder.ins().fcmp(FloatCC::Equal, left_f64, right_f64))
+        } else {
+            // Integer types (I64, I128) and everything else: load and compare by value.
+            // I128 loads 16 bytes (wide), all others load 8 bytes.
+            let left_slot = self
+                .builder
+                .ins()
+                .load(slot_type, MemFlags::new(), left_ptr, offset);
+            let right_slot = self
+                .builder
+                .ins()
+                .load(slot_type, MemFlags::new(), right_ptr, offset);
+            Ok(self.builder.ins().icmp(IntCC::Equal, left_slot, right_slot))
+        }
     }
 
     /// Compare an optional value with nil

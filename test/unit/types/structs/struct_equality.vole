@@ -6,6 +6,10 @@ struct Point { x: i64, y: i64 }
 struct Single { value: i64 }
 struct FPoint { x: f64, y: f64 }
 struct Mixed { n: i64, v: f64 }
+struct F32Point { x: f32, y: f32 }
+struct MixedF32 { n: i64, v: f32 }
+struct F128Point { x: f128, y: f128 }
+struct MixedF128 { n: i64, v: f128 }
 
 tests {
     test "equal structs" {
@@ -81,5 +85,70 @@ tests {
         let a = Mixed { n: 1, v: nan }
         let b = Mixed { n: 1, v: nan }
         assert(!(a == b))
+    }
+
+    // ===== f32 field equality =====
+    // F32 fields are stored as zero-extended I64 (8 bytes). The equality
+    // codegen must load as I64, ireduce to I32, bitcast to F32, then fcmp.
+
+    test "f32 fields equal" {
+        let a = F32Point { x: 1.5_f32, y: 2.5_f32 }
+        let b = F32Point { x: 1.5_f32, y: 2.5_f32 }
+        assert(a == b)
+    }
+
+    test "f32 fields not equal" {
+        let a = F32Point { x: 1.5_f32, y: 2.5_f32 }
+        let b = F32Point { x: 1.5_f32, y: 3.5_f32 }
+        assert(a != b)
+    }
+
+    test "f32 NaN field not equal to itself" {
+        // IEEE 754: NaN != NaN — a bitwise I64 comparison would give wrong result
+        let nan: f32 = f32.nan()
+        let a = F32Point { x: nan, y: 0.0_f32 }
+        let b = F32Point { x: nan, y: 0.0_f32 }
+        assert(!(a == b))
+        assert(a != b)
+    }
+
+    test "mixed i64 and f32 fields equal" {
+        let a = MixedF32 { n: 42, v: 3.0_f32 }
+        let b = MixedF32 { n: 42, v: 3.0_f32 }
+        assert(a == b)
+    }
+
+    test "mixed i64 and f32 fields not equal when f32 differs" {
+        let a = MixedF32 { n: 42, v: 3.0_f32 }
+        let b = MixedF32 { n: 42, v: 2.0_f32 }
+        assert(a != b)
+    }
+
+    // ===== f128 field equality =====
+    // Cranelift has no native fcmp for F128; equality must use the
+    // call_f128_cmp(RuntimeKey::F128Eq, ...) runtime call.
+
+    test "f128 fields equal" {
+        let a = F128Point { x: 1.5_f128, y: 2.5_f128 }
+        let b = F128Point { x: 1.5_f128, y: 2.5_f128 }
+        assert(a == b)
+    }
+
+    test "f128 fields not equal" {
+        let a = F128Point { x: 1.5_f128, y: 2.5_f128 }
+        let b = F128Point { x: 1.5_f128, y: 3.5_f128 }
+        assert(a != b)
+    }
+
+    test "mixed i64 and f128 fields equal" {
+        let a = MixedF128 { n: 42, v: 3.0_f128 }
+        let b = MixedF128 { n: 42, v: 3.0_f128 }
+        assert(a == b)
+    }
+
+    test "mixed i64 and f128 fields not equal when f128 differs" {
+        let a = MixedF128 { n: 42, v: 3.0_f128 }
+        let b = MixedF128 { n: 42, v: 2.0_f128 }
+        assert(a != b)
     }
 }
