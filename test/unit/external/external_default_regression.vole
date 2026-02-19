@@ -1,0 +1,34 @@
+// Regression test: external call path with omitted default arguments.
+//
+// This exercises the compile_external_call_args path in codegen, which
+// previously used raw *const Expr pointers to resolve default expressions.
+// After vol-4a9y, it uses typed &'ctx Expr references via function_default_expr.
+
+external("std:string") {
+    func "str_substring" as substr_reg(s: string, start: i32 = 0, end: i32 = -1) -> string
+}
+
+tests "external default args regression (vol-4a9y)" {
+    test "all args explicit - no defaults compiled" {
+        let result = substr_reg("abcde", 1, 3)
+        assert(result == "bc")
+    }
+
+    test "last arg omitted - one default compiled" {
+        let result = substr_reg("abcde", 2)
+        assert(result == "cde")
+    }
+
+    test "both defaults omitted - both defaults compiled" {
+        let result = substr_reg("abcde")
+        assert(result == "abcde")
+    }
+
+    test "default integer expression is correctly evaluated" {
+        // start defaults to 0, which is a literal i32 expression.
+        // Verifies the default expression is compiled without crashes.
+        let a = substr_reg("xyz")
+        let b = substr_reg("xyz", 0)
+        assert(a == b)
+    }
+}

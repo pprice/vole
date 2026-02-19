@@ -1585,8 +1585,6 @@ impl Cg<'_, '_, '_> {
 
     /// Compile default expressions for omitted method parameters.
     /// Returns compiled values for parameters starting at `start_index`.
-    ///
-    /// Uses the unified `compile_defaults_from_ptrs` helper.
     pub(super) fn compile_method_default_args(
         &mut self,
         method_id: MethodId,
@@ -1594,22 +1592,6 @@ impl Cg<'_, '_, '_> {
         expected_types: &[TypeId],
         is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        // Get raw pointers to default expressions from MethodDef.
-        let default_ptrs: Vec<Option<*const Expr>> = {
-            let method_def = self.registry().get_method(method_id);
-            method_def
-                .param_defaults
-                .iter()
-                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
-                .collect()
-        };
-
-        // Use the unified helper
-        self.compile_defaults_from_ptrs(
-            &default_ptrs,
-            start_index,
-            expected_types,
-            is_generic_class,
-        )
+        self.compile_method_defaults(method_id, start_index, expected_types, is_generic_class)
     }
 }

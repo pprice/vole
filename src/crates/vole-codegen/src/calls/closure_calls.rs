@@ -8,8 +8,8 @@ use cranelift_codegen::ir::SigRef;
 use cranelift_module::Module;
 use smallvec::{SmallVec, smallvec};
 
+use vole_frontend::NodeId;
 use vole_frontend::ast::CallExpr;
-use vole_frontend::{Expr, NodeId};
 use vole_sema::type_arena::TypeId;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -17,13 +17,13 @@ use crate::types::{CompiledValue, is_wide_fallible, type_id_to_cranelift};
 use crate::union_layout;
 
 use super::super::RuntimeKey;
-use super::super::context::{Cg, deref_expr_ptr};
+use super::super::context::Cg;
 use crate::ops::sextend_const;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
 
-impl Cg<'_, '_, '_> {
+impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call a function via variable (dispatches to closure or pure function call)
     pub(super) fn call_closure(
         &mut self,
@@ -136,41 +136,34 @@ impl Cg<'_, '_, '_> {
         if let Some(defaults_info) = lambda_defaults
             && call.args.len() < params.len()
         {
-            // Find the lambda expression by NodeId to get its default expressions
-            // Use raw pointers to avoid borrow conflicts (the data lives in Program AST
-            // which is owned by AnalyzedProgram and outlives this compilation session)
+            // Find the lambda expression by NodeId to get its default expressions.
+            // analyzed() returns &'ctx AnalyzedProgram, so the returned &'ctx LambdaExpr
+            // and its &'ctx Expr defaults are independent of &mut self.
             let lambda_node_id = defaults_info.lambda_node_id;
-            let Some(lambda) = self.find_lambda_by_node_id(lambda_node_id) else {
+            let analyzed = self.analyzed();
+            let Some(lambda) =
+                super::lambda_search::find_lambda_in_analyzed(analyzed, lambda_node_id)
+            else {
                 return Err(CodegenError::internal_with_context(
                     "lambda expression not found",
                     format!("NodeId {:?}", lambda_node_id),
                 ));
             };
-            // Get raw pointers to the default expressions for params we need
-            let default_ptrs: Vec<Option<*const Expr>> = lambda
+
+            // Collect &'ctx Expr references for the omitted params before &mut self borrows.
+            let skip = call.args.len();
+            let omitted_type_ids: Vec<TypeId> = params[skip..].to_vec();
+            let default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = lambda
                 .params
                 .iter()
-                .skip(call.args.len())
-                .map(|p| p.default_value.as_ref().map(|e| e.as_ref() as *const Expr))
+                .skip(skip)
+                .map(|p| p.default_value.as_deref())
                 .collect();
 
-            // Compile defaults for missing params (starting from call.args.len())
-            for (default_ptr_opt, &param_type_id) in
-                default_ptrs.iter().zip(params.iter().skip(call.args.len()))
-            {
-                let Some(default_ptr) = default_ptr_opt else {
-                    return Err(CodegenError::internal(
-                        "missing default expression for parameter in lambda call",
-                    ));
-                };
-                let default_expr = deref_expr_ptr(self.analyzed(), *default_ptr);
-                let compiled = self.expr_with_expected_type(default_expr, param_type_id)?;
-                if compiled.is_owned() {
-                    rc_temp_args.push(compiled);
-                }
-                let compiled = self.coerce_to_type(compiled, param_type_id)?;
-                args.push(compiled.value);
-            }
+            let (default_vals, rc_owned) =
+                self.compile_lambda_defaults(&default_refs, &omitted_type_ids)?;
+            rc_temp_args.extend(rc_owned);
+            args.extend(default_vals);
         }
 
         let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);

@@ -19,18 +19,18 @@ use cranelift_module::Module;
 use crate::errors::{CodegenError, CodegenResult};
 
 use vole_frontend::ast::CallExpr;
-use vole_frontend::{Expr, ExprKind, NodeId, Symbol};
+use vole_frontend::{ExprKind, NodeId, Symbol};
 use vole_identity::NameId;
 use vole_sema::type_arena::TypeId;
 
-use super::context::{Cg, deref_expr_ptr};
+use super::context::Cg;
 use super::types::CompiledValue;
 use super::{FunctionKey, RuntimeKey};
 use crate::ops::sextend_const;
 
 use cranelift_module::FuncId;
 
-impl Cg<'_, '_, '_> {
+impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Compile a function call
     #[tracing::instrument(skip(self, call))]
     pub fn call(
@@ -507,29 +507,15 @@ impl Cg<'_, '_, '_> {
             return Ok((Vec::new(), Vec::new()));
         };
 
-        let (default_ptrs, param_type_ids): (Vec<Option<*const Expr>>, Vec<TypeId>) = {
+        // Determine which type IDs to use for the omitted parameters.
+        let param_type_ids: Vec<TypeId> = if param_type_ids_override.is_empty() {
             let func_def = self.registry().get_function(func_id);
-            let ptrs = func_def
-                .param_defaults
-                .iter()
-                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
-                .collect();
-            let type_ids = func_def.signature.params_id.iter().copied().collect();
-            (ptrs, type_ids)
-        };
-
-        let param_type_ids = if param_type_ids_override.is_empty() {
-            param_type_ids
+            func_def.signature.params_id.iter().copied().collect()
         } else {
             param_type_ids_override.to_vec()
         };
 
-        self.compile_defaults_from_ptrs(
-            &default_ptrs,
-            start_index,
-            &param_type_ids[start_index..],
-            false,
-        )
+        self.compile_function_defaults(func_id, start_index, &param_type_ids[start_index..])
     }
 
     /// Compile call arguments for an external function, including defaults for omitted parameters.
@@ -546,16 +532,16 @@ impl Cg<'_, '_, '_> {
 
         let expected_param_count = expected_types.len();
 
-        // If we have all expected arguments, we're done
+        // If we have all expected arguments, we're done (fast path)
         if args.len() >= expected_param_count {
             return Ok(args);
         }
 
-        // Otherwise, we need to compile defaults for the missing parameters
+        // Otherwise, compile defaults for the missing parameters.
         let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
 
-        // Get the function ID from EntityRegistry.
-        // Use self.interner() to resolve module-local Symbols correctly (see call_func_id).
+        // Look up the function by symbol. Use self.interner() to resolve module-local
+        // symbols correctly (avoids index-out-of-bounds on module interners).
         let func_id = {
             let name_id = self
                 .name_table()
@@ -567,50 +553,45 @@ impl Cg<'_, '_, '_> {
             return Ok(args);
         };
 
-        // Get raw pointers to default expressions.
-        // These point to data in EntityRegistry which lives for the duration of AnalyzedProgram.
-        // We use raw pointers to work around the borrow checker since self.expr() needs &mut self.
-        let default_ptrs: Vec<Option<*const Expr>> = {
-            let func_def = self.registry().get_function(func_id);
-            func_def
-                .param_defaults
-                .iter()
-                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
+        // Collect &'ctx Expr references for the missing parameters before taking &mut self.
+        // registry() returns &'ctx EntityRegistry, so these refs are valid for compilation.
+        let start_index = args.len();
+        let default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = {
+            let registry = self.registry();
+            (start_index..expected_param_count)
+                .map(|idx| registry.function_default_expr(func_id, idx))
                 .collect()
         };
 
-        // Compile defaults for missing parameters
-        let start_index = args.len();
-        for (param_idx, &expected_ty) in expected_types
+        // Compile each default and apply Cranelift type coercion to match the signature.
+        for (default_ref, &expected_ty) in default_refs
             .iter()
-            .enumerate()
-            .skip(start_index)
-            .take(expected_param_count - start_index)
+            .zip(expected_types[start_index..].iter())
         {
-            if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
-                let default_expr = deref_expr_ptr(self.analyzed(), *default_ptr);
-                let compiled = self.expr(default_expr)?;
+            let Some(default_expr) = default_ref else {
+                continue;
+            };
+            let compiled = self.expr(default_expr)?;
 
-                // Narrow/extend integer types or promote/demote floats if needed
-                let arg_value = if compiled.ty.is_int()
-                    && expected_ty.is_int()
-                    && expected_ty.bits() < compiled.ty.bits()
-                {
-                    self.builder.ins().ireduce(expected_ty, compiled.value)
-                } else if compiled.ty.is_int()
-                    && expected_ty.is_int()
-                    && expected_ty.bits() > compiled.ty.bits()
-                {
-                    sextend_const(self.builder, expected_ty, compiled.value)
-                } else if compiled.ty == types::F32 && expected_ty == types::F64 {
-                    self.builder.ins().fpromote(types::F64, compiled.value)
-                } else if compiled.ty == types::F64 && expected_ty == types::F32 {
-                    self.builder.ins().fdemote(types::F32, compiled.value)
-                } else {
-                    compiled.value
-                };
-                args.push(arg_value);
-            }
+            // Narrow/extend integer types or promote/demote floats if needed
+            let arg_value = if compiled.ty.is_int()
+                && expected_ty.is_int()
+                && expected_ty.bits() < compiled.ty.bits()
+            {
+                self.builder.ins().ireduce(expected_ty, compiled.value)
+            } else if compiled.ty.is_int()
+                && expected_ty.is_int()
+                && expected_ty.bits() > compiled.ty.bits()
+            {
+                sextend_const(self.builder, expected_ty, compiled.value)
+            } else if compiled.ty == types::F32 && expected_ty == types::F64 {
+                self.builder.ins().fpromote(types::F64, compiled.value)
+            } else if compiled.ty == types::F64 && expected_ty == types::F32 {
+                self.builder.ins().fdemote(types::F32, compiled.value)
+            } else {
+                compiled.value
+            };
+            args.push(arg_value);
         }
 
         Ok(args)

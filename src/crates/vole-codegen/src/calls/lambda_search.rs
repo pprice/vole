@@ -4,13 +4,16 @@
 
 use vole_frontend::{Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt};
 
-use super::super::context::Cg;
-
-impl Cg<'_, '_, '_> {
-    /// Find a lambda expression by NodeId in the program.
-    pub(super) fn find_lambda_by_node_id(&self, node_id: NodeId) -> Option<&LambdaExpr> {
-        find_lambda_in_program(&self.analyzed().program, node_id)
-    }
+/// Find a lambda expression by NodeId in an `AnalyzedProgram`.
+///
+/// Searches the main program's AST. Returns a reference with the same
+/// lifetime as the `AnalyzedProgram`, so the caller may hold it while
+/// taking a separate `&mut Cg` borrow.
+pub(crate) fn find_lambda_in_analyzed(
+    analyzed: &crate::AnalyzedProgram,
+    node_id: NodeId,
+) -> Option<&LambdaExpr> {
+    find_lambda_in_program(&analyzed.program, node_id)
 }
 
 /// Find a lambda expression by NodeId in a program.

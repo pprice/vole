@@ -160,4 +160,38 @@ impl EntityRegistry {
     pub fn field_type(&self, id: FieldId) -> ArenaTypeId {
         self.get_field(id).ty
     }
+
+    // ===== Default expression accessors =====
+
+    /// Get the default expression for a function parameter by index.
+    ///
+    /// Returns `Some(&Expr)` if the parameter at `param_idx` has a default,
+    /// or `None` if it is required or the index is out of range.
+    #[inline]
+    pub fn function_default_expr(
+        &self,
+        func_id: vole_identity::FunctionId,
+        param_idx: usize,
+    ) -> Option<&vole_frontend::Expr> {
+        self.get_function(func_id)
+            .param_defaults
+            .get(param_idx)
+            .and_then(|opt| opt.as_deref())
+    }
+
+    /// Get the default expression for a method parameter by index.
+    ///
+    /// Returns `Some(&Expr)` if the parameter at `param_idx` has a default,
+    /// or `None` if it is required or the index is out of range.
+    #[inline]
+    pub fn method_default_expr(
+        &self,
+        method_id: MethodId,
+        param_idx: usize,
+    ) -> Option<&vole_frontend::Expr> {
+        self.get_method(method_id)
+            .param_defaults
+            .get(param_idx)
+            .and_then(|opt| opt.as_deref())
+    }
 }

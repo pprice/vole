@@ -6,7 +6,7 @@ use rustc_hash::FxHashMap;
 
 use super::helpers::{convert_to_i64_for_storage, split_i128_for_storage, store_field_value};
 use crate::RuntimeKey;
-use crate::context::{Cg, deref_expr_ptr};
+use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 use crate::union_layout;
@@ -38,7 +38,7 @@ fn format_path(path: &[Symbol], interner: &vole_frontend::Interner) -> String {
         .join(".")
 }
 
-impl Cg<'_, '_, '_> {
+impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn struct_literal(
         &mut self,
         sl: &StructLiteralExpr,
@@ -221,23 +221,20 @@ impl Cg<'_, '_, '_> {
         }
 
         // Handle omitted fields with default values
-        // Look up the original type declaration to get default expressions
-        // We use raw pointers to the original AST to avoid cloning, which would
-        // invalidate string literal pointers during JIT execution.
-        // For qualified paths, we need the type name (last segment) for looking up field declarations
+        // Look up the original type declaration to get default expressions.
+        // For qualified paths, we need the type name (last segment) for looking up field declarations.
         let type_name = sl.path.last().copied();
-        let field_default_ptrs = if let Some(type_name) = type_name {
-            self.collect_field_default_ptrs(type_name, &provided_fields, type_def_id)
+        let field_default_refs = if let Some(type_name) = type_name {
+            self.collect_field_default_refs(type_name, &provided_fields, type_def_id)
         } else {
             Vec::new()
         };
 
-        for (field_name, default_expr_ptr) in field_default_ptrs {
+        for (field_name, default_expr) in field_default_refs {
             let slot = *field_slots.get(&field_name).ok_or_else(|| {
                 CodegenError::not_found("field", format!("{} in {}", field_name, path_str))
             })?;
 
-            let default_expr = deref_expr_ptr(self.analyzed(), default_expr_ptr);
             let field_type_id = field_types.get(&field_name).copied();
 
             // Compile the default expression
@@ -342,51 +339,45 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Collect raw pointers to default expressions for omitted fields in a struct literal.
-    /// Returns Vec of (field_name, raw_pointer_to_expression) pairs for fields that have
-    /// defaults but were not provided in the struct literal.
+    /// Collect borrowed references to default expressions for omitted fields in a struct literal.
     ///
-    /// # Safety
-    /// The returned raw pointers are valid for the lifetime of AnalyzedProgram, which
-    /// owns both the main Program and all module Programs. Since AnalyzedProgram outlives
-    /// all compilation, these pointers remain valid during struct literal compilation.
-    fn collect_field_default_ptrs(
+    /// Returns `Vec<(field_name, &'ctx Expr)>` for fields that have defaults but were not
+    /// provided in the struct literal. The references borrow from `AnalyzedProgram` via the
+    /// `'ctx` lifetime, so they are independent of `&mut self` and safe to use while calling
+    /// expression-compilation methods.
+    fn collect_field_default_refs(
         &self,
         type_name: Symbol,
         provided_fields: &HashSet<String>,
         type_def_id: vole_identity::TypeDefId,
-    ) -> Vec<(String, *const Expr)> {
+    ) -> Vec<(String, &'ctx Expr)> {
         let mut defaults = Vec::new();
 
-        // Get the type definition to find out which module it's in
+        // Get the type definition to find out which module it's in.
         let type_def = self.query().get_type(type_def_id);
         let type_module = type_def.module;
 
-        // Get the program module (the module of the file being compiled).
-        // Types defined in the main program are registered with program_module(),
-        // which may differ from main_module() when using shared caches.
-        let program_module = self.env.analyzed.module_id;
+        // analyzed() returns &'ctx AnalyzedProgram, giving 'ctx-lifetime references
+        // to the AST nodes owned inside it.
+        let analyzed = self.analyzed();
+        let program_module = analyzed.module_id;
 
         if type_module == program_module {
-            // Type is in the main program - search there
-            if let Some(fields) = find_type_fields(&self.analyzed().program, type_name) {
+            // Type is in the main program - search there.
+            if let Some(fields) = find_type_fields(&analyzed.program, type_name) {
                 for field in fields {
                     let field_name = self.interner().resolve(field.name).to_string();
                     if !provided_fields.contains(&field_name)
                         && let Some(default_value) = &field.default_value
                     {
-                        // Store raw pointer to the original expression
-                        defaults.push((field_name, default_value.as_ref() as *const Expr));
+                        defaults.push((field_name, default_value.as_ref()));
                     }
                 }
             }
         } else {
-            // Type is in a module - find the module path and search there
+            // Type is in a module - find the module path and search there.
             let module_path = self.name_table().module_path(type_module).to_string();
-            if let Some((program, module_interner)) =
-                self.analyzed().module_programs.get(&module_path)
-            {
-                // Get the type name in the module's interner
+            if let Some((program, module_interner)) = analyzed.module_programs.get(&module_path) {
                 let type_name_str = self.interner().resolve(type_name);
                 if let Some(module_type_sym) = module_interner.lookup(type_name_str)
                     && let Some(fields) = find_type_fields(program, module_type_sym)
@@ -396,8 +387,7 @@ impl Cg<'_, '_, '_> {
                         if !provided_fields.contains(&field_name)
                             && let Some(default_value) = &field.default_value
                         {
-                            // Store raw pointer to the original expression
-                            defaults.push((field_name, default_value.as_ref() as *const Expr));
+                            defaults.push((field_name, default_value.as_ref()));
                         }
                     }
                 }
@@ -655,20 +645,18 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         let type_name = sl.path.last().copied();
-        let field_default_ptrs = if let Some(type_name) = type_name {
-            self.collect_field_default_ptrs(type_name, &provided_fields, type_def_id)
+        let field_default_refs = if let Some(type_name) = type_name {
+            self.collect_field_default_refs(type_name, &provided_fields, type_def_id)
         } else {
             Vec::new()
         };
 
-        for (field_name, default_expr_ptr) in field_default_ptrs {
+        for (field_name, default_expr) in field_default_refs {
             let field_slot = *field_slots.get(&field_name).ok_or_else(|| {
                 CodegenError::not_found("field", format!("{} in {}", field_name, path_str))
             })?;
 
             let offset = self.struct_field_byte_offset(result_type_id, field_slot);
-
-            let default_expr = deref_expr_ptr(self.analyzed(), default_expr_ptr);
             let value = if let Some(&field_type_id) = field_types.get(&field_name) {
                 self.expr_with_expected_type(default_expr, field_type_id)?
             } else {
