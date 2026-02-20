@@ -1270,7 +1270,10 @@ impl Cg<'_, '_, '_> {
                 return Ok(unreachable_block);
             }
             // Divisor is known non-zero — no check needed, continue in current block.
-            return Ok(self.builder.current_block().unwrap());
+            return self
+                .builder
+                .current_block()
+                .ok_or_else(|| CodegenError::internal("no current block in div-by-zero check"));
         }
 
         let is_zero = self.builder.ins().icmp_imm(IntCC::Equal, divisor, 0);
