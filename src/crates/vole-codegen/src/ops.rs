@@ -930,14 +930,11 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
         op: BinaryOp,
     ) -> CodegenResult<CompiledValue> {
-        let field_slots = crate::structs::struct_flat_field_cranelift_types(
-            left.type_id,
-            self.arena(),
-            self.registry(),
-        )
-        .ok_or_else(|| {
-            CodegenError::type_mismatch("struct_equality", "struct type", "non-struct")
-        })?;
+        let field_slots = self
+            .struct_flat_field_cranelift_types(left.type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch("struct_equality", "struct type", "non-struct")
+            })?;
 
         // Start with true (1) - all fields equal so far
         let mut result = self.iconst_cached(types::I8, 1);

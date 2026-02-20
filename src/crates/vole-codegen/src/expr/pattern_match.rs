@@ -454,17 +454,9 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> CodegenResult<Option<Value>> {
-        use crate::types::tuple_layout_id;
-
         let elem_type_ids = self.arena().unwrap_tuple(scrutinee.type_id).cloned();
         if let Some(elem_type_ids) = elem_type_ids {
-            let ptr_type = self.ptr_type();
-            let offsets = {
-                let arena = self.arena();
-                let (_, offsets) =
-                    tuple_layout_id(&elem_type_ids, ptr_type, self.registry(), arena);
-                offsets
-            };
+            let (_, offsets) = self.tuple_layout(&elem_type_ids);
             let elem_cr_types = self.cranelift_types(&elem_type_ids);
             for (i, pat) in elements.iter().enumerate() {
                 if let PatternKind::Identifier { name } = &pat.kind {

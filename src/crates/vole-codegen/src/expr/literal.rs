@@ -6,7 +6,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::CodegenResult;
-use crate::types::{CompiledValue, array_element_tag_id, field_byte_size, tuple_layout_id};
+use crate::types::{CompiledValue, array_element_tag_id, field_byte_size};
 
 use vole_frontend::ast::RangeExpr;
 use vole_frontend::{Expr, ExprKind};
@@ -132,12 +132,7 @@ impl Cg<'_, '_, '_> {
         tuple_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Calculate layout using TypeId-based function
-        let (total_size, offsets) = tuple_layout_id(
-            elem_type_ids,
-            self.ptr_type(),
-            self.registry(),
-            self.arena(),
-        );
+        let (total_size, offsets) = self.tuple_layout(elem_type_ids);
 
         // Create stack slot for the tuple
         let slot = self.alloc_stack(total_size);

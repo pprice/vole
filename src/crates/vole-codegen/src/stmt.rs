@@ -17,8 +17,7 @@ use super::structs::{
     store_value_to_stack,
 };
 use super::types::{
-    CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, is_wide_fallible, tuple_layout_id,
-    type_id_to_cranelift,
+    CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, is_wide_fallible, type_id_to_cranelift,
 };
 use crate::ops::sextend_const;
 
@@ -753,12 +752,7 @@ impl Cg<'_, '_, '_> {
 
                 // Try tuple first
                 if let Some(elem_type_ids) = arena.unwrap_tuple(ty_id).cloned() {
-                    let (_, offsets) = tuple_layout_id(
-                        &elem_type_ids,
-                        self.ptr_type(),
-                        self.registry(),
-                        self.arena(),
-                    );
+                    let (_, offsets) = self.tuple_layout(&elem_type_ids);
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = offsets[i];
                         let elem_type_id = elem_type_ids[i];

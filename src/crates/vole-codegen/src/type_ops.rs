@@ -90,6 +90,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_id_size(ty, self.ptr_type(), self.registry(), self.arena())
     }
 
+    /// Compute the memory layout for a tuple type.
+    ///
+    /// Returns (total_size_bytes, per_element_byte_offsets).
+    pub fn tuple_layout(&self, elem_type_ids: &[TypeId]) -> (u32, Vec<i32>) {
+        super::types::tuple_layout_id(
+            elem_type_ids,
+            self.ptr_type(),
+            self.registry(),
+            self.arena(),
+        )
+    }
+
     /// Convert a TypeId to an ImplTypeId if the type supports implementation blocks.
     ///
     /// Wrapper around `ImplTypeId::from_type_id` that internalizes the registry/arena

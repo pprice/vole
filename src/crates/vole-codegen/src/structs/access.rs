@@ -22,6 +22,16 @@ impl Cg<'_, '_, '_> {
         super::helpers::struct_total_byte_size(type_id, self.arena(), self.registry())
     }
 
+    /// Return (byte_offset, cranelift_type) pairs for all flat fields of a struct.
+    ///
+    /// Returns None if type_id is not a struct. Used for struct equality comparison.
+    pub(crate) fn struct_flat_field_cranelift_types(
+        &self,
+        type_id: TypeId,
+    ) -> Option<Vec<(i32, Type)>> {
+        super::helpers::struct_flat_field_cranelift_types(type_id, self.arena(), self.registry())
+    }
+
     #[tracing::instrument(skip(self, fa), fields(field = %self.interner().resolve(fa.field)))]
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> CodegenResult<CompiledValue> {
         let obj = self.expr(&fa.object)?;

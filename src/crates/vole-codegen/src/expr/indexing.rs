@@ -51,17 +51,10 @@ impl Cg<'_, '_, '_> {
         index: &Expr,
         elem_type_ids: &[TypeId],
     ) -> CodegenResult<CompiledValue> {
-        use crate::types::tuple_layout_id;
-
         // Tuple indexing - must be constant index (checked in sema)
         if let ExprKind::IntLiteral(i, _) = &index.kind {
             let i = *i as usize;
-            let (_, offsets) = tuple_layout_id(
-                elem_type_ids,
-                self.ptr_type(),
-                self.registry(),
-                self.arena(),
-            );
+            let (_, offsets) = self.tuple_layout(elem_type_ids);
             let offset = offsets[i];
             let elem_type_id = elem_type_ids[i];
             let elem_cr_type = type_id_to_cranelift(elem_type_id, self.arena(), self.ptr_type());
