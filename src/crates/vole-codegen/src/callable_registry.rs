@@ -60,11 +60,8 @@ pub fn resolve_callable_with_preference(
         CallableKey::Intrinsic(intrinsic) => match strategy_for_intrinsic(&intrinsic) {
             CallableStrategy::InlineOnly => Ok(ResolvedCallable::InlineIntrinsic(intrinsic)),
             CallableStrategy::RuntimeOnly => {
-                let runtime = runtime_peer_for_intrinsic(&intrinsic).ok_or_else(|| {
-                    CallableResolutionError::MissingRuntimePeer {
-                        intrinsic: intrinsic.as_str().to_string(),
-                    }
-                })?;
+                let runtime = runtime_peer_for_intrinsic(&intrinsic)
+                    .ok_or(CallableResolutionError::MissingRuntimePeer { intrinsic })?;
                 Ok(ResolvedCallable::Runtime(runtime))
             }
             CallableStrategy::PreferInlineFallbackRuntime => {
@@ -93,17 +90,17 @@ pub enum CallableResolutionError {
         runtime: RuntimeKey,
     },
     MissingRuntimePeer {
-        intrinsic: String,
+        intrinsic: IntrinsicKey,
     },
     MissingIntrinsicSignature {
-        intrinsic: String,
+        intrinsic: IntrinsicKey,
     },
     MissingRuntimeAdapterSignature {
-        intrinsic: String,
+        intrinsic: IntrinsicKey,
         runtime: RuntimeKey,
     },
     SignatureMismatch {
-        intrinsic: String,
+        intrinsic: IntrinsicKey,
     },
 }
 
@@ -114,19 +111,22 @@ impl std::fmt::Display for CallableResolutionError {
                 write!(f, "invalid runtime strategy for `{runtime:?}`")
             }
             Self::MissingRuntimePeer { intrinsic } => {
-                write!(f, "missing runtime peer for intrinsic `{intrinsic}`")
+                write!(f, "missing runtime peer for intrinsic `{intrinsic:?}`")
             }
             Self::MissingIntrinsicSignature { intrinsic } => {
-                write!(f, "missing intrinsic signature contract for `{intrinsic}`")
+                write!(
+                    f,
+                    "missing intrinsic signature contract for `{intrinsic:?}`"
+                )
             }
             Self::MissingRuntimeAdapterSignature { intrinsic, runtime } => {
                 write!(
                     f,
-                    "missing runtime adapter signature contract for `{intrinsic}` -> `{runtime:?}`"
+                    "missing runtime adapter signature contract for `{intrinsic:?}` -> `{runtime:?}`"
                 )
             }
             Self::SignatureMismatch { intrinsic } => {
-                write!(f, "signature mismatch for `{intrinsic}` runtime swap")
+                write!(f, "signature mismatch for `{intrinsic:?}` runtime swap")
             }
         }
     }
@@ -135,34 +135,32 @@ impl std::fmt::Display for CallableResolutionError {
 impl std::error::Error for CallableResolutionError {}
 
 fn strategy_for_intrinsic(intrinsic: &IntrinsicKey) -> CallableStrategy {
-    match intrinsic.as_str() {
+    match intrinsic {
         // Guardrail: only explicitly-vetted callables are dual-backend; NaN/overflow-sensitive
         // numeric intrinsics stay inline-only until behavior conformance exists.
-        "panic" | "array_len" | "string_len" => CallableStrategy::PreferInlineFallbackRuntime,
+        IntrinsicKey::Panic | IntrinsicKey::ArrayLen | IntrinsicKey::StringLen => {
+            CallableStrategy::PreferInlineFallbackRuntime
+        }
         _ => CallableStrategy::InlineOnly,
     }
 }
 
 fn runtime_peer_for_intrinsic(key: &IntrinsicKey) -> Option<RuntimeKey> {
-    match key.as_str() {
-        "panic" => Some(RuntimeKey::Panic),
-        "array_len" => Some(RuntimeKey::ArrayLen),
-        "string_len" => Some(RuntimeKey::StringLen),
+    match key {
+        IntrinsicKey::Panic => Some(RuntimeKey::Panic),
+        IntrinsicKey::ArrayLen => Some(RuntimeKey::ArrayLen),
+        IntrinsicKey::StringLen => Some(RuntimeKey::StringLen),
         _ => None,
     }
 }
 
 fn intrinsic_signature(key: &IntrinsicKey) -> Option<CallableSig> {
-    match key.as_str() {
-        "panic" => Some(CallableSig {
+    match key {
+        IntrinsicKey::Panic => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: None,
         }),
-        "array_len" => Some(CallableSig {
-            params: &[AbiTy::Ptr],
-            ret: Some(AbiTy::I64),
-        }),
-        "string_len" => Some(CallableSig {
+        IntrinsicKey::ArrayLen | IntrinsicKey::StringLen => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: Some(AbiTy::I64),
         }),
@@ -171,17 +169,17 @@ fn intrinsic_signature(key: &IntrinsicKey) -> Option<CallableSig> {
 }
 
 fn runtime_adapter_signature(key: &IntrinsicKey, runtime: RuntimeKey) -> Option<CallableSig> {
-    match (key.as_str(), runtime) {
+    match (key, runtime) {
         // The runtime backend for panic enriches args with source-file metadata.
-        ("panic", RuntimeKey::Panic) => Some(CallableSig {
+        (IntrinsicKey::Panic, RuntimeKey::Panic) => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: None,
         }),
-        ("array_len", RuntimeKey::ArrayLen) => Some(CallableSig {
+        (IntrinsicKey::ArrayLen, RuntimeKey::ArrayLen) => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: Some(AbiTy::I64),
         }),
-        ("string_len", RuntimeKey::StringLen) => Some(CallableSig {
+        (IntrinsicKey::StringLen, RuntimeKey::StringLen) => Some(CallableSig {
             params: &[AbiTy::Ptr],
             ret: Some(AbiTy::I64),
         }),
@@ -193,21 +191,16 @@ fn validate_runtime_swap_contract(
     key: &IntrinsicKey,
     runtime: RuntimeKey,
 ) -> Result<(), CallableResolutionError> {
-    let intrinsic = intrinsic_signature(key).ok_or_else(|| {
-        CallableResolutionError::MissingIntrinsicSignature {
-            intrinsic: key.as_str().to_string(),
-        }
-    })?;
-    let runtime_adapter = runtime_adapter_signature(key, runtime).ok_or_else(|| {
+    let intrinsic_sig = intrinsic_signature(key)
+        .ok_or(CallableResolutionError::MissingIntrinsicSignature { intrinsic: *key })?;
+    let runtime_adapter = runtime_adapter_signature(key, runtime).ok_or(
         CallableResolutionError::MissingRuntimeAdapterSignature {
-            intrinsic: key.as_str().to_string(),
+            intrinsic: *key,
             runtime,
-        }
-    })?;
-    if intrinsic != runtime_adapter {
-        return Err(CallableResolutionError::SignatureMismatch {
-            intrinsic: key.as_str().to_string(),
-        });
+        },
+    )?;
+    if intrinsic_sig != runtime_adapter {
+        return Err(CallableResolutionError::SignatureMismatch { intrinsic: *key });
     }
     Ok(())
 }
@@ -232,25 +225,25 @@ mod tests {
     #[test]
     fn intrinsic_key_resolves_to_inline_backend() {
         let resolved = resolve_callable_with_preference(
-            CallableKey::Intrinsic(IntrinsicKey::from("f64_nan")),
+            CallableKey::Intrinsic(IntrinsicKey::F64Nan),
             CallableBackendPreference::PreferInline,
         )
         .expect("intrinsic callable resolution");
         assert!(matches!(
             resolved,
-            ResolvedCallable::InlineIntrinsic(key) if key.as_str() == "f64_nan"
+            ResolvedCallable::InlineIntrinsic(IntrinsicKey::F64Nan)
         ));
     }
 
     #[test]
     fn panic_intrinsic_can_toggle_to_runtime_backend() {
-        let key = CallableKey::Intrinsic(IntrinsicKey::from("panic"));
+        let key = CallableKey::Intrinsic(IntrinsicKey::Panic);
         let inline =
             resolve_callable_with_preference(key.clone(), CallableBackendPreference::PreferInline)
                 .expect("inline panic callable resolution");
         assert!(matches!(
             inline,
-            ResolvedCallable::InlineIntrinsic(k) if k.as_str() == "panic"
+            ResolvedCallable::InlineIntrinsic(IntrinsicKey::Panic)
         ));
 
         let runtime =
@@ -264,15 +257,15 @@ mod tests {
 
     #[test]
     fn panic_runtime_swap_contract_is_valid() {
-        validate_runtime_swap_contract(&IntrinsicKey::from("panic"), RuntimeKey::Panic)
+        validate_runtime_swap_contract(&IntrinsicKey::Panic, RuntimeKey::Panic)
             .expect("panic swap contract must remain valid");
     }
 
     #[test]
     fn len_intrinsics_can_toggle_to_runtime_backend() {
-        for key in ["array_len", "string_len"] {
+        for key in [IntrinsicKey::ArrayLen, IntrinsicKey::StringLen] {
             let resolved = resolve_callable_with_preference(
-                CallableKey::Intrinsic(IntrinsicKey::from(key)),
+                CallableKey::Intrinsic(key),
                 CallableBackendPreference::PreferRuntime,
             )
             .expect("len callable resolution");

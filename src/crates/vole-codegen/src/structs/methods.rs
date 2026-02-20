@@ -937,7 +937,7 @@ impl Cg<'_, '_, '_> {
             return match method_name {
                 "length" => {
                     let result = self.call_compiler_intrinsic_key_with_line(
-                        crate::IntrinsicKey::from("array_len"),
+                        crate::IntrinsicKey::ArrayLen,
                         &[obj.value],
                         TypeId::I64,
                         0,
@@ -976,7 +976,7 @@ impl Cg<'_, '_, '_> {
             return match method_name {
                 "length" => {
                     let result = self.call_compiler_intrinsic_key_with_line(
-                        crate::IntrinsicKey::from("string_len"),
+                        crate::IntrinsicKey::StringLen,
                         &[obj.value],
                         TypeId::I64,
                         0,

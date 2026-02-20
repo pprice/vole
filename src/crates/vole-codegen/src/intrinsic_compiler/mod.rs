@@ -61,12 +61,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Check if this is a compiler intrinsic
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
-            return self.call_compiler_intrinsic_key_with_line(
-                crate::IntrinsicKey::from(native_name.as_str()),
-                args,
-                return_type_id,
-                0,
-            );
+            let key =
+                crate::IntrinsicKey::try_from_name(native_name.as_str()).ok_or_else(|| {
+                    CodegenError::not_found(
+                        "intrinsic handler",
+                        format!(
+                            "\"{}\" (add handler in codegen/intrinsics.rs)",
+                            native_name.as_str()
+                        ),
+                    )
+                })?;
+            return self.call_compiler_intrinsic_key_with_line(key, args, return_type_id, 0);
         }
 
         // Look up native function for FFI call
@@ -213,24 +218,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         return_type_id: TypeId,
         call_line: u32,
     ) -> CodegenResult<CompiledValue> {
-        use crate::intrinsics::{FloatConstant, IntrinsicHandler, UnaryFloatOp};
+        use crate::intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, UnaryFloatOp};
 
-        let intrinsic_name = intrinsic_key.as_str();
-
-        match intrinsic_name {
-            "task_channel_send" => {
+        match intrinsic_key {
+            IntrinsicKey::TaskChannelSend => {
                 return self.emit_task_channel_send_intrinsic(typed_args);
             }
-            "task_channel_recv" => {
+            IntrinsicKey::TaskChannelRecv => {
                 return self.emit_task_channel_recv_intrinsic(typed_args, return_type_id);
             }
-            "task_channel_try_recv" => {
+            IntrinsicKey::TaskChannelTryRecv => {
                 return self.emit_task_channel_try_recv_intrinsic(typed_args, return_type_id);
             }
-            "task_join" => {
+            IntrinsicKey::TaskJoin => {
                 return self.emit_task_join_intrinsic(typed_args, return_type_id);
             }
-            "task_run" => {
+            IntrinsicKey::TaskRun => {
                 return self.emit_task_run_intrinsic(typed_args);
             }
             _ => {}
@@ -242,12 +245,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .ok_or_else(|| {
                 CodegenError::not_found(
                     "intrinsic handler",
-                    format!(
-                        "\"{}\" (add handler in codegen/intrinsics.rs)",
-                        intrinsic_name
-                    ),
+                    format!("{intrinsic_key:?} (add handler in codegen/intrinsics.rs)"),
                 )
             })?;
+
+        let key_display = format!("{intrinsic_key:?}");
 
         match handler {
             IntrinsicHandler::FloatConstant(fc) => {
@@ -289,7 +291,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             IntrinsicHandler::UnaryFloatOp(op) => {
                 if args.is_empty() {
-                    return Err(CodegenError::arg_count(intrinsic_name, 1, args.len()));
+                    return Err(CodegenError::arg_count(key_display, 1, args.len()));
                 }
                 let arg = args[0];
                 let (value, ty, type_id) = match op {
@@ -347,7 +349,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::BinaryFloatOp(op) => {
                 use crate::intrinsics::BinaryFloatOp;
                 if args.len() < 2 {
-                    return Err(CodegenError::arg_count(intrinsic_name, 2, args.len()));
+                    return Err(CodegenError::arg_count(key_display, 2, args.len()));
                 }
                 let arg1 = args[0];
                 let arg2 = args[1];
@@ -373,14 +375,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             IntrinsicHandler::UnaryIntOp(op) => {
                 if args.is_empty() {
-                    return Err(CodegenError::arg_count(intrinsic_name, 1, args.len()));
+                    return Err(CodegenError::arg_count(key_display, 1, args.len()));
                 }
                 let (value, ty, type_id) = self.compile_unary_int_op(*op, args[0]);
                 Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::BinaryIntOp(op) => {
                 if args.len() < 2 {
-                    return Err(CodegenError::arg_count(intrinsic_name, 2, args.len()));
+                    return Err(CodegenError::arg_count(key_display, 2, args.len()));
                 }
                 let (value, ty, type_id) = self.compile_binary_int_op(*op, args[0], args[1]);
                 Ok(CompiledValue::new(value, ty, type_id))
@@ -388,7 +390,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::UnaryIntWrappingOp(op) => {
                 use crate::intrinsics::UnaryIntWrappingOp;
                 if args.is_empty() {
-                    return Err(CodegenError::arg_count(intrinsic_name, 1, args.len()));
+                    return Err(CodegenError::arg_count(key_display, 1, args.len()));
                 }
                 let arg = args[0];
                 let (value, ty, type_id) = match op {
@@ -414,7 +416,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             IntrinsicHandler::CheckedIntOp(op) => {
                 if args.len() < 2 {
-                    return Err(CodegenError::arg_count(intrinsic_name, 2, args.len()));
+                    return Err(CodegenError::arg_count(key_display, 2, args.len()));
                 }
                 let arg1 = args[0];
                 let arg2 = args[1];

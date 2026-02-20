@@ -396,10 +396,16 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         // Check if this is a compiler intrinsic module
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
+            let key = crate::IntrinsicKey::try_from_name(intrinsic_key).ok_or_else(|| {
+                CodegenError::not_found(
+                    "intrinsic handler",
+                    format!("\"{intrinsic_key}\" (add handler in codegen/intrinsics.rs)"),
+                )
+            })?;
             let typed_args = self
                 .compile_intrinsic_args_with_expected_types(args_exprs, expected_param_type_ids)?;
             return self.call_compiler_intrinsic_key_typed_with_line(
-                crate::IntrinsicKey::from(intrinsic_key),
+                key,
                 &typed_args,
                 return_type_id,
                 0,

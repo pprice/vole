@@ -222,7 +222,7 @@ impl Cg<'_, '_, '_> {
 
         let len_val = self
             .call_compiler_intrinsic_key_with_line(
-                IntrinsicKey::from("array_len"),
+                IntrinsicKey::ArrayLen,
                 &[arr.value],
                 TypeId::I64,
                 0,

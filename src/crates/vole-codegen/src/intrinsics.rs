@@ -106,50 +106,485 @@ macro_rules! define_int_op_enum {
 /// Macro for registering integer intrinsics for all or signed-only types.
 macro_rules! register_int_intrinsics {
     // All integer types
-    ($self:ident, all, $handler:ident, $method:literal, $op:ident) => {
+    ($self:ident, all, $handler:ident, $op:ident) => {
         paste! {
-            $self.register(IntrinsicKey::from(concat!("i8_", $method)), IntrinsicHandler::$handler($handler::[<I8 $op>]));
-            $self.register(IntrinsicKey::from(concat!("i16_", $method)), IntrinsicHandler::$handler($handler::[<I16 $op>]));
-            $self.register(IntrinsicKey::from(concat!("i32_", $method)), IntrinsicHandler::$handler($handler::[<I32 $op>]));
-            $self.register(IntrinsicKey::from(concat!("i64_", $method)), IntrinsicHandler::$handler($handler::[<I64 $op>]));
-            $self.register(IntrinsicKey::from(concat!("u8_", $method)), IntrinsicHandler::$handler($handler::[<U8 $op>]));
-            $self.register(IntrinsicKey::from(concat!("u16_", $method)), IntrinsicHandler::$handler($handler::[<U16 $op>]));
-            $self.register(IntrinsicKey::from(concat!("u32_", $method)), IntrinsicHandler::$handler($handler::[<U32 $op>]));
-            $self.register(IntrinsicKey::from(concat!("u64_", $method)), IntrinsicHandler::$handler($handler::[<U64 $op>]));
+            $self.register(IntrinsicKey::[<I8 $op>], IntrinsicHandler::$handler($handler::[<I8 $op>]));
+            $self.register(IntrinsicKey::[<I16 $op>], IntrinsicHandler::$handler($handler::[<I16 $op>]));
+            $self.register(IntrinsicKey::[<I32 $op>], IntrinsicHandler::$handler($handler::[<I32 $op>]));
+            $self.register(IntrinsicKey::[<I64 $op>], IntrinsicHandler::$handler($handler::[<I64 $op>]));
+            $self.register(IntrinsicKey::[<U8 $op>], IntrinsicHandler::$handler($handler::[<U8 $op>]));
+            $self.register(IntrinsicKey::[<U16 $op>], IntrinsicHandler::$handler($handler::[<U16 $op>]));
+            $self.register(IntrinsicKey::[<U32 $op>], IntrinsicHandler::$handler($handler::[<U32 $op>]));
+            $self.register(IntrinsicKey::[<U64 $op>], IntrinsicHandler::$handler($handler::[<U64 $op>]));
         }
     };
     // Signed integer types only
-    ($self:ident, signed, $handler:ident, $method:literal, $op:ident) => {
+    ($self:ident, signed, $handler:ident, $op:ident) => {
         paste! {
-            $self.register(IntrinsicKey::from(concat!("i8_", $method)), IntrinsicHandler::$handler($handler::[<I8 $op>]));
-            $self.register(IntrinsicKey::from(concat!("i16_", $method)), IntrinsicHandler::$handler($handler::[<I16 $op>]));
-            $self.register(IntrinsicKey::from(concat!("i32_", $method)), IntrinsicHandler::$handler($handler::[<I32 $op>]));
-            $self.register(IntrinsicKey::from(concat!("i64_", $method)), IntrinsicHandler::$handler($handler::[<I64 $op>]));
+            $self.register(IntrinsicKey::[<I8 $op>], IntrinsicHandler::$handler($handler::[<I8 $op>]));
+            $self.register(IntrinsicKey::[<I16 $op>], IntrinsicHandler::$handler($handler::[<I16 $op>]));
+            $self.register(IntrinsicKey::[<I32 $op>], IntrinsicHandler::$handler($handler::[<I32 $op>]));
+            $self.register(IntrinsicKey::[<I64 $op>], IntrinsicHandler::$handler($handler::[<I64 $op>]));
         }
     };
 }
 
-/// A unique key identifying an intrinsic.
+/// A typed key identifying an intrinsic function.
 ///
-/// Format: `{type_name}_{method_name}`, e.g., "f32_nan", "f64_infinity".
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct IntrinsicKey(String);
+/// One variant per intrinsic; no heap allocation. String names only appear at
+/// the boundary where Vole names map to typed keys (see `From<&str>`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntrinsicKey {
+    // ---- Float constants ----
+    F32Nan,
+    F32Infinity,
+    F32NegInfinity,
+    F32Epsilon,
+    F64Nan,
+    F64Infinity,
+    F64NegInfinity,
+    F64Epsilon,
 
-impl IntrinsicKey {
-    /// Create a new intrinsic key from type and method names.
-    pub fn new(type_name: &str, method_name: &str) -> Self {
-        Self(format!("{}_{}", type_name, method_name))
-    }
+    // ---- Unary float ops ----
+    F32Sqrt,
+    F64Sqrt,
+    F32Abs,
+    F64Abs,
+    F32Ceil,
+    F64Ceil,
+    F32Floor,
+    F64Floor,
+    F32Trunc,
+    F64Trunc,
+    F32Round,
+    F64Round,
 
-    /// Get the key as a string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+    // ---- Binary float ops ----
+    F32Min,
+    F64Min,
+    F32Max,
+    F64Max,
+
+    // ---- Unary integer ops (signed-only: abs) ----
+    I8Abs,
+    I16Abs,
+    I32Abs,
+    I64Abs,
+
+    // ---- Unary integer ops (all types: clz, ctz, popcnt, bitrev) ----
+    I8Clz,
+    I16Clz,
+    I32Clz,
+    I64Clz,
+    U8Clz,
+    U16Clz,
+    U32Clz,
+    U64Clz,
+
+    I8Ctz,
+    I16Ctz,
+    I32Ctz,
+    I64Ctz,
+    U8Ctz,
+    U16Ctz,
+    U32Ctz,
+    U64Ctz,
+
+    I8Popcnt,
+    I16Popcnt,
+    I32Popcnt,
+    I64Popcnt,
+    U8Popcnt,
+    U16Popcnt,
+    U32Popcnt,
+    U64Popcnt,
+
+    I8Bitrev,
+    I16Bitrev,
+    I32Bitrev,
+    I64Bitrev,
+    U8Bitrev,
+    U16Bitrev,
+    U32Bitrev,
+    U64Bitrev,
+
+    // ---- Binary integer ops (all types) ----
+    I8Min,
+    I16Min,
+    I32Min,
+    I64Min,
+    U8Min,
+    U16Min,
+    U32Min,
+    U64Min,
+
+    I8Max,
+    I16Max,
+    I32Max,
+    I64Max,
+    U8Max,
+    U16Max,
+    U32Max,
+    U64Max,
+
+    I8Rotl,
+    I16Rotl,
+    I32Rotl,
+    I64Rotl,
+    U8Rotl,
+    U16Rotl,
+    U32Rotl,
+    U64Rotl,
+
+    I8Rotr,
+    I16Rotr,
+    I32Rotr,
+    I64Rotr,
+    U8Rotr,
+    U16Rotr,
+    U32Rotr,
+    U64Rotr,
+
+    I8WrappingAdd,
+    I16WrappingAdd,
+    I32WrappingAdd,
+    I64WrappingAdd,
+    U8WrappingAdd,
+    U16WrappingAdd,
+    U32WrappingAdd,
+    U64WrappingAdd,
+
+    I8WrappingSub,
+    I16WrappingSub,
+    I32WrappingSub,
+    I64WrappingSub,
+    U8WrappingSub,
+    U16WrappingSub,
+    U32WrappingSub,
+    U64WrappingSub,
+
+    I8WrappingMul,
+    I16WrappingMul,
+    I32WrappingMul,
+    I64WrappingMul,
+    U8WrappingMul,
+    U16WrappingMul,
+    U32WrappingMul,
+    U64WrappingMul,
+
+    // ---- Unary integer wrapping ops (signed-only: wrapping_neg) ----
+    I8WrappingNeg,
+    I16WrappingNeg,
+    I32WrappingNeg,
+    I64WrappingNeg,
+
+    // ---- Saturating integer ops (all types) ----
+    I8SaturatingAdd,
+    I16SaturatingAdd,
+    I32SaturatingAdd,
+    I64SaturatingAdd,
+    U8SaturatingAdd,
+    U16SaturatingAdd,
+    U32SaturatingAdd,
+    U64SaturatingAdd,
+
+    I8SaturatingSub,
+    I16SaturatingSub,
+    I32SaturatingSub,
+    I64SaturatingSub,
+    U8SaturatingSub,
+    U16SaturatingSub,
+    U32SaturatingSub,
+    U64SaturatingSub,
+
+    I8SaturatingMul,
+    I16SaturatingMul,
+    I32SaturatingMul,
+    I64SaturatingMul,
+    U8SaturatingMul,
+    U16SaturatingMul,
+    U32SaturatingMul,
+    U64SaturatingMul,
+
+    // ---- Checked integer ops (all types) ----
+    I8CheckedAdd,
+    I16CheckedAdd,
+    I32CheckedAdd,
+    I64CheckedAdd,
+    U8CheckedAdd,
+    U16CheckedAdd,
+    U32CheckedAdd,
+    U64CheckedAdd,
+
+    I8CheckedSub,
+    I16CheckedSub,
+    I32CheckedSub,
+    I64CheckedSub,
+    U8CheckedSub,
+    U16CheckedSub,
+    U32CheckedSub,
+    U64CheckedSub,
+
+    I8CheckedMul,
+    I16CheckedMul,
+    I32CheckedMul,
+    I64CheckedMul,
+    U8CheckedMul,
+    U16CheckedMul,
+    U32CheckedMul,
+    U64CheckedMul,
+
+    I8CheckedDiv,
+    I16CheckedDiv,
+    I32CheckedDiv,
+    I64CheckedDiv,
+    U8CheckedDiv,
+    U16CheckedDiv,
+    U32CheckedDiv,
+    U64CheckedDiv,
+
+    // ---- Builtins ----
+    Panic,
+    ArrayLen,
+    StringLen,
+
+    // ---- Task intrinsics ----
+    TaskChannelSend,
+    TaskChannelRecv,
+    TaskChannelTryRecv,
+    TaskJoin,
+    TaskRun,
 }
 
-impl From<&str> for IntrinsicKey {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
+impl IntrinsicKey {
+    /// Boundary translation: map a Vole intrinsic name string to a typed key.
+    ///
+    /// Returns `None` if the string does not correspond to any known intrinsic.
+    /// This is the single place where strings enter the intrinsic system;
+    /// all internal code uses `IntrinsicKey` variants directly.
+    pub fn try_from_name(s: &str) -> Option<Self> {
+        Some(match s {
+            // Float constants
+            "f32_nan" => Self::F32Nan,
+            "f32_infinity" => Self::F32Infinity,
+            "f32_neg_infinity" => Self::F32NegInfinity,
+            "f32_epsilon" => Self::F32Epsilon,
+            "f64_nan" => Self::F64Nan,
+            "f64_infinity" => Self::F64Infinity,
+            "f64_neg_infinity" => Self::F64NegInfinity,
+            "f64_epsilon" => Self::F64Epsilon,
+            // Unary float ops
+            "f32_sqrt" => Self::F32Sqrt,
+            "f64_sqrt" => Self::F64Sqrt,
+            "f32_abs" => Self::F32Abs,
+            "f64_abs" => Self::F64Abs,
+            "f32_ceil" => Self::F32Ceil,
+            "f64_ceil" => Self::F64Ceil,
+            "f32_floor" => Self::F32Floor,
+            "f64_floor" => Self::F64Floor,
+            "f32_trunc" => Self::F32Trunc,
+            "f64_trunc" => Self::F64Trunc,
+            "f32_round" => Self::F32Round,
+            "f64_round" => Self::F64Round,
+            // Binary float ops
+            "f32_min" => Self::F32Min,
+            "f64_min" => Self::F64Min,
+            "f32_max" => Self::F32Max,
+            "f64_max" => Self::F64Max,
+            // Unary integer ops - abs (signed only)
+            "i8_abs" => Self::I8Abs,
+            "i16_abs" => Self::I16Abs,
+            "i32_abs" => Self::I32Abs,
+            "i64_abs" => Self::I64Abs,
+            // Unary integer ops - clz
+            "i8_clz" => Self::I8Clz,
+            "i16_clz" => Self::I16Clz,
+            "i32_clz" => Self::I32Clz,
+            "i64_clz" => Self::I64Clz,
+            "u8_clz" => Self::U8Clz,
+            "u16_clz" => Self::U16Clz,
+            "u32_clz" => Self::U32Clz,
+            "u64_clz" => Self::U64Clz,
+            // Unary integer ops - ctz
+            "i8_ctz" => Self::I8Ctz,
+            "i16_ctz" => Self::I16Ctz,
+            "i32_ctz" => Self::I32Ctz,
+            "i64_ctz" => Self::I64Ctz,
+            "u8_ctz" => Self::U8Ctz,
+            "u16_ctz" => Self::U16Ctz,
+            "u32_ctz" => Self::U32Ctz,
+            "u64_ctz" => Self::U64Ctz,
+            // Unary integer ops - popcnt
+            "i8_popcnt" => Self::I8Popcnt,
+            "i16_popcnt" => Self::I16Popcnt,
+            "i32_popcnt" => Self::I32Popcnt,
+            "i64_popcnt" => Self::I64Popcnt,
+            "u8_popcnt" => Self::U8Popcnt,
+            "u16_popcnt" => Self::U16Popcnt,
+            "u32_popcnt" => Self::U32Popcnt,
+            "u64_popcnt" => Self::U64Popcnt,
+            // Unary integer ops - bitrev
+            "i8_bitrev" => Self::I8Bitrev,
+            "i16_bitrev" => Self::I16Bitrev,
+            "i32_bitrev" => Self::I32Bitrev,
+            "i64_bitrev" => Self::I64Bitrev,
+            "u8_bitrev" => Self::U8Bitrev,
+            "u16_bitrev" => Self::U16Bitrev,
+            "u32_bitrev" => Self::U32Bitrev,
+            "u64_bitrev" => Self::U64Bitrev,
+            // Binary integer ops - min
+            "i8_min" => Self::I8Min,
+            "i16_min" => Self::I16Min,
+            "i32_min" => Self::I32Min,
+            "i64_min" => Self::I64Min,
+            "u8_min" => Self::U8Min,
+            "u16_min" => Self::U16Min,
+            "u32_min" => Self::U32Min,
+            "u64_min" => Self::U64Min,
+            // Binary integer ops - max
+            "i8_max" => Self::I8Max,
+            "i16_max" => Self::I16Max,
+            "i32_max" => Self::I32Max,
+            "i64_max" => Self::I64Max,
+            "u8_max" => Self::U8Max,
+            "u16_max" => Self::U16Max,
+            "u32_max" => Self::U32Max,
+            "u64_max" => Self::U64Max,
+            // Binary integer ops - rotl
+            "i8_rotl" => Self::I8Rotl,
+            "i16_rotl" => Self::I16Rotl,
+            "i32_rotl" => Self::I32Rotl,
+            "i64_rotl" => Self::I64Rotl,
+            "u8_rotl" => Self::U8Rotl,
+            "u16_rotl" => Self::U16Rotl,
+            "u32_rotl" => Self::U32Rotl,
+            "u64_rotl" => Self::U64Rotl,
+            // Binary integer ops - rotr
+            "i8_rotr" => Self::I8Rotr,
+            "i16_rotr" => Self::I16Rotr,
+            "i32_rotr" => Self::I32Rotr,
+            "i64_rotr" => Self::I64Rotr,
+            "u8_rotr" => Self::U8Rotr,
+            "u16_rotr" => Self::U16Rotr,
+            "u32_rotr" => Self::U32Rotr,
+            "u64_rotr" => Self::U64Rotr,
+            // Binary integer ops - wrapping_add
+            "i8_wrapping_add" => Self::I8WrappingAdd,
+            "i16_wrapping_add" => Self::I16WrappingAdd,
+            "i32_wrapping_add" => Self::I32WrappingAdd,
+            "i64_wrapping_add" => Self::I64WrappingAdd,
+            "u8_wrapping_add" => Self::U8WrappingAdd,
+            "u16_wrapping_add" => Self::U16WrappingAdd,
+            "u32_wrapping_add" => Self::U32WrappingAdd,
+            "u64_wrapping_add" => Self::U64WrappingAdd,
+            // Binary integer ops - wrapping_sub
+            "i8_wrapping_sub" => Self::I8WrappingSub,
+            "i16_wrapping_sub" => Self::I16WrappingSub,
+            "i32_wrapping_sub" => Self::I32WrappingSub,
+            "i64_wrapping_sub" => Self::I64WrappingSub,
+            "u8_wrapping_sub" => Self::U8WrappingSub,
+            "u16_wrapping_sub" => Self::U16WrappingSub,
+            "u32_wrapping_sub" => Self::U32WrappingSub,
+            "u64_wrapping_sub" => Self::U64WrappingSub,
+            // Binary integer ops - wrapping_mul
+            "i8_wrapping_mul" => Self::I8WrappingMul,
+            "i16_wrapping_mul" => Self::I16WrappingMul,
+            "i32_wrapping_mul" => Self::I32WrappingMul,
+            "i64_wrapping_mul" => Self::I64WrappingMul,
+            "u8_wrapping_mul" => Self::U8WrappingMul,
+            "u16_wrapping_mul" => Self::U16WrappingMul,
+            "u32_wrapping_mul" => Self::U32WrappingMul,
+            "u64_wrapping_mul" => Self::U64WrappingMul,
+            // Unary integer wrapping ops - wrapping_neg (signed only)
+            "i8_wrapping_neg" => Self::I8WrappingNeg,
+            "i16_wrapping_neg" => Self::I16WrappingNeg,
+            "i32_wrapping_neg" => Self::I32WrappingNeg,
+            "i64_wrapping_neg" => Self::I64WrappingNeg,
+            // Saturating ops - saturating_add
+            "i8_saturating_add" => Self::I8SaturatingAdd,
+            "i16_saturating_add" => Self::I16SaturatingAdd,
+            "i32_saturating_add" => Self::I32SaturatingAdd,
+            "i64_saturating_add" => Self::I64SaturatingAdd,
+            "u8_saturating_add" => Self::U8SaturatingAdd,
+            "u16_saturating_add" => Self::U16SaturatingAdd,
+            "u32_saturating_add" => Self::U32SaturatingAdd,
+            "u64_saturating_add" => Self::U64SaturatingAdd,
+            // Saturating ops - saturating_sub
+            "i8_saturating_sub" => Self::I8SaturatingSub,
+            "i16_saturating_sub" => Self::I16SaturatingSub,
+            "i32_saturating_sub" => Self::I32SaturatingSub,
+            "i64_saturating_sub" => Self::I64SaturatingSub,
+            "u8_saturating_sub" => Self::U8SaturatingSub,
+            "u16_saturating_sub" => Self::U16SaturatingSub,
+            "u32_saturating_sub" => Self::U32SaturatingSub,
+            "u64_saturating_sub" => Self::U64SaturatingSub,
+            // Saturating ops - saturating_mul
+            "i8_saturating_mul" => Self::I8SaturatingMul,
+            "i16_saturating_mul" => Self::I16SaturatingMul,
+            "i32_saturating_mul" => Self::I32SaturatingMul,
+            "i64_saturating_mul" => Self::I64SaturatingMul,
+            "u8_saturating_mul" => Self::U8SaturatingMul,
+            "u16_saturating_mul" => Self::U16SaturatingMul,
+            "u32_saturating_mul" => Self::U32SaturatingMul,
+            "u64_saturating_mul" => Self::U64SaturatingMul,
+            // Checked ops - checked_add
+            "i8_checked_add" => Self::I8CheckedAdd,
+            "i16_checked_add" => Self::I16CheckedAdd,
+            "i32_checked_add" => Self::I32CheckedAdd,
+            "i64_checked_add" => Self::I64CheckedAdd,
+            "u8_checked_add" => Self::U8CheckedAdd,
+            "u16_checked_add" => Self::U16CheckedAdd,
+            "u32_checked_add" => Self::U32CheckedAdd,
+            "u64_checked_add" => Self::U64CheckedAdd,
+            // Checked ops - checked_sub
+            "i8_checked_sub" => Self::I8CheckedSub,
+            "i16_checked_sub" => Self::I16CheckedSub,
+            "i32_checked_sub" => Self::I32CheckedSub,
+            "i64_checked_sub" => Self::I64CheckedSub,
+            "u8_checked_sub" => Self::U8CheckedSub,
+            "u16_checked_sub" => Self::U16CheckedSub,
+            "u32_checked_sub" => Self::U32CheckedSub,
+            "u64_checked_sub" => Self::U64CheckedSub,
+            // Checked ops - checked_mul
+            "i8_checked_mul" => Self::I8CheckedMul,
+            "i16_checked_mul" => Self::I16CheckedMul,
+            "i32_checked_mul" => Self::I32CheckedMul,
+            "i64_checked_mul" => Self::I64CheckedMul,
+            "u8_checked_mul" => Self::U8CheckedMul,
+            "u16_checked_mul" => Self::U16CheckedMul,
+            "u32_checked_mul" => Self::U32CheckedMul,
+            "u64_checked_mul" => Self::U64CheckedMul,
+            // Checked ops - checked_div
+            "i8_checked_div" => Self::I8CheckedDiv,
+            "i16_checked_div" => Self::I16CheckedDiv,
+            "i32_checked_div" => Self::I32CheckedDiv,
+            "i64_checked_div" => Self::I64CheckedDiv,
+            "u8_checked_div" => Self::U8CheckedDiv,
+            "u16_checked_div" => Self::U16CheckedDiv,
+            "u32_checked_div" => Self::U32CheckedDiv,
+            "u64_checked_div" => Self::U64CheckedDiv,
+            // Builtins
+            "panic" => Self::Panic,
+            "array_len" => Self::ArrayLen,
+            "string_len" => Self::StringLen,
+            // Task intrinsics
+            "task_channel_send" => Self::TaskChannelSend,
+            "task_channel_recv" => Self::TaskChannelRecv,
+            "task_channel_try_recv" => Self::TaskChannelTryRecv,
+            "task_join" => Self::TaskJoin,
+            "task_run" => Self::TaskRun,
+            _ => return None,
+        })
+    }
+
+    /// Boundary translation: map a composite key from two name parts.
+    ///
+    /// This is called at the boundary where Vole type/method names arrive as strings.
+    /// Internal code should use enum variants directly.
+    /// Returns `None` if the combined name does not correspond to any known intrinsic.
+    pub fn from_names(type_name: &str, method_name: &str) -> Option<Self> {
+        let combined = format!("{}_{}", type_name, method_name);
+        Self::try_from_name(combined.as_str())
     }
 }
 
@@ -364,8 +799,11 @@ impl IntrinsicsRegistry {
     }
 
     /// Look up an intrinsic by type and method name.
+    ///
+    /// This is the boundary method for looking up by string names. Internal code
+    /// should use `lookup` with a typed `IntrinsicKey` variant.
     pub fn lookup_by_names(&self, type_name: &str, method_name: &str) -> Option<&IntrinsicHandler> {
-        let key = IntrinsicKey::new(type_name, method_name);
+        let key = IntrinsicKey::from_names(type_name, method_name)?;
         self.lookup(&key)
     }
 
@@ -390,16 +828,16 @@ impl IntrinsicsRegistry {
         use IntrinsicHandler::FloatConstant as FC;
 
         // f32 intrinsics
-        self.register(IntrinsicKey::new("f32", "nan"), FC(F32Nan));
-        self.register(IntrinsicKey::new("f32", "infinity"), FC(F32Infinity));
-        self.register(IntrinsicKey::new("f32", "neg_infinity"), FC(F32NegInfinity));
-        self.register(IntrinsicKey::new("f32", "epsilon"), FC(F32Epsilon));
+        self.register(IntrinsicKey::F32Nan, FC(F32Nan));
+        self.register(IntrinsicKey::F32Infinity, FC(F32Infinity));
+        self.register(IntrinsicKey::F32NegInfinity, FC(F32NegInfinity));
+        self.register(IntrinsicKey::F32Epsilon, FC(F32Epsilon));
 
         // f64 intrinsics
-        self.register(IntrinsicKey::new("f64", "nan"), FC(F64Nan));
-        self.register(IntrinsicKey::new("f64", "infinity"), FC(F64Infinity));
-        self.register(IntrinsicKey::new("f64", "neg_infinity"), FC(F64NegInfinity));
-        self.register(IntrinsicKey::new("f64", "epsilon"), FC(F64Epsilon));
+        self.register(IntrinsicKey::F64Nan, FC(F64Nan));
+        self.register(IntrinsicKey::F64Infinity, FC(F64Infinity));
+        self.register(IntrinsicKey::F64NegInfinity, FC(F64NegInfinity));
+        self.register(IntrinsicKey::F64Epsilon, FC(F64Epsilon));
     }
 
     /// Register float operation intrinsics (sqrt, abs, ceil, floor, trunc, round).
@@ -408,28 +846,28 @@ impl IntrinsicsRegistry {
         use UnaryFloatOp::*;
 
         // sqrt
-        self.register(IntrinsicKey::from("f32_sqrt"), UF(F32Sqrt));
-        self.register(IntrinsicKey::from("f64_sqrt"), UF(F64Sqrt));
+        self.register(IntrinsicKey::F32Sqrt, UF(F32Sqrt));
+        self.register(IntrinsicKey::F64Sqrt, UF(F64Sqrt));
 
         // abs
-        self.register(IntrinsicKey::from("f32_abs"), UF(F32Abs));
-        self.register(IntrinsicKey::from("f64_abs"), UF(F64Abs));
+        self.register(IntrinsicKey::F32Abs, UF(F32Abs));
+        self.register(IntrinsicKey::F64Abs, UF(F64Abs));
 
         // ceil
-        self.register(IntrinsicKey::from("f32_ceil"), UF(F32Ceil));
-        self.register(IntrinsicKey::from("f64_ceil"), UF(F64Ceil));
+        self.register(IntrinsicKey::F32Ceil, UF(F32Ceil));
+        self.register(IntrinsicKey::F64Ceil, UF(F64Ceil));
 
         // floor
-        self.register(IntrinsicKey::from("f32_floor"), UF(F32Floor));
-        self.register(IntrinsicKey::from("f64_floor"), UF(F64Floor));
+        self.register(IntrinsicKey::F32Floor, UF(F32Floor));
+        self.register(IntrinsicKey::F64Floor, UF(F64Floor));
 
         // trunc
-        self.register(IntrinsicKey::from("f32_trunc"), UF(F32Trunc));
-        self.register(IntrinsicKey::from("f64_trunc"), UF(F64Trunc));
+        self.register(IntrinsicKey::F32Trunc, UF(F32Trunc));
+        self.register(IntrinsicKey::F64Trunc, UF(F64Trunc));
 
         // round (nearest)
-        self.register(IntrinsicKey::from("f32_round"), UF(F32Round));
-        self.register(IntrinsicKey::from("f64_round"), UF(F64Round));
+        self.register(IntrinsicKey::F32Round, UF(F32Round));
+        self.register(IntrinsicKey::F64Round, UF(F64Round));
     }
 
     /// Register binary float operation intrinsics (min, max).
@@ -438,71 +876,59 @@ impl IntrinsicsRegistry {
         use IntrinsicHandler::BinaryFloatOp as BF;
 
         // min
-        self.register(IntrinsicKey::from("f32_min"), BF(F32Min));
-        self.register(IntrinsicKey::from("f64_min"), BF(F64Min));
+        self.register(IntrinsicKey::F32Min, BF(F32Min));
+        self.register(IntrinsicKey::F64Min, BF(F64Min));
 
         // max
-        self.register(IntrinsicKey::from("f32_max"), BF(F32Max));
-        self.register(IntrinsicKey::from("f64_max"), BF(F64Max));
+        self.register(IntrinsicKey::F32Max, BF(F32Max));
+        self.register(IntrinsicKey::F64Max, BF(F64Max));
     }
 
     /// Register unary integer operation intrinsics (abs, clz, ctz, popcnt, bitrev).
     fn register_int_operations(&mut self) {
-        register_int_intrinsics!(self, signed, UnaryIntOp, "abs", Abs);
-        register_int_intrinsics!(self, all, UnaryIntOp, "clz", Clz);
-        register_int_intrinsics!(self, all, UnaryIntOp, "ctz", Ctz);
-        register_int_intrinsics!(self, all, UnaryIntOp, "popcnt", Popcnt);
-        register_int_intrinsics!(self, all, UnaryIntOp, "bitrev", Bitrev);
+        register_int_intrinsics!(self, signed, UnaryIntOp, Abs);
+        register_int_intrinsics!(self, all, UnaryIntOp, Clz);
+        register_int_intrinsics!(self, all, UnaryIntOp, Ctz);
+        register_int_intrinsics!(self, all, UnaryIntOp, Popcnt);
+        register_int_intrinsics!(self, all, UnaryIntOp, Bitrev);
     }
 
     /// Register binary integer operation intrinsics (min, max, rotl, rotr, wrapping_add/sub/mul).
     fn register_binary_int_operations(&mut self) {
-        register_int_intrinsics!(self, all, BinaryIntOp, "min", Min);
-        register_int_intrinsics!(self, all, BinaryIntOp, "max", Max);
-        register_int_intrinsics!(self, all, BinaryIntOp, "rotl", Rotl);
-        register_int_intrinsics!(self, all, BinaryIntOp, "rotr", Rotr);
-        register_int_intrinsics!(self, all, BinaryIntOp, "wrapping_add", WrappingAdd);
-        register_int_intrinsics!(self, all, BinaryIntOp, "wrapping_sub", WrappingSub);
-        register_int_intrinsics!(self, all, BinaryIntOp, "wrapping_mul", WrappingMul);
+        register_int_intrinsics!(self, all, BinaryIntOp, Min);
+        register_int_intrinsics!(self, all, BinaryIntOp, Max);
+        register_int_intrinsics!(self, all, BinaryIntOp, Rotl);
+        register_int_intrinsics!(self, all, BinaryIntOp, Rotr);
+        register_int_intrinsics!(self, all, BinaryIntOp, WrappingAdd);
+        register_int_intrinsics!(self, all, BinaryIntOp, WrappingSub);
+        register_int_intrinsics!(self, all, BinaryIntOp, WrappingMul);
     }
 
     /// Register wrapping integer operation intrinsics (wrapping_neg).
     fn register_wrapping_int_operations(&mut self) {
-        register_int_intrinsics!(
-            self,
-            signed,
-            UnaryIntWrappingOp,
-            "wrapping_neg",
-            WrappingNeg
-        );
+        register_int_intrinsics!(self, signed, UnaryIntWrappingOp, WrappingNeg);
     }
 
     /// Register saturating integer operation intrinsics (saturating_add, saturating_sub, saturating_mul).
     fn register_saturating_int_operations(&mut self) {
-        register_int_intrinsics!(self, all, BinaryIntOp, "saturating_add", SaturatingAdd);
-        register_int_intrinsics!(self, all, BinaryIntOp, "saturating_sub", SaturatingSub);
-        register_int_intrinsics!(self, all, BinaryIntOp, "saturating_mul", SaturatingMul);
+        register_int_intrinsics!(self, all, BinaryIntOp, SaturatingAdd);
+        register_int_intrinsics!(self, all, BinaryIntOp, SaturatingSub);
+        register_int_intrinsics!(self, all, BinaryIntOp, SaturatingMul);
     }
 
     /// Register checked integer operation intrinsics (checked_add, checked_sub, checked_mul, checked_div).
     fn register_checked_int_operations(&mut self) {
-        register_int_intrinsics!(self, all, CheckedIntOp, "checked_add", CheckedAdd);
-        register_int_intrinsics!(self, all, CheckedIntOp, "checked_sub", CheckedSub);
-        register_int_intrinsics!(self, all, CheckedIntOp, "checked_mul", CheckedMul);
-        register_int_intrinsics!(self, all, CheckedIntOp, "checked_div", CheckedDiv);
+        register_int_intrinsics!(self, all, CheckedIntOp, CheckedAdd);
+        register_int_intrinsics!(self, all, CheckedIntOp, CheckedSub);
+        register_int_intrinsics!(self, all, CheckedIntOp, CheckedMul);
+        register_int_intrinsics!(self, all, CheckedIntOp, CheckedDiv);
     }
 
     /// Register built-in intrinsics (panic, etc.).
     fn register_builtin_intrinsics(&mut self) {
-        self.register(IntrinsicKey::from("panic"), IntrinsicHandler::BuiltinPanic);
-        self.register(
-            IntrinsicKey::from("array_len"),
-            IntrinsicHandler::BuiltinArrayLen,
-        );
-        self.register(
-            IntrinsicKey::from("string_len"),
-            IntrinsicHandler::BuiltinStringLen,
-        );
+        self.register(IntrinsicKey::Panic, IntrinsicHandler::BuiltinPanic);
+        self.register(IntrinsicKey::ArrayLen, IntrinsicHandler::BuiltinArrayLen);
+        self.register(IntrinsicKey::StringLen, IntrinsicHandler::BuiltinStringLen);
     }
 }
 
@@ -515,46 +941,46 @@ mod tests {
         let registry = IntrinsicsRegistry::new();
 
         // Verify all f32 constant intrinsics are registered
-        assert!(registry.contains(&IntrinsicKey::new("f32", "nan")));
-        assert!(registry.contains(&IntrinsicKey::new("f32", "infinity")));
-        assert!(registry.contains(&IntrinsicKey::new("f32", "neg_infinity")));
-        assert!(registry.contains(&IntrinsicKey::new("f32", "epsilon")));
+        assert!(registry.contains(&IntrinsicKey::F32Nan));
+        assert!(registry.contains(&IntrinsicKey::F32Infinity));
+        assert!(registry.contains(&IntrinsicKey::F32NegInfinity));
+        assert!(registry.contains(&IntrinsicKey::F32Epsilon));
 
         // Verify all f64 constant intrinsics are registered
-        assert!(registry.contains(&IntrinsicKey::new("f64", "nan")));
-        assert!(registry.contains(&IntrinsicKey::new("f64", "infinity")));
-        assert!(registry.contains(&IntrinsicKey::new("f64", "neg_infinity")));
-        assert!(registry.contains(&IntrinsicKey::new("f64", "epsilon")));
+        assert!(registry.contains(&IntrinsicKey::F64Nan));
+        assert!(registry.contains(&IntrinsicKey::F64Infinity));
+        assert!(registry.contains(&IntrinsicKey::F64NegInfinity));
+        assert!(registry.contains(&IntrinsicKey::F64Epsilon));
 
         // Verify float operations are registered
-        assert!(registry.contains(&IntrinsicKey::from("f32_sqrt")));
-        assert!(registry.contains(&IntrinsicKey::from("f64_sqrt")));
-        assert!(registry.contains(&IntrinsicKey::from("f32_abs")));
-        assert!(registry.contains(&IntrinsicKey::from("f64_abs")));
-        assert!(registry.contains(&IntrinsicKey::from("f32_ceil")));
-        assert!(registry.contains(&IntrinsicKey::from("f64_ceil")));
-        assert!(registry.contains(&IntrinsicKey::from("f32_floor")));
-        assert!(registry.contains(&IntrinsicKey::from("f64_floor")));
-        assert!(registry.contains(&IntrinsicKey::from("f32_trunc")));
-        assert!(registry.contains(&IntrinsicKey::from("f64_trunc")));
-        assert!(registry.contains(&IntrinsicKey::from("f32_round")));
-        assert!(registry.contains(&IntrinsicKey::from("f64_round")));
+        assert!(registry.contains(&IntrinsicKey::F32Sqrt));
+        assert!(registry.contains(&IntrinsicKey::F64Sqrt));
+        assert!(registry.contains(&IntrinsicKey::F32Abs));
+        assert!(registry.contains(&IntrinsicKey::F64Abs));
+        assert!(registry.contains(&IntrinsicKey::F32Ceil));
+        assert!(registry.contains(&IntrinsicKey::F64Ceil));
+        assert!(registry.contains(&IntrinsicKey::F32Floor));
+        assert!(registry.contains(&IntrinsicKey::F64Floor));
+        assert!(registry.contains(&IntrinsicKey::F32Trunc));
+        assert!(registry.contains(&IntrinsicKey::F64Trunc));
+        assert!(registry.contains(&IntrinsicKey::F32Round));
+        assert!(registry.contains(&IntrinsicKey::F64Round));
 
         // Binary float operations
-        assert!(registry.contains(&IntrinsicKey::from("f32_min")));
-        assert!(registry.contains(&IntrinsicKey::from("f64_min")));
-        assert!(registry.contains(&IntrinsicKey::from("f32_max")));
-        assert!(registry.contains(&IntrinsicKey::from("f64_max")));
+        assert!(registry.contains(&IntrinsicKey::F32Min));
+        assert!(registry.contains(&IntrinsicKey::F64Min));
+        assert!(registry.contains(&IntrinsicKey::F32Max));
+        assert!(registry.contains(&IntrinsicKey::F64Max));
 
         // Unary integer operations (spot check)
-        assert!(registry.contains(&IntrinsicKey::from("i32_abs")));
-        assert!(registry.contains(&IntrinsicKey::from("i64_clz")));
-        assert!(registry.contains(&IntrinsicKey::from("u32_ctz")));
-        assert!(registry.contains(&IntrinsicKey::from("i64_popcnt")));
+        assert!(registry.contains(&IntrinsicKey::I32Abs));
+        assert!(registry.contains(&IntrinsicKey::I64Clz));
+        assert!(registry.contains(&IntrinsicKey::U32Ctz));
+        assert!(registry.contains(&IntrinsicKey::I64Popcnt));
 
         // Binary integer operations (spot check)
-        assert!(registry.contains(&IntrinsicKey::from("i32_min")));
-        assert!(registry.contains(&IntrinsicKey::from("u64_max")));
+        assert!(registry.contains(&IntrinsicKey::I32Min));
+        assert!(registry.contains(&IntrinsicKey::U64Max));
 
         // Verify count:
         // 8 float constants
@@ -616,9 +1042,48 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_intrinsic_returns_none() {
+    fn test_known_intrinsics_are_registered() {
         let registry = IntrinsicsRegistry::new();
-        assert!(registry.lookup_by_names("f32", "unknown").is_none());
-        assert!(registry.lookup_by_names("i64", "nan").is_none());
+        assert!(registry.lookup(&IntrinsicKey::F32Nan).is_some());
+        assert!(registry.lookup(&IntrinsicKey::Panic).is_some());
+    }
+
+    #[test]
+    fn test_from_str_boundary_roundtrip() {
+        // Verify the boundary translation works for all known keys
+        assert_eq!(
+            IntrinsicKey::try_from_name("f32_nan"),
+            Some(IntrinsicKey::F32Nan)
+        );
+        assert_eq!(
+            IntrinsicKey::try_from_name("f64_infinity"),
+            Some(IntrinsicKey::F64Infinity)
+        );
+        assert_eq!(
+            IntrinsicKey::try_from_name("panic"),
+            Some(IntrinsicKey::Panic)
+        );
+        assert_eq!(
+            IntrinsicKey::try_from_name("array_len"),
+            Some(IntrinsicKey::ArrayLen)
+        );
+        assert_eq!(
+            IntrinsicKey::try_from_name("string_len"),
+            Some(IntrinsicKey::StringLen)
+        );
+        assert_eq!(
+            IntrinsicKey::try_from_name("i32_abs"),
+            Some(IntrinsicKey::I32Abs)
+        );
+        assert_eq!(
+            IntrinsicKey::try_from_name("u64_wrapping_add"),
+            Some(IntrinsicKey::U64WrappingAdd)
+        );
+        assert_eq!(
+            IntrinsicKey::try_from_name("i64_checked_div"),
+            Some(IntrinsicKey::I64CheckedDiv)
+        );
+        // Unknown key returns None (no panic)
+        assert_eq!(IntrinsicKey::try_from_name("nonexistent_intrinsic"), None);
     }
 }

@@ -167,8 +167,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let return_type_id = self
                     .get_expr_type(&call_expr_id)
                     .expect("INTERNAL: compiler intrinsic call: missing sema return type");
+                let key = crate::IntrinsicKey::try_from_name(native_name_str.as_str()).ok_or_else(
+                    || {
+                        CodegenError::not_found(
+                            "intrinsic handler",
+                            format!(
+                                "\"{}\" (add handler in codegen/intrinsics.rs)",
+                                native_name_str.as_str()
+                            ),
+                        )
+                    },
+                )?;
                 return self.call_compiler_intrinsic_key_typed_with_line(
-                    crate::IntrinsicKey::from(native_name_str.as_str()),
+                    key,
                     &args,
                     return_type_id,
                     call_line,
