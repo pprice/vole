@@ -1,0 +1,118 @@
+// Tests for the `var` mutable binding syntax.
+// `var` declares a mutable binding; `let` declares an immutable one.
+
+class Point {
+    x: i32,
+    y: i32,
+}
+
+tests "var mutable bindings" {
+    test "basic var: assign then reassign" {
+        var x = 0
+        x = 1
+        assert(x == 1)
+    }
+
+    test "basic var: multiple reassignments" {
+        var x = 0
+        x = 1
+        x = 2
+        x = 3
+        assert(x == 3)
+    }
+
+    test "var with type annotation i32" {
+        var x: i32 = 0
+        x = 42
+        assert(x == 42)
+    }
+
+    test "var with type annotation i64" {
+        var n: i64 = 100
+        n = 999
+        assert(n == 999)
+    }
+
+    test "var with type annotation bool" {
+        var flag: bool = false
+        flag = true
+        assert(flag == true)
+    }
+
+    test "var with type annotation string" {
+        var s: string = "hello"
+        s = "world"
+        assert(s == "world")
+    }
+
+    test "var struct destructuring: field mutation" {
+        let p = Point { x: 1, y: 2 }
+        var { x, y } = p
+        x = 10
+        assert(x == 10)
+        assert(y == 2)
+    }
+
+    test "var struct destructuring: both fields mutated" {
+        let p = Point { x: 3, y: 7 }
+        var { x, y } = p
+        x = 30
+        y = 70
+        assert(x == 30)
+        assert(y == 70)
+    }
+
+    test "var fixed array destructuring: first element mutated" {
+        let arr: [i64; 2] = [5; 2]
+        var [a, b] = arr
+        a = 99
+        assert(a == 99)
+        assert(b == 5)
+    }
+
+    test "var fixed array destructuring: second element mutated" {
+        let arr: [i64; 3] = [0; 3]
+        var [a, b, c] = arr
+        b = 42
+        assert(a == 0)
+        assert(b == 42)
+        assert(c == 0)
+    }
+
+    test "var in loop: accumulator" {
+        var sum = 0
+        for i in 0..5 {
+            sum = sum + i
+        }
+        // 0+1+2+3+4 = 10
+        assert(sum == 10)
+    }
+
+    test "var in loop: counting iterations" {
+        var count = 0
+        for i in 0..8 {
+            count = count + 1
+        }
+        assert(count == 8)
+    }
+
+    test "var used across multiple loops" {
+        var total = 0
+        for i in 0..3 {
+            total = total + i
+        }
+        for i in 0..3 {
+            total = total + i
+        }
+        // (0+1+2) + (0+1+2) = 6
+        assert(total == 6)
+    }
+
+    test "let immutable is unchanged by var in same scope" {
+        let n = 5
+        var m = 10
+        m = 20
+        assert(n == 5)
+        assert(m == 20)
+    }
+}
