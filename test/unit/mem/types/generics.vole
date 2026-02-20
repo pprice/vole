@@ -59,7 +59,7 @@ class Tag implements Describable {
     label: string,
 }
 
-implement Describable for Tag {
+extend Tag with Describable {
     func describe() -> string {
         return self.label
     }

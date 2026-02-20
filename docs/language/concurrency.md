@@ -682,7 +682,7 @@ class Token {
     label: string,
 }
 
-implement Transferable for Token {
+extend Token with Transferable {
     func transfer() -> Token {
         return Token { label: self.label }
     }

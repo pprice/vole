@@ -50,7 +50,7 @@ class MyNumber {
     value: i64,
 }
 
-implement Factory for MyNumber {
+extend MyNumber with Factory {
     statics {
         func make() -> i64 {
             return 42
@@ -58,7 +58,7 @@ implement Factory for MyNumber {
     }
 }
 
-implement FactoryExplicit for MyNumber {
+extend MyNumber with FactoryExplicit {
     statics {
         func make_explicit() -> i64 {
             return 42
@@ -66,7 +66,7 @@ implement FactoryExplicit for MyNumber {
     }
 }
 
-implement DefaultValue for MyNumber {
+extend MyNumber with DefaultValue {
     statics {
         func default_value() -> MyNumber {
             return MyNumber { value: 0 }
@@ -74,7 +74,7 @@ implement DefaultValue for MyNumber {
     }
 }
 
-implement Bounded for MyNumber {
+extend MyNumber with Bounded {
     statics {
         func min_bound() -> MyNumber {
             return MyNumber { value: -1000 }
@@ -86,7 +86,7 @@ implement Bounded for MyNumber {
     }
 }
 
-implement Counter for MyNumber {
+extend MyNumber with Counter {
     statics {
         func start_count() -> i64 {
             return 10

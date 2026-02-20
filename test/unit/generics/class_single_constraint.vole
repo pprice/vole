@@ -20,7 +20,7 @@ class MyInt implements Hashable {
     n: i64,
 }
 
-implement Hashable for MyInt {
+extend MyInt with Hashable {
     func hash() -> i64 {
         return self.n * 7
     }

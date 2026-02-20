@@ -351,13 +351,13 @@ class Point {
     y: i64,
 }
 
-implement Hashable for Point {
+extend Point with Hashable {
     func hash() -> i64 {
         return self.x * 31 + self.y
     }
 }
 
-implement Equatable for Point {
+extend Point with Equatable {
     func equals(other: Point) -> bool {
         return self.x == other.x && self.y == other.y
     }
@@ -675,13 +675,13 @@ class Color {
     b: i64,
 }
 
-implement Hashable for Color {
+extend Color with Hashable {
     func hash() -> i64 {
         return self.r * 65536 + self.g * 256 + self.b
     }
 }
 
-implement Equatable for Color {
+extend Color with Equatable {
     func equals(other: Color) -> bool {
         return self.r == other.r && self.g == other.g && self.b == other.b
     }

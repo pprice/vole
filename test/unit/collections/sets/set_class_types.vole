@@ -12,13 +12,13 @@ class Color {
     }
 }
 
-implement Hashable for Color {
+extend Color with Hashable {
     func hash() -> i64 {
         return self.r * 65536 + self.g * 256 + self.b
     }
 }
 
-implement Equatable for Color {
+extend Color with Equatable {
     func equals(other: Color) -> bool {
         return self.r == other.r && self.g == other.g && self.b == other.b
     }
@@ -29,13 +29,13 @@ class Tag {
     priority: i64,
 }
 
-implement Hashable for Tag {
+extend Tag with Hashable {
     func hash() -> i64 {
         return self.label.hash() * 31 + self.priority
     }
 }
 
-implement Equatable for Tag {
+extend Tag with Equatable {
     func equals(other: Tag) -> bool {
         return self.label.equals(other.label) && self.priority == other.priority
     }

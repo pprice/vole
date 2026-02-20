@@ -2,7 +2,7 @@
 
 let { Stringable } = import "./traits"
 
-implement Stringable for handle {
+extend handle with Stringable {
     func to_string() -> string {
         return "handle"
     }

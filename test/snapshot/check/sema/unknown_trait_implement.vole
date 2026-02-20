@@ -1,4 +1,4 @@
-implement UnknownTrait for i64 {
+extend i64 with UnknownTrait {
     func foo() -> i64 {
         return 42
     }

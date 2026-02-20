@@ -2,7 +2,7 @@ class Handle {
     value: i64
 }
 
-implement Transferable for Handle {
+extend Handle with Transferable {
     func transfer() -> Handle {
         return Handle { value: self.value }
     }

@@ -22,7 +22,7 @@ class Cat {
     name: string,
 }
 
-implement Animal for Dog {
+extend Dog with Animal {
     func speak() -> string {
         return "woof"
     }
@@ -37,7 +37,7 @@ implement Animal for Dog {
     }
 }
 
-implement Animal for Cat {
+extend Cat with Animal {
     func speak() -> string {
         return "meow"
     }

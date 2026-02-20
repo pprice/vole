@@ -7,7 +7,7 @@ class Tagged<T> {
 }
 
 tests {
-    implement Describable for Tagged<i64> {
+    extend Tagged<i64> with Describable {
         func describe() -> string {
             return "tagged"
         }

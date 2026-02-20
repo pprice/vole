@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E1039]: `implement Stringable for Foo` is not valid Vole syntax
+    ╭─[<path>/implement_for_deprecated.vole:9:1]
+  8 │ 
+  9 │ implement Stringable for Foo {
+    · ──────────────┬─────────────
+    ·               ╰── replace with `extend Foo with Stringable { ... }`
+ 10 │     func to_string() -> string => "Foo"
+    ╰────
+  help: use `extend Type with Interface { ... }` instead (note: argument order flips)

@@ -6,7 +6,7 @@ class StringProducer {
     value: string
 }
 
-implement Producer<string> for StringProducer {
+extend StringProducer with Producer<string> {
     func produce() -> string {
         return self.value
     }

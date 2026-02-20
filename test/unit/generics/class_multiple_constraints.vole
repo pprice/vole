@@ -58,15 +58,15 @@ class Id implements Hashable, Eq, Stringable {
     n: i64,
 }
 
-implement Hashable for Id {
+extend Id with Hashable {
     func hash() -> i64 { return self.n * 17 }
 }
 
-implement Eq for Id {
+extend Id with Eq {
     func eq(other: Id) -> bool { return self.n == other.n }
 }
 
-implement Stringable for Id {
+extend Id with Stringable {
     func str() -> string { return "Id" }
 }
 
@@ -74,7 +74,7 @@ class Label implements Stringable {
     text: string,
 }
 
-implement Stringable for Label {
+extend Label with Stringable {
     func str() -> string { return self.text }
 }
 

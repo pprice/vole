@@ -18,7 +18,7 @@ class Player {
     points: i64
 }
 
-implement Scorer for Player {
+extend Player with Scorer {
     func score() -> i64 => self.points
 }
 

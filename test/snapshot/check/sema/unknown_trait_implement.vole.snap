@@ -3,7 +3,7 @@
 [stderr]
   × [E2050]: unknown interface 'UnknownTrait'
    ╭─[<path>/unknown_trait_implement.vole:1:1]
- 1 │ ╭─▶ implement UnknownTrait for i64 {
+ 1 │ ╭─▶ extend i64 with UnknownTrait {
  2 │ │       func foo() -> i64 {
  3 │ │           return 42
  4 │ │       }

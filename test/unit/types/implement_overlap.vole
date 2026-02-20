@@ -17,7 +17,7 @@ class Widget {
     code: i64,
 }
 
-implement Displayable for Widget {
+extend Widget with Displayable {
     func label() -> string {
         return "widget:{self.name}"
     }
@@ -34,7 +34,7 @@ implement Displayable for Widget {
 
 // This implement block provides render() and id() again for the base interface.
 // Previously caused DuplicateDefinition for Widget::render and Widget::id.
-implement Renderable for Widget {
+extend Widget with Renderable {
     func render() -> string {
         return "[{self.name}]"
     }

@@ -5,7 +5,7 @@ class Foo {
     statics {}
 }
 
-implement IFace for Foo {}
+extend Foo with IFace {}
 
 implement Foo {
     func method_with_union(x: i128 | i16) -> Self {

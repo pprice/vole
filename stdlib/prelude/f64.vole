@@ -2,25 +2,25 @@
 
 let { Equatable, Comparable, Stringable, Default, FloatConstants } = import "./traits"
 
-implement Equatable for f64 {
+extend f64 with Equatable {
     external("vole:std:runtime") {
         func "f64_equals" as equals(other: Self) -> bool
     }
 }
 
-implement Comparable for f64 {
+extend f64 with Comparable {
     external("vole:std:runtime") {
         func "f64_compare" as compare(other: Self) -> i32
     }
 }
 
-implement Stringable for f64 {
+extend f64 with Stringable {
     external("vole:std:runtime") {
         func "f64_to_string" as to_string() -> string
     }
 }
 
-implement Default for f64 {
+extend f64 with Default {
     statics {
         func default_value() -> f64 {
             return 0.0
@@ -31,7 +31,7 @@ implement Default for f64 {
 
 
 // FloatConstants - compiler intrinsics that emit constants directly (no FFI call)
-implement FloatConstants for f64 {
+extend f64 with FloatConstants {
     statics {
         external("vole:compiler_intrinsic") {
             func "f64_nan" as nan() -> f64

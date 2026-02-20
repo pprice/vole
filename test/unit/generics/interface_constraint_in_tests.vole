@@ -6,7 +6,7 @@ class MyType implements Describable {
     name: string
 }
 
-implement Describable for MyType {
+extend MyType with Describable {
     func describe() -> string {
         return self.name
     }

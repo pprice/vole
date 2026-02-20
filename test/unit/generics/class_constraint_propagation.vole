@@ -30,7 +30,7 @@ class Resource implements Disposable {
     id: i64,
 }
 
-implement Disposable for Resource {
+extend Resource with Disposable {
     func dispose() -> i64 {
         return self.id
     }

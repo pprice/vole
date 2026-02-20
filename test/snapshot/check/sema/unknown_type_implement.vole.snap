@@ -4,7 +4,7 @@
   × [E2051]: cannot implement interface for unknown type 'UnknownType'
    ╭─[<path>/unknown_type_implement.vole:5:1]
  4 │     
- 5 │ ╭─▶ implement Sized for UnknownType {
+ 5 │ ╭─▶ extend UnknownType with Sized {
  6 │ │       func length() -> i64 {
  7 │ │           return 0
  8 │ │       }

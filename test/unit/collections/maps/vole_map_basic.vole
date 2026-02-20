@@ -233,7 +233,7 @@ class MapKeyIterator<K, V> implements Iterator<K> {
     index: i64,
 }
 
-implement Iterator<K> for MapKeyIterator<K, V> {
+extend MapKeyIterator<K, V> with Iterator<K> {
     func next() -> K | Done {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
@@ -261,7 +261,7 @@ class MapValueIterator<K, V> implements Iterator<V> {
     index: i64,
 }
 
-implement Iterator<V> for MapValueIterator<K, V> {
+extend MapValueIterator<K, V> with Iterator<V> {
     func next() -> V | Done {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
@@ -289,7 +289,7 @@ class MapEntryIterator<K, V> implements Iterator<[K, V]> {
     index: i64,
 }
 
-implement Iterator<[K, V]> for MapEntryIterator<K, V> {
+extend MapEntryIterator<K, V> with Iterator<[K, V]> {
     func next() -> [K, V] | Done {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]

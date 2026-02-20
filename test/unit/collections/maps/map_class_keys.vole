@@ -17,13 +17,13 @@ class Color {
     }
 }
 
-implement Hashable for Color {
+extend Color with Hashable {
     func hash() -> i64 {
         return self.r * 65536 + self.g * 256 + self.b
     }
 }
 
-implement Equatable for Color {
+extend Color with Equatable {
     func equals(other: Color) -> bool {
         return self.r == other.r && self.g == other.g && self.b == other.b
     }

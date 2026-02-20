@@ -180,7 +180,7 @@ class Point {
     y: i64,
 }
 
-implement traits.Hashable for Point {
+extend Point with traits.Hashable {
     func hash() -> i64 {
         return self.x + self.y
     }
@@ -373,7 +373,7 @@ class MyType {
     value: i64,
 }
 
-implement traits.Hashable for MyType {
+extend MyType with traits.Hashable {
     func hash() -> i64 {
         return self.value
     }

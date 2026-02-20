@@ -12,7 +12,7 @@ Interfaces define contracts that types can implement. Vole supports explicit imp
 | `class C implements I { }` | Explicit implementation |
 | `Self` | The implementing type |
 | `interface Child extends Parent { }` | Interface inheritance |
-| `implement I for T { }` | Standalone implementation block |
+| `extend T with I { }` | Standalone implementation block |
 | `static interface Name { }` | Interface with only static methods |
 
 ## Defining Interfaces
@@ -303,9 +303,9 @@ tests { test "interface inheritance" {
 } }
 ```
 
-## Standalone Implement Blocks
+## Standalone Extend Blocks
 
-Add interface implementations to existing types using `implement ... for ...` blocks:
+Add interface implementations to existing types using `extend ... with ...` blocks:
 
 ```vole
 interface Describable {
@@ -317,7 +317,7 @@ class Person {
     age: i64,
 }
 
-implement Describable for Person {
+extend Person with Describable {
     func describe() -> string {
         return self.name
     }
@@ -339,13 +339,13 @@ interface Describable {
     func describe() -> string
 }
 
-implement Describable for i32 {
+extend i32 with Describable {
     func describe() -> string {
         return "an integer"
     }
 }
 
-implement Describable for string {
+extend string with Describable {
     func describe() -> string {
         return "a string"
     }
@@ -371,7 +371,7 @@ class Score implements Incrementable {
     value: i64
 }
 
-implement Incrementable for Score {
+extend Score with Incrementable {
     func increment() -> i64 {
         return self.value + 1
     }
@@ -394,7 +394,7 @@ class Quantity {
     n: i64
 }
 
-implement Tripler for Quantity {
+extend Quantity with Tripler {
     func triple() -> i64 => self.n * 3
 }
 
@@ -477,7 +477,7 @@ class MyNumber {
     value: i64,
 }
 
-implement DefaultValue for MyNumber {
+extend MyNumber with DefaultValue {
     statics {
         func default_value() -> MyNumber {
             return MyNumber { value: 0 }
@@ -485,7 +485,7 @@ implement DefaultValue for MyNumber {
     }
 }
 
-implement Bounded for MyNumber {
+extend MyNumber with Bounded {
     statics {
         func min_bound() -> MyNumber {
             return MyNumber { value: -1000 }
@@ -539,13 +539,13 @@ class Cat {
     name: string,
 }
 
-implement Animal for Dog {
+extend Dog with Animal {
     func speak() -> string {
         return "woof"
     }
 }
 
-implement Animal for Cat {
+extend Cat with Animal {
     func speak() -> string {
         return "meow"
     }

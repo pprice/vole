@@ -7,7 +7,7 @@ class Counter implements Iterator<i64> {
     max: i64,
 }
 
-implement Iterator<i64> for Counter {
+extend Counter with Iterator<i64> {
     func next() -> i64 | Done {
         if self.current >= self.max {
             return Done {}
@@ -29,7 +29,7 @@ class Range implements Iterator<i64> {
     step: i64,
 }
 
-implement Iterator<i64> for Range {
+extend Range with Iterator<i64> {
     func next() -> i64 | Done {
         if self.start >= self.end {
             return Done {}

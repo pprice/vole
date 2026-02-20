@@ -2,31 +2,31 @@
 
 let { Equatable, Comparable, Hashable, Stringable, Default, Bounded, FloatConstants } = import "./traits"
 
-implement Equatable for f128 {
+extend f128 with Equatable {
     external("vole:std:runtime") {
         func "f128_equals" as equals(other: Self) -> bool
     }
 }
 
-implement Comparable for f128 {
+extend f128 with Comparable {
     external("vole:std:runtime") {
         func "f128_compare" as compare(other: Self) -> i32
     }
 }
 
-implement Hashable for f128 {
+extend f128 with Hashable {
     external("vole:std:runtime") {
         func "f128_hash" as hash() -> i64
     }
 }
 
-implement Stringable for f128 {
+extend f128 with Stringable {
     external("vole:std:runtime") {
         func "f128_to_string" as to_string() -> string
     }
 }
 
-implement Default for f128 {
+extend f128 with Default {
     statics {
         func default_value() -> f128 {
             return 0.0_f128
@@ -34,7 +34,7 @@ implement Default for f128 {
     }
 }
 
-implement Bounded for f128 {
+extend f128 with Bounded {
     statics {
         func min_value() -> f128 {
             return -1.7976931348623157e308_f128
@@ -45,7 +45,7 @@ implement Bounded for f128 {
     }
 }
 
-implement FloatConstants for f128 {
+extend f128 with FloatConstants {
     statics {
         func nan() -> f128 {
             return 0.0_f128 / 0.0_f128

@@ -7,13 +7,13 @@ class Point {
     y: i64,
 }
 
-implement Hashable for Point {
+extend Point with Hashable {
     func hash() -> i64 {
         return self.x * 31 + self.y
     }
 }
 
-implement Equatable for Point {
+extend Point with Equatable {
     func equals(other: Point) -> bool {
         return self.x == other.x && self.y == other.y
     }
@@ -35,7 +35,7 @@ interface Describable {
     func describe() -> string
 }
 
-implement Describable for i64 {
+extend i64 with Describable {
     func describe() -> string {
         return "{self}"
     }

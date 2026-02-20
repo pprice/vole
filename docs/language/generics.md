@@ -305,19 +305,19 @@ class Point {
     y: i64
 }
 
-implement Hashable for Point {
+extend Point with Hashable {
     func hash() -> i64 {
         return self.x * 31 + self.y
     }
 }
 
-implement Eq for Point {
+extend Point with Eq {
     func equals(other: Point) -> bool {
         return self.x == other.x && self.y == other.y
     }
 }
 
-implement Stringable for Point {
+extend Point with Stringable {
     func to_string() -> string {
         return "Point"
     }
@@ -354,11 +354,11 @@ class Id implements Hashable, Eq {
     n: i64,
 }
 
-implement Hashable for Id {
+extend Id with Hashable {
     func hash() -> i64 { return self.n * 17 }
 }
 
-implement Eq for Id {
+extend Id with Eq {
     func eq(other: Id) -> bool { return self.n == other.n }
 }
 
@@ -393,7 +393,7 @@ class Id implements Hashable {
     n: i64,
 }
 
-implement Hashable for Id {
+extend Id with Hashable {
     func hash() -> i64 { return self.n * 17 }
 }
 
@@ -401,7 +401,7 @@ class Label implements Stringable {
     text: string,
 }
 
-implement Stringable for Label {
+extend Label with Stringable {
     func str() -> string { return self.text }
 }
 
@@ -587,19 +587,19 @@ class Point {
     y: i64
 }
 
-implement Hashable for Point {
+extend Point with Hashable {
     func hash() -> i64 {
         return self.x * 31 + self.y
     }
 }
 
-implement Eq for Point {
+extend Point with Eq {
     func equals(other: Point) -> bool {
         return self.x == other.x && self.y == other.y
     }
 }
 
-implement Stringable for Point {
+extend Point with Stringable {
     func to_string() -> string {
         return "Point"
     }
@@ -650,7 +650,7 @@ class Wrapper<T> {
     value: T,
 }
 
-implement Describable for Wrapper<T> {
+extend Wrapper<T> with Describable {
     func describe() -> string {
         return "wrapper"
     }
@@ -676,7 +676,7 @@ class Box<T> {
     item: T,
 }
 
-implement Producer<T> for Box<T> {
+extend Box<T> with Producer<T> {
     func produce() -> T {
         return self.item
     }

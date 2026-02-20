@@ -13,7 +13,7 @@ class Counter {
     }
 }
 
-implement Getter for Counter {}
+extend Counter with Getter {}
 
 func use_getter(g: Getter) -> i64 {
     return g.get()

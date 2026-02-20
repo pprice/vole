@@ -316,7 +316,7 @@ class ChannelIterator<T: Sendable> implements Iterator<T> {
     _ptr: handle,
 }
 
-implement Iterator<T> for ChannelIterator<T> {
+extend ChannelIterator<T> with Iterator<T> {
     func next() -> T | Done {
         return _channel_try_receive_t(self._ptr)
     }
@@ -331,7 +331,7 @@ class StreamIterator<T: Sendable> implements Iterator<T> {
     _task: handle,
 }
 
-implement Iterator<T> for StreamIterator<T> {
+extend StreamIterator<T> with Iterator<T> {
     func next() -> T | Done {
         return _channel_try_receive_t(self._ch)
     }

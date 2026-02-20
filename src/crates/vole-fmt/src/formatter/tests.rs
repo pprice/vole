@@ -383,8 +383,8 @@ fn test_interface_extends() {
 #[test]
 fn test_implement_block() {
     let source =
-        "implement Describable for Person { func describe() -> string { return self.name } }";
-    let expected = "implement Describable for Person {\n    func describe() -> string {\n        return self.name\n    }\n}\n";
+        "extend Person with Describable { func describe() -> string { return self.name } }";
+    let expected = "extend Person with Describable {\n    func describe() -> string {\n        return self.name\n    }\n}\n";
     assert_eq!(fmt(source), expected);
 }
 

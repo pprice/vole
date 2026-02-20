@@ -296,7 +296,7 @@ class SetIterator<T> implements Iterator<T> {
     index: i64,
 }
 
-implement Iterator<T> for SetIterator<T> {
+extend SetIterator<T> with Iterator<T> {
     func next() -> T | Done {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]

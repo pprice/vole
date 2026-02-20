@@ -312,7 +312,7 @@ struct Timestamp {
     }
 }
 
-implement Bounded for Duration {
+extend Duration with Bounded {
     statics {
         func min_value() -> Duration {
             return Duration { nanos: -9223372036854775807 - 1 }
@@ -324,7 +324,7 @@ implement Bounded for Duration {
     }
 }
 
-implement Bounded for Timestamp {
+extend Timestamp with Bounded {
     statics {
         func min_value() -> Timestamp {
             return Timestamp { nanos: -9223372036854775807 - 1, offset_mins: 0 }

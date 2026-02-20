@@ -120,7 +120,7 @@ tests "scoped interface and implement block" {
         name: string,
     }
 
-    implement ScopedDescribable for ScopedItem {
+    extend ScopedItem with ScopedDescribable {
         func describe() -> string {
             return self.name
         }

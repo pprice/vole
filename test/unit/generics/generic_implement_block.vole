@@ -12,7 +12,7 @@ class Wrapper<T> {
     value: T,
 }
 
-implement Describable for Wrapper<T> {
+extend Wrapper<T> with Describable {
     func describe() -> string {
         return "wrapper"
     }
@@ -28,7 +28,7 @@ class Box<T> {
     item: T,
 }
 
-implement Producer<T> for Box<T> {
+extend Box<T> with Producer<T> {
     func produce() -> T {
         return self.item
     }
@@ -40,7 +40,7 @@ class Holder<X> {
     data: X,
 }
 
-implement Producer<A> for Holder<A> {
+extend Holder<A> with Producer<A> {
     func produce() -> A {
         return self.data
     }
@@ -53,7 +53,7 @@ class Counter {
     count: i64,
 }
 
-implement Describable for Counter {
+extend Counter with Describable {
     func describe() -> string {
         return "counter"
     }
@@ -66,7 +66,7 @@ class Pair<K, V> {
     second: V,
 }
 
-implement Describable for Pair<K, V> {
+extend Pair<K, V> with Describable {
     func describe() -> string {
         return "pair"
     }

@@ -126,7 +126,7 @@ tests "shadow interface" {
         name: string,
     }
 
-    implement Describable for Thing {
+    extend Thing with Describable {
         func describe() -> string => self.name
         func short() -> string => "t"
     }

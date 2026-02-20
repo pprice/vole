@@ -2,29 +2,29 @@
 
 let { Equatable, Comparable, Hashable, Stringable, Default, Iterator } = import "./traits"
 
-implement Equatable for string {
+extend string with Equatable {
     external("std:string") {
         func "str_equals" as equals(other: Self) -> bool
     }
 }
 
-implement Comparable for string {
+extend string with Comparable {
     external("std:string") {
         func "str_compare" as compare(other: Self) -> i32
     }
 }
 
-implement Hashable for string {
+extend string with Hashable {
     external("std:string") {
         func "str_hash" as hash() -> i64
     }
 }
 
-implement Stringable for string {
+extend string with Stringable {
     func to_string() -> string { return self }
 }
 
-implement Default for string {
+extend string with Default {
     statics {
         func default_value() -> string {
             return ""

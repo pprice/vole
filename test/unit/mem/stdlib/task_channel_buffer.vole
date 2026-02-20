@@ -4,7 +4,7 @@ class Packet {
     body: string,
 }
 
-implement Transferable for Packet {
+extend Packet with Transferable {
     func transfer() -> Packet {
         return Packet { body: self.body }
     }

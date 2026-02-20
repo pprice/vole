@@ -2,25 +2,25 @@
 
 let { Equatable, Comparable, Hashable, Default, FloatConstants } = import "./traits"
 
-implement Equatable for f32 {
+extend f32 with Equatable {
     external("vole:std:runtime") {
         func "f32_equals" as equals(other: Self) -> bool
     }
 }
 
-implement Comparable for f32 {
+extend f32 with Comparable {
     external("vole:std:runtime") {
         func "f32_compare" as compare(other: Self) -> i32
     }
 }
 
-implement Hashable for f32 {
+extend f32 with Hashable {
     external("vole:std:runtime") {
         func "f32_hash" as hash() -> i64
     }
 }
 
-implement Default for f32 {
+extend f32 with Default {
     statics {
         func default_value() -> f32 {
             return 0.0
@@ -31,7 +31,7 @@ implement Default for f32 {
 
 
 // FloatConstants - compiler intrinsics that emit constants directly (no FFI call)
-implement FloatConstants for f32 {
+extend f32 with FloatConstants {
     statics {
         external("vole:compiler_intrinsic") {
             func "f32_nan" as nan() -> f32

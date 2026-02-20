@@ -16,14 +16,14 @@ interface Showable {
 }
 
 // First test: local interface (should work)
-implement Showable for Point {
+extend Point with Showable {
     func show() -> string {
         return "Point"
     }
 }
 
 // Second test: qualified interface path
-implement traits.Hashable for Point {
+extend Point with traits.Hashable {
     func hash() -> i64 {
         return self.x + self.y
     }

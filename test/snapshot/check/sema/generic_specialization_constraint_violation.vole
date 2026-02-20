@@ -9,7 +9,7 @@ class Box<T> {
     value: T
 }
 
-implement Describable for Box<i64> {
+extend Box<i64> with Describable {
     func describe() -> string {
         return "boxed int"
     }

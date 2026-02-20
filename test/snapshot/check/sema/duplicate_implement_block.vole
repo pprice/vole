@@ -4,13 +4,13 @@ interface IFace {
 
 class Foo {}
 
-implement IFace for Foo {
+extend Foo with IFace {
     func foo() -> i64 {
         return 42
     }
 }
 
-implement IFace for Foo {
+extend Foo with IFace {
     func foo() -> i64 {
         return 99
     }

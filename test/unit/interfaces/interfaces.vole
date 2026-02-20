@@ -44,7 +44,7 @@ interface Describable {
 }
 
 // Implement for existing class
-implement Describable for Person {
+extend Person with Describable {
     func describe() -> string {
         return self.name
     }
@@ -144,7 +144,7 @@ class Counter {
 }
 
 // Satisfy Printable via implement block (not inline method)
-implement Printable for Counter {
+extend Counter with Printable {
     func print_value() -> string {
         return "counter"
     }
@@ -159,7 +159,7 @@ class Score implements Incrementable {
     value: i64
 }
 
-implement Incrementable for Score {
+extend Score with Incrementable {
     func increment() -> i64 {
         return self.value + 1
     }
@@ -198,7 +198,7 @@ class Quantity {
 }
 
 // Expression-bodied implement block method
-implement Tripler for Quantity {
+extend Quantity with Tripler {
     func triple() -> i64 => self.n * 3
 }
 

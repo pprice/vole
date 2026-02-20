@@ -1,0 +1,11 @@
+interface Stringable {
+    func to_string() -> string
+}
+
+class Foo {
+    x: i32
+}
+
+implement Stringable for Foo {
+    func to_string() -> string => "Foo"
+}

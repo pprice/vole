@@ -2,25 +2,25 @@
 
 let { Equatable, Comparable, Hashable, Default, Bounded } = import "./traits"
 
-implement Equatable for u32 {
+extend u32 with Equatable {
     external("vole:std:runtime") {
         func "u32_equals" as equals(other: Self) -> bool
     }
 }
 
-implement Comparable for u32 {
+extend u32 with Comparable {
     external("vole:std:runtime") {
         func "u32_compare" as compare(other: Self) -> i32
     }
 }
 
-implement Hashable for u32 {
+extend u32 with Hashable {
     external("vole:std:runtime") {
         func "u32_hash" as hash() -> i64
     }
 }
 
-implement Default for u32 {
+extend u32 with Default {
     statics {
         func default_value() -> u32 {
             return 0
@@ -30,7 +30,7 @@ implement Default for u32 {
 
 
 
-implement Bounded for u32 {
+extend u32 with Bounded {
     statics {
         func min_value() -> u32 {
             return 0

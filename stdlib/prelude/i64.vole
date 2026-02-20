@@ -2,31 +2,31 @@
 
 let { Equatable, Comparable, Hashable, Stringable, Default, Bounded } = import "./traits"
 
-implement Equatable for i64 {
+extend i64 with Equatable {
     external("vole:std:runtime") {
         func "i64_equals" as equals(other: Self) -> bool
     }
 }
 
-implement Comparable for i64 {
+extend i64 with Comparable {
     external("vole:std:runtime") {
         func "i64_compare" as compare(other: Self) -> i32
     }
 }
 
-implement Hashable for i64 {
+extend i64 with Hashable {
     external("vole:std:runtime") {
         func "i64_hash" as hash() -> i64
     }
 }
 
-implement Stringable for i64 {
+extend i64 with Stringable {
     external("vole:std:runtime") {
         func "i64_to_string" as to_string() -> string
     }
 }
 
-implement Default for i64 {
+extend i64 with Default {
     statics {
         func default_value() -> i64 {
             return 0
@@ -36,7 +36,7 @@ implement Default for i64 {
 
 
 
-implement Bounded for i64 {
+extend i64 with Bounded {
     statics {
         func min_value() -> i64 {
             // -9223372036854775808 can't be written as a literal (overflow on positive part)

@@ -6,10 +6,51 @@ use super::ast::*;
 use super::parser::{ParseError, Parser};
 use super::token::{Span, TokenType};
 use crate::errors::ParserError;
+use vole_identity::Interner;
+
+/// Produce a short human-readable label for a TypeExpr, used in error messages.
+///
+/// This is best-effort: it covers the common cases (Named, Generic, QualifiedPath,
+/// Primitive) and falls back to `"<type>"` for anything more exotic.
+fn type_expr_display(ty: &TypeExpr, interner: &Interner) -> String {
+    match &ty.kind {
+        TypeExprKind::Named(sym) => interner.resolve(*sym).to_string(),
+        TypeExprKind::Generic { name, args } => {
+            let base = interner.resolve(*name);
+            let arg_strs: Vec<String> = args
+                .iter()
+                .map(|a| type_expr_display(a, interner))
+                .collect();
+            format!("{}<{}>", base, arg_strs.join(", "))
+        }
+        TypeExprKind::QualifiedPath { segments, args } => {
+            let path: Vec<&str> = segments.iter().map(|s| interner.resolve(*s)).collect();
+            let base = path.join(".");
+            if args.is_empty() {
+                base
+            } else {
+                let arg_strs: Vec<String> = args
+                    .iter()
+                    .map(|a| type_expr_display(a, interner))
+                    .collect();
+                format!("{}<{}>", base, arg_strs.join(", "))
+            }
+        }
+        TypeExprKind::Primitive(p) => p.as_str().to_string(),
+        _ => "<type>".to_string(),
+    }
+}
 
 /// Result of parsing a class body.
 struct ClassBodyParseResult {
     fields: Vec<FieldDef>,
+    external: Option<ExternalBlock>,
+    methods: Vec<FuncDecl>,
+    statics: Option<StaticsBlock>,
+}
+
+/// Result of parsing an implement/extend block body.
+struct ImplementBodyParseResult {
     external: Option<ExternalBlock>,
     methods: Vec<FuncDecl>,
     statics: Option<StaticsBlock>,
@@ -154,6 +195,7 @@ impl<'src> Parser<'src> {
             TokenType::KwInterface => self.interface_decl(false),
             TokenType::KwStatic => self.static_interface_decl(),
             TokenType::KwImplement => self.implement_block(),
+            TokenType::KwExtend => self.parse_extend_block(),
             TokenType::KwError => self.error_decl(),
             TokenType::KwSentinel => self.sentinel_decl(),
             TokenType::KwExternal => {
@@ -828,38 +870,59 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Parse implement block: implement [Trait for] Type { methods }
-    /// Trait can be a qualified path like mod.Interface or mod.Interface<T>
-    fn implement_block(&mut self) -> Result<Decl, ParseError> {
+    /// Parse extend block: extend Type [with Interface] { methods }
+    ///
+    /// - `extend Type with Interface { }` → ImplementBlock { trait_type: Some(Interface), target_type: Type }
+    /// - `extend Type { }` → ImplementBlock { trait_type: None, target_type: Type }
+    ///
+    /// Note the argument order compared to the old `implement Interface for Type`:
+    /// the **Type comes first**, the interface comes after `with`.
+    fn parse_extend_block(&mut self) -> Result<Decl, ParseError> {
         let start_span = self.current.span;
-        self.advance(); // consume 'implement'
+        self.advance(); // consume 'extend'
 
-        // Parse: Trait for Type  OR  just Type
-        // For the first type:
-        //   - If identifier: could be Interface, Interface<T>, mod.Interface
-        //   - If keyword (string, i64, etc.): must be a type extension
-        // We can only use parse_interface_path() for identifiers since qualified
-        // paths start with identifiers (module names).
-        let first_type = if self.check(TokenType::Identifier) {
-            // Could be interface path or simple type name
+        // Parse the target type (always first in `extend`)
+        let target_type = if self.check(TokenType::Identifier) {
             self.parse_interface_path()?
         } else {
-            // Must be a primitive type or other type expression (type extension)
             self.parse_type()?
         };
 
-        let (trait_type, target_type) = if self.match_token(TokenType::KwFor) {
-            // implement Trait for Type (Trait may be generic like Iterator<i64>)
-            let target = self.parse_type()?;
-            (Some(first_type), target)
+        // Optional `with Interface` clause
+        let trait_type = if self.match_token(TokenType::KwWith) {
+            let iface = if self.check(TokenType::Identifier) {
+                self.parse_interface_path()?
+            } else {
+                self.parse_type()?
+            };
+            Some(iface)
         } else {
-            // implement Type { ... } (type extension)
-            (None, first_type)
+            None
         };
 
-        self.consume(TokenType::LBrace, "expected '{' in implement block")?;
+        self.consume(TokenType::LBrace, "expected '{' in extend block")?;
         self.skip_newlines();
 
+        let body = self.parse_implement_body()?;
+
+        self.consume(TokenType::RBrace, "expected '}' to close extend block")?;
+        let span = start_span.merge(self.previous.span);
+
+        Ok(Decl::Implement(ImplementBlock {
+            trait_type,
+            target_type,
+            external: body.external,
+            methods: body.methods,
+            statics: body.statics,
+            span,
+        }))
+    }
+
+    /// Parse the shared body of implement/extend blocks.
+    ///
+    /// Parses zero or more method declarations, an optional external block,
+    /// and an optional statics block. Stops when `}` or EOF is seen.
+    fn parse_implement_body(&mut self) -> Result<ImplementBodyParseResult, ParseError> {
         let mut external = None;
         let mut methods = Vec::new();
         let mut statics = None;
@@ -889,6 +952,56 @@ impl<'src> Parser<'src> {
             }
             self.skip_newlines();
         }
+        Ok(ImplementBodyParseResult {
+            external,
+            methods,
+            statics,
+        })
+    }
+
+    /// Parse implement block: implement Type { methods }
+    ///
+    /// The `implement Interface for Type` form is now a parse error;
+    /// use `extend Type with Interface { }` instead.
+    fn implement_block(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'implement'
+
+        // Parse: Trait for Type  OR  just Type
+        // For the first type:
+        //   - If identifier: could be Interface, Interface<T>, mod.Interface
+        //   - If keyword (string, i64, etc.): must be a type extension
+        // We can only use parse_interface_path() for identifiers since qualified
+        // paths start with identifiers (module names).
+        let first_type = if self.check(TokenType::Identifier) {
+            // Could be interface path or simple type name
+            self.parse_interface_path()?
+        } else {
+            // Must be a primitive type or other type expression (type extension)
+            self.parse_type()?
+        };
+
+        if self.match_token(TokenType::KwFor) {
+            // implement Trait for Type — deprecated syntax; emit a parse error.
+            let target = self.parse_type()?;
+            let trait_name = type_expr_display(&first_type, &self.interner);
+            let type_name = type_expr_display(&target, &self.interner);
+            let err_span = start_span.merge(self.previous.span);
+            return Err(ParseError::new(
+                ParserError::ImplementForDeprecated {
+                    trait_name,
+                    type_name,
+                    span: err_span.into(),
+                },
+                err_span,
+            ));
+        }
+        let (trait_type, target_type) = (None, first_type);
+
+        self.consume(TokenType::LBrace, "expected '{' in implement block")?;
+        self.skip_newlines();
+
+        let body = self.parse_implement_body()?;
 
         self.consume(TokenType::RBrace, "expected '}' to close implement block")?;
         let span = start_span.merge(self.previous.span);
@@ -896,9 +1009,9 @@ impl<'src> Parser<'src> {
         Ok(Decl::Implement(ImplementBlock {
             trait_type,
             target_type,
-            external,
-            methods,
-            statics,
+            external: body.external,
+            methods: body.methods,
+            statics: body.statics,
             span,
         }))
     }

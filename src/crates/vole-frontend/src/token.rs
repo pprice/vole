@@ -71,6 +71,8 @@ define_keywords! {
     "where"       => KwWhere,
     "unreachable" => KwUnreachable,
     "sentinel"    => KwSentinel,
+    "extend"      => KwExtend,
+    "with"        => KwWith,
     // Type keywords
     "i8"          => KwI8,
     "i16"         => KwI16,
@@ -147,6 +149,8 @@ pub enum TokenType {
     KwWhere,       // where keyword (generic type mappings)
     KwUnreachable, // unreachable keyword (bottom type expression)
     KwSentinel,    // sentinel keyword (sentinel type declarations)
+    KwExtend,      // extend keyword (extend Type with Interface { })
+    KwWith,        // with keyword (used in extend...with...)
 
     // Type keywords
     KwI8,

@@ -2,7 +2,7 @@ interface Sized {
     func length() -> i64
 }
 
-implement Sized for UnknownType {
+extend UnknownType with Sized {
     func length() -> i64 {
         return 0
     }

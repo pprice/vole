@@ -7,7 +7,7 @@ class Packet {
     payload: string,
 }
 
-implement Transferable for Packet {
+extend Packet with Transferable {
     func transfer() -> Packet {
         return Packet { payload: self.payload }
     }

@@ -2,19 +2,19 @@
 
 let { Equatable, Stringable, Default } = import "./traits"
 
-implement Equatable for bool {
+extend bool with Equatable {
     external("vole:std:runtime") {
         func "bool_equals" as equals(other: Self) -> bool
     }
 }
 
-implement Stringable for bool {
+extend bool with Stringable {
     external("vole:std:runtime") {
         func "bool_to_string" as to_string() -> string
     }
 }
 
-implement Default for bool {
+extend bool with Default {
     statics {
         func default_value() -> bool {
             return false

@@ -75,7 +75,7 @@ class Buffer {
     }
 }
 
-implement Equatable for Buffer {
+extend Buffer with Equatable {
     func equals(other: Self) -> bool {
         return _buffer_equals(self._ptr, other._ptr) == 1
     }

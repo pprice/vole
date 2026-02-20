@@ -2,7 +2,7 @@ class Connection {
     id: i64
 }
 
-implement Transferable for Connection {
+extend Connection with Transferable {
     func transfer() -> Connection {
         return Connection { id: self.id }
     }

@@ -9,7 +9,7 @@ class Point {
     y: i64,
 }
 
-implement FakePreludeTrait for Point {
+extend Point with FakePreludeTrait {
     func notReal() -> i64 {
         return 0
     }

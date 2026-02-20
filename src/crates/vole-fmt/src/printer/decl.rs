@@ -445,10 +445,10 @@ pub(super) fn print_implement_block<'a>(
 ) -> DocBuilder<'a, Arena<'a>> {
     let header = if let Some(ref trait_type) = impl_block.trait_type {
         arena
-            .text("implement ")
-            .append(print_type_expr(arena, trait_type, interner))
-            .append(arena.text(" for "))
+            .text("extend ")
             .append(print_type_expr(arena, &impl_block.target_type, interner))
+            .append(arena.text(" with "))
+            .append(print_type_expr(arena, trait_type, interner))
     } else {
         arena
             .text("implement ")

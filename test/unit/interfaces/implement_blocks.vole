@@ -4,13 +4,13 @@ interface Describable {
     func describe() -> string
 }
 
-implement Describable for i32 {
+extend i32 with Describable {
     func describe() -> string {
         return "an integer"
     }
 }
 
-implement Describable for string {
+extend string with Describable {
     func describe() -> string {
         return "a string"
     }

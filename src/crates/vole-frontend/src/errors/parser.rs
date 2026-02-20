@@ -228,4 +228,16 @@ pub enum ParserError {
         #[label("replace `let mut` with `var`")]
         span: SourceSpan,
     },
+
+    #[error("`implement {trait_name} for {type_name}` is not valid Vole syntax")]
+    #[diagnostic(
+        code(E1039),
+        help("use `extend Type with Interface {{ ... }}` instead (note: argument order flips)")
+    )]
+    ImplementForDeprecated {
+        trait_name: String,
+        type_name: String,
+        #[label("replace with `extend {type_name} with {trait_name} {{ ... }}`")]
+        span: SourceSpan,
+    },
 }
