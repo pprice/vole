@@ -1,0 +1,16 @@
+// Helper module: a user-defined class implementing stdlib's Comparable.
+// Default methods lt/gt/lte/gte should be available cross-module.
+
+class Score {
+    value: i64,
+}
+
+extend Score with Comparable {
+    func compare(other: Self) -> i32 {
+        return self.value.compare(other.value)
+    }
+}
+
+func make_score(v: i64) -> Score {
+    return Score { value: v }
+}

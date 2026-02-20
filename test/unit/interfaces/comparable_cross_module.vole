@@ -1,0 +1,34 @@
+// Regression test: Comparable default methods (lt, gt, lte, gte) on a user-defined
+// type from a separate module. The interface declaration lives in stdlib.
+// Tracked: vol-yq3y
+let helper = import "./comparable_cross_module_helper"
+
+tests "cross-module Comparable default methods" {
+    test "lt via cross-module Comparable" {
+        let a = helper.make_score(3)
+        let b = helper.make_score(5)
+        assert(a.lt(b))
+        assert(!b.lt(a))
+    }
+
+    test "gt via cross-module Comparable" {
+        let a = helper.make_score(10)
+        let b = helper.make_score(2)
+        assert(a.gt(b))
+        assert(!b.gt(a))
+    }
+
+    test "lte via cross-module Comparable" {
+        let a = helper.make_score(3)
+        let b = helper.make_score(3)
+        assert(a.lte(b))
+        assert(b.lte(a))
+    }
+
+    test "gte via cross-module Comparable" {
+        let a = helper.make_score(7)
+        let b = helper.make_score(7)
+        assert(a.gte(b))
+        assert(b.gte(a))
+    }
+}

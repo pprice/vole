@@ -1,0 +1,34 @@
+// Helper module: a user-defined class implementing Iterable<T>.
+// The Iterable<T> interface is from stdlib, and default methods (count, collect, etc.)
+// must be available when this type is used from another module.
+
+class RangeIter {
+    current: i64,
+    end_val: i64,
+}
+
+extend RangeIter with Iterator<i64> {
+    func next() -> i64 | Done {
+        if self.current >= self.end_val {
+            return Done {}
+        }
+        let v = self.current
+        self.current = self.current + 1
+        return v
+    }
+}
+
+class CrossModuleRange {
+    start: i64,
+    end_val: i64,
+}
+
+extend CrossModuleRange with Iterable<i64> {
+    func iter() -> Iterator<i64> {
+        return RangeIter { current: self.start, end_val: self.end_val }
+    }
+}
+
+func make_range(start: i64, end_val: i64) -> Iterable<i64> {
+    return CrossModuleRange { start: start, end_val: end_val }
+}
