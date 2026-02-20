@@ -1086,4 +1086,70 @@ mod tests {
         // Unknown key returns None (no panic)
         assert_eq!(IntrinsicKey::try_from_name("nonexistent_intrinsic"), None);
     }
+
+    /// Guard: no stringly-typed IntrinsicKey or RuntimeKey construction outside boundary modules.
+    ///
+    /// Boundary modules (allowed to use string->key translation):
+    ///   - intrinsics.rs           (IntrinsicKey::try_from_name / from_names)
+    ///   - runtime_registry.rs     (runtime_keys! macro, the sole place RuntimeKey strings live)
+    ///
+    /// All other codegen source files must NOT construct keys from raw string literals.
+    /// This test enforces that invariant by scanning every .rs file under codegen/src.
+    #[test]
+    fn no_stringly_typed_key_construction_outside_boundary() {
+        use std::fs;
+        use std::path::Path;
+
+        let crate_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut rs_files = Vec::new();
+        collect_rs_files_for_guard(&crate_root, &mut rs_files);
+
+        let forbidden: &[&str] = &[
+            "IntrinsicKey::from(",
+            "IntrinsicKey(\"",
+            "RuntimeKey::from(",
+            "RuntimeKey(\"",
+            "format!(\"vole_",
+            "concat!(\"vole_",
+        ];
+
+        for file in &rs_files {
+            let rel = file
+                .strip_prefix(&crate_root)
+                .expect("INTERNAL: file must live under codegen/src");
+
+            // Skip the two designated boundary modules.
+            if rel == Path::new("intrinsics.rs") || rel == Path::new("runtime_registry.rs") {
+                continue;
+            }
+
+            let content =
+                fs::read_to_string(file).expect("INTERNAL: failed to read codegen source file");
+
+            for pattern in forbidden {
+                assert!(
+                    !content.contains(pattern),
+                    "forbidden stringly-typed key pattern {:?} found outside boundary modules: {}",
+                    pattern,
+                    rel.display()
+                );
+            }
+        }
+    }
+
+    fn collect_rs_files_for_guard(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        use std::fs;
+        let entries = fs::read_dir(dir).expect("INTERNAL: failed to read directory");
+        for entry in entries {
+            let entry = entry.expect("INTERNAL: failed to read directory entry");
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs_files_for_guard(&path, out);
+                continue;
+            }
+            if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
 }
