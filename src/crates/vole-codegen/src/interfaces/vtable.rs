@@ -1211,12 +1211,12 @@ fn resolve_vtable_target<C: VtableCtx>(
     // Fall back to interface default if method has one
     if interface_method.has_default {
         // Check for default external binding via EntityRegistry
-        if let Some(interface_type_def_id) = ctx.registry().type_by_name(interface_name_id)
+        if let Some(interface_type_def_id) = ctx.query().try_type_def_id(interface_name_id)
             && let Some(method_name_id) = method_name_id
             && let Some(found_method_id) = ctx
-                .registry()
-                .find_method_on_type(interface_type_def_id, method_name_id)
-            && let Some(external_info) = ctx.registry().get_external_binding(found_method_id)
+                .query()
+                .find_method(interface_type_def_id, method_name_id)
+            && let Some(external_info) = ctx.query().method_external_binding(found_method_id)
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.

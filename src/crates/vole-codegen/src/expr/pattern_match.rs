@@ -57,7 +57,7 @@ impl Cg<'_, '_, '_> {
                 let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
                 let query = self.query();
                 if let Some(type_def_id) = query.resolve_type_def_by_str(module_id, name) {
-                    return self.registry().get_type(type_def_id).base_type_id;
+                    return query.sentinel_base_type(type_def_id);
                 }
                 // If name resolution failed, check if this is a type parameter
                 // that can be resolved via the current substitutions map.
