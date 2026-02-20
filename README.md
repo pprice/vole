@@ -20,16 +20,16 @@ class Player {
     losses: i64,
 }
 
-implement Scorable for Player {
+extend Player with Scorable {
     func score() -> i64    { return self.wins * 3 - self.losses }
     func label() -> string { return "{self.name}: {self.score()} pts" }
 }
 
 // Works with any type that implements Scorable
 func leaderboard<T: Scorable>(players: [T]) -> [string] {
-    return players.iter()
-        .filter((p) => p.score() > 0)
-        .map((p) => p.label())
+    return players
+        .filter(p => p.score() > 0)
+        .map(p => p.label())
         .collect()
 }
 
@@ -40,7 +40,7 @@ func main() {
         Player { name: "Carol", wins: 7,  losses: 1 },
     ]
 
-    for line in leaderboard(squad).iter() {
+    for line in leaderboard(squad) {
         println(line)
     }
 }
