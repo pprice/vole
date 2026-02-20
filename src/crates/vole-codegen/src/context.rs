@@ -302,9 +302,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.query()
     }
 
-    /// Get the type arena
+    /// Get the type arena.
+    /// Returns `&'ctx TypeArena` so that references obtained from it
+    /// have the full `'ctx` lifetime, enabling them to outlive `self` borrows.
     #[inline]
-    pub fn arena(&self) -> &vole_sema::type_arena::TypeArena {
+    pub fn arena(&self) -> &'ctx vole_sema::type_arena::TypeArena {
         self.env.analyzed.type_arena()
     }
 

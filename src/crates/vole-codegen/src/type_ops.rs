@@ -35,7 +35,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            let arena = self.env.analyzed.type_arena();
+            let arena = self.arena();
             let result = arena.expect_substitute(ty, substitutions, "Cg::substitute_type");
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
@@ -54,7 +54,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            let arena = self.env.analyzed.type_arena();
+            let arena = self.arena();
             if let Some(result) = arena.lookup_substitute(ty, substitutions) {
                 self.substitution_cache.borrow_mut().insert(ty, result);
                 result
@@ -91,18 +91,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Convert an i64 value back to its proper type (reverse of convert_to_i64_for_storage)
     pub fn convert_from_i64_storage(&mut self, word: Value, type_id: TypeId) -> Value {
         use super::types::word_to_value_type_id;
-        // Get the needed data before mutable borrow of builder
         let ptr_type = self.ptr_type();
-        let arena = self.env.analyzed.type_arena();
-        let entity_registry = self.env.analyzed.query().registry();
-        word_to_value_type_id(
-            self.builder,
-            word,
-            type_id,
-            ptr_type,
-            entity_registry,
-            arena,
-        )
+        let registry = self.registry();
+        let arena = self.arena();
+        word_to_value_type_id(self.builder, word, type_id, ptr_type, registry, arena)
     }
 
     // ========== Type resolution ==========

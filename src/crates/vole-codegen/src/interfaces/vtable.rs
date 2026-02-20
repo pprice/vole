@@ -522,6 +522,27 @@ impl InterfaceVtableRegistry {
     }
 }
 
+/// Convert an i64 word back to its properly typed Cranelift value.
+///
+/// Consolidates the repeated `word_to_value_type_id(builder, word, ty, ctx.ptr_type(),
+/// ctx.registry(), ctx.arena())` call pattern used throughout vtable wrapper compilation.
+#[inline]
+fn word_to_value_ctx<C: VtableCtx>(
+    builder: &mut FunctionBuilder,
+    word: Value,
+    type_id: TypeId,
+    ctx: &C,
+) -> Value {
+    word_to_value_type_id(
+        builder,
+        word,
+        type_id,
+        ctx.ptr_type(),
+        ctx.registry(),
+        ctx.arena(),
+    )
+}
+
 /// Compile wrapper body for Function target (closure/function pointer calls)
 fn compile_function_wrapper<C: VtableCtx>(
     builder: &mut FunctionBuilder,
@@ -541,24 +562,10 @@ fn compile_function_wrapper<C: VtableCtx>(
             .unwrap_or_else(|| (arena.void(), false))
     };
 
-    let self_val = word_to_value_type_id(
-        builder,
-        data_word,
-        concrete_type_id,
-        ctx.ptr_type(),
-        ctx.registry(),
-        ctx.arena(),
-    );
+    let self_val = word_to_value_ctx(builder, data_word, concrete_type_id, ctx);
     let mut args = Vec::with_capacity(param_type_ids.len() + 1);
     for (param_word, &param_ty_id) in params[1..].iter().zip(param_type_ids.iter()) {
-        args.push(word_to_value_type_id(
-            builder,
-            *param_word,
-            param_ty_id,
-            ctx.ptr_type(),
-            ctx.registry(),
-            ctx.arena(),
-        ));
+        args.push(word_to_value_ctx(builder, *param_word, param_ty_id, ctx));
     }
 
     let (func_ptr, call_args, sig) = if is_closure {
@@ -637,25 +644,11 @@ fn compile_method_wrapper<C: VtableCtx>(
     method_info: &MethodInfo,
     param_type_ids: &[TypeId],
 ) -> CodegenResult<Vec<Value>> {
-    let self_val = word_to_value_type_id(
-        builder,
-        data_word,
-        concrete_type_id,
-        ctx.ptr_type(),
-        ctx.registry(),
-        ctx.arena(),
-    );
+    let self_val = word_to_value_ctx(builder, data_word, concrete_type_id, ctx);
     let mut call_args = Vec::with_capacity(1 + param_type_ids.len());
     call_args.push(self_val);
     for (param_word, &param_ty_id) in params[1..].iter().zip(param_type_ids.iter()) {
-        call_args.push(word_to_value_type_id(
-            builder,
-            *param_word,
-            param_ty_id,
-            ctx.ptr_type(),
-            ctx.registry(),
-            ctx.arena(),
-        ));
+        call_args.push(word_to_value_ctx(builder, *param_word, param_ty_id, ctx));
     }
     let func_id = ctx
         .funcs()
@@ -760,27 +753,13 @@ fn compile_external_wrapper<C: VtableCtx>(
         };
         builder.inst_results(iter_call)[0]
     } else {
-        word_to_value_type_id(
-            builder,
-            data_word,
-            concrete_type_id,
-            ctx.ptr_type(),
-            ctx.registry(),
-            ctx.arena(),
-        )
+        word_to_value_ctx(builder, data_word, concrete_type_id, ctx)
     };
 
     let mut call_args = Vec::with_capacity(1 + param_type_ids.len());
     call_args.push(self_val);
     for (param_word, &param_ty_id) in params[1..].iter().zip(param_type_ids.iter()) {
-        call_args.push(word_to_value_type_id(
-            builder,
-            *param_word,
-            param_ty_id,
-            ctx.ptr_type(),
-            ctx.registry(),
-            ctx.arena(),
-        ));
+        call_args.push(word_to_value_ctx(builder, *param_word, param_ty_id, ctx));
     }
 
     // Get string names from NameId

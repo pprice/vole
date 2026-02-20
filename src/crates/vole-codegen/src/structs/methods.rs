@@ -14,7 +14,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::{
     CompiledValue, RcLifecycle, array_element_tag_id, module_name_id, type_id_to_cranelift,
-    value_to_word, word_to_value_type_id,
+    value_to_word,
 };
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::{MethodId, NameId, TypeDefId};
@@ -582,8 +582,8 @@ impl Cg<'_, '_, '_> {
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
                     let ptr_type = self.ptr_type();
-                    let arena = self.env.analyzed.type_arena();
-                    let registry = self.env.analyzed.entity_registry();
+                    let arena = self.arena();
+                    let registry = self.registry();
                     value_to_word(
                         self.builder,
                         &compiled,
@@ -606,8 +606,8 @@ impl Cg<'_, '_, '_> {
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
                     let ptr_type = self.ptr_type();
-                    let arena = self.env.analyzed.type_arena();
-                    let registry = self.env.analyzed.entity_registry();
+                    let arena = self.arena();
+                    let registry = self.registry();
                     value_to_word(
                         self.builder,
                         &compiled,
@@ -712,17 +712,7 @@ impl Cg<'_, '_, '_> {
 
             let result_value = if actual_ty != expected_ty && actual_ty == types::I64 {
                 // Method returned i64 (TypeParam) but we expect a different type
-                let ptr_type = self.ptr_type();
-                let registry = self.registry();
-                let arena = self.env.analyzed.type_arena();
-                word_to_value_type_id(
-                    self.builder,
-                    actual_result,
-                    return_type_id,
-                    ptr_type,
-                    registry,
-                    arena,
-                )
+                self.convert_from_i64_storage(actual_result, return_type_id)
             } else {
                 actual_result
             };
@@ -1218,17 +1208,7 @@ impl Cg<'_, '_, '_> {
             let expected_cty = self.cranelift_type(return_type_id);
             let actual_cty = self.builder.func.dfg.value_type(result_val);
             let converted = if actual_cty != expected_cty {
-                let ptr_type = self.ptr_type();
-                let registry = self.registry();
-                let arena = self.env.analyzed.type_arena();
-                word_to_value_type_id(
-                    self.builder,
-                    result_val,
-                    return_type_id,
-                    ptr_type,
-                    registry,
-                    arena,
-                )
+                self.convert_from_i64_storage(result_val, return_type_id)
             } else {
                 result_val
             };
@@ -1251,17 +1231,7 @@ impl Cg<'_, '_, '_> {
             let expected_cty = self.cranelift_type(effective_return_type);
             let actual_cty = self.builder.func.dfg.value_type(result_val);
             let converted = if actual_cty != expected_cty {
-                let ptr_type = self.ptr_type();
-                let registry = self.registry();
-                let arena = self.env.analyzed.type_arena();
-                word_to_value_type_id(
-                    self.builder,
-                    result_val,
-                    effective_return_type,
-                    ptr_type,
-                    registry,
-                    arena,
-                )
+                self.convert_from_i64_storage(result_val, effective_return_type)
             } else {
                 result_val
             };
@@ -1537,8 +1507,8 @@ impl Cg<'_, '_, '_> {
             } else {
                 compiled
             };
-            let arena = self.env.analyzed.type_arena();
-            let registry = self.env.analyzed.entity_registry();
+            let arena = self.arena();
+            let registry = self.registry();
             let word = value_to_word(
                 self.builder,
                 &compiled,
@@ -1565,16 +1535,7 @@ impl Cg<'_, '_, '_> {
             .first()
             .copied()
             .ok_or_else(|| CodegenError::internal("interface call missing return value"))?;
-        let registry = self.registry();
-        let arena = self.env.analyzed.type_arena();
-        let value = word_to_value_type_id(
-            self.builder,
-            word,
-            return_type_id,
-            word_type,
-            registry,
-            arena,
-        );
+        let value = self.convert_from_i64_storage(word, return_type_id);
 
         // Convert Iterator return types to RuntimeIterator for interface dispatch
         // since external iterator methods return raw iterator pointers, not boxed interfaces
