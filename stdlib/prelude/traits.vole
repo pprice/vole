@@ -116,6 +116,35 @@ interface Iterator<T> {
 
 interface Iterable<T> {
     func iter() -> Iterator<T>
+
+    // Transforming — lazy, return Iterator<T>
+    default func map(f: (T) -> T) -> Iterator<T> => self.iter().map(f)
+    default func filter(pred: (T) -> bool) -> Iterator<T> => self.iter().filter(pred)
+    default func take(n: i64) -> Iterator<T> => self.iter().take(n)
+    default func skip(n: i64) -> Iterator<T> => self.iter().skip(n)
+    default func enumerate() -> Iterator<[i64, T]> => self.iter().enumerate()
+    default func zip(other: Iterator<T>) -> Iterator<[T, T]> => self.iter().zip(other)
+    default func chain(other: Iterator<T>) -> Iterator<T> => self.iter().chain(other)
+    default func reverse() -> Iterator<T> => self.iter().reverse()
+    default func flatten() -> Iterator<T> => self.iter().flatten()
+    default func flat_map(f: (T) -> [T]) -> Iterator<T> => self.iter().flat_map(f)
+    default func sorted() -> Iterator<T> => self.iter().sorted()
+    default func unique() -> Iterator<T> => self.iter().unique()
+    default func chunks(n: i64) -> Iterator<[T]> => self.iter().chunks(n)
+    default func windows(n: i64) -> Iterator<[T]> => self.iter().windows(n)
+
+    // Consuming — eager, return a value
+    default func collect() -> [T] => self.iter().collect()
+    default func reduce(init: T, f: (T, T) -> T) -> T => self.iter().reduce(init, f)
+    default func for_each(f: (T) -> void) -> void => self.iter().for_each(f)
+    default func count() -> i64 => self.iter().count()
+    default func sum() -> T => self.iter().sum()
+    default func find(pred: (T) -> bool) -> T? => self.iter().find(pred)
+    default func first() -> T? => self.iter().first()
+    default func last() -> T? => self.iter().last()
+    default func nth(n: i64) -> T? => self.iter().nth(n)
+    default func any(pred: (T) -> bool) -> bool => self.iter().any(pred)
+    default func all(pred: (T) -> bool) -> bool => self.iter().all(pred)
 }
 
 // Read-only collection interfaces for polymorphic access
