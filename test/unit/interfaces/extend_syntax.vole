@@ -1,0 +1,97 @@
+// Tests for the `extend Type with Interface { }` syntax (retroactive interface implementation).
+// The parser produces the same ImplementBlock AST as `implement Interface for Type { }`,
+// so sema handles both identically.
+
+interface Greetable {
+    func greet() -> string
+}
+
+class Dog {
+    name: string
+}
+
+extend Dog with Greetable {
+    func greet() -> string {
+        return "Woof!"
+    }
+}
+
+func greet_all(g: Greetable) -> string {
+    return g.greet()
+}
+
+tests "extend Type with Interface" {
+    test "extend adds method callable on value" {
+        let d = Dog { name: "Rex" }
+        assert(d.greet() == "Woof!")
+    }
+
+    test "extended type is accepted as interface argument" {
+        let d = Dog { name: "Rex" }
+        assert(greet_all(d) == "Woof!")
+    }
+
+    test "extended type can be stored in interface variable" {
+        let g: Greetable = Dog { name: "Rex" }
+        assert(g.greet() == "Woof!")
+    }
+}
+
+// Verify interface method checking works: all required methods must be present.
+interface Measurable {
+    func length() -> i64
+    func area() -> i64
+}
+
+class Rectangle {
+    width: i64,
+    height: i64
+}
+
+extend Rectangle with Measurable {
+    func length() -> i64 {
+        return self.width + self.height
+    }
+
+    func area() -> i64 {
+        return self.width * self.height
+    }
+}
+
+tests "extend with multi-method interface" {
+    test "all interface methods are available after extend" {
+        let r = Rectangle { width: 3, height: 4 }
+        assert(r.length() == 7)
+        assert(r.area() == 12)
+    }
+
+    test "multi-method type accepted as interface value" {
+        let m: Measurable = Rectangle { width: 5, height: 6 }
+        assert(m.area() == 30)
+    }
+}
+
+// Verify extend works with expression-bodied methods.
+interface Tripler {
+    func triple() -> i64
+}
+
+class Amount {
+    value: i64
+}
+
+extend Amount with Tripler {
+    func triple() -> i64 => self.value * 3
+}
+
+tests "extend with expression-bodied method" {
+    test "expression-bodied extend method works" {
+        let a = Amount { value: 7 }
+        assert(a.triple() == 21)
+    }
+
+    test "expression-bodied extend through interface value" {
+        let t: Tripler = Amount { value: 14 }
+        assert(t.triple() == 42)
+    }
+}
