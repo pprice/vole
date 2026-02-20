@@ -685,13 +685,11 @@ impl<'src> Parser<'src> {
         // Parse optional type parameters: interface Iterator<T>
         let type_params = self.parse_type_params()?;
 
-        // Parse optional extends clause
+        // Parse optional extends clause (supports generic args: `extends Iterable<T>`)
         let mut extends = Vec::new();
         if self.match_token(TokenType::KwExtends) {
             loop {
-                let parent_token = self.current.clone();
-                self.consume(TokenType::Identifier, "expected parent interface name")?;
-                extends.push(self.interner.intern(&parent_token.lexeme));
+                extends.push(self.parse_interface_path()?);
                 if !self.match_token(TokenType::Comma) {
                     break;
                 }

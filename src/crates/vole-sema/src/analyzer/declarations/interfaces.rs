@@ -202,13 +202,21 @@ impl Analyzer {
         let extends_parents: Vec<(NameId, Option<TypeDefId>)> = interface_decl
             .extends
             .iter()
-            .map(|&parent_sym| {
+            .filter_map(|parent_type_expr| {
+                let parent_sym = match &parent_type_expr.kind {
+                    TypeExprKind::Named(sym) => *sym,
+                    TypeExprKind::Generic { name, .. } => *name,
+                    TypeExprKind::QualifiedPath { segments, .. } => {
+                        *segments.last().expect("non-empty path")
+                    }
+                    _ => return None,
+                };
                 let parent_str = interner.resolve(parent_sym);
                 let parent_name_id = self
                     .name_table_mut()
                     .intern_raw(self.module.current_module, &[parent_str]);
                 let parent_type_id = self.entity_registry().type_by_name(parent_name_id);
-                (parent_name_id, parent_type_id)
+                Some((parent_name_id, parent_type_id))
             })
             .collect();
         let _extends_type_ids: Vec<TypeDefId> = extends_parents

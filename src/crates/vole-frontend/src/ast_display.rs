@@ -320,11 +320,11 @@ impl<'a> AstPrinter<'a> {
         if !iface.extends.is_empty() {
             inner.write_indent(out);
             out.push_str("extends: [");
-            for (i, sym) in iface.extends.iter().enumerate() {
+            for (i, ty) in iface.extends.iter().enumerate() {
                 if i > 0 {
                     out.push_str(", ");
                 }
-                out.push_str(self.interner.resolve(*sym));
+                self.write_type_inline(out, ty);
             }
             out.push_str("]\n");
         }

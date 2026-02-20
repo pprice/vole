@@ -206,8 +206,8 @@ pub struct StructDecl {
 pub struct InterfaceDecl {
     pub name: Symbol,
     pub type_params: Vec<TypeParam>,
-    pub extends: Vec<Symbol>,                // Parent interfaces
-    pub fields: Vec<FieldDef>,               // Required fields
+    pub extends: Vec<TypeExpr>, // Parent interfaces (may include generic args)
+    pub fields: Vec<FieldDef>,  // Required fields
     pub external_blocks: Vec<ExternalBlock>, // External methods from native code (multiple allowed)
     pub methods: Vec<InterfaceMethod>,
     pub statics: Option<StaticsBlock>, // Static methods

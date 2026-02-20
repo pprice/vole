@@ -343,14 +343,14 @@ pub(super) fn print_interface_decl<'a>(
     let extends = if iface.extends.is_empty() {
         arena.nil()
     } else {
-        let extend_names: Vec<_> = iface
+        let extend_types: Vec<_> = iface
             .extends
             .iter()
-            .map(|s| arena.text(interner.resolve(*s).to_string()))
+            .map(|ty| print_type_expr(arena, ty, interner))
             .collect();
         arena
             .text(" extends ")
-            .append(arena.intersperse(extend_names, arena.text(", ")))
+            .append(arena.intersperse(extend_types, arena.text(", ")))
     };
 
     if iface.fields.is_empty()
@@ -451,7 +451,7 @@ pub(super) fn print_implement_block<'a>(
             .append(print_type_expr(arena, trait_type, interner))
     } else {
         arena
-            .text("implement ")
+            .text("extend ")
             .append(print_type_expr(arena, &impl_block.target_type, interner))
     };
 

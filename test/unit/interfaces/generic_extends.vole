@@ -1,0 +1,96 @@
+// Test interface extends clause with generic type arguments
+
+// Non-generic extends (should still work)
+interface Animal {
+    func speak() -> string
+}
+
+interface Pet extends Animal {
+    func name() -> string
+}
+
+class Dog {
+    dog_name: string,
+}
+
+extend Dog with Pet {
+    func speak() -> string => "Woof"
+    func name() -> string => self.dog_name
+}
+
+// Generic interface extended by another generic interface
+interface Container<T> {
+    func size() -> i64
+}
+
+interface Collection<T> extends Container<T> {
+    func first() -> T
+}
+
+// Concrete implementation of the child interface
+class IntPair {
+    a: i64,
+    b: i64,
+}
+
+extend IntPair with Collection<i64> {
+    func size() -> i64 => 2
+    func first() -> i64 => self.a
+}
+
+// Multiple extends with generics
+interface Printable {
+    func display() -> string
+}
+
+interface PrintableContainer<T> extends Container<T>, Printable {
+    func describe() -> string
+}
+
+class NamedBox {
+    label: string,
+    count: i64,
+}
+
+extend NamedBox with PrintableContainer<string> {
+    func size() -> i64 => self.count
+    func display() -> string => self.label
+    func describe() -> string => self.label
+}
+
+tests "non-generic extends" {
+    test "child interface inherits parent methods" {
+        let d = Dog { dog_name: "Rex" }
+        assert(d.speak() == "Woof")
+        assert(d.name() == "Rex")
+    }
+
+    test "child interface value dispatches parent method" {
+        let p: Pet = Dog { dog_name: "Buddy" }
+        assert(p.speak() == "Woof")
+        assert(p.name() == "Buddy")
+    }
+}
+
+tests "generic extends" {
+    test "concrete impl of generic child interface works" {
+        let pair = IntPair { a: 10, b: 20 }
+        assert(pair.size() == 2)
+        assert(pair.first() == 10)
+    }
+
+    test "generic child interface value dispatches methods" {
+        let c: Collection<i64> = IntPair { a: 42, b: 99 }
+        assert(c.size() == 2)
+        assert(c.first() == 42)
+    }
+}
+
+tests "multiple generic extends" {
+    test "multiple extends with generics works" {
+        let nb = NamedBox { label: "hello", count: 5 }
+        assert(nb.size() == 5)
+        assert(nb.display() == "hello")
+        assert(nb.describe() == "hello")
+    }
+}
