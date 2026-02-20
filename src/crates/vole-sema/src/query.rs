@@ -387,6 +387,12 @@ impl<'a> ProgramQuery<'a> {
         self.registry.method_full_name(method_id)
     }
 
+    /// Find a static method on a type by NameId
+    #[must_use]
+    pub fn find_static_method(&self, type_id: TypeDefId, name_id: NameId) -> Option<MethodId> {
+        self.registry.find_static_method_on_type(type_id, name_id)
+    }
+
     /// Look up a method NameId by Symbol (panics if not found)
     pub fn method_name_id(&self, name: Symbol) -> NameId {
         use vole_identity::NamerLookup;

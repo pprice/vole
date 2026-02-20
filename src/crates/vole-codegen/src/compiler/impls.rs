@@ -463,8 +463,7 @@ impl Compiler<'_> {
                 })?;
                 let method_id = self
                     .query()
-                    .registry()
-                    .find_static_method_on_type(tdef_id, name_id)
+                    .find_static_method(tdef_id, name_id)
                     .ok_or_else(|| {
                         CodegenError::internal_with_context(
                             "import: static method not in entity_registry",
@@ -656,8 +655,7 @@ impl Compiler<'_> {
                     })?;
                     let method_id = self
                         .query()
-                        .registry()
-                        .find_static_method_on_type(tdef_id, name_id)
+                        .find_static_method(tdef_id, name_id)
                         .ok_or_else(|| {
                             CodegenError::internal_with_context(
                                 "implement statics method not in entity_registry",

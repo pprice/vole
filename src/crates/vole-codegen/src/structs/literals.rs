@@ -58,9 +58,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if self.query().is_sentinel_type(type_def_id) {
                 let sentinel_type_id = self.get_expr_type(&expr.id).unwrap_or_else(|| {
                     // Fall back to the base TypeId from entity registry, or type_metadata
-                    self.registry()
-                        .get_type(type_def_id)
-                        .base_type_id
+                    self.query()
+                        .sentinel_base_type(type_def_id)
                         .or_else(|| self.type_metadata().get(&type_def_id).map(|m| m.vole_type))
                         .unwrap_or(TypeId::NIL)
                 });

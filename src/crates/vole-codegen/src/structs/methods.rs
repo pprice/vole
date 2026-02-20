@@ -1125,8 +1125,8 @@ impl Cg<'_, '_, '_> {
 
         // Get the external binding for this method
         let external_info = *self
-            .registry()
-            .get_external_binding(*method_id)
+            .query()
+            .method_external_binding(*method_id)
             .ok_or_else(|| CodegenError::not_found("external binding for Iterator", method_name))?;
 
         // In monomorphized module contexts, substituted_return_type can be absent.
