@@ -59,6 +59,21 @@ pub struct RcString {
     // Data follows inline
 }
 
+/// Byte offset from the start of an `RcString` allocation to the inline string
+/// data that immediately follows the header.
+///
+/// Because the data payload is an unsized byte tail (not a named struct field),
+/// `offset_of!` cannot be used here. Instead we use `size_of::<RcString>()`.
+/// This is correct because `u8` has an alignment of 1, so the compiler inserts
+/// no padding between the last field of `RcString` and the first byte of data.
+///
+/// The static assertion below enforces this assumption at compile time.
+const RCSTRING_DATA_OFFSET: usize = size_of::<RcString>();
+
+// Verify that u8 (the type of the inline data bytes) has alignment 1, meaning
+// no padding is inserted between the RcString header fields and the data tail.
+const _: () = assert!(align_of::<u8>() == 1);
+
 impl RcString {
     /// Allocate a new RcString from a string slice
     pub fn new(s: &str) -> *mut Self {
@@ -87,7 +102,7 @@ impl RcString {
             ptr::write(&mut (*ptr).hash, hash);
 
             // Copy string data
-            let data_ptr = (ptr as *mut u8).add(size_of::<RcString>());
+            let data_ptr = (ptr as *mut u8).add(RCSTRING_DATA_OFFSET);
             ptr::copy_nonoverlapping(s.as_ptr(), data_ptr, len);
 
             alloc_track::track_alloc(RuntimeTypeId::String as u32);
@@ -96,7 +111,7 @@ impl RcString {
     }
 
     fn layout_for_len(len: usize) -> Layout {
-        let size = size_of::<RcString>() + len;
+        let size = RCSTRING_DATA_OFFSET + len;
         let align = align_of::<RcString>();
         Layout::from_size_align(size, align).expect("string layout overflow")
     }
@@ -111,7 +126,7 @@ impl RcString {
     /// The caller must ensure `self` points to a valid, properly initialized `RcString`.
     pub unsafe fn data(&self) -> &[u8] {
         unsafe {
-            let data_ptr = (self as *const Self as *const u8).add(size_of::<RcString>());
+            let data_ptr = (self as *const Self as *const u8).add(RCSTRING_DATA_OFFSET);
             slice::from_raw_parts(data_ptr, self.len)
         }
     }
@@ -163,7 +178,7 @@ impl RcString {
             ptr::write(&mut (*ptr).char_count, char_count);
             ptr::write(&mut (*ptr).hash, hash);
 
-            let data_ptr = (ptr as *mut u8).add(size_of::<RcString>());
+            let data_ptr = (ptr as *mut u8).add(RCSTRING_DATA_OFFSET);
             ptr::copy_nonoverlapping(a.as_ptr(), data_ptr, a.len());
             ptr::copy_nonoverlapping(b.as_ptr(), data_ptr.add(a.len()), b.len());
 
@@ -271,7 +286,7 @@ pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
         return ptr::null();
     }
     // SAFETY: Null case handled above; inline data immediately follows the header.
-    unsafe { (ptr as *const u8).add(size_of::<RcString>()) }
+    unsafe { (ptr as *const u8).add(RCSTRING_DATA_OFFSET) }
 }
 
 /// Compare two strings for equality. Returns 1 if equal, 0 otherwise.
