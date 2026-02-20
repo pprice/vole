@@ -5,6 +5,8 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{NameId, Namer};
 
+use super::super::methods::call_args::NamedArgContext;
+
 impl Analyzer {
     pub(super) fn check_call_expr(
         &mut self,
@@ -45,25 +47,39 @@ impl Analyzer {
                         self.mark_lambda_has_side_effects();
                     }
 
-                    // Look up required_params from entity registry if available
-                    let required_params = {
+                    // Look up required_params, param_names, and is_external from entity registry
+                    let (required_params, param_names, is_external) = {
                         let name_id = self.name_table_mut().intern(
                             self.module.current_module,
                             &[*sym],
                             interner,
                         );
-                        self.entity_registry()
-                            .function_by_name(name_id)
-                            .map(|fid| self.entity_registry().get_function(fid).required_params)
-                            .unwrap_or(func_type.params_id.len())
+                        let fid = self.entity_registry().function_by_name(name_id);
+                        if let Some(fid) = fid {
+                            let registry = self.entity_registry();
+                            let def = registry.get_function(fid);
+                            (
+                                def.required_params,
+                                def.param_names.clone(),
+                                def.is_external,
+                            )
+                        } else {
+                            (func_type.params_id.len(), vec![], false)
+                        }
                     };
 
-                    return self.check_call_args_with_defaults_id(
+                    let named_ctx = NamedArgContext {
+                        param_names: &param_names,
+                        is_external,
+                        call_node_id: expr.id,
+                    };
+                    return self.check_call_args_named_id(
                         &call.args,
                         &func_type.params_id,
                         required_params,
                         func_type.return_type_id,
                         expr.span,
+                        named_ctx,
                         interner,
                     );
                 }
@@ -132,8 +148,8 @@ impl Analyzer {
                         }
 
                         // Check if this is a lambda with default parameters
-                        if let Some(&(lambda_node_id, required_params)) =
-                            self.lambda.variables.get(sym)
+                        if let Some((lambda_node_id, required_params, lambda_param_names)) =
+                            self.lambda.variables.get(sym).cloned()
                         {
                             // Store lambda defaults info for codegen
                             self.lambda.defaults.insert(
@@ -143,12 +159,18 @@ impl Analyzer {
                                     lambda_node_id,
                                 },
                             );
-                            return self.check_call_args_with_defaults_id(
+                            let named_ctx = NamedArgContext {
+                                param_names: &lambda_param_names,
+                                is_external: false,
+                                call_node_id: expr.id,
+                            };
+                            return self.check_call_args_named_id(
                                 &call.args,
                                 &params,
                                 required_params,
                                 ret,
                                 expr.span,
+                                named_ctx,
                                 interner,
                             );
                         }

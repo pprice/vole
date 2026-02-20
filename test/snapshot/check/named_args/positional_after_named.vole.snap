@@ -1,0 +1,21 @@
+[stdout]
+
+[stderr]
+  × [E2114]: positional argument after named argument
+   ╭─[<path>/positional_after_named.vole:7:11]
+ 6 │ func main() {
+ 7 │     greet(greeting: "Hello", "World")
+   ·           ────────┬────────  ───┬───
+   ·                   │             ╰── positional argument not allowed here
+   ·                   ╰── named argument appeared here
+ 8 │ }
+   ╰────
+  help: all positional arguments must come before named arguments
+  × [E2117]: missing required argument 'name'
+   ╭─[<path>/positional_after_named.vole:7:5]
+ 6 │ func main() {
+ 7 │     greet(greeting: "Hello", "World")
+   ·     ────────────────┬────────────────
+   ·                     ╰── call is missing argument 'name'
+ 8 │ }
+   ╰────

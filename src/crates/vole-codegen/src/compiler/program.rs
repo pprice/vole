@@ -508,6 +508,10 @@ impl Compiler<'_> {
         // Pass 1: Declare all functions and finalize types across all modules
         self.declare_module_types_and_functions(&module_paths)?;
 
+        // Pass 1.5a: Declare and compile array Iterable default methods for each concrete
+        // element type (e.g. count/map/filter on [i64], [string], etc.).
+        self.compile_array_iterable_default_methods()?;
+
         // Pass 1.5: Declare and compile monomorphized generic instances used by modules.
         self.declare_monomorphized_instances(true)?;
         self.compile_module_monomorphized_instances()?;
@@ -694,6 +698,12 @@ impl Compiler<'_> {
                 }
             }
         }
+
+        // Import array Iterable default methods from the pre-compiled module cache.
+        // compile_array_iterable_default_methods is only called in compile_modules_only;
+        // when using the module cache, we must import these functions instead so that
+        // array_iterable_func_keys is populated for call-site dispatch.
+        self.import_array_iterable_default_methods()?;
 
         Ok(())
     }

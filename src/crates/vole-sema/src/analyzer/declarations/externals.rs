@@ -35,12 +35,20 @@ impl Analyzer {
                 .map(|p| p.default_value.clone())
                 .collect();
 
+            // Collect parameter names for named argument resolution
+            let param_names: Vec<String> = func
+                .params
+                .iter()
+                .map(|p| interner.resolve(p.name).to_string())
+                .collect();
+
             // For generic external functions, set up type param scope and register with GenericFuncInfo
             if !func.type_params.is_empty() {
                 let reg_data = FuncRegistrationData {
                     name_id,
                     required_params,
                     param_defaults,
+                    param_names,
                 };
                 self.collect_generic_external_func(
                     func,
@@ -90,6 +98,8 @@ impl Analyzer {
                     func_type,
                     required_params,
                     param_defaults,
+                    param_names,
+                    true, // is_external
                 );
 
                 // Store the external info (module path and native name) for codegen
@@ -163,6 +173,8 @@ impl Analyzer {
             signature.clone(),
             reg_data.required_params,
             reg_data.param_defaults,
+            reg_data.param_names,
+            true, // is_external
         );
         // Extract type params from scope (consumes scope, avoids clone)
         let type_params = type_param_scope.into_params();

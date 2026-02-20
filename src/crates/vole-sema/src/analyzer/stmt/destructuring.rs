@@ -324,10 +324,19 @@ impl Analyzer {
                     func_def.signature.clone(),
                     func_def.required_params,
                     func_def.param_defaults.clone(),
+                    func_def.param_names.clone(),
+                    func_def.is_external,
                 )
             })
         });
-        if let Some((generic_info, signature, required_params, param_defaults)) = generic_func_data
+        if let Some((
+            generic_info,
+            signature,
+            required_params,
+            param_defaults,
+            param_names,
+            is_external,
+        )) = generic_func_data
         {
             let binding_name_id = self.name_table_mut().intern(
                 self.module.current_module,
@@ -343,6 +352,8 @@ impl Analyzer {
                 signature,
                 required_params,
                 param_defaults,
+                param_names,
+                is_external,
             );
             self.entity_registry_mut()
                 .set_function_generic_info(new_func_id, generic_info);

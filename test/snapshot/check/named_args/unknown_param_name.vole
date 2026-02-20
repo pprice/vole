@@ -1,0 +1,8 @@
+// check: E2115
+// Named argument refers to a parameter that does not exist.
+
+func greet(name: string) -> string => "Hello, {name}!"
+
+func main() {
+    greet(typo: "World")
+}

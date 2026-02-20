@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2117]: missing required argument 'name'
+   ╭─[<path>/missing_required_arg.vole:7:5]
+ 6 │ func main() {
+ 7 │     greet(greeting: "Hello")
+   ·     ────────────┬───────────
+   ·                 ╰── call is missing argument 'name'
+ 8 │ }
+   ╰────

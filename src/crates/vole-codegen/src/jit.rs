@@ -453,6 +453,15 @@ impl JitContext {
         self.func_ids.contains_key(name)
     }
 
+    /// Check if a FuncId corresponds to a locally-declared (Export linkage) function.
+    ///
+    /// Returns `true` if the FuncId was declared with `declare_function` (Export linkage).
+    /// Returns `false` if the FuncId was declared with `import_function` (Import linkage).
+    /// This is used to avoid attempting to define imported functions locally.
+    pub fn is_local_func_id(&self, func_id: FuncId) -> bool {
+        self.func_ids.values().any(|&id| id == func_id)
+    }
+
     /// Get a function pointer by FuncId
     pub fn get_function_ptr_by_id(&self, func_id: FuncId) -> Option<*const u8> {
         Some(self.module.get_finalized_function(func_id))

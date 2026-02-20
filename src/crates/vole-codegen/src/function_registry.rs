@@ -20,6 +20,8 @@ enum FunctionName {
     Runtime(RuntimeKey),
     Lambda(usize),
     Test(usize),
+    /// Raw string name (e.g. for array Iterable monomorphs like "array_i64_count")
+    Raw(String),
 }
 
 use vole_sema::type_arena::TypeId;
@@ -81,6 +83,13 @@ impl FunctionRegistry {
         self.insert(FunctionName::Test(index))
     }
 
+    /// Register a function by a raw string name (e.g. "array_i64_count").
+    /// Used for array Iterable monomorphs that are not associated with a NameId.
+    /// Returns a new unique FunctionKey each time (no deduplication).
+    pub fn intern_raw(&mut self, name: String) -> FunctionKey {
+        self.insert(FunctionName::Raw(name))
+    }
+
     pub fn set_func_id(&mut self, key: FunctionKey, func_id: FuncId) {
         if let Some(entry) = self.entries.get_mut(key.0 as usize) {
             entry.func_id = Some(func_id);
@@ -107,6 +116,7 @@ impl FunctionRegistry {
             FunctionName::Runtime(runtime) => runtime.name().to_string(),
             FunctionName::Lambda(idx) => format!("__lambda_{idx}"),
             FunctionName::Test(idx) => format!("__test_{idx}"),
+            FunctionName::Raw(s) => s.clone(),
         }
     }
 

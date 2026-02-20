@@ -1,6 +1,6 @@
 // stdlib/prelude/string.vole
 
-let { Equatable, Comparable, Hashable, Stringable, Default, Iterator } = import "./traits"
+let { Equatable, Comparable, Hashable, Stringable, Default, Iterator, Iterable } = import "./traits"
 
 extend string with Equatable {
     external("std:string") {
@@ -62,5 +62,14 @@ implement string {
         func "string_split_iter" as split(delimiter: string) -> Iterator<string>
         func "string_lines_iter" as lines() -> Iterator<string>
         func "string_codepoints_iter" as chars() -> Iterator<i32>
+    }
+}
+
+// Register string as implementing Iterable<string> so that Iterable default methods
+// (map, filter, count, collect, etc.) are available directly on string values.
+// The required iter() delegates to the existing string_chars_iter runtime function.
+extend string with Iterable<string> {
+    external("vole:std:runtime") {
+        func "string_chars_iter" as iter() -> Iterator<string>
     }
 }

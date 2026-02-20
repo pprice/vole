@@ -250,6 +250,8 @@ impl Analyzer {
             signature,
             reg_data.required_params,
             reg_data.param_defaults,
+            reg_data.param_names,
+            false,
         );
     }
 
@@ -284,6 +286,8 @@ impl Analyzer {
             signature,
             reg_data.required_params,
             reg_data.param_defaults,
+            reg_data.param_names,
+            false,
         );
 
         // Set generic info
@@ -313,10 +317,18 @@ impl Analyzer {
             .map(|p| p.default_value.clone())
             .collect();
 
+        // Collect parameter names for named argument resolution
+        let param_names: Vec<String> = func
+            .params
+            .iter()
+            .map(|p| interner.resolve(p.name).to_string())
+            .collect();
+
         let reg_data = FuncRegistrationData {
             name_id,
             required_params,
             param_defaults,
+            param_names,
         };
 
         // Build initial type param scope from explicit type params (if any)

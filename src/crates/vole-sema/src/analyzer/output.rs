@@ -98,6 +98,9 @@ pub(crate) struct AnalysisResults {
     /// Resolved intrinsic keys for compiler intrinsic calls (for optimizer constant folding).
     /// Maps call-site NodeId to the resolved intrinsic key (e.g., "f64_sqrt").
     pub intrinsic_keys: FxHashMap<NodeId, String>,
+    /// Resolved call arg order for calls with named arguments.
+    /// Maps call NodeId to param-slot -> call.args-index mapping.
+    pub resolved_call_args: FxHashMap<NodeId, Vec<Option<usize>>>,
 }
 
 /// Function and global variable symbol tables.

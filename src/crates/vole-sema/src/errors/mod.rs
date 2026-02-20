@@ -765,6 +765,52 @@ pub enum SemanticError {
         #[label("this method is not visible here")]
         span: SourceSpan,
     },
+
+    #[error("named arguments are not supported for external functions")]
+    #[diagnostic(
+        code(E2113),
+        help("external functions use C calling conventions; call positionally instead")
+    )]
+    ExternalFunctionNamedArg {
+        #[label("named argument used here")]
+        span: SourceSpan,
+    },
+
+    #[error("positional argument after named argument")]
+    #[diagnostic(
+        code(E2114),
+        help("all positional arguments must come before named arguments")
+    )]
+    PositionalArgAfterNamed {
+        #[label("positional argument not allowed here")]
+        span: SourceSpan,
+        #[label("named argument appeared here")]
+        named_span: SourceSpan,
+    },
+
+    #[error("unknown parameter name '{name}'")]
+    #[diagnostic(code(E2115))]
+    UnknownParamName {
+        name: String,
+        #[label("no parameter named '{name}'")]
+        span: SourceSpan,
+    },
+
+    #[error("argument '{name}' provided both positionally and by name")]
+    #[diagnostic(code(E2116))]
+    DuplicateArg {
+        name: String,
+        #[label("named argument here")]
+        span: SourceSpan,
+    },
+
+    #[error("missing required argument '{name}'")]
+    #[diagnostic(code(E2117))]
+    MissingRequiredArg {
+        name: String,
+        #[label("call is missing argument '{name}'")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

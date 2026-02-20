@@ -1,0 +1,8 @@
+// check: E2117
+// A required parameter is not provided when using named arguments.
+
+func greet(name: string, greeting: string) -> string => "{greeting}, {name}!"
+
+func main() {
+    greet(greeting: "Hello")
+}

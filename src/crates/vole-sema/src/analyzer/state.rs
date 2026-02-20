@@ -80,8 +80,8 @@ pub(crate) struct LambdaState {
     /// Stack of side effect flags for currently analyzed lambdas
     pub side_effects: Vec<bool>,
     /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
-    /// Maps Symbol -> (lambda_node_id, required_params)
-    pub variables: FxHashMap<Symbol, (NodeId, usize)>,
+    /// Maps Symbol -> (lambda_node_id, required_params, param_names)
+    pub variables: FxHashMap<Symbol, (NodeId, usize, Vec<String>)>,
     /// Lambda defaults for closure calls. Maps call site NodeId to lambda info.
     pub defaults: FxHashMap<NodeId, LambdaDefaults>,
     /// Lambda analysis results (captures and side effects).

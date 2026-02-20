@@ -127,9 +127,11 @@ macro_rules! define_name_primitives {
     };
 }
 
-// Define all name-based primitives (16 types that have NameIds)
+// Define all name-based primitives (17 types that have NameIds)
+// `range` is included here so it gets a TypeDefId in EntityRegistry, enabling
+// `extend range with Iterable<i64>` implement blocks to register interface methods.
 define_name_primitives!(
-    i8, i16, i32, i64, i128, u8, u16, u32, u64, f32, f64, f128, bool, string, handle, nil
+    i8, i16, i32, i64, i128, u8, u16, u32, u64, f32, f64, f128, bool, string, handle, nil, range
 );
 
 impl Primitives {

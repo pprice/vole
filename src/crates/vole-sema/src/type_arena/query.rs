@@ -400,6 +400,78 @@ impl TypeArena {
         self.intern_map.get(&ty).copied()
     }
 
+    /// Look up an existing Array type by element type (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_array(&self, element: TypeId) -> Option<TypeId> {
+        let ty = SemaType::Array(element);
+        self.intern_map.get(&ty).copied()
+    }
+
+    /// Return all concrete (non-TypeParam) element types for which a RuntimeIterator exists.
+    ///
+    /// Used by codegen to find the concrete array element types that need array Iterable
+    /// default methods (count, map, filter, etc.) compiled for them.
+    pub fn all_concrete_runtime_iterator_elem_types(&self) -> Vec<TypeId> {
+        self.types
+            .iter()
+            .filter_map(|ty| {
+                if let SemaType::RuntimeIterator(elem) = ty {
+                    // Skip abstract TypeParam elements
+                    if matches!(self.get(*elem), SemaType::TypeParam(_)) {
+                        None
+                    } else {
+                        Some(*elem)
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Look up any existing Array TypeId (read-only).
+    ///
+    /// Searches for the first array type available in the arena.
+    /// Useful in codegen when the arena is immutable but we need a representative
+    /// array TypeId (all array TypeIds map to pointer type in Cranelift).
+    /// Returns None only if no array type has been interned yet.
+    pub fn lookup_any_array(&self) -> Option<TypeId> {
+        self.intern_map
+            .iter()
+            .find_map(|(ty, &id)| matches!(ty, SemaType::Array(_)).then_some(id))
+    }
+
+    /// Look up an existing optional (T?) type for a given value type (read-only).
+    ///
+    /// Returns the TypeId of `Union(value_type, nil)` — a union with EXACTLY two variants
+    /// (the value type and nil) — if it exists in the arena, or None otherwise.
+    ///
+    /// This is intentionally strict: it only matches the exact 2-variant optional, not
+    /// wider unions like `A | B | nil` that also happen to contain both nil and value_type.
+    /// Using a wider union as a fallback return type (e.g. for `first()`) would cause
+    /// codegen to try to store a scalar value into the wrong union shape.
+    ///
+    /// Useful as a fallback when deriving return types without expression data.
+    pub fn lookup_optional(&self, value_type: TypeId) -> Option<TypeId> {
+        let nil_type = self.nil();
+        self.intern_map.iter().find_map(|(ty, &id)| {
+            if let SemaType::Union(variants) = ty {
+                // Must be exactly [value_type, nil] (in sorted order — Union stores variants
+                // sorted, so we check length == 2 and both are present).
+                if variants.len() == 2
+                    && variants.contains(&nil_type)
+                    && variants.contains(&value_type)
+                {
+                    Some(id)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+    }
+
     /// Unwrap a fallible type, returning (success, error)
     pub fn unwrap_fallible(&self, id: TypeId) -> Option<(TypeId, TypeId)> {
         match self.get(id) {

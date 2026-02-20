@@ -1,4 +1,5 @@
 use super::super::methods::GenericContext;
+use super::super::methods::call_args::NamedArgContext;
 use super::super::*;
 use super::call::resolve_intrinsic_key_from_mappings;
 use crate::generic::{TypeParamInfo, merge_type_params};
@@ -588,13 +589,14 @@ impl Analyzer {
             .entity_registry()
             .find_static_method_on_type(type_def_id, method_name_id);
         if let Some(method_id) = maybe_method_id {
-            let (method_type_params, signature_id, required_params) = {
+            let (method_type_params, signature_id, required_params, method_param_names) = {
                 let registry = self.entity_registry();
                 let method_def = registry.get_method(method_id);
                 (
                     method_def.method_type_params.clone(),
                     method_def.signature_id,
                     method_def.required_params,
+                    method_def.param_names.clone(),
                 )
             };
 
@@ -709,14 +711,40 @@ impl Analyzer {
                 (param_type_ids, return_type_id, None)
             };
 
-            // Second pass: check argument types against (potentially substituted) param types
-            for (arg, (&arg_ty_id, &param_ty_id)) in method_call
+            // Validate named args if present (stores resolved_call_args mapping for codegen).
+            // We do this before the second type-check pass so the mapping is available.
+            let has_named_args = method_call
                 .args
                 .iter()
-                .zip(arg_type_ids.iter().zip(final_param_ids.iter()))
-            {
-                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.expr().span);
+                .any(|a| matches!(a, CallArg::Named { .. }));
+            if has_named_args {
+                let named_ctx = NamedArgContext {
+                    param_names: &method_param_names,
+                    is_external: false, // Static methods are never external
+                    call_node_id: expr.id,
+                };
+                // Use check_call_args_named_id which validates and stores the mapping.
+                // Type errors from named-arg validation are collected as side effects.
+                let _ = self.check_call_args_named_id(
+                    &method_call.args,
+                    &final_param_ids,
+                    required_params,
+                    final_return_id,
+                    expr.span,
+                    named_ctx,
+                    interner,
+                );
+                // Skip the second pass since check_call_args_named_id already did type checking.
+            } else {
+                // Second pass: check argument types against (potentially substituted) param types
+                for (arg, (&arg_ty_id, &param_ty_id)) in method_call
+                    .args
+                    .iter()
+                    .zip(arg_type_ids.iter().zip(final_param_ids.iter()))
+                {
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.expr().span);
+                    }
                 }
             }
 
@@ -858,6 +886,17 @@ impl Analyzer {
                 || arena.unwrap_type_param(return_id).is_some()
         };
 
+        // Determine if the function is external and collect param names for named arg support.
+        let is_external_fn = self
+            .type_arena()
+            .module_metadata(module_id)
+            .is_some_and(|meta| meta.external_funcs.contains(&name_id));
+        let func_param_names = {
+            let fid = self.entity_registry().function_by_name(name_id);
+            fid.map(|fid| self.entity_registry().get_function(fid).param_names.clone())
+                .unwrap_or_default()
+        };
+
         // For generic functions, infer type params and check arguments against concrete types
         let (concrete_param_ids, concrete_return_id) = if has_type_params {
             let generic_info = self
@@ -880,21 +919,40 @@ impl Analyzer {
                     interner,
                 )?
             } else {
-                self.check_call_args_id(
+                let named_ctx = NamedArgContext {
+                    param_names: &func_param_names,
+                    is_external: is_external_fn,
+                    call_node_id: expr.id,
+                };
+                self.check_call_args_named_id(
                     &method_call.args,
                     &param_ids,
+                    param_ids.len(), // all required (no defaults for generic non-generic path)
                     return_id,
                     expr.span,
+                    named_ctx,
                     interner,
                 )?;
                 (param_ids.to_vec(), return_id)
             }
         } else {
-            self.check_call_args_id(
+            let required_params_count = self
+                .entity_registry()
+                .function_by_name(name_id)
+                .map(|fid| self.entity_registry().get_function(fid).required_params)
+                .unwrap_or(param_ids.len());
+            let named_ctx = NamedArgContext {
+                param_names: &func_param_names,
+                is_external: is_external_fn,
+                call_node_id: expr.id,
+            };
+            self.check_call_args_named_id(
                 &method_call.args,
                 &param_ids,
+                required_params_count,
                 return_id,
                 expr.span,
+                named_ctx,
                 interner,
             )?;
             (param_ids.to_vec(), return_id)
@@ -904,10 +962,7 @@ impl Analyzer {
         let func_type = FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
         let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
-        let is_external = self
-            .type_arena()
-            .module_metadata(module_id)
-            .is_some_and(|meta| meta.external_funcs.contains(&name_id));
+        let is_external = is_external_fn;
 
         let external_info = if is_external {
             let builtin_module = self.name_table_mut().builtin_module();

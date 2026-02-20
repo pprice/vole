@@ -234,10 +234,44 @@ impl Analyzer {
                             .add_implementation_with_target_args(
                                 entity_type_id,
                                 iface_id,
-                                interface_type_args,
+                                interface_type_args.clone(),
                                 target_type_args,
                                 Some(impl_block.span.into()),
                             );
+
+                        // Register interface default methods on the implementing type
+                        // so that find_method_on_type and codegen can look them up.
+                        // This mirrors what class declarations do in structs.rs.
+                        {
+                            let mut entities = self.entity_registry_mut();
+                            let mut names = self.name_table_mut();
+                            entities.register_interface_default_methods_on_implementing_type(
+                                entity_type_id,
+                                iface_id,
+                                &mut names,
+                            );
+                        }
+
+                        // If implementing Iterable<T>, pre-create RuntimeIterator<T> in the
+                        // type arena. This ensures codegen's `lookup_runtime_iterator` can
+                        // find the type when compiling Iterable default methods (count, map, etc.)
+                        // which call `self.iter()` internally.
+                        let is_iterable =
+                            self.name_table().well_known.is_iterable_type_def(iface_id);
+                        if is_iterable && !interface_type_args.is_empty() {
+                            let elem_type = interface_type_args[0];
+                            // Only pre-create for concrete types (not type param placeholders).
+                            // For generic `extend [T] with Iterable<T>`, T is a TypeParam and
+                            // RuntimeIterator<T> is pre-created at call site instead
+                            // (in resolve_method_on_array_type).
+                            let is_abstract = elem_type.is_invalid()
+                                || self.type_arena().unwrap_type_param(elem_type).is_some()
+                                || self.type_arena().unwrap_type_param_ref(elem_type).is_some()
+                                || self.type_arena().is_self_type(elem_type);
+                            if !is_abstract {
+                                self.type_arena_mut().runtime_iterator(elem_type);
+                            }
+                        }
                     }
                 }
             }
@@ -316,13 +350,20 @@ impl Analyzer {
                     // `extend Type { }` (no interface) produces file-scoped methods:
                     // only visible within the defining module. Mark with defining_module.
                     let is_file_scoped = impl_block.is_file_scoped;
+                    let impl_param_names: Vec<String> = method
+                        .params
+                        .iter()
+                        .filter(|p| interner.resolve(p.name) != "self")
+                        .map(|p| interner.resolve(p.name).to_string())
+                        .collect();
                     let mut method_builder = MethodDefBuilder::new(
                         entity_type_id,
                         method_name_id,
                         full_method_name_id,
                         signature_id,
                     )
-                    .has_default(false); // implement block methods don't have defaults
+                    .has_default(false) // implement block methods don't have defaults
+                    .param_names(impl_param_names);
                     if is_file_scoped {
                         method_builder = method_builder.defining_module(self.module.current_module);
                     }
@@ -405,6 +446,11 @@ impl Analyzer {
                             .iter()
                             .map(|p| p.default_value.clone())
                             .collect();
+                        let param_names: Vec<String> = method
+                            .params
+                            .iter()
+                            .map(|p| interner.resolve(p.name).to_string())
+                            .collect();
                         MethodDefBuilder::new(
                             entity_type_id,
                             method_name_id,
@@ -414,6 +460,7 @@ impl Analyzer {
                         .is_static(true)
                         .has_default(false) // has_default refers to interface method default body
                         .param_defaults(required_params, param_defaults)
+                        .param_names(param_names)
                         .register(&mut self.entity_registry_mut());
                     }
 
@@ -490,6 +537,8 @@ impl Analyzer {
     /// This method looks up the target class definition to find its declared type params,
     /// then matches the syntax args from the implement block positionally to build a scope.
     ///
+    /// Also handles array targets: `extend [T] with Iterable<T>` introduces `T` as a type param.
+    ///
     /// Returns a non-empty scope only when the target type is generic and has unresolved
     /// type arguments (i.e., args that don't resolve to known concrete types).
     pub(in crate::analyzer) fn infer_implement_type_params(
@@ -498,6 +547,30 @@ impl Analyzer {
         interner: &Interner,
     ) -> TypeParamScope {
         let mut scope = TypeParamScope::new();
+
+        // Handle Array target types: `extend [T] with Iterable<T>` — introduce T as a type param.
+        // The element type of [T] may be an unresolved Named symbol (type parameter).
+        if let TypeExprKind::Array(elem) = &target_type.kind {
+            if let TypeExprKind::Named(sym) = &elem.kind {
+                let arg_name = interner.resolve(*sym);
+                let is_known_type = self
+                    .resolver(interner)
+                    .resolve_type_str_or_interface(arg_name, &self.entity_registry())
+                    .is_some();
+                if !is_known_type {
+                    let builtin_mod = self.name_table_mut().builtin_module();
+                    let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[arg_name]);
+                    scope.add(TypeParamInfo {
+                        name: *sym,
+                        name_id: tp_name_id,
+                        constraint: None,
+                        type_param_id: None,
+                        variance: TypeParamVariance::default(),
+                    });
+                }
+            }
+            return scope;
+        }
 
         // Only Generic target types can introduce type params
         let TypeExprKind::Generic { name, args } = &target_type.kind else {

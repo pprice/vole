@@ -5,8 +5,8 @@ use super::{Compiler, SelfParam};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{MethodInfo, TypeMetadata, method_name_id_with_interner};
-use vole_frontend::ast::{ClassDecl, InterfaceDecl, SentinelDecl, StaticsBlock, StructDecl};
-use vole_frontend::{Decl, Interner, Program, Symbol};
+use vole_frontend::ast::{ClassDecl, SentinelDecl, StaticsBlock, StructDecl};
+use vole_frontend::{Interner, Program, Symbol};
 use vole_identity::{ModuleId, NameId, TypeDefId};
 use vole_runtime::type_registry::{FieldTypeTag, alloc_type_id, register_instance_type};
 use vole_sema::type_arena::TypeId;
@@ -52,22 +52,6 @@ impl Compiler<'_> {
         self.state
             .method_func_keys
             .insert((type_name_id, method_name_id), func_key);
-    }
-
-    /// Find an interface declaration by name in the program
-    pub(super) fn find_interface_decl<'b>(
-        &self,
-        program: &'b Program,
-        interface_name: Symbol,
-    ) -> Option<&'b InterfaceDecl> {
-        for decl in &program.declarations {
-            if let Decl::Interface(iface) = decl
-                && iface.name == interface_name
-            {
-                return Some(iface);
-            }
-        }
-        None
     }
 
     /// Pre-register a class type (just the name and type_id)
@@ -302,74 +286,83 @@ impl Compiler<'_> {
     }
 
     /// Register interface default methods on implementing class.
+    ///
+    /// This registers default methods from all implemented interfaces, including
+    /// interfaces imported from stdlib modules. It works entirely from entity
+    /// registry data so it does not need to search the AST.
     fn register_interface_default_methods<T: TypeDeclInfo>(
         &mut self,
         type_decl: &T,
         type_def_id: TypeDefId,
         module_id: ModuleId,
-        program: &Program,
+        _program: &Program,
         method_infos: &mut FxHashMap<NameId, MethodInfo>,
     ) -> CodegenResult<()> {
-        // Collect method names that the type directly defines
-        let direct_methods: std::collections::HashSet<_> =
-            type_decl.methods().iter().map(|m| m.name).collect();
+        // Collect direct method name strings to filter out explicitly implemented methods.
+        // We compare by string (cross-interner safe) rather than Symbol.
+        let direct_method_name_strs: std::collections::HashSet<String> = type_decl
+            .methods()
+            .iter()
+            .map(|m| self.resolve_symbol(m.name))
+            .collect();
 
-        // Collect interface info first to avoid borrow conflicts
-        let interfaces_to_process: Vec<_> = {
+        // Collect (interface_tdef_id, default_method_name_id pairs) from entity registry.
+        // Works for interfaces from any program (main, stdlib, user modules) since
+        // the entity registry is populated by sema regardless of which program the
+        // interface was defined in.
+        let default_method_ids: Vec<(TypeDefId, vole_identity::MethodId, NameId)> = {
             let query = self.query();
-            query
+            let lookup_tdef_id = query
                 .try_name_id(module_id, &[type_decl.name()])
                 .and_then(|name_id| query.try_type_def_id(name_id))
-                .map(|tdef_id| {
-                    query
-                        .implemented_interfaces(tdef_id)
-                        .into_iter()
-                        .filter_map(|interface_id| {
-                            let interface_def = query.get_type(interface_id);
-                            let interface_name_str = query.last_segment(interface_def.name_id)?;
-                            let interface_name = query.try_symbol(&interface_name_str)?;
-                            Some(interface_name)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-
-        for interface_name in interfaces_to_process {
-            if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
-                for method in &interface_decl.methods {
-                    if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let method_name_id = self.method_name_id(method.name)?;
-                        let semantic_method_id = self
-                            .query()
-                            .find_method(type_def_id, method_name_id)
-                            .ok_or_else(|| {
-                                let type_name_str = self.resolve_symbol(type_decl.name());
-                                let method_name_str = self.resolve_symbol(method.name);
-                                CodegenError::internal_with_context(
-                                    "interface default method not registered on implementing type",
-                                    format!(
-                                        "{}::{}::{} (type_def_id={:?}, method_name_id={:?})",
-                                        type_decl.type_kind(),
-                                        type_name_str,
-                                        method_name_str,
-                                        type_def_id,
-                                        method_name_id
-                                    ),
-                                )
-                            })?;
-                        let sig =
-                            self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-                        let method_def = self.query().get_method(semantic_method_id);
-                        let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-                        let display_name = self.func_registry.display(func_key);
-                        let jit_func_id = self.jit.declare_function(&display_name, &sig);
-                        self.func_registry.set_func_id(func_key, jit_func_id);
-                        method_infos.insert(method_name_id, MethodInfo { func_key });
-                        self.register_method_func_key(type_def_id, method_name_id, func_key);
+                .unwrap_or(type_def_id);
+            let mut results = Vec::new();
+            for interface_tdef_id in query.implemented_interfaces(lookup_tdef_id) {
+                let interface_method_ids = query.type_methods(interface_tdef_id);
+                for method_id in interface_method_ids {
+                    let method_def = query.get_method(method_id);
+                    if !method_def.has_default {
+                        continue;
+                    }
+                    // Skip external default methods - they are provided by the runtime,
+                    // not compiled from Vole source. Declaring them without compiling
+                    // would cause a JIT "can't resolve symbol" relocation error.
+                    if method_def.external_binding.is_some() {
+                        continue;
+                    }
+                    // Get method name string from name_table (cross-interner safe)
+                    let method_name_str =
+                        query.last_segment(method_def.name_id).unwrap_or_default();
+                    if direct_method_name_strs.contains(&method_name_str) {
+                        continue; // Explicitly implemented, skip
+                    }
+                    // NameId for this method on the implementing type (registered by sema)
+                    let implementing_method_name_id = method_def.name_id;
+                    // Find the method as registered on the implementing type
+                    let implementing_method_id =
+                        query.find_method(type_def_id, implementing_method_name_id);
+                    if let Some(impl_method_id) = implementing_method_id {
+                        results.push((
+                            interface_tdef_id,
+                            impl_method_id,
+                            implementing_method_name_id,
+                        ));
                     }
                 }
             }
+            results
+        };
+
+        // Register each default method in the JIT function registry
+        for (_interface_tdef_id, semantic_method_id, method_name_id) in default_method_ids {
+            let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
+            let method_def = self.query().get_method(semantic_method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+            let display_name = self.func_registry.display(func_key);
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
+            method_infos.insert(method_name_id, MethodInfo { func_key });
+            self.register_method_func_key(type_def_id, method_name_id, func_key);
         }
         Ok(())
     }

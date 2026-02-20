@@ -144,6 +144,19 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Yielder pointer variable for generator body functions.
     /// When set, `ExprKind::Yield` compiles to `vole_generator_yield(yielder, value)`.
     pub yielder_var: Option<Variable>,
+    /// True when compiling an Iterable default method body (e.g. `__array_iterable_4_map`).
+    ///
+    /// In these compiled bodies, closure parameters (like `f` in `fn map(f)`) are owned by
+    /// the body — the outer caller transferred ownership without emitting rc_dec (due to
+    /// `used_array_iterable_path`). This means:
+    ///   - For pipeline methods (map/filter): do NOT emit rc_inc for borrowed closure params
+    ///     (the iterator gets the single reference and frees it on drop)
+    ///   - For terminal methods (any/all/find): DO emit rc_dec after the runtime call
+    ///     (the runtime borrows the closure but doesn't free it; codegen must)
+    ///
+    /// When false (regular user code), closure params are borrowed — the CALLER retains
+    /// ownership and will dec_ref them. Pipeline methods must rc_inc to get their own ref.
+    pub in_iterable_default_body: bool,
     /// Cached `iconst.i64 0` created in the entry block for void returns.
     /// Reused by every `void_value()` call to avoid emitting thousands of
     /// dead iconst instructions (previously ~18,951 per compilation).
@@ -215,6 +228,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             global_module_bindings: env.global_module_bindings,
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
+            in_iterable_default_body: false,
             cached_void_val,
             entry_block,
             iconst_cache,
@@ -250,6 +264,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Set the yielder variable for generator body compilation.
     pub fn with_yielder(mut self, yielder_var: Variable) -> Self {
         self.yielder_var = Some(yielder_var);
+        self
+    }
+
+    /// Mark this as an Iterable default method body compilation.
+    ///
+    /// When true, closure parameters are treated as owned (caller transferred ownership).
+    /// Pipeline methods skip rc_inc; terminal methods emit rc_dec after the runtime call.
+    pub fn with_iterable_default_body(mut self) -> Self {
+        self.in_iterable_default_body = true;
         self
     }
 
@@ -437,6 +460,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn method_func_keys(&self) -> &'ctx FxHashMap<(NameId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
+    }
+
+    /// Get array Iterable default method key map.
+    /// Keyed by (method_name_id, elem_type_id) for per-element-type lookup.
+    #[inline]
+    pub fn array_iterable_func_keys(&self) -> &'ctx FxHashMap<(NameId, TypeId), FunctionKey> {
+        &self.env.state.array_iterable_func_keys
     }
 
     /// Get monomorph cache from entity registry

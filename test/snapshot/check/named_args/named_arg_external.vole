@@ -1,0 +1,10 @@
+// check: E2113
+// Named arguments are not allowed for external (FFI) functions.
+
+external("std:test") {
+    func log(msg: string, level: i64)
+}
+
+func main() {
+    log(level: 1, msg: "hello")
+}

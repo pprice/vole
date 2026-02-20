@@ -48,6 +48,10 @@ pub enum ResolvedMethod {
         type_def_id: Option<TypeDefId>,
         method_name_id: NameId,
         interface_name: Symbol,
+        /// TypeDefId of the interface that defines this default method.
+        /// Used in codegen to identify Iterable default methods via WellKnownTypes,
+        /// avoiding cross-interner Symbol comparison failures.
+        interface_type_def_id: TypeDefId,
         type_name: Symbol,
         method_name: Symbol,
         func_type_id: TypeId,

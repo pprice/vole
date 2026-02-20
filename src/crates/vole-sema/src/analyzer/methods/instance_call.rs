@@ -1,4 +1,5 @@
 use super::super::*;
+use super::call_args::NamedArgContext;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
 
@@ -50,12 +51,46 @@ impl Analyzer {
             self.mark_lambda_has_side_effects();
         }
 
+        // Determine if any named args were used, and look up param info if so.
+        let has_named_args = method_call
+            .args
+            .iter()
+            .any(|a| matches!(a, CallArg::Named { .. }));
+        let method_named_info = if has_named_args {
+            resolved.method_id().map(|method_id| {
+                let registry = self.entity_registry();
+                let method_def = registry.get_method(method_id);
+                (method_def.required_params, method_def.param_names.clone())
+            })
+        } else {
+            None
+        };
+
         // Check argument count with defaults support
         self.check_method_arg_count(&resolved, &func_type, method_call, expr.span);
 
         // Check argument types (including map/flat_map transform handling)
         let map_inferred_return_type =
-            self.check_instance_method_args(method_call, object_type_id, &func_type, interner)?;
+            if let Some((required_params, param_names)) = method_named_info {
+                // Named args present: use named-arg-aware arg checking
+                let named_ctx = NamedArgContext {
+                    param_names: &param_names,
+                    is_external: resolved.external_info().is_some(),
+                    call_node_id: expr.id,
+                };
+                self.check_call_args_named_id(
+                    &method_call.args,
+                    &func_type.params_id,
+                    required_params,
+                    func_type.return_type_id,
+                    expr.span,
+                    named_ctx,
+                    interner,
+                )?;
+                None // No map transform inferred when using named args path
+            } else {
+                self.check_instance_method_args(method_call, object_type_id, &func_type, interner)?
+            };
 
         // Compute final return type (handling map transform override)
         let external_info = resolved.external_info().copied();

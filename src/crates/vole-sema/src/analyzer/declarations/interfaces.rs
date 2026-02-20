@@ -83,41 +83,61 @@ impl Analyzer {
         // We resolve types once to TypeId and reuse the data
         // Get void type before the loop to avoid borrowing db while type_ctx is borrowed
         let void_type = self.type_arena().void();
-        let method_data: Vec<(Symbol, String, Vec<ArenaTypeId>, ArenaTypeId, bool)> =
-            interface_decl
-                .methods
-                .iter()
-                .map(|m| {
-                    let name = m.name;
-                    let name_str = interner.resolve(m.name).to_string();
-                    let params_id: Vec<ArenaTypeId> = m
-                        .params
-                        .iter()
-                        .map(|p| resolve_type_to_id(&p.ty, &mut type_ctx))
-                        .collect();
-                    let return_type_id = m
-                        .return_type
-                        .as_ref()
-                        .map(|t| resolve_type_to_id(t, &mut type_ctx))
-                        .unwrap_or(void_type);
-                    let has_default = m.is_default
-                        || m.body.is_some()
-                        || default_external_methods.contains(&m.name);
-                    (name, name_str, params_id, return_type_id, has_default)
-                })
-                .collect();
+        type MethodCollected = (
+            Symbol,
+            String,
+            Vec<ArenaTypeId>,
+            ArenaTypeId,
+            bool,
+            Vec<String>,
+        );
+        let method_data: Vec<MethodCollected> = interface_decl
+            .methods
+            .iter()
+            .map(|m| {
+                let name = m.name;
+                let name_str = interner.resolve(m.name).to_string();
+                let params_id: Vec<ArenaTypeId> = m
+                    .params
+                    .iter()
+                    .map(|p| resolve_type_to_id(&p.ty, &mut type_ctx))
+                    .collect();
+                let return_type_id = m
+                    .return_type
+                    .as_ref()
+                    .map(|t| resolve_type_to_id(t, &mut type_ctx))
+                    .unwrap_or(void_type);
+                let has_default =
+                    m.is_default || m.body.is_some() || default_external_methods.contains(&m.name);
+                let param_names: Vec<String> = m
+                    .params
+                    .iter()
+                    .map(|p| interner.resolve(p.name).to_string())
+                    .collect();
+                (
+                    name,
+                    name_str,
+                    params_id,
+                    return_type_id,
+                    has_default,
+                    param_names,
+                )
+            })
+            .collect();
 
         let _interface_methods: Vec<crate::types::InterfaceMethodType> = method_data
             .iter()
-            .map(|(name, _, params_id, return_type_id, has_default)| {
-                let method_name_id = self.method_name_id(*name, interner);
-                crate::types::InterfaceMethodType {
-                    name: method_name_id,
-                    has_default: *has_default,
-                    params_id: params_id.iter().copied().collect(),
-                    return_type_id: *return_type_id,
-                }
-            })
+            .map(
+                |(name, _, params_id, return_type_id, has_default, _pnames)| {
+                    let method_name_id = self.method_name_id(*name, interner);
+                    crate::types::InterfaceMethodType {
+                        name: method_name_id,
+                        has_default: *has_default,
+                        params_id: params_id.iter().copied().collect(),
+                        return_type_id: *return_type_id,
+                    }
+                },
+            )
             .collect();
 
         // Emit errors for methods with bodies that aren't marked as default
@@ -205,7 +225,9 @@ impl Analyzer {
             .collect();
 
         // Register methods in EntityRegistry (with external bindings)
-        for (_, method_name_str, params_id, return_type_id, has_default) in &method_data {
+        for (_, method_name_str, params_id, return_type_id, has_default, param_names) in
+            &method_data
+        {
             let builtin_mod = self.name_table_mut().builtin_module();
             let method_name_id = self
                 .name_table_mut()
@@ -217,13 +239,14 @@ impl Analyzer {
                 .intern(&mut self.type_arena_mut());
             // Look up external binding for this method
             let external_binding = external_methods.get(method_name_str).copied();
-            self.entity_registry_mut().register_method_with_binding(
+            self.entity_registry_mut().register_method_with_names(
                 entity_type_id,
                 method_name_id,
                 full_method_name_id,
                 signature_id,
                 *has_default,
                 external_binding,
+                param_names.clone(),
             );
         }
 

@@ -92,13 +92,36 @@ impl Analyzer {
         // Step 2: Try to get TypeDefId and type_args from nominal type
         let (type_def_id, type_args_id) = self.extract_nominal_type_info(object_type_id);
 
-        // Step 3: Try primitives if no nominal type matched
+        // Step 3: Try primitives if no nominal type matched.
+        // Also handles Range (which is a builtin type with a TypeDefId) and
+        // arrays (handled in a sub-step below).
         if type_def_id.is_none()
-            && (object_type_id.is_primitive() || object_type_id == ArenaTypeId::HANDLE)
+            && (object_type_id.is_primitive()
+                || object_type_id == ArenaTypeId::HANDLE
+                || object_type_id == ArenaTypeId::RANGE)
             && let Some(resolved) =
                 self.resolve_method_on_primitive_type(object_type_id, method_name, interner)
         {
             return Some(resolved);
+        }
+
+        // Step 3.5: Try array types — arrays have a TypeDefId so Iterable default methods
+        // registered on the array type (via `extend [T] with Iterable<T>`) can be resolved.
+        if type_def_id.is_none() {
+            let array_elem = {
+                let arena = self.type_arena();
+                arena.unwrap_array(object_type_id)
+            };
+            if let Some(elem_type) = array_elem
+                && let Some(resolved) = self.resolve_method_on_array_type(
+                    object_type_id,
+                    elem_type,
+                    method_name,
+                    interner,
+                )
+            {
+                return Some(resolved);
+            }
         }
 
         // Step 4: Try nominal type resolution
@@ -230,6 +253,7 @@ impl Analyzer {
             ArenaTypeId::BOOL => Some(primitives.bool),
             ArenaTypeId::STRING => Some(primitives.string),
             ArenaTypeId::HANDLE => Some(primitives.handle),
+            ArenaTypeId::RANGE => Some(primitives.range),
             _ => None,
         }
     }
@@ -478,43 +502,249 @@ impl Analyzer {
             .find_method_binding_with_interface(tdef_id, method_name_id)
             .map(|(interface_id, binding)| (interface_id, binding.clone()));
 
-        let (interface_id, binding) = binding_result?;
-        let interface_name_id = self.entity_registry().get_type(interface_id).name_id;
-        let trait_name = self
-            .name_table()
-            .last_segment_str(interface_name_id)
-            .and_then(|s| interner.lookup(&s));
+        if let Some((interface_id, binding)) = binding_result {
+            let interface_name_id = self.entity_registry().get_type(interface_id).name_id;
+            let trait_name = self
+                .name_table()
+                .last_segment_str(interface_name_id)
+                .and_then(|s| interner.lookup(&s));
 
-        // Substitute Self placeholder with the concrete primitive type.
-        // Interface methods like `equals(other: Self)` need Self -> i64, etc.
-        let substituted_params: smallvec::SmallVec<[_; 4]> = binding
-            .func_type
-            .params_id
-            .iter()
-            .map(|&p| self.type_arena_mut().substitute_self(p, object_type_id))
-            .collect();
-        let substituted_ret = self
-            .type_arena_mut()
-            .substitute_self(binding.func_type.return_type_id, object_type_id);
+            // Substitute Self placeholder with the concrete primitive type.
+            // Interface methods like `equals(other: Self)` need Self -> i64, etc.
+            let substituted_params: smallvec::SmallVec<[_; 4]> = binding
+                .func_type
+                .params_id
+                .iter()
+                .map(|&p| self.type_arena_mut().substitute_self(p, object_type_id))
+                .collect();
+            let substituted_ret = self
+                .type_arena_mut()
+                .substitute_self(binding.func_type.return_type_id, object_type_id);
 
-        let func_type = FunctionType {
-            is_closure: binding.func_type.is_closure,
-            params_id: substituted_params,
-            return_type_id: substituted_ret,
-        };
-        let return_type_id = func_type.return_type_id;
-        let func_type_id = func_type.intern(&mut self.type_arena_mut());
+            let func_type = FunctionType {
+                is_closure: binding.func_type.is_closure,
+                params_id: substituted_params,
+                return_type_id: substituted_ret,
+            };
+            let return_type_id = func_type.return_type_id;
+            let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
-        Some(ResolvedMethod::Implemented {
-            type_def_id: Some(tdef_id),
+            return Some(ResolvedMethod::Implemented {
+                type_def_id: Some(tdef_id),
+                method_name_id,
+                trait_name,
+                func_type_id,
+                return_type_id,
+                is_builtin: binding.is_builtin,
+                external_info: binding.external_info,
+                concrete_return_hint: None,
+            });
+        }
+
+        // No direct method binding found — try default methods from implemented interfaces.
+        // This allows primitive types (i64, string, etc.) to inherit default methods like
+        // `lt`, `gt` from Comparable, or `map`, `filter` from Iterable<T>.
+        let ctx = MethodResolutionContext::new(
+            interner,
+            method_name,
             method_name_id,
-            trait_name,
-            func_type_id,
-            return_type_id,
-            is_builtin: binding.is_builtin,
-            external_info: binding.external_info,
-            concrete_return_hint: None,
-        })
+            object_type_id,
+            tdef_id,
+        );
+
+        // Build interface type-parameter substitution map for generic interface implementations.
+        // For example, `range` implements `Iterable<i64>`, so `T → i64`.
+        // We collect all (interface_id, type_args) pairs where the interface has type parameters.
+        let iface_subs: FxHashMap<NameId, ArenaTypeId> = {
+            let implemented = self.entity_registry().get_implemented_interfaces(tdef_id);
+            let mut subs = FxHashMap::default();
+            for iface_id in implemented {
+                let type_params = self.entity_registry().type_params(iface_id);
+                if type_params.is_empty() {
+                    continue;
+                }
+                let type_args = self
+                    .entity_registry()
+                    .get_implementation_type_args(tdef_id, iface_id)
+                    .to_vec();
+                // Pair up T_name_id → concrete_type_id
+                for (param_name_id, concrete_type_id) in
+                    type_params.into_iter().zip(type_args.into_iter())
+                {
+                    subs.insert(param_name_id, concrete_type_id);
+                }
+            }
+            subs
+        };
+
+        // Pre-create RuntimeIterator<elem_type> for any Iterable<T> elem types so codegen can
+        // find it. Without this, compile_array_iterable_default_methods won't see the elem type.
+        for &elem_type_id in iface_subs.values() {
+            self.type_arena_mut().runtime_iterator(elem_type_id);
+        }
+
+        // Resolve the method via entity registry or interface fallback.
+        // Also check direct methods registered on the type (e.g. default methods
+        // that were copied from interfaces onto the type via
+        // register_interface_default_methods_on_implementing_type).
+        let resolved = if let Some(method_id) =
+            self.find_method_via_entity_registry(tdef_id, method_name_id)
+            && let Some(r) = self.resolve_found_method(&ctx, &[], method_id)
+        {
+            r
+        } else {
+            self.resolve_default_method_from_interfaces(&ctx)?
+        };
+
+        // Apply interface type-parameter substitution (e.g., T → i64) to the resolved
+        // func_type and return_type so the call-site sees concrete types instead of TypeParam(T).
+        // This is needed for generic interfaces like Iterable<T> where T must become i64 for range.
+        if iface_subs.is_empty() {
+            return Some(resolved);
+        }
+        Some(self.substitute_generic_iface_params_in_resolved(resolved, &iface_subs))
+    }
+
+    /// Apply a type-parameter substitution map to a `ResolvedMethod`'s func_type and return_type.
+    ///
+    /// Used to concretise generic interface method signatures, e.g. substituting `T → i64` in
+    /// the resolved `map` signature for `range` implementing `Iterable<i64>`.
+    fn substitute_generic_iface_params_in_resolved(
+        &mut self,
+        resolved: ResolvedMethod,
+        subs: &FxHashMap<NameId, ArenaTypeId>,
+    ) -> ResolvedMethod {
+        match resolved {
+            ResolvedMethod::DefaultMethod {
+                type_def_id,
+                method_name_id: mni,
+                interface_name,
+                interface_type_def_id,
+                type_name,
+                method_name: mn,
+                func_type_id,
+                return_type_id,
+                external_info,
+            } => {
+                let new_func_type_id = self.type_arena_mut().substitute(func_type_id, subs);
+                let new_return_type_id = self.type_arena_mut().substitute(return_type_id, subs);
+                ResolvedMethod::DefaultMethod {
+                    type_def_id,
+                    method_name_id: mni,
+                    interface_name,
+                    interface_type_def_id,
+                    type_name,
+                    method_name: mn,
+                    func_type_id: new_func_type_id,
+                    return_type_id: new_return_type_id,
+                    external_info,
+                }
+            }
+            other => other,
+        }
+    }
+
+    /// Resolve a method on an array type `[elem_type]`.
+    ///
+    /// Arrays implement `Iterable<T>` via `extend [T] with Iterable<T>`, so Iterable default
+    /// methods (map, filter, count, etc.) are registered on the array TypeDef by sema. This
+    /// method finds those defaults and returns them with the concrete element type substituted
+    /// for the generic `T` parameter.
+    ///
+    /// Note: Direct array methods (iter, length, push) are still handled by
+    /// `resolve_method_via_implement_registry` (step 5) because they use the ImplementRegistry
+    /// builtin/external mechanism. This function only handles entity-registry-registered methods.
+    fn resolve_method_on_array_type(
+        &mut self,
+        object_type_id: ArenaTypeId,
+        elem_type: ArenaTypeId,
+        method_name: Symbol,
+        interner: &Interner,
+    ) -> Option<ResolvedMethod> {
+        // Look up the TypeDefId for the "array" type
+        let array_name_id = self.entity_registry().array_name_id()?;
+        let tdef_id = self.entity_registry().type_by_name(array_name_id)?;
+
+        let method_name_id = self.method_name_id(method_name, interner);
+
+        // Guard: only handle methods registered on the array TypeDef (Iterable defaults).
+        // Direct builtin methods (iter, length, push) are not registered here.
+        self.entity_registry_mut()
+            .find_method_on_type(tdef_id, method_name_id)?;
+
+        let ctx = MethodResolutionContext::new(
+            interner,
+            method_name,
+            method_name_id,
+            object_type_id,
+            tdef_id,
+        );
+
+        // Pre-create RuntimeIterator<elem_type> so codegen can look it up.
+        self.type_arena_mut().runtime_iterator(elem_type);
+
+        // Resolve via the interface fallback — same pattern used by primitive types (string,
+        // range). This finds the Iterable default method, substitutes Self → object_type_id,
+        // and returns DefaultMethod { interface_name: "Iterable", type_name: "array", ... }.
+        let resolved = self.resolve_default_method_from_interfaces(&ctx)?;
+
+        // Additionally substitute T → elem_type in the resolved signature.
+        // The Iterable<T> implementation on array stores T as a TypeParam in its type_args.
+        // We need to replace that TypeParam with the concrete element type (e.g., TypeParam(T)
+        // → i64 for [i64]).
+        let t_nameid = {
+            let implemented = self.entity_registry().get_implemented_interfaces(tdef_id);
+            let iterable_tdef = implemented.first().copied()?;
+            let type_args = self
+                .entity_registry()
+                .get_implementation_type_args(tdef_id, iterable_tdef)
+                .to_vec();
+            if type_args.is_empty() {
+                return Some(resolved);
+            }
+            // Unwrap TypeParam(T_nameid) from the first type arg
+            self.type_arena().unwrap_type_param(type_args[0])?
+        };
+
+        // Build T → elem_type substitution map
+        let mut subs = FxHashMap::default();
+        subs.insert(t_nameid, elem_type);
+
+        // Apply substitution to the func_type and return_type in the resolved method
+        match resolved {
+            ResolvedMethod::DefaultMethod {
+                type_def_id,
+                method_name_id: mni,
+                interface_name,
+                interface_type_def_id,
+                type_name,
+                method_name: mn,
+                func_type_id,
+                return_type_id,
+                external_info,
+            } => {
+                let new_func_type_id = {
+                    let mut arena = self.type_arena_mut();
+                    arena.substitute(func_type_id, &subs)
+                };
+                let new_return_type_id = {
+                    let mut arena = self.type_arena_mut();
+                    arena.substitute(return_type_id, &subs)
+                };
+                Some(ResolvedMethod::DefaultMethod {
+                    type_def_id,
+                    method_name_id: mni,
+                    interface_name,
+                    interface_type_def_id,
+                    type_name,
+                    method_name: mn,
+                    func_type_id: new_func_type_id,
+                    return_type_id: new_return_type_id,
+                    external_info,
+                })
+            }
+            other => Some(other),
+        }
     }
 
     /// Resolve a method on a nominal type (class or interface)
@@ -535,22 +765,65 @@ impl Analyzer {
             type_def_id,
         );
 
+        // Build interface type-parameter substitution map so that generic interface
+        // implementations (e.g., string implements Iterable<string>) resolve with concrete
+        // types in the returned method signature instead of abstract TypeParam(T).
+        // This must be computed before any early returns so we can apply it everywhere.
+        let iface_subs: FxHashMap<NameId, ArenaTypeId> = {
+            let implemented = self
+                .entity_registry()
+                .get_implemented_interfaces(type_def_id);
+            let mut subs = FxHashMap::default();
+            for iface_id in implemented {
+                let type_params = self.entity_registry().type_params(iface_id);
+                if type_params.is_empty() {
+                    continue;
+                }
+                let type_args = self
+                    .entity_registry()
+                    .get_implementation_type_args(type_def_id, iface_id)
+                    .to_vec();
+                for (param_name_id, concrete_type_id) in
+                    type_params.into_iter().zip(type_args.into_iter())
+                {
+                    subs.insert(param_name_id, concrete_type_id);
+                }
+            }
+            subs
+        };
+
+        // Pre-create RuntimeIterator<elem_type> for any Iterable<T> elem types so codegen can
+        // find it when converting Iterator<T> return types to RuntimeIterator<T>.
+        for &elem_type_id in iface_subs.values() {
+            self.type_arena_mut().runtime_iterator(elem_type_id);
+        }
+
+        // Helper to apply iface_subs to a resolved method (if non-empty).
+        let apply_subs = |this: &mut Analyzer, resolved: ResolvedMethod| -> ResolvedMethod {
+            if iface_subs.is_empty() {
+                resolved
+            } else {
+                this.substitute_generic_iface_params_in_resolved(resolved, &iface_subs)
+            }
+        };
+
         // Try to find the method via EntityRegistry
         if let Some(method_id) = self.find_method_via_entity_registry(type_def_id, method_name_id)
             && let Some(resolved) = self.resolve_found_method(&ctx, type_args_id, method_id)
         {
-            return Some(resolved);
+            return Some(apply_subs(self, resolved));
         }
 
         // Check interface method bindings (for default methods on classes/records)
         if let Some(resolved) =
             self.resolve_method_from_binding(type_def_id, method_name_id, interner)
         {
-            return Some(resolved);
+            return Some(apply_subs(self, resolved));
         }
 
-        // Check default methods from implemented interfaces
-        self.resolve_default_method_from_interfaces(&ctx)
+        // Check default methods from implemented interfaces.
+        let resolved = self.resolve_default_method_from_interfaces(&ctx)?;
+        Some(apply_subs(self, resolved))
     }
 
     /// Check if a nominal type has a method that exists but is not visible from the current module.
@@ -635,6 +908,27 @@ impl Analyzer {
             }
         };
         let func_type = self.apply_substitutions_id(&method_sig, &substitutions);
+
+        // Also substitute Self placeholder with the concrete object type.
+        // Default interface methods copied onto implementing types keep Self in their
+        // signature (e.g., `lt(other: Self)` on Comparable). When resolved through a
+        // concrete type (e.g., Foo), Self must become Foo so argument type-checking passes.
+        let func_type = {
+            let substituted_params: smallvec::SmallVec<[_; 4]> = func_type
+                .params_id
+                .iter()
+                .map(|&p| self.type_arena_mut().substitute_self(p, ctx.object_type_id))
+                .collect();
+            let substituted_ret = self
+                .type_arena_mut()
+                .substitute_self(func_type.return_type_id, ctx.object_type_id);
+            FunctionType {
+                is_closure: func_type.is_closure,
+                params_id: substituted_params,
+                return_type_id: substituted_ret,
+            }
+        };
+
         let return_type_id = func_type.return_type_id;
         let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
@@ -685,10 +979,6 @@ impl Analyzer {
                 .map(|(_, _, kind)| kind)
         };
         let is_interface_type = nominal_kind == Some(NominalKind::Interface);
-        let is_class_or_struct = matches!(
-            nominal_kind,
-            Some(NominalKind::Class) | Some(NominalKind::Struct)
-        );
 
         // For external default methods on CONCRETE types (not interface types)
         if defining_info.method_has_default
@@ -699,9 +989,13 @@ impl Analyzer {
             return Some(resolved);
         }
 
-        // For non-external default methods on concrete types (Class/Record)
+        // For non-external default methods on concrete types (Class/Record/primitive).
+        // Use !is_interface_type so that primitives like string/range, which are not
+        // Class or Struct but still have default methods from implemented interfaces
+        // (e.g., Iterable<string> default methods), are resolved as DefaultMethod
+        // rather than vtable InterfaceMethod dispatch.
         if defining_info.method_has_default
-            && is_class_or_struct
+            && !is_interface_type
             && let Some(resolved) =
                 self.resolve_default_method(ctx, signature, defining_info, false)
         {
@@ -743,6 +1037,7 @@ impl Analyzer {
             type_def_id: Some(ctx.type_def_id),
             method_name_id: ctx.method_name_id,
             interface_name: interface_sym,
+            interface_type_def_id: defining_info.method_defining_type_id,
             type_name: type_sym,
             method_name: ctx.method_name,
             func_type_id: signature.func_type_id,
@@ -802,6 +1097,15 @@ impl Analyzer {
             .get_implemented_interfaces(ctx.type_def_id);
 
         for interface_id in interface_ids {
+            // Skip entries where the "interface" is the type itself.
+            // This can happen when `implement T { external(...) }` blocks
+            // (without a `with InterfaceName` clause) call add_method_binding,
+            // which creates a spurious implements entry with interface == type.
+            // Such entries don't represent real interface implementations and
+            // should not be used for default method resolution.
+            if interface_id == ctx.type_def_id {
+                continue;
+            }
             if let Some(resolved) =
                 self.find_default_method_in_interface(ctx, interface_id, type_sym, method_name_str)
             {
@@ -856,18 +1160,33 @@ impl Analyzer {
                 .and_then(|s| ctx.interner.lookup(&s))
                 .unwrap_or(Symbol::UNKNOWN);
 
-            let func_type = {
+            // Get raw params/ret before substitution
+            let (raw_params, raw_ret, is_closure) = {
                 let arena = self.type_arena();
                 let Some((params, ret, is_closure)) = arena.unwrap_function(method_signature_id)
                 else {
                     // Invalid signature - error already reported
                     return None;
                 };
-                FunctionType {
-                    is_closure,
-                    params_id: params.clone(),
-                    return_type_id: ret,
-                }
+                (params.clone(), ret, is_closure)
+            };
+
+            // Substitute Self placeholder with the concrete object type so that
+            // the resolved signature matches the actual argument types at the call site.
+            // Without this, a call like `a.lt(b)` where `a: Foo` would see the param
+            // type as `SelfType` and reject the `Foo` argument with a type mismatch.
+            let substituted_params: smallvec::SmallVec<[_; 4]> = raw_params
+                .iter()
+                .map(|&p| self.type_arena_mut().substitute_self(p, ctx.object_type_id))
+                .collect();
+            let substituted_ret = self
+                .type_arena_mut()
+                .substitute_self(raw_ret, ctx.object_type_id);
+
+            let func_type = FunctionType {
+                is_closure,
+                params_id: substituted_params,
+                return_type_id: substituted_ret,
             };
             let return_type_id = func_type.return_type_id;
             let func_type_id = func_type.intern(&mut self.type_arena_mut());
@@ -876,6 +1195,7 @@ impl Analyzer {
                 type_def_id: Some(ctx.type_def_id),
                 method_name_id: ctx.method_name_id,
                 interface_name,
+                interface_type_def_id: interface_id,
                 type_name: type_sym,
                 method_name: ctx.method_name,
                 func_type_id,

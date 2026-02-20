@@ -89,6 +89,15 @@ pub struct ExpressionData {
     pub(crate) lambda_analysis: FxHashMap<NodeId, LambdaAnalysis>,
     /// Resolved intrinsic keys for compiler intrinsic calls.
     pub(crate) intrinsic_keys: FxHashMap<NodeId, String>,
+    /// Resolved call arg order for calls with named arguments.
+    ///
+    /// Maps call expression NodeId to a vec of length `total_params`.
+    /// `resolved_call_args[i]` = Some(j) means call.args[j] fills param slot i.
+    /// `resolved_call_args[i]` = None means the slot uses its default value.
+    ///
+    /// Only present when named arguments were used (or arg reordering was needed).
+    /// Absent for purely positional calls (codegen uses call.args directly).
+    pub(crate) resolved_call_args: FxHashMap<NodeId, Vec<Option<usize>>>,
 }
 
 impl ExpressionData {
@@ -119,6 +128,7 @@ impl ExpressionData {
         self.declared_var_types.extend(other.declared_var_types);
         self.lambda_analysis.extend(other.lambda_analysis);
         self.intrinsic_keys.extend(other.intrinsic_keys);
+        self.resolved_call_args.extend(other.resolved_call_args);
     }
 
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
@@ -326,5 +336,18 @@ impl ExpressionData {
     /// Look up the intrinsic key for a call-site expression.
     pub fn get_intrinsic_key(&self, node: NodeId) -> Option<&str> {
         self.intrinsic_keys.get(&node).map(|s| s.as_str())
+    }
+
+    /// Get the resolved call arg mapping for a call with named arguments.
+    ///
+    /// Returns a slice where `slice[i]` = Some(j) means call.args[j] fills param slot i,
+    /// and None means the slot uses its default value.
+    pub fn get_resolved_call_args(&self, node: NodeId) -> Option<&Vec<Option<usize>>> {
+        self.resolved_call_args.get(&node)
+    }
+
+    /// Set the resolved call arg mapping for a call with named arguments.
+    pub fn set_resolved_call_args(&mut self, node: NodeId, mapping: Vec<Option<usize>>) {
+        self.resolved_call_args.insert(node, mapping);
     }
 }

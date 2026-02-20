@@ -46,6 +46,25 @@ impl EntityRegistry {
             .register(self)
     }
 
+    /// Register a new method with param names for named argument support.
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_method_with_names(
+        &mut self,
+        defining_type: TypeDefId,
+        name_id: NameId,
+        full_name_id: NameId,
+        signature_id: TypeId,
+        has_default: bool,
+        external_binding: Option<ExternalMethodInfo>,
+        param_names: Vec<String>,
+    ) -> MethodId {
+        MethodDefBuilder::new(defining_type, name_id, full_name_id, signature_id)
+            .has_default(has_default)
+            .external_binding(external_binding)
+            .param_names(param_names)
+            .register(self)
+    }
+
     /// Get all static methods defined directly on a type
     pub fn static_methods_on_type(
         &self,
@@ -178,6 +197,7 @@ impl EntityRegistry {
                 interface_method.required_params,
                 interface_method.param_defaults.clone(),
             )
+            .param_names(interface_method.param_names.clone())
             .register(self);
         }
     }

@@ -1,0 +1,19 @@
+[stdout]
+
+[stderr]
+  × [E2115]: unknown parameter name 'typo'
+   ╭─[<path>/unknown_param_name.vole:7:11]
+ 6 │ func main() {
+ 7 │     greet(typo: "World")
+   ·           ──────┬──────
+   ·                 ╰── no parameter named 'typo'
+ 8 │ }
+   ╰────
+  × [E2117]: missing required argument 'name'
+   ╭─[<path>/unknown_param_name.vole:7:5]
+ 6 │ func main() {
+ 7 │     greet(typo: "World")
+   ·     ──────────┬─────────
+   ·               ╰── call is missing argument 'name'
+ 8 │ }
+   ╰────

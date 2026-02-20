@@ -128,7 +128,7 @@ impl Analyzer {
 
     pub(super) fn register_primitive_name_ids(&mut self, interner: &Interner) {
         // Collect all name_ids while holding name_table borrow
-        let (primitive_names, array_name) = {
+        let (primitive_names, array_name, builtin_module) = {
             let builtin_module = self.name_table_mut().builtin_module();
             let mut name_table = self.name_table_mut();
             let mut namer = Namer::new(&mut name_table, interner);
@@ -163,7 +163,7 @@ impl Analyzer {
             .collect();
 
             let array_name = namer.intern_raw(builtin_module, &["array"]);
-            (primitives, array_name)
+            (primitives, array_name, builtin_module)
         };
 
         // Now register with entity_registry after dropping name_table borrow
@@ -171,6 +171,9 @@ impl Analyzer {
             self.entity_registry_mut()
                 .register_primitive_name(prim, name_id);
         }
-        self.entity_registry_mut().register_array_name(array_name);
+        // Pass builtin_module so register_array_name can also create a TypeDefId for array.
+        // This enables `extend [T] with Iterable<T>` to register interface default methods.
+        self.entity_registry_mut()
+            .register_array_name(array_name, builtin_module);
     }
 }

@@ -148,6 +148,9 @@ pub struct MethodDef {
     /// Index corresponds to parameter index.
     /// Required params have None, defaulted params have Some.
     pub param_defaults: Vec<Option<Box<Expr>>>,
+    /// Parameter names in declaration order (excluding `self`).
+    /// Used for named argument resolution at call sites.
+    pub param_names: Vec<String>,
     /// If Some, this method is only visible within the specified module (file-scoped).
     /// Used for `extend Type { }` ad-hoc extension methods, which are not globally visible.
     /// None means the method is globally visible (normal methods and interface implementations).
@@ -194,6 +197,12 @@ pub struct FunctionDef {
     /// Index corresponds to parameter index.
     /// Required params have None, defaulted params have Some.
     pub param_defaults: Vec<Option<Box<Expr>>>,
+    /// Parameter names in declaration order.
+    /// Used for named argument resolution at call sites.
+    pub param_names: Vec<String>,
+    /// Whether this function is an external (FFI) function.
+    /// Named arguments are not supported for external functions.
+    pub is_external: bool,
 }
 
 /// A global variable definition (module-level let/var)

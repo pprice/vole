@@ -1,0 +1,8 @@
+// check: E2114
+// Positional arguments must come before named arguments.
+
+func greet(greeting: string, name: string) -> string => "{greeting}, {name}!"
+
+func main() {
+    greet(greeting: "Hello", "World")
+}

@@ -1,8 +1,8 @@
 // stdlib/prelude/iterators.vole
 //
-// Iterator factory functions
+// Iterator factory functions and Iterable implementations for built-in types.
 
-let { Iterator } = import "./traits"
+let { Iterator, Iterable } = import "./traits"
 
 external("vole:std:runtime") {
     // repeat(value) - creates an infinite iterator yielding the same value
@@ -25,4 +25,24 @@ external("vole:std:runtime") {
     //   from_fn(() => { n = n + 1; if n <= 3 { return n } else { return nil } }).collect()
     //   => [1, 2, 3]
     func "iter_from_fn" as from_fn(generator: () -> i64?) -> Iterator<i64>
+}
+
+// Register range as implementing Iterable<i64> so that Iterable default methods
+// (map, filter, count, collect, etc.) are available directly on range values.
+// Example: (0..10).count()  =>  10
+//          (1..5).collect() =>  [1, 2, 3, 4]
+extend range with Iterable<i64> {
+    external("vole:std:runtime") {
+        func "range_iter" as iter() -> Iterator<i64>
+    }
+}
+
+// Register [T] as implementing Iterable<T> so that Iterable default methods
+// (map, filter, count, collect, etc.) are available directly on array values.
+// Example: [1, 2, 3].count()        =>  3
+//          [1, 2, 3].map((x) => x*2) =>  [2, 4, 6]
+extend [T] with Iterable<T> {
+    external("vole:std:runtime") {
+        func "array_iter" as iter() -> Iterator<T>
+    }
 }

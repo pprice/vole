@@ -8,7 +8,7 @@ use vole_identity::{FunctionId, ModuleId, NameId};
 use super::EntityRegistry;
 
 impl EntityRegistry {
-    /// Register a new free function
+    /// Register a new free function (all params required, no names, not external)
     pub fn register_function(
         &mut self,
         name_id: NameId,
@@ -24,10 +24,13 @@ impl EntityRegistry {
             signature,
             total_params, // All params required
             vec![None; total_params],
+            vec![String::new(); total_params],
+            false,
         )
     }
 
-    /// Register a new free function with default expressions
+    /// Register a new free function with default expressions and param names
+    #[allow(clippy::too_many_arguments)]
     pub fn register_function_full(
         &mut self,
         name_id: NameId,
@@ -36,6 +39,8 @@ impl EntityRegistry {
         signature: FunctionType,
         required_params: usize,
         param_defaults: Vec<Option<Box<Expr>>>,
+        param_names: Vec<String>,
+        is_external: bool,
     ) -> FunctionId {
         let id = FunctionId::new(self.function_defs.len() as u32);
         self.function_defs.push(FunctionDef {
@@ -47,6 +52,8 @@ impl EntityRegistry {
             required_params,
             generic_info: None,
             param_defaults,
+            param_names,
+            is_external,
         });
         self.function_by_name.insert(full_name_id, id);
         // Also register under name_id if different (for renamed imports like `sqrt as squareRoot`)

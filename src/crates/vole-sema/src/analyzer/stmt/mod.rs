@@ -250,9 +250,14 @@ impl Analyzer {
         // Track lambda variables for default parameter support
         if let ExprKind::Lambda(lambda) = &init_expr.kind {
             let required_params = Self::lambda_required_params(lambda);
+            let param_names: Vec<String> = lambda
+                .params
+                .iter()
+                .map(|p| interner.resolve(p.name).to_string())
+                .collect();
             self.lambda
                 .variables
-                .insert(let_stmt.name, (init_expr.id, required_params));
+                .insert(let_stmt.name, (init_expr.id, required_params, param_names));
         } else {
             // Remove stale entry if this variable shadows a lambda
             // from a different scope (e.g. same-named local in another function)

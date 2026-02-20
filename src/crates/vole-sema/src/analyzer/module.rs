@@ -612,6 +612,8 @@ impl Analyzer {
             is_check_results: sub_analyzer.results.is_check_results,
             declared_var_types: sub_analyzer.results.declared_var_types,
             lambda_analysis: sub_analyzer.lambda.analysis,
+            intrinsic_keys: sub_analyzer.results.intrinsic_keys,
+            resolved_call_args: sub_analyzer.results.resolved_call_args,
             ..Default::default()
         };
         self.ctx.merged_expr_data.borrow_mut().merge(module_data);
@@ -699,6 +701,11 @@ impl Analyzer {
         exports.insert(name_id, func_type_id);
 
         // Register in EntityRegistry so module destructuring can find generic info
+        let param_names: Vec<String> = func
+            .params
+            .iter()
+            .map(|p| module_interner.resolve(p.name).to_string())
+            .collect();
         let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
         let func_id = self.entity_registry_mut().register_function_full(
             name_id,
@@ -707,6 +714,8 @@ impl Analyzer {
             signature,
             func.params.len(),
             vec![],
+            param_names,
+            true, // generic externals are external
         );
         self.entity_registry_mut().set_function_generic_info(
             func_id,
@@ -981,6 +990,20 @@ impl Analyzer {
         self.lambda
             .analysis
             .extend(sub.lambda.analysis.iter().map(|(&k, v)| (k, v.clone())));
+        // Merge resolved_call_args
+        self.results.resolved_call_args.extend(
+            sub.results
+                .resolved_call_args
+                .iter()
+                .map(|(&k, v)| (k, v.clone())),
+        );
+        // Merge intrinsic_keys
+        self.results.intrinsic_keys.extend(
+            sub.results
+                .intrinsic_keys
+                .iter()
+                .map(|(k, v)| (*k, v.clone())),
+        );
         // Merge errors and warnings
         self.diagnostics
             .errors

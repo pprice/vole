@@ -37,6 +37,7 @@ pub struct MethodDefBuilder {
     method_type_params: Vec<TypeParamInfo>,
     required_params: usize,
     param_defaults: Vec<Option<Box<Expr>>>,
+    param_names: Vec<String>,
     defining_module: Option<ModuleId>,
 }
 
@@ -61,6 +62,7 @@ impl MethodDefBuilder {
             method_type_params: Vec::new(),
             required_params: 0,
             param_defaults: Vec::new(),
+            param_names: Vec::new(),
             defining_module: None,
         }
     }
@@ -100,6 +102,12 @@ impl MethodDefBuilder {
         self
     }
 
+    /// Set parameter names for named argument resolution.
+    pub fn param_names(mut self, names: Vec<String>) -> Self {
+        self.param_names = names;
+        self
+    }
+
     /// Restrict this method to a specific module (file-scoped extension method).
     ///
     /// When set, this method is only visible to callers in the given module.
@@ -126,6 +134,7 @@ impl MethodDefBuilder {
             method_type_params: self.method_type_params,
             required_params: self.required_params,
             param_defaults: self.param_defaults,
+            param_names: self.param_names,
             defining_module: self.defining_module,
         });
         registry.method_by_full_name.insert(self.full_name_id, id);

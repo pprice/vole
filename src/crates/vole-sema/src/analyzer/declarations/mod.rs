@@ -22,6 +22,7 @@ struct FuncRegistrationData {
     name_id: NameId,
     required_params: usize,
     param_defaults: Vec<Option<Box<Expr>>>,
+    param_names: Vec<String>,
 }
 
 /// Extract the base interface name from a TypeExpr.

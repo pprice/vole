@@ -28,7 +28,7 @@ use crate::entity_defs::{FieldDef, FunctionDef, GlobalDef, MethodDef, TypeDef, T
 use crate::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
 use crate::implement_registry::PrimitiveTypeId;
 use crate::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
-use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, NameId, TypeDefId};
+use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, TypeDefId};
 
 pub use fields::{FieldSubstitutionCache, FieldSubstitutionKey};
 
@@ -406,7 +406,7 @@ impl EntityRegistry {
     pub fn register_alias(
         &mut self,
         name_id: NameId,
-        module: vole_identity::ModuleId,
+        module: ModuleId,
         aliased_type: ArenaTypeId,
     ) -> TypeDefId {
         // Register the type with kind Alias
@@ -619,10 +619,15 @@ impl EntityRegistry {
         self.primitive_names.entry(prim).or_insert(name_id);
     }
 
-    /// Register the NameId for the array type
-    pub fn register_array_name(&mut self, name_id: NameId) {
+    /// Register the NameId for the array type and create its TypeDefId.
+    ///
+    /// Arrays need a TypeDefId so that `extend [T] with Iterable<T>` can register
+    /// Iterable default methods (map, filter, count, etc.) on the array type via
+    /// EntityRegistry, enabling method resolution for array Iterable calls.
+    pub fn register_array_name(&mut self, name_id: NameId, builtin_module: ModuleId) {
         if self.array_name.is_none() {
             self.array_name = Some(name_id);
+            self.register_type(name_id, TypeDefKind::Primitive, builtin_module);
         }
     }
 

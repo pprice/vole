@@ -1,0 +1,56 @@
+// Named call arguments
+
+// Basic named arg call (same order as declaration)
+func greet(name: string, greeting: string) -> string => "{greeting}, {name}!"
+
+// Named args with defaults
+func connect(host: string, port: i64 = 8080, timeout: i64 = 30) -> string => "{host}:{port} (timeout={timeout})"
+
+// Multiple params with different types
+func describe(label: string, value: i64, verbose: bool = false) -> string => when { verbose => "{label}={value} (verbose)", _ => "{label}={value}" }
+
+// Single required param
+func double(x: i64) -> i64 => x * 2
+
+tests {
+    test "all args positional" {
+        assert(greet("World", "Hello") == "Hello, World!")
+    }
+
+    test "all args named in declaration order" {
+        assert(greet(name: "World", greeting: "Hello") == "Hello, World!")
+    }
+
+    test "all args named in different order" {
+        assert(greet(greeting: "Hi", name: "Alice") == "Hi, Alice!")
+    }
+
+    test "positional then named" {
+        assert(greet("Bob", greeting: "Hey") == "Hey, Bob!")
+    }
+
+    test "named args with defaults - skip middle param" {
+        // Provide host and timeout, skip port (use default 8080)
+        assert(connect(host: "localhost", timeout: 60) == "localhost:8080 (timeout=60)")
+    }
+
+    test "named args with defaults - all positional" {
+        assert(connect("example.com", 443, 10) == "example.com:443 (timeout=10)")
+    }
+
+    test "named args with defaults - first positional then named" {
+        assert(connect("db.local", timeout: 5) == "db.local:8080 (timeout=5)")
+    }
+
+    test "named args with defaults - only required" {
+        assert(connect(host: "proxy") == "proxy:8080 (timeout=30)")
+    }
+
+    test "named arg for last optional param only" {
+        assert(describe("count", 42, verbose: true) == "count=42 (verbose)")
+    }
+
+    test "single positional arg" {
+        assert(double(x: 21) == 42)
+    }
+}

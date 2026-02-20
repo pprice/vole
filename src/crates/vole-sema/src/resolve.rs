@@ -259,6 +259,12 @@ fn resolve_named_type_to_id(sym: Symbol, ctx: &mut TypeResolutionContext<'_>) ->
     if name_str == "Done" {
         return TypeId::DONE;
     }
+    // `range` is not a lexer keyword (unlike `string`, `i64`, etc.) so it is parsed as a
+    // Named identifier rather than a Primitive AST node. Handle it explicitly here so that
+    // `extend range with Iterable<i64>` can resolve the target type correctly.
+    if name_str == "range" {
+        return TypeId::RANGE;
+    }
 
     // Check if it's a type parameter in scope first
     if let Some(type_params) = ctx.type_params

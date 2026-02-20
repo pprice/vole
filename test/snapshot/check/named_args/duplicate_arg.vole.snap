@@ -1,0 +1,19 @@
+[stdout]
+
+[stderr]
+  × [E2116]: argument 'name' provided both positionally and by name
+   ╭─[<path>/duplicate_arg.vole:7:20]
+ 6 │ func main() {
+ 7 │     greet("Alice", name: "Bob")
+   ·                    ─────┬─────
+   ·                         ╰── named argument here
+ 8 │ }
+   ╰────
+  × [E2117]: missing required argument 'greeting'
+   ╭─[<path>/duplicate_arg.vole:7:5]
+ 6 │ func main() {
+ 7 │     greet("Alice", name: "Bob")
+   ·     ─────────────┬─────────────
+   ·                  ╰── call is missing argument 'greeting'
+ 8 │ }
+   ╰────

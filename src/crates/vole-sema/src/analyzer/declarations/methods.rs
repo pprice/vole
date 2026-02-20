@@ -263,6 +263,10 @@ impl Analyzer {
             .iter()
             .map(|p| p.default_value.clone())
             .collect();
+        let param_names: Vec<String> = non_self_params
+            .iter()
+            .map(|p| interner.resolve(p.name).to_string())
+            .collect();
 
         MethodDefBuilder::new(
             entity_type_id,
@@ -272,6 +276,7 @@ impl Analyzer {
         )
         .has_default(false) // instance methods don't have defaults (implementation defaults)
         .param_defaults(required_params, param_defaults)
+        .param_names(param_names)
         .register(&mut self.entity_registry_mut());
     }
 
@@ -328,6 +333,11 @@ impl Analyzer {
             .iter()
             .map(|p| p.default_value.clone())
             .collect();
+        let param_names: Vec<String> = method
+            .params
+            .iter()
+            .map(|p| interner.resolve(p.name).to_string())
+            .collect();
 
         MethodDefBuilder::new(
             entity_type_id,
@@ -339,6 +349,7 @@ impl Analyzer {
         .has_default(has_default)
         .method_type_params(method_type_params)
         .param_defaults(required_params, param_defaults)
+        .param_names(param_names)
         .register(&mut self.entity_registry_mut());
     }
 

@@ -1,0 +1,8 @@
+// check: E2116
+// A parameter is provided both positionally and as a named argument.
+
+func greet(name: string, greeting: string) -> string => "{greeting}, {name}!"
+
+func main() {
+    greet("Alice", name: "Bob")
+}

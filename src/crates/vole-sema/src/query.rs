@@ -257,6 +257,65 @@ impl<'a> ProgramQuery<'a> {
         self.registry.get_implemented_interfaces(type_id)
     }
 
+    /// Get the type parameters (NameIds) for a generic interface or type.
+    /// Returns the list of type param NameIds for the type definition (e.g., [T] for Iterable<T>).
+    #[must_use]
+    pub fn interface_type_params(&self, type_id: TypeDefId) -> Vec<NameId> {
+        self.registry.type_params(type_id)
+    }
+
+    /// Get the concrete type arguments for a specific interface implementation.
+    /// E.g., for `extend range with Iterable<i64>`, returns `[TypeId::I64]`.
+    /// Returns an empty slice if no matching implementation is found.
+    #[must_use]
+    pub fn implementation_type_args(
+        &self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> &'a [TypeId] {
+        self.registry
+            .get_implementation_type_args(type_id, interface_id)
+    }
+
+    /// Build a type-parameter substitution map for a type's implementation of an interface.
+    ///
+    /// For `extend range with Iterable<i64>`:
+    ///   - `interface_id` is Iterable's TypeDefId
+    ///   - returns `{ T_name_id -> i64 }`
+    ///
+    /// Returns an empty map if the implementation has no type arguments (non-generic interface).
+    #[must_use]
+    pub fn interface_impl_type_param_subs(
+        &self,
+        implementing_type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> FxHashMap<NameId, TypeId> {
+        let type_params = self.registry.type_params(interface_id);
+        let type_args = self
+            .registry
+            .get_implementation_type_args(implementing_type_id, interface_id);
+        type_params
+            .into_iter()
+            .zip(type_args.iter().copied())
+            .collect()
+    }
+
+    /// Substitute type parameters in a TypeId using a substitution map.
+    ///
+    /// This is the read-only variant of `TypeArena::substitute`. Returns `Some(type_id)` if
+    /// all substituted types already exist in the arena, `None` if any intermediate
+    /// type would need to be created (which would require mutable arena access).
+    ///
+    /// In practice, all substituted types should already exist for concrete interface implementations.
+    #[must_use]
+    pub fn lookup_substitute(
+        &self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<TypeId> {
+        self.type_arena.lookup_substitute(ty, subs)
+    }
+
     /// Check if a type is a functional interface (single abstract method).
     /// Returns the single method's ID if it's a functional interface.
     #[must_use]
@@ -355,6 +414,12 @@ impl<'a> ProgramQuery<'a> {
     /// Get a method definition by ID
     pub fn get_method(&self, method_id: MethodId) -> &'a MethodDef {
         self.registry.get_method(method_id)
+    }
+
+    /// Get all method IDs declared directly on a type (not inherited).
+    /// Used for enumerating interface methods during codegen default method registration.
+    pub fn type_methods(&self, type_id: TypeDefId) -> Vec<MethodId> {
+        self.registry.methods_on_type(type_id).collect()
     }
 
     /// Get the display name of a method

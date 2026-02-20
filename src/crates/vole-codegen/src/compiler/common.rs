@@ -49,6 +49,9 @@ pub struct FunctionCompileConfig<'a> {
     pub skip_block_params: usize,
     /// What to return when the block doesn't terminate explicitly
     pub default_return: DefaultReturn,
+    /// True when compiling an Iterable default method body.
+    /// Affects RC lifecycle for closure parameters passed to pipeline/terminal methods.
+    pub in_iterable_default_body: bool,
 }
 
 impl<'a> FunctionCompileConfig<'a> {
@@ -67,12 +70,19 @@ impl<'a> FunctionCompileConfig<'a> {
             return_type_id,
             skip_block_params: 0,
             default_return: DefaultReturn::Empty,
+            in_iterable_default_body: false,
         }
     }
 
     /// Set skip_block_params to 1 (for sret hidden parameter).
     pub fn with_sret(mut self) -> Self {
         self.skip_block_params = 1;
+        self
+    }
+
+    /// Mark this as an Iterable default method body compilation.
+    pub fn with_iterable_default_body(mut self) -> Self {
+        self.in_iterable_default_body = true;
         self
     }
 
@@ -92,6 +102,7 @@ impl<'a> FunctionCompileConfig<'a> {
             return_type_id,
             skip_block_params: 0,
             default_return: DefaultReturn::Empty,
+            in_iterable_default_body: false,
         }
     }
 
@@ -121,6 +132,7 @@ impl<'a> FunctionCompileConfig<'a> {
             return_type_id: Some(return_type_id),
             skip_block_params: 1, // Skip the closure pointer
             default_return: DefaultReturn::Zero,
+            in_iterable_default_body: false,
         }
     }
 }
@@ -198,7 +210,20 @@ fn emit_implicit_return(
             .map(|ret_type_id| cg.arena().unwrap_fallible(ret_type_id).is_some())
             .unwrap_or(false);
 
-        if is_fallible_return {
+        // Check if the function has a void return type. Expression-bodied default methods
+        // like `=> self.iter().for_each(f)` produce a void value that must not be returned.
+        // The Cranelift signature for void functions has no return values.
+        let is_void_return = cg
+            .return_type
+            .map(|ret_type_id| cg.arena().is_void(ret_type_id))
+            .unwrap_or(false);
+
+        if is_void_return {
+            // Void-return expression body: discard the expression value and return nothing.
+            // This happens for Iterable default methods like `for_each` whose body is
+            // `=> self.iter().for_each(f)`, which evaluates to void but must not be returned.
+            cg.builder.ins().return_(&[]);
+        } else if is_fallible_return {
             // Expression-bodied fallible function: the value is a pointer to (tag, payload)
             // We need to load both and return them
             let tag = cg
@@ -479,6 +504,10 @@ pub(crate) fn compile_function_inner_with_params<'ctx>(
         .with_captures(captures)
         .with_module(module_id)
         .with_substitutions(substitutions);
+
+    if config.in_iterable_default_body {
+        cg = cg.with_iterable_default_body();
+    }
 
     compile_function_body_with_cg(&mut cg, config.body, config.default_return)?;
 

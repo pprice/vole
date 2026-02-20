@@ -395,7 +395,7 @@ mod tests {
         let builtin = names.builtin_module();
         let array_name = names.intern_raw(builtin, &["array"]);
         entity_registry.register_primitive_name(PrimitiveTypeId::I64, i64_name);
-        entity_registry.register_array_name(array_name);
+        entity_registry.register_array_name(array_name, builtin);
 
         // Test primitive type
         assert_eq!(

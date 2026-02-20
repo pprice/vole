@@ -594,6 +594,7 @@ impl Cg<'_, '_, '_> {
                     Some(original_name),
                     Some(param_type_ids),
                     self.get_expr_type_substituted(&call_expr_id),
+                    call_expr_id,
                 )
                 .map(Some);
         }
