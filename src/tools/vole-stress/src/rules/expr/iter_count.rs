@@ -2,11 +2,53 @@
 //!
 //! Generates `arrVar.iter().count()` or `arrVar.iter().filter(...).count()`
 //! when an array-typed variable is in scope. Result type is `i64`.
+//!
+//! Single-param lambdas use unparenthesized `x => pred` 30% of the time
+//! and implicit `it` style 20% of the time.
+//! The `.iter()` call is omitted 40% of the time (direct array method call).
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
+
+/// Replace standalone `x` tokens with `it` in a lambda body string.
+fn replace_x_with_it(body: &str) -> String {
+    let mut result = String::with_capacity(body.len() + 2);
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == 'x' {
+            let prev_ok = i == 0 || !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_';
+            let next_ok =
+                i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric() && chars[i + 1] != '_';
+            if prev_ok && next_ok {
+                result.push_str("it");
+            } else {
+                result.push('x');
+            }
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Emit a single-param lambda, choosing style randomly:
+/// - 20%: implicit `it` (replaces `x` with `it` in the body)
+/// - 30%: unparenthesized `x => body`
+/// - 50%: parenthesized `(x) => body`
+fn emit_single_param_lambda(emit: &mut Emit, body_with_x: &str) -> String {
+    let roll = emit.gen_range(0..10_usize);
+    if roll < 2 {
+        replace_x_with_it(body_with_x)
+    } else if roll < 5 {
+        format!("x => {}", body_with_x)
+    } else {
+        format!("(x) => {}", body_with_x)
+    }
+}
 
 pub struct IterCount;
 
@@ -42,17 +84,22 @@ impl ExprRule for IterCount {
         let idx = emit.gen_range(0..array_vars.len());
         let (var_name, elem_ty) = &array_vars[idx];
 
+        // ~40%: call methods directly on the array (no .iter())
+        let use_direct = emit.gen_bool(0.4);
+        let iter_prefix = if use_direct { "" } else { ".iter()" };
+
         // ~40% chance to chain a .filter() before .count()
-        if emit.gen_bool(0.4) {
-            if let Some(pred) = gen_predicate(emit, elem_ty) {
-                return Some(format!(
-                    "{}.iter().filter((x) => {}).count()",
-                    var_name, pred
-                ));
-            }
+        if emit.gen_bool(0.4)
+            && let Some(pred) = gen_predicate(emit, elem_ty)
+        {
+            let lambda = emit_single_param_lambda(emit, &pred);
+            return Some(format!(
+                "{}{}.filter({}).count()",
+                var_name, iter_prefix, lambda
+            ));
         }
 
-        Some(format!("{}.iter().count()", var_name))
+        Some(format!("{}{}.count()", var_name, iter_prefix))
     }
 }
 
@@ -127,7 +174,8 @@ mod tests {
         );
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains(".iter()"), "expected iter, got: {text}");
+        // Either uses .iter() or direct array method call; always ends with .count()
+        assert!(text.contains("arr"), "expected arr, got: {text}");
         assert!(text.contains(".count()"), "expected count, got: {text}");
     }
 }

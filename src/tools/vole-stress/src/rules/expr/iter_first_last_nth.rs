@@ -4,11 +4,53 @@
 //! `arr.iter().nth(N)` for Optional-typed expressions. These iterator
 //! terminals return `T?` from `[T]` arrays. Optionally chains
 //! `.filter()` or `.map()` before the terminal.
+//!
+//! Single-param lambdas use unparenthesized `x => body` 30% of the time
+//! and implicit `it` style 20% of the time.
+//! The `.iter()` call is omitted 40% of the time (direct array method call).
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
+
+/// Replace standalone `x` tokens with `it` in a lambda body string.
+fn replace_x_with_it(body: &str) -> String {
+    let mut result = String::with_capacity(body.len() + 2);
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == 'x' {
+            let prev_ok = i == 0 || !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_';
+            let next_ok =
+                i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric() && chars[i + 1] != '_';
+            if prev_ok && next_ok {
+                result.push_str("it");
+            } else {
+                result.push('x');
+            }
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Emit a single-param lambda, choosing style randomly:
+/// - 20%: implicit `it` (replaces `x` with `it` in the body)
+/// - 30%: unparenthesized `x => body`
+/// - 50%: parenthesized `(x) => body`
+fn emit_single_param_lambda(emit: &mut Emit, body_with_x: &str) -> String {
+    let roll = emit.gen_range(0..10_usize);
+    if roll < 2 {
+        replace_x_with_it(body_with_x)
+    } else if roll < 5 {
+        format!("x => {}", body_with_x)
+    } else {
+        format!("(x) => {}", body_with_x)
+    }
+}
 
 pub struct IterFirstLastNth;
 
@@ -76,27 +118,33 @@ impl ExprRule for IterFirstLastNth {
             }
         };
 
+        // ~40%: call methods directly on the array (no .iter())
+        let use_direct = emit.gen_bool(0.4);
+        let iter_prefix = if use_direct { "" } else { ".iter()" };
+
         // ~20% chance: chain a .filter() before the terminal
-        if emit.gen_bool(0.2) {
-            if let Some(pred) = gen_pred(emit, elem_ty) {
-                return Some(format!(
-                    "{}.iter().filter((x) => {}){}",
-                    var_name, pred, terminal
-                ));
-            }
+        if emit.gen_bool(0.2)
+            && let Some(pred) = gen_pred(emit, elem_ty)
+        {
+            let lambda = emit_single_param_lambda(emit, &pred);
+            return Some(format!(
+                "{}{}.filter({}){}",
+                var_name, iter_prefix, lambda, terminal
+            ));
         }
 
         // ~20% chance: chain a .map() before the terminal (same-type only)
-        if emit.gen_bool(0.2) {
-            if let Some(body) = gen_map_body(emit, elem_ty) {
-                return Some(format!(
-                    "{}.iter().map((x) => {}){}",
-                    var_name, body, terminal
-                ));
-            }
+        if emit.gen_bool(0.2)
+            && let Some(body) = gen_map_body(emit, elem_ty)
+        {
+            let lambda = emit_single_param_lambda(emit, &body);
+            return Some(format!(
+                "{}{}.map({}){}",
+                var_name, iter_prefix, lambda, terminal
+            ));
         }
 
-        Some(format!("{}.iter(){}", var_name, terminal))
+        Some(format!("{}{}{}", var_name, iter_prefix, terminal))
     }
 }
 
@@ -233,7 +281,8 @@ mod tests {
         );
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains(".iter()"), "expected iter, got: {text}");
+        // Either uses .iter() or direct array method call; terminal is always present
+        assert!(text.contains("arr"), "expected arr, got: {text}");
         assert!(
             text.contains(".first()") || text.contains(".last()") || text.contains(".nth("),
             "expected first/last/nth, got: {text}"

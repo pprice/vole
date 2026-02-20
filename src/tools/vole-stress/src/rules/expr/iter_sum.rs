@@ -2,11 +2,53 @@
 //!
 //! Generates `arrVar.iter().sum()` or with optional `.filter()`/`.map()`
 //! chaining. Works for `i64` and `f64` target types.
+//!
+//! Single-param lambdas use unparenthesized `x => body` 30% of the time
+//! and implicit `it` style 20% of the time.
+//! The `.iter()` call is omitted 40% of the time (direct array method call).
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
+
+/// Replace standalone `x` tokens with `it` in a lambda body string.
+fn replace_x_with_it(body: &str) -> String {
+    let mut result = String::with_capacity(body.len() + 2);
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == 'x' {
+            let prev_ok = i == 0 || !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_';
+            let next_ok =
+                i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric() && chars[i + 1] != '_';
+            if prev_ok && next_ok {
+                result.push_str("it");
+            } else {
+                result.push('x');
+            }
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Emit a single-param lambda, choosing style randomly:
+/// - 20%: implicit `it` (replaces `x` with `it` in the body)
+/// - 30%: unparenthesized `x => body`
+/// - 50%: parenthesized `(x) => body`
+fn emit_single_param_lambda(emit: &mut Emit, body_with_x: &str) -> String {
+    let roll = emit.gen_range(0..10_usize);
+    if roll < 2 {
+        replace_x_with_it(body_with_x)
+    } else if roll < 5 {
+        format!("x => {}", body_with_x)
+    } else {
+        format!("(x) => {}", body_with_x)
+    }
+}
 
 pub struct IterSum;
 
@@ -49,6 +91,10 @@ impl ExprRule for IterSum {
         let idx = emit.gen_range(0..candidates.len());
         let (var_name, _) = candidates[idx];
 
+        // ~40%: call methods directly on the array (no .iter())
+        let use_direct = emit.gen_bool(0.4);
+        let iter_prefix = if use_direct { "" } else { ".iter()" };
+
         // ~30% chance: chain a .filter() before .sum()
         if emit.gen_bool(0.3) {
             let pred = match target_prim {
@@ -60,9 +106,13 @@ impl ExprRule for IterSum {
                     let n = emit.gen_i64_range(0, 10);
                     format!("x > {}.0", n)
                 }
-                _ => return Some(format!("{}.iter().sum()", var_name)),
+                _ => return Some(format!("{}{}.sum()", var_name, iter_prefix)),
             };
-            return Some(format!("{}.iter().filter((x) => {}).sum()", var_name, pred));
+            let lambda = emit_single_param_lambda(emit, &pred);
+            return Some(format!(
+                "{}{}.filter({}).sum()",
+                var_name, iter_prefix, lambda
+            ));
         }
 
         // ~20% chance: chain a .map() before .sum()
@@ -77,12 +127,13 @@ impl ExprRule for IterSum {
                     0 => "x * 2.0",
                     _ => "x + 1.0",
                 },
-                _ => return Some(format!("{}.iter().sum()", var_name)),
+                _ => return Some(format!("{}{}.sum()", var_name, iter_prefix)),
             };
-            return Some(format!("{}.iter().map((x) => {}).sum()", var_name, body));
+            let lambda = emit_single_param_lambda(emit, body);
+            return Some(format!("{}{}.map({}).sum()", var_name, iter_prefix, lambda));
         }
 
-        Some(format!("{}.iter().sum()", var_name))
+        Some(format!("{}{}.sum()", var_name, iter_prefix))
     }
 }
 
@@ -134,7 +185,9 @@ mod tests {
         );
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains(".iter()"), "expected iter, got: {text}");
+        // Either uses .iter() or direct array method call; always ends with .sum()
+        assert!(text.contains("arr"), "expected arr, got: {text}");
+        assert!(text.contains(".sum()"), "expected sum, got: {text}");
     }
 
     #[test]

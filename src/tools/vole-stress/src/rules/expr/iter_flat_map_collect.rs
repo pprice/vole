@@ -3,11 +3,55 @@
 //! Generates `arr.iter().flat_map((x) => [x, expr]).collect()` for
 //! i64 and i32 array types. Optionally chains `.filter()` after
 //! flat_map.
+//!
+//! Single-param flat_map lambdas use unparenthesized `x => body` 30% of the
+//! time and implicit `it` style 20% of the time.
+//! The `.iter()` call is omitted 40% of the time (direct array method call).
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
+
+/// Replace standalone `x` tokens with `it` in a lambda body string.
+fn replace_x_with_it(body: &str) -> String {
+    let mut result = String::with_capacity(body.len() + 2);
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == 'x' {
+            let prev_ok = i == 0 || !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_';
+            let next_ok =
+                i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric() && chars[i + 1] != '_';
+            if prev_ok && next_ok {
+                result.push_str("it");
+            } else {
+                result.push('x');
+            }
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Emit a single-param flat_map lambda wrapping body_elems in an array.
+/// Chooses style randomly:
+/// - 20%: implicit `it` (replaces `x` with `it` in body_elems)
+/// - 30%: unparenthesized `x => [body_elems]`
+/// - 50%: parenthesized `(x) => [body_elems]`
+fn emit_flat_map_lambda(emit: &mut Emit, body_elems: &str) -> String {
+    let roll = emit.gen_range(0..10_usize);
+    if roll < 2 {
+        let it_elems = replace_x_with_it(body_elems);
+        format!("[{}]", it_elems)
+    } else if roll < 5 {
+        format!("x => [{}]", body_elems)
+    } else {
+        format!("(x) => [{}]", body_elems)
+    }
+}
 
 pub struct IterFlatMapCollect;
 
@@ -55,11 +99,16 @@ impl ExprRule for IterFlatMapCollect {
         let idx = emit.gen_range(0..candidates.len());
         let (var_name, _) = candidates[idx];
 
+        // ~40%: call .flat_map() directly on the array (no .iter())
+        let use_direct = emit.gen_bool(0.4);
+        let iter_prefix = if use_direct { "" } else { ".iter()" };
+
         let (body_elems, suffix) = gen_flat_map_body(emit, is_i32);
+        let lambda = emit_flat_map_lambda(emit, &body_elems);
 
         Some(format!(
-            "{}.iter().flat_map((x) => [{}]){}.collect()",
-            var_name, body_elems, suffix
+            "{}{}.flat_map({}){}.collect()",
+            var_name, iter_prefix, lambda, suffix
         ))
     }
 }

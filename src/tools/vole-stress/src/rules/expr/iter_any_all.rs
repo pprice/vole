@@ -2,11 +2,52 @@
 //!
 //! Generates `arrVar.iter().any((x) => pred)` or `.all((x) => pred)`
 //! on arrays with primitive element types. Result type is `bool`.
+//!
+//! Unparenthesized single-param lambdas (`x => pred`) are emitted 30% of the
+//! time; implicit-it style (`it > 0`) is emitted 20% of the time.
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
+
+/// Replace standalone `x` tokens with `it` in a lambda body string.
+fn replace_x_with_it(body: &str) -> String {
+    let mut result = String::with_capacity(body.len() + 2);
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == 'x' {
+            let prev_ok = i == 0 || !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_';
+            let next_ok =
+                i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric() && chars[i + 1] != '_';
+            if prev_ok && next_ok {
+                result.push_str("it");
+            } else {
+                result.push('x');
+            }
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Emit a single-param lambda, choosing style randomly:
+/// - 20%: implicit `it` (replaces `x` with `it` in the body)
+/// - 30%: unparenthesized `x => body`
+/// - 50%: parenthesized `(x) => body`
+fn emit_single_param_lambda(emit: &mut Emit, body_with_x: &str) -> String {
+    let roll = emit.gen_range(0..10_usize);
+    if roll < 2 {
+        replace_x_with_it(body_with_x)
+    } else if roll < 5 {
+        format!("x => {}", body_with_x)
+    } else {
+        format!("(x) => {}", body_with_x)
+    }
+}
 
 pub struct IterAnyAll;
 
@@ -59,7 +100,15 @@ impl ExprRule for IterAnyAll {
 
         let method = if emit.gen_bool(0.5) { "any" } else { "all" };
 
-        let pred = match elem_ty {
+        // ~40%: call method directly on the array (no .iter())
+        let use_direct = emit.gen_bool(0.4);
+        let receiver = if use_direct {
+            format!("{}.{}(", var_name, method)
+        } else {
+            format!("{}.iter().{}(", var_name, method)
+        };
+
+        let body_x = match elem_ty {
             TypeInfo::Primitive(PrimitiveType::I64) => match emit.gen_range(0..4_usize) {
                 0 => {
                     let n = emit.gen_i64_range(0, 5);
@@ -93,7 +142,8 @@ impl ExprRule for IterAnyAll {
             _ => return None,
         };
 
-        Some(format!("{}.iter().{}((x) => {})", var_name, method, pred))
+        let lambda = emit_single_param_lambda(emit, &body_x);
+        Some(format!("{}{})", receiver, lambda))
     }
 }
 

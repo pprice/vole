@@ -3,11 +3,53 @@
 //! Generates `arr.iter().filter((x) => pred).collect()` where the
 //! predicate filters elements of the source array. The element type
 //! must match the target array element type.
+//!
+//! Single-param lambdas use unparenthesized `x => pred` 30% of the time
+//! and implicit `it` style 20% of the time.
+//! The `.iter()` call is omitted 40% of the time (direct array method call).
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
+
+/// Replace standalone `x` tokens with `it` in a lambda body string.
+fn replace_x_with_it(body: &str) -> String {
+    let mut result = String::with_capacity(body.len() + 2);
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == 'x' {
+            let prev_ok = i == 0 || !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_';
+            let next_ok =
+                i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric() && chars[i + 1] != '_';
+            if prev_ok && next_ok {
+                result.push_str("it");
+            } else {
+                result.push('x');
+            }
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Emit a single-param lambda, choosing style randomly:
+/// - 20%: implicit `it` (replaces `x` with `it` in the body)
+/// - 30%: unparenthesized `x => body`
+/// - 50%: parenthesized `(x) => body`
+fn emit_single_param_lambda(emit: &mut Emit, body_with_x: &str) -> String {
+    let roll = emit.gen_range(0..10_usize);
+    if roll < 2 {
+        replace_x_with_it(body_with_x)
+    } else if roll < 5 {
+        format!("x => {}", body_with_x)
+    } else {
+        format!("(x) => {}", body_with_x)
+    }
+}
 
 pub struct IterFilterCollect;
 
@@ -65,10 +107,14 @@ impl ExprRule for IterFilterCollect {
 
         let pred = gen_filter_pred(emit, elem_ty)?;
 
-        Some(format!(
-            "{}.iter().filter((x) => {}).collect()",
-            var_name, pred
-        ))
+        // ~40%: call .filter() directly on the array (no .iter())
+        let use_direct = emit.gen_bool(0.4);
+        let lambda = emit_single_param_lambda(emit, &pred);
+        if use_direct {
+            Some(format!("{}.filter({}).collect()", var_name, lambda))
+        } else {
+            Some(format!("{}.iter().filter({}).collect()", var_name, lambda))
+        }
     }
 }
 
@@ -167,10 +213,7 @@ mod tests {
         );
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(
-            text.contains(".iter().filter("),
-            "expected filter, got: {text}"
-        );
+        assert!(text.contains(".filter("), "expected filter, got: {text}");
         assert!(text.contains(".collect()"), "expected collect, got: {text}");
     }
 }

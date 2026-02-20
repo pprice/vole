@@ -7,11 +7,53 @@
 //! - `arr.iter().unique().collect()`
 //!
 //! Target type must be `[T]` where `T` matches an existing array var element.
+//!
+//! Single-param lambdas use unparenthesized `x => pred` 30% of the time
+//! and implicit `it` style 20% of the time.
+//! The `.iter()` call is omitted 40% of the time (direct array method call).
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
+
+/// Replace standalone `x` tokens with `it` in a lambda body string.
+fn replace_x_with_it(body: &str) -> String {
+    let mut result = String::with_capacity(body.len() + 2);
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == 'x' {
+            let prev_ok = i == 0 || !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_';
+            let next_ok =
+                i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric() && chars[i + 1] != '_';
+            if prev_ok && next_ok {
+                result.push_str("it");
+            } else {
+                result.push('x');
+            }
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Emit a single-param lambda, choosing style randomly:
+/// - 20%: implicit `it` (replaces `x` with `it` in the body)
+/// - 30%: unparenthesized `x => body`
+/// - 50%: parenthesized `(x) => body`
+fn emit_single_param_lambda(emit: &mut Emit, body_with_x: &str) -> String {
+    let roll = emit.gen_range(0..10_usize);
+    if roll < 2 {
+        replace_x_with_it(body_with_x)
+    } else if roll < 5 {
+        format!("x => {}", body_with_x)
+    } else {
+        format!("(x) => {}", body_with_x)
+    }
+}
 
 pub struct IterCollect;
 
@@ -53,10 +95,14 @@ impl ExprRule for IterCollect {
         let idx = emit.gen_range(0..candidates.len());
         let (var_name, _) = candidates[idx];
 
+        // ~40%: call methods directly on the array (no .iter())
+        let use_direct = emit.gen_bool(0.4);
+        let iter_prefix = if use_direct { "" } else { ".iter()" };
+
         // Pick a chain variant
         match emit.gen_range(0..5_usize) {
             0 => {
-                // skip+take
+                // skip+take — only via .iter() (no direct form)
                 let skip = emit.gen_i64_range(0, 1);
                 let take = emit.gen_i64_range(1, 2);
                 Some(format!(
@@ -67,7 +113,10 @@ impl ExprRule for IterCollect {
             1 => {
                 // take only
                 let take = emit.gen_i64_range(1, 3);
-                Some(format!("{}.iter().take({}).collect()", var_name, take))
+                Some(format!(
+                    "{}{}.take({}).collect()",
+                    var_name, iter_prefix, take
+                ))
             }
             2 => {
                 // sorted (only for integer types)
@@ -76,23 +125,27 @@ impl ExprRule for IterCollect {
                     TypeInfo::Primitive(PrimitiveType::I64 | PrimitiveType::I32)
                 ) {
                     if emit.gen_bool(0.3) {
-                        Some(format!("{}.iter().sorted().reverse().collect()", var_name))
+                        Some(format!(
+                            "{}{}.sorted().reverse().collect()",
+                            var_name, iter_prefix
+                        ))
                     } else {
-                        Some(format!("{}.iter().sorted().collect()", var_name))
+                        Some(format!("{}{}.sorted().collect()", var_name, iter_prefix))
                     }
                 } else {
-                    Some(format!("{}.iter().collect()", var_name))
+                    Some(format!("{}{}.collect()", var_name, iter_prefix))
                 }
             }
             3 => {
                 // filter
                 if let Some(pred) = gen_filter_pred(emit, target_elem) {
+                    let lambda = emit_single_param_lambda(emit, &pred);
                     Some(format!(
-                        "{}.iter().filter((x) => {}).collect()",
-                        var_name, pred
+                        "{}{}.filter({}).collect()",
+                        var_name, iter_prefix, lambda
                     ))
                 } else {
-                    Some(format!("{}.iter().collect()", var_name))
+                    Some(format!("{}{}.collect()", var_name, iter_prefix))
                 }
             }
             _ => {
@@ -101,9 +154,9 @@ impl ExprRule for IterCollect {
                     target_elem,
                     TypeInfo::Primitive(PrimitiveType::I64 | PrimitiveType::I32)
                 ) {
-                    Some(format!("{}.iter().unique().collect()", var_name))
+                    Some(format!("{}{}.unique().collect()", var_name, iter_prefix))
                 } else {
-                    Some(format!("{}.iter().collect()", var_name))
+                    Some(format!("{}{}.collect()", var_name, iter_prefix))
                 }
             }
         }
@@ -181,7 +234,8 @@ mod tests {
         );
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains(".iter()"), "expected iter, got: {text}");
+        // Either uses .iter() or direct array method call; always ends with .collect()
+        assert!(text.contains("arr"), "expected arr, got: {text}");
         assert!(text.contains(".collect()"), "expected collect, got: {text}");
     }
 

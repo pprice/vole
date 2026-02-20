@@ -3,11 +3,53 @@
 //! Generates `arr1.iter().chain(arr2.iter()).collect()` from two different
 //! array-typed variables with matching element types. Only supports i64
 //! and i32 element types. Optionally chains `.filter()` or `.map()`.
+//!
+//! Single-param lambdas use unparenthesized `x => body` 30% of the time
+//! and implicit `it` style 20% of the time.
+//! The `.iter()` calls are omitted 40% of the time (direct array method calls).
 
 use crate::emit::Emit;
 use crate::rule::{ExprRule, Param, Params, TypeInfo};
 use crate::scope::Scope;
 use crate::symbols::PrimitiveType;
+
+/// Replace standalone `x` tokens with `it` in a lambda body string.
+fn replace_x_with_it(body: &str) -> String {
+    let mut result = String::with_capacity(body.len() + 2);
+    let chars: Vec<char> = body.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == 'x' {
+            let prev_ok = i == 0 || !chars[i - 1].is_alphanumeric() && chars[i - 1] != '_';
+            let next_ok =
+                i + 1 >= chars.len() || !chars[i + 1].is_alphanumeric() && chars[i + 1] != '_';
+            if prev_ok && next_ok {
+                result.push_str("it");
+            } else {
+                result.push('x');
+            }
+        } else {
+            result.push(chars[i]);
+        }
+        i += 1;
+    }
+    result
+}
+
+/// Emit a single-param lambda, choosing style randomly:
+/// - 20%: implicit `it` (replaces `x` with `it` in the body)
+/// - 30%: unparenthesized `x => body`
+/// - 50%: parenthesized `(x) => body`
+fn emit_single_param_lambda(emit: &mut Emit, body_with_x: &str) -> String {
+    let roll = emit.gen_range(0..10_usize);
+    if roll < 2 {
+        replace_x_with_it(body_with_x)
+    } else if roll < 5 {
+        format!("x => {}", body_with_x)
+    } else {
+        format!("(x) => {}", body_with_x)
+    }
+}
 
 pub struct IterChainCollect;
 
@@ -63,21 +105,34 @@ impl ExprRule for IterChainCollect {
         let (var1, _) = candidates[idx1];
         let (var2, _) = candidates[idx2];
 
+        // ~40%: use direct array method calls (no .iter())
+        let use_direct = emit.gen_bool(0.4);
+        let (v1_prefix, v2_iter) = if use_direct {
+            ("", format!("{}", var2))
+        } else {
+            (".iter()", format!("{}.iter()", var2))
+        };
+
         // Pick variant: plain chain (60%), filter (20%), map (20%)
         match emit.gen_range(0..10) {
-            0..6 => Some(format!("{}.iter().chain({}.iter()).collect()", var1, var2)),
+            0..6 => Some(format!(
+                "{}{}.chain({}).collect()",
+                var1, v1_prefix, v2_iter
+            )),
             6..8 => {
                 let pred = gen_chain_pred(emit, is_i32);
+                let lambda = emit_single_param_lambda(emit, &pred);
                 Some(format!(
-                    "{}.iter().chain({}.iter()).filter((x) => {}).collect()",
-                    var1, var2, pred
+                    "{}{}.chain({}).filter({}).collect()",
+                    var1, v1_prefix, v2_iter, lambda
                 ))
             }
             _ => {
                 let body = gen_chain_map_body(emit, is_i32);
+                let lambda = emit_single_param_lambda(emit, &body);
                 Some(format!(
-                    "{}.iter().chain({}.iter()).map((x) => {}).collect()",
-                    var1, var2, body
+                    "{}{}.chain({}).map({}).collect()",
+                    var1, v1_prefix, v2_iter, lambda
                 ))
             }
         }
