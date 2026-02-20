@@ -78,7 +78,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr, expr.id),
             ExprKind::Is(is_expr) => self.is_expr(is_expr, expr.id),
-            ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
+            ExprKind::NullCoalesce(nc) => self.null_coalesce(nc, expr.id),
             ExprKind::Lambda(lambda) => {
                 let result = self.lambda(lambda, expr.id)?;
                 Ok(self.mark_rc_owned(result))

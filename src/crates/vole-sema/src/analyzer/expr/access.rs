@@ -184,8 +184,9 @@ impl Analyzer {
         }
 
         // The object must be an optional type (union with nil)
-        // Check via arena if it's optional and unwrap
-        let inner_type_id = if let Some(inner_id) = self.unwrap_optional_id(object_type_id) {
+        // Check via arena if it's optional and unwrap (handles T | nil and A | B | nil)
+        let inner_type_id = if let Some(inner_id) = self.unwrap_optional_non_nil_id(object_type_id)
+        {
             inner_id
         } else {
             // If not optional, treat it as regular field access wrapped in optional
@@ -219,8 +220,8 @@ impl Analyzer {
         if let Some(field_type_id) = self.get_field_type_id(type_def_id, &type_args_id, field_name)
         {
             // Result is always optional (field_type | nil)
-            // But if field type is already optional, don't double-wrap
-            if self.unwrap_optional_id(field_type_id).is_some() {
+            // But if field type is already optional (contains nil), don't double-wrap
+            if self.is_optional_id(field_type_id) {
                 Ok(field_type_id)
             } else {
                 Ok(self.ty_optional_id(field_type_id))

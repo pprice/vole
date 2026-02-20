@@ -23,9 +23,9 @@ impl Analyzer {
             return Ok(ArenaTypeId::INVALID);
         }
 
-        // Get the non-nil type
+        // Get the non-nil type (works for both T | nil and A | B | nil)
         let unwrapped_id = self
-            .unwrap_optional_id(value_type_id)
+            .unwrap_optional_non_nil_id(value_type_id)
             .unwrap_or(ArenaTypeId::INVALID);
 
         // Default must match the unwrapped type (using TypeId version)

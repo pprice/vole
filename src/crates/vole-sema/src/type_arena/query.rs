@@ -80,6 +80,23 @@ impl TypeArena {
         }
     }
 
+    /// Unwrap an optional type (union containing nil), returning all non-nil variants.
+    /// Returns `Some(variants)` for any union that contains nil (one or more non-nil variants).
+    /// Returns `None` if the type is not a union or does not contain nil.
+    pub fn unwrap_optional_non_nil_variants(&self, id: TypeId) -> Option<TypeIdVec> {
+        match self.get(id) {
+            SemaType::Union(variants) => {
+                let nil = self.nil();
+                if !variants.contains(&nil) {
+                    return None;
+                }
+                let non_nil: TypeIdVec = variants.iter().copied().filter(|&v| v != nil).collect();
+                Some(non_nil)
+            }
+            _ => None,
+        }
+    }
+
     /// Unwrap a function type, returning (params, return_type, is_closure)
     pub fn unwrap_function(&self, id: TypeId) -> Option<(&TypeIdVec, TypeId, bool)> {
         match self.get(id) {

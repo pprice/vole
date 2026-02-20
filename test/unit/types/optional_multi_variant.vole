@@ -1,0 +1,64 @@
+// Tests for ?? and ?. on multi-variant optional unions (A | B | nil)
+
+class Box {
+    value: i32,
+}
+
+tests "multi-variant null coalesce" {
+
+    test "?? with i32 | string | nil holding i32" {
+        let x: i32 | string | nil = 42
+        let y = x ?? 0
+        assert(y is i32)
+    }
+
+    test "?? with i32 | string | nil holding string" {
+        let x: i32 | string | nil = "hello"
+        let y = x ?? 0
+        assert(y is string)
+    }
+
+    test "?? with i32 | string | nil holding nil - result is fallback" {
+        let x: i32 | string | nil = nil
+        let y = x ?? 0
+        assert(y is i32)
+        if y is i32 {
+            assert(y == 0)
+        }
+    }
+
+    test "?? with i32 | nil (single non-nil) holding i32 still works" {
+        let x: i32 | nil = 99
+        let result = x ?? 0
+        assert(result == 99)
+    }
+
+    test "?? with i32 | nil (single non-nil) holding nil" {
+        let x: i32 | nil = nil
+        let result = x ?? 7
+        assert(result == 7)
+    }
+
+    test "?? with three non-nil variants plus nil" {
+        let x: i32 | string | bool | nil = nil
+        let y = x ?? 0
+        assert(y is i32)
+    }
+
+}
+
+tests "multi-variant optional chaining" {
+
+    test "?. on Box | nil (single class variant) - non-nil" {
+        let b: Box | nil = Box { value: 55 }
+        let v = b?.value
+        assert((v ?? -1) == 55)
+    }
+
+    test "?. on Box | nil (single class variant) - nil" {
+        let b: Box | nil = nil
+        let v = b?.value
+        assert(v is nil)
+    }
+
+}

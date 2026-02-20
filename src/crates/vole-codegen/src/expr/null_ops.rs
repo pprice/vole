@@ -13,7 +13,8 @@ use crate::types::{
 };
 use crate::union_layout;
 
-use vole_frontend::Expr;
+use vole_frontend::{Expr, NodeId};
+use vole_sema::type_arena::TypeId;
 
 use super::super::context::Cg;
 
@@ -22,23 +23,49 @@ impl Cg<'_, '_, '_> {
     pub(super) fn null_coalesce(
         &mut self,
         nc: &vole_frontend::ast::NullCoalesceExpr,
+        expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let value = self.expr(&nc.value)?;
         let nil_tag = self.find_nil_variant(value.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
         })?;
 
-        let is_nil = self.tag_eq(value.value, nil_tag as i64);
+        // The inner type (non-nil result) is stored in the sema expr_data as the result
+        // type of the ?? expression. For T | nil it's T; for A | B | nil it's A | B.
+        let inner_type_id = self.get_expr_type(&expr_id).unwrap_or_else(|| {
+            // Fallback for simple T | nil where sema result type equals unwrapped inner type.
+            self.arena()
+                .unwrap_optional(value.type_id)
+                .unwrap_or(TypeId::INVALID)
+        });
 
+        let is_multi_variant_inner = self.arena().is_union(inner_type_id);
+        if is_multi_variant_inner {
+            // Multi-variant optional (A | B | nil): result type A | B is itself a union.
+            // The non-nil variants have compatible tag values in the source union (they are
+            // sorted the same way), so we can return the source pointer retyped as A | B.
+            self.null_coalesce_union_result(nc, value, inner_type_id, nil_tag)
+        } else {
+            // Simple optional (T | nil): result is scalar T.
+            self.null_coalesce_scalar_result(nc, value, inner_type_id, nil_tag)
+        }
+    }
+
+    /// Compile ?? where the result type is a scalar (non-union) type.
+    /// This is the case for `T | nil ?? default` → `T`.
+    fn null_coalesce_scalar_result(
+        &mut self,
+        nc: &vole_frontend::ast::NullCoalesceExpr,
+        value: CompiledValue,
+        inner_type_id: TypeId,
+        nil_tag: usize,
+    ) -> CodegenResult<CompiledValue> {
+        let cranelift_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
+
+        let is_nil = self.tag_eq(value.value, nil_tag as i64);
         let nil_block = self.builder.create_block();
         let not_nil_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
-
-        let inner_type_id = self
-            .arena()
-            .unwrap_optional(value.type_id)
-            .expect("INTERNAL: unwrap expr: expected optional type");
-        let cranelift_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
         self.builder.append_block_param(merge_block, cranelift_type);
 
         let result_needs_rc =
@@ -97,10 +124,56 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(merge_block, &[payload_arg]);
 
         self.switch_and_seal(merge_block);
-
         let result = self.builder.block_params(merge_block)[0];
         let cv = CompiledValue::new(result, cranelift_type, inner_type_id);
         Ok(self.mark_rc_owned(cv))
+    }
+
+    /// Compile ?? where the result type is itself a union (A | B from A | B | nil).
+    /// The non-nil variants have compatible tag values between the source union and
+    /// the result union (same sort order, same indices), so we can return the source
+    /// pointer retyped as the result union type.
+    fn null_coalesce_union_result(
+        &mut self,
+        nc: &vole_frontend::ast::NullCoalesceExpr,
+        value: CompiledValue,
+        inner_type_id: TypeId,
+        nil_tag: usize,
+    ) -> CodegenResult<CompiledValue> {
+        let ptr_type = self.ptr_type();
+
+        let is_nil = self.tag_eq(value.value, nil_tag as i64);
+        let nil_block = self.builder.create_block();
+        let not_nil_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        // Both branches pass a pointer (the union pointer or default pointer)
+        self.builder.append_block_param(merge_block, ptr_type);
+
+        self.emit_brif(is_nil, nil_block, not_nil_block);
+
+        // Nil branch: evaluate and use the default value (must be A | B type)
+        self.switch_and_seal(nil_block);
+        let default_val = self.expr(&nc.default)?;
+        let default_ptr = if self.arena().is_union(default_val.type_id) {
+            // Default is already a union pointer
+            default_val.value
+        } else {
+            // Default is a scalar or non-union; box it into a union slot
+            let boxed = self.construct_union_id(default_val, inner_type_id)?;
+            boxed.value
+        };
+        let default_arg = BlockArg::from(default_ptr);
+        self.builder.ins().jump(merge_block, &[default_arg]);
+
+        // Not-nil branch: reuse the source pointer (tag/payload are compatible for A | B)
+        self.switch_and_seal(not_nil_block);
+        let value_ptr_arg = BlockArg::from(value.value);
+        self.builder.ins().jump(merge_block, &[value_ptr_arg]);
+
+        self.switch_and_seal(merge_block);
+        let result_ptr = self.builder.block_params(merge_block)[0];
+        let cv = CompiledValue::new(result_ptr, ptr_type, inner_type_id);
+        Ok(cv)
     }
 
     /// Compile a try expression (propagation)

@@ -267,16 +267,30 @@ impl Analyzer {
         self.type_arena().unwrap_runtime_iterator(id)
     }
 
-    /// Get inner type if this is an optional type (T | nil)
+    /// Get inner type if this is an optional type (T | nil) with exactly one non-nil variant.
+    /// For multi-variant optionals (A | B | nil), use `unwrap_optional_non_nil_id` instead.
     #[inline]
     pub(crate) fn unwrap_optional_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
         self.type_arena().unwrap_optional(id)
     }
 
-    /// Check if TypeId is an optional type (T | nil)
+    /// Get the non-nil type from an optional union (union containing nil).
+    /// For a single-variant optional `T | nil`, returns `T`.
+    /// For a multi-variant optional `A | B | nil`, returns `A | B` (a new union).
+    /// Returns `None` if the type is not an optional (union containing nil).
+    pub(crate) fn unwrap_optional_non_nil_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
+        let non_nil_variants = self.type_arena().unwrap_optional_non_nil_variants(id)?;
+        if non_nil_variants.len() == 1 {
+            Some(non_nil_variants[0])
+        } else {
+            Some(self.type_arena_mut().union(non_nil_variants))
+        }
+    }
+
+    /// Check if TypeId is an optional type (any union containing nil)
     #[inline]
     pub(crate) fn is_optional_id(&self, id: ArenaTypeId) -> bool {
-        self.type_arena().unwrap_optional(id).is_some()
+        self.type_arena().is_optional(id)
     }
 
     /// Get fallible (success, error) types if this is a fallible type
