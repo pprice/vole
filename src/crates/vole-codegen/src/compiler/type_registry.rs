@@ -241,7 +241,7 @@ impl Compiler<'_> {
         let mut fields_by_slot: Vec<_> = field_ids
             .iter()
             .map(|&fid| {
-                let fd = self.registry().get_field(fid);
+                let fd = self.query().get_field(fid);
                 (fd.slot, fid)
             })
             .collect();
@@ -250,7 +250,7 @@ impl Compiler<'_> {
         let arena = self.arena();
         let mut physical_slot = 0usize;
         for (ordinal, (_, field_id)) in fields_by_slot.iter().enumerate() {
-            let field_def = self.registry().get_field(*field_id);
+            let field_def = self.query().get_field(*field_id);
             let field_name = self
                 .query()
                 .last_segment(field_def.name_id)
@@ -555,9 +555,10 @@ impl Compiler<'_> {
                 })?;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
 
-            // Function key from entity registry
-            let method_def = self.registry().get_method(method_id);
-            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+            // Function key from method full name
+            let func_key = self
+                .func_registry
+                .intern_name_id(self.query().method_full_name(method_id));
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);

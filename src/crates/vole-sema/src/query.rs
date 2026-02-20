@@ -381,6 +381,12 @@ impl<'a> ProgramQuery<'a> {
         self.registry.get_external_binding(method_id)
     }
 
+    /// Get the full NameId for a method (used for func_registry key construction)
+    #[must_use]
+    pub fn method_full_name(&self, method_id: MethodId) -> NameId {
+        self.registry.method_full_name(method_id)
+    }
+
     /// Look up a method NameId by Symbol (panics if not found)
     pub fn method_name_id(&self, name: Symbol) -> NameId {
         use vole_identity::NamerLookup;
@@ -431,6 +437,11 @@ impl<'a> ProgramQuery<'a> {
         use vole_identity::NamerLookup;
         let namer = NamerLookup::new(self.name_table, self.interner);
         namer.function(module, name)
+    }
+
+    /// Get a function definition by FunctionId
+    pub fn get_function(&self, func_id: FunctionId) -> &'a crate::entity_defs::FunctionDef {
+        self.registry.get_function(func_id)
     }
 
     /// Get a function's return type from entity_registry

@@ -343,13 +343,11 @@ impl Compiler<'_> {
             .ok_or_else(|| {
                 CodegenError::not_found("function", self.analyzed.interner.resolve(func.name))
             })?;
-        let (param_type_ids, return_type_id) = {
-            let func_def = self.registry().get_function(semantic_func_id);
-            (
-                func_def.signature.params_id.clone(),
-                func_def.signature.return_type_id,
-            )
-        };
+        let func_def = self.query().get_function(semantic_func_id);
+        let (param_type_ids, return_type_id) = (
+            func_def.signature.params_id.clone(),
+            func_def.signature.return_type_id,
+        );
 
         // Create function signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);

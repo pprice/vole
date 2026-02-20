@@ -175,7 +175,7 @@ impl Compiler<'_> {
         sig: &cranelift::prelude::Signature,
         mode: DeclareMode,
     ) -> crate::function_registry::FunctionKey {
-        let full_name_id = self.registry().get_method(method_id).full_name_id;
+        let full_name_id = self.query().method_full_name(method_id);
         let func_key = self.func_registry.intern_name_id(full_name_id);
         if self.func_registry.func_id(func_key).is_none() {
             let display_name = self.func_registry.display(func_key);
@@ -1042,9 +1042,10 @@ impl Compiler<'_> {
                 )
             })?;
 
-            // Look up the registered function via EntityRegistry full_name_id
-            let method_def = self.registry().get_method(method_id);
-            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+            // Look up the registered function via its full NameId
+            let func_key = self
+                .func_registry
+                .intern_name_id(self.query().method_full_name(method_id));
             let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found(
                     "static method",

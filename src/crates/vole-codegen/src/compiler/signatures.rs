@@ -145,7 +145,7 @@ impl Compiler<'_> {
     /// This is a convenience method that retrieves the function definition
     /// and builds the signature from its pre-resolved TypeIds.
     pub fn build_signature_for_function(&self, func_id: FunctionId) -> Signature {
-        let func_def = self.registry().get_function(func_id);
+        let func_def = self.query().get_function(func_id);
         self.build_signature_from_type_ids(
             &func_def.signature.params_id,
             Some(func_def.signature.return_type_id),
@@ -162,7 +162,7 @@ impl Compiler<'_> {
         method_id: MethodId,
         self_param: SelfParam,
     ) -> Signature {
-        let method_def = self.registry().get_method(method_id);
+        let method_def = self.query().get_method(method_id);
         let arena = self.arena();
         let (params, ret, _) = arena
             .unwrap_function(method_def.signature_id)

@@ -760,16 +760,13 @@ impl Compiler<'_> {
         // Get FunctionId and extract pre-resolved signature data
         let semantic_func_id = self
             .query()
-            .registry()
-            .function_by_name(name_id)
+            .function_id_by_name_id(name_id)
             .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
-        let (param_type_ids, return_type_id) = {
-            let func_def = self.registry().get_function(semantic_func_id);
-            (
-                func_def.signature.params_id.clone(),
-                func_def.signature.return_type_id,
-            )
-        };
+        let func_def = self.query().get_function(semantic_func_id);
+        let (param_type_ids, return_type_id) = (
+            func_def.signature.params_id.clone(),
+            func_def.signature.return_type_id,
+        );
 
         // Check if this is a generator function (returns Iterator<T> and body contains yield)
         let source_file_ptr = self.source_file_ptr();
@@ -852,13 +849,11 @@ impl Compiler<'_> {
             .query()
             .function_id(program_module, func.name)
             .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
-        let (param_type_ids, return_type_id) = {
-            let func_def = self.registry().get_function(semantic_func_id);
-            (
-                func_def.signature.params_id.clone(),
-                func_def.signature.return_type_id,
-            )
-        };
+        let func_def = self.query().get_function(semantic_func_id);
+        let (param_type_ids, return_type_id) = (
+            func_def.signature.params_id.clone(),
+            func_def.signature.return_type_id,
+        );
 
         // Check if this is a generator function (returns Iterator<T> and body contains yield)
         let source_file_ptr = self.source_file_ptr();

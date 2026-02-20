@@ -156,10 +156,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
 
         let field_types: HashMap<String, TypeId> = self
-            .registry()
+            .query()
             .fields_on_type(type_def_id)
             .map(|field_id| {
-                let field = self.registry().get_field(field_id);
+                let field = self.query().get_field(field_id);
                 (
                     self.name_table()
                         .last_segment_str(field.name_id)
@@ -286,12 +286,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     // If this is a type alias, resolve through to the underlying type
                     if let Some(def_id) = resolved_id
                         && query.is_alias_type(def_id)
-                            && let Some(aliased_type_id) = query.aliased_type(def_id)
-                            && let Some((underlying_id, _, _)) =
-                                self.arena().unwrap_class_or_struct(aliased_type_id)
-                        {
-                            resolved_id = Some(underlying_id);
-                        }
+                        && let Some(aliased_type_id) = query.aliased_type(def_id)
+                        && let Some((underlying_id, _, _)) =
+                            self.arena().unwrap_class_or_struct(aliased_type_id)
+                    {
+                        resolved_id = Some(underlying_id);
+                    }
                     resolved_id
                 } else {
                     None
@@ -591,10 +591,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Compile and store each explicitly provided field
         let field_types: HashMap<String, TypeId> = self
-            .registry()
+            .query()
             .fields_on_type(type_def_id)
             .map(|field_id| {
-                let field = self.registry().get_field(field_id);
+                let field = self.query().get_field(field_id);
                 (
                     self.name_table()
                         .last_segment_str(field.name_id)
