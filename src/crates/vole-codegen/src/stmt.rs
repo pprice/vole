@@ -17,8 +17,8 @@ use super::structs::{
     store_value_to_stack,
 };
 use super::types::{
-    CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, fallible_error_tag_by_id,
-    is_wide_fallible, tuple_layout_id, type_id_to_cranelift,
+    CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, is_wide_fallible, tuple_layout_id,
+    type_id_to_cranelift,
 };
 use crate::ops::sextend_const;
 
@@ -882,17 +882,14 @@ impl Cg<'_, '_, '_> {
             })?;
 
         // Get the error tag for this error type
-        let error_tag = fallible_error_tag_by_id(
-            error_type_id,
-            raise_stmt.error_name,
-            self.arena(),
-            self.interner(),
-            self.name_table(),
-            self.registry(),
-        )
-        .ok_or_else(|| {
-            CodegenError::not_found("error type", self.interner().resolve(raise_stmt.error_name))
-        })?;
+        let error_tag = self
+            .error_tag_for(error_type_id, raise_stmt.error_name)
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "error type",
+                    self.interner().resolve(raise_stmt.error_name),
+                )
+            })?;
 
         // Resolve the error TypeDefId and get its fields
         let error_type_def_id =

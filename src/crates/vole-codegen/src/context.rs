@@ -282,9 +282,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.entity_registry()
     }
 
-    /// Get the name table
+    /// Get the name table.
+    /// Returns `&'ctx NameTable` so references obtained from it outlive `self` borrows.
     #[inline]
-    pub fn name_table(&self) -> &vole_identity::NameTable {
+    pub fn name_table(&self) -> &'ctx vole_identity::NameTable {
         self.env.analyzed.name_table()
     }
 

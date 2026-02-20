@@ -219,19 +219,9 @@ impl Cg<'_, '_, '_> {
             .is_some_and(|type_id| self.query().is_error_type(type_id))
             || {
                 // Fallback: check if name matches an error type in the fallible's error union
-                let arena = self.arena();
-                arena
+                self.arena()
                     .unwrap_fallible(scrutinee.type_id)
-                    .and_then(|(_, error_type_id)| {
-                        fallible_error_tag_by_id(
-                            error_type_id,
-                            name,
-                            arena,
-                            self.interner(),
-                            self.name_table(),
-                            self.registry(),
-                        )
-                    })
+                    .and_then(|(_, error_type_id)| self.error_tag_for(error_type_id, name))
                     .is_some()
             };
 
@@ -270,22 +260,14 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         tag: Value,
     ) -> CodegenResult<Option<Value>> {
-        let arena = self.arena();
-        let Some((_success_type_id, error_type_id)) = arena.unwrap_fallible(scrutinee.type_id)
+        let Some((_success_type_id, error_type_id)) =
+            self.arena().unwrap_fallible(scrutinee.type_id)
         else {
             // Not matching on a fallible type
             return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
 
-        let name_table = self.name_table();
-        let Some(error_tag) = fallible_error_tag_by_id(
-            error_type_id,
-            name,
-            arena,
-            self.interner(),
-            name_table,
-            self.registry(),
-        ) else {
+        let Some(error_tag) = self.error_tag_for(error_type_id, name) else {
             // Error type not found in fallible - will never match
             return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
@@ -297,6 +279,21 @@ impl Cg<'_, '_, '_> {
     // =========================================================================
     // Record field extraction helpers
     // =========================================================================
+
+    /// Look up the numeric error tag for a named error type within a fallible error union.
+    ///
+    /// Thin wrapper around `fallible_error_tag_by_id` that pulls all context
+    /// arguments from `self`, keeping call sites free of `self.registry()` passes.
+    pub(crate) fn error_tag_for(&self, error_type_id: TypeId, error_name: Symbol) -> Option<i64> {
+        fallible_error_tag_by_id(
+            error_type_id,
+            error_name,
+            self.arena(),
+            self.interner(),
+            self.name_table(),
+            self.registry(),
+        )
+    }
 
     /// Extract and bind fields from a destructure pattern source.
     ///
@@ -479,22 +476,13 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
 
-        let arena = self.arena();
         let Some((_success_type_id, fallible_error_type_id)) =
-            arena.unwrap_fallible(scrutinee.type_id)
+            self.arena().unwrap_fallible(scrutinee.type_id)
         else {
             return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
 
-        let name_table = self.name_table();
-        let Some(error_tag) = fallible_error_tag_by_id(
-            fallible_error_type_id,
-            name,
-            arena,
-            self.interner(),
-            name_table,
-            self.registry(),
-        ) else {
+        let Some(error_tag) = self.error_tag_for(fallible_error_type_id, name) else {
             // Error type not found in fallible
             return Ok(Some(self.iconst_cached(types::I8, 0)));
         };
