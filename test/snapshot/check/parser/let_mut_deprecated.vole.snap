@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E1038]: `let mut` is not valid Vole syntax
+   ╭─[<path>/let_mut_deprecated.vole:2:5]
+ 1 │ func main() {
+ 2 │     let mut x = 5
+   ·     ─┬─
+   ·      ╰── replace `let mut` with `var`
+ 3 │     x = 10
+   ╰────
+  help: use `var` instead of `let mut` for mutable bindings
