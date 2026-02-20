@@ -578,12 +578,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_def_id: vole_identity::TypeDefId,
     ) -> CodegenResult<CompiledValue> {
         // Use flat total size to account for nested struct fields
-        let total_size = {
-            let arena = self.arena();
-            let entities = self.registry();
-            super::helpers::struct_total_byte_size(result_type_id, arena, entities)
-                .expect("INTERNAL: valid struct must have computable size")
-        };
+        let total_size = self
+            .struct_total_byte_size(result_type_id)
+            .expect("INTERNAL: valid struct must have computable size");
 
         // Allocate stack slot for the struct
         let slot = self.alloc_stack(total_size);
@@ -671,11 +668,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: StackSlot,
         offset: i32,
     ) -> CodegenResult<()> {
-        let field_flat_slots = {
-            let arena = self.arena();
-            let entities = self.registry();
-            super::helpers::struct_flat_slot_count(value.type_id, arena, entities)
-        };
+        let field_flat_slots = self.struct_flat_slot_count(value.type_id);
         if let Some(nested_flat) = field_flat_slots {
             for i in 0..nested_flat {
                 let src_off = (i as i32) * 8;

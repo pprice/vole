@@ -363,9 +363,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// This is the number of 8-byte slots needed to store the struct inline,
     /// accounting for nested struct fields.
     pub fn struct_flat_slot_count(&self, type_id: TypeId) -> Option<usize> {
-        let arena = self.arena();
-        let entities = self.registry();
-        super::structs::struct_flat_slot_count(type_id, arena, entities)
+        super::structs::struct_flat_slot_count(type_id, self.arena(), self.registry())
     }
 
     /// Check if a struct type uses small return convention (1-2 flat slots).

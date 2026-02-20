@@ -14,7 +14,6 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::{
     CompiledValue, RcLifecycle, array_element_tag_id, module_name_id, type_id_to_cranelift,
-    value_to_word,
 };
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::{MethodId, NameId, TypeDefId};
@@ -581,17 +580,7 @@ impl Cg<'_, '_, '_> {
 
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
-                    let ptr_type = self.ptr_type();
-                    let arena = self.arena();
-                    let registry = self.registry();
-                    value_to_word(
-                        self.builder,
-                        &compiled,
-                        ptr_type,
-                        None, // No heap alloc needed for primitive conversions
-                        arena,
-                        registry,
-                    )?
+                    self.emit_word(&compiled, None)?
                 } else {
                     compiled.value
                 };
@@ -605,17 +594,7 @@ impl Cg<'_, '_, '_> {
                 }
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
-                    let ptr_type = self.ptr_type();
-                    let arena = self.arena();
-                    let registry = self.registry();
-                    value_to_word(
-                        self.builder,
-                        &compiled,
-                        ptr_type,
-                        None, // No heap alloc needed for primitive conversions
-                        arena,
-                        registry,
-                    )?
+                    self.emit_word(&compiled, None)?
                 } else {
                     compiled.value
                 };
@@ -1507,16 +1486,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 compiled
             };
-            let arena = self.arena();
-            let registry = self.registry();
-            let word = value_to_word(
-                self.builder,
-                &compiled,
-                word_type,
-                Some(heap_alloc_ref),
-                arena,
-                registry,
-            )?;
+            let word = self.emit_word(&compiled, Some(heap_alloc_ref))?;
             call_args.push(word);
         }
 

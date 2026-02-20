@@ -459,11 +459,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         expected_type_ids: &[TypeId],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         // Collect &'ctx Expr references before taking &mut self.
-        // registry() returns &'ctx EntityRegistry, so default_refs lives as 'ctx.
+        // query() returns ProgramQuery<'ctx>, so default_refs lives as 'ctx.
         let default_refs: Vec<Option<&'ctx Expr>> = {
-            let registry = self.registry();
+            let query = self.query();
             (start_index..start_index + expected_type_ids.len())
-                .map(|idx| registry.function_default_expr(func_id, idx))
+                .map(|idx| query.function_default_expr_by_id(func_id, idx))
                 .collect()
         };
         self.compile_defaults_from_refs(&default_refs, expected_type_ids, false)
@@ -487,9 +487,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let default_refs: Vec<Option<&'ctx Expr>> = {
-            let registry = self.registry();
+            let query = self.query();
             (start_index..start_index + expected_type_ids.len())
-                .map(|idx| registry.method_default_expr(method_id, idx))
+                .map(|idx| query.method_default_expr_by_id(method_id, idx))
                 .collect()
         };
         self.compile_defaults_from_refs(&default_refs, expected_type_ids, is_generic_class)
@@ -522,8 +522,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         expected_type_ids: &[TypeId],
         is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        use crate::types::value_to_word;
-
         let mut args = Vec::new();
         let mut rc_owned = Vec::new();
 
@@ -559,10 +557,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             // Generic class methods expect i64 for TypeParam, convert if needed
             let arg_value = if is_generic_class && compiled.ty != types::I64 {
-                let ptr_type = self.ptr_type();
-                let arena = self.env.analyzed.type_arena();
-                let registry = self.env.analyzed.entity_registry();
-                value_to_word(self.builder, &compiled, ptr_type, None, arena, registry)?
+                self.emit_word(&compiled, None)?
             } else {
                 compiled.value
             };

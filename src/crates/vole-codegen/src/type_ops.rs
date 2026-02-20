@@ -7,6 +7,7 @@
 // policy, type resolution, and error type lookup. Split from context.rs.
 
 use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
+use cranelift_codegen::ir::FuncRef;
 
 use vole_frontend::Symbol;
 use vole_identity::TypeDefId;
@@ -14,7 +15,7 @@ use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
-use super::types::{type_id_size, type_id_to_cranelift};
+use super::types::{CompiledValue, type_id_size, type_id_to_cranelift, value_to_word};
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Type context & substitution ==========
@@ -95,6 +96,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// lookups, keeping call sites free of self.registry() passes.
     pub fn impl_type_id_for(&self, ty: TypeId) -> Option<ImplTypeId> {
         ImplTypeId::from_type_id(ty, self.arena(), self.registry())
+    }
+
+    /// Convert a typed value to its word (i64) representation for generic dispatch.
+    ///
+    /// Wrapper around `value_to_word` that internalizes the ptr_type/registry/arena
+    /// parameters, keeping call sites free of self.registry() passes.
+    pub fn emit_word(
+        &mut self,
+        compiled: &CompiledValue,
+        heap_alloc_ref: Option<FuncRef>,
+    ) -> crate::errors::CodegenResult<Value> {
+        let ptr_type = self.ptr_type();
+        let registry = self.registry();
+        let arena = self.arena();
+        value_to_word(
+            self.builder,
+            compiled,
+            ptr_type,
+            heap_alloc_ref,
+            arena,
+            registry,
+        )
     }
 
     /// Convert an i64 value back to its proper type (reverse of convert_to_i64_for_storage)

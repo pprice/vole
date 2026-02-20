@@ -538,6 +538,16 @@ impl<'a> ProgramQuery<'a> {
         self.registry.function_default_expr(func_id, param_idx)
     }
 
+    /// Get a single default expression for a method parameter by MethodId and index.
+    #[must_use]
+    pub fn method_default_expr_by_id(
+        &self,
+        method_id: MethodId,
+        param_idx: usize,
+    ) -> Option<&'a Expr> {
+        self.registry.method_default_expr(method_id, param_idx)
+    }
+
     /// Get a method's return type from entity_registry
     #[must_use]
     pub fn method_return_type(&self, type_name: Symbol, method_name: Symbol) -> Option<TypeId> {

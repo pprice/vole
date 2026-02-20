@@ -17,6 +17,11 @@ impl Cg<'_, '_, '_> {
             .expect("INTERNAL: struct field offset must be computable for valid struct type")
     }
 
+    /// Compute total byte size of a struct type (None if type is not a struct).
+    pub(crate) fn struct_total_byte_size(&self, type_id: TypeId) -> Option<u32> {
+        super::helpers::struct_total_byte_size(type_id, self.arena(), self.registry())
+    }
+
     #[tracing::instrument(skip(self, fa), fields(field = %self.interner().resolve(fa.field)))]
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> CodegenResult<CompiledValue> {
         let obj = self.expr(&fa.object)?;
@@ -291,11 +296,7 @@ impl Cg<'_, '_, '_> {
             let offset = self.struct_field_byte_offset(obj.type_id, slot);
 
             // If assigning a nested struct, copy all flat slots inline
-            let nested_flat = {
-                let arena = self.arena();
-                let entities = self.registry();
-                super::helpers::struct_flat_slot_count(value.type_id, arena, entities)
-            };
+            let nested_flat = self.struct_flat_slot_count(value.type_id);
             if let Some(nested_flat) = nested_flat {
                 for i in 0..nested_flat {
                     let src_off = (i as i32) * 8;
