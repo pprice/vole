@@ -487,7 +487,7 @@ func is_even(x: i64) -> bool {
 tests {
     test "function passed to map" {
         let arr = [1, 2, 3]
-        let result = arr.iter().map(double).collect()
+        let result = arr.map(double).collect()
         assert(result[0] == 2)
         assert(result[1] == 4)
         assert(result[2] == 6)
@@ -495,7 +495,7 @@ tests {
 
     test "function passed to filter" {
         let arr = [1, 2, 3, 4, 5, 6]
-        let evens = arr.iter().filter(is_even).collect()
+        let evens = arr.filter(is_even).collect()
         assert(evens[0] == 2)
         assert(evens[1] == 4)
         assert(evens[2] == 6)

@@ -79,7 +79,7 @@ tests {
     }
 
     test "array iterator" {
-        let doubled = [1, 2, 3].iter().map((x) => x * 2).collect()
+        let doubled = [1, 2, 3].map(x => x * 2).collect()
         assert(doubled[0] == 2)
         assert(doubled[2] == 6)
     }

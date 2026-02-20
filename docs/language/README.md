@@ -23,7 +23,7 @@ vole run hello.vole
 |-----|-------------|
 | [Cheatsheet](cheatsheet.md) | Single-page syntax reference |
 | [Types](types.md) | Type system: primitives, arrays, optionals, unions |
-| [Variables](variables.md) | let/let mut, scoping, destructuring |
+| [Variables](variables.md) | let/var, scoping, destructuring |
 | [Functions](functions.md) | Functions, lambdas, closures, higher-order |
 | [Control Flow](control-flow.md) | if/else, while, for, match, when, break/continue |
 | [Operators](operators.md) | Arithmetic, comparison, logical, bitwise, type ops |
@@ -63,9 +63,9 @@ func main() {
         Person { name: "Bob", age: 25 },
     ]
 
-    let greetings = people.iter()
-        .filter((p) => p.age >= 18)
-        .map((p) => p.greet())
+    let greetings = people
+        .filter(p => p.age >= 18)
+        .map(p => p.greet())
         .collect()
 
     for greeting in greetings {

@@ -1,6 +1,6 @@
 # Variables
 
-Variables in Vole are immutable by default. Use `let` for bindings and `let mut` for mutable variables.
+Variables in Vole are immutable by default. Use `let` for bindings and `var` for mutable variables.
 
 ## Quick Reference
 
@@ -13,7 +13,7 @@ Variables in Vole are immutable by default. Use `let` for bindings and `let mut`
 | `let { x, y } = point` | Destructuring |
 
 **Rules:**
-- Immutable by default -- prefer `let` over `let mut`
+- Immutable by default -- prefer `let` over `var`
 - No shadowing in the same scope
 - Must be initialized at declaration
 - Type can be inferred or explicit
@@ -44,7 +44,7 @@ Immutability is the default because it:
 
 ### Mutable Bindings
 
-When you need to change a value, use `let mut`:
+When you need to change a value, use `var`:
 
 ```vole
 tests {
@@ -259,7 +259,7 @@ tests {
 
 ### Module-Level Variables
 
-Variables can be declared at the top level of a file. Top-level `let` and `let mut` are module-scoped:
+Variables can be declared at the top level of a file. Top-level `let` and `var` are module-scoped:
 
 ```vole
 let VERSION = "1.0.0"
@@ -288,7 +288,7 @@ let x = 1
 x = 2  // Error: cannot assign to immutable variable
 ```
 
-Fix: Use `let mut` if you need mutation.
+Fix: Use `var` if you need mutation.
 
 **Redeclaring in same scope:**
 

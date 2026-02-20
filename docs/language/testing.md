@@ -329,7 +329,7 @@ tests "User operations" {
 tests "Iterator operations" {
     test "map transforms elements" {
         let nums = [1, 2, 3]
-        let doubled = nums.iter().map((x) => x * 2).collect()
+        let doubled = nums.map(x => x * 2).collect()
         assert(doubled[0] == 2)
         assert(doubled[1] == 4)
         assert(doubled[2] == 6)
@@ -337,7 +337,7 @@ tests "Iterator operations" {
 
     test "filter selects matching" {
         let nums = [1, 2, 3, 4, 5]
-        let evens = nums.iter().filter((x) => x % 2 == 0).collect()
+        let evens = nums.filter(x => x % 2 == 0).collect()
         assert(evens.length() == 2)
         assert(evens[0] == 2)
         assert(evens[1] == 4)
@@ -345,7 +345,7 @@ tests "Iterator operations" {
 
     test "reduce accumulates" {
         let nums = [1, 2, 3, 4, 5]
-        let sum = nums.iter().reduce(0, (acc, x) => acc + x)
+        let sum = nums.reduce(0, (acc, x) => acc + x)
         assert(sum == 15)
     }
 }

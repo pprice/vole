@@ -360,7 +360,7 @@ tests {
 
     test "nth" {
         let s = "hello"
-        let ch = s.iter().nth(2)
+        let ch = s.nth(2)
         assert(ch is string)
         assert((ch ?? "") == "l")
     }
