@@ -107,7 +107,7 @@ fn analyze_immutable_assignment() {
 
 #[test]
 fn analyze_mutable_assignment() {
-    let source = "func main() { let mut x = 1\n x = 2 }";
+    let source = "func main() { var x = 1\n x = 2 }";
     assert!(check(source).is_ok());
 }
 
@@ -275,7 +275,7 @@ fn lambda_captures_mutable_variable() {
     let source = r#"
         func apply(f: () -> i64) -> i64 { return f() }
         func main() {
-            let mut x = 10
+            var x = 10
             let f = () => x + 1
             apply(f)
         }
@@ -295,7 +295,7 @@ fn lambda_captures_and_mutates_variable() {
     let source = r#"
         func apply(f: () -> i64) -> i64 { return f() }
         func main() {
-            let mut x = 10
+            var x = 10
             let f: () -> i64 = () => {
                 x = x + 1
                 return x
@@ -481,7 +481,7 @@ fn lambda_purity_captures_mutable() {
     let source = r#"
         func apply(f: () -> i64) -> i64 { return f() }
         func main() {
-            let mut x = 10
+            var x = 10
             let f = () => x + 1
             apply(f)
         }
@@ -498,7 +498,7 @@ fn lambda_purity_mutates_captures() {
     let source = r#"
         func apply(f: () -> i64) -> i64 { return f() }
         func main() {
-            let mut x = 10
+            var x = 10
             let f: () -> i64 = () => {
                 x = x + 1
                 return x
@@ -519,7 +519,7 @@ fn lambda_side_effects_take_precedence_over_captures() {
     let source = r#"
         func apply(f: () -> i64) -> i64 { return f() }
         func main() {
-            let mut x = 10
+            var x = 10
             let f: () -> i64 = () => {
                 println("hello")
                 x = x + 1

@@ -22,7 +22,7 @@ tests "random float" {
     }
 
     test "many floats in range" {
-        let mut i = 0
+        var i = 0
         while i < 100 {
             let f = random.float()
             assert(f >= 0.0)
@@ -57,7 +57,7 @@ tests "random int" {
     }
 
     test "many ints in range" {
-        let mut i = 0
+        var i = 0
         while i < 100 {
             let n = random.int(0, 100)
             assert(n >= 0)
@@ -81,9 +81,9 @@ tests "random int" {
 tests "random coin" {
     test "coin returns true or false" {
         // Run many times - should get both values
-        let mut got_true = false
-        let mut got_false = false
-        let mut i = 0
+        var got_true = false
+        var got_false = false
+        var i = 0
         while i < 100 {
             if random.coin() {
                 got_true = true
@@ -123,7 +123,7 @@ tests "seeded rng" {
 
     test "seeded int in range" {
         let rng = random.seeded(123)
-        let mut i = 0
+        var i = 0
         while i < 100 {
             let n = random.rng_int(rng, 10, 20)
             assert(n >= 10)
@@ -134,9 +134,9 @@ tests "seeded rng" {
 
     test "seeded coin varies" {
         let rng = random.seeded(456)
-        let mut got_true = false
-        let mut got_false = false
-        let mut i = 0
+        var got_true = false
+        var got_false = false
+        var i = 0
         while i < 100 {
             if random.rng_coin(rng) {
                 got_true = true
@@ -151,7 +151,7 @@ tests "seeded rng" {
 
     test "seeded float in range" {
         let rng = random.seeded(789)
-        let mut i = 0
+        var i = 0
         while i < 100 {
             let f = random.rng_float(rng)
             assert(f >= 0.0)

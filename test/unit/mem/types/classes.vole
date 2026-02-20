@@ -44,7 +44,7 @@ tests "class with string fields" {
     }
 
     test "reassign instance with string field" {
-        let mut p = Person { name: "Dave", age: 20 }
+        var p = Person { name: "Dave", age: 20 }
         p = Person { name: "Eve", age: 35 }
         assert(p.name == "Eve")
         assert(p.age == 35)
@@ -102,7 +102,7 @@ tests "class with class fields" {
     }
 
     test "reassign outer with different inner" {
-        let mut outer = Outer { inner: Inner { value: "first" }, label: "v1" }
+        var outer = Outer { inner: Inner { value: "first" }, label: "v1" }
         assert(outer.inner.value == "first")
         outer = Outer { inner: Inner { value: "second" }, label: "v2" }
         assert(outer.inner.value == "second")
@@ -147,7 +147,7 @@ tests "class with primitives" {
     }
 
     test "reassign instance variable" {
-        let mut m = Measurement { value: 1, scale: 0.5, active: true }
+        var m = Measurement { value: 1, scale: 0.5, active: true }
         m = Measurement { value: 2, scale: 1.0, active: false }
         assert(m.value == 2)
         assert(m.scale == 1.0)

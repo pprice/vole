@@ -12,7 +12,7 @@
   help: use literals, operators on constants, or array/tuple literals with constant elements
   × [E2089]: default value for 'x' must be a constant expression
     ╭─[<path>/default_must_be_constant_param.vole:14:28]
- 13 │ let mut mutable_global = 100
+ 13 │ var mutable_global = 100
  14 │ func with_mut_var(x: i32 = mutable_global) {
     ·                            ───────┬──────
     ·                                   ╰── non-constant expression

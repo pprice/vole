@@ -1,6 +1,6 @@
 // Test array out-of-bounds on set produces a clean panic
 func main() {
-    let mut arr = [10, 20, 30]
+    var arr = [10, 20, 30]
     arr[10] = 99
     println(arr[0])
 }

@@ -457,7 +457,7 @@ tests "non-taken arms with RC values" {
 // tests "match in a loop with RC values" {
 //     test "match optional strings in loop" {
 //         let values: [string?] = ["alpha", nil, "beta", nil, "gamma"]
-//         let mut result = ""
+//         var result = ""
 //         for v in values {
 //             let extracted = match v {
 //                 string => v
@@ -473,7 +473,7 @@ tests "non-taken arms with RC values" {
 //         let a2: Animal? = nil
 //         let a3: Animal? = Animal { name: "Cat", sound: "meow", legs: 4 }
 //         let animals: [Animal?] = [a1, a2, a3]
-//         let mut names = ""
+//         var names = ""
 //         for a in animals {
 //             let name = match a {
 //                 Animal => a.name
@@ -486,8 +486,8 @@ tests "non-taken arms with RC values" {
 //
 //     test "match union in loop accumulating strings" {
 //         let items: [string | i64] = ["hello", 42, "world", 99]
-//         let mut strings = ""
-//         let mut sum = 0
+//         var strings = ""
+//         var sum = 0
 //         for item in items {
 //             if item is string {
 //                 strings = strings + item + ","
@@ -501,8 +501,8 @@ tests "non-taken arms with RC values" {
 //
 //     test "match in while loop with index" {
 //         let data: [string?] = ["first", nil, "third"]
-//         let mut i = 0
-//         let mut result = ""
+//         var i = 0
+//         var result = ""
 //         while i < data.length() {
 //             let elem = data[i]
 //             let s = match elem {

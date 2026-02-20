@@ -16,7 +16,7 @@ tests {
 
         // Server: reads one request, spawns handler, closes response channel.
         let server = Task.run(() -> i64 => {
-            let mut handled = 0
+            var handled = 0
             while true {
                 let req_val = req_ch.try_receive()
                 if req_val is Done { break }
@@ -54,7 +54,7 @@ tests {
 
         // Server: reads requests, spawns one task per request.
         let server = Task.run(() -> i64 => {
-            let mut handled = 0
+            var handled = 0
             while true {
                 let req_val = req_ch.try_receive()
                 if req_val is Done { break }
@@ -75,7 +75,7 @@ tests {
         })
 
         // Client: send 5 requests (path IDs 1..5).
-        let mut i = 1
+        var i = 1
         while i <= 5 {
             req_ch.send(i)
             i = i + 1
@@ -83,8 +83,8 @@ tests {
         req_ch.close()
 
         // Collect all responses.
-        let mut total = 0
-        let mut count = 0
+        var total = 0
+        var count = 0
         while true {
             let r = resp_ch.try_receive()
             if r is Done { break }
@@ -112,7 +112,7 @@ tests {
 
         // Server: reads requests, increments counter, responds with ack.
         let server = Task.run(() -> i64 => {
-            let mut handled = 0
+            var handled = 0
             while true {
                 let req_val = req_ch.try_receive()
                 if req_val is Done { break }
@@ -134,8 +134,8 @@ tests {
         req_ch.close()
 
         // Drain responses.
-        let mut resp_sum = 0
-        let mut resp_count = 0
+        var resp_sum = 0
+        var resp_count = 0
         while true {
             let r = resp_ch.try_receive()
             if r is Done { break }
@@ -164,7 +164,7 @@ tests {
 
         // Acceptor: reads requests, forwards to processing pipeline.
         let acceptor = Task.run(() -> i64 => {
-            let mut count = 0
+            var count = 0
             while true {
                 let req_val = req_ch.try_receive()
                 if req_val is Done { break }
@@ -179,7 +179,7 @@ tests {
 
         // Processor: transforms requests (squares them) and sends to responder.
         let processor = Task.run(() -> i64 => {
-            let mut count = 0
+            var count = 0
             while true {
                 let r = process_ch.try_receive()
                 if r is Done { break }
@@ -193,7 +193,7 @@ tests {
         })
 
         // Client: send 8 requests.
-        let mut i = 1
+        var i = 1
         while i <= 8 {
             req_ch.send(i)
             i = i + 1
@@ -201,8 +201,8 @@ tests {
         req_ch.close()
 
         // Collect responses.
-        let mut total = 0
-        let mut count = 0
+        var total = 0
+        var count = 0
         while true {
             let r = resp_ch.try_receive()
             if r is Done { break }
@@ -236,7 +236,7 @@ tests {
             ]
             let results = Task.all(fns)
             // Send all results to response channel.
-            let mut i = 0
+            var i = 0
             while i < results.length() {
                 resp_ch.send(results[i])
                 i = i + 1
@@ -246,8 +246,8 @@ tests {
         })
 
         // Collect responses.
-        let mut total = 0
-        let mut count = 0
+        var total = 0
+        var count = 0
         while true {
             let r = resp_ch.try_receive()
             if r is Done { break }
@@ -270,10 +270,10 @@ tests {
 
         // Server: select across two request channels.
         let server = Task.run(() -> i64 => {
-            let mut handled = 0
+            var handled = 0
             // Process a fixed number of requests (no select-in-loop
             // since we can't detect "both closed" with select).
-            let mut remaining = 5
+            var remaining = 5
 
             while remaining > 0 {
                 let r = Task.select2(req_ch1, req_ch2, Duration.zero())
@@ -296,8 +296,8 @@ tests {
         req_ch2.send(5)
 
         // Drain responses.
-        let mut total = 0
-        let mut count = 0
+        var total = 0
+        var count = 0
         while true {
             let r = resp_ch.try_receive()
             if r is Done { break }

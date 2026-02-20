@@ -248,9 +248,9 @@ fn parse_mandelbrot_structure() {
     let source = r#"
 func main() {
     let size = 200
-    let mut y = 0
+    var y = 0
     while y < size {
-        let mut x = 0
+        var x = 0
         while x < size {
             if x == 0 {
                 break

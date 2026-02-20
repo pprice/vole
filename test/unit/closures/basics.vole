@@ -9,7 +9,7 @@ func make_adder(n: i64) -> (i64) -> i64 {
 }
 
 func make_counter() -> () -> i64 {
-    let mut count = 0
+    var count = 0
     return () => {
         count = count + 1
         return count

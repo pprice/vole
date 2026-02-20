@@ -34,10 +34,7 @@ pub enum SemanticError {
     },
 
     #[error("cannot assign to immutable variable '{name}'")]
-    #[diagnostic(
-        code(E2006),
-        help("consider declaring with 'let mut' to make it mutable")
-    )]
+    #[diagnostic(code(E2006), help("consider declaring with 'var' to make it mutable"))]
     ImmutableAssignment {
         name: String,
         #[label("cannot assign")]

@@ -375,7 +375,7 @@ tests "generic struct in arrays" {
 
     test "iterate over array of generic structs" {
         let boxes = [Box { value: 10 }, Box { value: 20 }, Box { value: 30 }]
-        let mut sum = 0
+        var sum = 0
         for b in boxes {
             sum = sum + b.value
         }

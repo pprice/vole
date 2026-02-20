@@ -2,49 +2,49 @@
 
 tests "compound assignment" {
     test "add assign" {
-        let mut x = 10
+        var x = 10
         x += 5
         assert(x == 15)
     }
 
     test "sub assign" {
-        let mut x = 10
+        var x = 10
         x -= 3
         assert(x == 7)
     }
 
     test "mul assign" {
-        let mut x = 4
+        var x = 4
         x *= 3
         assert(x == 12)
     }
 
     test "div assign" {
-        let mut x = 20
+        var x = 20
         x /= 4
         assert(x == 5)
     }
 
     test "mod assign" {
-        let mut x = 17
+        var x = 17
         x %= 5
         assert(x == 2)
     }
 
     test "float add assign" {
-        let mut f: f64 = 3.5
+        var f: f64 = 3.5
         f += 1.5
         assert(f == 5.0)
     }
 
     test "array index" {
-        let mut arr = [1, 2, 3]
+        var arr = [1, 2, 3]
         arr[0] += 10
         assert(arr[0] == 11)
     }
 
     test "chained" {
-        let mut x = 5
+        var x = 5
         x += 3
         x *= 2
         x -= 4

@@ -35,12 +35,12 @@ func unused_bool() {
 
 // Should NOT warn: regular assignment (used for side effect)
 func regular_assignment() {
-    let mut x = 1
+    var x = 1
     x = 2
 }
 
 // Should NOT warn: compound assignment (used for side effect)
 func compound_assignment() {
-    let mut x = 1
+    var x = 1
     x += 1
 }

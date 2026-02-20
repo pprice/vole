@@ -277,7 +277,7 @@ class Flags {
         }
 
         func count_set(f: Flags) -> i64 {
-            let mut count = 0
+            var count = 0
             if f.a { count = count + 1 }
             if f.b { count = count + 1 }
             if f.c { count = count + 1 }

@@ -4,7 +4,7 @@
 
 use super::ast::*;
 use super::parser::{ParseError, Parser};
-use super::token::TokenType;
+use super::token::{Span, TokenType};
 use crate::errors::ParserError;
 
 /// Result of parsing a class body.
@@ -148,6 +148,7 @@ impl<'src> Parser<'src> {
             TokenType::KwFunc => self.function_decl(),
             TokenType::KwTests => self.tests_decl(),
             TokenType::KwLet => self.let_decl(),
+            TokenType::KwVar => self.var_decl(),
             TokenType::KwClass => self.class_decl(),
             TokenType::KwStruct => self.struct_decl(),
             TokenType::KwInterface => self.interface_decl(false),
@@ -377,9 +378,29 @@ impl<'src> Parser<'src> {
         let start_span = self.current.span;
         self.advance(); // consume 'let'
 
-        let mutable = self.match_token(TokenType::KwMut);
+        // `let mut` is no longer valid — use `var` instead
+        if self.check(TokenType::KwMut) {
+            return Err(ParseError::new(
+                ParserError::LetMutDeprecated {
+                    span: start_span.into(),
+                },
+                start_span,
+            ));
+        }
 
-        // Check for tuple destructuring: let [a, b] = expr
+        self.let_decl_body(false, start_span)
+    }
+
+    /// Parse a var declaration (mutable binding at module level): `var x = expr`
+    fn var_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'var'
+        self.let_decl_body(true, start_span)
+    }
+
+    /// Parse the body of a let/var declaration after consuming the keyword.
+    fn let_decl_body(&mut self, mutable: bool, start_span: Span) -> Result<Decl, ParseError> {
+        // Check for tuple destructuring: let/var [a, b] = expr
         if self.check(TokenType::LBracket) {
             let pattern = self.parse_tuple_pattern()?;
             self.consume(TokenType::Eq, "expected '=' in let statement")?;
@@ -394,7 +415,7 @@ impl<'src> Parser<'src> {
             }));
         }
 
-        // Check for record destructuring: let { x, y } = expr
+        // Check for record destructuring: let/var { x, y } = expr
         if self.check(TokenType::LBrace) {
             let pattern = self.parse_record_pattern()?;
             self.consume(TokenType::Eq, "expected '=' in let statement")?;
@@ -409,7 +430,7 @@ impl<'src> Parser<'src> {
             }));
         }
 
-        // Regular let declaration
+        // Regular let/var declaration
         let stmt = self.let_statement_inner(mutable, start_span)?;
         Ok(Decl::Let(stmt))
     }
@@ -613,7 +634,7 @@ impl<'src> Parser<'src> {
     fn interface_decl_inner(
         &mut self,
         is_static: bool,
-        start_span: crate::Span,
+        start_span: Span,
     ) -> Result<Decl, ParseError> {
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected interface name")?;

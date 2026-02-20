@@ -21,7 +21,7 @@ func item_name(it: Item) -> string {
 tests "basic for-in iteration over RC elements" {
     test "iterate string array and concatenate" {
         let words = ["hello", "world", "foo"]
-        let mut result = ""
+        var result = ""
         for w in words {
             result = result + w + ","
         }
@@ -30,8 +30,8 @@ tests "basic for-in iteration over RC elements" {
 
     test "iterate string array and build result" {
         let names = ["alice", "bob", "carol"]
-        let mut count = 0
-        let mut last = ""
+        var count = 0
+        var last = ""
         for n in names {
             count = count + 1
             last = n
@@ -45,8 +45,8 @@ tests "basic for-in iteration over RC elements" {
         let b = Item { name: "shield", value: 20 }
         let c = Item { name: "potion", value: 5 }
         let items = [a, b, c]
-        let mut total = 0
-        let mut names = ""
+        var total = 0
+        var names = ""
         for it in items {
             total = total + it.value
             names = names + it.name + ","
@@ -59,7 +59,7 @@ tests "basic for-in iteration over RC elements" {
         let a = Item { name: "alpha", value: 1 }
         let b = Item { name: "beta", value: 2 }
         let items = [a, b]
-        let mut result = ""
+        var result = ""
         for it in items {
             let n = it.name
             result = result + n + ","
@@ -316,7 +316,7 @@ tests "iterator over strings (RC elements)" {
 tests "early termination with break in for loop" {
     test "break from string iteration" {
         let words = ["first", "second", "third", "fourth"]
-        let mut found = ""
+        var found = ""
         for w in words {
             if w == "second" {
                 found = w
@@ -331,8 +331,8 @@ tests "early termination with break in for loop" {
         let b = Item { name: "target", value: 42 }
         let c = Item { name: "c", value: 3 }
         let items = [a, b, c]
-        let mut found_name = ""
-        let mut found_value = 0
+        var found_name = ""
+        var found_value = 0
         for it in items {
             if it.value == 42 {
                 found_name = it.name
@@ -346,7 +346,7 @@ tests "early termination with break in for loop" {
 
     test "break after partial string concatenation" {
         let words = ["a", "b", "c", "d", "e"]
-        let mut result = ""
+        var result = ""
         for w in words {
             result = result + w
             if result.length() >= 3 {
@@ -358,7 +358,7 @@ tests "early termination with break in for loop" {
 
     test "continue skipping strings" {
         let words = ["keep", "skip", "keep2", "skip", "keep3"]
-        let mut result = ""
+        var result = ""
         for w in words {
             if w == "skip" {
                 continue
@@ -449,7 +449,7 @@ tests "iterator over classes and closures (RC elements)" {
         let add2 = (x: i64) -> i64 => x + 2
         let add3 = (x: i64) -> i64 => x + 3
         let fns = [add1, add2, add3]
-        let mut total = 0
+        var total = 0
         for f in fns {
             total = total + f(10)
         }
@@ -461,7 +461,7 @@ tests "iterator over classes and closures (RC elements)" {
         let greet = (name: string) -> string => "hello " + name
         let farewell = (name: string) -> string => "bye " + name
         let fns = [greet, farewell]
-        let mut result = ""
+        var result = ""
         for f in fns {
             result = result + f("world") + ","
         }

@@ -53,7 +53,7 @@ impl StmtRule for ForPushCollect {
         let inner = format!("{}    ", indent);
 
         Some(format!(
-            "let mut {}: [i64] = []\n\
+            "var {}: [i64] = []\n\
              {}for {} in {}.iter() {{\n\
              {}{}.push({})\n\
              {}}}",

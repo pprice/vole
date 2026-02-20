@@ -190,7 +190,7 @@ tests "string iterator" {
 
     test "for loop over string" {
         let s = "abc"
-        let mut count = 0
+        var count = 0
         for ch in s {
             count = count + 1
         }
@@ -199,7 +199,7 @@ tests "string iterator" {
 
     test "for loop over unicode string" {
         let s = "日本語"
-        let mut count = 0
+        var count = 0
         for ch in s {
             count = count + 1
         }

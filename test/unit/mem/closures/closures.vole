@@ -107,7 +107,7 @@ tests "closure with mixed capture kinds" {
 
 tests "mutable capture with rc" {
     test "mutable int capture with string return" {
-        let mut count = 0
+        var count = 0
         let label = "count"
         let incAndDescribe = () -> string => {
             count = count + 1

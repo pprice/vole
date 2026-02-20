@@ -30,8 +30,8 @@ func nested_defaults() -> i64 {
 
 func lambda_default_in_loop() -> i64 {
     let f = (x: i64, step: i64 = 1) -> i64 => x + step
-    let mut total = 0
-    let mut i = 0
+    var total = 0
+    var i = 0
     while i < 5 {
         total = total + f(i)
         i = i + 1

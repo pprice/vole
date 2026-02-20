@@ -1,6 +1,6 @@
 // Valid generator function - yield with correct type
 func counter(n: i64) -> Iterator<i64> {
-    let mut i = 0
+    var i = 0
     while i < n {
         yield i
         i = i + 1

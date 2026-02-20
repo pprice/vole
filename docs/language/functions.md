@@ -350,7 +350,7 @@ Closures can capture mutable variables:
 ```vole
 tests {
     test "mutable closure" {
-        let mut count = 0
+        var count = 0
         let inc = () -> i64 => {
             count = count + 1
             return count

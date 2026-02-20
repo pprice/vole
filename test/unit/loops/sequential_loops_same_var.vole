@@ -14,7 +14,7 @@ tests {
         }
 
         // Second loop: read from the map
-        let mut total = 0
+        var total = 0
         for i in 0..5 {
             total = total + (m.get(i) ?? 0)
         }
@@ -29,7 +29,7 @@ tests {
         m.set(2, 30)
 
         // First loop: read values
-        let mut sum1 = 0
+        var sum1 = 0
         for i in 0..3 {
             sum1 = sum1 + (m.get(i) ?? 0)
         }
@@ -40,7 +40,7 @@ tests {
         }
 
         // Third loop: read modified values
-        let mut sum2 = 0
+        var sum2 = 0
         for i in 0..3 {
             sum2 = sum2 + (m.get(i) ?? 0)
         }
@@ -63,7 +63,7 @@ tests {
         }
 
         // Loop 3
-        let mut total = 0
+        var total = 0
         for i in 0..3 {
             total = total + (m.get(i) ?? 0)
         }
@@ -83,7 +83,7 @@ tests {
         }
 
         // Read with sequential loops
-        let mut total = 0
+        var total = 0
         for i in 0..3 {
             for j in 0..3 {
                 let key = i * 10 + j

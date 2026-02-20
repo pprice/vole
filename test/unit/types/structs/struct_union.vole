@@ -39,7 +39,7 @@ tests {
     }
 
     test "struct in union assignment" {
-        let mut v: Point | nil = nil
+        var v: Point | nil = nil
         v = Point { x: 42, y: 99 }
         let result = match v {
             Point { x, y } => x + y

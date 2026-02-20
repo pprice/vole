@@ -38,7 +38,7 @@ impl StmtRule for RangeTostring {
         );
 
         Some(format!(
-            "let mut {} = \"\"\n\
+            "var {} = \"\"\n\
              {}for {} in 0..{} {{\n\
              {}    {} = {} + {}.to_string()\n\
              {}}}",
@@ -79,7 +79,7 @@ mod tests {
         let result = RangeTostring.generate(&mut scope, &mut emit, &params);
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains("let mut "));
+        assert!(text.contains("var "));
         assert!(text.contains(".to_string()"));
         assert!(text.contains("for "));
     }

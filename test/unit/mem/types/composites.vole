@@ -64,20 +64,20 @@ tests "struct field read" {
 
 tests "struct field assignment" {
     test "overwrite string field" {
-        let mut s = Named { name: "old", value: 1 }
+        var s = Named { name: "old", value: 1 }
         s.name = "new"
         assert(s.name == "new")
     }
 
     test "overwrite string field with variable" {
-        let mut s = Named { name: "old", value: 1 }
+        var s = Named { name: "old", value: 1 }
         let replacement = "new"
         s.name = replacement
         assert(s.name == "new")
     }
 
     test "overwrite both string fields" {
-        let mut p = Pair { first: "a", second: "b" }
+        var p = Pair { first: "a", second: "b" }
         p.first = "x"
         p.second = "y"
         assert(p.first == "x")
@@ -85,7 +85,7 @@ tests "struct field assignment" {
     }
 
     test "overwrite string field in loop" {
-        let mut s = Named { name: "start", value: 0 }
+        var s = Named { name: "start", value: 0 }
         let names = ["one", "two", "three"]
         for n in names {
             s.name = n
@@ -133,7 +133,7 @@ tests "fixed array of strings" {
     }
 
     test "fixed array string element overwrite" {
-        let mut arr: [string; 2] = ["old"; 2]
+        var arr: [string; 2] = ["old"; 2]
         arr[0] = "new"
         assert(arr[0] == "new")
         assert(arr[1] == "old")
@@ -178,7 +178,7 @@ tests "array of RC types" {
 
     test "array of strings iterate with for loop" {
         let arr = ["one", "two", "three"]
-        let mut result = ""
+        var result = ""
         for item in arr {
             result = result + item + ","
         }
@@ -214,7 +214,7 @@ tests "array of RC types" {
         let y = Item { label: "y", count: 20 }
         let z = Item { label: "z", count: 30 }
         let items = [x, y, z]
-        let mut total = 0
+        var total = 0
         for it in items {
             total = total + it.count
         }

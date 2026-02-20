@@ -24,7 +24,7 @@ func find_first(arr: [string], target: string) -> string {
 
 // Helper: uses while loop with array indexing
 func find_at_index(arr: [string], target: string) -> string {
-    let mut i = 0
+    var i = 0
     while i < arr.length() {
         let elem = arr[i]
         if elem == target {
@@ -84,8 +84,8 @@ tests "array indexing" {
 
     test "index in while loop" {
         let arr = ["a", "b", "c"]
-        let mut i = 0
-        let mut found = ""
+        var i = 0
+        var found = ""
         while i < arr.length() {
             let elem = arr[i]
             if elem == "b" {
@@ -105,13 +105,13 @@ tests "array indexing" {
 
 tests "reassignment" {
     test "reassign string variable" {
-        let mut x = "old"
+        var x = "old"
         x = "new"
         assert(x == "new")
     }
 
     test "reassign with variable copy" {
-        let mut x = "old"
+        var x = "old"
         let y = "other"
         x = y
         assert(x == "other")
@@ -120,7 +120,7 @@ tests "reassignment" {
 
     test "reassign in loop" {
         let arr = ["one", "two", "three"]
-        let mut last = ""
+        var last = ""
         for item in arr {
             last = item
         }

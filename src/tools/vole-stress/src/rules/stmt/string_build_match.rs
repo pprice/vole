@@ -62,7 +62,7 @@ impl StmtRule for StringBuildMatch {
         scope.protected_vars.push(s_name.clone());
 
         Some(format!(
-            "let mut {} = \"\"\n\
+            "var {} = \"\"\n\
              {}for {} in 0..{} {{\n\
              {}{} = {} + match {} {{\n\
              {}\n\
@@ -115,7 +115,7 @@ mod tests {
         let result = StringBuildMatch.generate(&mut scope, &mut emit, &params);
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains("let mut "));
+        assert!(text.contains("var "));
         assert!(text.contains("match "));
         assert!(text.contains("_ => "));
     }

@@ -99,7 +99,7 @@ tests {
     }
 
     test "stream produces values consumed by for loop" {
-        let mut sum = 0
+        var sum = 0
         let s = Task.stream((emit: (i64) -> void) => {
             emit(1)
             emit(2)
@@ -200,7 +200,7 @@ tests {
     test "parallel map doubles values" {
         let results = Task.parallel<i64>([1, 2, 3, 4, 5], (x: i64) -> i64 => { return x * 2 })
         assert(results.length() == 5)
-        let mut sum = 0
+        var sum = 0
         for v in results.iter() {
             sum = sum + v
         }
@@ -216,7 +216,7 @@ tests {
     test "parallel with multiple items" {
         let results = Task.parallel<i64>([5, 10], (x: i64) -> i64 => { return x * 10 })
         assert(results.length() == 2)
-        let mut sum = 0
+        var sum = 0
         for v in results.iter() {
             sum = sum + v
         }
@@ -226,7 +226,7 @@ tests {
     test "parallel identity transform" {
         let results = Task.parallel<i64>([7, 14, 21], (x: i64) -> i64 => { return x })
         assert(results.length() == 3)
-        let mut sum = 0
+        var sum = 0
         for v in results.iter() {
             sum = sum + v
         }
@@ -307,7 +307,7 @@ tests {
         ch.send(20)
         ch.send(30)
         ch.close()
-        let mut sum = 0
+        var sum = 0
         for v in ch.iter() {
             sum = sum + v
         }
@@ -317,7 +317,7 @@ tests {
     test "channel iter on empty closed channel yields nothing" {
         let ch = Channel.buffered<i64>(4)
         ch.close()
-        let mut count = 0
+        var count = 0
         for v in ch.iter() {
             count = count + 1
         }
@@ -361,7 +361,7 @@ tests {
         ch.send(0)
         ch.send(0)
         ch.close()
-        let mut count = 0
+        var count = 0
         for v in ch.iter() {
             assert(v == 0)
             count = count + 1
@@ -388,7 +388,7 @@ tests {
             emit(0)
             emit(0)
         })
-        let mut count = 0
+        var count = 0
         for v in s {
             assert(v == 0)
             count = count + 1

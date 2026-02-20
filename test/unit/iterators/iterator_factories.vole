@@ -147,7 +147,7 @@ tests "iterator factories" {
     // =========================================================================
 
     test "from_fn collect sequence" {
-        let mut n = 0
+        var n = 0
         let result = from_fn(() -> i64? => {
             n = n + 1
             if n <= 3 {
@@ -167,7 +167,7 @@ tests "iterator factories" {
     }
 
     test "from_fn with sum" {
-        let mut n = 0
+        var n = 0
         let result = from_fn(() -> i64? => {
             n = n + 1
             if n <= 4 {

@@ -132,7 +132,7 @@ tests {
 ```vole
 tests {
     test "compound assignment" {
-        let mut a: i32 = 10
+        var a: i32 = 10
         a += 5
         assert(a == 15)
         a *= 2
@@ -679,7 +679,7 @@ Created with range literals:
 ```vole
 tests {
     test "range" {
-        let mut sum = 0
+        var sum = 0
         for i in 0..5 {
             sum += i
         }

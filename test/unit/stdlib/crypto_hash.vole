@@ -104,7 +104,7 @@ tests "sha256_bytes array hashing" {
 
     test "sha256_bytes values are in byte range" {
         let result = hash.sha256_bytes("arbitrary input")
-        let mut i = 0
+        var i = 0
         while i < 32 {
             assert(result[i] >= 0)
             assert(result[i] <= 255)
@@ -115,7 +115,7 @@ tests "sha256_bytes array hashing" {
     test "sha256_bytes is deterministic" {
         let r1 = hash.sha256_bytes("deterministic")
         let r2 = hash.sha256_bytes("deterministic")
-        let mut i = 0
+        var i = 0
         while i < 32 {
             assert(r1[i] == r2[i])
             i = i + 1
@@ -126,8 +126,8 @@ tests "sha256_bytes array hashing" {
         let r1 = hash.sha256_bytes("input1")
         let r2 = hash.sha256_bytes("input2")
         // At least one byte should differ
-        let mut found_diff = false
-        let mut i = 0
+        var found_diff = false
+        var i = 0
         while i < 32 {
             if r1[i] != r2[i] {
                 found_diff = true
@@ -186,7 +186,7 @@ tests "sha256 edge cases" {
 
     test "sha256 many times is stable" {
         let expected = hash.sha256("stability test")
-        let mut i = 0
+        var i = 0
         while i < 100 {
             let result = hash.sha256("stability test")
             assert(result == expected)
@@ -196,10 +196,10 @@ tests "sha256 edge cases" {
 
     test "sha256_bytes many times is stable" {
         let expected = hash.sha256_bytes("stability test")
-        let mut i = 0
+        var i = 0
         while i < 100 {
             let result = hash.sha256_bytes("stability test")
-            let mut j = 0
+            var j = 0
             while j < 32 {
                 assert(result[j] == expected[j])
                 j = j + 1

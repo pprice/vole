@@ -39,7 +39,7 @@ func make_words() -> Iterator<string> {
 tests "for-in loop iterator consumption" {
     test "for-in over array iterator consumes and frees" {
         let arr = ["one", "two", "three"]
-        let mut result = ""
+        var result = ""
         for s in arr {
             result = result + s + ","
         }
@@ -48,7 +48,7 @@ tests "for-in loop iterator consumption" {
 
     test "for-in over iter() call consumes and frees" {
         let arr = ["alpha", "beta"]
-        let mut result = ""
+        var result = ""
         for s in arr.iter() {
             result = result + s
         }
@@ -57,7 +57,7 @@ tests "for-in loop iterator consumption" {
 
     test "for-in over mapped iterator" {
         let arr = [1, 2, 3]
-        let mut total = 0
+        var total = 0
         for x in arr.iter().map((n) => n * 10) {
             total = total + x
         }
@@ -66,7 +66,7 @@ tests "for-in loop iterator consumption" {
 
     test "for-in over filtered iterator" {
         let arr = [1, 2, 3, 4, 5, 6]
-        let mut sum = 0
+        var sum = 0
         for x in arr.iter().filter((n) => n % 2 == 0) {
             sum = sum + x
         }
@@ -78,8 +78,8 @@ tests "for-in loop iterator consumption" {
         let b = Widget { label: "bow", cost: 25 }
         let c = Widget { label: "cape", cost: 35 }
         let items = [a, b, c]
-        let mut total_cost = 0
-        let mut labels = ""
+        var total_cost = 0
+        var labels = ""
         for w in items {
             total_cost = total_cost + w.cost
             labels = labels + w.label + ","
@@ -91,7 +91,7 @@ tests "for-in loop iterator consumption" {
     test "for-in nested loops over string arrays" {
         let outer = ["a", "b"]
         let inner = ["1", "2"]
-        let mut result = ""
+        var result = ""
         for o in outer {
             for i in inner {
                 result = result + o + i + ","
@@ -241,7 +241,7 @@ tests "reduce with string accumulator" {
 tests "string iteration RC patterns" {
     test "for-in over string characters" {
         let s = "abc"
-        let mut count = 0
+        var count = 0
         for ch in s {
             count = count + 1
         }
@@ -302,7 +302,7 @@ tests "string iteration RC patterns" {
 
     test "for-in string concatenation builds new strings" {
         let s = "abc"
-        let mut result = ""
+        var result = ""
         for ch in s {
             result = result + ch + "-"
         }
@@ -332,7 +332,7 @@ tests "enumerate and zip RC patterns" {
 
     test "enumerate for-in with string array" {
         let words = ["foo", "bar", "baz"]
-        let mut index_sum = 0
+        var index_sum = 0
         for pair in words.iter().enumerate() {
             index_sum = index_sum + pair[0]
         }
@@ -343,7 +343,7 @@ tests "enumerate and zip RC patterns" {
     test "zip two integer arrays in for-in" {
         let a = [1, 2, 3]
         let b = [10, 20, 30]
-        let mut sum = 0
+        var sum = 0
         for pair in a.iter().zip(b.iter()) {
             sum = sum + pair[0] * pair[1]
         }
@@ -452,7 +452,7 @@ tests "generator iterator RC patterns" {
     // called from vole_array_iter_next when iterating a string generator via for-in.
     // This is a pre-existing runtime bug, not a test issue.
     // test "string generator for-in" {
-    //     let mut result = ""
+    //     var result = ""
     //     for w in make_words() {
     //         result = result + w + ","
     //     }
@@ -626,7 +626,7 @@ tests "sorted and reverse RC patterns" {
 tests "early termination RC patterns" {
     test "break from string for-in early" {
         let words = ["first", "second", "third", "fourth", "fifth"]
-        let mut found = ""
+        var found = ""
         for w in words {
             if w == "third" {
                 found = w
@@ -641,7 +641,7 @@ tests "early termination RC patterns" {
         let b = Widget { label: "target", cost: 42 }
         let c = Widget { label: "expensive", cost: 100 }
         let items = [a, b, c]
-        let mut found_label = ""
+        var found_label = ""
         for w in items {
             if w.cost == 42 {
                 found_label = w.label
@@ -653,7 +653,7 @@ tests "early termination RC patterns" {
 
     test "break from mapped iterator" {
         let arr = [1, 2, 3, 4, 5]
-        let mut sum = 0
+        var sum = 0
         for x in arr.iter().map((n) => n * 10) {
             if x > 30 {
                 break
@@ -666,7 +666,7 @@ tests "early termination RC patterns" {
 
     test "continue in for-in with strings" {
         let words = ["keep", "skip", "keep2", "skip", "keep3"]
-        let mut result = ""
+        var result = ""
         for w in words {
             if w == "skip" {
                 continue
@@ -678,7 +678,7 @@ tests "early termination RC patterns" {
 
     test "break after partial accumulation" {
         let words = ["a", "b", "c", "d", "e", "f"]
-        let mut result = ""
+        var result = ""
         for w in words {
             result = result + w
             if result.length() >= 3 {
@@ -691,7 +691,7 @@ tests "early termination RC patterns" {
     test "break from nested for-in loops" {
         let outer = ["x", "y", "z"]
         let inner = [1, 2, 3, 4]
-        let mut count = 0
+        var count = 0
         for o in outer {
             for i in inner {
                 if i > 2 {
@@ -743,11 +743,11 @@ tests "multiple iterators in same scope" {
 
     test "multiple for-in loops sequential" {
         let words = ["a", "b", "c"]
-        let mut result1 = ""
+        var result1 = ""
         for w in words {
             result1 = result1 + w
         }
-        let mut result2 = ""
+        var result2 = ""
         for w in words {
             result2 = result2 + w + "-"
         }

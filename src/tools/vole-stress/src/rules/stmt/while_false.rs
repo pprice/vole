@@ -37,7 +37,7 @@ impl StmtRule for WhileFalse {
         scope.protected_vars.push(var_name.clone());
 
         Some(format!(
-            "let mut {} = 42\n{}while false {{\n{}    {} = 0\n{}}}",
+            "var {} = 42\n{}while false {{\n{}    {} = 0\n{}}}",
             var_name, indent, indent, var_name, indent,
         ))
     }
@@ -81,7 +81,7 @@ mod tests {
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(text.contains("while false"), "got: {text}");
-        assert!(text.contains("let mut"), "got: {text}");
+        assert!(text.contains("var"), "got: {text}");
     }
 
     #[test]

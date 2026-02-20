@@ -7,7 +7,7 @@ tests {
     test "filled with i64" {
         let arr = Array.filled<i64>(5, 0)
         assert(arr.length() == 5)
-        let mut i = 0
+        var i = 0
         while i < 5 {
             assert(arr[i] == 0)
             i = i + 1

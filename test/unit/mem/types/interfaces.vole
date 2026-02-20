@@ -286,14 +286,14 @@ tests "interface with string-returning methods" {
 
 tests "reassign interface variable to different implementing class" {
     test "reassign Greetable from dog to cat" {
-        let mut g: Greetable = Dog { name: "Rover" }
+        var g: Greetable = Dog { name: "Rover" }
         assert(g.greet() == "Rover")
         g = Cat { name: "Misty", lives: 6 }
         assert(g.greet() == "Misty")
     }
 
     test "reassign Describable from widget to gadget" {
-        let mut d: Describable = Widget { label: "old-widget", id: 1 }
+        var d: Describable = Widget { label: "old-widget", id: 1 }
         assert(d.describe() == "old-widget")
         assert(d.tag() == 1)
         d = Gadget { model: "new-gadget", version: 99 }
@@ -302,7 +302,7 @@ tests "reassign interface variable to different implementing class" {
     }
 
     test "reassign multiple times" {
-        let mut g: Greetable = Dog { name: "First" }
+        var g: Greetable = Dog { name: "First" }
         assert(g.greet() == "First")
         g = Cat { name: "Second", lives: 2 }
         assert(g.greet() == "Second")
@@ -311,7 +311,7 @@ tests "reassign interface variable to different implementing class" {
     }
 
     test "reassign with function return value" {
-        let mut g: Greetable = Dog { name: "Initial" }
+        var g: Greetable = Dog { name: "Initial" }
         assert(g.greet() == "Initial")
         g = return_greetable_cat("Replaced", 4)
         assert(g.greet() == "Replaced")

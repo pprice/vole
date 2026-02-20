@@ -71,7 +71,7 @@ tests {
 
     test "fixed array of structs: index mutation" {
         let p = Point { x: 0, y: 0 }
-        let mut arr: [Point; 2] = [p; 2]
+        var arr: [Point; 2] = [p; 2]
         arr[0] = Point { x: 10, y: 20 }
         assert(arr[0].x == 10)
         assert(arr[0].y == 20)
@@ -81,7 +81,7 @@ tests {
 
     test "fixed array of structs: mutation does not affect other elements" {
         let p = Point { x: 5, y: 5 }
-        let mut arr: [Point; 3] = [p; 3]
+        var arr: [Point; 3] = [p; 3]
         arr[1] = Point { x: 99, y: 99 }
         assert(arr[0].x == 5)
         assert(arr[0].y == 5)

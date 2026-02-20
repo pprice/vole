@@ -77,7 +77,7 @@ impl StmtRule for IterWhileAccum {
         let inner = format!("{}    ", indent);
 
         Some(format!(
-            "let mut {} = 0\n\
+            "var {} = 0\n\
              {}let mut {} = 0\n\
              {}let mut {} = 0\n\
              {}while {} < {} {{\n\

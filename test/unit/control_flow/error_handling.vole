@@ -345,8 +345,8 @@ func checkPositive(x: i64) -> fallible(bool, DivByZero) {
 }
 
 func sumDivisions(n: i64) -> fallible(i64, DivByZero) {
-    let mut sum = 0
-    let mut i = 1
+    var sum = 0
+    var i = 1
     while i <= n {
         let result = try divide(100, i)
         sum = sum + result
@@ -356,7 +356,7 @@ func sumDivisions(n: i64) -> fallible(i64, DivByZero) {
 }
 
 func findFirstDivisible(divisor: i64) -> fallible(i64, DivByZero) {
-    let mut i = 0
+    var i = 0
     while i < 10 {
         let result = try divide(i * 10, divisor)
         if result > 5 {

@@ -10,7 +10,7 @@ func with_call(x: i32 = get_value()) {
 }
 
 // Error: mutable variable reference is not a constant expression
-let mut mutable_global = 100
+var mutable_global = 100
 func with_mut_var(x: i32 = mutable_global) {
     let _ = x
 }

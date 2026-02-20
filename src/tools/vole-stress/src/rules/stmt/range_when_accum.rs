@@ -39,7 +39,7 @@ impl StmtRule for RangeWhenAccum {
         );
 
         Some(format!(
-            "let mut {} = \"\"\n\
+            "var {} = \"\"\n\
              {}for {} in 0..{} {{\n\
              {}    {} = {} + when {{ {} > {} => \"hi\", _ => \"lo\" }}\n\
              {}}}",
@@ -80,7 +80,7 @@ mod tests {
         let result = RangeWhenAccum.generate(&mut scope, &mut emit, &params);
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains("let mut "));
+        assert!(text.contains("var "));
         assert!(text.contains("when {"));
         assert!(text.contains("\"hi\""));
         assert!(text.contains("\"lo\""));

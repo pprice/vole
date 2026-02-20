@@ -60,8 +60,8 @@ tests "task/channel/buffer RC smoke" {
 
     test "buffer slices and temporary strings in loop" {
         let buf = Buffer.from_string("abcdef")
-        let mut acc = ""
-        let mut i = 0
+        var acc = ""
+        var i = 0
         while i < 3 {
             let part = buf.slice(i, i + 2)
             acc = acc + part.to_string_raw()

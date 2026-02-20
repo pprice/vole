@@ -108,7 +108,7 @@ tests "narrow type coercion at call boundaries" {
 
     test "for loop over narrow-typed array" {
         let arr: [i32] = [10_i32, 20_i32, 30_i32]
-        let mut total: i64 = 0
+        var total: i64 = 0
         for item in arr {
             total = total + item
         }

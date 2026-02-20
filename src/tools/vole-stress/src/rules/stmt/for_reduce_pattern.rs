@@ -52,7 +52,7 @@ impl StmtRule for ForReducePattern {
         scope.add_local(acc_name.clone(), TypeInfo::Primitive(*prim), true);
 
         Some(format!(
-            "let mut {} = 0{}\nfor {} in {}.iter() {{\n    {} = {} + {}\n}}",
+            "var {} = 0{}\nfor {} in {}.iter() {{\n    {} = {} + {}\n}}",
             acc_name, suffix, iter_name, arr_name, acc_name, acc_name, iter_name
         ))
     }

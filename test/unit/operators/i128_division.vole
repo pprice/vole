@@ -12,13 +12,13 @@ tests "i128 division and modulo" {
     }
 
     test "i128 compound modulo assignment" {
-        let mut x: i128 = 8295_i128
+        var x: i128 = 8295_i128
         x %= 9084_i128
         assert(x == 8295_i128)
     }
 
     test "i128 compound division assignment" {
-        let mut x: i128 = 100_i128
+        var x: i128 = 100_i128
         x /= 4_i128
         assert(x == 25_i128)
     }

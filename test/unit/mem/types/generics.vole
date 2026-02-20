@@ -118,7 +118,7 @@ tests "generic box with primitive field (control)" {
     }
 
     test "reassign Box<i64>" {
-        let mut b = Box { value: 1 }
+        var b = Box { value: 1 }
         b = Box { value: 2 }
         assert(b.get() == 2)
     }
@@ -152,7 +152,7 @@ tests "generic box with string field" {
     }
 
     test "reassign Box<string>" {
-        let mut b = Box { value: "first" }
+        var b = Box { value: "first" }
         b = Box { value: "second" }
         assert(b.get() == "second")
     }
@@ -204,7 +204,7 @@ tests "generic static method returning instance" {
     }
 
     test "static create then reassign" {
-        let mut b = Box.create("first")
+        var b = Box.create("first")
         b = Box.create("second")
         assert(b.get() == "second")
     }
@@ -342,7 +342,7 @@ tests "multiple generic type params with RC values" {
     }
 
     test "reassign Pair<string, string>" {
-        let mut p = Pair { first: "old1", second: "old2" }
+        var p = Pair { first: "old1", second: "old2" }
         p = Pair { first: "new1", second: "new2" }
         assert(p.getFirst() == "new1")
         assert(p.getSecond() == "new2")
@@ -376,7 +376,7 @@ tests "generic class with interface constraint" {
     }
 
     test "reassign Wrapper" {
-        let mut w = Wrapper { inner: Tag { label: "first" } }
+        var w = Wrapper { inner: Tag { label: "first" } }
         w = Wrapper { inner: Tag { label: "second" } }
         assert(w.getDescription() == "second")
     }

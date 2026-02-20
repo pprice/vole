@@ -3,8 +3,8 @@
 tests {
 
     test "break in while loop" {
-        let mut count = 0
-        let mut i = 0
+        var count = 0
+        var i = 0
         while i < 100 {
             if i == 5 {
                 break
@@ -16,7 +16,7 @@ tests {
     }
 
     test "break exits immediately" {
-        let mut x = 0
+        var x = 0
         while true {
             x = 1
             break
@@ -26,8 +26,8 @@ tests {
     }
 
     test "continue in while loop" {
-        let mut sum = 0
-        let mut i = 0
+        var sum = 0
+        var i = 0
         while i < 10 {
             i = i + 1
             if i % 2 == 0 {
@@ -40,8 +40,8 @@ tests {
     }
 
     test "continue skips rest of iteration" {
-        let mut x = 0
-        let mut i = 0
+        var x = 0
+        var i = 0
         while i < 3 {
             i = i + 1
             continue
@@ -51,7 +51,7 @@ tests {
     }
 
     test "break in for loop" {
-        let mut sum = 0
+        var sum = 0
         for i in 0..100 {
             if i >= 5 {
                 break
@@ -63,7 +63,7 @@ tests {
     }
 
     test "continue in for loop" {
-        let mut sum = 0
+        var sum = 0
         for i in 0..10 {
             if i % 2 == 0 {
                 continue
@@ -75,7 +75,7 @@ tests {
     }
 
     test "break in nested loops - inner only" {
-        let mut count = 0
+        var count = 0
         for i in 0..3 {
             for j in 0..10 {
                 if j >= 2 {
@@ -89,7 +89,7 @@ tests {
     }
 
     test "continue in nested loops - inner only" {
-        let mut sum = 0
+        var sum = 0
         for i in 0..3 {
             for j in 0..4 {
                 if j % 2 == 0 {
@@ -104,7 +104,7 @@ tests {
 
     test "break with array iteration" {
         let arr = [10, 20, 30, 40, 50]
-        let mut sum = 0
+        var sum = 0
         for item in arr {
             if item > 25 {
                 break
@@ -117,7 +117,7 @@ tests {
 
     test "continue with array iteration" {
         let arr = [1, 2, 3, 4, 5, 6]
-        let mut sum = 0
+        var sum = 0
         for item in arr {
             if item % 2 == 0 {
                 continue
@@ -129,8 +129,8 @@ tests {
     }
 
     test "break and continue in same loop" {
-        let mut sum = 0
-        let mut i = 0
+        var sum = 0
+        var i = 0
         while i < 20 {
             i = i + 1
             if i % 2 == 0 {
@@ -146,7 +146,7 @@ tests {
     }
 
     test "break in inclusive range" {
-        let mut count = 0
+        var count = 0
         for i in 1..=100 {
             if i > 5 {
                 break

@@ -225,8 +225,8 @@ tests "conditional expressions with string results" {
 
 tests "string temps in while loops" {
     test "concat in while loop body" {
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         while i < 5 {
             result = result + "x"
             i = i + 1
@@ -235,9 +235,9 @@ tests "string temps in while loops" {
     }
 
     test "method call temps in while loop" {
-        let mut result = ""
+        var result = ""
         let words = ["  hello  ", "  world  "]
-        let mut i = 0
+        var i = 0
         while i < words.length() {
             let trimmed = words[i].trim()
             if i > 0 {
@@ -250,8 +250,8 @@ tests "string temps in while loops" {
     }
 
     test "string temps created and discarded in while loop" {
-        let mut i = 0
-        let mut last = ""
+        var i = 0
+        var last = ""
         while i < 3 {
             let temp = "iter-" + i.to_string()
             last = temp
@@ -261,8 +261,8 @@ tests "string temps in while loops" {
     }
 
     test "nested concat in while loop" {
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         while i < 3 {
             result = result + "[" + i.to_string() + "]"
             i = i + 1
@@ -274,7 +274,7 @@ tests "string temps in while loops" {
 tests "string temps in for loops" {
     test "method calls on for loop items" {
         let items = ["  alpha  ", "  beta  ", "  gamma  "]
-        let mut result = ""
+        var result = ""
         for item in items {
             if result.length() > 0 {
                 result = result + ","
@@ -286,7 +286,7 @@ tests "string temps in for loops" {
 
     test "concat temps in for loop" {
         let names = ["alice", "bob", "carol"]
-        let mut result = ""
+        var result = ""
         for name in names {
             result = result + "(" + name + ")"
         }
@@ -295,7 +295,7 @@ tests "string temps in for loops" {
 
     test "nested function calls in for loop" {
         let words = ["hello", "world"]
-        let mut result = ""
+        var result = ""
         for w in words {
             let wrapped = wrap("<", w.to_upper(), ">")
             result = result + wrapped
@@ -305,7 +305,7 @@ tests "string temps in for loops" {
 
     test "for loop with to_string temps" {
         let nums = [1, 2, 3, 4, 5]
-        let mut result = ""
+        var result = ""
         for n in nums {
             result = result + n.to_string()
         }
@@ -314,7 +314,7 @@ tests "string temps in for loops" {
 
     test "replace_all in for loop" {
         let templates = ["a-b", "c-d", "e-f"]
-        let mut result = ""
+        var result = ""
         for t in templates {
             result = result + t.replace_all("-", "=") + " "
         }
@@ -343,7 +343,7 @@ tests "string interpolation temporaries" {
     }
 
     test "interpolation in loop creates temps each iteration" {
-        let mut result = ""
+        var result = ""
         let names = ["a", "b", "c"]
         for name in names {
             let line = "item={name} "
@@ -495,7 +495,7 @@ tests "single-part interpolation RC lifecycle" {
     }
 
     test "repeated single-part interp does not corrupt heap" {
-        let mut i: i32 = 0_i32
+        var i: i32 = 0_i32
         while i < 10_i32 {
             let _r = single_part_interp_with_class("iter", i)
             i = i + 1_i32

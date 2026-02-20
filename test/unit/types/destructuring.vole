@@ -86,7 +86,7 @@ tests "destructuring" {
 
     test "mutable class destructuring" {
         let p = Point { x: 1, y: 2 }
-        let mut { x, y } = p
+        var { x, y } = p
         x = 99
         assert(x == 99)
         assert(y == 2)

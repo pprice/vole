@@ -42,7 +42,7 @@ class Processor<T: Subtractable + Describable> {
 
     // Lambda used inline (not returned)
     func describe_all() -> string {
-        let mut result = ""
+        var result = ""
         for item in self.items {
             let desc = ((x: T) -> string => x.describe())(item)
             result = "{result}{desc},"

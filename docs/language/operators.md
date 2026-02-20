@@ -243,13 +243,13 @@ tests {
     test "logical in conditions" {
         let x = 5
         let y = 10
-        let mut result = false
+        var result = false
         if x > 0 && y > 0 {
             result = true
         }
         assert(result == true)
 
-        let mut either = false
+        var either = false
         if x > 100 || y > 0 {
             either = true
         }
@@ -258,7 +258,7 @@ tests {
         let a = 5
         let b = 10
         let c = -1
-        let mut combined = false
+        var combined = false
         if (a > 0 && b > 0) || c > 0 {
             combined = true
         }
@@ -370,7 +370,7 @@ Modify a mutable variable in place:
 ```vole
 tests {
     test "compound assignment" {
-        let mut x = 10
+        var x = 10
         x += 5
         assert(x == 15)
 
@@ -394,7 +394,7 @@ Works with array indexing:
 ```vole
 tests {
     test "compound assignment on array" {
-        let mut arr = [1, 2, 3]
+        var arr = [1, 2, 3]
         arr[0] += 10
         assert(arr[0] == 11)
     }

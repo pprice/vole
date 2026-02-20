@@ -2,25 +2,25 @@
 
 tests "if" {
     test "simple if true" {
-        let mut x = 0
+        var x = 0
         if true { x = 1 }
         assert(x == 1)
     }
 
     test "simple if false" {
-        let mut x = 0
+        var x = 0
         if false { x = 1 }
         assert(x == 0)
     }
 
     test "if else true" {
-        let mut x = 0
+        var x = 0
         if true { x = 1 } else { x = 2 }
         assert(x == 1)
     }
 
     test "if else false" {
-        let mut x = 0
+        var x = 0
         if false { x = 1 } else { x = 2 }
         assert(x == 2)
     }
@@ -28,7 +28,7 @@ tests "if" {
     test "if condition expression" {
         let a = 10
         let b = 5
-        let mut x = 0
+        var x = 0
         if a > b { x = 1 }
         assert(x == 1)
     }
@@ -36,7 +36,7 @@ tests "if" {
 
 tests "else-if chains" {
     test "first branch matches" {
-        let mut result = ""
+        var result = ""
         if 10 > 5 {
             result = "big"
         } else if 10 > 0 {
@@ -46,7 +46,7 @@ tests "else-if chains" {
     }
 
     test "second branch matches" {
-        let mut result = ""
+        var result = ""
         if 3 > 5 {
             result = "big"
         } else if 3 > 0 {
@@ -56,7 +56,7 @@ tests "else-if chains" {
     }
 
     test "else branch negative" {
-        let mut result = ""
+        var result = ""
         if -5 > 0 {
             result = "positive"
         } else if -5 < 0 {
@@ -68,7 +68,7 @@ tests "else-if chains" {
     }
 
     test "else branch zero" {
-        let mut result = ""
+        var result = ""
         if 0 > 0 {
             result = "positive"
         } else if 0 < 0 {
@@ -82,8 +82,8 @@ tests "else-if chains" {
 
 tests "while" {
     test "simple while" {
-        let mut i = 0
-        let mut sum = 0
+        var i = 0
+        var sum = 0
         while i < 5 {
             sum = sum + i
             i = i + 1
@@ -92,7 +92,7 @@ tests "while" {
     }
 
     test "while never runs" {
-        let mut x = 0
+        var x = 0
         while false { x = 1 }
         assert(x == 0)
     }
@@ -100,7 +100,7 @@ tests "while" {
 
 tests "for" {
     test "for over array" {
-        let mut sum = 0
+        var sum = 0
         for x in [1, 2, 3, 4, 5] {
             sum = sum + x
         }
@@ -108,7 +108,7 @@ tests "for" {
     }
 
     test "for empty array" {
-        let mut x = 0
+        var x = 0
         for i in [] {
             x = 1
         }
@@ -117,7 +117,7 @@ tests "for" {
 
     test "exclusive range" {
         // 0..3 = 0, 1, 2
-        let mut sum = 0
+        var sum = 0
         for i in 0..3 {
             sum = sum + i
         }
@@ -126,7 +126,7 @@ tests "for" {
 
     test "inclusive range" {
         // 0..=3 = 0, 1, 2, 3
-        let mut sum = 0
+        var sum = 0
         for j in 0..=3 {
             sum = sum + j
         }
@@ -134,7 +134,7 @@ tests "for" {
     }
 
     test "nested ranges" {
-        let mut count = 0
+        var count = 0
         for x in 0..2 {
             for y in 0..3 {
                 count = count + 1

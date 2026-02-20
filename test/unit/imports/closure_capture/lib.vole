@@ -37,7 +37,7 @@ func make_multiplier(factor: i64) -> (i64) -> i64 {
 
 // Mutable captured variable
 func make_accumulator() -> (i64) -> i64 {
-    let mut total = 0
+    var total = 0
     let f = (n: i64) -> i64 => {
         total = total + n
         return total

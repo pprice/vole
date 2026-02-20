@@ -73,7 +73,7 @@ impl StmtRule for WhileStmt {
         let indent = emit.indent_str();
 
         Some(format!(
-            "let mut {} = 0\n{}let mut {} = 0\n{}while {} < {} {{\n{}\n{}}}",
+            "var {} = 0\n{}var {} = 0\n{}while {} < {} {{\n{}\n{}}}",
             counter_name, indent, guard_name, indent, counter_name, limit, body, indent
         ))
     }
@@ -117,10 +117,7 @@ mod tests {
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(text.contains("while "), "expected while, got: {text}");
-        assert!(
-            text.contains("let mut"),
-            "expected counter init, got: {text}"
-        );
+        assert!(text.contains("var"), "expected counter init, got: {text}");
         assert!(text.contains("break"), "expected guard break, got: {text}");
     }
 

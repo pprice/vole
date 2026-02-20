@@ -52,7 +52,7 @@ tests "struct with string fields" {
     }
 
     test "reassign string field on mut struct" {
-        let mut p = NamedPoint { label: "start", x: 1, y: 2 }
+        var p = NamedPoint { label: "start", x: 1, y: 2 }
         p.label = "end"
         assert(p.label == "end")
         assert(p.x == 1)
@@ -75,7 +75,7 @@ tests "struct with string fields" {
     }
 
     test "reassign struct with string fields" {
-        let mut n = FullName { first: "Bob", last: "Jones" }
+        var n = FullName { first: "Bob", last: "Jones" }
         n = FullName { first: "Carol", last: "King" }
         assert(n.first == "Carol")
         assert(n.last == "King")
@@ -102,7 +102,7 @@ tests "struct with primitives" {
     }
 
     test "reassign struct variable" {
-        let mut m = Metrics { count: 1, ratio: 0.1, enabled: false }
+        var m = Metrics { count: 1, ratio: 0.1, enabled: false }
         m = Metrics { count: 2, ratio: 0.9, enabled: true }
         assert(m.count == 2)
         assert(m.ratio == 0.9)
@@ -187,7 +187,7 @@ tests "struct with RC fields" {
     }
 
     test "struct with array field reassign" {
-        let mut s = WithArray { label: "old", items: [1] }
+        var s = WithArray { label: "old", items: [1] }
         s = WithArray { label: "new", items: [4, 5, 6, 7] }
         assert(s.label == "new")
         assert(s.items.length() == 4)
@@ -223,7 +223,7 @@ tests "struct with RC fields" {
     }
 
     test "struct with class field reassign" {
-        let mut s = WithClass { tag: Tag { name: "first" }, value: 10 }
+        var s = WithClass { tag: Tag { name: "first" }, value: 10 }
         s = WithClass { tag: Tag { name: "second" }, value: 20 }
         assert(s.tag.name == "second")
         assert(s.value == 20)
@@ -261,7 +261,7 @@ tests "struct with RC fields" {
     test "struct with closure field reassign" {
         let add1 = (x: i64) -> i64 => x + 1
         let mul3 = (x: i64) -> i64 => x * 3
-        let mut s = WithClosure { transform: add1, label: "add" }
+        var s = WithClosure { transform: add1, label: "add" }
         let f1 = s.transform
         assert(f1(5) == 6)
         s = WithClosure { transform: mul3, label: "mul" }
@@ -304,7 +304,7 @@ tests "struct with RC fields" {
     }
 
     test "struct with multiple mixed RC fields reassign" {
-        let mut s = MixedRC { name: "v1", tags: ["old"], tag: Tag { name: "t1" }, count: 1 }
+        var s = MixedRC { name: "v1", tags: ["old"], tag: Tag { name: "t1" }, count: 1 }
         s = MixedRC { name: "v2", tags: ["new", "newer"], tag: Tag { name: "t2" }, count: 2 }
         assert(s.name == "v2")
         assert(s.tags[0] == "new")
@@ -336,7 +336,7 @@ tests "struct with RC fields" {
     }
 
     test "nested struct reassign" {
-        let mut o = Outer { inner: Inner { name: "first", value: 1 }, label: "v1" }
+        var o = Outer { inner: Inner { name: "first", value: 1 }, label: "v1" }
         o = Outer { inner: Inner { name: "second", value: 2 }, label: "v2" }
         assert(o.inner.name == "second")
         assert(o.inner.value == 2)

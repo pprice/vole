@@ -13,7 +13,7 @@ tests {
 
     test "enumerate with for loop" {
         let arr = [10, 20, 30]
-        let mut sum = 0
+        var sum = 0
         for pair in arr.iter().enumerate() {
             sum = sum + pair[0] + pair[1]
         }
@@ -23,7 +23,7 @@ tests {
 
     test "enumerate indices are correct" {
         let arr = [100, 200, 300]
-        let mut indices = 0
+        var indices = 0
         for pair in arr.iter().enumerate() {
             indices = indices + pair[0]
         }
@@ -59,7 +59,7 @@ tests {
     test "zip with for loop" {
         let names = [1, 2, 3]
         let values = [10, 20, 30]
-        let mut sum = 0
+        var sum = 0
         for pair in names.iter().zip(values.iter()) {
             sum = sum + pair[0] + pair[1]
         }
@@ -98,7 +98,7 @@ tests {
     test "zip values are correct" {
         let a = [10, 20, 30]
         let b = [1, 2, 3]
-        let mut product_sum = 0
+        var product_sum = 0
         for pair in a.iter().zip(b.iter()) {
             product_sum = product_sum + (pair[0] * pair[1])
         }

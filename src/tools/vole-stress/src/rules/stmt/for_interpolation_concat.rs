@@ -35,7 +35,7 @@ impl StmtRule for ForInterpolationConcat {
 
         let indent = emit.indent_str();
         Some(format!(
-            "let mut {} = \"\"\n{}for {} in 0..{} {{\n{}    {} = {} + \"{}={{{}}} \"\n{}}}",
+            "var {} = \"\"\n{}for {} in 0..{} {{\n{}    {} = {} + \"{}={{{}}} \"\n{}}}",
             acc_name, indent, iter_name, n, indent, acc_name, acc_name, prefix, iter_name, indent
         ))
     }

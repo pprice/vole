@@ -9,7 +9,7 @@ tests {
     test "variables" {
         let x = 42              // Immutable, inferred type
         let y: i64 = 42         // Immutable, explicit type
-        let mut z = 0           // Mutable
+        var z = 0           // Mutable
         z = 10                  // Reassign mutable
         assert(x == 42)
         assert(y == 42)
@@ -99,7 +99,7 @@ tests {
 tests {
     test "if else" {
         let x = 5
-        let mut result = ""
+        var result = ""
         if x > 0 {
             result = "pos"
         } else {
@@ -118,7 +118,7 @@ tests {
     }
 
     test "loops" {
-        let mut sum = 0
+        var sum = 0
         for i in 0..5 {
             sum = sum + i
         }
@@ -332,7 +332,7 @@ Functions containing `yield` are generators. They return `Iterator<T>`.
 
 ```vole
 func counter(max: i64) -> Iterator<i64> {
-    let mut i = 0
+    var i = 0
     while i < max {
         yield i
         i = i + 1

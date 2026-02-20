@@ -31,7 +31,7 @@ func test_f64_iter_when_in_class_field() {
 
 func test_f64_iter_arithmetic() {
     let values = [10.0_f64, 20.0_f64, 30.0_f64]
-    let mut sum = 0.0_f64
+    var sum = 0.0_f64
     for x in values.iter() {
         sum = sum + x
     }
@@ -48,7 +48,7 @@ func test_f64_iter_take_comparison() {
 
 func test_f64_iter_when_arithmetic() {
     let values = [4.0_f64, 6.0_f64]
-    let mut total = 0.0_f64
+    var total = 0.0_f64
     for x in values.iter() {
         let v = when { true => x, _ => 0.0_f64 }
         total = total + v

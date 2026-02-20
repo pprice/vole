@@ -80,7 +80,7 @@ impl StmtRule for ForInMatchAccum {
         let inner2 = format!("{}        ", indent);
 
         let result = format!(
-            "let mut {} = 0\n\
+            "var {} = 0\n\
              {}for {} in {}.iter(){} {{\n\
              {}let {} = match {} {{\n\
              {}{}\n\

@@ -22,7 +22,7 @@ tests {
     }
 
     test "RC locals in loops with break" {
-        let mut found = ""
+        var found = ""
         let items = ["alpha", "beta", "gamma"]
         for item in items {
             if item == "beta" {
@@ -34,7 +34,7 @@ tests {
     }
 
     test "RC locals in loops with continue" {
-        let mut count = 0
+        var count = 0
         let items = [1, 0, 2, 0, 3]
         for item in items {
             if item == 0 {
@@ -60,7 +60,7 @@ tests {
     }
 
     test "string concat in loop" {
-        let mut result = ""
+        var result = ""
         let parts = ["hello", " ", "world"]
         for p in parts {
             result = result + p

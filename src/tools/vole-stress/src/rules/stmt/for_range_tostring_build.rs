@@ -31,7 +31,7 @@ impl StmtRule for ForRangeTostringBuild {
         );
         let indent = emit.indent_str();
         Some(format!(
-            "let mut {} = \"\"\n{}for {} in 0..{} {{\n{}    {} = {} + {}.to_string()\n{}}}",
+            "var {} = \"\"\n{}for {} in 0..{} {{\n{}    {} = {} + {}.to_string()\n{}}}",
             acc_name, indent, iter_var, n, indent, acc_name, acc_name, iter_var, indent
         ))
     }

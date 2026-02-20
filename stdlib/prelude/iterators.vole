@@ -21,7 +21,7 @@ external("vole:std:runtime") {
     // from_fn(f) - creates an iterator from a generator function
     // The function should return T? - when it returns nil, iteration ends
     // Example:
-    //   let mut n = 0
+    //   var n = 0
     //   from_fn(() => { n = n + 1; if n <= 3 { return n } else { return nil } }).collect()
     //   => [1, 2, 3]
     func "iter_from_fn" as from_fn(generator: () -> i64?) -> Iterator<i64>

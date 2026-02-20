@@ -41,7 +41,7 @@ impl StmtRule for InterpolationConcat {
         );
 
         Some(format!(
-            "let mut {} = \"\"\n\
+            "var {} = \"\"\n\
              for {} in 0..{} {{\n\
                  {} = {} + \"{}={{{}}} \"\n\
              }}",
@@ -82,7 +82,7 @@ mod tests {
         let result = InterpolationConcat.generate(&mut scope, &mut emit, &params);
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains("let mut "));
+        assert!(text.contains("var "));
         assert!(text.contains("for "));
         assert!(text.contains("0.."));
     }

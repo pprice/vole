@@ -39,7 +39,7 @@ class Set<T: Hashable + Equatable> {
                 return 8
             }
 
-            let mut power = 8
+            var power = 8
             while power < n {
                 power = power * 2
             }
@@ -103,16 +103,16 @@ class Set<T: Hashable + Equatable> {
 
     func find_slot(value: T) -> i64 {
         let cap = self.buckets.length()
-        let mut idx = value.hash() & (cap - 1)
-        let mut first_deleted = -1
-        let mut probes = 0
+        var idx = value.hash() & (cap - 1)
+        var first_deleted = -1
+        var probes = 0
 
         while probes < cap {
             let bucket = self.buckets[idx]
 
-            let mut same_value = false
-            let mut saw_deleted = false
-            let mut saw_empty = false
+            var same_value = false
+            var saw_deleted = false
+            var saw_empty = false
 
             match bucket {
                 SetEntry { value: existing } => same_value = existing.equals(value)
@@ -305,7 +305,7 @@ implement Iterator<T> for SetIterator<T> {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
             self.index = self.index + 1
-            let mut found = false
+            var found = false
             match bucket {
                 SetEntry { value } => found = true
                 Empty => found = false

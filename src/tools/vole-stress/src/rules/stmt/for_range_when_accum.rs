@@ -32,7 +32,7 @@ impl StmtRule for ForRangeWhenAccum {
         );
         let indent = emit.indent_str();
         Some(format!(
-            "let mut {} = \"\"\n{}for {} in 0..{} {{\n{}    {} = {} + when {{ {} > {} => \"hi\", _ => \"lo\" }}\n{}}}",
+            "var {} = \"\"\n{}for {} in 0..{} {{\n{}    {} = {} + when {{ {} > {} => \"hi\", _ => \"lo\" }}\n{}}}",
             acc_name, indent, iter_var, n, indent, acc_name, acc_name, iter_var, threshold, indent
         ))
     }

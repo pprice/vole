@@ -71,8 +71,8 @@ tests {
     }
 
     test "fma in loop (mandelbrot-like)" {
-        let mut zr = 0.0
-        let mut zi = 0.0
+        var zr = 0.0
+        var zi = 0.0
         let cr = -0.5
         let ci = 0.5
 

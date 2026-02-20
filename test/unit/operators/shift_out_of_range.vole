@@ -44,21 +44,21 @@ tests "shift amount out of range is not folded and matches runtime" {
 
     test "u8 shift by 8 is not folded - runtime result" {
         // Shift amount equals bit width: Cranelift masks 8 % 8 = 0, result is 1
-        let mut amount: u8 = 8  // mutable to prevent constant folding
+        var amount: u8 = 8  // mutable to prevent constant folding
         let x = 1_u8 << amount
         assert(x == 1_u8)
     }
 
     test "u16 shift by 16 is not folded - runtime result" {
         // Shift amount equals bit width: Cranelift masks 16 % 16 = 0, result is 1
-        let mut amount: u16 = 16
+        var amount: u16 = 16
         let x = 1_u16 << amount
         assert(x == 1_u16)
     }
 
     test "u8 shift by 9 is not folded - runtime result" {
         // 9 % 8 = 1, result is 1 << 1 = 2
-        let mut amount: u8 = 9
+        var amount: u8 = 9
         let x = 1_u8 << amount
         assert(x == 2_u8)
     }

@@ -47,7 +47,7 @@ tests "val pattern basics" {
     }
 
     test "val with mutable variable" {
-        let mut limit = 10
+        var limit = 10
         let x = 10
         let result1 = match x {
             val limit => "at limit"

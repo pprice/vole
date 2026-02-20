@@ -138,7 +138,7 @@ class Task<T: Sendable> {
         func state(initial: T, handler: (T, T) -> T) -> StateActor<T> {
             let ch = Channel.buffered<T>(8)
             let task = Task.run<T>(() -> T => {
-                let mut current = initial
+                var current = initial
                 for msg in ch.iter() {
                     current = handler(current, msg)
                 }
@@ -206,7 +206,7 @@ class Task<T: Sendable> {
         func all(fns: [() -> T]) -> [T] {
             // Spawn all tasks first.
             let tasks: [Task<T>] = []
-            let mut i = 0
+            var i = 0
             while i < fns.length() {
                 tasks.push(Task.run(fns[i]))
                 i = i + 1
@@ -214,7 +214,7 @@ class Task<T: Sendable> {
 
             // Join all tasks and collect results in order.
             let results: [T] = []
-            let mut j = 0
+            var j = 0
             while j < tasks.length() {
                 results.push(_task_join_t(tasks[j]._handle))
                 j = j + 1
@@ -225,7 +225,7 @@ class Task<T: Sendable> {
         // Transform all items and collect results.
         func parallel(items: [T], transform: (T) -> T) -> [T] {
             let fns: [() -> T] = []
-            let mut i = 0
+            var i = 0
             while i < items.length() {
                 let item = items[i]
                 fns.push(() -> T => { return transform(item) })

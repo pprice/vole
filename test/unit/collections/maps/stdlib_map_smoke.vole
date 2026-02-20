@@ -32,7 +32,7 @@ tests {
         assert(m.values().count() == 3)
         assert(m.entries().count() == 3)
 
-        let mut sum = 0
+        var sum = 0
         for k in m.keys() {
             sum = sum + k
         }

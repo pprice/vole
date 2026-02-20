@@ -46,7 +46,7 @@ impl StmtRule for WhileStringBuild {
         );
 
         Some(format!(
-            "let mut {} = {}\n\
+            "var {} = {}\n\
              {indent}while {}.length() < {} {{\n\
              {indent}    {} = {} + {}\n\
              {indent}}}",
@@ -94,7 +94,7 @@ mod tests {
         let result = WhileStringBuild.generate(&mut scope, &mut emit, &params);
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains("let mut "));
+        assert!(text.contains("var "));
         assert!(text.contains("while "));
         assert!(text.contains(".length()"));
     }

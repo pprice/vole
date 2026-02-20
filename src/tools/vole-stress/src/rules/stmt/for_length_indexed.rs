@@ -64,7 +64,7 @@ impl StmtRule for ForLengthIndexed {
         };
 
         Some(format!(
-            "let mut {} = 0\n{indent}for {} in 0..{}.length() {{\n{indent}    {}\n{indent}}}",
+            "var {} = 0\n{indent}for {} in 0..{}.length() {{\n{indent}    {}\n{indent}}}",
             acc_name,
             iter_name,
             arr_name,

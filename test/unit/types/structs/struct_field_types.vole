@@ -112,7 +112,7 @@ tests {
 
     test "bool field: use in if conditional" {
         let t = Toggle { on: true }
-        let mut result = 0
+        var result = 0
         if t.on {
             result = 1
         } else {
@@ -123,7 +123,7 @@ tests {
 
     test "bool field: false in if conditional" {
         let t = Toggle { on: false }
-        let mut result = 0
+        var result = 0
         if t.on {
             result = 1
         } else {
@@ -286,7 +286,7 @@ tests {
 
     test "i64 array field: for loop iteration" {
         let n = Numbers { values: [1, 2, 3, 4] }
-        let mut sum = 0
+        var sum = 0
         for v in n.values {
             sum = sum + v
         }
@@ -295,7 +295,7 @@ tests {
 
     test "string array field: for loop iteration" {
         let t = Tags { items: ["a", "b", "c"] }
-        let mut result = ""
+        var result = ""
         for item in t.items {
             result = result + item
         }
@@ -331,7 +331,7 @@ tests {
 
     test "mixed struct: bool field in conditional" {
         let c = Config { name: "feature", count: 1, enabled: true, rate: 1.0 }
-        let mut status = "off"
+        var status = "off"
         if c.enabled {
             status = "on"
         }
@@ -340,7 +340,7 @@ tests {
 
     test "mixed struct: disabled config conditional" {
         let c = Config { name: "feature", count: 0, enabled: false, rate: 0.0 }
-        let mut status = "off"
+        var status = "off"
         if c.enabled {
             status = "on"
         }

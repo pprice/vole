@@ -74,7 +74,7 @@ func has_version(args: [string]) -> bool {
 // Get the value of an option (--name value or -n value)
 // Returns nil if not found
 func get_option(args: [string], short: string, long: string) -> string? {
-    let mut i = 0
+    var i = 0
     while i < args.length() {
         let arg = args[i]
         if arg == short || arg == long {
@@ -100,7 +100,7 @@ func get_option(args: [string], short: string, long: string) -> string? {
 // Get all positional arguments (non-option args)
 func positional_args(args: [string]) -> [string] {
     let result: [string] = []
-    let mut skip_next = false
+    var skip_next = false
     for arg in args {
         if skip_next {
             skip_next = false
@@ -130,7 +130,7 @@ func first_positional(args: [string]) -> string? {
 
 // Get positional argument at index (0-based, skipping options)
 func positional_at(args: [string], index: i64) -> string? {
-    let mut pos_count = 0
+    var pos_count = 0
     for arg in args {
         if !is_option(arg) {
             if pos_count == index {
@@ -144,7 +144,7 @@ func positional_at(args: [string], index: i64) -> string? {
 
 // Count positional arguments
 func positional_count(args: [string]) -> i64 {
-    let mut count = 0
+    var count = 0
     for arg in args {
         if !is_option(arg) {
             count = count + 1

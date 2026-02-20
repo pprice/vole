@@ -17,7 +17,7 @@ implement Transferable for Token {
 
 func sum_in_task(src: Iterator<i64>) -> i64 {
     let t = Task.run(() -> i64 => {
-        let mut total = 0
+        var total = 0
         for item in src {
             total = total + item
         }

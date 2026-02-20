@@ -1,7 +1,7 @@
 // Iterator method tests
 
 func sum_iterator_param(iter: Iterator<i64>) -> i64 {
-    let mut total = 0
+    var total = 0
     for v in iter {
         total = total + v
     }
@@ -62,7 +62,7 @@ tests "iterators" {
     test "iterate all elements" {
         let arr = [1, 2, 3]
         let iter = arr.iter()
-        let mut count = 0
+        var count = 0
 
         // Verify we can call next() three times and get values
         let first = iter.next()

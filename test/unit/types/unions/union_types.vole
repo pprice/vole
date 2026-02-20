@@ -49,7 +49,7 @@ tests "union types" {
     }
 
     test "reassign union variable" {
-        let mut x: i32 | string = 42
+        var x: i32 | string = 42
         x = "changed"
         assert(x is string)
     }

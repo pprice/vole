@@ -67,7 +67,7 @@ fn print_let_stmt<'a>(
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
     let keyword = if stmt.mutable {
-        arena.text("let mut ")
+        arena.text("var ")
     } else {
         arena.text("let ")
     };
@@ -101,7 +101,7 @@ fn print_let_tuple_stmt<'a>(
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
     let keyword = if stmt.mutable {
-        arena.text("let mut ")
+        arena.text("var ")
     } else {
         arena.text("let ")
     };

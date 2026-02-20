@@ -56,7 +56,7 @@ tests "map basics" {
     }
 
     test "reassign map variable" {
-        let mut m = Map.new<i64, i64>()
+        var m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         assert(m.len() == 2)

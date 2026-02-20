@@ -100,7 +100,7 @@ For-in loops work directly on arrays, strings, and generators:
 ```vole
 tests {
     test "for in loop" {
-        let mut sum = 0
+        var sum = 0
         for x in [1, 2, 3] {
             sum = sum + x
         }
@@ -371,7 +371,7 @@ Yield (index, value) pairs as arrays:
 tests {
     test "enumerate" {
         let arr = [10, 20, 30]
-        let mut sum = 0
+        var sum = 0
         for pair in arr.iter().enumerate() {
             sum = sum + pair[0] + pair[1]
         }
@@ -397,7 +397,7 @@ tests {
     test "zip" {
         let a = [1, 2, 3]
         let b = [10, 20, 30]
-        let mut sum = 0
+        var sum = 0
         for pair in a.iter().zip(b.iter()) {
             sum = sum + pair[0] + pair[1]
         }
@@ -605,8 +605,8 @@ Generator functions use `yield` to produce iterator values lazily:
 
 ```vole
 func fibonacci() -> Iterator<i64> {
-    let mut a = 0
-    let mut b = 1
+    var a = 0
+    var b = 1
     while true {
         yield a
         let next = a + b
@@ -634,7 +634,7 @@ Generators support `yield` inside loops and conditionals:
 
 ```vole
 func count_up(n: i64) -> Iterator<i64> {
-    let mut i = 0
+    var i = 0
     while i < n {
         yield i
         i = i + 1
@@ -642,7 +642,7 @@ func count_up(n: i64) -> Iterator<i64> {
 }
 
 func evens_up_to(n: i64) -> Iterator<i64> {
-    let mut i = 0
+    var i = 0
     while i < n {
         if i % 2 == 0 {
             yield i
@@ -704,7 +704,7 @@ Generators can also be consumed by for loops:
 
 ```vole
 func count_to(n: i64) -> Iterator<i64> {
-    let mut i = 0
+    var i = 0
     while i < n {
         yield i
         i = i + 1
@@ -713,7 +713,7 @@ func count_to(n: i64) -> Iterator<i64> {
 
 tests {
     test "generator in for loop" {
-        let mut sum = 0
+        var sum = 0
         for x in count_to(5) {
             sum = sum + x
         }
@@ -779,7 +779,7 @@ tests {
 
     test "for loop over string" {
         let s = "abc"
-        let mut count = 0
+        var count = 0
         for ch in s {
             count = count + 1
         }

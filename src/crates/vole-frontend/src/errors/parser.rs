@@ -218,4 +218,14 @@ pub enum ParserError {
         #[label("duplicate default arm")]
         span: SourceSpan,
     },
+
+    #[error("`let mut` is not valid Vole syntax")]
+    #[diagnostic(
+        code(E1038),
+        help("use `var` instead of `let mut` for mutable bindings")
+    )]
+    LetMutDeprecated {
+        #[label("replace `let mut` with `var`")]
+        span: SourceSpan,
+    },
 }

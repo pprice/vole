@@ -483,10 +483,11 @@ mod tests {
 
     #[test]
     fn lex_keywords() {
-        let mut lexer = Lexer::new("func let mut while if else break return");
+        let mut lexer = Lexer::new("func let mut var while if else break return");
         assert_eq!(lexer.next_token().ty, TokenType::KwFunc);
         assert_eq!(lexer.next_token().ty, TokenType::KwLet);
         assert_eq!(lexer.next_token().ty, TokenType::KwMut);
+        assert_eq!(lexer.next_token().ty, TokenType::KwVar);
         assert_eq!(lexer.next_token().ty, TokenType::KwWhile);
         assert_eq!(lexer.next_token().ty, TokenType::KwIf);
         assert_eq!(lexer.next_token().ty, TokenType::KwElse);

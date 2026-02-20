@@ -814,7 +814,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
     fn emit_global(&mut self, symbol: &Symbol) {
         if let SymbolKind::Global(ref info) = symbol.kind {
-            let mutability = if info.is_mutable { "let mut" } else { "let" };
+            let mutability = if info.is_mutable { "var" } else { "let" };
             // Non-mutable globals are exported and must use constant expressions
             // (single literal tokens, no unary negation) so the module analyzer
             // can evaluate them at compile time.

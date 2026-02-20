@@ -35,7 +35,7 @@ class VoleSet<T: Hashable + Equatable> {
                 return 8
             }
 
-            let mut power = 8
+            var power = 8
             while power < n {
                 power = power * 2
             }
@@ -99,16 +99,16 @@ class VoleSet<T: Hashable + Equatable> {
 
     func find_slot(value: T) -> i64 {
         let cap = self.buckets.length()
-        let mut idx = value.hash() & (cap - 1)
-        let mut first_deleted = -1
-        let mut probes = 0
+        var idx = value.hash() & (cap - 1)
+        var first_deleted = -1
+        var probes = 0
 
         while probes < cap {
             let bucket = self.buckets[idx]
 
-            let mut same_value = false
-            let mut saw_deleted = false
-            let mut saw_empty = false
+            var same_value = false
+            var saw_deleted = false
+            var saw_empty = false
 
             match bucket {
                 SetEntry { value: existing } => same_value = existing.equals(value)
@@ -301,7 +301,7 @@ implement Iterator<T> for SetIterator<T> {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
             self.index = self.index + 1
-            let mut found = false
+            var found = false
             match bucket {
                 SetEntry { value } => found = true
                 Empty => found = false
@@ -387,7 +387,7 @@ tests {
     test "vole_set::rehash preserves entries" {
         let s = VoleSet.new<i64>()
 
-        let mut i = 0
+        var i = 0
         while i < 40 {
             _ = s.add(i)
             i = i + 1
@@ -395,7 +395,7 @@ tests {
 
         assert(s.len() == 40)
 
-        let mut j = 0
+        var j = 0
         while j < 40 {
             assert(s.contains(j))
             j = j + 1
@@ -450,7 +450,7 @@ tests {
         _ = s.add(1)
         _ = s.add(2)
         _ = s.add(3)
-        let mut sum = 0
+        var sum = 0
         for v in s.iter() {
             sum = sum + v
         }
@@ -461,7 +461,7 @@ tests {
         let s = VoleSet.new<i64>()
         assert(s.iter().count() == 0)
 
-        let mut ran = false
+        var ran = false
         for _v in s.iter() {
             ran = true
         }
@@ -476,7 +476,7 @@ tests {
         _ = s.remove(2)
 
         assert(s.iter().count() == 2)
-        let mut sum = 0
+        var sum = 0
         for v in s.iter() {
             sum = sum + v
         }

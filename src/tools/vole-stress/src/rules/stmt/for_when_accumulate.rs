@@ -52,7 +52,7 @@ impl StmtRule for ForWhenAccumulate {
         scope.protected_vars.push(acc_name.clone());
 
         Some(format!(
-            "let mut {} = 0\n{}for {} in {} {{\n{}    {} = {} + when {{ {} {} {} => {}, _ => {} }}\n{}}}",
+            "var {} = 0\n{}for {} in {} {{\n{}    {} = {} + when {{ {} {} {} => {}, _ => {} }}\n{}}}",
             acc_name,
             indent,
             item_name,

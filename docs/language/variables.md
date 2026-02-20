@@ -8,7 +8,7 @@ Variables in Vole are immutable by default. Use `let` for bindings and `let mut`
 |--------|-------------|
 | `let x = 42` | Immutable binding, type inferred |
 | `let x: i64 = 42` | Immutable with explicit type |
-| `let mut x = 0` | Mutable binding |
+| `var x = 0` | Mutable binding |
 | `x = 10` | Reassign mutable variable |
 | `let { x, y } = point` | Destructuring |
 
@@ -49,7 +49,7 @@ When you need to change a value, use `let mut`:
 ```vole
 tests {
     test "mutable bindings" {
-        let mut counter = 0
+        var counter = 0
         counter = counter + 1
         counter = counter + 1
         assert(counter == 2)
@@ -65,7 +65,7 @@ Common use cases for mutable variables:
 ```vole
 tests {
     test "accumulator" {
-        let mut sum = 0
+        var sum = 0
         for i in 1..=10 {
             sum = sum + i
         }
@@ -81,7 +81,7 @@ Mutable variables support compound assignment operators:
 ```vole
 tests {
     test "compound assignment" {
-        let mut x = 10
+        var x = 10
         x += 5
         assert(x == 15)
         x -= 3
@@ -120,7 +120,7 @@ Type annotations go after the variable name, before the `=`:
 
 ```vole
 let name: string = "hello"
-let mut count: i32 = 0
+var count: i32 = 0
 ```
 
 ### Destructuring
@@ -156,7 +156,7 @@ tests {
 
     test "mutable destructuring" {
         let point = Point { x: 1, y: 2 }
-        let mut { x, y } = point
+        var { x, y } = point
         x = 99
         assert(x == 99)
         assert(y == 2)
@@ -207,7 +207,7 @@ func compute() -> i64 {
 tests {
     test "scoping" {
         let x = 1
-        let mut y = 0
+        var y = 0
         if true {
             let inner = 2
             y = x + inner
@@ -234,7 +234,7 @@ Use a different block (such as an `if` or function) if you need a new variable w
 tests {
     test "nested scope shadowing" {
         let x = 1
-        let mut result = 0
+        var result = 0
         if true {
             let x = 2      // OK - different scope
             result = x
@@ -250,7 +250,7 @@ Or use mutation if the value needs to change:
 ```vole
 tests {
     test "mutation instead of shadowing" {
-        let mut x = 1
+        var x = 1
         x = 2
         assert(x == 2)
     }
@@ -263,7 +263,7 @@ Variables can be declared at the top level of a file. Top-level `let` and `let m
 
 ```vole
 let VERSION = "1.0.0"
-let mut request_count = 0
+var request_count = 0
 
 func handle_request() {
     request_count = request_count + 1

@@ -21,7 +21,7 @@ tests {
 
         // Client task: sends 2560 chunk markers.
         let client = Task.run(() -> i64 => {
-            let mut sent = 0
+            var sent = 0
             while sent < CHUNK_COUNT {
                 body_ch.send(sent)
                 sent = sent + 1
@@ -32,8 +32,8 @@ tests {
 
         // Server task: accumulates all chunks, verifies order and total.
         let server = Task.run(() -> i64 => {
-            let mut total_chunks = 0
-            let mut expected = 0
+            var total_chunks = 0
+            var expected = 0
             while true {
                 let r = body_ch.try_receive()
                 if r is Done { break }
@@ -60,7 +60,7 @@ tests {
 
         // Producer: computes squares 1..100
         let producer = Task.run(() -> i64 => {
-            let mut i = 1
+            var i = 1
             while i <= 100 {
                 ch.send(i * i)
                 i = i + 1
@@ -71,7 +71,7 @@ tests {
 
         // Consumer: sums all squares
         let consumer = Task.run(() -> i64 => {
-            let mut sum = 0
+            var sum = 0
             while true {
                 let r = ch.try_receive()
                 if r is Done { break }
@@ -96,7 +96,7 @@ tests {
 
         // Producer: sends raw values 1..50
         let producer = Task.run(() -> i64 => {
-            let mut i = 1
+            var i = 1
             while i <= 50 {
                 raw_ch.send(i)
                 i = i + 1
@@ -107,7 +107,7 @@ tests {
 
         // Transformer: doubles each value
         let transformer = Task.run(() -> i64 => {
-            let mut count = 0
+            var count = 0
             while true {
                 let r = raw_ch.try_receive()
                 if r is Done { break }
@@ -122,7 +122,7 @@ tests {
 
         // Consumer: sums the transformed values
         let consumer = Task.run(() -> i64 => {
-            let mut sum = 0
+            var sum = 0
             while true {
                 let r = processed_ch.try_receive()
                 if r is Done { break }
@@ -149,7 +149,7 @@ tests {
 
         // Dispatcher: sends 20 work items
         let dispatcher = Task.run(() -> i64 => {
-            let mut i = 1
+            var i = 1
             while i <= 20 {
                 work_ch.send(i)
                 i = i + 1
@@ -160,7 +160,7 @@ tests {
 
         // Worker 1: processes items from work channel
         let worker1 = Task.run(() -> i64 => {
-            let mut count = 0
+            var count = 0
             while true {
                 let r = work_ch.try_receive()
                 if r is Done { break }
@@ -174,7 +174,7 @@ tests {
 
         // Worker 2: also processes items from work channel
         let worker2 = Task.run(() -> i64 => {
-            let mut count = 0
+            var count = 0
             while true {
                 let r = work_ch.try_receive()
                 if r is Done { break }
@@ -196,7 +196,7 @@ tests {
         assert(w1 + w2 == 20)
 
         // Sum all results from the result channel
-        let mut total = 0
+        var total = 0
         while true {
             let r = result_ch.try_receive()
             if r is Done { break }

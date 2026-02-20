@@ -226,28 +226,28 @@ tests "union returned from functions" {
 
 tests "optional variable reassignment" {
     test "reassign optional from string to nil" {
-        let mut x: string? = "initial"
+        var x: string? = "initial"
         assert(x is string)
         x = nil
         assert(x is nil)
     }
 
     test "reassign optional from nil to string" {
-        let mut x: string? = nil
+        var x: string? = nil
         assert(x is nil)
         x = "assigned"
         assert(x is string)
     }
 
     test "reassign optional string multiple times" {
-        let mut x: string? = "first"
+        var x: string? = "first"
         x = "second"
         x = "third"
         assert(x is string)
     }
 
     test "reassign optional between string and nil repeatedly" {
-        let mut x: string? = "a"
+        var x: string? = "a"
         x = nil
         x = "b"
         x = nil
@@ -256,14 +256,14 @@ tests "optional variable reassignment" {
     }
 
     test "reassign optional box from value to nil" {
-        let mut b: Box? = Box { label: "old", value: 1 }
+        var b: Box? = Box { label: "old", value: 1 }
         assert(b is Box)
         b = nil
         assert(b is nil)
     }
 
     test "reassign optional box from nil to value" {
-        let mut b: Box? = nil
+        var b: Box? = nil
         assert(b is nil)
         b = Box { label: "new", value: 2 }
         assert(b is Box)
@@ -274,21 +274,21 @@ tests "optional variable reassignment" {
 
 tests "union variable reassignment" {
     test "reassign union from int to string" {
-        let mut x: i64 | string = 42
+        var x: i64 | string = 42
         assert(x is i64)
         x = "now_string"
         assert(x is string)
     }
 
     test "reassign union from string to int" {
-        let mut x: i64 | string = "start"
+        var x: i64 | string = "start"
         assert(x is string)
         x = 100
         assert(x is i64)
     }
 
     test "reassign union multiple times across variants" {
-        let mut x: i64 | string = "a"
+        var x: i64 | string = "a"
         x = 1
         x = "b"
         x = 2
@@ -297,7 +297,7 @@ tests "union variable reassignment" {
     }
 
     test "reassign three-way union" {
-        let mut x: i64 | string | nil = "initial"
+        var x: i64 | string | nil = "initial"
         x = 42
         x = nil
         x = "back"
@@ -348,7 +348,7 @@ tests "optional scope cleanup" {
 
 tests "optional in loops without match" {
     test "create optional strings in for loop" {
-        let mut count = 0
+        var count = 0
         for i in 0..5 {
             let x: string? = "iter"
             if x is string {
@@ -359,7 +359,7 @@ tests "optional in loops without match" {
     }
 
     test "create nil optionals in for loop" {
-        let mut count = 0
+        var count = 0
         for i in 0..5 {
             let x: string? = nil
             if x is nil {
@@ -370,10 +370,10 @@ tests "optional in loops without match" {
     }
 
     test "alternate optional values in loop" {
-        let mut some_count = 0
-        let mut nil_count = 0
+        var some_count = 0
+        var nil_count = 0
         for i in 0..6 {
-            let mut x: string? = "even"
+            var x: string? = "even"
             if i % 2 != 0 {
                 x = nil
             }
@@ -388,10 +388,10 @@ tests "optional in loops without match" {
     }
 
     test "union values in for loop" {
-        let mut str_count = 0
-        let mut int_count = 0
+        var str_count = 0
+        var int_count = 0
         for i in 0..4 {
-            let mut x: i64 | string = "s"
+            var x: i64 | string = "s"
             if i % 2 != 0 {
                 x = 1
             }
@@ -406,7 +406,7 @@ tests "optional in loops without match" {
     }
 
     test "reassign optional in loop body" {
-        let mut x: string? = nil
+        var x: string? = nil
         for i in 0..3 {
             x = "iteration"
         }
@@ -414,7 +414,7 @@ tests "optional in loops without match" {
     }
 
     test "reassign union in loop body" {
-        let mut x: i64 | string = 0
+        var x: i64 | string = 0
         for i in 0..3 {
             x = "loop_val"
         }
@@ -729,7 +729,7 @@ tests "method calls on extracted optionals" {
 
 tests "match inside loops" {
     test "match optional in for loop" {
-        let mut count = 0
+        var count = 0
         for i in 0..3 {
             let x: string? = "val"
             let r = match x {
@@ -744,9 +744,9 @@ tests "match inside loops" {
     }
 
     test "match union in for loop" {
-        let mut str_count = 0
+        var str_count = 0
         for i in 0..4 {
-            let mut x: i64 | string = "s"
+            var x: i64 | string = "s"
             if i >= 2 {
                 x = 0
             }

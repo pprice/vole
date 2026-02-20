@@ -116,7 +116,7 @@ tests {
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
-        let mut sum = 0
+        var sum = 0
         for k in m.keys() {
             sum = sum + k
         }
@@ -128,7 +128,7 @@ tests {
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
-        let mut sum = 0
+        var sum = 0
         for v in m.values() {
             sum = sum + v
         }

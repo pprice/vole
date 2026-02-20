@@ -28,7 +28,7 @@ Basic conditional:
 ```vole
 tests {
     test "basic if" {
-        let mut x = 0
+        var x = 0
         if true { x = 1 }
         assert(x == 1)
     }
@@ -40,7 +40,7 @@ With else:
 ```vole
 tests {
     test "if else" {
-        let mut x = 0
+        var x = 0
         if false { x = 1 } else { x = 2 }
         assert(x == 2)
     }
@@ -53,7 +53,7 @@ Else-if chains:
 tests {
     test "else-if chain" {
         let score = 85
-        let mut grade = ""
+        var grade = ""
         if score >= 90 {
             grade = "A"
         } else if score >= 80 {
@@ -91,8 +91,8 @@ Execute while a condition is true:
 ```vole
 tests {
     test "simple while" {
-        let mut i = 0
-        let mut sum = 0
+        var i = 0
+        var sum = 0
         while i < 5 {
             sum = sum + i
             i = i + 1
@@ -107,7 +107,7 @@ Infinite loop (break to exit):
 ```vole
 tests {
     test "while true with break" {
-        let mut count = 0
+        var count = 0
         while true {
             count = count + 1
             if count >= 10 {
@@ -127,7 +127,7 @@ Iterate over arrays:
 tests {
     test "for over array" {
         let arr = [10, 20, 30]
-        let mut sum = 0
+        var sum = 0
         for x in arr {
             sum = sum + x
         }
@@ -143,7 +143,7 @@ Exclusive range with `..` (end not included):
 ```vole
 tests {
     test "exclusive range" {
-        let mut sum = 0
+        var sum = 0
         for i in 0..5 {
             sum = sum + i
         }
@@ -157,7 +157,7 @@ Inclusive range with `..=` (end included):
 ```vole
 tests {
     test "inclusive range" {
-        let mut total = 0
+        var total = 0
         for i in 1..=10 {
             total = total + i
         }
@@ -171,7 +171,7 @@ Ranges can start at any value:
 ```vole
 tests {
     test "range with offset" {
-        let mut sum = 0
+        var sum = 0
         for i in 5..8 {
             sum = sum + i
         }
@@ -187,7 +187,7 @@ Exit a loop early:
 ```vole
 tests {
     test "break in for loop" {
-        let mut sum = 0
+        var sum = 0
         for i in 0..100 {
             if i >= 5 {
                 break
@@ -204,7 +204,7 @@ With while:
 ```vole
 tests {
     test "break in while loop" {
-        let mut i = 0
+        var i = 0
         while true {
             if i >= 5 {
                 break
@@ -223,7 +223,7 @@ Skip to the next iteration:
 ```vole
 tests {
     test "continue skips even numbers" {
-        let mut sum = 0
+        var sum = 0
         for i in 0..10 {
             if i % 2 == 0 {
                 continue
@@ -240,8 +240,8 @@ tests {
 ```vole
 tests {
     test "break and continue in same loop" {
-        let mut sum = 0
-        let mut i = 0
+        var sum = 0
+        var i = 0
         while i < 20 {
             i = i + 1
             if i % 2 == 0 {
@@ -264,7 +264,7 @@ tests {
 ```vole
 tests {
     test "break in nested loops - inner only" {
-        let mut count = 0
+        var count = 0
         for i in 0..3 {
             for j in 0..10 {
                 if j >= 2 {
@@ -628,7 +628,7 @@ Control structures can be nested:
 ```vole
 tests {
     test "nested control flow" {
-        let mut count = 0
+        var count = 0
         for i in 0..4 {
             if i % 2 == 0 {
                 for j in 0..i {
@@ -649,7 +649,7 @@ tests {
 tests {
     test "find first match" {
         let nums = [1, 2, 3, 4, 5]
-        let mut found = -1
+        var found = -1
         for n in nums {
             if n > 3 {
                 found = n
@@ -667,7 +667,7 @@ tests {
 tests {
     test "count occurrences" {
         let nums = [1, 2, 1, 3, 1]
-        let mut count = 0
+        var count = 0
         for n in nums {
             if n == 1 {
                 count = count + 1
@@ -684,7 +684,7 @@ tests {
 tests {
     test "accumulate" {
         let nums = [1, 2, 3, 4, 5]
-        let mut sum = 0
+        var sum = 0
         for n in nums {
             sum = sum + n
         }
@@ -724,13 +724,13 @@ tests {
     test "logical operators in conditions" {
         let x = 5
         let y = 10
-        let mut result = false
+        var result = false
         if x > 0 && y > 0 {
             result = true
         }
         assert(result == true)
 
-        let mut either = false
+        var either = false
         if x > 100 || y > 0 {
             either = true
         }

@@ -656,7 +656,7 @@ impl Emit<'_> {
         let limit = self.random_in(2, 5);
 
         // Initialize counter
-        lines.push("let mut _gi = 0".to_string());
+        lines.push("var _gi = 0".to_string());
 
         // For generator yield expressions, use a literal only (compiler bug
         // prevents referencing params inside generators).

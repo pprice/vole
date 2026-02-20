@@ -356,7 +356,7 @@ fn gen_enumerate(
     emit.indented(|_emit| {
         let inner_indent = format!("{}    ", indent);
         format!(
-            "let mut {} = 0\n{}for {} in {}.iter(){}.enumerate() {{\n{}{}\n{}}}",
+            "var {} = 0\n{}for {} in {}.iter(){}.enumerate() {{\n{}{}\n{}}}",
             acc_name, indent, pair_name, arr_name, prefix, inner_indent, body_expr, indent
         )
     })
@@ -409,7 +409,7 @@ fn gen_zip(scope: &mut Scope, emit: &mut Emit, i64_arrays: &[(String, PrimitiveT
     emit.indented(|_emit| {
         let inner_indent = format!("{}    ", indent);
         format!(
-            "let mut {} = 0\n{}for {} in {}.iter().zip({}.iter()) {{\n{}{}\n{}}}",
+            "var {} = 0\n{}for {} in {}.iter().zip({}.iter()) {{\n{}{}\n{}}}",
             acc_name, indent, pair_name, arr_a, arr_b, inner_indent, body_expr, indent,
         )
     })

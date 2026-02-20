@@ -49,13 +49,13 @@ tests {
     }
 
     test "static string reassigned" {
-        let mut s = "hello"
+        var s = "hello"
         s = "world"
         assert(s == "world")
     }
 
     test "static string in loop" {
-        let mut count = 0
+        var count = 0
         for i in 0..3 {
             let s = "hello"
             if s == "hello" {

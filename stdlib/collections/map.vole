@@ -40,7 +40,7 @@ class Map<K: Hashable + Equatable, V> {
                 return 8
             }
 
-            let mut power = 8
+            var power = 8
             while power < n {
                 power = power * 2
             }
@@ -136,16 +136,16 @@ class Map<K: Hashable + Equatable, V> {
 
     func find_slot(key: K) -> i64 {
         let cap = self.buckets.length()
-        let mut idx = key.hash() & (cap - 1)
-        let mut first_deleted = -1
-        let mut probes = 0
+        var idx = key.hash() & (cap - 1)
+        var first_deleted = -1
+        var probes = 0
 
         while probes < cap {
             let bucket = self.buckets[idx]
 
-            let mut same_key = false
-            let mut saw_deleted = false
-            let mut saw_empty = false
+            var same_key = false
+            var saw_deleted = false
+            var saw_empty = false
 
             match bucket {
                 MapEntry { key: existing_key, value: existing_value } => same_key = existing_key.equals(key)
@@ -249,7 +249,7 @@ implement Iterator<K> for MapKeyIterator<K, V> {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
             self.index = self.index + 1
-            let mut found = false
+            var found = false
             match bucket {
                 MapEntry { key, value } => found = true
                 Empty => found = false
@@ -277,7 +277,7 @@ implement Iterator<V> for MapValueIterator<K, V> {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
             self.index = self.index + 1
-            let mut found = false
+            var found = false
             match bucket {
                 MapEntry { key, value } => found = true
                 Empty => found = false
@@ -305,7 +305,7 @@ implement Iterator<[K, V]> for MapEntryIterator<K, V> {
         while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
             self.index = self.index + 1
-            let mut found = false
+            var found = false
             match bucket {
                 MapEntry { key, value } => found = true
                 Empty => found = false

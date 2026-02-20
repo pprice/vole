@@ -55,7 +55,7 @@ impl StmtRule for ForIterWhenStringBody {
         scope.protected_vars.push(s_name.clone());
 
         Some(format!(
-            "let mut {} = \"\"\n{}for {} in {} {{\n{}    {} = {} + when {{ {} > {} => \"{}\", _ => \"{}\" }}\n{}}}",
+            "var {} = \"\"\n{}for {} in {} {{\n{}    {} = {} + when {{ {} > {} => \"{}\", _ => \"{}\" }}\n{}}}",
             s_name,
             indent,
             item_name,

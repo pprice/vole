@@ -71,7 +71,7 @@ Arrays work directly with `for` loops and the iterator pipeline:
 ```vole
 tests {
     test "array for loop" {
-        let mut sum = 0
+        var sum = 0
         for x in [1, 2, 3] {
             sum = sum + x
         }
@@ -120,7 +120,7 @@ tests {
 
     test "union array" {
         let arr: [i64 | string] = [1, "two", 3, "four"]
-        let mut nums: i64 = 0
+        var nums: i64 = 0
         for item in arr {
             if item is i64 {
                 nums = nums + item
@@ -308,7 +308,7 @@ tests {
         m.set(2, 20)
         m.set(3, 30)
 
-        let mut sum = 0
+        var sum = 0
         for k in m.keys() {
             sum = sum + k
         }
@@ -321,7 +321,7 @@ tests {
         m.set(2, 20)
         m.set(3, 30)
 
-        let mut sum = 0
+        var sum = 0
         for v in m.values() {
             sum = sum + v
         }
@@ -635,7 +635,7 @@ tests {
 
         assert(s.iter().count() == 3)
 
-        let mut sum = 0
+        var sum = 0
         for x in s.iter() {
             sum = sum + x
         }

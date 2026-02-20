@@ -255,7 +255,7 @@ tests {
     test "parallel doubles values" {
         let results = Task.parallel<i64>([1, 2, 3, 4, 5], (x: i64) -> i64 => { return x * 2 })
         assert(results.length() == 5)
-        let mut sum = 0
+        var sum = 0
         for v in results.iter() {
             sum = sum + v
         }
@@ -284,7 +284,7 @@ let { Task } = import "std:task"
 
 tests {
     test "stream produces values consumed by for loop" {
-        let mut sum = 0
+        var sum = 0
         let s = Task.stream((emit: (i64) -> void) => {
             emit(1)
             emit(2)
@@ -578,7 +578,7 @@ tests {
         ch.send(20)
         ch.send(30)
         ch.close()
-        let mut sum = 0
+        var sum = 0
         for v in ch.iter() {
             sum = sum + v
         }
@@ -601,7 +601,7 @@ tests {
     test "empty closed channel yields nothing" {
         let ch = Channel.buffered<i64>(4)
         ch.close()
-        let mut count = 0
+        var count = 0
         for v in ch.iter() {
             count = count + 1
         }
@@ -876,7 +876,7 @@ tests {
         let ch = Channel.buffered<i64>(4)
 
         let producer = Task.run(() -> i64 => {
-            let mut i = 1
+            var i = 1
             while i <= 100 {
                 ch.send(i * i)
                 i = i + 1
@@ -886,7 +886,7 @@ tests {
         })
 
         let consumer = Task.run(() -> i64 => {
-            let mut sum = 0
+            var sum = 0
             while true {
                 let r = ch.try_receive()
                 if r is Done { break }
@@ -920,7 +920,7 @@ tests {
         let processed_ch = Channel.buffered<i64>(4)
 
         let producer = Task.run(() -> i64 => {
-            let mut i = 1
+            var i = 1
             while i <= 50 {
                 raw_ch.send(i)
                 i = i + 1
@@ -930,7 +930,7 @@ tests {
         })
 
         let transformer = Task.run(() -> i64 => {
-            let mut count = 0
+            var count = 0
             while true {
                 let r = raw_ch.try_receive()
                 if r is Done { break }
@@ -944,7 +944,7 @@ tests {
         })
 
         let consumer = Task.run(() -> i64 => {
-            let mut sum = 0
+            var sum = 0
             while true {
                 let r = processed_ch.try_receive()
                 if r is Done { break }
@@ -980,7 +980,7 @@ tests {
         let result_ch = Channel.buffered<i64>(20)
 
         let dispatcher = Task.run(() -> i64 => {
-            let mut i = 1
+            var i = 1
             while i <= 20 {
                 work_ch.send(i)
                 i = i + 1
@@ -990,7 +990,7 @@ tests {
         })
 
         let worker1 = Task.run(() -> i64 => {
-            let mut count = 0
+            var count = 0
             while true {
                 let r = work_ch.try_receive()
                 if r is Done { break }
@@ -1003,7 +1003,7 @@ tests {
         })
 
         let worker2 = Task.run(() -> i64 => {
-            let mut count = 0
+            var count = 0
             while true {
                 let r = work_ch.try_receive()
                 if r is Done { break }
@@ -1022,7 +1022,7 @@ tests {
 
         assert(w1 + w2 == 20)
 
-        let mut total = 0
+        var total = 0
         while true {
             let r = result_ch.try_receive()
             if r is Done { break }

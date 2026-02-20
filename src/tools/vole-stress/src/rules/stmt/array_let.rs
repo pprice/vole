@@ -40,7 +40,7 @@ impl StmtRule for ArrayLet {
         let array_ty = TypeInfo::Array(Box::new(elem_ty));
         scope.add_local(name.clone(), array_ty, is_mutable);
 
-        let mutability = if is_mutable { "let mut" } else { "let" };
+        let mutability = if is_mutable { "var" } else { "let" };
         Some(format!(
             "{} {} = [{}]",
             mutability,

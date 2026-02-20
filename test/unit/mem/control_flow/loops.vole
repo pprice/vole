@@ -20,8 +20,8 @@ func wrap(prefix: string, s: string, suffix: string) -> string {
 
 tests "while loop string temps" {
     test "concat creates temp each iteration" {
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         while i < 10 {
             result = result + "a"
             i = i + 1
@@ -30,8 +30,8 @@ tests "while loop string temps" {
     }
 
     test "multi-part concat creates multiple temps each iteration" {
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         while i < 5 {
             result = result + "[" + i.to_string() + "]"
             i = i + 1
@@ -40,8 +40,8 @@ tests "while loop string temps" {
     }
 
     test "to_string temp in while loop" {
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         while i < 6 {
             let s = i.to_string()
             result = result + s
@@ -51,8 +51,8 @@ tests "while loop string temps" {
     }
 
     test "concat with function call each iteration" {
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         while i < 4 {
             let temp = identity("x" + i.to_string())
             result = result + temp
@@ -62,8 +62,8 @@ tests "while loop string temps" {
     }
 
     test "reassign local string each iteration" {
-        let mut i = 0
-        let mut last = ""
+        var i = 0
+        var last = ""
         while i < 5 {
             let temp = "item-" + i.to_string()
             last = temp
@@ -73,8 +73,8 @@ tests "while loop string temps" {
     }
 
     test "wrap call producing temp each iteration" {
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         while i < 3 {
             result = result + wrap("(", i.to_string(), ")")
             i = i + 1
@@ -86,7 +86,7 @@ tests "while loop string temps" {
 tests "for loop string temps" {
     test "concat in for loop body" {
         let items = ["a", "b", "c", "d", "e"]
-        let mut result = ""
+        var result = ""
         for item in items {
             result = result + item + "-"
         }
@@ -95,7 +95,7 @@ tests "for loop string temps" {
 
     test "to_string on index in for loop" {
         let nums = [10, 20, 30, 40, 50]
-        let mut result = ""
+        var result = ""
         for n in nums {
             result = result + n.to_string() + " "
         }
@@ -104,7 +104,7 @@ tests "for loop string temps" {
 
     test "multiple concat temps per for iteration" {
         let names = ["alice", "bob", "carol"]
-        let mut result = ""
+        var result = ""
         for name in names {
             let entry = "[" + name + ":" + name.length().to_string() + "]"
             result = result + entry
@@ -114,7 +114,7 @@ tests "for loop string temps" {
 
     test "function call returning string each for iteration" {
         let words = ["one", "two", "three"]
-        let mut result = ""
+        var result = ""
         for w in words {
             let wrapped = wrap("<", w, ">")
             result = result + wrapped
@@ -124,7 +124,7 @@ tests "for loop string temps" {
 
     test "discard string temp each for iteration" {
         let items = ["a", "b", "c"]
-        let mut count = 0
+        var count = 0
         for item in items {
             _ = item + "_suffix"
             count = count + 1
@@ -136,7 +136,7 @@ tests "for loop string temps" {
 tests "for loop with method call string temps" {
     test "trim in for loop" {
         let items = ["  hello  ", "  world  ", "  vole  "]
-        let mut result = ""
+        var result = ""
         for item in items {
             let trimmed = item.trim()
             result = result + trimmed + " "
@@ -146,7 +146,7 @@ tests "for loop with method call string temps" {
 
     test "to_upper in for loop" {
         let items = ["hello", "world", "vole"]
-        let mut result = ""
+        var result = ""
         for item in items {
             result = result + item.to_upper() + " "
         }
@@ -155,7 +155,7 @@ tests "for loop with method call string temps" {
 
     test "to_lower in for loop" {
         let items = ["HELLO", "WORLD", "VOLE"]
-        let mut result = ""
+        var result = ""
         for item in items {
             result = result + item.to_lower() + " "
         }
@@ -164,7 +164,7 @@ tests "for loop with method call string temps" {
 
     test "chained trim then to_upper in for loop" {
         let items = ["  abc  ", "  def  ", "  ghi  "]
-        let mut result = ""
+        var result = ""
         for item in items {
             let transformed = item.trim().to_upper()
             result = result + transformed + ","
@@ -174,7 +174,7 @@ tests "for loop with method call string temps" {
 
     test "replace in for loop" {
         let items = ["a-b-c", "d-e-f", "g-h-i"]
-        let mut result = ""
+        var result = ""
         for item in items {
             result = result + item.replace_all("-", ".") + " "
         }
@@ -183,7 +183,7 @@ tests "for loop with method call string temps" {
 
     test "substring in for loop" {
         let items = ["hello", "world", "volex"]
-        let mut result = ""
+        var result = ""
         for item in items {
             result = result + item.substring(0, 3) + " "
         }
@@ -194,7 +194,7 @@ tests "for loop with method call string temps" {
 tests "for loop with interpolation temps" {
     test "interpolation in for loop body" {
         let names = ["alice", "bob", "carol"]
-        let mut result = ""
+        var result = ""
         for name in names {
             let line = "name={name} "
             result = result + line
@@ -204,7 +204,7 @@ tests "for loop with interpolation temps" {
 
     test "interpolation with expression in for loop" {
         let nums = [1, 2, 3]
-        let mut result = ""
+        var result = ""
         for n in nums {
             let doubled = n * 2
             let line = "{n}*2={doubled} "
@@ -215,7 +215,7 @@ tests "for loop with interpolation temps" {
 
     test "interpolation with method call in for loop" {
         let items = ["  hi  ", "  bye  "]
-        let mut result = ""
+        var result = ""
         for item in items {
             let line = "trimmed={item.trim()} "
             result = result + line
@@ -226,8 +226,8 @@ tests "for loop with interpolation temps" {
     test "multiple interpolations per for iteration" {
         let keys = ["a", "b", "c"]
         let values = [1, 2, 3]
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         for key in keys {
             let line = "{key}={values[i]} "
             result = result + line
@@ -241,7 +241,7 @@ tests "nested loops with string temps" {
     test "nested for loops with concat" {
         let outer_items = ["a", "b"]
         let inner_items = ["1", "2", "3"]
-        let mut result = ""
+        var result = ""
         for o in outer_items {
             for i in inner_items {
                 result = result + o + i + " "
@@ -252,8 +252,8 @@ tests "nested loops with string temps" {
 
     test "for loop inside while loop with string temps" {
         let words = ["x", "y"]
-        let mut result = ""
-        let mut i = 0
+        var result = ""
+        var i = 0
         while i < 3 {
             for w in words {
                 result = result + w + i.to_string()
@@ -266,9 +266,9 @@ tests "nested loops with string temps" {
 
     test "while loop inside for loop with string temps" {
         let items = ["a", "b", "c"]
-        let mut result = ""
+        var result = ""
         for item in items {
-            let mut j = 0
+            var j = 0
             while j < 2 {
                 result = result + item + j.to_string()
                 j = j + 1
@@ -281,7 +281,7 @@ tests "nested loops with string temps" {
     test "nested for loops with method call temps" {
         let items = ["  ab  ", "  cd  "]
         let suffixes = ["1", "2"]
-        let mut result = ""
+        var result = ""
         for item in items {
             for suffix in suffixes {
                 result = result + item.trim() + suffix + " "
@@ -294,7 +294,7 @@ tests "nested loops with string temps" {
         let a_items = ["a", "b"]
         let b_items = ["1", "2"]
         let c_items = ["x"]
-        let mut result = ""
+        var result = ""
         for a in a_items {
             for b in b_items {
                 for c in c_items {
@@ -308,8 +308,8 @@ tests "nested loops with string temps" {
 
 tests "while loop with array temps" {
     test "array created each iteration" {
-        let mut i = 0
-        let mut total = 0
+        var i = 0
+        var total = 0
         while i < 5 {
             let arr = [i, i * 2, i * 3]
             total = total + arr[0] + arr[1] + arr[2]
@@ -320,8 +320,8 @@ tests "while loop with array temps" {
     }
 
     test "array of strings created each iteration" {
-        let mut i = 0
-        let mut result = ""
+        var i = 0
+        var result = ""
         while i < 3 {
             let arr = ["item-" + i.to_string()]
             result = result + arr[0] + " "
@@ -332,7 +332,7 @@ tests "while loop with array temps" {
 
     test "for loop creating array temp each iteration" {
         let nums = [1, 2, 3]
-        let mut total = 0
+        var total = 0
         for n in nums {
             let pair = [n, n * 10]
             total = total + pair[0] + pair[1]
@@ -345,7 +345,7 @@ tests "while loop with array temps" {
 tests "for loop with closure temps" {
     test "closure created each for iteration" {
         let names = ["alice", "bob", "carol"]
-        let mut result = ""
+        var result = ""
         for name in names {
             let greet = () -> string => "hello " + name
             result = result + greet() + "|"
@@ -354,8 +354,8 @@ tests "for loop with closure temps" {
     }
 
     test "closure with capture created each while iteration" {
-        let mut i = 0
-        let mut result = ""
+        var i = 0
+        var result = ""
         while i < 4 {
             let n = i
             let describe = () -> string => "n=" + n.to_string()
@@ -367,7 +367,7 @@ tests "for loop with closure temps" {
 
     test "closure capturing string temp each iteration" {
         let items = ["  x  ", "  y  ", "  z  "]
-        let mut result = ""
+        var result = ""
         for item in items {
             let trimmed = item.trim()
             let get_trimmed = () -> string => trimmed
@@ -379,9 +379,9 @@ tests "for loop with closure temps" {
 
 tests "loop body creating class instance each iteration" {
     test "class instance created each while iteration" {
-        let mut i = 0
-        let mut last_label = ""
-        let mut total = 0
+        var i = 0
+        var last_label = ""
+        var total = 0
         while i < 5 {
             let c = Counter { label: "iter-" + i.to_string(), value: i * 10 }
             last_label = c.label
@@ -395,8 +395,8 @@ tests "loop body creating class instance each iteration" {
 
     test "class instance created each for iteration" {
         let names = ["alpha", "beta", "gamma"]
-        let mut result = ""
-        let mut idx = 0
+        var result = ""
+        var idx = 0
         for name in names {
             let c = Counter { label: name, value: idx }
             result = result + c.label + ":" + c.value.to_string() + " "
@@ -406,8 +406,8 @@ tests "loop body creating class instance each iteration" {
     }
 
     test "class with string field reassigned each iteration" {
-        let mut c = Counter { label: "init", value: 0 }
-        let mut i = 0
+        var c = Counter { label: "init", value: 0 }
+        var i = 0
         while i < 4 {
             c = Counter { label: "step-" + i.to_string(), value: i }
             i = i + 1
@@ -418,7 +418,7 @@ tests "loop body creating class instance each iteration" {
 
     test "class instance passed to function in loop" {
         let names = ["x", "y", "z"]
-        let mut result = ""
+        var result = ""
         for name in names {
             let c = Counter { label: name, value: 0 }
             result = result + identity(c.label) + " "
@@ -429,7 +429,7 @@ tests "loop body creating class instance each iteration" {
     test "nested class creation in nested loop" {
         let prefixes = ["a", "b"]
         let suffixes = ["1", "2"]
-        let mut result = ""
+        var result = ""
         for prefix in prefixes {
             for suffix in suffixes {
                 let c = Counter { label: prefix + suffix, value: 0 }

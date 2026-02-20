@@ -215,8 +215,8 @@ tests {
 
     test "constant in loop bound (constant expression)" {
         let limit = 5 + 5  // Should fold to 10
-        let mut sum = 0
-        let mut i = 0
+        var sum = 0
+        var i = 0
         while i < limit {
             sum = sum + 1
             i = i + 1
@@ -327,7 +327,7 @@ tests {
 
     test "no propagation for mutable" {
         // Mutable variables should NOT be propagated
-        let mut value = 10
+        var value = 10
         let a = value + 1  // Should not replace value with 10
         value = 20
         let b = value + 1  // Should definitely use current value of 20
@@ -360,8 +360,8 @@ tests {
 
     test "propagate in loop condition" {
         let limit = 5
-        let mut sum = 0
-        let mut i = 0
+        var sum = 0
+        var i = 0
         while i < limit {
             sum = sum + 1
             i = i + 1
@@ -464,7 +464,7 @@ tests {
     }
 
     test "no propagation for mutable string" {
-        let mut s = "hello"
+        var s = "hello"
         let a = s + " world"
         s = "goodbye"
         let b = s + " world"
@@ -476,7 +476,7 @@ tests {
 
     test "eliminate if true statement with else" {
         // if true { a } else { b } => a
-        let mut result = 0
+        var result = 0
         if true {
             result = 42
         } else {
@@ -487,7 +487,7 @@ tests {
 
     test "eliminate if false statement with else branch" {
         // if false { a } else { b } => b
-        let mut result = 0
+        var result = 0
         if false {
             result = 42
         } else {
@@ -498,7 +498,7 @@ tests {
 
     test "eliminate if true no else" {
         // if true { a } => a (value is the then branch)
-        let mut x = 0
+        var x = 0
         if true {
             x = 42
         }
@@ -507,7 +507,7 @@ tests {
 
     test "eliminate if false no else" {
         // if false { a } => removed (dead code)
-        let mut x = 10
+        var x = 10
         if false {
             x = 42
         }
@@ -517,7 +517,7 @@ tests {
     test "eliminate if statement with propagated true constant" {
         // Constant propagation feeds into dead branch elimination
         let debug = true
-        let mut result = "release mode"
+        var result = "release mode"
         if debug {
             result = "debug mode"
         }
@@ -526,7 +526,7 @@ tests {
 
     test "eliminate if statement with propagated false constant" {
         let debug = false
-        let mut result = "release mode"
+        var result = "release mode"
         if debug {
             result = "debug mode"
         }
@@ -535,7 +535,7 @@ tests {
 
     test "eliminate if statement with propagated false and else" {
         let verbose = false
-        let mut output = "unknown"
+        var output = "unknown"
         if verbose {
             output = "loud"
         } else {
@@ -548,7 +548,7 @@ tests {
         // Both levels should be eliminated
         let a = true
         let b = false
-        let mut result = 0
+        var result = 0
         if a {
             if b {
                 result = 1
@@ -590,7 +590,7 @@ tests {
 
     test "eliminate if with computed constant condition" {
         // Condition is a constant expression: 5 > 3 folds to true
-        let mut result = "no"
+        var result = "no"
         if 5 > 3 {
             result = "yes"
         }
@@ -599,7 +599,7 @@ tests {
 
     test "eliminate if with constant boolean expression" {
         // true && false folds to false, so the else branch is taken
-        let mut result = 0
+        var result = 0
         if true && false {
             result = 100
         } else {
@@ -610,7 +610,7 @@ tests {
 
     test "eliminate if false statement with else" {
         let mode = false
-        let mut result = "unknown"
+        var result = "unknown"
         if mode {
             result = "on"
         } else {
@@ -621,7 +621,7 @@ tests {
 
     test "eliminate dead branch preserves side effects in taken branch" {
         // The taken branch should still execute correctly
-        let mut counter = 0
+        var counter = 0
         if true {
             counter = counter + 1
             counter = counter + 1
@@ -632,7 +632,7 @@ tests {
 
     test "eliminate dead branch with multiple statements" {
         // The dead branch has multiple statements that should all be eliminated
-        let mut x = 0
+        var x = 0
         if false {
             x = 1
             x = x + 1
@@ -645,7 +645,7 @@ tests {
         // a = 10, b = a > 5 = true, if b { ... } => taken
         let a = 10
         let b = a > 5
-        let mut result = "small"
+        var result = "small"
         if b {
             result = "big"
         }
@@ -828,7 +828,7 @@ tests "division/modulo by zero should NOT fold (remain runtime)" {
 
     test "integer division with runtime zero divisor is not folded" {
         // Use a runtime-computed zero to ensure the folder can't see it
-        let mut d = 1
+        var d = 1
         d = d - 1  // d = 0 at runtime, but folder can't track mutable
         // We can't actually call 1 / d here because it would panic at runtime.
         // Instead, verify the folder leaves it alone by checking a guarded version.
@@ -840,7 +840,7 @@ tests "division/modulo by zero should NOT fold (remain runtime)" {
     }
 
     test "integer modulo with runtime zero divisor is not folded" {
-        let mut d = 1
+        var d = 1
         d = d - 1
         let result = when {
             d != 0 => 10 % d,
@@ -854,7 +854,7 @@ tests "division/modulo by zero should NOT fold (remain runtime)" {
         // Verify folded result matches runtime behavior
         let folded = 1.0 / 0.0
         let rt_zero = 0.0
-        let mut z = rt_zero
+        var z = rt_zero
         z = z * 1.0  // ensure runtime
         let runtime = 1.0 / rt_zero
         // Both should be positive infinity
@@ -886,8 +886,8 @@ tests "runtime values mixed with constants should NOT fold" {
     }
 
     test "mutable variable incremented in loop is not propagated" {
-        let mut sum = 0
-        let mut i = 0
+        var sum = 0
+        var i = 0
         while i < 5 {
             sum = sum + i
             i = i + 1
@@ -898,7 +898,7 @@ tests "runtime values mixed with constants should NOT fold" {
     }
 
     test "mutable variable reassignment prevents propagation" {
-        let mut x = 100
+        var x = 100
         let a = x + 1  // should use 100 (but not folded since x is mutable)
         x = 200
         let b = x + 1  // should use 200
@@ -1064,7 +1064,7 @@ tests "string edge cases in constant folding" {
     }
 
     test "mutable string prevents propagation" {
-        let mut s = "first"
+        var s = "first"
         let a = s + "!"
         s = "second"
         let b = s + "!"
@@ -1088,7 +1088,7 @@ tests "dead branch edge cases" {
     }
 
     test "if with side-effecting then branch preserves effect" {
-        let mut counter = 0
+        var counter = 0
         let flag = true
         if flag {
             counter = counter + 1
@@ -1099,7 +1099,7 @@ tests "dead branch edge cases" {
     }
 
     test "if with side-effecting else branch preserves effect" {
-        let mut counter = 0
+        var counter = 0
         let flag = false
         if flag {
             counter = 100

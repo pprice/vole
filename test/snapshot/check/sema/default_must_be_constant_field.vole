@@ -5,7 +5,7 @@ func get_value() -> i32 {
 }
 
 // Error: mutable variable reference is not a constant expression
-let mut mutable_global = 100
+var mutable_global = 100
 
 // Error: function call is not constant, mutable variable reference is not constant
 class BadConfig {

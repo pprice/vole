@@ -511,7 +511,7 @@ tests { test "mixed constraints" {
 class Item { value: i64 }
 
 func sum_values<T: { value: i64 }>(items: [T]) -> i64 {
-    let mut total = 0
+    var total = 0
     for item in items {
         total = total + item.value
     }

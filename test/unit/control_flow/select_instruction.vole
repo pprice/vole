@@ -134,7 +134,7 @@ tests "select instruction optimization" {
 
     test "if statement without else (no select, not an expression)" {
         let x = 5
-        let mut result = 0
+        var result = 0
         if x > 0 { result = x }
         assert(result == 5)
     }

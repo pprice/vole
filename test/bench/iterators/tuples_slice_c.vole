@@ -10,8 +10,8 @@ func main() {
         18, 20, 22, 24, 26, 28, 30, 32,
     ]
 
-    let mut checksum = 0
-    let mut round = 0
+    var checksum = 0
+    var round = 0
     while round < 600 {
         for pair in left.iter().enumerate() {
             checksum = checksum + pair[0] + pair[1]

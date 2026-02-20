@@ -104,6 +104,7 @@ impl<'src> Parser<'src> {
     pub fn statement(&mut self) -> Result<Stmt, ParseError> {
         match self.current.ty {
             TokenType::KwLet => self.let_stmt(),
+            TokenType::KwVar => self.var_stmt(),
             TokenType::KwWhile => self.while_stmt(),
             TokenType::KwFor => self.for_stmt(),
             TokenType::KwIf => self.if_stmt(),
@@ -207,9 +208,29 @@ impl<'src> Parser<'src> {
         let start_span = self.current.span;
         self.advance(); // consume 'let'
 
-        let mutable = self.match_token(TokenType::KwMut);
+        // `let mut` is no longer valid — use `var` instead
+        if self.check(TokenType::KwMut) {
+            return Err(ParseError::new(
+                ParserError::LetMutDeprecated {
+                    span: start_span.into(),
+                },
+                start_span,
+            ));
+        }
 
-        // Check for tuple destructuring: let [a, b] = expr
+        self.let_stmt_body(false, start_span)
+    }
+
+    /// Parse a var statement (mutable binding): `var x = expr`
+    fn var_stmt(&mut self) -> Result<Stmt, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'var'
+        self.let_stmt_body(true, start_span)
+    }
+
+    /// Parse the body of a let/var statement after consuming the keyword.
+    fn let_stmt_body(&mut self, mutable: bool, start_span: Span) -> Result<Stmt, ParseError> {
+        // Check for tuple destructuring: let/var [a, b] = expr
         if self.check(TokenType::LBracket) {
             let pattern = self.parse_tuple_pattern()?;
 
@@ -225,7 +246,7 @@ impl<'src> Parser<'src> {
             }));
         }
 
-        // Check for record destructuring: let { x, y } = expr
+        // Check for record destructuring: let/var { x, y } = expr
         if self.check(TokenType::LBrace) {
             let pattern = self.parse_record_pattern()?;
 
@@ -241,7 +262,7 @@ impl<'src> Parser<'src> {
             }));
         }
 
-        // Regular let statement
+        // Regular let/var statement
         let stmt = self.let_statement_inner(mutable, start_span)?;
         Ok(Stmt::Let(stmt))
     }

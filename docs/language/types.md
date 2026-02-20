@@ -139,7 +139,7 @@ tests {
         assert(arr[1] == 42)
         assert(arr[2] == 42)
 
-        let mut buf: [i64; 3] = [0; 3]
+        var buf: [i64; 3] = [0; 3]
         buf[0] = 1
         buf[1] = 2
         buf[2] = 3

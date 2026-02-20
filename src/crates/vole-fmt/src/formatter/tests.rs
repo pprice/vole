@@ -38,7 +38,7 @@ fn test_let_immutable() {
 
 #[test]
 fn test_let_mutable() {
-    assert_eq!(fmt("let mut x = 1"), "let mut x = 1\n");
+    assert_eq!(fmt("var x = 1"), "var x = 1\n");
 }
 
 #[test]
@@ -502,7 +502,7 @@ fn assert_idempotent(source: &str) {
 #[test]
 fn test_idempotent_let() {
     assert_idempotent("let x = 1\n");
-    assert_idempotent("let mut x: i32 = 42\n");
+    assert_idempotent("var x: i32 = 42\n");
 }
 
 #[test]

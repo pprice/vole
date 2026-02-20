@@ -30,7 +30,7 @@ impl StmtRule for PrimitiveLet {
 
         scope.add_local(name.clone(), ty.clone(), is_mutable);
 
-        let mutability = if is_mutable { "let mut" } else { "let" };
+        let mutability = if is_mutable { "var" } else { "let" };
 
         // ~15% chance: add explicit type annotation
         if emit.gen_bool(0.15) {

@@ -404,8 +404,8 @@ func divide(a: i64, b: i64) -> fallible(i64, DivByZero) {
 }
 
 func sumDivisions(n: i64) -> fallible(i64, DivByZero) {
-    let mut sum = 0
-    let mut i = 1
+    var sum = 0
+    var i = 1
     while i <= n {
         let result = try divide(100, i)
         sum = sum + result

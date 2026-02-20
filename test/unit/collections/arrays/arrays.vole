@@ -19,7 +19,7 @@ tests "arrays" {
     }
 
     test "for iteration" {
-        let mut sum = 0
+        var sum = 0
         for x in [1, 2, 3] {
             sum = sum + x
         }
@@ -55,7 +55,7 @@ tests "arrays" {
     }
 
     test "i128 index assignment preserves neighbors" {
-        let mut xs: [i128] = [0_i128, 1_i128, 2_i128]
+        var xs: [i128] = [0_i128, 1_i128, 2_i128]
         let big = (1_i128 << 64) + 77_i128
         xs[1] = big
         assert(xs[0] == 0_i128)
@@ -64,7 +64,7 @@ tests "arrays" {
     }
 
     test "f128 literal and index assignment" {
-        let mut xs: [f128] = [1.25_f128, 2.5_f128, 3.75_f128]
+        var xs: [f128] = [1.25_f128, 2.5_f128, 3.75_f128]
         assert(xs[1] == 2.5_f128)
         xs[1] = 42.5_f128
         assert(xs[0] == 1.25_f128)
@@ -74,7 +74,7 @@ tests "arrays" {
 
     test "for iteration over i128 array" {
         let xs: [i128] = [1_i128 << 64, 5_i128]
-        let mut sum: i128 = 0_i128
+        var sum: i128 = 0_i128
         for x in xs {
             sum = sum + x
         }
