@@ -1,0 +1,71 @@
+// Tests for unparenthesized lambda params in call expressions.
+// `f(x => body)` is syntactic sugar for `f((x) => body)`.
+// The ENTIRE arg list before `=>` is the lambda params; the lambda is the sole arg.
+
+// Takes a single-param lambda and applies it to 5
+func apply_single(f: (i64) -> i64) -> i64 {
+    return f(5)
+}
+
+// Takes a two-param lambda and applies it to (3, 4)
+func apply_pair(f: (i64, i64) -> i64) -> i64 {
+    return f(3, 4)
+}
+
+// Takes two args: the lambda accepts (i64) and the value
+func apply_with_val(f: (i64) -> i64, x: i64) -> i64 {
+    return f(x)
+}
+
+tests "unparenthesized lambda params" {
+    test "single untyped param" {
+        let result = apply_single(x => x * 2)
+        assert(result == 10)
+    }
+
+    test "single typed param" {
+        let result = apply_single(x: i64 => x + 1)
+        assert(result == 6)
+    }
+
+    test "two untyped params" {
+        let result = apply_pair(x, y => x + y)
+        assert(result == 7)
+    }
+
+    test "two typed params" {
+        let result = apply_pair(x: i64, y: i64 => x * y)
+        assert(result == 12)
+    }
+
+    test "block body single param" {
+        let result = apply_single(x => {
+            let doubled = x * 2
+            return doubled + 1
+        })
+        assert(result == 11)
+    }
+
+    test "block body two params" {
+        let result = apply_pair(a, b => {
+            return a + b + 1
+        })
+        assert(result == 8)
+    }
+
+    test "parenthesized lambda still works — zero params require parens" {
+        let result = apply_single((_x) => 42)
+        assert(result == 42)
+    }
+
+    test "parenthesized lambda still works — explicit parens" {
+        let result = apply_single((x) => x * 3)
+        assert(result == 15)
+    }
+
+    test "mixed args: lambda is NOT sole arg must use parens" {
+        // f(0, (acc, x) => acc + x) — parenthesized lambda when mixed args
+        let result = apply_with_val((x) => x - 1, 10)
+        assert(result == 9)
+    }
+}

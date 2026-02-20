@@ -634,7 +634,7 @@ impl Cg<'_, '_, '_> {
                             rc_temps.push(compiled);
                         }
                         let compiled = self.coerce_to_type(compiled, param_type_id)?;
-                        
+
                         if is_generic_class && compiled.ty != types::I64 {
                             self.emit_word(&compiled, None)?
                         } else {

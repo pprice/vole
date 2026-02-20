@@ -232,21 +232,7 @@ impl<'src> Parser<'src> {
                     // Method call: expr.method(args)
                     self.advance(); // consume '('
                     self.skip_newlines();
-                    let mut args = Vec::new();
-                    if !self.check(TokenType::RParen) {
-                        loop {
-                            args.push(self.parse_call_arg()?);
-                            self.skip_newlines();
-                            if !self.match_token(TokenType::Comma) {
-                                break;
-                            }
-                            self.skip_newlines();
-                            // Allow trailing comma
-                            if self.check(TokenType::RParen) {
-                                break;
-                            }
-                        }
-                    }
+                    let args = self.parse_call_args()?;
                     let end_span = self.current.span;
                     self.consume(TokenType::RParen, "expected ')' after arguments")?;
 

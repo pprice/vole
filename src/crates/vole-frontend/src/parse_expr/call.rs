@@ -1,6 +1,7 @@
 use super::super::ast::*;
 use super::super::parser::{ParseError, Parser};
 use super::super::token::TokenType;
+use crate::errors::ParserError;
 
 impl<'src> Parser<'src> {
     /// Parse a single call argument.
@@ -21,6 +22,163 @@ impl<'src> Parser<'src> {
         } else {
             Ok(CallArg::Positional(self.expression(0)?))
         }
+    }
+
+    /// Scan ahead (without consuming) to check whether `=>` appears at nesting
+    /// depth 0 inside the current call arg list, AND every comma-separated piece
+    /// before `=>` looks like an unparenthesized lambda parameter (`ident` or
+    /// `ident : TypeExpr`).
+    ///
+    /// This discriminates `f(x => body)` (unparenthesized lambda) from
+    /// `f((x) => body)` or `f(c, (x) => body)` (regular call args that the
+    /// normal `parse_call_arg` / `expression(0)` path already handles).
+    ///
+    /// Each "piece" between commas (at depth 0) must begin with an `Identifier`.
+    /// If any piece starts with something else (e.g. `(`, a literal), returns false.
+    ///
+    /// Caller must already have consumed `(` and skipped leading newlines.
+    fn has_top_level_fat_arrow(&self) -> bool {
+        // The current token starts the first piece; it must be an identifier.
+        if self.current.ty != TokenType::Identifier {
+            return false;
+        }
+
+        let mut scan_lexer = self.lexer.clone();
+        let mut token = self.current.clone();
+        let mut depth: u32 = 0;
+
+        loop {
+            match token.ty {
+                TokenType::LParen | TokenType::LBracket | TokenType::LBrace => depth += 1,
+                TokenType::RBracket | TokenType::RBrace => {
+                    depth = depth.saturating_sub(1);
+                }
+                TokenType::RParen => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                }
+                // A comma at depth 0 separates param pieces.
+                // The next non-newline token must be an Identifier or `=>`
+                // (trailing comma before `=>` is unusual but harmless to reject).
+                TokenType::Comma if depth == 0 => {
+                    // Peek at the next real token
+                    let mut next = scan_lexer.next_token();
+                    while next.ty == TokenType::Newline {
+                        next = scan_lexer.next_token();
+                    }
+                    // Next piece must start with an identifier (or be `=>` for
+                    // an unexpected but benign trailing comma, which we accept
+                    // by letting the main loop see `=>` on the next iteration).
+                    if next.ty != TokenType::Identifier && next.ty != TokenType::FatArrow {
+                        return false;
+                    }
+                    token = next;
+                    continue;
+                }
+                TokenType::FatArrow if depth == 0 => return true,
+                TokenType::Eof => return false,
+                _ => {}
+            }
+            token = scan_lexer.next_token();
+        }
+    }
+
+    /// Parse the entire call arg list as a single unparenthesized lambda.
+    ///
+    /// Called when `has_top_level_fat_arrow` returned true.  We collect all
+    /// comma-separated pieces before `=>` as `LambdaParam`s, then parse the
+    /// body after `=>`, and return a single `CallArg::Positional(Lambda{...})`.
+    ///
+    /// If any piece is not a valid lambda param (`ident` or `ident : TypeExpr`),
+    /// an error is returned.
+    fn parse_unparenthesized_lambda(&mut self) -> Result<CallArg, ParseError> {
+        let start_span = self.current.span;
+        let mut params: Vec<LambdaParam> = Vec::new();
+
+        // Collect params until we hit `=>`
+        loop {
+            if self.check(TokenType::FatArrow) {
+                break;
+            }
+            // Expect an identifier (param name)
+            if !self.check(TokenType::Identifier) {
+                return Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: format!(
+                            "use parentheses around lambda params when mixing with other arguments \
+                             (found '{}')",
+                            self.current.ty.as_str()
+                        ),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+            let param_span = self.current.span;
+            let param_name_str = self.current.lexeme.to_string();
+            self.advance(); // consume identifier
+
+            let ty = if self.match_token(TokenType::Colon) {
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+
+            let name = self.interner.intern(&param_name_str);
+            params.push(LambdaParam {
+                name,
+                ty,
+                default_value: None,
+                span: param_span,
+            });
+
+            // After a param, expect `,` (more params) or `=>` (done)
+            if self.check(TokenType::FatArrow) {
+                break;
+            }
+            if !self.match_token(TokenType::Comma) {
+                return Err(ParseError::new(
+                    ParserError::ExpectedToken {
+                        expected: "',', or '=>' in unparenthesized lambda params".to_string(),
+                        found: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+        }
+
+        // Consume `=>`
+        self.consume(TokenType::FatArrow, "expected '=>' after lambda parameters")?;
+
+        // Parse body - block or expression
+        let body = if self.check(TokenType::LBrace) {
+            FuncBody::Block(self.block()?)
+        } else {
+            FuncBody::Expr(Box::new(self.expression(0)?))
+        };
+
+        let end_span = match &body {
+            FuncBody::Block(b) => b.span,
+            FuncBody::Expr(e) => e.span,
+        };
+
+        let lambda_span = start_span.merge(end_span);
+        let lambda = Expr {
+            id: self.next_id(),
+            kind: ExprKind::Lambda(Box::new(LambdaExpr {
+                type_params: Vec::new(),
+                params,
+                return_type: None,
+                body,
+                span: lambda_span,
+            })),
+            span: lambda_span,
+        };
+
+        Ok(CallArg::Positional(lambda))
     }
 }
 
@@ -121,21 +279,7 @@ impl<'src> Parser<'src> {
             // Method call: expr.method(args) or expr.method<T>(args)
             self.advance(); // consume '('
             self.skip_newlines();
-            let mut args = Vec::new();
-            if !self.check(TokenType::RParen) {
-                loop {
-                    args.push(self.parse_call_arg()?);
-                    self.skip_newlines();
-                    if !self.match_token(TokenType::Comma) {
-                        break;
-                    }
-                    self.skip_newlines();
-                    // Allow trailing comma
-                    if self.check(TokenType::RParen) {
-                        break;
-                    }
-                }
-            }
+            let args = self.parse_call_args()?;
             let end_span = self.current.span;
             self.consume(TokenType::RParen, "expected ')' after arguments")?;
 
@@ -163,7 +307,7 @@ impl<'src> Parser<'src> {
             } else if !type_args.is_empty() {
                 // Had type args but LHS wasn't an identifier path - syntax error
                 Err(ParseError::new(
-                    crate::errors::ParserError::ExpectedToken {
+                    ParserError::ExpectedToken {
                         expected: "'(' after type arguments".to_string(),
                         found: self.current.ty.as_str().to_string(),
                         span: self.current.span.into(),
@@ -186,7 +330,7 @@ impl<'src> Parser<'src> {
         } else if !type_args.is_empty() {
             // Had type args but no parens or struct literal - syntax error
             Err(ParseError::new(
-                crate::errors::ParserError::ExpectedToken {
+                ParserError::ExpectedToken {
                     expected: "'(' or '{' after type arguments".to_string(),
                     found: self.current.ty.as_str().to_string(),
                     span: self.current.span.into(),
@@ -210,24 +354,8 @@ impl<'src> Parser<'src> {
 
     /// Finish parsing a function call (after the opening paren)
     pub(crate) fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
-        let mut args = Vec::new();
         self.skip_newlines();
-
-        if !self.check(TokenType::RParen) {
-            loop {
-                args.push(self.parse_call_arg()?);
-                self.skip_newlines();
-                if !self.match_token(TokenType::Comma) {
-                    break;
-                }
-                self.skip_newlines();
-                // Allow trailing comma
-                if self.check(TokenType::RParen) {
-                    break;
-                }
-            }
-        }
-
+        let args = self.parse_call_args()?;
         let end_span = self.current.span;
         self.consume(TokenType::RParen, "expected ')' after arguments")?;
 
@@ -237,6 +365,43 @@ impl<'src> Parser<'src> {
             kind: ExprKind::Call(Box::new(CallExpr { callee, args })),
             span,
         })
+    }
+
+    /// Parse the argument list inside a call or method-call expression.
+    ///
+    /// Caller must have consumed `(` and skipped leading newlines before calling.
+    /// Stops just before `)`.
+    ///
+    /// If `=>` appears at nesting depth 0 in the arg list, the entire arg list
+    /// before `=>` is treated as unparenthesized lambda params and the result
+    /// is a single `CallArg::Positional(Lambda)`.
+    pub(crate) fn parse_call_args(&mut self) -> Result<Vec<CallArg>, ParseError> {
+        if self.check(TokenType::RParen) {
+            return Ok(Vec::new());
+        }
+
+        // Scan ahead: if `=>` appears at top level, treat the whole arg list
+        // as an unparenthesized lambda.
+        if self.has_top_level_fat_arrow() {
+            let lambda_arg = self.parse_unparenthesized_lambda()?;
+            self.skip_newlines();
+            return Ok(vec![lambda_arg]);
+        }
+
+        let mut args = Vec::new();
+        loop {
+            args.push(self.parse_call_arg()?);
+            self.skip_newlines();
+            if !self.match_token(TokenType::Comma) {
+                break;
+            }
+            self.skip_newlines();
+            // Allow trailing comma
+            if self.check(TokenType::RParen) {
+                break;
+            }
+        }
+        Ok(args)
     }
 
     /// Try to extract a path of identifiers from an expression.
