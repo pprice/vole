@@ -226,7 +226,7 @@ impl Cg<'_, '_, '_> {
             }
             Ok(cv)
         } else if let Some(&(module_id, export_name, export_type_id)) =
-            self.module_bindings.get(&sym)
+            self.lookup_module_binding(&sym)
         {
             // Module binding - look up the constant value
             self.module_binding_value(module_id, export_name, export_type_id)

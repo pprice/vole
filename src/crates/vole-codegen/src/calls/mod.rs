@@ -56,7 +56,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Check if it's a module binding (from destructuring import)
-        if let Some(&(module_id, export_name, _)) = self.module_bindings.get(&callee_sym) {
+        if let Some(&(module_id, export_name, _)) = self.lookup_module_binding(&callee_sym) {
             // Check if this is a generic external function that needs monomorphization
             if let Some(result) =
                 self.try_call_generic_external_intrinsic_from_monomorph(call_expr_id, call)?

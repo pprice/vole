@@ -838,8 +838,8 @@ impl Cg<'_, '_, '_> {
             let Some(export_type_id) = export_type_id else {
                 return Err(CodegenError::not_found("module export", export_name_str));
             };
-            // Register the module binding: local_name -> (module_id, export_name, type_id)
-            self.module_bindings.insert(
+            // Register the module binding locally (within-function only, not propagated back).
+            self.local_module_bindings.insert(
                 field_pattern.binding,
                 (module_info.module_id, export_name, export_type_id),
             );

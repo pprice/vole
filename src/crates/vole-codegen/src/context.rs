@@ -134,8 +134,11 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub(crate) substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
     /// Cache for RC state computations
     pub(crate) rc_state_cache: RefCell<FxHashMap<TypeId, RcState>>,
-    /// Module export bindings from destructuring imports: local_name -> (module_id, export_name, type_id)
-    pub module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
+    /// Module export bindings registered within this function body (destructuring imports inside a function).
+    /// Looked up first; falls back to `global_module_bindings` for top-level registrations.
+    pub local_module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
+    /// Read-only reference to globally-registered module bindings from top-level destructuring imports.
+    pub global_module_bindings: &'ctx FxHashMap<Symbol, ModuleExportBinding>,
     /// RC scope stack for drop flag tracking and cleanup emission
     pub rc_scopes: RcScopeStack,
     /// Yielder pointer variable for generator body functions.
@@ -206,8 +209,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             callable_backend_preference: CallableBackendPreference::PreferInline,
             substitution_cache: RefCell::new(FxHashMap::default()),
             rc_state_cache: RefCell::new(FxHashMap::default()),
-            // Initialize with global module bindings from top-level destructuring imports
-            module_bindings: env.global_module_bindings.clone(),
+            // No clone: local_module_bindings starts empty for within-function inserts.
+            // Global bindings are accessed via the read-only reference below.
+            local_module_bindings: FxHashMap::default(),
+            global_module_bindings: env.global_module_bindings,
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
             cached_void_val,
@@ -641,6 +646,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let mut cv = CompiledValue::new(ptr, ptr_type, resolved_union_id);
         cv.mark_borrowed();
         cv
+    }
+
+    /// Look up a module export binding by symbol.
+    ///
+    /// Checks within-function local bindings first, then falls back to the
+    /// globally-registered bindings from top-level destructuring imports.
+    pub fn lookup_module_binding(&self, sym: &Symbol) -> Option<&ModuleExportBinding> {
+        self.local_module_bindings
+            .get(sym)
+            .or_else(|| self.global_module_bindings.get(sym))
     }
 
     /// Get capture binding for a symbol, if any
