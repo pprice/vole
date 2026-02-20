@@ -399,13 +399,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Get parameter TypeIds from the function definition for union coercion
         let param_type_ids: Vec<TypeId> = param_type_ids_override.unwrap_or_else(|| {
-            let func_id_sema = name_id.and_then(|id| self.registry().function_by_name(id));
-            if let Some(fid) = func_id_sema {
-                let func_def = self.registry().get_function(fid);
-                func_def.signature.params_id.iter().copied().collect()
-            } else {
-                Vec::new()
-            }
+            name_id
+                .and_then(|id| self.query().function_id_by_name_id(id))
+                .map(|fid| self.query().function_param_type_ids(fid))
+                .unwrap_or_default()
         });
 
         // Compile arguments with type narrowing, tracking RC temps for cleanup
@@ -513,15 +510,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         start_index: usize,
         param_type_ids_override: &[TypeId],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        let func_id = self.registry().function_by_name(name_id);
+        let func_id = self.query().function_id_by_name_id(name_id);
         let Some(func_id) = func_id else {
             return Ok((Vec::new(), Vec::new()));
         };
 
         // Determine which type IDs to use for the omitted parameters.
         let param_type_ids: Vec<TypeId> = if param_type_ids_override.is_empty() {
-            let func_def = self.registry().get_function(func_id);
-            func_def.signature.params_id.iter().copied().collect()
+            self.query().function_param_type_ids(func_id)
         } else {
             param_type_ids_override.to_vec()
         };
@@ -557,7 +553,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let name_id = self
                 .name_table()
                 .name_id(module_id, &[callee_sym], self.interner());
-            name_id.and_then(|id| self.registry().function_by_name(id))
+            name_id.and_then(|id| self.query().function_id_by_name_id(id))
         };
 
         let Some(func_id) = func_id else {
@@ -565,14 +561,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
 
         // Collect &'ctx Expr references for the missing parameters before taking &mut self.
-        // registry() returns &'ctx EntityRegistry, so these refs are valid for compilation.
         let start_index = args.len();
-        let default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = {
-            let registry = self.registry();
-            (start_index..expected_param_count)
-                .map(|idx| registry.function_default_expr(func_id, idx))
-                .collect()
-        };
+        let default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = (start_index
+            ..expected_param_count)
+            .map(|idx| self.query().function_default_expr_by_id(func_id, idx))
+            .collect();
 
         // Compile each default and apply Cranelift type coercion to match the signature.
         for (default_ref, &expected_ty) in default_refs

@@ -493,6 +493,34 @@ impl<'a> ProgramQuery<'a> {
         Some((func_def.required_params, &func_def.param_defaults))
     }
 
+    /// Look up a FunctionId by NameId, without requiring a module/symbol pair.
+    #[must_use]
+    pub fn function_id_by_name_id(&self, name_id: NameId) -> Option<FunctionId> {
+        self.registry.function_by_name(name_id)
+    }
+
+    /// Get a function's parameter TypeIds by FunctionId.
+    #[must_use]
+    pub fn function_param_type_ids(&self, func_id: FunctionId) -> Vec<TypeId> {
+        self.registry
+            .get_function(func_id)
+            .signature
+            .params_id
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    /// Get a single default expression for a function parameter by FunctionId and index.
+    #[must_use]
+    pub fn function_default_expr_by_id(
+        &self,
+        func_id: FunctionId,
+        param_idx: usize,
+    ) -> Option<&'a Expr> {
+        self.registry.function_default_expr(func_id, param_idx)
+    }
+
     /// Get a method's return type from entity_registry
     #[must_use]
     pub fn method_return_type(&self, type_name: Symbol, method_name: Symbol) -> Option<TypeId> {

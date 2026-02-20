@@ -294,9 +294,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.codegen_ctx.ptr_type()
     }
 
-    /// Get the query interface for the analyzed program
+    /// Get the query interface for the analyzed program.
+    /// Returns ProgramQuery<'ctx> so that references obtained from it
+    /// have the full `'ctx` lifetime, enabling them to outlive `self` borrows.
     #[inline]
-    pub fn query(&self) -> vole_sema::ProgramQuery<'_> {
+    pub fn query(&self) -> vole_sema::ProgramQuery<'ctx> {
         self.env.analyzed.query()
     }
 
