@@ -1,0 +1,50 @@
+// Test: for-in loop over a user-defined class implementing Iterable<T>.
+// This is a separate file because it fails at sema (compile-time type error), which
+// would prevent the codegen-failing tests in iterable_user_defined.vole from running.
+//
+// Tracked: vol-7wxd — for-in loop does not recognise user-defined Iterable<T> types;
+// it only handles the builtin fast-path types (range, array, string, Iterator<T>).
+//
+// DO NOT SIMPLIFY this test.
+
+class FoInRangeIter {
+    current: i64,
+    end_val: i64,
+}
+
+extend FoInRangeIter with Iterator<i64> {
+    func next() -> i64 | Done {
+        if self.current >= self.end_val {
+            return Done {}
+        }
+        let v = self.current
+        self.current = self.current + 1
+        return v
+    }
+}
+
+class FoInRange {
+    start: i64,
+    end_val: i64,
+}
+
+extend FoInRange with Iterable<i64> {
+    func iter() -> Iterator<i64> {
+        return FoInRangeIter { current: self.start, end_val: self.end_val }
+    }
+}
+
+tests "user-defined iterable: for-in loop" {
+    test "for-in loop over user-defined Iterable" {
+        // Tracked: vol-7wxd
+        // Expected: for-in works on any type implementing Iterable<T>
+        // Actual: sema rejects it with "expected iterable (range, array, string, or Iterator<T>)"
+        let r = FoInRange { start: 0, end_val: 5 }
+        var total = 0
+        for x in r {
+            total = total + x
+        }
+        // 0 + 1 + 2 + 3 + 4 = 10
+        assert(total == 10)
+    }
+}
