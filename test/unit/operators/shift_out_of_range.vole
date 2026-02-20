@@ -1,0 +1,65 @@
+// Tests for shift operations where the shift amount is >= the bit width of the type.
+//
+// The constant folder must NOT fold these: returning None lets Cranelift handle them
+// at runtime, where it masks the shift amount to the operand's bit width (e.g.,
+// `8 % 8 = 0` for u8), so the result agrees between compiled and interpreted paths.
+//
+// Previously the constant folder eagerly folded `1_u8 << 8_u8` to 256 (i64 arithmetic
+// with `r & 63`), which then failed the literal_fits(256, u8) overflow check and
+// produced a spurious type error.  The fix is Option A from the ticket: return None
+// for any shift whose amount is out of range for the operand type.
+
+tests "shift amount in range is still folded" {
+    // These are within the valid range for u8 (0..7) and should constant-fold.
+
+    test "u8 shift by 0 folds to original value" {
+        let x = 1_u8 << 0_u8
+        assert(x == 1_u8)
+    }
+
+    test "u8 shift by 7 folds correctly" {
+        // 1 << 7 = 128, which fits in u8
+        let x = 1_u8 << 7_u8
+        assert(x == 128_u8)
+    }
+
+    test "u16 shift by 15 folds correctly" {
+        // 1 << 15 = 32768, which fits in u16
+        let x = 1_u16 << 15_u16
+        assert(x == 32768_u16)
+    }
+
+    test "i32 shift by 30 folds correctly" {
+        // 1 << 30 = 1073741824, which fits in i32
+        let x = 1_i32 << 30_i32
+        assert(x == 1073741824_i32)
+    }
+}
+
+tests "shift amount out of range is not folded and matches runtime" {
+    // When the shift amount equals or exceeds the bit width, the constant folder
+    // returns None and the expression is evaluated by Cranelift at runtime.
+    // Cranelift's ishl instruction masks the shift amount modulo the bit width,
+    // so `1_u8 << 8_u8` executes as `1_u8 << (8 % 8)` = `1_u8 << 0` = 1.
+
+    test "u8 shift by 8 is not folded - runtime result" {
+        // Shift amount equals bit width: Cranelift masks 8 % 8 = 0, result is 1
+        let mut amount: u8 = 8  // mutable to prevent constant folding
+        let x = 1_u8 << amount
+        assert(x == 1_u8)
+    }
+
+    test "u16 shift by 16 is not folded - runtime result" {
+        // Shift amount equals bit width: Cranelift masks 16 % 16 = 0, result is 1
+        let mut amount: u16 = 16
+        let x = 1_u16 << amount
+        assert(x == 1_u16)
+    }
+
+    test "u8 shift by 9 is not folded - runtime result" {
+        // 9 % 8 = 1, result is 1 << 1 = 2
+        let mut amount: u8 = 9
+        let x = 1_u8 << amount
+        assert(x == 2_u8)
+    }
+}

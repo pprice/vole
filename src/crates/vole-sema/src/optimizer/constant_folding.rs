@@ -188,8 +188,8 @@ fn fold_binary_values(left: ConstValue, right: ConstValue, op: BinaryOp) -> Opti
                 BinaryOp::BitAnd => Some(ConstValue::Int(l & r, s)),
                 BinaryOp::BitOr => Some(ConstValue::Int(l | r, s)),
                 BinaryOp::BitXor => Some(ConstValue::Int(l ^ r, s)),
-                BinaryOp::Shl => Some(ConstValue::Int(l << (r & 63), s)),
-                BinaryOp::Shr => Some(ConstValue::Int(l >> (r & 63), s)),
+                BinaryOp::Shl if shift_in_range(r, s) => Some(ConstValue::Int(l << r, s)),
+                BinaryOp::Shr if shift_in_range(r, s) => Some(ConstValue::Int(l >> r, s)),
                 _ => None,
             }
         }
@@ -926,6 +926,38 @@ impl<'a> ConstantFolder<'a> {
     }
 }
 
+/// Return the bit width of an integer type given its suffix.
+///
+/// When no suffix is present the expression is an unsized integer literal, which
+/// is stored in an i64 context (64 bits), so the Cranelift `& 63` masking is
+/// correct — we return 64 so that all shifts [0, 63] are in range.
+fn int_bit_width(suffix: Option<NumericSuffix>) -> i64 {
+    match suffix {
+        Some(NumericSuffix::I8) | Some(NumericSuffix::U8) => 8,
+        Some(NumericSuffix::I16) | Some(NumericSuffix::U16) => 16,
+        Some(NumericSuffix::I32) | Some(NumericSuffix::U32) => 32,
+        Some(NumericSuffix::I64) | Some(NumericSuffix::U64) => 64,
+        Some(NumericSuffix::I128) => 128,
+        // Float suffixes never reach this code (handled in fold_float_binary).
+        // No suffix → treat as 64-bit, consistent with Cranelift's i64 default.
+        _ => 64,
+    }
+}
+
+/// Return true if `r` is a valid shift amount for the type described by `suffix`.
+///
+/// A shift amount is in range when `0 <= r < bit_width(type)`.  Out-of-range
+/// shifts are left unfolded so the runtime (Cranelift) handles them consistently
+/// instead of producing a value that disagrees with compile-time evaluation.
+///
+/// The constant folder stores all integers as `i64`, so the maximum safe shift
+/// amount is 63 regardless of the declared type.  For `i128`, where the true
+/// bit width is 128, shifts of 64..127 cannot be represented correctly in i64
+/// arithmetic and are left unfolded too.
+fn shift_in_range(r: i64, suffix: Option<NumericSuffix>) -> bool {
+    r >= 0 && r < int_bit_width(suffix).min(64)
+}
+
 /// Check if n is a positive power of 2 and return the shift amount (log2).
 fn power_of_two_shift(n: i64) -> Option<i64> {
     if n > 0 && (n & (n - 1)) == 0 {
@@ -1127,5 +1159,89 @@ mod tests {
         assert_eq!(power_of_two_shift(3), None);
         assert_eq!(power_of_two_shift(0), None);
         assert_eq!(power_of_two_shift(-1), None);
+    }
+
+    #[test]
+    fn test_shift_in_range() {
+        // u8: valid shifts are 0..7
+        assert!(shift_in_range(0, Some(NumericSuffix::U8)));
+        assert!(shift_in_range(7, Some(NumericSuffix::U8)));
+        assert!(!shift_in_range(8, Some(NumericSuffix::U8)));
+        assert!(!shift_in_range(9, Some(NumericSuffix::U8)));
+        assert!(!shift_in_range(-1, Some(NumericSuffix::U8)));
+
+        // u16: valid shifts are 0..15
+        assert!(shift_in_range(15, Some(NumericSuffix::U16)));
+        assert!(!shift_in_range(16, Some(NumericSuffix::U16)));
+
+        // i32/u32: valid shifts are 0..31
+        assert!(shift_in_range(31, Some(NumericSuffix::I32)));
+        assert!(!shift_in_range(32, Some(NumericSuffix::I32)));
+        assert!(shift_in_range(31, Some(NumericSuffix::U32)));
+        assert!(!shift_in_range(32, Some(NumericSuffix::U32)));
+
+        // i64/u64: valid shifts are 0..63
+        assert!(shift_in_range(63, Some(NumericSuffix::I64)));
+        assert!(!shift_in_range(64, Some(NumericSuffix::I64)));
+
+        // No suffix → 64-bit context; shifts 0..63 are valid
+        assert!(shift_in_range(63, None));
+        assert!(!shift_in_range(64, None));
+
+        // i128: true bit width is 128, but the folder uses i64 arithmetic,
+        // so we can only fold shifts 0..63 (r < 64).
+        assert!(shift_in_range(63, Some(NumericSuffix::I128)));
+        assert!(!shift_in_range(64, Some(NumericSuffix::I128)));
+    }
+
+    #[test]
+    fn test_fold_shl_out_of_range_not_folded() {
+        use vole_frontend::ast::ExprKind;
+        use vole_frontend::{BinaryExpr, BinaryOp, Expr, NodeId, Span};
+
+        // Helper to make a literal Expr
+        let make_int = |v: i64, suffix: Option<NumericSuffix>| -> Expr {
+            Expr {
+                id: NodeId::new_for_test(0),
+                kind: ExprKind::IntLiteral(v, suffix),
+                span: Span::default(),
+            }
+        };
+
+        let known: HashMap<_, _> = HashMap::new();
+
+        // 1_u8 << 8_u8 — shift amount equals the bit width: must NOT fold
+        let bin = BinaryExpr {
+            left: make_int(1, Some(NumericSuffix::U8)),
+            right: make_int(8, Some(NumericSuffix::U8)),
+            op: BinaryOp::Shl,
+        };
+        assert!(
+            eval_binary(&bin, &known).is_none(),
+            "1_u8 << 8_u8 must not fold"
+        );
+
+        // 1_u8 << 7_u8 — shift amount is in range: must fold to 128_u8
+        let bin2 = BinaryExpr {
+            left: make_int(1, Some(NumericSuffix::U8)),
+            right: make_int(7, Some(NumericSuffix::U8)),
+            op: BinaryOp::Shl,
+        };
+        let folded = eval_binary(&bin2, &known);
+        assert!(
+            matches!(folded, Some(ConstValue::Int(128, Some(NumericSuffix::U8)))),
+            "1_u8 << 7_u8 must fold to 128_u8, got {folded:?}"
+        );
+
+        // 1_u16 << 16_u16 — out of range: must NOT fold
+        let bin3 = BinaryExpr {
+            left: make_int(1, Some(NumericSuffix::U16)),
+            right: make_int(16, Some(NumericSuffix::U16)),
+            op: BinaryOp::Shl,
+        };
+        assert!(
+            eval_binary(&bin3, &known).is_none(),
+            "1_u16 << 16_u16 must not fold"
+        );
     }
 }
