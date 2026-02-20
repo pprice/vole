@@ -287,8 +287,7 @@ impl<'a> Compiler<'a> {
         mode: DeclareMode,
     ) -> Option<FunctionKey> {
         // Look up semantic FunctionId from NameId
-        let registry = self.registry();
-        let semantic_func_id = registry.function_by_name(name_id)?;
+        let semantic_func_id = self.query().function_id_by_name_id(name_id)?;
 
         // Build signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);
@@ -305,7 +304,7 @@ impl<'a> Compiler<'a> {
 
         // Record return type from pre-resolved signature
         let return_type_id = self
-            .registry()
+            .query()
             .get_function(semantic_func_id)
             .signature
             .return_type_id;
