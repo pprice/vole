@@ -206,28 +206,39 @@ tests { test "static calling static" {
 } }
 ```
 
-### Implement Blocks
+### Extend Blocks
 
-Methods can be added to classes (or structs) using `implement` blocks, allowing you to define methods outside the class body:
+Methods can be added to a class (or struct) outside its body using `extend T { }`. This is useful for splitting a type's helpers across a file without making them part of the type's public interface:
 
 ```vole
 class Counter {
     value: i64
 }
 
-implement Counter {
-    func get(self: Counter) -> i64 => self.value
-    func increment(self: Counter, amount: i64) -> i64 => self.value + amount
+extend Counter {
+    func get() -> i64 => self.value
+    func increment(amount: i64) -> i64 => self.value + amount
 }
 
-tests { test "implement block" {
+tests { test "extend block" {
     let c = Counter { value: 42 }
     assert(c.get() == 42)
     assert(c.increment(8) == 50)
 } }
 ```
 
+Methods added via `extend T { }` are visible only within the current file.
+
+To retroactively add an interface to a type, use `extend T with I { }` (see [Interfaces](interfaces.md)).
+
 ### Implementing Interfaces
+
+When defining your own type, list interfaces directly in the class declaration. This is the preferred form when the type and its interface implementations live together:
+
+| Syntax | When to use |
+|--------|-------------|
+| `class T implements I { }` | Defining your own type — bind interface at the declaration site |
+| `extend T with I { }` | Adding an interface to a type defined elsewhere (retroactive / external) |
 
 Classes can implement interfaces directly in their declaration:
 

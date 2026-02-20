@@ -1,6 +1,6 @@
 # Interfaces
 
-Interfaces define contracts that types can implement. Vole supports explicit implementation, structural implementation, and standalone `implement` blocks.
+Interfaces define contracts that types can implement. Vole supports explicit implementation, retroactive extension, and file-scoped helper methods via `extend` blocks.
 
 ## Quick Reference
 
@@ -9,10 +9,11 @@ Interfaces define contracts that types can implement. Vole supports explicit imp
 | `interface Name { }` | Define interface |
 | `func method() -> T` | Required method |
 | `default func method() -> T { }` | Default method |
-| `class C implements I { }` | Explicit implementation |
+| `class C implements I { }` | Implement interface when defining your own type |
+| `extend T with I { }` | Retroactively add an interface to an existing type |
+| `extend T { }` | Add file-scoped helper methods to any type |
 | `Self` | The implementing type |
 | `interface Child extends Parent { }` | Interface inheritance |
-| `extend T with I { }` | Standalone implementation block |
 | `static interface Name { }` | Interface with only static methods |
 
 ## Defining Interfaces
@@ -35,7 +36,7 @@ interface Named {
 
 ## Implementing Interfaces
 
-Use `implements` in the class declaration to explicitly implement an interface:
+Use `implements` in the class declaration when you are defining your own type and want to bind it to an interface in one place:
 
 ```vole
 interface Hashable {
@@ -303,9 +304,9 @@ tests { test "interface inheritance" {
 } }
 ```
 
-## Standalone Extend Blocks
+## Retroactive Extension: extend T with I
 
-Add interface implementations to existing types using `extend ... with ...` blocks:
+Use `extend T with I { }` to add an interface to a type you do not own, or to separate the implementation from the type definition. This is also called a retroactive (or external) implementation.
 
 ```vole
 interface Describable {
@@ -323,7 +324,7 @@ extend Person with Describable {
     }
 }
 
-tests { test "implement block for interface" {
+tests { test "extend with interface" {
     let p = Person { name: "Bob", age: 25 }
     assert(p.describe() == "Bob")
 
@@ -332,7 +333,7 @@ tests { test "implement block for interface" {
 } }
 ```
 
-Implement blocks work for primitive types too:
+`extend ... with ...` works for primitive types too:
 
 ```vole
 interface Describable {
@@ -351,7 +352,7 @@ extend string with Describable {
     }
 }
 
-tests { test "implement block for primitives" {
+tests { test "extend primitives with interface" {
     let x: i32 = 42
     assert(x.describe() == "an integer")
 
@@ -360,7 +361,7 @@ tests { test "implement block for primitives" {
 } }
 ```
 
-You can also declare `implements` on a class and satisfy it via a separate implement block:
+You can also declare `implements` on a class and satisfy it via a separate `extend ... with ...` block:
 
 ```vole
 interface Incrementable {
@@ -383,7 +384,7 @@ tests { test "implements satisfied by external block" {
 } }
 ```
 
-Expression-bodied methods work in implement blocks:
+Expression-bodied methods work in extend blocks:
 
 ```vole
 interface Tripler {
@@ -398,11 +399,58 @@ extend Quantity with Tripler {
     func triple() -> i64 => self.n * 3
 }
 
-tests { test "expression-bodied in implement block" {
+tests { test "expression-bodied in extend block" {
     let q = Quantity { n: 14 }
     assert(q.triple() == 42)
 } }
 ```
+
+## File-Scoped Helper Methods: extend T
+
+Use `extend T { }` (without `with`) to add helper methods to any type that are only visible within the current file. This is useful for organising code without polluting a type's public interface:
+
+```vole
+class Point {
+    x: i64,
+    y: i64,
+}
+
+extend Point {
+    func magnitude_sq() -> i64 {
+        return self.x * self.x + self.y * self.y
+    }
+}
+
+tests { test "file-scoped helper method" {
+    let p = Point { x: 3, y: 4 }
+    assert(p.magnitude_sq() == 25)
+} }
+```
+
+Expression-bodied helpers work too:
+
+```vole
+class Counter {
+    value: i64,
+}
+
+extend Counter {
+    func doubled() -> i64 => self.value * 2
+}
+
+tests { test "expression-bodied file-scoped helper" {
+    let c = Counter { value: 7 }
+    assert(c.doubled() == 14)
+} }
+```
+
+### When to use which form
+
+| Situation | Syntax |
+|-----------|--------|
+| Defining your own type and binding it to an interface | `class T implements I { }` |
+| Adding an interface to a type defined elsewhere | `extend T with I { }` |
+| Adding helpers visible only in this file | `extend T { }` |
 
 ## Functional Interfaces
 

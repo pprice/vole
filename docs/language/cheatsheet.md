@@ -200,6 +200,7 @@ interface Named {
     func name() -> string
 }
 
+// Own type: implement at declaration
 class Person implements Named {
     n: string,
 
@@ -208,10 +209,32 @@ class Person implements Named {
     }
 }
 
+// External type: retroactively add interface
+class Tag {
+    label: string,
+}
+
+extend Tag with Named {
+    func name() -> string {
+        return self.label
+    }
+}
+
+// File-scoped helper (not an interface, visible only in this file)
+extend Tag {
+    func upper() -> string {
+        return self.label
+    }
+}
+
 tests {
     test "interface" {
         let p = Person { n: "Alice" }
         assert(p.name() == "Alice")
+
+        let t = Tag { label: "vole" }
+        let n: Named = t
+        assert(n.name() == "vole")
     }
 }
 ```
@@ -282,7 +305,7 @@ func process() -> fallible(i64, NotFound) {
 
 ## Iterators
 
-Arrays provide `.iter()` to get an iterator. Iterators are lazy and support chaining.
+Arrays, strings, and ranges support iterator methods directly — no `.iter()` call needed. Iterators are lazy and support chaining.
 
 **Transformers (lazy, return iterators):**
 - `.map(fn)` -- transform each element
@@ -315,7 +338,7 @@ Arrays provide `.iter()` to get an iterator. Iterators are lazy and support chai
 ```vole
 tests {
     test "iterator chaining" {
-        let result = [1, 2, 3, 4, 5].iter()
+        let result = [1, 2, 3, 4, 5]
             .filter((x) => x % 2 == 0)
             .map((x) => x * 10)
             .collect()
@@ -325,6 +348,8 @@ tests {
     }
 }
 ```
+
+`.iter()` is still valid when you need an explicit `Iterator<T>` value, for example to pass to a function that expects one or to build a lazy chain from a variable.
 
 ## Generators
 

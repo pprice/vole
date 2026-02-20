@@ -2,36 +2,38 @@
 
 Iterators provide lazy, composable operations over sequences. Most iterator operations are lazy -- they don't execute until consumed by a terminal operation like `collect()`, `sum()`, or `count()`.
 
+Arrays, strings, and ranges implement `Iterable<T>`, so all iterator methods are available directly on them -- no `.iter()` call is required. Calling `.iter()` is still valid and useful when you need an explicit `Iterator<T>` value (for example to pass to a function that expects one, or to build a named lazy chain).
+
 ## Quick Reference
 
-| Method | Description |
-|--------|-------------|
-| `.iter()` | Create an iterator from an array, string, or range |
-| `.map(fn)` | Transform each element |
-| `.filter(fn)` | Keep elements matching predicate |
-| `.flat_map(fn)` | Map then flatten results |
-| `.flatten()` | Flatten nested iterators |
-| `.take(n)` | Take first n elements |
-| `.skip(n)` | Skip first n elements |
-| `.chain(iter)` | Concatenate two iterators |
-| `.enumerate()` | Yield (index, value) pairs |
-| `.zip(iter)` | Combine two iterators into pairs |
-| `.chunks(n)` | Group into non-overlapping chunks |
-| `.windows(n)` | Sliding windows of size n |
-| `.reverse()` | Reverse element order |
-| `.sorted()` | Sort elements |
-| `.unique()` | Remove consecutive duplicates |
-| `.reduce(init, fn)` | Fold to single value |
-| `.sum()` | Sum numeric elements |
-| `.count()` | Count elements |
-| `.collect()` | Materialize to array |
-| `.for_each(fn)` | Run function on each element |
-| `.find(fn)` | First element matching predicate (or nil) |
-| `.first()` | First element (or nil) |
-| `.last()` | Last element (or nil) |
-| `.nth(n)` | Element at index n (or nil) |
-| `.any(fn)` | True if any element matches |
-| `.all(fn)` | True if all elements match |
+| Method | Description | Direct on arrays/strings/ranges |
+|--------|-------------|---------------------------------|
+| `.iter()` | Get an explicit `Iterator<T>` | Yes (optional) |
+| `.map(fn)` | Transform each element | Yes |
+| `.filter(fn)` | Keep elements matching predicate | Yes |
+| `.flat_map(fn)` | Map then flatten results | Yes |
+| `.flatten()` | Flatten nested iterators | Yes |
+| `.take(n)` | Take first n elements | Yes |
+| `.skip(n)` | Skip first n elements | Yes |
+| `.chain(iter)` | Concatenate two iterators | Yes |
+| `.enumerate()` | Yield (index, value) pairs | Yes |
+| `.zip(iter)` | Combine two iterators into pairs | Yes |
+| `.chunks(n)` | Group into non-overlapping chunks | Yes |
+| `.windows(n)` | Sliding windows of size n | Yes |
+| `.reverse()` | Reverse element order | Yes |
+| `.sorted()` | Sort elements | Yes |
+| `.unique()` | Remove consecutive duplicates | Yes |
+| `.reduce(init, fn)` | Fold to single value | Yes |
+| `.sum()` | Sum numeric elements | Yes |
+| `.count()` | Count elements | Yes |
+| `.collect()` | Materialize to array | Yes |
+| `.for_each(fn)` | Run function on each element | Yes |
+| `.find(fn)` | First element matching predicate (or nil) | Yes |
+| `.first()` | First element (or nil) | Yes |
+| `.last()` | Last element (or nil) | Yes |
+| `.nth(n)` | Element at index n (or nil) | Yes |
+| `.any(fn)` | True if any element matches | Yes |
+| `.all(fn)` | True if all elements match | Yes |
 
 ## Factory Functions
 
@@ -41,61 +43,36 @@ Iterators provide lazy, composable operations over sequences. Most iterator oper
 | `once(val)` | Iterator that yields a single value |
 | `empty()` | Iterator that yields nothing |
 
-## Creating Iterators
+## Direct Methods on Arrays, Strings, and Ranges
 
-Arrays, strings, and ranges all support `.iter()`:
+Iterator methods work directly on arrays, strings, and ranges. You do not need to call `.iter()` first:
 
 ```vole
 tests {
-    test "array iterator" {
-        let arr = [1, 2, 3]
-        let iter = arr.iter()
-        let collected = iter.collect()
-        assert(collected.length() == 3)
+    test "array direct map" {
+        let doubled = [1, 2, 3].map((x) => x * 2).collect()
+        assert(doubled[0] == 2)
+        assert(doubled[2] == 6)
+    }
+
+    test "array direct filter" {
+        let evens = [1, 2, 3, 4, 5].filter((x) => x % 2 == 0).collect()
+        assert(evens.length() == 2)
+        assert(evens[0] == 2)
+        assert(evens[1] == 4)
+    }
+
+    test "range direct sum" {
+        assert((1..=10).sum() == 55)
+    }
+
+    test "string direct count" {
+        assert("hello".count() == 5)
     }
 }
 ```
 
-Strings iterate over unicode characters:
-
-```vole
-tests {
-    test "string iterator" {
-        let s = "hello"
-        let chars = s.iter().collect()
-        assert(chars.length() == 5)
-        assert(chars[0] == "h")
-        assert(chars[4] == "o")
-    }
-}
-```
-
-Ranges produce integer sequences:
-
-```vole
-tests {
-    test "range iterator" {
-        let result = (0..5).iter().collect()
-        assert(result.length() == 5)
-        assert(result[0] == 0)
-        assert(result[4] == 4)
-    }
-}
-```
-
-Inclusive ranges use `..=`:
-
-```vole
-tests {
-    test "inclusive range" {
-        let result = (0..=4).iter().collect()
-        assert(result.length() == 5)
-        assert(result[4] == 4)
-    }
-}
-```
-
-For-in loops work directly on arrays, strings, and generators:
+For-in loops also work directly on arrays, strings, ranges, and generators:
 
 ```vole
 tests {
@@ -109,6 +86,24 @@ tests {
 }
 ```
 
+## When to Use .iter()
+
+`.iter()` converts an array, string, or range into an explicit `Iterator<T>`. Use it when:
+
+- A function parameter or variable is typed as `Iterator<T>` and you need to pass one explicitly.
+- You want to name a lazy iterator before consuming it.
+
+```vole
+tests {
+    test "explicit iterator variable" {
+        let nums = [1, 2, 3, 4, 5]
+        let iter = nums.iter()
+        let collected = iter.collect()
+        assert(collected.length() == 5)
+    }
+}
+```
+
 ## Transforming: map
 
 Transform each element:
@@ -117,7 +112,7 @@ Transform each element:
 tests {
     test "map doubles" {
         let nums = [1, 2, 3, 4, 5]
-        let doubled = nums.iter().map((x) => x * 2).collect()
+        let doubled = nums.map((x) => x * 2).collect()
         assert(doubled[0] == 2)
         assert(doubled[4] == 10)
     }
@@ -131,7 +126,7 @@ tests {
     test "map with capture" {
         let arr = [1, 2, 3]
         let multiplier = 10
-        let result = arr.iter().map((x) => x * multiplier).collect()
+        let result = arr.map((x) => x * multiplier).collect()
         assert(result[0] == 10)
         assert(result[1] == 20)
         assert(result[2] == 30)
@@ -147,7 +142,7 @@ Keep elements matching a predicate:
 tests {
     test "filter evens" {
         let nums = [1, 2, 3, 4, 5, 6]
-        let evens = nums.iter().filter((x) => x % 2 == 0).collect()
+        let evens = nums.filter((x) => x % 2 == 0).collect()
         assert(evens.length() == 3)
         assert(evens[0] == 2)
         assert(evens[1] == 4)
@@ -164,7 +159,7 @@ Iterator methods return iterators, enabling chains:
 tests {
     test "filter then map" {
         let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        let result = nums.iter()
+        let result = nums
             .filter((x) => x % 2 == 0)
             .map((x) => x * x)
             .take(3)
@@ -184,7 +179,7 @@ Take the first n elements:
 tests {
     test "take" {
         let nums = [1, 2, 3, 4, 5]
-        let first3 = nums.iter().take(3).collect()
+        let first3 = nums.take(3).collect()
         assert(first3.length() == 3)
         assert(first3[0] == 1)
         assert(first3[2] == 3)
@@ -198,7 +193,7 @@ Skip the first n elements:
 tests {
     test "skip" {
         let nums = [1, 2, 3, 4, 5]
-        let rest = nums.iter().skip(2).collect()
+        let rest = nums.skip(2).collect()
         assert(rest.length() == 3)
         assert(rest[0] == 3)
         assert(rest[2] == 5)
@@ -212,7 +207,7 @@ Combine skip and take for pagination:
 tests {
     test "skip then take" {
         let arr = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        let page = arr.iter().skip(3).take(4).collect()
+        let page = arr.skip(3).take(4).collect()
         assert(page.length() == 4)
         assert(page[0] == 4)
         assert(page[3] == 7)
@@ -228,13 +223,13 @@ Fold elements into a single value. The first argument is the initial accumulator
 tests {
     test "reduce sum" {
         let nums = [1, 2, 3, 4, 5]
-        let total = nums.iter().reduce(0, (acc, x) => acc + x)
+        let total = nums.reduce(0, (acc, x) => acc + x)
         assert(total == 15)
     }
 
     test "reduce product" {
         let nums = [1, 2, 3, 4]
-        let product = nums.iter().reduce(1, (acc, x) => acc * x)
+        let product = nums.reduce(1, (acc, x) => acc * x)
         assert(product == 24)
     }
 }
@@ -246,17 +241,17 @@ tests {
 tests {
     test "sum" {
         let nums = [1, 2, 3, 4, 5]
-        assert(nums.iter().sum() == 15)
+        assert(nums.sum() == 15)
     }
 
     test "count" {
         let nums = [1, 2, 3, 4, 5]
-        assert(nums.iter().count() == 5)
+        assert(nums.count() == 5)
     }
 
     test "count with filter" {
         let nums = [1, 2, 3, 4, 5, 6]
-        let even_count = nums.iter().filter((x) => x % 2 == 0).count()
+        let even_count = nums.filter((x) => x % 2 == 0).count()
         assert(even_count == 3)
     }
 }
@@ -270,7 +265,7 @@ Materialize a lazy iterator into an array:
 tests {
     test "collect" {
         let nums = [1, 2, 3, 4, 5]
-        let doubled = nums.iter().map((x) => x * 2).collect()
+        let doubled = nums.map((x) => x * 2).collect()
         assert(doubled.length() == 5)
         assert(doubled[0] == 2)
         assert(doubled[4] == 10)
@@ -288,14 +283,14 @@ Always call `.collect()` when you need the actual array.
 tests {
     test "find" {
         let arr = [1, 2, 3, 4, 5]
-        let result = arr.iter().find((x) => x > 3)
+        let result = arr.find((x) => x > 3)
         assert(result is i64)
         assert((result ?? 0) == 4)
     }
 
     test "find returns nil" {
         let arr = [1, 2, 3]
-        let result = arr.iter().find((x) => x > 10)
+        let result = arr.find((x) => x > 10)
         assert(result is nil)
     }
 }
@@ -307,8 +302,8 @@ tests {
 tests {
     test "any" {
         let arr = [1, 2, 3, 4, 5]
-        assert(arr.iter().any((x) => x > 3))
-        assert(!arr.iter().any((x) => x > 10))
+        assert(arr.any((x) => x > 3))
+        assert(!arr.any((x) => x > 10))
     }
 }
 ```
@@ -319,8 +314,8 @@ tests {
 tests {
     test "all" {
         let arr = [2, 4, 6, 8]
-        assert(arr.iter().all((x) => x % 2 == 0))
-        assert(!arr.iter().all((x) => x > 5))
+        assert(arr.all((x) => x % 2 == 0))
+        assert(!arr.all((x) => x > 5))
     }
 }
 ```
@@ -331,8 +326,8 @@ tests {
 tests {
     test "first and last" {
         let arr = [10, 20, 30]
-        let first = arr.iter().first()
-        let last = arr.iter().last()
+        let first = arr.first()
+        let last = arr.last()
         assert((first ?? 0) == 10)
         assert((last ?? 0) == 30)
     }
@@ -372,7 +367,7 @@ tests {
     test "enumerate" {
         let arr = [10, 20, 30]
         var sum = 0
-        for pair in arr.iter().enumerate() {
+        for pair in arr.enumerate() {
             sum = sum + pair[0] + pair[1]
         }
         assert(sum == 63)
@@ -380,7 +375,7 @@ tests {
 
     test "enumerate with map" {
         let arr = [1, 2, 3]
-        let result = arr.iter().enumerate().map((pair) => pair[0] * pair[1]).collect()
+        let result = arr.enumerate().map((pair) => pair[0] * pair[1]).collect()
         assert(result[0] == 0)
         assert(result[1] == 2)
         assert(result[2] == 6)
@@ -430,7 +425,7 @@ Flatten nested arrays:
 tests {
     test "flatten" {
         let nested = [[1, 2], [3, 4]]
-        let flat = nested.iter().flatten().collect()
+        let flat = nested.flatten().collect()
         assert(flat.length() == 4)
         assert(flat[0] == 1)
         assert(flat[3] == 4)
@@ -444,7 +439,7 @@ tests {
 tests {
     test "flat_map" {
         let arr = [1, 2, 3]
-        let result = arr.iter().flat_map((x) => [x, x * 10]).collect()
+        let result = arr.flat_map((x) => [x, x * 10]).collect()
         assert(result.length() == 6)
         assert(result[0] == 1)
         assert(result[1] == 10)
@@ -462,7 +457,7 @@ tests {
 tests {
     test "chunks" {
         let arr = [1, 2, 3, 4, 5]
-        let c = arr.iter().chunks(2).collect()
+        let c = arr.chunks(2).collect()
         assert(c.length() == 3)
         assert(c[0].length() == 2)
         assert(c[0][0] == 1)
@@ -479,7 +474,7 @@ tests {
 tests {
     test "windows" {
         let arr = [1, 2, 3, 4, 5]
-        let w = arr.iter().windows(3).collect()
+        let w = arr.windows(3).collect()
         assert(w.length() == 3)
         assert(w[0][0] == 1)
         assert(w[0][2] == 3)
@@ -496,7 +491,7 @@ tests {
 tests {
     test "reverse" {
         let arr = [1, 2, 3]
-        let rev = arr.iter().reverse().collect()
+        let rev = arr.reverse().collect()
         assert(rev[0] == 3)
         assert(rev[1] == 2)
         assert(rev[2] == 1)
@@ -504,7 +499,7 @@ tests {
 
     test "sorted" {
         let arr = [3, 1, 4, 1, 5, 9, 2, 6]
-        let s = arr.iter().sorted().collect()
+        let s = arr.sorted().collect()
         assert(s[0] == 1)
         assert(s[1] == 1)
         assert(s[2] == 2)
@@ -513,7 +508,7 @@ tests {
 
     test "unique removes consecutive duplicates" {
         let arr = [1, 1, 2, 2, 2, 3, 1]
-        let u = arr.iter().unique().collect()
+        let u = arr.unique().collect()
         assert(u.length() == 4)
         assert(u[0] == 1)
         assert(u[1] == 2)
@@ -523,7 +518,7 @@ tests {
 
     test "sorted then unique for true dedup" {
         let arr = [3, 1, 2, 1, 3, 2]
-        let result = arr.iter().sorted().unique().collect()
+        let result = arr.sorted().unique().collect()
         assert(result.length() == 3)
         assert(result[0] == 1)
         assert(result[1] == 2)
@@ -540,7 +535,7 @@ Run a function on each element (for side effects):
 tests {
     test "for_each" {
         let arr = [1, 2, 3]
-        arr.iter().for_each((x) => { let y = x * 2 })
+        arr.for_each((x) => { let y = x * 2 })
         assert(true)
     }
 }
@@ -729,12 +724,12 @@ Ranges work as iterators for computing sequences:
 ```vole
 tests {
     test "range sum" {
-        let sum = (1..101).iter().sum()
+        let sum = (1..101).sum()
         assert(sum == 5050)
     }
 
     test "range with pipeline" {
-        let sum_of_squares = (1..11).iter()
+        let sum_of_squares = (1..11)
             .map((x) => x * x)
             .sum()
         assert(sum_of_squares == 385)
@@ -743,7 +738,7 @@ tests {
     test "range with variables" {
         let start = 5
         let end = 10
-        let result = (start..end).iter().collect()
+        let result = (start..end).collect()
         assert(result.length() == 5)
         assert(result[0] == 5)
         assert(result[4] == 9)
@@ -758,20 +753,20 @@ Strings iterate over unicode characters:
 ```vole
 tests {
     test "string characters" {
-        let chars = "hello".iter().collect()
+        let chars = "hello".collect()
         assert(chars.length() == 5)
         assert(chars[0] == "h")
         assert(chars[4] == "o")
     }
 
     test "unicode string" {
-        let chars = "abc".iter().collect()
+        let chars = "abc".collect()
         assert(chars.length() == 3)
         assert(chars[0] == "a")
     }
 
     test "string iter with pipeline" {
-        let chars = "abcdefgh".iter().skip(2).take(4).collect()
+        let chars = "abcdefgh".skip(2).take(4).collect()
         assert(chars.length() == 4)
         assert(chars[0] == "c")
         assert(chars[3] == "f")
@@ -788,6 +783,48 @@ tests {
 }
 ```
 
+## Implementing Iterable<T> for Custom Types
+
+Any class can participate in the iterator protocol by implementing `Iterable<T>`. Implement a single method — `iter()` — and all iterator methods become available for free via default method dispatch.
+
+To implement `Iterable<T>` you also need a helper type that implements `Iterator<T>` (providing `next() -> T | Done`):
+
+```vole,ignore
+// Step 1: define the iterator state
+class MyIter {
+    current: i64,
+    end_val: i64,
+}
+
+extend MyIter with Iterator<i64> {
+    func next() -> i64 | Done {
+        if self.current >= self.end_val {
+            return Done {}
+        }
+        let v = self.current
+        self.current = self.current + 1
+        return v
+    }
+}
+
+// Step 2: define the iterable type — implement only iter()
+class MyRange {
+    start: i64,
+    end_val: i64,
+}
+
+extend MyRange with Iterable<i64> {
+    func iter() -> Iterator<i64> {
+        return MyIter { current: self.start, end_val: self.end_val }
+    }
+}
+
+// Step 3: all Iterable<T> default methods are now available
+// r.count(), r.collect(), r.map(f), r.filter(f), r.sum(), etc.
+```
+
+Once `iter()` is implemented, the type gets `count`, `collect`, `map`, `filter`, `reduce`, `sum`, `first`, `any`, `all`, and every other `Iterable<T>` default method automatically.
+
 ## Lazy Evaluation
 
 Iterator operations are lazy -- nothing happens until a terminal operation consumes the iterator:
@@ -796,7 +833,7 @@ Iterator operations are lazy -- nothing happens until a terminal operation consu
 tests {
     test "lazy evaluation" {
         let nums = [1, 2, 3, 4, 5]
-        let doubled = nums.iter().map((x) => x * 2)
+        let doubled = nums.map((x) => x * 2)
         let result = doubled.collect()
         assert(result.length() == 5)
     }
