@@ -567,6 +567,7 @@ fn plan_function_typed_param<R: Rng>(rng: &mut R, names: &mut NameGen) -> ParamI
             param_types,
             return_type: Box::new(TypeInfo::Primitive(return_type)),
         },
+        has_default: false,
     }
 }
 
@@ -608,6 +609,7 @@ fn plan_function<R: Rng>(
             params.push(ParamInfo {
                 name: names.next("param"),
                 param_type: TypeInfo::Struct(module_id, *sym_id),
+                has_default: false,
             });
         } else {
             params.push(plan_param_with_type_params(rng, names, &type_params));
@@ -642,6 +644,13 @@ fn plan_function<R: Rng>(
         plan_return_type_with_type_params(rng, &type_params)
     };
 
+    // For non-generic functions, sometimes mark trailing primitive params as
+    // having defaults (~20% chance per trailing param, scanning from the end).
+    // This enables named-arg and default-arg call patterns.
+    if type_params.is_empty() && params.len() >= 2 {
+        mark_trailing_defaults(rng, &mut params);
+    }
+
     let kind = SymbolKind::Function(FunctionInfo {
         type_params,
         params,
@@ -652,6 +661,24 @@ fn plan_function<R: Rng>(
         .get_module_mut(module_id)
         .map(|m| m.add_symbol(name, kind))
         .unwrap_or(SymbolId(0))
+}
+
+/// Mark trailing primitive parameters as having defaults.
+///
+/// Scans from the end of the parameter list; stops as soon as a
+/// non-primitive (struct, interface, function, etc.) or a random
+/// coin-flip says "no default". This preserves the Vole rule that
+/// all defaulted params must be contiguous at the tail.
+fn mark_trailing_defaults<R: Rng>(rng: &mut R, params: &mut [ParamInfo]) {
+    for param in params.iter_mut().rev() {
+        if !param.param_type.is_primitive() {
+            break;
+        }
+        if !rng.gen_bool(0.20) {
+            break;
+        }
+        param.has_default = true;
+    }
 }
 
 /// Plan a "generic closure interface" function declaration.
@@ -692,6 +719,7 @@ fn plan_generic_closure_interface_fn<R: Rng>(
     params.push(ParamInfo {
         name: names.next("param"),
         param_type: TypeInfo::Array(Box::new(elem_type.clone())),
+        has_default: false,
     });
 
     // Required: type-param-typed param (the constrained instance)
@@ -700,6 +728,7 @@ fn plan_generic_closure_interface_fn<R: Rng>(
     params.push(ParamInfo {
         name: names.next("param"),
         param_type: TypeInfo::TypeParam(type_params[tp_idx].name.clone()),
+        has_default: false,
     });
 
     // Required: matching closure param
@@ -709,6 +738,7 @@ fn plan_generic_closure_interface_fn<R: Rng>(
             param_types: vec![elem_type.clone()],
             return_type: Box::new(elem_type.clone()),
         },
+        has_default: false,
     });
 
     // Optionally add 0-2 more random params for variety
@@ -768,6 +798,7 @@ fn plan_closure_returning_fn<R: Rng>(
         params.push(ParamInfo {
             name: names.next("param"),
             param_type: TypeInfo::Primitive(PrimitiveType::random_expr_type(rng)),
+            has_default: false,
         });
     }
 
@@ -992,6 +1023,7 @@ fn plan_param<R: Rng>(rng: &mut R, names: &mut NameGen) -> ParamInfo {
     ParamInfo {
         name: names.next("param"),
         param_type,
+        has_default: false,
     }
 }
 
@@ -1144,6 +1176,7 @@ fn plan_method_signature_with_type_params<R: Rng>(
                 params.push(ParamInfo {
                     name: names.next("param"),
                     param_type: TypeInfo::TypeParam(tp_name.clone()),
+                    has_default: false,
                 });
             } else {
                 let idx = rng.gen_range(0..params.len());
@@ -1184,6 +1217,7 @@ fn plan_param_with_type_params<R: Rng>(
     ParamInfo {
         name: names.next("param"),
         param_type,
+        has_default: false,
     }
 }
 
@@ -1713,6 +1747,7 @@ fn plan_interface_params<R: Rng>(
             let param = ParamInfo {
                 name: param_name,
                 param_type: TypeInfo::Interface(module_id, *iface_sym_id),
+                has_default: false,
             };
 
             if let Some(module) = table.get_module_mut(module_id)

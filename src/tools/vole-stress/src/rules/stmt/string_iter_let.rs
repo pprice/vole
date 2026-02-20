@@ -146,6 +146,7 @@ mod tests {
         let params = &[ParamInfo {
             name: "s".to_string(),
             param_type: TypeInfo::Primitive(PrimitiveType::String),
+            has_default: false,
         }];
         let mut scope = Scope::new(params, &table);
 

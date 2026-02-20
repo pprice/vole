@@ -124,6 +124,7 @@ mod tests {
         let fn_params = [ParamInfo {
             name: "nums".into(),
             param_type: TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            has_default: false,
         }];
         let mut scope = Scope::new(&fn_params, &table);
 

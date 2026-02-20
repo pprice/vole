@@ -576,6 +576,8 @@ pub struct MethodInfo {
 pub struct ParamInfo {
     pub name: String,
     pub param_type: TypeInfo,
+    /// Whether this parameter has a default value (can be omitted at call sites).
+    pub has_default: bool,
 }
 
 /// Information about an interface declaration.

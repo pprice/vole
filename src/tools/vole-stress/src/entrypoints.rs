@@ -540,11 +540,21 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
     }
 
     fn generate_call_args(&mut self, params: &[ParamInfo]) -> String {
-        params
-            .iter()
-            .map(|p| self.generate_value_for_type(&p.param_type))
-            .collect::<Vec<_>>()
-            .join(", ")
+        let actions = crate::emitter::plan_call_args(params, self.rng);
+        let mut args: Vec<String> = Vec::new();
+        for (p, action) in params.iter().zip(actions) {
+            match action {
+                crate::emitter::CallArgAction::Skip => {}
+                crate::emitter::CallArgAction::Positional => {
+                    args.push(self.generate_value_for_type(&p.param_type));
+                }
+                crate::emitter::CallArgAction::Named(name) => {
+                    let val = self.generate_value_for_type(&p.param_type);
+                    args.push(format!("{}: {}", name, val));
+                }
+            }
+        }
+        args.join(", ")
     }
 
     fn generate_field_values(&mut self, fields: &[FieldInfo]) -> String {

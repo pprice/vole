@@ -95,6 +95,7 @@ mod tests {
                 param_types: vec![TypeInfo::Primitive(PrimitiveType::I64)],
                 return_type: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),
             },
+            has_default: false,
         }];
         let mut scope = Scope::new(params, &table);
 
@@ -115,6 +116,7 @@ mod tests {
         let params = &[ParamInfo {
             name: "x".to_string(),
             param_type: TypeInfo::Primitive(PrimitiveType::I64),
+            has_default: false,
         }];
         let mut scope = Scope::new(params, &table);
 

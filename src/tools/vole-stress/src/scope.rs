@@ -493,6 +493,7 @@ mod tests {
         let params = [ParamInfo {
             name: "p".into(),
             param_type: TypeInfo::Primitive(PrimitiveType::String),
+            has_default: false,
         }];
         let scope = Scope::new(&params, &table);
         assert!(scope.has_var_of_type(&TypeInfo::Primitive(PrimitiveType::String)));
@@ -507,6 +508,7 @@ mod tests {
         let params = [ParamInfo {
             name: "a".into(),
             param_type: TypeInfo::Primitive(PrimitiveType::I64),
+            has_default: false,
         }];
         let mut scope = Scope::new(&params, &table);
         scope.add_local("b".into(), TypeInfo::Primitive(PrimitiveType::I64), true);
@@ -578,6 +580,7 @@ mod tests {
         let params = [ParamInfo {
             name: "p".into(),
             param_type: TypeInfo::Primitive(PrimitiveType::I32),
+            has_default: false,
         }];
         let mut scope = Scope::new(&params, &table);
         scope.add_local("l".into(), TypeInfo::Primitive(PrimitiveType::I32), false);

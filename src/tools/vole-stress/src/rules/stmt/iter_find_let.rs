@@ -96,6 +96,7 @@ mod tests {
         let params = &[ParamInfo {
             name: "arr".to_string(),
             param_type: TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            has_default: false,
         }];
         let mut scope = Scope::new(params, &table);
 
@@ -125,6 +126,7 @@ mod tests {
         let params = &[ParamInfo {
             name: "names".to_string(),
             param_type: TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+            has_default: false,
         }];
         let mut scope = Scope::new(params, &table);
 
@@ -143,6 +145,7 @@ mod tests {
         let params = &[ParamInfo {
             name: "x".to_string(),
             param_type: TypeInfo::Primitive(PrimitiveType::I64),
+            has_default: false,
         }];
         let mut scope = Scope::new(params, &table);
 
@@ -161,6 +164,7 @@ mod tests {
         let params = &[ParamInfo {
             name: "arr".to_string(),
             param_type: TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            has_default: false,
         }];
         let mut scope = Scope::new(params, &table);
 

@@ -331,6 +331,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             .map(|p| ParamInfo {
                 name: p.name.clone(),
                 param_type: p.param_type.substitute_type_param(tp_name, &concrete_type),
+                has_default: p.has_default,
             })
             .collect();
         let concrete_return = info
@@ -547,12 +548,27 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     }
 
     /// Generate test arguments for function/method parameters.
+    ///
+    /// For params with defaults, randomly chooses to:
+    /// - skip the param (use default value)
+    /// - use a named arg (`name: value`)
+    /// - pass positionally (only if no named/skipped args yet)
     fn generate_test_args(&mut self, params: &[ParamInfo]) -> String {
-        params
-            .iter()
-            .map(|p| self.generate_test_value(&p.param_type))
-            .collect::<Vec<_>>()
-            .join(", ")
+        let actions = plan_call_args(params, self.rng);
+        let mut args: Vec<String> = Vec::new();
+        for (p, action) in params.iter().zip(actions) {
+            match action {
+                CallArgAction::Skip => {}
+                CallArgAction::Positional => {
+                    args.push(self.generate_test_value(&p.param_type));
+                }
+                CallArgAction::Named(name) => {
+                    let val = self.generate_test_value(&p.param_type);
+                    args.push(format!("{}: {}", name, val));
+                }
+            }
+        }
+        args.join(", ")
     }
 
     /// Generate a test value for a given type.
@@ -1463,7 +1479,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn format_params(&self, params: &[ParamInfo]) -> String {
         params
             .iter()
-            .map(|p| format!("{}: {}", p.name, p.param_type.to_vole_syntax(self.table)))
+            .map(|p| {
+                let base = format!("{}: {}", p.name, p.param_type.to_vole_syntax(self.table));
+                if p.has_default {
+                    format!("{} = {}", base, default_literal(&p.param_type))
+                } else {
+                    base
+                }
+            })
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -1530,23 +1553,23 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         self.current_class = Some(info.target_type);
 
         if let Some((iface_mod_id, iface_sym_id)) = info.interface {
-            // Interface implementation: implement Interface for Class
+            // Interface implementation: extend Class with Interface
             let iface_name = self
                 .table
                 .get_symbol(iface_mod_id, iface_sym_id)
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| "UnknownInterface".to_string());
 
-            self.emit_line(&format!("implement {} for {} {{", iface_name, target_name));
+            self.emit_line(&format!("extend {} with {} {{", target_name, iface_name));
             self.indent += 1;
 
             for method in &info.methods {
                 self.emit_method(method);
             }
         } else {
-            // Standalone implement block: implement Class { ... }
+            // Standalone extend block: extend Class { ... }
             // Methods can use Self as return type
-            self.emit_line(&format!("implement {} {{", target_name));
+            self.emit_line(&format!("extend {} {{", target_name));
             self.indent += 1;
 
             for method in &info.methods {
@@ -1732,6 +1755,74 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         for part in line.lines() {
             writeln!(self.output, "{}{}", indent_str, part).unwrap();
         }
+    }
+}
+
+/// Decide, for each parameter, whether to skip / name / pass positionally.
+///
+/// Returns a vector of `CallArgAction` decisions that callers use to
+/// build the final argument list after generating values.
+pub fn plan_call_args<R: Rng>(params: &[ParamInfo], rng: &mut R) -> Vec<CallArgAction> {
+    let mut actions = Vec::with_capacity(params.len());
+    let mut must_name = false;
+
+    for p in params {
+        if p.has_default {
+            // Roll: 30% skip, 50% named, 20% positional (if allowed)
+            let roll: u8 = rng.gen_range(0..10);
+            if roll < 3 {
+                must_name = true;
+                actions.push(CallArgAction::Skip);
+                continue;
+            }
+            if roll < 8 || must_name {
+                must_name = true;
+                actions.push(CallArgAction::Named(p.name.clone()));
+            } else {
+                actions.push(CallArgAction::Positional);
+            }
+        } else if must_name {
+            actions.push(CallArgAction::Named(p.name.clone()));
+        } else {
+            actions.push(CallArgAction::Positional);
+        }
+    }
+    actions
+}
+
+/// How to emit a single call argument.
+pub enum CallArgAction {
+    /// Emit the argument positionally (just the value).
+    Positional,
+    /// Emit as a named argument: `name: value`.
+    Named(String),
+    /// Skip this argument (use its default value).
+    Skip,
+}
+
+/// Return a simple default literal for a primitive type.
+///
+/// Used when emitting function signatures with defaulted parameters:
+/// `func foo(x: i64, y: i64 = 0) -> i64 { ... }`
+fn default_literal(ty: &TypeInfo) -> &'static str {
+    match ty {
+        TypeInfo::Primitive(prim) => match prim {
+            PrimitiveType::I8 => "0_i8",
+            PrimitiveType::I16 => "0_i16",
+            PrimitiveType::I32 => "0_i32",
+            PrimitiveType::I64 => "0",
+            PrimitiveType::I128 => "0_i128",
+            PrimitiveType::U8 => "0_u8",
+            PrimitiveType::U16 => "0_u16",
+            PrimitiveType::U32 => "0_u32",
+            PrimitiveType::U64 => "0_u64",
+            PrimitiveType::F32 => "0.0_f32",
+            PrimitiveType::F64 => "0.0",
+            PrimitiveType::Bool => "false",
+            PrimitiveType::String => "\"\"",
+            PrimitiveType::Nil => "nil",
+        },
+        _ => "nil",
     }
 }
 

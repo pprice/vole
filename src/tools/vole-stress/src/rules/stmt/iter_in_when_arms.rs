@@ -94,6 +94,7 @@ mod tests {
         let params = &[ParamInfo {
             name: "arr".to_string(),
             param_type: TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            has_default: false,
         }];
         let mut scope = Scope::new(params, &table);
         scope.add_local("x".into(), TypeInfo::Primitive(PrimitiveType::I64), false);
