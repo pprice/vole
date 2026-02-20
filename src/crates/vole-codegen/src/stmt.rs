@@ -672,8 +672,12 @@ impl Cg<'_, '_, '_> {
         })?;
         let variants = variants.clone();
 
-        // If the value is already the same union type, just return it
-        if value.type_id == union_type_id {
+        // If the value is already the same union type, just return it.
+        // Also check the substituted type, since generic code may produce values
+        // whose raw type_id is e.g. `T | nil` but after substitution matches the
+        // concrete union type `i64 | nil`.
+        let resolved_type_id = self.try_substitute_type(value.type_id);
+        if value.type_id == union_type_id || resolved_type_id == union_type_id {
             return Ok(value);
         }
 

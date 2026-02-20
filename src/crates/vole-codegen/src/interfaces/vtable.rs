@@ -1243,7 +1243,32 @@ fn resolve_vtable_target<C: VtableCtx>(
                 target: VtableMethodTarget::External(*external_info),
             });
         }
-        // TODO: Handle Vole body defaults when interface method bodies are supported
+        // Handle Vole-body default methods: look up the compiled function via
+        // method_func_keys. Sema's register_interface_default_methods_on_implementing_type
+        // copies default methods onto the implementing type, and the compiler registers
+        // their JIT functions in method_func_keys during register_implement_block.
+        if let Some(method_name_id) = method_name_id {
+            let type_name_id = impl_type_id.name_id();
+            if let Some(&func_key) = ctx.method_func_keys().get(&(type_name_id, method_name_id)) {
+                let (param_type_ids, return_type_id) = substituted_types.unwrap_or_else(|| {
+                    let arena = ctx.arena();
+                    let (params, ret, _) = arena
+                        .unwrap_function(interface_method.signature_id)
+                        .expect("INTERNAL: vtable default: signature is not a function");
+                    (params.to_vec(), ret)
+                });
+                let returns_void = matches!(ctx.arena().get(return_type_id), SemaType::Void);
+                let method_info = MethodInfo { func_key };
+                return Ok(VtableMethod {
+                    param_count: param_type_ids.len(),
+                    returns_void,
+                    param_type_ids,
+                    return_type_id,
+                    union_tag_remap: None,
+                    target: VtableMethodTarget::Method(method_info),
+                });
+            }
+        }
     }
 
     Err(CodegenError::not_found(
