@@ -50,13 +50,13 @@ Iterator methods work directly on arrays, strings, and ranges. You do not need t
 ```vole
 tests {
     test "array direct map" {
-        let doubled = [1, 2, 3].map((x) => x * 2).collect()
+        let doubled = [1, 2, 3].map(x => x * 2).collect()
         assert(doubled[0] == 2)
         assert(doubled[2] == 6)
     }
 
     test "array direct filter" {
-        let evens = [1, 2, 3, 4, 5].filter((x) => x % 2 == 0).collect()
+        let evens = [1, 2, 3, 4, 5].filter(x => x % 2 == 0).collect()
         assert(evens.length() == 2)
         assert(evens[0] == 2)
         assert(evens[1] == 4)
@@ -106,13 +106,20 @@ tests {
 
 ## Transforming: map
 
-Transform each element:
+Transform each element. Unparenthesized lambda syntax works when the lambda is the sole argument:
 
 ```vole
 tests {
     test "map doubles" {
         let nums = [1, 2, 3, 4, 5]
-        let doubled = nums.map((x) => x * 2).collect()
+        let doubled = nums.map(x => x * 2).collect()
+        assert(doubled[0] == 2)
+        assert(doubled[4] == 10)
+    }
+
+    test "map with implicit it" {
+        let nums = [1, 2, 3, 4, 5]
+        let doubled = nums.map(it * 2).collect()
         assert(doubled[0] == 2)
         assert(doubled[4] == 10)
     }
@@ -126,7 +133,7 @@ tests {
     test "map with capture" {
         let arr = [1, 2, 3]
         let multiplier = 10
-        let result = arr.map((x) => x * multiplier).collect()
+        let result = arr.map(x => x * multiplier).collect()
         assert(result[0] == 10)
         assert(result[1] == 20)
         assert(result[2] == 30)
@@ -142,26 +149,45 @@ Keep elements matching a predicate:
 tests {
     test "filter evens" {
         let nums = [1, 2, 3, 4, 5, 6]
-        let evens = nums.filter((x) => x % 2 == 0).collect()
+        let evens = nums.filter(x => x % 2 == 0).collect()
         assert(evens.length() == 3)
         assert(evens[0] == 2)
         assert(evens[1] == 4)
         assert(evens[2] == 6)
+    }
+
+    test "filter with implicit it" {
+        let nums = [1, 2, 3, 4, 5, 6]
+        let evens = nums.filter(it % 2 == 0).collect()
+        assert(evens.length() == 3)
+        assert(evens[0] == 2)
     }
 }
 ```
 
 ## Chaining Operations
 
-Iterator methods return iterators, enabling chains:
+Iterator methods return iterators, enabling chains. Each call in the chain gets its own independent `it` context:
 
 ```vole
 tests {
     test "filter then map" {
         let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         let result = nums
-            .filter((x) => x % 2 == 0)
-            .map((x) => x * x)
+            .filter(x => x % 2 == 0)
+            .map(x => x * x)
+            .take(3)
+            .collect()
+        assert(result[0] == 4)
+        assert(result[1] == 16)
+        assert(result[2] == 36)
+    }
+
+    test "filter then map with implicit it" {
+        let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        let result = nums
+            .filter(it % 2 == 0)
+            .map(it * it)
             .take(3)
             .collect()
         assert(result[0] == 4)
@@ -251,7 +277,7 @@ tests {
 
     test "count with filter" {
         let nums = [1, 2, 3, 4, 5, 6]
-        let even_count = nums.filter((x) => x % 2 == 0).count()
+        let even_count = nums.filter(it % 2 == 0).count()
         assert(even_count == 3)
     }
 }
@@ -265,7 +291,7 @@ Materialize a lazy iterator into an array:
 tests {
     test "collect" {
         let nums = [1, 2, 3, 4, 5]
-        let doubled = nums.map((x) => x * 2).collect()
+        let doubled = nums.map(x => x * 2).collect()
         assert(doubled.length() == 5)
         assert(doubled[0] == 2)
         assert(doubled[4] == 10)
@@ -283,14 +309,14 @@ Always call `.collect()` when you need the actual array.
 tests {
     test "find" {
         let arr = [1, 2, 3, 4, 5]
-        let result = arr.find((x) => x > 3)
+        let result = arr.find(it > 3)
         assert(result is i64)
         assert((result ?? 0) == 4)
     }
 
     test "find returns nil" {
         let arr = [1, 2, 3]
-        let result = arr.find((x) => x > 10)
+        let result = arr.find(it > 10)
         assert(result is nil)
     }
 }
@@ -302,8 +328,8 @@ tests {
 tests {
     test "any" {
         let arr = [1, 2, 3, 4, 5]
-        assert(arr.any((x) => x > 3))
-        assert(!arr.any((x) => x > 10))
+        assert(arr.any(it > 3))
+        assert(!arr.any(it > 10))
     }
 }
 ```
@@ -314,8 +340,8 @@ tests {
 tests {
     test "all" {
         let arr = [2, 4, 6, 8]
-        assert(arr.all((x) => x % 2 == 0))
-        assert(!arr.all((x) => x > 5))
+        assert(arr.all(it % 2 == 0))
+        assert(!arr.all(it > 5))
     }
 }
 ```
@@ -375,7 +401,7 @@ tests {
 
     test "enumerate with map" {
         let arr = [1, 2, 3]
-        let result = arr.enumerate().map((pair) => pair[0] * pair[1]).collect()
+        let result = arr.enumerate().map(pair => pair[0] * pair[1]).collect()
         assert(result[0] == 0)
         assert(result[1] == 2)
         assert(result[2] == 6)
@@ -402,7 +428,7 @@ tests {
     test "zip with map" {
         let a = [1, 2, 3]
         let b = [10, 20, 30]
-        let result = a.iter().zip(b.iter()).map((pair) => pair[0] + pair[1]).collect()
+        let result = a.iter().zip(b.iter()).map(pair => pair[0] + pair[1]).collect()
         assert(result[0] == 11)
         assert(result[1] == 22)
         assert(result[2] == 33)
@@ -439,7 +465,7 @@ tests {
 tests {
     test "flat_map" {
         let arr = [1, 2, 3]
-        let result = arr.flat_map((x) => [x, x * 10]).collect()
+        let result = arr.flat_map(x => [x, x * 10]).collect()
         assert(result.length() == 6)
         assert(result[0] == 1)
         assert(result[1] == 10)
@@ -535,7 +561,7 @@ Run a function on each element (for side effects):
 tests {
     test "for_each" {
         let arr = [1, 2, 3]
-        arr.for_each((x) => { let y = x * 2 })
+        arr.for_each(x => { let y = x * 2 })
         assert(true)
     }
 }
@@ -683,7 +709,7 @@ tests {
     }
 
     test "generator with map and filter" {
-        let result = simple_gen().map((x) => x * 2).filter((x) => x > 2).collect()
+        let result = simple_gen().map(x => x * 2).filter(it > 2).collect()
         assert(result.length() == 2)
         assert(result[0] == 4)
         assert(result[1] == 6)
@@ -730,7 +756,7 @@ tests {
 
     test "range with pipeline" {
         let sum_of_squares = (1..11)
-            .map((x) => x * x)
+            .map(x => x * x)
             .sum()
         assert(sum_of_squares == 385)
     }
@@ -833,7 +859,7 @@ Iterator operations are lazy -- nothing happens until a terminal operation consu
 tests {
     test "lazy evaluation" {
         let nums = [1, 2, 3, 4, 5]
-        let doubled = nums.map((x) => x * 2)
+        let doubled = nums.map(x => x * 2)
         let result = doubled.collect()
         assert(result.length() == 5)
     }
@@ -848,6 +874,7 @@ Benefits:
 ## Performance Tips
 
 - Use `.count()` instead of `.collect().length()`
-- Use `.sum()` instead of `.reduce(0, (acc, x) => acc + x)` for readability
+- Use `.sum()` instead of `.reduce(0, (acc, x) => acc + x)` for numeric sums
+- Use concise lambda syntax for simple transformations: `.map(x => x * 2)` or `.filter(it > 0)`
 - Use `.take(n)` with infinite iterators (generators, `repeat`)
 - Use `.sorted().unique()` for true deduplication (`unique` only removes consecutive duplicates)

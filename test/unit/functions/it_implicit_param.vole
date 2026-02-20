@@ -20,6 +20,11 @@ func apply_with_val(f: (i64) -> i64, x: i64) -> i64 {
     return f(x)
 }
 
+class Person {
+    name: string,
+    age: i64,
+}
+
 tests "implicit it parameter" {
     test "it in arithmetic expression" {
         let result = apply_fn(it * 2)
@@ -67,5 +72,37 @@ tests "implicit it parameter" {
     test "explicit lambda still works alongside it" {
         let result = apply_fn(x => x * 3)
         assert(result == 15)
+    }
+
+    test "it field access: map it.age on class instances" {
+        // Uses .iter() to avoid unrelated direct-array-map bug with struct values
+        let people = [Person { name: "Alice", age: 30_i64 }, Person { name: "Bob", age: 25_i64 }, Person { name: "Carol", age: 41_i64 }]
+        let ages = people.iter().map(it.age).collect()
+        assert(ages.length() == 3)
+        assert(ages[0] == 30)
+        assert(ages[1] == 25)
+        assert(ages[2] == 41)
+    }
+
+    test "chained calls: filter then map each with its own it context" {
+        let nums = [1_i64, -2_i64, 3_i64, -4_i64, 5_i64]
+        let result = nums.filter(it > 0).map(it * 2).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 2)
+        assert(result[1] == 6)
+        assert(result[2] == 10)
+    }
+
+    test "it as normal variable (soft keyword, not reserved)" {
+        let it = 42_i64
+        assert(it == 42)
+    }
+
+    test "it as variable does not synthesize implicit lambda" {
+        // When `it` is in scope as a variable, it is used as a regular identifier
+        // and does not trigger implicit lambda synthesis
+        let it = 10_i64
+        let doubled = it * 2
+        assert(doubled == 20)
     }
 }

@@ -12,6 +12,12 @@ return value                   // Return a value
 (x: T) -> R => x * 2          // Lambda, single expression
 (x: T) -> R => { ... }        // Lambda with block body
 (T, T) -> R                   // Function type signature
+
+// Concise lambda syntax (when lambda is the sole argument)
+f(x => x * 2)                 // Unparenthesized single param
+f(x, y => x + y)              // Unparenthesized multi-param
+f(x: i64 => x * 2)            // Unparenthesized typed param
+f(it * 2)                     // Implicit `it` parameter
 ```
 
 ## In Depth
@@ -317,6 +323,96 @@ tests {
     }
 }
 ```
+
+### Concise Lambda Syntax
+
+When a lambda is the **sole argument** to a call, you can omit the parentheses around the parameter list. The entire argument list before `=>` becomes the lambda parameters:
+
+```vole
+func apply(f: (i64) -> i64) -> i64 {
+    return f(5)
+}
+
+func apply_pair(f: (i64, i64) -> i64) -> i64 {
+    return f(3, 4)
+}
+
+tests {
+    test "unparenthesized single param" {
+        let result = apply(x => x * 2)
+        assert(result == 10)
+    }
+
+    test "unparenthesized multi-param" {
+        let result = apply_pair(x, y => x + y)
+        assert(result == 7)
+    }
+
+    test "unparenthesized typed param" {
+        let result = apply(x: i64 => x + 1)
+        assert(result == 6)
+    }
+}
+```
+
+When the lambda is **not** the sole argument (e.g., mixed with other arguments), use standard parenthesized syntax:
+
+```vole
+func apply_with_val(f: (i64) -> i64, x: i64) -> i64 {
+    return f(x)
+}
+
+tests {
+    test "parens required when lambda is not sole arg" {
+        let result = apply_with_val((x) => x - 1, 10)
+        assert(result == 9)
+    }
+}
+```
+
+Zero-parameter lambdas always require parentheses: `() => expr`.
+
+### Implicit `it` Parameter
+
+When a call site expects a single-parameter function type `(T) -> U` and the argument expression contains the identifier `it`, Vole automatically synthesizes `it => expr`. This avoids naming the parameter when the name adds no clarity:
+
+```vole
+tests {
+    test "it in filter" {
+        let nums = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64]
+        let positives = nums.filter(it > 0).collect()
+        assert(positives.length() == 5)
+    }
+
+    test "it in map" {
+        let nums = [1_i64, 2_i64, 3_i64]
+        let doubled = nums.map(it * 2).collect()
+        assert(doubled[0] == 2)
+        assert(doubled[1] == 4)
+        assert(doubled[2] == 6)
+    }
+
+    test "it in chained calls: each call gets its own it context" {
+        let nums = [1_i64, -2_i64, 3_i64, -4_i64, 5_i64]
+        let result = nums.filter(it > 0).map(it * 2).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 2)
+    }
+}
+```
+
+`it` is a soft keyword — it can still be used as a regular variable name. When `it` is already in scope as a variable, no synthesis occurs:
+
+```vole
+tests {
+    test "it as regular variable" {
+        let it = 42_i64
+        assert(it == 42)
+    }
+}
+```
+
+When lambdas are nested, the outer `it` binding prevents inner synthesis. Use explicit parameter names for nested lambdas.
 
 ### Function Types
 

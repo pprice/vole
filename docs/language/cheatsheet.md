@@ -93,11 +93,20 @@ tests {
         assert(connect("db.local", timeout: 5) == "db.local:8080")
         assert(connect(host: "proxy", timeout: 15) == "proxy:8080")
 
-        // Lambdas
+        // Lambdas — full syntax
         let f = (x: i64) => x * 2
         let g = (x: i64) => { return x * 2 }
         assert(f(5) == 10)
         assert(g(5) == 10)
+
+        // Concise lambda syntax (lambda is the sole argument)
+        let nums = [1_i64, 2_i64, 3_i64]
+        let a = nums.map(x => x * 2).collect()    // unparenthesized param
+        let b = nums.filter(it > 0).collect()      // implicit `it` param
+        let c = nums.map(it * 2).collect()         // it in map
+        assert(a[0] == 2)
+        assert(b.length() == 3)
+        assert(c[0] == 2)
     }
 }
 ```
@@ -348,8 +357,8 @@ Arrays, strings, and ranges support iterator methods directly — no `.iter()` c
 tests {
     test "iterator chaining" {
         let result = [1, 2, 3, 4, 5]
-            .filter((x) => x % 2 == 0)
-            .map((x) => x * 10)
+            .filter(it % 2 == 0)
+            .map(it * 10)
             .collect()
         assert(result.length() == 2)
         assert(result[0] == 20)

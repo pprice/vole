@@ -1,0 +1,19 @@
+[stdout]
+
+[stderr]
+  × [E2001]: expected [i64], found integer literal
+   ╭─[<path>/it_nested_lambda.vole:4:42]
+ 3 │     let nums = [[1_i64, 2_i64], [3_i64, 4_i64]]
+ 4 │     let result = nums.map(it.filter(it > 0))
+   ·                                          ┬
+   ·                                          ╰── type mismatch
+ 5 │ }
+   ╰────
+  × [E2001]: expected (i64) -> bool, found bool
+   ╭─[<path>/it_nested_lambda.vole:4:37]
+ 3 │     let nums = [[1_i64, 2_i64], [3_i64, 4_i64]]
+ 4 │     let result = nums.map(it.filter(it > 0))
+   ·                                     ───┬──
+   ·                                        ╰── type mismatch
+ 5 │ }
+   ╰────

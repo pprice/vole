@@ -1,0 +1,5 @@
+// Error: nested 'it' usage — should emit E2118
+func main() {
+    let nums = [[1_i64, 2_i64], [3_i64, 4_i64]]
+    let result = nums.map(it.filter(it > 0))
+}

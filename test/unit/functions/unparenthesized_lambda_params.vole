@@ -68,4 +68,25 @@ tests "unparenthesized lambda params" {
         let result = apply_with_val((x) => x - 1, 10)
         assert(result == 9)
     }
+
+    test "method chain usage: unparenthesized lambda in .map" {
+        let result = [1_i64, 2_i64, 3_i64].map(x => x * 10).collect()
+        assert(result[0] == 10)
+        assert(result[1] == 20)
+        assert(result[2] == 30)
+    }
+
+    test "method chain usage: unparenthesized lambda in .filter" {
+        let result = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64].filter(x => x > 3).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 4)
+        assert(result[1] == 5)
+    }
+
+    test "reduce with mixed args forces parens on lambda" {
+        // reduce(init, (acc, x) => ...) — lambda is NOT the sole arg, must use parens
+        let nums = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64]
+        let total = nums.reduce(0, (acc, x) => acc + x)
+        assert(total == 15)
+    }
 }
