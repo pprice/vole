@@ -8,7 +8,6 @@ use cranelift_codegen::ir::{Function, InstructionData};
 
 use crate::RuntimeKey;
 use vole_frontend::{BinaryExpr, BinaryOp, ExprKind};
-use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::numeric_model::numeric_result_type;
 use vole_sema::type_arena::TypeId;
 
@@ -399,11 +398,9 @@ impl Cg<'_, '_, '_> {
     /// Call to_string() on a value via the Stringable interface.
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> CodegenResult<Value> {
-        let arena = self.arena();
-        let impl_type_id = ImplTypeId::from_type_id(val.type_id, arena, self.registry())
-            .ok_or_else(|| {
-                CodegenError::not_found("ImplTypeId for type_id", format!("{:?}", val.type_id))
-            })?;
+        let impl_type_id = self.impl_type_id_for(val.type_id).ok_or_else(|| {
+            CodegenError::not_found("ImplTypeId for type_id", format!("{:?}", val.type_id))
+        })?;
 
         // Look up to_string method via query
         let method_id = self.query().method_name_id_by_str("to_string");

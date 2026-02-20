@@ -112,19 +112,15 @@ impl InterfaceVtableRegistry {
     ) -> CodegenResult<DataId> {
         // Build key for lookup using arena unwraps
         let concrete_key = {
-            let arena = ctx.arena();
-            if let Some((_, _, is_closure)) = arena.unwrap_function(concrete_type_id) {
+            if let Some((_, _, is_closure)) = ctx.arena().unwrap_function(concrete_type_id) {
                 InterfaceConcreteType::Function { is_closure }
             } else {
-                let impl_type_id =
-                    ImplTypeId::from_type_id(concrete_type_id, arena, ctx.registry()).ok_or_else(
-                        || {
-                            CodegenError::internal_with_context(
-                                "cannot build vtable for unsupported type",
-                                format!("{:?}", concrete_type_id),
-                            )
-                        },
-                    )?;
+                let impl_type_id = impl_type_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "cannot build vtable for unsupported type",
+                        format!("{:?}", concrete_type_id),
+                    )
+                })?;
                 InterfaceConcreteType::ImplTypeId(impl_type_id)
             }
         };
@@ -234,19 +230,15 @@ impl InterfaceVtableRegistry {
     ) -> CodegenResult<DataId> {
         // Build key for lookup using arena unwraps
         let concrete_key = {
-            let arena = ctx.arena();
-            if let Some((_, _, is_closure)) = arena.unwrap_function(concrete_type_id) {
+            if let Some((_, _, is_closure)) = ctx.arena().unwrap_function(concrete_type_id) {
                 InterfaceConcreteType::Function { is_closure }
             } else {
-                let impl_type_id =
-                    ImplTypeId::from_type_id(concrete_type_id, arena, ctx.registry()).ok_or_else(
-                        || {
-                            CodegenError::internal_with_context(
-                                "cannot build vtable for unsupported type",
-                                format!("{:?}", concrete_type_id),
-                            )
-                        },
-                    )?;
+                let impl_type_id = impl_type_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "cannot build vtable for unsupported type",
+                        format!("{:?}", concrete_type_id),
+                    )
+                })?;
                 InterfaceConcreteType::ImplTypeId(impl_type_id)
             }
         };
@@ -434,8 +426,7 @@ impl InterfaceVtableRegistry {
                 // heap-boxed, so we handle union boxing explicitly here.
                 if ctx.arena().is_union(method.return_type_id) {
                     let ptr_type = ctx.ptr_type();
-                    let union_size =
-                        type_id_size(method.return_type_id, ptr_type, ctx.registry(), ctx.arena());
+                    let union_size = type_size_ctx(method.return_type_id, ctx);
 
                     // First copy to wrapper-local stack so callee memory is safe to
                     // reference while we call heap_alloc below.
@@ -493,19 +484,16 @@ impl InterfaceVtableRegistry {
                     builder.ins().return_(&[heap_ptr]);
                 } else {
                     let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
-                    let arena = ctx.arena();
-                    let word = value_to_word(
-                        &mut builder,
-                        &CompiledValue::new(
+                    let compiled = {
+                        let arena = ctx.arena();
+                        CompiledValue::new(
                             result,
                             type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
                             method.return_type_id,
-                        ),
-                        ctx.ptr_type(),
-                        Some(heap_alloc_ref),
-                        ctx.arena(),
-                        ctx.registry(),
-                    )?;
+                        )
+                    };
+                    let word =
+                        value_to_word_ctx(&mut builder, &compiled, Some(heap_alloc_ref), ctx)?;
                     builder.ins().return_(&[word]);
                 }
             }
@@ -541,6 +529,43 @@ fn word_to_value_ctx<C: VtableCtx>(
         ctx.registry(),
         ctx.arena(),
     )
+}
+
+/// Convert a typed value to an i64 word for vtable dispatch.
+///
+/// Consolidates `value_to_word(builder, value, ctx.ptr_type(), heap_alloc_ref,
+/// ctx.arena(), ctx.registry())` call sites.
+#[inline]
+fn value_to_word_ctx<C: VtableCtx>(
+    builder: &mut FunctionBuilder,
+    value: &CompiledValue,
+    heap_alloc_ref: Option<FuncRef>,
+    ctx: &mut C,
+) -> CodegenResult<Value> {
+    value_to_word(
+        builder,
+        value,
+        ctx.ptr_type(),
+        heap_alloc_ref,
+        ctx.arena(),
+        ctx.registry(),
+    )
+}
+
+/// Convert a TypeId to an ImplTypeId using vtable context internals.
+///
+/// Consolidates `ImplTypeId::from_type_id(ty, ctx.arena(), ctx.registry())` call sites.
+#[inline]
+fn impl_type_id_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> Option<ImplTypeId> {
+    ImplTypeId::from_type_id(ty, ctx.arena(), ctx.registry())
+}
+
+/// Get the byte size of a TypeId using vtable context internals.
+///
+/// Consolidates `type_id_size(ty, ctx.ptr_type(), ctx.registry(), ctx.arena())` call sites.
+#[inline]
+fn type_size_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> u32 {
+    type_id_size(ty, ctx.ptr_type(), ctx.registry(), ctx.arena())
 }
 
 /// Compile wrapper body for Function target (closure/function pointer calls)
@@ -969,14 +994,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     // Create a VtableCtxView for operations that need VtableCtx
     let mut ctx_view = VtableCtxView::new(codegen_ctx, env);
     let heap_alloc_ref = runtime_heap_alloc_ref(&mut ctx_view, builder)?;
-    let data_word = value_to_word(
-        builder,
-        &value,
-        ctx_view.ptr_type(),
-        Some(heap_alloc_ref),
-        ctx_view.arena(),
-        ctx_view.registry(),
-    )?;
+    let data_word = value_to_word_ctx(builder, &value, Some(heap_alloc_ref), &mut ctx_view)?;
 
     // Phase 1: Declare vtable
     let vtable_id = env.state.interface_vtables.borrow_mut().get_or_declare(
@@ -1066,13 +1084,12 @@ fn resolve_vtable_target<C: VtableCtx>(
         });
     }
 
-    let impl_type_id = ImplTypeId::from_type_id(concrete_type_id, ctx.arena(), ctx.registry())
-        .ok_or_else(|| {
-            CodegenError::not_found(
-                "interface method",
-                format!("{} on {:?}", method_name_str, concrete_type_id),
-            )
-        })?;
+    let impl_type_id = impl_type_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
+        CodegenError::not_found(
+            "interface method",
+            format!("{} on {:?}", method_name_str, concrete_type_id),
+        )
+    })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented
     let method_name_id = method_name_id_by_str(ctx.analyzed(), ctx.interner(), &method_name_str);
@@ -1150,10 +1167,10 @@ fn resolve_vtable_target<C: VtableCtx>(
         let meta = type_metadata_by_name_id(ctx.type_metadata(), type_name_id)?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
-        // Look up method signature via EntityRegistry - require TypeId fields
+        // Look up method signature via ProgramQuery - require TypeId fields
         let sig_from_entity = ctx
-            .registry()
-            .find_method_on_type(type_def_id, method_name_id)
+            .query()
+            .find_method(type_def_id, method_name_id)
             .and_then(|m_id| {
                 let method = ctx.query().get_method(m_id);
                 let arena = ctx.arena();

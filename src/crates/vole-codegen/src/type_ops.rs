@@ -10,6 +10,7 @@ use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
 
 use vole_frontend::Symbol;
 use vole_identity::TypeDefId;
+use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
@@ -86,6 +87,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the size (in bits) of a TypeId
     pub fn type_size(&self, ty: TypeId) -> u32 {
         type_id_size(ty, self.ptr_type(), self.registry(), self.arena())
+    }
+
+    /// Convert a TypeId to an ImplTypeId if the type supports implementation blocks.
+    ///
+    /// Wrapper around `ImplTypeId::from_type_id` that internalizes the registry/arena
+    /// lookups, keeping call sites free of self.registry() passes.
+    pub fn impl_type_id_for(&self, ty: TypeId) -> Option<ImplTypeId> {
+        ImplTypeId::from_type_id(ty, self.arena(), self.registry())
     }
 
     /// Convert an i64 value back to its proper type (reverse of convert_to_i64_for_storage)
