@@ -218,16 +218,9 @@ impl Compiler<'_> {
                     let query = self.query();
                     let name_id = query.function_name_id(program_module, func.name);
                     let has_implicit_generic_info = self
-                        .analyzed
-                        .entity_registry()
-                        .function_by_name(name_id)
-                        .map(|func_id| {
-                            self.analyzed
-                                .entity_registry()
-                                .get_function(func_id)
-                                .generic_info
-                                .is_some()
-                        })
+                        .query()
+                        .function_id_by_name_id(name_id)
+                        .map(|func_id| self.query().get_function(func_id).generic_info.is_some())
                         .unwrap_or(false);
                     if has_implicit_generic_info {
                         continue;

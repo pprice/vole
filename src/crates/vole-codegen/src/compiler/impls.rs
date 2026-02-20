@@ -399,16 +399,12 @@ impl Compiler<'_> {
                         format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
                 })?;
-                let method_id = self
-                    .analyzed
-                    .entity_registry()
-                    .find_method_on_type(tdef_id, name_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "import: method not in entity_registry",
-                            format!("{}.{}", type_name, interner.resolve(method.name)),
-                        )
-                    })?;
+                let method_id = self.query().find_method(tdef_id, name_id).ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "import: method not in entity_registry",
+                        format!("{}.{}", type_name, interner.resolve(method.name)),
+                    )
+                })?;
                 let sig =
                     self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
                 (sig, method_id)
@@ -587,11 +583,8 @@ impl Compiler<'_> {
                         format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
                 })?;
-                let semantic_method_id = self
-                    .analyzed
-                    .entity_registry()
-                    .find_method_on_type(tdef_id, name_id)
-                    .ok_or_else(|| {
+                let semantic_method_id =
+                    self.query().find_method(tdef_id, name_id).ok_or_else(|| {
                         CodegenError::internal_with_context(
                             "implement block instance method not in entity_registry",
                             format!(
@@ -905,11 +898,7 @@ impl Compiler<'_> {
             })?;
 
         let semantic_method_id = type_def_id
-            .and_then(|tdef_id| {
-                self.analyzed
-                    .entity_registry()
-                    .find_method_on_type(tdef_id, method_name_id)
-            })
+            .and_then(|tdef_id| self.query().find_method(tdef_id, method_name_id))
             .ok_or_else(|| {
                 CodegenError::internal_with_context(
                     "implement block method not registered",
@@ -924,10 +913,7 @@ impl Compiler<'_> {
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else {
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
+            let method_def = self.query().get_method(semantic_method_id);
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
@@ -1023,14 +1009,9 @@ impl Compiler<'_> {
 
             // Resolve MethodId for this static method
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
-            let semantic_method_id =
-                type_def_id
-                    .zip(method_name_id)
-                    .and_then(|(tdef_id, name_id)| {
-                        self.analyzed
-                            .entity_registry()
-                            .find_static_method_on_type(tdef_id, name_id)
-                    });
+            let semantic_method_id = type_def_id
+                .zip(method_name_id)
+                .and_then(|(tdef_id, name_id)| self.query().find_static_method(tdef_id, name_id));
 
             let method_id = semantic_method_id.ok_or_else(|| {
                 let method_name_str = interner.resolve(method.name);
@@ -1127,11 +1108,7 @@ impl Compiler<'_> {
         let method_name_id = self.method_name_id(method.name)?;
 
         let semantic_method_id = type_def_id
-            .and_then(|tdef_id| {
-                self.analyzed
-                    .entity_registry()
-                    .find_method_on_type(tdef_id, method_name_id)
-            })
+            .and_then(|tdef_id| self.query().find_method(tdef_id, method_name_id))
             .ok_or_else(|| {
                 let method_name_str = self.resolve_symbol(method.name);
                 CodegenError::internal_with_context(
@@ -1146,10 +1123,7 @@ impl Compiler<'_> {
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else {
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
+            let method_def = self.query().get_method(semantic_method_id);
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
@@ -1253,9 +1227,8 @@ impl Compiler<'_> {
 
         // Look up MethodId from entity_registry for pre-computed signature
         let semantic_method_id = self
-            .analyzed
-            .entity_registry()
-            .find_method_on_type(metadata.type_def_id, method_name_id)
+            .query()
+            .find_method(metadata.type_def_id, method_name_id)
             .ok_or_else(|| {
                 CodegenError::internal_with_context(
                     "class instance method not registered in entity_registry",
@@ -1363,9 +1336,8 @@ impl Compiler<'_> {
 
         // Look up MethodId - interface default methods are now registered on implementing types
         let semantic_method_id = self
-            .analyzed
-            .entity_registry()
-            .find_method_on_type(metadata.type_def_id, method_name_id)
+            .query()
+            .find_method(metadata.type_def_id, method_name_id)
             .ok_or_else(|| {
                 CodegenError::internal_with_context(
                     "interface default method not registered on implementing type",
@@ -1468,9 +1440,8 @@ impl Compiler<'_> {
             // Look up MethodId from entity_registry for pre-computed signature
             let method_name_id = self.method_name_id(method.name)?;
             let semantic_method_id = self
-                .analyzed
-                .entity_registry()
-                .find_static_method_on_type(type_def_id, method_name_id)
+                .query()
+                .find_static_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
                     let type_name_str = self.resolve_symbol(type_name);
                     let method_name_str = self.resolve_symbol(method.name);
@@ -1484,10 +1455,7 @@ impl Compiler<'_> {
                 })?;
 
             // Function key from EntityRegistry full_name_id
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
+            let method_def = self.analyzed.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found(
@@ -1661,9 +1629,8 @@ impl Compiler<'_> {
                     })?;
 
             let semantic_method_id = self
-                .analyzed
-                .entity_registry()
-                .find_method_on_type(metadata.type_def_id, method_name_id)
+                .query()
+                .find_method(metadata.type_def_id, method_name_id)
                 .ok_or_else(|| {
                     CodegenError::internal_with_context(
                         "module method not registered in entity_registry",
@@ -1678,10 +1645,7 @@ impl Compiler<'_> {
                     )
                 })?;
 
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
+            let method_def = self.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found("method", format!("{}::{}", type_name_str, method_name_str))
@@ -1786,9 +1750,8 @@ impl Compiler<'_> {
                     })?;
 
             let semantic_method_id = self
-                .analyzed
-                .entity_registry()
-                .find_static_method_on_type(metadata.type_def_id, method_name_id)
+                .query()
+                .find_static_method(metadata.type_def_id, method_name_id)
                 .ok_or_else(|| {
                     CodegenError::internal_with_context(
                         "module static method not registered in entity_registry",
@@ -1803,10 +1766,7 @@ impl Compiler<'_> {
                     )
                 })?;
 
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
+            let method_def = self.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found(

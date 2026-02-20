@@ -230,11 +230,7 @@ impl Compiler<'_> {
         let mut field_slots = FxHashMap::default();
         let mut field_type_tags = Vec::new();
 
-        let field_ids: Vec<_> = self
-            .analyzed
-            .entity_registry()
-            .fields_on_type(type_def_id)
-            .collect();
+        let field_ids: Vec<_> = self.query().fields_on_type(type_def_id).collect();
 
         // Remap sema slots to physical slots: i128 fields need 2 u64 slots.
         // Sort by sema slot to ensure deterministic physical slot assignment.
@@ -284,9 +280,8 @@ impl Compiler<'_> {
         for method in type_decl.methods() {
             let method_name_id = self.method_name_id(method.name)?;
             let method_id = self
-                .analyzed
-                .entity_registry()
-                .find_method_on_type(type_def_id, method_name_id)
+                .query()
+                .find_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
                     CodegenError::internal_with_context(
                         "finalize_type: method not in entity registry",
@@ -294,11 +289,7 @@ impl Compiler<'_> {
                     )
                 })?;
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
-            let full_name_id = self
-                .analyzed
-                .entity_registry()
-                .get_method(method_id)
-                .full_name_id;
+            let full_name_id = self.query().get_method(method_id).full_name_id;
             let func_key = self.func_registry.intern_name_id(full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -350,9 +341,8 @@ impl Compiler<'_> {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
                         let method_name_id = self.method_name_id(method.name)?;
                         let semantic_method_id = self
-                            .analyzed
-                            .entity_registry()
-                            .find_method_on_type(type_def_id, method_name_id)
+                            .query()
+                            .find_method(type_def_id, method_name_id)
                             .ok_or_else(|| {
                                 let type_name_str = self.resolve_symbol(type_decl.name());
                                 let method_name_str = self.resolve_symbol(method.name);
@@ -370,10 +360,7 @@ impl Compiler<'_> {
                             })?;
                         let sig =
                             self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-                        let method_def = self
-                            .analyzed
-                            .entity_registry()
-                            .get_method(semantic_method_id);
+                        let method_def = self.query().get_method(semantic_method_id);
                         let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
                         let display_name = self.func_registry.display(func_key);
                         let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -545,9 +532,8 @@ impl Compiler<'_> {
 
             // Get MethodId and build signature from pre-resolved types
             let method_id = self
-                .analyzed
-                .entity_registry()
-                .find_static_method_on_type(type_def_id, method_name_id)
+                .query()
+                .find_static_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
                     CodegenError::internal(
                         "register_static_methods: static method not in entity registry",
@@ -719,9 +705,8 @@ impl Compiler<'_> {
                     })?;
 
             let semantic_method_id = self
-                .analyzed
-                .entity_registry()
-                .find_method_on_type(type_def_id, method_name_id)
+                .query()
+                .find_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
                     CodegenError::internal_with_context(
                         "module method not registered in entity_registry",
@@ -733,10 +718,7 @@ impl Compiler<'_> {
                 })?;
 
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
+            let method_def = self.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -786,9 +768,8 @@ impl Compiler<'_> {
                     })?;
 
             let semantic_method_id = self
-                .analyzed
-                .entity_registry()
-                .find_static_method_on_type(type_def_id, method_name_id)
+                .query()
+                .find_static_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
                     CodegenError::internal_with_context(
                         "module static method not registered in entity_registry",
@@ -800,10 +781,7 @@ impl Compiler<'_> {
                 })?;
 
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
-            let method_def = self
-                .analyzed
-                .entity_registry()
-                .get_method(semantic_method_id);
+            let method_def = self.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
