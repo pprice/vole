@@ -1372,6 +1372,19 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Get the vtable slot index for an interface method by TypeDefId and method NameId.
+    fn interface_method_slot(
+        &self,
+        interface_type_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> CodegenResult<usize> {
+        crate::interfaces::interface_method_slot_by_type_def_id(
+            interface_type_id,
+            method_name_id,
+            self.registry(),
+        )
+    }
+
     /// Dispatch an interface method call by TypeDefId (EntityRegistry-based)
     pub(crate) fn interface_dispatch_call_args_by_type_def_id(
         &mut self,
@@ -1381,11 +1394,7 @@ impl Cg<'_, '_, '_> {
         method_name_id: NameId,
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let slot = crate::interfaces::interface_method_slot_by_type_def_id(
-            interface_type_id,
-            method_name_id,
-            self.registry(),
-        )?;
+        let slot = self.interface_method_slot(interface_type_id, method_name_id)?;
         self.interface_dispatch_call_args_inner(obj, args, slot, func_type_id)
     }
 

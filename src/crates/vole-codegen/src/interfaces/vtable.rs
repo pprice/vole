@@ -171,8 +171,7 @@ impl InterfaceVtableRegistry {
         }
 
         // Collect method IDs
-        let method_ids =
-            collect_interface_methods_via_entity_registry(interface_type_def_id, ctx.registry())?;
+        let method_ids = collect_interface_methods_ctx(interface_type_def_id, ctx)?;
 
         // Build vtable name and declare data
         let type_name = match concrete_key {
@@ -508,6 +507,17 @@ impl InterfaceVtableRegistry {
 
         Ok(func_id)
     }
+}
+
+/// Collect all method IDs for an interface using the vtable context.
+///
+/// Consolidates `collect_interface_methods_via_entity_registry(id, ctx.registry())`
+/// at vtable construction sites.
+fn collect_interface_methods_ctx<C: VtableCtx>(
+    interface_id: TypeDefId,
+    ctx: &C,
+) -> CodegenResult<Vec<MethodId>> {
+    collect_interface_methods_via_entity_registry(interface_id, ctx.registry())
 }
 
 /// Convert an i64 word back to its properly typed Cranelift value.
