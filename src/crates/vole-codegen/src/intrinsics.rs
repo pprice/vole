@@ -1116,15 +1116,16 @@ mod tests {
         for file in &rs_files {
             let rel = file
                 .strip_prefix(&crate_root)
-                .expect("INTERNAL: file must live under codegen/src");
+                .unwrap_or_else(|_| panic!("file must live under codegen/src: {}", file.display()));
 
             // Skip the two designated boundary modules.
             if rel == Path::new("intrinsics.rs") || rel == Path::new("runtime_registry.rs") {
                 continue;
             }
 
-            let content =
-                fs::read_to_string(file).expect("INTERNAL: failed to read codegen source file");
+            let content = fs::read_to_string(file).unwrap_or_else(|e| {
+                panic!("failed to read codegen source file {}: {e}", file.display())
+            });
 
             for pattern in forbidden {
                 assert!(
@@ -1139,9 +1140,12 @@ mod tests {
 
     fn collect_rs_files_for_guard(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
         use std::fs;
-        let entries = fs::read_dir(dir).expect("INTERNAL: failed to read directory");
+        let entries = fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("failed to read directory {}: {e}", dir.display()));
         for entry in entries {
-            let entry = entry.expect("INTERNAL: failed to read directory entry");
+            let entry = entry.unwrap_or_else(|e| {
+                panic!("failed to read directory entry in {}: {e}", dir.display())
+            });
             let path = entry.path();
             if path.is_dir() {
                 collect_rs_files_for_guard(&path, out);

@@ -610,7 +610,7 @@ impl Cg<'_, '_, '_> {
             }
         }
         // Handle struct return conventions: sret (large structs) or multi-value (small structs)
-        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id) {
+        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id)? {
             args.insert(0, sret_ptr);
             true
         } else {
@@ -663,7 +663,7 @@ impl Cg<'_, '_, '_> {
             let results = self.builder.inst_results(call);
             if results.len() == 2 {
                 let results_vec: Vec<Value> = results.to_vec();
-                return Ok(self.reconstruct_struct_from_regs(&results_vec, return_type_id));
+                return self.reconstruct_struct_from_regs(&results_vec, return_type_id);
             }
         }
 
@@ -858,7 +858,7 @@ impl Cg<'_, '_, '_> {
             .declare_func_in_func(func_id, self.builder.func);
         // Handle sret convention for large struct returns (3+ flat slots).
         let mut call_args = args;
-        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id) {
+        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id)? {
             call_args.insert(0, sret_ptr);
             true
         } else {
@@ -874,7 +874,7 @@ impl Cg<'_, '_, '_> {
             let results = self.builder.inst_results(call_inst);
             CompiledValue::new(results[0], self.ptr_type(), return_type_id)
         } else {
-            self.call_result(call_inst, return_type_id)
+            self.call_result(call_inst, return_type_id)?
         };
         self.consume_rc_args(&mut rc_temps)?;
         Ok(result)
@@ -1342,7 +1342,7 @@ impl Cg<'_, '_, '_> {
 
             // Perform the indirect call
             let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
-            Ok(self.call_result(call_inst, return_type_id))
+            self.call_result(call_inst, return_type_id)
         } else {
             // It's a pure function - call directly
             let mut sig = self.jit_module().make_signature();
@@ -1368,7 +1368,7 @@ impl Cg<'_, '_, '_> {
                 .builder
                 .ins()
                 .call_indirect(sig_ref, func_ptr_or_closure, &args);
-            Ok(self.call_result(call_inst, return_type_id))
+            self.call_result(call_inst, return_type_id)
         }
     }
 

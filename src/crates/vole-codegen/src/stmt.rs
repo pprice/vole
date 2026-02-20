@@ -547,11 +547,11 @@ impl Cg<'_, '_, '_> {
             } else if let Some(ret_type_id) = return_type_id
                 && self.is_small_struct_return(ret_type_id)
             {
-                self.emit_small_struct_return(compiled.value, ret_type_id);
+                self.emit_small_struct_return(compiled.value, ret_type_id)?;
             } else if let Some(ret_type_id) = return_type_id
                 && self.is_sret_struct_return(ret_type_id)
             {
-                self.emit_sret_struct_return(compiled.value, ret_type_id);
+                self.emit_sret_struct_return(compiled.value, ret_type_id)?;
             } else if let Some(ret_type_id) = return_type_id
                 && self.arena().is_union(ret_type_id)
             {

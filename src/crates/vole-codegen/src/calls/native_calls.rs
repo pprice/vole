@@ -44,7 +44,7 @@ impl Cg<'_, '_, '_> {
             .get_expr_type_substituted(call_expr_id)
             .expect("INTERNAL: native call: missing sema return type");
         let type_id = self.maybe_convert_iterator_return_type(type_id);
-        Ok(self.native_call_result(call_inst, native_func, type_id))
+        self.native_call_result(call_inst, native_func, type_id)
     }
 
     /// Call a function via destructured module binding.
@@ -229,11 +229,11 @@ impl Cg<'_, '_, '_> {
         call_inst: cranelift_codegen::ir::Inst,
         native_func: &NativeFunction,
         type_id: TypeId,
-    ) -> CompiledValue {
+    ) -> CodegenResult<CompiledValue> {
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {
-            return self.void_value();
+            return Ok(self.void_value());
         }
 
         // Handle struct return types
@@ -244,7 +244,7 @@ impl Cg<'_, '_, '_> {
                 return self.reconstruct_struct_from_regs(&results_vec, type_id);
             }
             // Large struct (sret): result[0] is already the pointer to our buffer
-            return CompiledValue::new(results[0], self.ptr_type(), type_id);
+            return Ok(CompiledValue::new(results[0], self.ptr_type(), type_id));
         }
 
         // Non-struct: standard single result
@@ -256,7 +256,7 @@ impl Cg<'_, '_, '_> {
         } else {
             self.coerce_cranelift_value(results[0], actual_ty, expected_ty)
         };
-        CompiledValue::new(value, expected_ty, type_id)
+        Ok(CompiledValue::new(value, expected_ty, type_id))
     }
 
     /// Compile a native function call with known Vole types (for generic external functions)
@@ -272,7 +272,7 @@ impl Cg<'_, '_, '_> {
         let call_inst = self.call_native_indirect(native_func, &args);
         let type_id = self.substitute_type(return_type_id);
         let type_id = self.maybe_convert_iterator_return_type(type_id);
-        Ok(self.native_call_result(call_inst, native_func, type_id))
+        self.native_call_result(call_inst, native_func, type_id)
     }
 
     /// Resolve the intrinsic key for a generic external function call.

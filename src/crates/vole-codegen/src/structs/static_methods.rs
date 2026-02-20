@@ -116,7 +116,7 @@ impl Cg<'_, '_, '_> {
         // Handle sret convention for large struct returns (3+ flat slots).
         // The function signature has a hidden first parameter for the return
         // buffer pointer that must be prepended to the call arguments.
-        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id) {
+        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id)? {
             args.insert(0, sret_ptr);
             true
         } else {
@@ -136,7 +136,7 @@ impl Cg<'_, '_, '_> {
         } else {
             // call_result must run before consume_rc_args to copy union data
             // from callee's stack before rc_dec calls can clobber it
-            self.call_result(call, return_type_id)
+            self.call_result(call, return_type_id)?
         };
         self.consume_rc_args(&mut rc_temps)?;
 
@@ -286,7 +286,7 @@ impl Cg<'_, '_, '_> {
         // Get monomorphized function reference and call
         let return_type_id = instance.func_type.return_type_id;
         // Handle sret convention for large struct returns (3+ flat slots).
-        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id) {
+        let is_sret = if let Some(sret_ptr) = self.alloc_sret_ptr(return_type_id)? {
             args.insert(0, sret_ptr);
             true
         } else {
@@ -306,7 +306,7 @@ impl Cg<'_, '_, '_> {
         } else {
             // call_result must run before consume_rc_args to copy union data
             // from callee's stack before rc_dec calls can clobber it
-            self.call_result(call, return_type_id)
+            self.call_result(call, return_type_id)?
         };
         self.consume_rc_args(&mut rc_temps)?;
 

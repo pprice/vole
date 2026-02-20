@@ -237,11 +237,11 @@ fn emit_implicit_return(
         } else if let Some(ret_type_id) = cg.return_type
             && cg.is_small_struct_return(ret_type_id)
         {
-            cg.emit_small_struct_return(value.value, ret_type_id);
+            cg.emit_small_struct_return(value.value, ret_type_id)?;
         } else if let Some(ret_type_id) = cg.return_type
             && cg.is_sret_struct_return(ret_type_id)
         {
-            cg.emit_sret_struct_return(value.value, ret_type_id);
+            cg.emit_sret_struct_return(value.value, ret_type_id)?;
         } else if let Some(ret_type_id) = cg.return_type
             && cg.arena().is_union(ret_type_id)
         {

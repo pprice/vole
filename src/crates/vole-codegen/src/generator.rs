@@ -165,9 +165,13 @@ pub(crate) fn compile_generator_function<'ctx>(
 
     // Override the return type to RuntimeIterator(T) so callers use direct dispatch
     let arena = env.analyzed.type_arena();
-    let runtime_iter_type_id = arena.lookup_runtime_iterator(params.elem_type_id).expect(
-        "INTERNAL: RuntimeIterator type not pre-created by sema for generator element type",
-    );
+    let runtime_iter_type_id = arena
+        .lookup_runtime_iterator(params.elem_type_id)
+        .ok_or_else(|| {
+            CodegenError::internal(
+                "RuntimeIterator type not pre-created by sema for generator element type",
+            )
+        })?;
     codegen_ctx
         .funcs()
         .set_return_type(params.wrapper_func_key, runtime_iter_type_id);

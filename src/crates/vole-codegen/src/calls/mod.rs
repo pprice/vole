@@ -497,7 +497,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(result);
         }
 
-        let mut result = self.call_result(call_inst, callee_return_type_id);
+        let mut result = self.call_result(call_inst, callee_return_type_id)?;
         if return_type_id != callee_return_type_id {
             result = self.coerce_to_type(result, return_type_id)?;
         }

@@ -381,25 +381,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// If the return type uses sret convention (large struct), allocate a stack
     /// buffer for the return value and return a pointer to it. The caller should
     /// prepend this pointer to the call arguments.
-    pub fn alloc_sret_ptr(&mut self, return_type_id: TypeId) -> Option<Value> {
+    pub fn alloc_sret_ptr(&mut self, return_type_id: TypeId) -> CodegenResult<Option<Value>> {
         if !self.is_sret_struct_return(return_type_id) {
-            return None;
+            return Ok(None);
         }
         let ptr_type = self.ptr_type();
         let flat_count = self
             .struct_flat_slot_count(return_type_id)
-            .expect("INTERNAL: sret call: missing flat slot count");
+            .ok_or_else(|| CodegenError::internal("sret call: missing flat slot count"))?;
         let total_size = (flat_count as u32) * 8;
         let slot = self.alloc_stack(total_size);
-        Some(self.builder.ins().stack_addr(ptr_type, slot, 0))
+        Ok(Some(self.builder.ins().stack_addr(ptr_type, slot, 0)))
     }
 
     /// Emit a return for a small struct (1-2 flat slots) via register passing.
     /// Loads flat slots into registers, pads to 2, and emits the return instruction.
-    pub fn emit_small_struct_return(&mut self, struct_ptr: Value, ret_type_id: TypeId) {
+    pub fn emit_small_struct_return(
+        &mut self,
+        struct_ptr: Value,
+        ret_type_id: TypeId,
+    ) -> CodegenResult<()> {
         let flat_count = self
             .struct_flat_slot_count(ret_type_id)
-            .expect("INTERNAL: struct return: missing flat slot count");
+            .ok_or_else(|| CodegenError::internal("struct return: missing flat slot count"))?;
         let mut return_vals = Vec::with_capacity(crate::MAX_SMALL_STRUCT_FIELDS);
         for i in 0..flat_count {
             let offset = (i as i32) * 8;
@@ -413,21 +417,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return_vals.push(self.iconst_cached(types::I64, 0));
         }
         self.builder.ins().return_(&return_vals);
+        Ok(())
     }
 
     /// Emit a return for a large struct (3+ flat slots) via sret convention.
     /// Copies flat slots into the sret buffer (first parameter) and returns the pointer.
-    pub fn emit_sret_struct_return(&mut self, struct_ptr: Value, ret_type_id: TypeId) {
-        let entry_block = self
-            .builder
-            .func
-            .layout
-            .entry_block()
-            .expect("INTERNAL: sret return: function has no entry block");
+    pub fn emit_sret_struct_return(
+        &mut self,
+        struct_ptr: Value,
+        ret_type_id: TypeId,
+    ) -> CodegenResult<()> {
+        let entry_block =
+            self.builder.func.layout.entry_block().ok_or_else(|| {
+                CodegenError::internal("sret return: function has no entry block")
+            })?;
         let sret_ptr = self.builder.block_params(entry_block)[0];
         let flat_count = self
             .struct_flat_slot_count(ret_type_id)
-            .expect("INTERNAL: sret return: missing flat slot count");
+            .ok_or_else(|| CodegenError::internal("sret return: missing flat slot count"))?;
         for i in 0..flat_count {
             let offset = (i as i32) * 8;
             let val = self
@@ -439,6 +446,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .store(MemFlags::new(), val, sret_ptr, offset);
         }
         self.builder.ins().return_(&[sret_ptr]);
+        Ok(())
     }
 
     /// Reconstruct a struct from a multi-value return (two i64 registers).
@@ -447,10 +455,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         values: &[Value],
         type_id: TypeId,
-    ) -> CompiledValue {
-        let flat_count = self
-            .struct_flat_slot_count(type_id)
-            .expect("INTERNAL: reconstruct_struct_from_regs: expected struct type");
+    ) -> CodegenResult<CompiledValue> {
+        let flat_count = self.struct_flat_slot_count(type_id).ok_or_else(|| {
+            CodegenError::internal("reconstruct_struct_from_regs: expected struct type")
+        })?;
         let total_size = (flat_count as u32) * 8;
         let slot = self.alloc_stack(total_size);
 
@@ -462,7 +470,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        CompiledValue::new(ptr, ptr_type, type_id)
+        Ok(CompiledValue::new(ptr, ptr_type, type_id))
     }
 
     /// Copy a struct value to a new stack slot (value semantics).
@@ -533,10 +541,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         call: cranelift_codegen::ir::Inst,
         return_type_id: TypeId,
-    ) -> CompiledValue {
+    ) -> CodegenResult<CompiledValue> {
         let results = self.builder.inst_results(call);
         if results.is_empty() {
-            return self.void_value();
+            return Ok(self.void_value());
         }
 
         // Check for wide fallible multi-value return (3 results: tag, low, high)
@@ -564,7 +572,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            return CompiledValue::new(ptr, ptr_type, return_type_id);
+            return Ok(CompiledValue::new(ptr, ptr_type, return_type_id));
         }
 
         // Check for fallible multi-value return (2 results: tag, payload)
@@ -587,7 +595,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            return CompiledValue::new(ptr, ptr_type, return_type_id);
+            return Ok(CompiledValue::new(ptr, ptr_type, return_type_id));
         }
 
         // Check for small struct multi-value return (2 results: field0, field1)
@@ -605,10 +613,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // calls (e.g. rc_dec for temporary args) can clobber the callee's stack frame.
         if self.arena().is_union(return_type_id) {
             let src_ptr = results[0];
-            return self.copy_union_ptr_to_local(src_ptr, return_type_id);
+            return Ok(self.copy_union_ptr_to_local(src_ptr, return_type_id));
         }
 
-        self.compiled(results[0], return_type_id)
+        Ok(self.compiled(results[0], return_type_id))
     }
 
     /// Copy a union value from a pointer (typically callee's stack) to a local stack slot.
