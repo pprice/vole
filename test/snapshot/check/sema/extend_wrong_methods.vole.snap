@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E2052]: type 'Player' does not satisfy interface 'Scorable': missing method 'label'
+   ╭─[<path>/extend_wrong_methods.vole:6:1]
+ 5 │     
+ 6 │ ╭─▶ class Player {
+ 7 │ │       name: string,
+ 8 │ ├─▶ }
+   · ╰──── declared to implement Scorable
+ 9 │     
+   ╰────

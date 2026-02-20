@@ -1,0 +1,15 @@
+interface Scorable {
+    func score() -> i64
+    func label() -> string
+}
+
+class Player {
+    name: string,
+}
+
+// Missing: label() method
+extend Player with Scorable {
+    func score() -> i64 {
+        return 0
+    }
+}
