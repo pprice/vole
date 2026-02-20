@@ -155,3 +155,37 @@ tests "extend Type ad-hoc multiple methods" {
         assert(b.surface_area() == 52)
     }
 }
+
+// ---- Generics: extend with a concrete type specialization ----
+// extend Wrapper<i64> with Printable implements the interface only for
+// the i64 instantiation.
+
+interface Printable {
+    func display() -> string
+}
+
+class Wrapper<T> {
+    value: T,
+}
+
+extend Wrapper<i64> with Printable {
+    func display() -> string => self.value.to_string()
+}
+
+tests "extend generic concrete specialization" {
+    test "extend Wrapper<i64> with Printable - display returns string" {
+        let w = Wrapper { value: 42 }
+        assert(w.display() == "42")
+    }
+
+    test "extend Wrapper<i64> with Printable - accepted as interface argument" {
+        func print_it(p: Printable) -> string => p.display()
+        let w = Wrapper { value: 100 }
+        assert(print_it(w) == "100")
+    }
+
+    test "extend Wrapper<i64> with Printable - zero value" {
+        let w = Wrapper { value: 0 }
+        assert(w.display() == "0")
+    }
+}
