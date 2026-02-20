@@ -205,9 +205,18 @@ impl Analyzer {
                     map_inferred_return_type = Some(ret_ty);
                 }
             } else {
-                let arg_ty_id = self.check_expr_expecting_id(expr, Some(param_ty_id), interner)?;
-                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                // Try implicit `it` lambda synthesis before normal type checking
+                if let Some(arg_ty_id) = self.try_check_as_it_lambda(expr, param_ty_id, interner) {
+                    self.record_expr_type_id(expr, arg_ty_id);
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                    }
+                } else {
+                    let arg_ty_id =
+                        self.check_expr_expecting_id(expr, Some(param_ty_id), interner)?;
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                    }
                 }
             }
         }
@@ -267,6 +276,9 @@ impl Analyzer {
                 self.analyze_lambda(lambda, arg.id, Some(&param_only_expected), interner);
             self.record_expr_type_id(arg, lambda_ty_id);
             lambda_ty_id
+        } else if let Some(synth_ty) = self.try_check_as_it_lambda(arg, param_ty_id, interner) {
+            self.record_expr_type_id(arg, synth_ty);
+            synth_ty
         } else {
             self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?
         };

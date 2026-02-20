@@ -389,6 +389,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get_lambda_analysis(node_id)
     }
 
+    /// Get the synthetic lambda for an implicit `it`-expression, if one was synthesized.
+    #[inline]
+    pub fn get_synthetic_it_lambda(
+        &self,
+        node_id: vole_frontend::NodeId,
+    ) -> Option<&vole_frontend::LambdaExpr> {
+        self.env
+            .analyzed
+            .expression_data
+            .get_synthetic_it_lambda(node_id)
+    }
+
     /// Get substituted return type for generic method calls.
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {

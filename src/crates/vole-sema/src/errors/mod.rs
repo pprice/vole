@@ -811,6 +811,16 @@ pub enum SemanticError {
         #[label("call is missing argument '{name}'")]
         span: SourceSpan,
     },
+
+    #[error("'it' cannot be used inside a nested implicit lambda")]
+    #[diagnostic(
+        code(E2118),
+        help("use an explicit parameter name instead, e.g.: x => x > 0")
+    )]
+    ItInNestedLambda {
+        #[label("'it' used here inside nested lambda context")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

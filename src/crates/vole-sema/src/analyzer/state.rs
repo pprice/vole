@@ -87,6 +87,10 @@ pub(crate) struct LambdaState {
     /// Lambda analysis results (captures and side effects).
     /// Maps lambda expression NodeId -> LambdaAnalysis.
     pub analysis: FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>,
+    /// Depth counter for implicit `it`-lambda contexts.
+    /// Incremented when synthesizing an implicit `it => expr` lambda, decremented after.
+    /// Used to detect nested `it` usage and emit E2118.
+    pub it_lambda_depth: u32,
 }
 
 /// Module loading and file context state.

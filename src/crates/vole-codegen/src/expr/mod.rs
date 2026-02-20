@@ -37,6 +37,19 @@ impl Cg<'_, '_, '_> {
             return self.load_capture(&binding);
         }
 
+        // Check if this expression was synthesized as an implicit `it` lambda.
+        // If so, compile it as a lambda (closure) instead of a bare expression.
+        // Skip this check if `it` is already bound in scope — that means we're
+        // inside the lambda body itself, compiling the inner expression.
+        if let Some(synthetic_lambda) = self.get_synthetic_it_lambda(expr.id).cloned() {
+            let it_sym = self.interner().lookup("it");
+            let it_already_bound = it_sym.is_some_and(|sym| self.vars.contains_key(&sym));
+            if !it_already_bound {
+                let result = self.lambda(&synthetic_lambda, expr.id)?;
+                return Ok(self.mark_rc_owned(result));
+            }
+        }
+
         match &expr.kind {
             ExprKind::IntLiteral(n, _) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference.

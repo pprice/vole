@@ -101,6 +101,9 @@ pub(crate) struct AnalysisResults {
     /// Resolved call arg order for calls with named arguments.
     /// Maps call NodeId to param-slot -> call.args-index mapping.
     pub resolved_call_args: FxHashMap<NodeId, Vec<Option<usize>>>,
+    /// Synthetic lambdas for implicit `it` expressions.
+    /// Maps original expression NodeId -> synthetic LambdaExpr for codegen.
+    pub synthetic_it_lambdas: FxHashMap<NodeId, vole_frontend::LambdaExpr>,
 }
 
 /// Function and global variable symbol tables.

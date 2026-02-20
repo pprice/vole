@@ -12,7 +12,7 @@ use crate::analysis_cache::IsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
-use vole_frontend::{Capture, LambdaPurity, NodeId, Span};
+use vole_frontend::{Capture, LambdaExpr, LambdaPurity, NodeId, Span};
 use vole_identity::ModuleId;
 
 /// Analysis results for a lambda expression (captures and side effects).
@@ -98,6 +98,13 @@ pub struct ExpressionData {
     /// Only present when named arguments were used (or arg reordering was needed).
     /// Absent for purely positional calls (codegen uses call.args directly).
     pub(crate) resolved_call_args: FxHashMap<NodeId, Vec<Option<usize>>>,
+    /// Synthetic lambdas synthesized from implicit `it` expressions.
+    ///
+    /// When sema synthesizes an implicit `it => expr` lambda for a call argument
+    /// that matches a function-type parameter, the synthetic `LambdaExpr` is stored
+    /// here keyed by the original expression's NodeId. Codegen uses this map to
+    /// generate proper lambda closures for these expressions.
+    pub(crate) synthetic_it_lambdas: FxHashMap<NodeId, LambdaExpr>,
 }
 
 impl ExpressionData {
@@ -129,6 +136,7 @@ impl ExpressionData {
         self.lambda_analysis.extend(other.lambda_analysis);
         self.intrinsic_keys.extend(other.intrinsic_keys);
         self.resolved_call_args.extend(other.resolved_call_args);
+        self.synthetic_it_lambdas.extend(other.synthetic_it_lambdas);
     }
 
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
@@ -349,5 +357,10 @@ impl ExpressionData {
     /// Set the resolved call arg mapping for a call with named arguments.
     pub fn set_resolved_call_args(&mut self, node: NodeId, mapping: Vec<Option<usize>>) {
         self.resolved_call_args.insert(node, mapping);
+    }
+
+    /// Get the synthetic lambda for an implicit `it`-expression, if one was synthesized.
+    pub fn get_synthetic_it_lambda(&self, node: NodeId) -> Option<&LambdaExpr> {
+        self.synthetic_it_lambdas.get(&node)
     }
 }

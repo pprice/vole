@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
-use vole_frontend::ast::CallArg;
+use vole_frontend::ast::{CallArg, FuncBody, LambdaExpr, LambdaParam, StringPart};
 
 /// Context for resolving named call arguments.
 ///
@@ -105,9 +105,19 @@ impl Analyzer {
             // Check each provided argument against its expected parameter type.
             for (arg, &param_ty_id) in args.iter().zip(param_type_ids.iter()) {
                 let expr = arg.expr();
-                let arg_ty_id = self.check_expr_expecting_id(expr, Some(param_ty_id), interner)?;
-                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                // Try implicit `it` lambda synthesis before normal type checking
+                if let Some(arg_ty_id) = self.try_check_as_it_lambda(expr, param_ty_id, interner) {
+                    // Record the synthesized type for the expression node
+                    self.record_expr_type_id(expr, arg_ty_id);
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                    }
+                } else {
+                    let arg_ty_id =
+                        self.check_expr_expecting_id(expr, Some(param_ty_id), interner)?;
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                    }
                 }
             }
 
@@ -138,9 +148,18 @@ impl Analyzer {
             }
             for (arg, &param_ty_id) in args.iter().zip(param_type_ids.iter()) {
                 let expr = arg.expr();
-                let arg_ty_id = self.check_expr_expecting_id(expr, Some(param_ty_id), interner)?;
-                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                // Try implicit `it` lambda synthesis before normal type checking
+                if let Some(arg_ty_id) = self.try_check_as_it_lambda(expr, param_ty_id, interner) {
+                    self.record_expr_type_id(expr, arg_ty_id);
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                    }
+                } else {
+                    let arg_ty_id =
+                        self.check_expr_expecting_id(expr, Some(param_ty_id), interner)?;
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                    }
                 }
             }
             Ok(return_type_id)
@@ -337,15 +356,23 @@ impl Analyzer {
             let expr = arg.expr();
             if slot < param_type_ids.len() {
                 let param_ty_id = param_type_ids[slot];
-                match self.check_expr_expecting_id(expr, Some(param_ty_id), interner) {
-                    Ok(arg_ty_id) => {
-                        if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                            self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
-                        }
+                // Try implicit `it` lambda synthesis before normal type checking
+                if let Some(arg_ty_id) = self.try_check_as_it_lambda(expr, param_ty_id, interner) {
+                    self.record_expr_type_id(expr, arg_ty_id);
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
                     }
-                    Err(errs) => {
-                        for e in errs {
-                            self.diagnostics.errors.push(e);
+                } else {
+                    match self.check_expr_expecting_id(expr, Some(param_ty_id), interner) {
+                        Ok(arg_ty_id) => {
+                            if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                                self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
+                            }
+                        }
+                        Err(errs) => {
+                            for e in errs {
+                                self.diagnostics.errors.push(e);
+                            }
                         }
                     }
                 }
@@ -372,5 +399,164 @@ impl Analyzer {
         }
 
         Ok(return_type_id)
+    }
+
+    /// Check whether `expr` should be treated as an implicit `it => expr` lambda.
+    ///
+    /// Returns `Some(type_id)` when synthesis was performed (either successfully or
+    /// with an error), `None` when normal type checking should proceed.
+    ///
+    /// Synthesis is triggered when:
+    /// - `expected` is a single-parameter function type `(T) -> U`
+    /// - `expr` is not already a lambda expression
+    /// - `expr` contains `it` as an identifier
+    /// - `it` is NOT currently bound in scope (would be a free reference)
+    pub(crate) fn try_check_as_it_lambda(
+        &mut self,
+        expr: &Expr,
+        expected: ArenaTypeId,
+        interner: &Interner,
+    ) -> Option<ArenaTypeId> {
+        // Must not already be a lambda
+        if matches!(expr.kind, ExprKind::Lambda(_)) {
+            return None;
+        }
+
+        // Must have `it` in the interner (only present if user actually wrote "it")
+        let it_sym = interner.lookup("it")?;
+
+        // Check if expression contains `it` as a free identifier
+        if !expr_contains_it(expr, it_sym) {
+            return None;
+        }
+
+        // Expected type must be a function type with exactly 1 parameter
+        let (param_types, ret_type) = {
+            let arena = self.type_arena();
+            let info = arena.unwrap_function(expected)?;
+            if info.0.len() != 1 {
+                return None;
+            }
+            (info.0.to_vec(), info.1)
+        };
+
+        // If `it` is already in scope as a variable, don't synthesize
+        // (it's being used as a regular variable, not as the implicit param)
+        if self.get_variable_type_id(it_sym).is_some() {
+            return None;
+        }
+
+        // Nesting check: if already inside an implicit `it`-lambda, emit E2118
+        if self.lambda.it_lambda_depth > 0 {
+            self.add_error(
+                SemanticError::ItInNestedLambda {
+                    span: expr.span.into(),
+                },
+                expr.span,
+            );
+            return Some(ArenaTypeId::INVALID);
+        }
+
+        // Build expected function type for analyze_lambda
+        let expected_fn = FunctionType::from_ids(&param_types, ret_type, false);
+
+        // When the expected return type is void, wrap the expression in a block body
+        // so the expression result is discarded (expression body always returns a value).
+        let body = if ret_type.is_void() {
+            FuncBody::Block(Block {
+                stmts: vec![Stmt::Expr(ExprStmt {
+                    expr: expr.clone(),
+                    span: expr.span,
+                })],
+                span: expr.span,
+            })
+        } else {
+            FuncBody::Expr(Box::new(expr.clone()))
+        };
+
+        // Synthesize: build a LambdaExpr with `it` as the single param
+        let synthetic_lambda = LambdaExpr {
+            type_params: vec![],
+            params: vec![LambdaParam {
+                name: it_sym,
+                ty: None, // Type will be inferred from expected_fn
+                default_value: None,
+                span: expr.span,
+            }],
+            return_type: None,
+            body,
+            span: expr.span,
+        };
+
+        // Increment depth, analyze, decrement
+        self.lambda.it_lambda_depth += 1;
+        let lambda_ty =
+            self.analyze_lambda(&synthetic_lambda, expr.id, Some(&expected_fn), interner);
+        self.lambda.it_lambda_depth -= 1;
+
+        // Store the synthetic lambda so codegen can generate a proper closure
+        self.results
+            .synthetic_it_lambdas
+            .insert(expr.id, synthetic_lambda);
+
+        Some(lambda_ty)
+    }
+}
+
+/// Walk an expression tree and return true if it contains `it_sym` as an Identifier.
+/// This is a recursive check that covers all sub-expressions.
+fn expr_contains_it(expr: &Expr, it_sym: Symbol) -> bool {
+    match &expr.kind {
+        ExprKind::Identifier(sym) => *sym == it_sym,
+        ExprKind::Binary(bin) => {
+            expr_contains_it(&bin.left, it_sym) || expr_contains_it(&bin.right, it_sym)
+        }
+        ExprKind::Unary(un) => expr_contains_it(&un.operand, it_sym),
+        ExprKind::Call(call) => {
+            expr_contains_it(&call.callee, it_sym)
+                || call
+                    .args
+                    .iter()
+                    .any(|a: &CallArg| expr_contains_it(a.expr(), it_sym))
+        }
+        ExprKind::Grouping(inner) => expr_contains_it(inner, it_sym),
+        ExprKind::Index(idx) => {
+            expr_contains_it(&idx.object, it_sym) || expr_contains_it(&idx.index, it_sym)
+        }
+        ExprKind::ArrayLiteral(elems) => elems.iter().any(|e| expr_contains_it(e, it_sym)),
+        ExprKind::NullCoalesce(nc) => {
+            expr_contains_it(&nc.value, it_sym) || expr_contains_it(&nc.default, it_sym)
+        }
+        ExprKind::Is(is_expr) => expr_contains_it(&is_expr.value, it_sym),
+        ExprKind::StructLiteral(sl) => sl.fields.iter().any(|f| expr_contains_it(&f.value, it_sym)),
+        ExprKind::InterpolatedString(parts) => parts.iter().any(|p| {
+            if let StringPart::Expr(e) = p {
+                expr_contains_it(e, it_sym)
+            } else {
+                false
+            }
+        }),
+        // Method calls: check the object and all args
+        ExprKind::MethodCall(mc) => {
+            expr_contains_it(&mc.object, it_sym)
+                || mc
+                    .args
+                    .iter()
+                    .any(|a: &CallArg| expr_contains_it(a.expr(), it_sym))
+        }
+        // Field access: check the object
+        ExprKind::FieldAccess(fa) => expr_contains_it(&fa.object, it_sym),
+        ExprKind::OptionalChain(oc) => expr_contains_it(&oc.object, it_sym),
+        ExprKind::Range(r) => {
+            expr_contains_it(&r.start, it_sym) || expr_contains_it(&r.end, it_sym)
+        }
+        ExprKind::Try(inner) => expr_contains_it(inner, it_sym),
+        ExprKind::Assign(assign) => expr_contains_it(&assign.value, it_sym),
+        ExprKind::CompoundAssign(ca) => expr_contains_it(&ca.value, it_sym),
+        // Lambda bodies are nested lambdas — don't descend into them for synthesis detection
+        ExprKind::Lambda(_) => false,
+        // Literals, TypeLiteral, Import, Unreachable, Yield, Block, If, When, Match
+        // — skip for now; `it` in complex nested structures is less common
+        _ => false,
     }
 }

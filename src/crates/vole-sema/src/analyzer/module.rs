@@ -1004,6 +1004,13 @@ impl Analyzer {
                 .iter()
                 .map(|(k, v)| (*k, v.clone())),
         );
+        // Merge synthetic_it_lambdas
+        self.results.synthetic_it_lambdas.extend(
+            sub.results
+                .synthetic_it_lambdas
+                .iter()
+                .map(|(&k, v)| (k, v.clone())),
+        );
         // Merge errors and warnings
         self.diagnostics
             .errors

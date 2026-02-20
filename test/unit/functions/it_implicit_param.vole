@@ -1,0 +1,71 @@
+// Tests for implicit `it` parameter in lambda-expecting positions.
+// When a call site expects a function type `(T) -> U` and the argument
+// expression contains the identifier `it`, sema synthesizes `it => expr`.
+
+// Single-arg function accepting a transformation
+func apply_fn(f: (i64) -> i64) -> i64 {
+    return f(5)
+}
+
+// Single-arg function accepting a predicate
+func apply_pred(f: (i64) -> bool) -> i64 {
+    if f(7) {
+        return 1
+    }
+    return 0
+}
+
+// Two-arg: value and transformer
+func apply_with_val(f: (i64) -> i64, x: i64) -> i64 {
+    return f(x)
+}
+
+tests "implicit it parameter" {
+    test "it in arithmetic expression" {
+        let result = apply_fn(it * 2)
+        assert(result == 10)
+    }
+
+    test "it in comparison predicate" {
+        let result = apply_pred(it > 0)
+        assert(result == 1)
+    }
+
+    test "it in addition" {
+        let result = apply_fn(it + 10)
+        assert(result == 15)
+    }
+
+    test "it with multiple uses in same expression" {
+        let result = apply_fn(it * it)
+        assert(result == 25)
+    }
+
+    test "it in map" {
+        let nums = [1_i64, 2_i64, 3_i64]
+        let doubled = nums.map(it * 2).collect()
+        assert(doubled[0] == 2)
+        assert(doubled[1] == 4)
+        assert(doubled[2] == 6)
+    }
+
+    test "it in filter" {
+        let nums = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64]
+        let evens = nums.filter(it % 2 == 0).collect()
+        assert(evens[0] == 2)
+        assert(evens[1] == 4)
+    }
+
+    test "it in for_each" {
+        let nums = [1_i64, 2_i64, 3_i64]
+        // for_each with it: apply an implicit lambda to each element (no mutable captures)
+        // Uses implicit it => it * 1 which is a no-op transform
+        nums.for_each(it * 1)
+        assert(true) // verify it compiles and runs without error
+    }
+
+    test "explicit lambda still works alongside it" {
+        let result = apply_fn(x => x * 3)
+        assert(result == 15)
+    }
+}

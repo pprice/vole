@@ -192,6 +192,7 @@ impl Analyzer {
 
         let intrinsic_keys = results.intrinsic_keys;
         let resolved_call_args = results.resolved_call_args;
+        let synthetic_it_lambdas = results.synthetic_it_lambdas;
         // Build main-program expression data, then merge in module data
         let mut expression_data = ExpressionData {
             types: expr_types,
@@ -207,6 +208,7 @@ impl Analyzer {
             lambda_analysis,
             intrinsic_keys,
             resolved_call_args,
+            synthetic_it_lambdas,
         };
         // Merge module analysis data (globally unique NodeIds, no collisions)
         expression_data.merge(merged_expr_data);
