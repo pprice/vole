@@ -364,15 +364,9 @@ impl Cg<'_, '_, '_> {
             };
             if let Some(interface_type_def_id) = interface_type_def_id {
                 let func_type_id = self
-                    .analyzed()
-                    .entity_registry()
-                    .find_method_on_type(interface_type_def_id, method_name_id)
-                    .map(|mid| {
-                        self.analyzed()
-                            .entity_registry()
-                            .get_method(mid)
-                            .signature_id
-                    })
+                    .query()
+                    .find_method(interface_type_def_id, method_name_id)
+                    .map(|mid| self.query().get_method(mid).signature_id)
                     .ok_or_else(|| {
                         CodegenError::not_found(
                             "interface method",
@@ -397,10 +391,7 @@ impl Cg<'_, '_, '_> {
                     .ok_or_else(|| CodegenError::not_found("TypeDefId", method_name_str))?;
 
             // Check for external method binding first (interface methods on primitives)
-            if let Some(binding) = self
-                .analyzed()
-                .entity_registry()
-                .find_method_binding(type_def_id, method_name_id)
+            if let Some(binding) = self.query().method_binding(type_def_id, method_name_id)
                 && let Some(external_info) = binding.external_info
             {
                 // External method - call via FFI
@@ -434,9 +425,8 @@ impl Cg<'_, '_, '_> {
 
             // Get return type and param types from entity registry
             let (return_type_id, fb_param_ids) = self
-                .analyzed()
-                .entity_registry()
-                .find_method_binding(type_def_id, method_name_id)
+                .query()
+                .method_binding(type_def_id, method_name_id)
                 .map(|binding| {
                     (
                         binding.func_type.return_type_id,
@@ -444,13 +434,12 @@ impl Cg<'_, '_, '_> {
                     )
                 })
                 .or_else(|| {
-                    self.analyzed()
-                        .entity_registry()
-                        .find_method_on_type(type_def_id, method_name_id)
+                    self.query()
+                        .find_method(type_def_id, method_name_id)
                         .map(|mid| {
-                            let method = self.analyzed().entity_registry().get_method(mid);
-                            let arena = self.analyzed().type_arena();
-                            let (params, ret) = arena
+                            let method = self.query().get_method(mid);
+                            let (params, ret) = self
+                                .arena()
                                 .unwrap_function(method.signature_id)
                                 .map(|(params, ret, _)| (Some(params.clone()), ret))
                                 .unwrap_or((None, TypeId::VOID));

@@ -982,7 +982,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     }
 
     // Check if this is an external-only interface
-    if env.analyzed.entity_registry().is_external_only(type_def_id) {
+    if env.analyzed.query().is_external_only(type_def_id) {
         tracing::debug!("external-only interface, skip boxing");
         return Ok(CompiledValue::new(
             value.value,

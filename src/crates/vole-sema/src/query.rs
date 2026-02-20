@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 
 use std::rc::Rc;
 
-use crate::entity_defs::{FieldDef, GlobalDef, Implementation, MethodDef, TypeDef};
+use crate::entity_defs::{FieldDef, GlobalDef, Implementation, MethodBinding, MethodDef, TypeDef};
 use crate::entity_registry::EntityRegistry;
 use crate::expression_data::ExpressionData;
 use crate::generic::{
@@ -373,6 +373,26 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn resolve_method(&self, type_id: TypeDefId, method_name: NameId) -> Option<MethodId> {
         self.registry.resolve_method(type_id, method_name)
+    }
+
+    /// Find the interface method binding for a type by method name.
+    ///
+    /// Used to look up external bindings and function types for interface calls.
+    #[must_use]
+    pub fn method_binding(
+        &self,
+        type_id: TypeDefId,
+        method_name: NameId,
+    ) -> Option<&'a MethodBinding> {
+        self.registry.find_method_binding(type_id, method_name)
+    }
+
+    /// Returns true if all methods on a type have external bindings.
+    ///
+    /// Used during vtable construction to skip emitting wrapper functions.
+    #[must_use]
+    pub fn is_external_only(&self, type_id: TypeDefId) -> bool {
+        self.registry.is_external_only(type_id)
     }
 
     /// Get the external binding for a method (if any)
