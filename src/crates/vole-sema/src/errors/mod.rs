@@ -742,6 +742,20 @@ pub enum SemanticError {
         #[label("empty match expression")]
         span: SourceSpan,
     },
+
+    #[error("could not locate standard library at '{path}': {message}")]
+    #[diagnostic(
+        code(E2110),
+        help("check that the standard library is installed correctly")
+    )]
+    PreludeNotFound { path: String, message: String },
+
+    #[error("failed to parse standard library file '{path}': {message}")]
+    #[diagnostic(
+        code(E2111),
+        help("the standard library file may be corrupted or from an incompatible version")
+    )]
+    PreludeParseError { path: String, message: String },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

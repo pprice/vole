@@ -9,7 +9,7 @@
 
 use super::Analyzer;
 use crate::analysis_cache::CachedModule;
-use crate::errors::SemanticWarning;
+use crate::errors::{SemanticError, SemanticWarning};
 use crate::type_arena::TypeId as ArenaTypeId;
 use smallvec::smallvec;
 use vole_frontend::ast::Decl;
@@ -79,16 +79,19 @@ impl Analyzer {
     /// Load a single prelude file as a proper module
     pub(super) fn load_prelude_file(&mut self, import_path: &str) {
         // Resolve path first, then canonicalize for consistent cache keys
-        let resolved_path = self
-            .module
-            .module_loader
-            .resolve_path(import_path, None)
-            .unwrap_or_else(|err| {
-                panic!(
-                    "Failed to resolve prelude path '{import_path}': {err}\n\
-                     This is a bug in the standard library or installation."
-                )
-            });
+        let resolved_path = match self.module.module_loader.resolve_path(import_path, None) {
+            Ok(path) => path,
+            Err(err) => {
+                self.add_error(
+                    SemanticError::PreludeNotFound {
+                        path: import_path.to_string(),
+                        message: err.to_string(),
+                    },
+                    Span::default(),
+                );
+                return;
+            }
+        };
         let canonical_path = resolved_path
             .canonicalize()
             .unwrap_or(resolved_path)
@@ -160,16 +163,19 @@ impl Analyzer {
         }
 
         // Load source via module_loader
-        let module_info = self
-            .module
-            .module_loader
-            .load(import_path)
-            .unwrap_or_else(|err| {
-                panic!(
-                    "Failed to load prelude file '{import_path}': {err}\n\
-                     This is a bug in the standard library or installation."
-                )
-            });
+        let module_info = match self.module.module_loader.load(import_path) {
+            Ok(info) => info,
+            Err(err) => {
+                self.add_error(
+                    SemanticError::PreludeNotFound {
+                        path: import_path.to_string(),
+                        message: err.to_string(),
+                    },
+                    Span::default(),
+                );
+                return;
+            }
+        };
 
         // For prelude files, use the symbolic import_path (like "std:prelude/traits")
         // for module_id to maintain consistent type identity for interfaces.
@@ -179,12 +185,19 @@ impl Analyzer {
 
         // Parse the module (pass prelude_module so NodeIds are globally unique)
         let mut parser = Parser::new(&module_info.source, prelude_module);
-        let program = parser.parse_program().unwrap_or_else(|err| {
-            panic!(
-                "Failed to parse prelude file '{import_path}': {err:?}\n\
-                 This is a bug in the standard library."
-            )
-        });
+        let program = match parser.parse_program() {
+            Ok(p) => p,
+            Err(err) => {
+                self.add_error(
+                    SemanticError::PreludeParseError {
+                        path: import_path.to_string(),
+                        message: format!("{:?}", err.error),
+                    },
+                    Span::default(),
+                );
+                return;
+            }
+        };
 
         let mut prelude_interner = parser.into_interner();
         prelude_interner.seed_builtin_symbols();
@@ -348,7 +361,7 @@ impl Analyzer {
 mod tests {
     use super::*;
     use crate::analysis_cache::ModuleCache;
-    use crate::errors::SemanticWarning;
+    use crate::errors::{SemanticError, SemanticWarning};
     use crate::module::ModuleLoader;
     use std::cell::RefCell;
     use std::fs;
@@ -464,6 +477,58 @@ func partial_warning_probe() -> i64 {
             second.iter().any(
                 |(module, count)| module == "std:prelude/zz_partial_warning_probe" && *count > 0
             )
+        );
+    }
+
+    fn setup_project_with_unparseable_prelude() -> TempDir {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let stdlib_src = repo_root.join("stdlib");
+        let stdlib_dst = temp.path().join("stdlib");
+        copy_dir_recursive(&stdlib_src, &stdlib_dst);
+
+        // Write a prelude file with invalid syntax so parse_program() fails
+        let bad_file = stdlib_dst.join("prelude/zz_unparseable.vole");
+        fs::write(bad_file, "func @@@ this is not valid syntax { { { }")
+            .expect("write unparseable prelude file");
+
+        fs::write(temp.path().join("main.vole"), "func main() {}\n").expect("write main");
+        temp
+    }
+
+    fn analyze_file_errors(project_root: &Path, file_name: &str) -> Vec<SemanticError> {
+        let file_path = project_root.join(file_name);
+        let source = fs::read_to_string(&file_path).expect("read source");
+        let mut parser = Parser::new(&source, ModuleId::new(0));
+        let program = parser.parse_program().expect("parse source");
+        let mut interner = parser.into_interner();
+        interner.seed_builtin_symbols();
+
+        let mut analyzer = crate::AnalyzerBuilder::new(file_path.to_string_lossy().as_ref())
+            .with_project_root(Some(project_root))
+            .build();
+        analyzer.module.module_loader = ModuleLoader::with_stdlib(project_root.join("stdlib"));
+        analyzer
+            .module
+            .module_loader
+            .set_project_root(project_root.to_path_buf());
+        match analyzer.analyze(&program, &interner) {
+            Ok(()) => vec![],
+            Err(errors) => errors.into_iter().map(|e| e.error).collect(),
+        }
+    }
+
+    #[test]
+    fn unparseable_prelude_emits_error_not_panic() {
+        let project = setup_project_with_unparseable_prelude();
+        let errors = analyze_file_errors(project.path(), "main.vole");
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                SemanticError::PreludeParseError { path, .. }
+                    if path == "std:prelude/zz_unparseable"
+            )),
+            "expected PreludeParseError, got: {errors:?}"
         );
     }
 }
