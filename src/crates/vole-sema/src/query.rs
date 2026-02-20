@@ -276,6 +276,59 @@ impl<'a> ProgramQuery<'a> {
         self.name_table.last_segment_str(name_id)
     }
 
+    /// Check if a type is an error type (defined with `error` keyword)
+    #[must_use]
+    pub fn is_error_type(&self, type_id: TypeDefId) -> bool {
+        use crate::entity_defs::TypeDefKind;
+        self.registry.get_type(type_id).kind == TypeDefKind::ErrorType
+    }
+
+    /// Check if an error type has error fields defined (error_info is Some)
+    #[must_use]
+    pub fn is_error_type_with_info(&self, type_id: TypeDefId) -> bool {
+        use crate::entity_defs::TypeDefKind;
+        let type_def = self.registry.get_type(type_id);
+        type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some()
+    }
+
+    /// Check if a type is a sentinel type (zero-field struct)
+    #[must_use]
+    pub fn is_sentinel_type(&self, type_id: TypeDefId) -> bool {
+        use crate::entity_defs::TypeDefKind;
+        self.registry.get_type(type_id).kind == TypeDefKind::Sentinel
+    }
+
+    /// Check if a type is an interface
+    #[must_use]
+    pub fn is_interface_type(&self, type_id: TypeDefId) -> bool {
+        use crate::entity_defs::TypeDefKind;
+        self.registry.get_type(type_id).kind == TypeDefKind::Interface
+    }
+
+    /// Check if a type is a struct (not class, not sentinel)
+    #[must_use]
+    pub fn is_struct_type(&self, type_id: TypeDefId) -> bool {
+        use crate::entity_defs::TypeDefKind;
+        self.registry.get_type(type_id).kind == TypeDefKind::Struct
+    }
+
+    /// Check if a type is an alias
+    #[must_use]
+    pub fn is_alias_type(&self, type_id: TypeDefId) -> bool {
+        use crate::entity_defs::TypeDefKind;
+        self.registry.get_type(type_id).kind == TypeDefKind::Alias
+    }
+
+    /// Get the arena TypeId that a type alias resolves to, if any.
+    pub fn aliased_type(&self, type_id: TypeDefId) -> Option<TypeId> {
+        self.registry.get_type(type_id).aliased_type
+    }
+
+    /// Get the arena TypeId stored in a sentinel type's base_type_id field.
+    pub fn sentinel_base_type(&self, type_id: TypeDefId) -> Option<TypeId> {
+        self.registry.get_type(type_id).base_type_id
+    }
+
     // =========================================================================
     // Field queries
     // =========================================================================

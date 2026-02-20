@@ -13,7 +13,6 @@ use crate::types::{
 
 use vole_frontend::ast::RecordFieldPattern;
 use vole_frontend::{Pattern, PatternKind, Symbol};
-use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::TypeId;
 
 use super::super::context::Cg;
@@ -217,7 +216,7 @@ impl Cg<'_, '_, '_> {
         // This handles error types from imported modules that aren't in the consumer's scope.
         let is_error_type = self
             .resolve_type(name)
-            .is_some_and(|type_id| self.query().get_type(type_id).kind == TypeDefKind::ErrorType)
+            .is_some_and(|type_id| self.query().is_error_type(type_id))
             || {
                 // Fallback: check if name matches an error type in the fallible's error union
                 let arena = self.arena();
@@ -461,8 +460,7 @@ impl Cg<'_, '_, '_> {
         let error_type_id = self
             .resolve_type(name)
             .and_then(|type_id| {
-                let type_def = self.query().get_type(type_id);
-                if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
+                if self.query().is_error_type_with_info(type_id) {
                     Some(type_id)
                 } else {
                     None

@@ -17,7 +17,6 @@ use crate::union_layout;
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::EntityRegistry;
-use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use vole_sema::type_arena::{SemaType, TypeId};
 
@@ -882,7 +881,7 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
     let interface = entity_registry.get_type(interface_id);
 
     // Verify this is an interface
-    if interface.kind != TypeDefKind::Interface {
+    if !entity_registry.is_interface_type(interface_id) {
         return Err(CodegenError::type_mismatch(
             "interface vtable",
             "interface",

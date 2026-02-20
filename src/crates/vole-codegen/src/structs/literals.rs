@@ -14,7 +14,6 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::StackSlot;
 use vole_frontend::{Decl, Expr, FieldDef, Program, StructLiteralExpr, Symbol};
 use vole_runtime::value::RuntimeTypeId;
-use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::TypeId;
 
 /// Find the field definitions for a type by looking up the class declaration in the program.
@@ -56,8 +55,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // They may not be in type_metadata if they come from prelude modules,
         // so handle them early before the metadata lookup.
         {
-            let kind = self.registry().type_kind(type_def_id);
-            if kind == TypeDefKind::Sentinel {
+            if self.query().is_sentinel_type(type_def_id) {
                 let sentinel_type_id = self.get_expr_type(&expr.id).unwrap_or_else(|| {
                     // Fall back to the base TypeId from entity registry, or type_metadata
                     self.registry()
@@ -77,10 +75,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .ok_or_else(|| CodegenError::not_found("type in type_metadata", &path_str))?;
 
         // Check if this is a struct type (stack-allocated value type)
-        let is_struct_type = {
-            let kind = self.registry().type_kind(type_def_id);
-            kind == TypeDefKind::Struct
-        };
+        let is_struct_type = self.query().is_struct_type(type_def_id);
 
         if is_struct_type {
             let result_type_id = self.get_expr_type(&expr.id).unwrap_or(metadata.vole_type);
@@ -289,16 +284,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     let mut resolved_id = query.resolve_type_def_by_str(module_id, type_name);
 
                     // If this is a type alias, resolve through to the underlying type
-                    if let Some(def_id) = resolved_id {
-                        let type_def = query.registry().get_type(def_id);
-                        if type_def.kind == TypeDefKind::Alias
-                            && let Some(aliased_type_id) = type_def.aliased_type
+                    if let Some(def_id) = resolved_id
+                        && query.is_alias_type(def_id)
+                            && let Some(aliased_type_id) = query.aliased_type(def_id)
                             && let Some((underlying_id, _, _)) =
                                 self.arena().unwrap_class_or_struct(aliased_type_id)
                         {
                             resolved_id = Some(underlying_id);
                         }
-                    }
                     resolved_id
                 } else {
                     None

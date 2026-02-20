@@ -21,7 +21,6 @@ use crate::union_layout;
 use vole_frontend::ast::YieldExpr;
 use vole_frontend::{Expr, ExprKind, Symbol};
 use vole_identity::ModuleId;
-use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
@@ -136,9 +135,8 @@ impl Cg<'_, '_, '_> {
                     let name = self.interner().resolve(sym);
                     let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
                     let type_def_id = self.query().resolve_type_def_by_str(module_id, name)?;
-                    let kind = self.registry().get_type(type_def_id).kind;
-                    if kind == TypeDefKind::Sentinel {
-                        self.registry().get_type(type_def_id).base_type_id
+                    if self.query().is_sentinel_type(type_def_id) {
+                        self.query().sentinel_base_type(type_def_id)
                     } else {
                         None
                     }
