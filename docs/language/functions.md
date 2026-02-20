@@ -154,6 +154,82 @@ tests {
 }
 ```
 
+Named arguments let you skip non-trailing defaults by naming the parameter you want to provide. See [Named Arguments](#named-arguments) below.
+
+### Named Arguments
+
+Call arguments can be provided by name using `name: value` syntax. Named arguments may follow positional arguments but not precede them.
+
+```vole
+func connect(host: string, port: i64 = 8080, timeout: i64 = 30) -> string {
+    return "{host}:{port} (timeout={timeout})"
+}
+
+tests {
+    test "named args in declaration order" {
+        assert(connect(host: "localhost", port: 443, timeout: 10) == "localhost:443 (timeout=10)")
+    }
+
+    test "named args in any order" {
+        assert(connect(timeout: 60, host: "db.local") == "db.local:8080 (timeout=60)")
+    }
+
+    test "positional then named" {
+        assert(connect("api.local", timeout: 5) == "api.local:8080 (timeout=5)")
+    }
+
+    test "skip non-trailing default" {
+        // Skip port (keep its default 8080), provide only host and timeout
+        assert(connect(host: "proxy", timeout: 15) == "proxy:8080 (timeout=15)")
+    }
+}
+```
+
+Named arguments work on functions, instance methods, static methods, and lambdas:
+
+```vole
+class Server {
+    host: string,
+    port: i64,
+    timeout: i64,
+
+    func reconnect(host: string, port: i64 = 8080, timeout: i64 = 30) -> string {
+        return "{host}:{port} (t={timeout})"
+    }
+
+    statics {
+        func create(host: string, port: i64 = 8080, timeout: i64 = 30) -> Server {
+            return Server { host: host, port: port, timeout: timeout }
+        }
+    }
+}
+
+tests {
+    test "named args on instance method" {
+        let s = Server { host: "old", port: 80, timeout: 10 }
+        assert(s.reconnect(host: "db", timeout: 5) == "db:8080 (t=5)")
+    }
+
+    test "named args on static method" {
+        let s = Server.create(host: "cache", timeout: 20)
+        assert(s.host == "cache")
+        assert(s.port == 8080)
+        assert(s.timeout == 20)
+    }
+
+    test "named args on lambda" {
+        let f = (host: string, port: i64 = 8080, timeout: i64 = 30) -> string => "{host}:{port} (t={timeout})"
+        assert(f(host: "api", timeout: 60) == "api:8080 (t=60)")
+    }
+}
+```
+
+Rules for named arguments:
+- Positional arguments must come before named arguments
+- A parameter cannot be filled both positionally and by name
+- All required parameters (those without defaults) must be provided
+- Named arguments are not supported on external (FFI) functions
+
 ### Optional Return Types
 
 Functions can return optional types (`T?`):

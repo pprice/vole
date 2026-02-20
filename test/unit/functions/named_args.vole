@@ -12,6 +12,32 @@ func describe(label: string, value: i64, verbose: bool = false) -> string => whe
 // Single required param
 func double(x: i64) -> i64 => x * 2
 
+// Four params with two middle defaults - for skipping multiple non-trailing defaults
+func configure(name: string, width: i64 = 100, height: i64 = 200, depth: i64 = 50) -> string {
+    return "{name}:{width}x{height}x{depth}"
+}
+
+// Class with instance methods and a static method using named args
+class Server {
+    host: string,
+    port: i64,
+    timeout: i64,
+
+    func reconnect(host: string, port: i64 = 8080, timeout: i64 = 30) -> string {
+        return "{host}:{port} (t={timeout})"
+    }
+
+    func describe() -> string {
+        return "{self.host}:{self.port} (t={self.timeout})"
+    }
+
+    statics {
+        func create(host: string, port: i64 = 8080, timeout: i64 = 30) -> Server {
+            return Server { host: host, port: port, timeout: timeout }
+        }
+    }
+}
+
 tests {
     test "all args positional" {
         assert(greet("World", "Hello") == "Hello, World!")
@@ -52,5 +78,66 @@ tests {
 
     test "single positional arg" {
         assert(double(x: 21) == 42)
+    }
+
+    test "skip multiple non-trailing defaults" {
+        // provide name and depth, skip width (100) and height (200)
+        assert(configure(name: "box", depth: 10) == "box:100x200x10")
+    }
+
+    test "skip first non-trailing default of multiple" {
+        // provide name, height and depth, skip width (100)
+        assert(configure("panel", height: 50, depth: 5) == "panel:100x50x5")
+    }
+}
+
+tests "instance method named args" {
+    test "instance method - skip middle default" {
+        let s = Server { host: "old", port: 443, timeout: 60 }
+        assert(s.reconnect(host: "db.local", timeout: 5) == "db.local:8080 (t=5)")
+    }
+
+    test "instance method - positional then named" {
+        let s = Server { host: "old", port: 443, timeout: 60 }
+        assert(s.reconnect("api.local", timeout: 15) == "api.local:8080 (t=15)")
+    }
+
+    test "instance method - all named out of order" {
+        let s = Server { host: "old", port: 443, timeout: 60 }
+        assert(s.reconnect(timeout: 20, host: "proxy") == "proxy:8080 (t=20)")
+    }
+}
+
+tests "static method named args" {
+    test "static method - skip middle default" {
+        let s = Server.create(host: "proxy", timeout: 15)
+        assert(s.describe() == "proxy:8080 (t=15)")
+    }
+
+    test "static method - positional then named" {
+        let s = Server.create("db.local", timeout: 5)
+        assert(s.describe() == "db.local:8080 (t=5)")
+    }
+
+    test "static method - all named out of order" {
+        let s = Server.create(timeout: 10, host: "cache")
+        assert(s.describe() == "cache:8080 (t=10)")
+    }
+}
+
+tests "lambda named args" {
+    test "lambda - skip middle default" {
+        let f = (host: string, port: i64 = 8080, timeout: i64 = 30) -> string => "{host}:{port} (t={timeout})"
+        assert(f(host: "api", timeout: 60) == "api:8080 (t=60)")
+    }
+
+    test "lambda - positional then named" {
+        let f = (host: string, port: i64 = 8080, timeout: i64 = 30) -> string => "{host}:{port} (t={timeout})"
+        assert(f("svc", timeout: 5) == "svc:8080 (t=5)")
+    }
+
+    test "lambda - all named out of order" {
+        let f = (host: string, port: i64 = 8080, timeout: i64 = 30) -> string => "{host}:{port} (t={timeout})"
+        assert(f(timeout: 45, host: "lb") == "lb:8080 (t=45)")
     }
 }

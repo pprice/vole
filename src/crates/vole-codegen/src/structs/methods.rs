@@ -615,7 +615,52 @@ impl Cg<'_, '_, '_> {
             .or(fallback_param_type_ids);
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
-        if let Some(param_type_ids) = &param_type_ids {
+        // When named args were used, sema stored a resolved_call_args mapping that tells
+        // us which call.args[j] fills each parameter slot i (and None means use the default).
+        let named_mapping = self
+            .analyzed()
+            .expression_data
+            .get_resolved_call_args(expr_id)
+            .cloned();
+        if let Some(ref mapping) = named_mapping {
+            let method_id_for_defaults = resolution.and_then(|r| r.method_id());
+            if let Some(param_type_ids) = &param_type_ids {
+                for (slot, opt_call_idx) in mapping.iter().enumerate() {
+                    let param_type_id = param_type_ids[slot];
+                    let compiled = if let Some(&Some(call_arg_idx)) = Some(opt_call_idx) {
+                        let arg = &mc.args[call_arg_idx];
+                        let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
+                        if compiled.is_owned() {
+                            rc_temps.push(compiled);
+                        }
+                        let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                        
+                        if is_generic_class && compiled.ty != types::I64 {
+                            self.emit_word(&compiled, None)?
+                        } else {
+                            compiled.value
+                        }
+                    } else if let Some(method_id) = method_id_for_defaults {
+                        // slot uses its default value
+                        let (default_vals, rc_owned) = self.compile_method_default_args(
+                            method_id,
+                            slot,
+                            &[param_type_id],
+                            is_generic_class,
+                        )?;
+                        rc_temps.extend(rc_owned);
+                        if let Some(&val) = default_vals.first() {
+                            val
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    };
+                    args.push(compiled);
+                }
+            }
+        } else if let Some(param_type_ids) = &param_type_ids {
             for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                 let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
                 if compiled.is_owned() {
@@ -633,25 +678,9 @@ impl Cg<'_, '_, '_> {
                 };
                 args.push(arg_value);
             }
-        } else {
-            for arg in &mc.args {
-                let compiled = self.expr(arg.expr())?;
-                if compiled.is_owned() {
-                    rc_temps.push(compiled);
-                }
-                // Generic class methods expect i64 for TypeParam, convert if needed
-                let arg_value = if is_generic_class && compiled.ty != types::I64 {
-                    self.emit_word(&compiled, None)?
-                } else {
-                    compiled.value
-                };
-                args.push(arg_value);
-            }
-        }
 
-        // Compile default arguments if fewer args provided than expected
-        // args includes self, so provided_args = args.len() - 1, expected includes params only
-        if let Some(param_type_ids) = &param_type_ids {
+            // Compile default arguments if fewer args provided than expected
+            // args includes self, so provided_args = args.len() - 1, expected includes params only
             let provided_args = args.len() - 1; // subtract self
             let expected_params = param_type_ids.len();
             if provided_args < expected_params {
@@ -665,6 +694,20 @@ impl Cg<'_, '_, '_> {
                     )?;
                     args.extend(default_args);
                 }
+            }
+        } else {
+            for arg in &mc.args {
+                let compiled = self.expr(arg.expr())?;
+                if compiled.is_owned() {
+                    rc_temps.push(compiled);
+                }
+                // Generic class methods expect i64 for TypeParam, convert if needed
+                let arg_value = if is_generic_class && compiled.ty != types::I64 {
+                    self.emit_word(&compiled, None)?
+                } else {
+                    compiled.value
+                };
+                args.push(arg_value);
             }
         }
         // Handle struct return conventions: sret (large structs) or multi-value (small structs)

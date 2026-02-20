@@ -80,9 +80,18 @@ func greet(name: string) {
     println("Hi " + name)
 }
 
+func connect(host: string, port: i64 = 8080, timeout: i64 = 30) -> string {
+    return "{host}:{port}"
+}
+
 tests {
     test "functions" {
         assert(add(2, 3) == 5)
+
+        // Named arguments (positional args must come first)
+        assert(connect(host: "localhost") == "localhost:8080")
+        assert(connect("db.local", timeout: 5) == "db.local:8080")
+        assert(connect(host: "proxy", timeout: 15) == "proxy:8080")
 
         // Lambdas
         let f = (x: i64) => x * 2

@@ -91,27 +91,60 @@ impl Cg<'_, '_, '_> {
             (params.clone(), ret)
         };
 
-        // Compile provided arguments (no receiver for static methods), tracking RC temps
+        // Compile provided arguments (no receiver for static methods), tracking RC temps.
+        // When named args were used, sema stored a resolved_call_args mapping that tells
+        // us which call.args[j] fills each parameter slot i (and None means use the default).
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
-        for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
-            let compiled = self.expr_with_expected_type(arg.expr(), *param_id)?;
-            if compiled.is_owned() {
-                rc_temps.push(compiled);
+        let named_mapping = self
+            .analyzed()
+            .expression_data
+            .get_resolved_call_args(expr_id)
+            .cloned();
+        if let Some(ref mapping) = named_mapping {
+            // Named arg reordering: compile each slot in parameter order using the mapping.
+            for (slot, opt_call_idx) in mapping.iter().enumerate() {
+                let param_id = param_ids[slot];
+                let compiled = if let Some(&Some(call_arg_idx)) = Some(opt_call_idx) {
+                    let arg = &mc.args[call_arg_idx];
+                    let compiled = self.expr_with_expected_type(arg.expr(), param_id)?;
+                    if compiled.is_owned() {
+                        rc_temps.push(compiled);
+                    }
+                    self.coerce_to_type(compiled, param_id)?
+                } else {
+                    // slot uses its default value
+                    let (default_vals, rc_owned) =
+                        self.compile_method_default_args(method_id, slot, &[param_id], false)?;
+                    rc_temps.extend(rc_owned);
+                    if let Some(&val) = default_vals.first() {
+                        CompiledValue::new(val, self.cranelift_type(param_id), param_id)
+                    } else {
+                        continue;
+                    }
+                };
+                args.push(compiled.value);
             }
-            let compiled = self.coerce_to_type(compiled, *param_id)?;
-            args.push(compiled.value);
-        }
+        } else {
+            for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
+                let compiled = self.expr_with_expected_type(arg.expr(), *param_id)?;
+                if compiled.is_owned() {
+                    rc_temps.push(compiled);
+                }
+                let compiled = self.coerce_to_type(compiled, *param_id)?;
+                args.push(compiled.value);
+            }
 
-        // If there are fewer provided args than expected, compile default expressions
-        if args.len() < param_ids.len() {
-            let (default_args, _rc_owned) = self.compile_method_default_args(
-                method_id,
-                args.len(),
-                &param_ids[args.len()..],
-                false,
-            )?;
-            args.extend(default_args);
+            // If there are fewer provided args than expected, compile default expressions
+            if args.len() < param_ids.len() {
+                let (default_args, _rc_owned) = self.compile_method_default_args(
+                    method_id,
+                    args.len(),
+                    &param_ids[args.len()..],
+                    false,
+                )?;
+                args.extend(default_args);
+            }
         }
         // Handle sret convention for large struct returns (3+ flat slots).
         // The function signature has a hidden first parameter for the return
