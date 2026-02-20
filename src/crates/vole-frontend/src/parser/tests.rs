@@ -1503,3 +1503,91 @@ external("vole:compiler_intrinsic") {
         ParserError::DuplicateWhereDefaultArm { .. }
     ));
 }
+
+#[test]
+fn parse_call_named_arg_single() {
+    let mut parser = Parser::new("foo(x: 1)", ModuleId::new(0));
+    let expr = parser.parse_expression().unwrap();
+    match expr.kind {
+        ExprKind::Call(call) => {
+            assert_eq!(call.args.len(), 1);
+            assert!(
+                matches!(&call.args[0], CallArg::Named { .. }),
+                "expected named arg"
+            );
+        }
+        _ => panic!("expected call"),
+    }
+}
+
+#[test]
+fn parse_call_named_args_mixed() {
+    let mut parser = Parser::new("foo(1, y: 2)", ModuleId::new(0));
+    let expr = parser.parse_expression().unwrap();
+    match expr.kind {
+        ExprKind::Call(call) => {
+            assert_eq!(call.args.len(), 2);
+            assert!(
+                matches!(&call.args[0], CallArg::Positional(_)),
+                "first arg should be positional"
+            );
+            assert!(
+                matches!(&call.args[1], CallArg::Named { .. }),
+                "second arg should be named"
+            );
+        }
+        _ => panic!("expected call"),
+    }
+}
+
+#[test]
+fn parse_call_all_positional_unchanged() {
+    let mut parser = Parser::new("foo(1, 2, 3)", ModuleId::new(0));
+    let expr = parser.parse_expression().unwrap();
+    match expr.kind {
+        ExprKind::Call(call) => {
+            assert_eq!(call.args.len(), 3);
+            for arg in &call.args {
+                assert!(
+                    matches!(arg, CallArg::Positional(_)),
+                    "all args should be positional"
+                );
+            }
+        }
+        _ => panic!("expected call"),
+    }
+}
+
+#[test]
+fn parse_method_call_named_arg() {
+    let mut parser = Parser::new("obj.method(x: 42)", ModuleId::new(0));
+    let expr = parser.parse_expression().unwrap();
+    match expr.kind {
+        ExprKind::MethodCall(mc) => {
+            assert_eq!(mc.args.len(), 1);
+            assert!(
+                matches!(&mc.args[0], CallArg::Named { .. }),
+                "expected named arg in method call"
+            );
+        }
+        _ => panic!("expected method call"),
+    }
+}
+
+#[test]
+fn parse_call_named_arg_name_is_correct() {
+    let mut parser = Parser::new("foo(alpha: 99)", ModuleId::new(0));
+    let expr = parser.parse_expression().unwrap();
+    match expr.kind {
+        ExprKind::Call(call) => {
+            assert_eq!(call.args.len(), 1);
+            if let CallArg::Named { name, .. } = &call.args[0] {
+                let resolved = parser.interner.resolve(*name);
+                assert_eq!(resolved, "alpha");
+            } else {
+                panic!("expected named arg");
+            }
+        }
+        _ => panic!("expected call"),
+    }
+}

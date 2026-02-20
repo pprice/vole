@@ -256,10 +256,28 @@ fn print_call_expr<'a>(
     callee.append(args)
 }
 
+/// Print a single call argument. Named args are rendered as `name: value`.
+fn print_call_arg<'a>(
+    arena: &'a Arena<'a>,
+    arg: &CallArg,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match arg {
+        CallArg::Positional(expr) => print_expr(arena, expr, interner),
+        CallArg::Named { name, value, .. } => {
+            let name_str = interner.resolve(*name).to_string();
+            arena
+                .text(name_str)
+                .append(arena.text(": "))
+                .append(print_expr(arena, value, interner))
+        }
+    }
+}
+
 /// Print call arguments with grouping for line breaking.
 fn print_call_args<'a>(
     arena: &'a Arena<'a>,
-    args: &[Expr],
+    args: &[CallArg],
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
     if args.is_empty() {
@@ -268,7 +286,7 @@ fn print_call_args<'a>(
 
     let arg_docs: Vec<_> = args
         .iter()
-        .map(|a| print_expr(arena, a, interner))
+        .map(|a| print_call_arg(arena, a, interner))
         .collect();
 
     // Multi-line format: each arg on its own line with trailing comma

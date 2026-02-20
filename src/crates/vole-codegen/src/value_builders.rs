@@ -199,9 +199,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Call argument compilation ==========
 
-    /// Compile a list of expression arguments into Cranelift values.
-    /// This is the common pattern for function/method calls.
-    pub fn compile_call_args(&mut self, args: &[vole_frontend::Expr]) -> CodegenResult<Vec<Value>> {
+    /// Compile a list of call arguments into Cranelift values.
+    /// Named args are treated positionally here; ordering validation is in sema (vol-4v7n).
+    pub fn compile_call_args(
+        &mut self,
+        args: &[vole_frontend::ast::CallArg],
+    ) -> CodegenResult<Vec<Value>> {
         let (values, _) = self.compile_call_args_tracking_rc(args)?;
         Ok(values)
     }
@@ -210,12 +213,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// and owned `CompiledValue`s that need rc_dec after the call completes.
     pub fn compile_call_args_tracking_rc(
         &mut self,
-        args: &[vole_frontend::Expr],
+        args: &[vole_frontend::ast::CallArg],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let mut values = Vec::with_capacity(args.len());
         let mut rc_temps = Vec::new();
         for arg in args {
-            let compiled = self.expr(arg)?;
+            let compiled = self.expr(arg.expr())?;
             if compiled.is_owned() {
                 rc_temps.push(compiled);
             }

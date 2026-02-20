@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
+use vole_frontend::ast::CallArg;
 
 impl Analyzer {
     /// Check call arguments against expected parameter types.
@@ -7,7 +8,7 @@ impl Analyzer {
     /// Uses check_expr_expecting_id for inference (integer literals, union coercion).
     pub(crate) fn check_call_args_id(
         &mut self,
-        args: &[Expr],
+        args: &[CallArg],
         param_type_ids: &[ArenaTypeId],
         return_type_id: ArenaTypeId,
         call_span: Span,
@@ -29,10 +30,13 @@ impl Analyzer {
     /// `required_params` is the number of parameters that must be provided (no defaults).
     /// Parameters from `required_params` up to `param_type_ids.len()` have default values.
     ///
+    /// Named arguments are treated as positional for now; ordering validation is done in sema
+    /// (vol-4v7n).
+    ///
     /// Uses check_expr_expecting_id for inference (integer literals, union coercion).
     pub(crate) fn check_call_args_with_defaults_id(
         &mut self,
-        args: &[Expr],
+        args: &[CallArg],
         param_type_ids: &[ArenaTypeId],
         required_params: usize,
         return_type_id: ArenaTypeId,
@@ -46,13 +50,15 @@ impl Analyzer {
             self.add_wrong_arg_count_range(required_params, total_params, args.len(), call_span);
         }
 
-        // Check each provided argument against its expected parameter type
+        // Check each provided argument against its expected parameter type.
+        // Named args are treated positionally here; full named-arg validation is vol-4v7n.
         for (arg, &param_ty_id) in args.iter().zip(param_type_ids.iter()) {
+            let expr = arg.expr();
             // Use check_expr_expecting_id to enable integer literal inference
             // and union type coercion (e.g., passing i32 literal to union param)
-            let arg_ty_id = self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?;
+            let arg_ty_id = self.check_expr_expecting_id(expr, Some(param_ty_id), interner)?;
             if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
+                self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
             }
         }
 

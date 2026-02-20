@@ -124,7 +124,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Compile provided arguments, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
-            let compiled = self.expr_with_expected_type(arg, param_type_id)?;
+            let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
             if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }

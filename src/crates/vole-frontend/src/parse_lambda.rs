@@ -235,7 +235,7 @@ impl<'src> Parser<'src> {
                     let mut args = Vec::new();
                     if !self.check(TokenType::RParen) {
                         loop {
-                            args.push(self.expression(0)?);
+                            args.push(self.parse_call_arg()?);
                             self.skip_newlines();
                             if !self.match_token(TokenType::Comma) {
                                 break;

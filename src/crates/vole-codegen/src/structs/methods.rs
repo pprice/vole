@@ -15,7 +15,8 @@ use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::{
     CompiledValue, RcLifecycle, array_element_tag_id, module_name_id, type_id_to_cranelift,
 };
-use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
+use vole_frontend::ast::CallArg;
+use vole_frontend::{ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_identity::{ModuleId, NamerLookup};
 use vole_sema::generic::ClassMethodMonomorphKey;
@@ -147,6 +148,21 @@ impl Cg<'_, '_, '_> {
             "method call"
         );
 
+        // If sema recorded InterfaceMethod dispatch but the receiver is a concrete (non-interface)
+        // type, the resolution came from analyzing the interface default method body with `self:
+        // Self`. When compiling that body for a concrete implementing type (e.g. string, [T],
+        // range), vtable dispatch is wrong — we need direct/external dispatch instead. Treat
+        // resolution as None so the monomorphized-fallback path (which derives dispatch from
+        // obj.type_id) handles it correctly.
+        let resolution = match resolution {
+            Some(ResolvedMethod::InterfaceMethod { .. })
+                if !self.arena().is_interface(obj.type_id) =>
+            {
+                None
+            }
+            other => other,
+        };
+
         // Handle special cases from ResolvedMethod
         if let Some(resolved) = resolution {
             // Interface dispatch with pre-computed slot (optimized path)
@@ -245,7 +261,7 @@ impl Cg<'_, '_, '_> {
                 let mut rc_temps: Vec<CompiledValue> = Vec::new();
                 if let Some(param_type_ids) = &param_type_ids {
                     for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-                        let compiled = self.expr_with_expected_type(arg, param_type_id)?;
+                        let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
                         if compiled.is_owned() {
                             rc_temps.push(compiled);
                         }
@@ -254,7 +270,7 @@ impl Cg<'_, '_, '_> {
                     }
                 } else {
                     for arg in &mc.args {
-                        let compiled = self.expr(arg)?;
+                        let compiled = self.expr(arg.expr())?;
                         if compiled.is_owned() {
                             rc_temps.push(compiled);
                         }
@@ -328,6 +344,12 @@ impl Cg<'_, '_, '_> {
         // Get func_key, return_type_id, and fallback_param_type_ids from resolution or fallback.
         // fallback_param_type_ids is used when resolution doesn't provide param types (e.g. in
         // monomorphized generic contexts where sema skips the generic body).
+        // used_array_iterable_path tracks whether the method is a compiled Iterable default that
+        // returns raw *mut RcIterator (not a boxed interface). This happens for:
+        // 1. Array/primitive types whose Iterable default is in array_iterable_func_keys
+        // 2. Primitive types (range, string) whose Iterable default is in method_func_keys
+        //    (compiled via compile_implement_block) — these also return *mut RcIterator.
+        let mut used_array_iterable_path = false;
         let (func_key, return_type_id, fallback_param_type_ids) = if let Some(resolved) = resolution
         {
             // Use ResolvedMethod's type_def_id and method_name_id for method_func_keys lookup
@@ -337,10 +359,39 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| CodegenError::not_found("type_def_id", method_name_str))?;
             let type_name_id = self.query().get_type(type_def_id).name_id;
             let resolved_method_name_id = resolved.method_name_id();
+
+            // Detect if this is a DefaultMethod from Iterable interface.
+            // Such methods (range::map, etc.) are compiled from the Iterable body which calls
+            // self.iter().map(f). At runtime they return *mut RcIterator, not Iterator<T>.
+            // Use interface_type_def_id (stable across interners) instead of interface_name
+            // (Symbol), which fails when the interface is defined in the prelude's interner.
+            let is_iterable_default_method = matches!(&resolved,
+                ResolvedMethod::DefaultMethod { interface_type_def_id, .. }
+                if self.name_table().well_known.is_iterable_type_def(*interface_type_def_id)
+            );
+
             let func_key = self
                 .method_func_keys()
                 .get(&(type_name_id, resolved_method_name_id))
-                .copied();
+                .copied()
+                .inspect(|_k| {
+                    if is_iterable_default_method {
+                        used_array_iterable_path = true;
+                    }
+                })
+                .or_else(|| {
+                    // Fallback: check array_iterable_func_keys for Iterable default methods on
+                    // arrays and primitives (range, string). Each concrete self-type (e.g. [i64],
+                    // range) has its own compiled function keyed by (method_name_id, self_type_id).
+                    let key = self
+                        .array_iterable_func_keys()
+                        .get(&(resolved_method_name_id, obj.type_id))
+                        .copied();
+                    if key.is_some() {
+                        used_array_iterable_path = true;
+                    }
+                    key
+                });
             (func_key, resolved.return_type_id(), None)
         } else {
             // Fallback path for monomorphized context: derive type_def_id from object type.
@@ -399,7 +450,7 @@ impl Cg<'_, '_, '_> {
                 let mut args: ArgVec = smallvec![obj.value];
                 let mut rc_temps: Vec<CompiledValue> = Vec::new();
                 for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-                    let compiled = self.expr_with_expected_type(arg, param_type_id)?;
+                    let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
                     if compiled.is_owned() {
                         rc_temps.push(compiled);
                     }
@@ -471,7 +522,14 @@ impl Cg<'_, '_, '_> {
         // NOTE: RuntimeIterator conversion for Iterator<T> return types is handled
         // in the external method call paths above (which return early). Non-external
         // methods (pure Vole classes) return interface-boxed iterators and use vtable
-        // dispatch — no RuntimeIterator conversion needed here.
+        // dispatch — no RuntimeIterator conversion needed there.
+        //
+        // However, array_iterable_func_keys functions (compiled Iterable default methods
+        // for arrays) return raw *mut RcIterator, not boxed interfaces. Apply the
+        // RuntimeIterator conversion here so subsequent method calls use direct dispatch.
+        if used_array_iterable_path {
+            return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
+        }
 
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
@@ -559,7 +617,7 @@ impl Cg<'_, '_, '_> {
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         if let Some(param_type_ids) = &param_type_ids {
             for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-                let compiled = self.expr_with_expected_type(arg, param_type_id)?;
+                let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
                 if compiled.is_owned() {
                     rc_temps.push(compiled);
                 }
@@ -577,7 +635,7 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             for arg in &mc.args {
-                let compiled = self.expr(arg)?;
+                let compiled = self.expr(arg.expr())?;
                 if compiled.is_owned() {
                     rc_temps.push(compiled);
                 }
@@ -630,10 +688,19 @@ impl Cg<'_, '_, '_> {
                 let src_ptr = results[0];
                 let union_copy = self.copy_union_ptr_to_local(src_ptr, return_type_id);
 
-                // Now consume RC receiver and arg temps
+                // Now consume RC receiver and arg temps.
+                // For compiled Iterable default methods (used_array_iterable_path), the callee
+                // owns RC args (closures) and frees them internally. Mark them consumed without
+                // emitting rc_dec to avoid a double-free.
                 let mut obj = obj;
                 self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
-                self.consume_rc_args(&mut rc_temps)?;
+                if used_array_iterable_path {
+                    for cv in rc_temps.iter_mut() {
+                        cv.mark_consumed();
+                    }
+                } else {
+                    self.consume_rc_args(&mut rc_temps)?;
+                }
 
                 return Ok(union_copy);
             }
@@ -644,9 +711,24 @@ impl Cg<'_, '_, '_> {
         // from trim() is Owned but was never rc_dec'd, causing leaks/heap
         // corruption. Similarly, Owned class arguments (e.g., b.equals(Id{n:5}))
         // need cleanup after the callee has consumed them.
+        //
+        // Exception: compiled Iterable default methods (used_array_iterable_path) take
+        // ownership of all RC arguments (closures, etc.) and free them internally —
+        // either by storing them in iterators (map/filter/flat_map), passing them through
+        // to runtime functions that free them (reduce/for_each via vole_iter_reduce_tagged),
+        // or borrowing and freeing them in the runtime (find/any/all). The caller must NOT
+        // free these args again. Mark them consumed without emitting an rc_dec.
         let mut obj = obj;
         self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
-        self.consume_rc_args(&mut rc_temps)?;
+        if used_array_iterable_path {
+            // Ownership of RC args transferred to the compiled Iterable default method.
+            // Mark as consumed to satisfy lifecycle tracking without emitting a double-free.
+            for cv in rc_temps.iter_mut() {
+                cv.mark_consumed();
+            }
+        } else {
+            self.consume_rc_args(&mut rc_temps)?;
+        }
 
         if is_sret {
             // Sret: result[0] is the sret pointer we passed in
@@ -1018,7 +1100,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Compile the argument
-        let value = self.expr(&mc.args[0])?;
+        let value = self.expr(mc.args[0].expr())?;
 
         let elem_type = self.arena().unwrap_array(arr_obj.type_id);
         let (tag_val, value_bits, _value) = if let Some(elem_id) = elem_type {
@@ -1056,10 +1138,14 @@ impl Cg<'_, '_, '_> {
 
     /// Resolve an Iterator interface method: find the external binding and
     /// compute the substituted return type (converting Iterator<T> to RuntimeIterator(T)).
+    ///
+    /// `fallback_elem_type` is used when expression data is absent (e.g. when compiling
+    /// Iterable default method bodies like `map` whose expressions were not analyzed by sema).
     fn resolve_iterator_method(
         &self,
         method_name: &str,
         expr_id: NodeId,
+        fallback_elem_type: Option<TypeId>,
     ) -> CodegenResult<(ExternalMethodInfo, TypeId)> {
         // Look up the Iterator interface
         let iter_type_id = self
@@ -1089,9 +1175,17 @@ impl Cg<'_, '_, '_> {
 
         // In monomorphized module contexts, substituted_return_type can be absent.
         // Fall back to expression type before failing.
+        // When compiling Iterable default method bodies (e.g. `map` in traits.vole),
+        // sema never analyzes the expression so both lookups return None.
+        // In that case, derive the return type from the method name + fallback_elem_type.
         let return_type_id = self
             .get_substituted_return_type(&expr_id)
             .or_else(|| self.get_expr_type(&expr_id))
+            .or_else(|| {
+                fallback_elem_type.and_then(|elem_type_id| {
+                    self.derive_iterator_return_type(method_name, elem_type_id, iter_type_id)
+                })
+            })
             .ok_or_else(|| {
                 CodegenError::not_found(
                     "iterator method return type",
@@ -1106,6 +1200,77 @@ impl Cg<'_, '_, '_> {
         Ok((external_info, return_type_id))
     }
 
+    /// Derive the return type of an Iterator method from the method name and element type.
+    ///
+    /// Used as a fallback when expression data is absent (interface default method bodies
+    /// are not analyzed by sema). Returns None if the type can't be determined without
+    /// expression data.
+    fn derive_iterator_return_type(
+        &self,
+        method_name: &str,
+        elem_type_id: TypeId,
+        iter_type_id: TypeDefId,
+    ) -> Option<TypeId> {
+        let arena = self.arena();
+        match method_name {
+            // Methods returning Iterator<T> — convert to RuntimeIterator<elem_type_id>
+            "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
+            | "flatten" | "flat_map" => arena.lookup_runtime_iterator(elem_type_id),
+
+            // Methods returning Iterator<[i64, T]> for enumerate
+            "enumerate" => {
+                // [i64, T] element type
+                let tuple_type = arena.lookup_array(TypeId::I64).or_else(|| {
+                    // Fall back to any array if [i64] not found
+                    arena.lookup_runtime_iterator(elem_type_id)
+                });
+                // We need Iterator<[i64, T]> but that may not be in the arena.
+                // Return the same RuntimeIterator<elem_type_id> as a best-effort fallback.
+                // The actual element type tag will be set at runtime.
+                tuple_type.and_then(|_| arena.lookup_runtime_iterator(elem_type_id))
+            }
+
+            // Methods returning Iterator<[T, T]> for zip
+            "zip" => arena.lookup_runtime_iterator(elem_type_id),
+
+            // Methods returning Iterator<[T]> for chunks/windows
+            "chunks" | "windows" => arena.lookup_runtime_iterator(elem_type_id),
+
+            // Method returning [T] (collect)
+            "collect" => arena.lookup_array(elem_type_id),
+
+            // Methods returning i64
+            "count" => Some(TypeId::I64),
+
+            // Methods returning bool
+            "any" | "all" => Some(TypeId::BOOL),
+
+            // Methods returning void
+            "for_each" => Some(arena.void()),
+
+            // Methods returning T (the element type)
+            "sum" | "reduce" => Some(elem_type_id),
+
+            // Methods returning T? (optional element): first, last, nth, find
+            // The optional type is a Union(T, nil). Try to look it up in the arena.
+            // If not found, fall back to elem_type_id (codegen will handle it).
+            "first" | "last" | "nth" | "find" => {
+                // Look for the optional type in the arena (Union with nil + elem).
+                // The arena may have interned T? during sema analysis.
+                arena.lookup_optional(elem_type_id)
+            }
+
+            // next() -> T | Done — return the T type directly
+            "next" => {
+                let _ = iter_type_id;
+                Some(elem_type_id)
+            }
+
+            // Unknown method: can't derive
+            _ => None,
+        }
+    }
+
     /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
     fn runtime_iterator_method(
         &mut self,
@@ -1115,7 +1280,8 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
         expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
-        let (external_info, return_type_id) = self.resolve_iterator_method(method_name, expr_id)?;
+        let (external_info, return_type_id) =
+            self.resolve_iterator_method(method_name, expr_id, Some(elem_type_id))?;
 
         // When the iterator comes from a variable (borrowed), rc_inc it before
         // pipeline and terminal method calls. Both categories assume ownership
@@ -1131,25 +1297,82 @@ impl Cg<'_, '_, '_> {
 
         // Build args: self (iterator ptr) + method args
         //
-        // Pipeline methods (map, filter, flat_map) store closure arguments in the
-        // iterator and free them on drop (Closure::free). If the closure arg is
-        // borrowed (e.g. a function parameter variable), we must rc_inc it so the
-        // iterator owns its own reference. Without this, the iterator's drop and
-        // the variable's scope-exit cleanup would both free the same closure,
-        // causing a double-free / heap corruption.
+        // Two distinct ownership contexts for closure parameters:
+        //
+        // A) Iterable default body (self.in_iterable_default_body == true):
+        //    The compiled body (e.g. `__array_iterable_map`) receives `f` as an
+        //    *owned* reference — the outer call-site used `used_array_iterable_path`
+        //    which skips rc_dec for the closure. The body therefore owns the single
+        //    reference to `f`.
+        //    - Pipeline methods (map/filter/flat_map): iterator takes ownership of `f`;
+        //      do NOT emit rc_inc (there is only one reference, and the iterator frees it).
+        //    - Terminal methods (any/all/find): runtime borrows `f` but does NOT free it.
+        //      Codegen MUST emit rc_dec after the call (track in borrowed_closure_args).
+        //
+        // B) Regular user code (self.in_iterable_default_body == false):
+        //    The closure is a *borrowed* reference — the outer caller retains ownership
+        //    and will dec_ref it (either via scope-exit for locals, or on return for
+        //    function parameters).
+        //    - Pipeline methods: iterator will also dec_ref the closure on drop.
+        //      We MUST emit rc_inc so both cleanup paths can dec independently.
+        //    - Terminal methods: runtime borrows and does NOT free. The outer caller
+        //      handles dec_ref (scope-exit or return cleanup). No extra action needed.
         let stores_closure = matches!(method_name, "map" | "filter" | "flat_map");
+        let codegen_frees_closure = matches!(method_name, "find" | "any" | "all");
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
+        // Borrowed RC args for codegen_frees_closure methods inside an Iterable default body.
+        // In that context the outer caller transferred ownership (no rc_dec), so the body
+        // must emit the rc_dec after the runtime call returns.
+        let mut borrowed_closure_args: Vec<CompiledValue> = Vec::new();
         for arg in &mc.args {
-            let compiled = self.expr(arg)?;
+            let expr = arg.expr();
+            // Check whether this arg is a local variable with scope-exit RC cleanup
+            // BEFORE compiling, so we can see the variable binding.
+            let arg_var_has_scope_exit_cleanup = if let ExprKind::Identifier(sym) = &expr.kind {
+                self.vars
+                    .get(sym)
+                    .map(|(var, _)| {
+                        self.rc_scopes.is_rc_local(*var)
+                            || self.rc_scopes.is_composite_rc_local(*var)
+                            || self.rc_scopes.is_union_rc_local(*var)
+                    })
+                    .unwrap_or(false)
+            } else {
+                // Non-identifier expressions (inline lambdas, etc.) are Owned, not Borrowed.
+                // They won't enter borrowed-specific branches, so this value is unused.
+                false
+            };
+            let compiled = self.expr(expr)?;
             if stores_closure
                 && compiled.is_borrowed()
                 && self.rc_state(compiled.type_id).needs_cleanup()
             {
-                // The iterator will take ownership of this closure — bump
-                // its refcount so both the iterator drop and the variable's
-                // scope cleanup can safely dec_ref independently.
-                self.emit_rc_inc(compiled.value)?;
+                if self.in_iterable_default_body {
+                    // Iterable default body: `f` is owned (caller transferred ownership).
+                    // The iterator receives the single reference and frees it on drop.
+                    // Do NOT emit rc_inc.
+                } else if arg_var_has_scope_exit_cleanup {
+                    // Regular code, local variable: scope-exit will dec_ref AND iterator
+                    // will dec_ref on drop. Bump the refcount so both can dec independently.
+                    self.emit_rc_inc(compiled.value)?;
+                } else {
+                    // Regular code, function parameter: caller will dec_ref on return AND
+                    // iterator will dec_ref on drop. Bump the refcount so both can dec.
+                    self.emit_rc_inc(compiled.value)?;
+                }
+            } else if codegen_frees_closure
+                && compiled.is_borrowed()
+                && self.rc_state(compiled.type_id).needs_cleanup()
+                && self.in_iterable_default_body
+                && !arg_var_has_scope_exit_cleanup
+            {
+                // Iterable default body: terminal predicate methods borrow the closure
+                // but don't free it. The outer caller transferred ownership (no rc_dec),
+                // so codegen must emit the rc_dec here after the runtime call.
+                borrowed_closure_args.push(compiled);
+                // When arg_var_has_scope_exit_cleanup == true even inside an Iterable default
+                // body, scope-exit handles the dec. (Unusual but handle it safely.)
             } else if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
@@ -1212,10 +1435,19 @@ impl Cg<'_, '_, '_> {
         // find/any/all borrow the closure — codegen must free it after the call.
         // for_each/reduce free the closure themselves via Closure::free in the runtime.
         // Pipeline methods (map, filter, etc.) store closures in the iterator.
-        let codegen_frees_closure = matches!(method_name, "find" | "any" | "all");
+        //
+        // We must free both:
+        //   - Owned closures (rc_temps): fresh lambdas that are not yet refcounted to anything else
+        //   - Borrowed closures (borrowed_closure_args): closures from function parameters
+        //     (e.g., `f` in a compiled Iterable default body like `self.iter().any(f)`).
+        //     In that case the outer caller does NOT free the closure (used_array_iterable_path),
+        //     so the inner body must dec it explicitly after the runtime call returns.
         if codegen_frees_closure {
             for mut tmp in rc_temps {
                 self.consume_rc_value(&mut tmp)?;
+            }
+            for borrow in &borrowed_closure_args {
+                self.emit_rc_dec_for_type(borrow.value, borrow.type_id)?;
             }
         }
 
@@ -1334,7 +1566,7 @@ impl Cg<'_, '_, '_> {
             // Compile arguments - closure pointer first, then user args
             let mut args: ArgVec = smallvec![func_ptr_or_closure];
             for arg in &mc.args {
-                let compiled = self.expr(arg)?;
+                let compiled = self.expr(arg.expr())?;
                 args.push(compiled.value);
             }
 
@@ -1389,7 +1621,7 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn interface_dispatch_call_args_by_type_def_id(
         &mut self,
         obj: &CompiledValue,
-        args: &[Expr],
+        args: &[CallArg],
         interface_type_id: TypeDefId,
         method_name_id: NameId,
         func_type_id: TypeId,
@@ -1403,7 +1635,7 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn interface_dispatch_call_args_by_slot(
         &mut self,
         obj: &CompiledValue,
-        args: &[Expr],
+        args: &[CallArg],
         slot: u32,
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
@@ -1413,7 +1645,7 @@ impl Cg<'_, '_, '_> {
     fn interface_dispatch_call_args_inner(
         &mut self,
         obj: &CompiledValue,
-        args: &[Expr],
+        args: &[CallArg],
         slot: usize,
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
@@ -1471,9 +1703,9 @@ impl Cg<'_, '_, '_> {
         let mut call_args: ArgVec = smallvec![obj.value];
         for (i, arg) in args.iter().enumerate() {
             let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {
-                self.expr_with_expected_type(arg, expected_type_id)?
+                self.expr_with_expected_type(arg.expr(), expected_type_id)?
             } else {
-                self.expr(arg)?
+                self.expr(arg.expr())?
             };
             // Coerce arguments to their expected parameter types before converting
             // to word representation. Without this, union-typed parameters would be

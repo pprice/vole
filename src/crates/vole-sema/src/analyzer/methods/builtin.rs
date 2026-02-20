@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
+use vole_frontend::ast::CallArg;
 
 impl Analyzer {
     /// Check if a method call is a built-in method on a primitive type (TypeId version)
@@ -8,7 +9,7 @@ impl Analyzer {
         &mut self,
         object_type_id: ArenaTypeId,
         method_name: &str,
-        args: &[Expr],
+        args: &[CallArg],
         interner: &Interner,
     ) -> Option<FunctionType> {
         // Check for array types - extract element type before borrowing again
@@ -18,14 +19,14 @@ impl Analyzer {
                 // Array.length() -> i64
                 "length" => {
                     if !args.is_empty() {
-                        self.add_wrong_arg_count(0, args.len(), args[0].span);
+                        self.add_wrong_arg_count(0, args.len(), args[0].expr().span);
                     }
                     Some(FunctionType::nullary(self.ty_i64_id()))
                 }
                 // Array.iter() -> Iterator<T>
                 "iter" => {
                     if !args.is_empty() {
-                        self.add_wrong_arg_count(0, args.len(), args[0].span);
+                        self.add_wrong_arg_count(0, args.len(), args[0].expr().span);
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[elem_ty_id], interner)?;
@@ -41,7 +42,7 @@ impl Analyzer {
                 // Range.iter() -> Iterator<i64>
                 "iter" => {
                     if !args.is_empty() {
-                        self.add_wrong_arg_count(0, args.len(), args[0].span);
+                        self.add_wrong_arg_count(0, args.len(), args[0].expr().span);
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[self.ty_i64_id()], interner)?;
@@ -57,14 +58,14 @@ impl Analyzer {
                 // String.length() -> i64
                 "length" => {
                     if !args.is_empty() {
-                        self.add_wrong_arg_count(0, args.len(), args[0].span);
+                        self.add_wrong_arg_count(0, args.len(), args[0].expr().span);
                     }
                     Some(FunctionType::nullary(self.ty_i64_id()))
                 }
                 // String.iter() -> Iterator<string>
                 "iter" => {
                     if !args.is_empty() {
-                        self.add_wrong_arg_count(0, args.len(), args[0].span);
+                        self.add_wrong_arg_count(0, args.len(), args[0].expr().span);
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[self.ty_string_id()], interner)?;

@@ -99,7 +99,8 @@ fn expr_contains_yield(expr: &vole_frontend::Expr) -> bool {
                     .is_some_and(expr_contains_yield)
         }
         ExprKind::Call(call) => {
-            expr_contains_yield(&call.callee) || call.args.iter().any(expr_contains_yield)
+            expr_contains_yield(&call.callee)
+                || call.args.iter().any(|a| expr_contains_yield(a.expr()))
         }
         ExprKind::Binary(bin) => expr_contains_yield(&bin.left) || expr_contains_yield(&bin.right),
         ExprKind::Unary(un) => expr_contains_yield(&un.operand),
@@ -108,7 +109,7 @@ fn expr_contains_yield(expr: &vole_frontend::Expr) -> bool {
                 || m.arms.iter().any(|arm| expr_contains_yield(&arm.body))
         }
         ExprKind::MethodCall(mc) => {
-            expr_contains_yield(&mc.object) || mc.args.iter().any(expr_contains_yield)
+            expr_contains_yield(&mc.object) || mc.args.iter().any(|a| expr_contains_yield(a.expr()))
         }
         ExprKind::Lambda(_) => false, // Lambdas are separate closures; don't recurse
         _ => false,

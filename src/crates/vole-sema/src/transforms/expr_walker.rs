@@ -28,7 +28,7 @@ pub fn any_child_expr(expr: &Expr, visit: &mut impl FnMut(&Expr) -> bool) -> boo
     match &expr.kind {
         ExprKind::Binary(bin) => visit(&bin.left) || visit(&bin.right),
         ExprKind::Unary(un) => visit(&un.operand),
-        ExprKind::Call(call) => visit(&call.callee) || call.args.iter().any(&mut *visit),
+        ExprKind::Call(call) => visit(&call.callee) || call.args.iter().any(|a| visit(a.expr())),
         ExprKind::Grouping(inner) => visit(inner),
         ExprKind::ArrayLiteral(elems) => elems.iter().any(&mut *visit),
         ExprKind::RepeatLiteral { element, .. } => visit(element),
@@ -38,7 +38,7 @@ pub fn any_child_expr(expr: &Expr, visit: &mut impl FnMut(&Expr) -> bool) -> boo
         ExprKind::Is(is_expr) => visit(&is_expr.value),
         ExprKind::FieldAccess(fa) => visit(&fa.object),
         ExprKind::OptionalChain(oc) => visit(&oc.object),
-        ExprKind::MethodCall(mc) => visit(&mc.object) || mc.args.iter().any(&mut *visit),
+        ExprKind::MethodCall(mc) => visit(&mc.object) || mc.args.iter().any(|a| visit(a.expr())),
         ExprKind::StructLiteral(sl) => sl.fields.iter().any(|f| visit(&f.value)),
         ExprKind::Assign(assign) => visit(&assign.value),
         ExprKind::CompoundAssign(ca) => visit(&ca.value),

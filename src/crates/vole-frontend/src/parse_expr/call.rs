@@ -3,6 +3,28 @@ use super::super::parser::{ParseError, Parser};
 use super::super::token::TokenType;
 
 impl<'src> Parser<'src> {
+    /// Parse a single call argument.
+    ///
+    /// If the current token is an `Identifier` immediately followed by `:`,
+    /// parse it as `CallArg::Named { name, value }`.  Otherwise parse the
+    /// expression as `CallArg::Positional`.
+    pub(crate) fn parse_call_arg(&mut self) -> Result<CallArg, ParseError> {
+        // Look ahead: if current is Identifier and next is Colon, it's a named arg.
+        if self.check(TokenType::Identifier) && self.peek_token().ty == TokenType::Colon {
+            let name_span = self.current.span;
+            let name = self.interner.intern(&self.current.lexeme);
+            self.advance(); // consume identifier
+            self.advance(); // consume ':'
+            let value = self.expression(0)?;
+            let span = name_span.merge(value.span);
+            Ok(CallArg::Named { name, value, span })
+        } else {
+            Ok(CallArg::Positional(self.expression(0)?))
+        }
+    }
+}
+
+impl<'src> Parser<'src> {
     /// Parse a call expression (function call), index expressions, field access, and method calls
     pub(super) fn call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
@@ -102,7 +124,7 @@ impl<'src> Parser<'src> {
             let mut args = Vec::new();
             if !self.check(TokenType::RParen) {
                 loop {
-                    args.push(self.expression(0)?);
+                    args.push(self.parse_call_arg()?);
                     self.skip_newlines();
                     if !self.match_token(TokenType::Comma) {
                         break;
@@ -193,7 +215,7 @@ impl<'src> Parser<'src> {
 
         if !self.check(TokenType::RParen) {
             loop {
-                args.push(self.expression(0)?);
+                args.push(self.parse_call_arg()?);
                 self.skip_newlines();
                 if !self.match_token(TokenType::Comma) {
                     break;

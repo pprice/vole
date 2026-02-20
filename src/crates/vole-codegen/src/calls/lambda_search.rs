@@ -226,7 +226,7 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
                 return Some(lambda);
             }
             for arg in &call.args {
-                if let Some(lambda) = find_lambda_in_expr(arg, node_id) {
+                if let Some(lambda) = find_lambda_in_expr(arg.expr(), node_id) {
                     return Some(lambda);
                 }
             }
@@ -266,7 +266,7 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
                 return Some(lambda);
             }
             for arg in &mc.args {
-                if let Some(lambda) = find_lambda_in_expr(arg, node_id) {
+                if let Some(lambda) = find_lambda_in_expr(arg.expr(), node_id) {
                     return Some(lambda);
                 }
             }

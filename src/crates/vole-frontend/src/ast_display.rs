@@ -21,7 +21,7 @@ macro_rules! wln {
 
 use crate::Interner;
 use crate::ast::{
-    AssignTarget, BinaryOp, Block, ClassDecl, CompoundOp, Decl, ErrorDecl, Expr, ExprKind,
+    AssignTarget, BinaryOp, Block, CallArg, ClassDecl, CompoundOp, Decl, ErrorDecl, Expr, ExprKind,
     ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, LetInit,
     LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, Param, Program, RaiseStmt,
     SentinelDecl, Stmt, StringPart, StructDecl, StructLiteralExpr, TestCase, TestsDecl, TypeExpr,
@@ -832,7 +832,7 @@ impl<'a> AstPrinter<'a> {
                     out.push_str("args:\n");
                     let args_inner = inner.indented();
                     for arg in &c.args {
-                        args_inner.write_expr(out, arg);
+                        self.write_call_arg(out, &args_inner, arg);
                     }
                 }
             }
@@ -1181,7 +1181,19 @@ impl<'a> AstPrinter<'a> {
             out.push_str("args:\n");
             let args_inner = inner.indented();
             for arg in &mc.args {
-                args_inner.write_expr(out, arg);
+                self.write_call_arg(out, &args_inner, arg);
+            }
+        }
+    }
+
+    /// Display a single call argument, showing the name prefix for named args.
+    fn write_call_arg(&self, out: &mut String, printer: &AstPrinter<'_>, arg: &CallArg) {
+        match arg {
+            CallArg::Positional(expr) => printer.write_expr(out, expr),
+            CallArg::Named { name, value, .. } => {
+                printer.write_indent(out);
+                wln!(out, "named: {}", self.interner.resolve(*name));
+                printer.indented().write_expr(out, value);
             }
         }
     }

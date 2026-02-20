@@ -657,7 +657,7 @@ impl<'a> ConstantFolder<'a> {
             ExprKind::Call(call) => {
                 self.fold_expr(&mut call.callee);
                 for arg in &mut call.args {
-                    self.fold_expr(arg);
+                    self.fold_expr(arg.expr_mut());
                 }
             }
             ExprKind::ArrayLiteral(elements) => {
@@ -714,7 +714,7 @@ impl<'a> ConstantFolder<'a> {
             ExprKind::MethodCall(mc) => {
                 self.fold_expr(&mut mc.object);
                 for arg in &mut mc.args {
-                    self.fold_expr(arg);
+                    self.fold_expr(arg.expr_mut());
                 }
             }
             ExprKind::Try(inner) => {
@@ -814,12 +814,12 @@ impl<'a> ConstantFolder<'a> {
 
         match mc.args.len() {
             1 => {
-                let arg = self.get_const_value(&mc.args[0])?;
+                let arg = self.get_const_value(mc.args[0].expr())?;
                 fold_intrinsic_unary(intrinsic_key, arg)
             }
             2 => {
-                let a = self.get_const_value(&mc.args[0])?;
-                let b = self.get_const_value(&mc.args[1])?;
+                let a = self.get_const_value(mc.args[0].expr())?;
+                let b = self.get_const_value(mc.args[1].expr())?;
                 fold_intrinsic_binary(intrinsic_key, a, b)
             }
             _ => None,

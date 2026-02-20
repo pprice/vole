@@ -313,7 +313,7 @@ impl Analyzer {
                 method_call.method_span,
             );
             for arg in &method_call.args {
-                self.check_expr(arg, interner)?;
+                self.check_expr(arg.expr(), interner)?;
             }
             return Ok(self.ty_invalid_traced_id("method_on_optional"));
         }
@@ -329,7 +329,7 @@ impl Analyzer {
                 method_call.method_span,
             );
             for arg in &method_call.args {
-                self.check_expr(arg, interner)?;
+                self.check_expr(arg.expr(), interner)?;
             }
             return Ok(self.ty_invalid_traced_id("method_on_union"));
         }
@@ -358,16 +358,17 @@ impl Analyzer {
                             expr.span,
                         );
                         for arg in &method_call.args {
-                            self.check_expr(arg, interner)?;
+                            self.check_expr(arg.expr(), interner)?;
                         }
                         return Ok(ArenaTypeId::INVALID);
                     }
 
                     // Check argument types
                     for (arg, &param_type) in method_call.args.iter().zip(method.params.iter()) {
-                        let arg_type = self.check_expr(arg, interner)?;
+                        let expr = arg.expr();
+                        let arg_type = self.check_expr(expr, interner)?;
                         if !self.types_compatible_id(arg_type, param_type, interner) {
-                            self.add_type_mismatch_id(param_type, arg_type, arg.span);
+                            self.add_type_mismatch_id(param_type, arg_type, expr.span);
                         }
                     }
 
@@ -426,7 +427,7 @@ impl Analyzer {
             interner,
         ) {
             for arg in &method_call.args {
-                self.check_expr(arg, interner)?;
+                self.check_expr(arg.expr(), interner)?;
             }
             return Ok(ArenaTypeId::INVALID);
         }
@@ -442,7 +443,7 @@ impl Analyzer {
         );
         // Still check args for more errors
         for arg in &method_call.args {
-            self.check_expr(arg, interner)?;
+            self.check_expr(arg.expr(), interner)?;
         }
         Ok(ArenaTypeId::INVALID)
     }
@@ -626,7 +627,7 @@ impl Analyzer {
             // First pass: type-check arguments to get their types (as TypeId)
             let mut arg_type_ids = Vec::new();
             for arg in &method_call.args {
-                let arg_ty_id = self.check_expr(arg, interner)?;
+                let arg_ty_id = self.check_expr(arg.expr(), interner)?;
                 arg_type_ids.push(arg_ty_id);
             }
 
@@ -715,7 +716,7 @@ impl Analyzer {
                 .zip(arg_type_ids.iter().zip(final_param_ids.iter()))
             {
                 if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
+                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.expr().span);
                 }
             }
 
@@ -779,7 +780,7 @@ impl Analyzer {
 
         // Still check args for more errors
         for arg in &method_call.args {
-            self.check_expr(arg, interner)?;
+            self.check_expr(arg.expr(), interner)?;
         }
 
         Ok(ArenaTypeId::INVALID)
@@ -957,7 +958,7 @@ impl Analyzer {
         let arg_type_ids: Vec<ArenaTypeId> = method_call
             .args
             .iter()
-            .map(|arg| self.check_expr(arg, interner))
+            .map(|arg| self.check_expr(arg.expr(), interner))
             .collect::<Result<Vec<_>, _>>()?;
 
         let inferred_id = self.infer_type_params_id(
@@ -992,7 +993,7 @@ impl Analyzer {
         {
             let arg_ty_id = arg_type_ids[i];
             if !self.types_compatible_id(arg_ty_id, expected_id, interner) {
-                self.add_type_mismatch_id(expected_id, arg_ty_id, arg.span);
+                self.add_type_mismatch_id(expected_id, arg_ty_id, arg.expr().span);
             }
         }
 

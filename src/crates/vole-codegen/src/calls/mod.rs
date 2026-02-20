@@ -158,7 +158,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // Compile args and dispatch through intrinsic handler
                 let mut args = Vec::new();
                 for arg in &call.args {
-                    args.push(self.expr(arg)?);
+                    args.push(self.expr(arg.expr())?);
                 }
                 let native_name_str = self
                     .name_table()
@@ -409,9 +409,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
-                self.expr_with_expected_type(arg, param_type_id)?
+                self.expr_with_expected_type(arg.expr(), param_type_id)?
             } else {
-                self.expr(arg)?
+                self.expr(arg.expr())?
             };
             if compiled.is_owned() {
                 rc_temp_args.push(compiled);
@@ -626,7 +626,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Err(CodegenError::arg_count("print_char", 1, call.args.len()));
         }
 
-        let arg = self.expr(&call.args[0])?;
+        let arg = self.expr(call.args[0].expr())?;
 
         // Convert to u8 if needed (truncate from i64)
         let char_val = if arg.ty == types::I64 {
@@ -653,7 +653,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Err(CodegenError::arg_count("assert", 1, 0));
         }
 
-        let cond = self.expr(&call.args[0])?;
+        let cond = self.expr(call.args[0].expr())?;
 
         let pass_block = self.builder.create_block();
         let fail_block = self.builder.create_block();

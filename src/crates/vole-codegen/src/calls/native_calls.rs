@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use vole_frontend::ast::CallExpr;
-use vole_frontend::{Expr, NodeId, Symbol};
+use vole_frontend::{NodeId, Symbol};
 use vole_identity::ModuleId;
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::implement_registry::{TypeMappingEntry, TypeMappingKind};
@@ -347,18 +347,19 @@ impl Cg<'_, '_, '_> {
 
     fn compile_intrinsic_args_with_expected_types(
         &mut self,
-        args_exprs: &[Expr],
+        args_exprs: &[vole_frontend::ast::CallArg],
         expected_param_type_ids: Option<&[TypeId]>,
     ) -> CodegenResult<Vec<CompiledValue>> {
         let mut args = Vec::with_capacity(args_exprs.len());
         for (index, arg_expr) in args_exprs.iter().enumerate() {
+            let expr = arg_expr.expr();
             let compiled = if let Some(param_type_ids) = expected_param_type_ids
                 && let Some(&param_type_id) = param_type_ids.get(index)
             {
-                let compiled = self.expr_with_expected_type(arg_expr, param_type_id)?;
+                let compiled = self.expr_with_expected_type(expr, param_type_id)?;
                 self.coerce_to_type(compiled, param_type_id)?
             } else {
-                self.expr(arg_expr)?
+                self.expr(expr)?
             };
             args.push(compiled);
         }
@@ -390,7 +391,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         module_path: &str,
         intrinsic_key: &str,
-        args_exprs: &[Expr],
+        args_exprs: &[vole_frontend::ast::CallArg],
         return_type_id: TypeId,
         expected_param_type_ids: Option<&[TypeId]>,
     ) -> CodegenResult<CompiledValue> {
@@ -497,7 +498,7 @@ impl Cg<'_, '_, '_> {
     pub(super) fn try_call_functional_interface(
         &mut self,
         obj: &CompiledValue,
-        args: &[Expr],
+        args: &[vole_frontend::ast::CallArg],
     ) -> CodegenResult<Option<CompiledValue>> {
         let Some(iface_type_def_id) = self.interface_type_def_id(obj.type_id) else {
             return Ok(None);

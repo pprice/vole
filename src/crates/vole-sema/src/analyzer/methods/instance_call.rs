@@ -163,15 +163,16 @@ impl Analyzer {
         let mut map_inferred_return_type: Option<ArenaTypeId> = None;
 
         for (arg, &param_ty_id) in method_call.args.iter().zip(func_type.params_id.iter()) {
+            let expr = arg.expr();
             if is_map_transform {
-                let inferred = self.check_map_transform_arg(arg, param_ty_id, interner)?;
+                let inferred = self.check_map_transform_arg(expr, param_ty_id, interner)?;
                 if let Some(ret_ty) = inferred {
                     map_inferred_return_type = Some(ret_ty);
                 }
             } else {
-                let arg_ty_id = self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?;
+                let arg_ty_id = self.check_expr_expecting_id(expr, Some(param_ty_id), interner)?;
                 if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
+                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, expr.span);
                 }
             }
         }

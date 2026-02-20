@@ -864,11 +864,51 @@ pub enum UnaryOp {
     BitNot, // ~
 }
 
+/// A single argument in a call expression: either positional or named.
+///
+/// Named arguments use the syntax `name: value`.  The parser produces these
+/// but does not validate ordering (positional before named) — that is left to
+/// sema (vol-4v7n).
+#[derive(Debug, Clone)]
+pub enum CallArg {
+    /// A plain positional argument.
+    Positional(Expr),
+    /// A named argument: `name: value`.
+    Named {
+        name: Symbol,
+        value: Expr,
+        span: Span,
+    },
+}
+
+impl CallArg {
+    /// Return a reference to the expression regardless of variant.
+    pub fn expr(&self) -> &Expr {
+        match self {
+            CallArg::Positional(e) => e,
+            CallArg::Named { value, .. } => value,
+        }
+    }
+
+    /// Return a mutable reference to the expression regardless of variant.
+    pub fn expr_mut(&mut self) -> &mut Expr {
+        match self {
+            CallArg::Positional(e) => e,
+            CallArg::Named { value, .. } => value,
+        }
+    }
+
+    /// Return `true` if this is a positional argument.
+    pub fn is_positional(&self) -> bool {
+        matches!(self, CallArg::Positional(_))
+    }
+}
+
 /// Function call
 #[derive(Debug, Clone)]
 pub struct CallExpr {
     pub callee: Expr,
-    pub args: Vec<Expr>,
+    pub args: Vec<CallArg>,
 }
 
 /// Index expression
@@ -1024,7 +1064,7 @@ pub struct MethodCallExpr {
     pub object: Expr,
     pub method: Symbol,
     pub type_args: Vec<TypeExpr>,
-    pub args: Vec<Expr>,
+    pub args: Vec<CallArg>,
     pub method_span: Span,
 }
 

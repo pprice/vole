@@ -95,7 +95,7 @@ impl Cg<'_, '_, '_> {
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
-            let compiled = self.expr_with_expected_type(arg, *param_id)?;
+            let compiled = self.expr_with_expected_type(arg.expr(), *param_id)?;
             if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
@@ -275,7 +275,7 @@ impl Cg<'_, '_, '_> {
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-            let compiled = self.expr_with_expected_type(arg, param_type_id)?;
+            let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
             if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
@@ -420,10 +420,10 @@ impl Cg<'_, '_, '_> {
         };
 
         // Compile count argument
-        let count = self.expr(&mc.args[0])?;
+        let count = self.expr(mc.args[0].expr())?;
 
         // Compile value argument
-        let value = self.expr(&mc.args[1])?;
+        let value = self.expr(mc.args[1].expr())?;
 
         let (tag_val, value_bits, mut stored_value) =
             self.prepare_dynamic_array_store(value, elem_type_id)?;

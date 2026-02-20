@@ -265,7 +265,7 @@ impl Analyzer {
                 let arg_type_ids: Vec<ArenaTypeId> = call
                     .args
                     .iter()
-                    .map(|arg| self.check_expr(arg, interner))
+                    .map(|arg| self.check_expr(arg.expr(), interner))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 // Infer type parameters from argument types (using TypeId version)
@@ -314,7 +314,7 @@ impl Analyzer {
                 {
                     let arg_ty_id = arg_type_ids[i];
                     if !self.types_compatible_id(arg_ty_id, expected_id, interner) {
-                        self.add_type_mismatch_id(expected_id, arg_ty_id, arg.span);
+                        self.add_type_mismatch_id(expected_id, arg_ty_id, arg.expr().span);
                     }
                 }
 
@@ -402,7 +402,7 @@ impl Analyzer {
                     self.mark_lambda_has_side_effects();
                 }
                 for arg in &call.args {
-                    self.check_expr(arg, interner)?;
+                    self.check_expr(arg.expr(), interner)?;
                 }
                 return Ok(ArenaTypeId::VOID);
             }
@@ -419,7 +419,7 @@ impl Analyzer {
                 );
                 // Still check args for more errors
                 for arg in &call.args {
-                    self.check_expr(arg, interner)?;
+                    self.check_expr(arg.expr(), interner)?;
                 }
                 return Ok(ArenaTypeId::INVALID);
             }
@@ -430,7 +430,7 @@ impl Analyzer {
                 self.mark_lambda_has_side_effects();
             }
             for arg in &call.args {
-                self.check_expr(arg, interner)?;
+                self.check_expr(arg.expr(), interner)?;
             }
             return Ok(ArenaTypeId::VOID);
         }
