@@ -553,6 +553,29 @@ impl Analyzer {
         self.resolve_default_method_from_interfaces(&ctx)
     }
 
+    /// Check if a nominal type has a method that exists but is not visible from the current module.
+    /// Used to emit the correct error when a file-scoped extension method is called from another file.
+    pub fn find_extension_method_not_visible(
+        &mut self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> bool {
+        let Some(method_id) = self
+            .entity_registry_mut()
+            .resolve_method(type_def_id, method_name_id)
+        else {
+            return false;
+        };
+        let defining_module = {
+            let registry = self.entity_registry();
+            registry.get_method(method_id).defining_module
+        };
+        match defining_module {
+            Some(def_module) => def_module != self.module.current_module,
+            None => false,
+        }
+    }
+
     /// Resolve a method that was found via EntityRegistry
     fn resolve_found_method(
         &mut self,
@@ -566,6 +589,7 @@ impl Analyzer {
             method_signature_id,
             method_has_default,
             method_external_binding,
+            method_defining_module,
         ) = {
             let registry = self.entity_registry();
             let method_def = registry.get_method(method_id);
@@ -574,8 +598,17 @@ impl Analyzer {
                 method_def.signature_id,
                 method_def.has_default,
                 method_def.external_binding,
+                method_def.defining_module,
             )
         };
+
+        // File-scoped extension methods are only visible within their defining module.
+        // Return None here so the caller can check for this case and emit the correct error.
+        if let Some(def_module) = method_defining_module
+            && def_module != self.module.current_module
+        {
+            return None;
+        }
         let (defining_type_kind, defining_type_name_id) = self
             .entity_registry()
             .type_kind_and_name(method_defining_type_id);

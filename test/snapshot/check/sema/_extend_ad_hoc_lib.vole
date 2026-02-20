@@ -1,0 +1,16 @@
+// Library file for extend_ad_hoc_cross_module test.
+// Prefixed with _ so vole-snap skips it as a standalone test file.
+
+class Animal {
+    name: string,
+}
+
+extend Animal {
+    func speak() -> string {
+        return "..."
+    }
+}
+
+func make_animal() -> Animal {
+    return Animal { name: "unnamed" }
+}

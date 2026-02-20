@@ -5,7 +5,7 @@ use crate::generic::TypeParamInfo;
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId;
 use vole_frontend::Expr;
-use vole_identity::{MethodId, NameId, TypeDefId};
+use vole_identity::{MethodId, ModuleId, NameId, TypeDefId};
 
 use super::EntityRegistry;
 
@@ -37,6 +37,7 @@ pub struct MethodDefBuilder {
     method_type_params: Vec<TypeParamInfo>,
     required_params: usize,
     param_defaults: Vec<Option<Box<Expr>>>,
+    defining_module: Option<ModuleId>,
 }
 
 impl MethodDefBuilder {
@@ -60,6 +61,7 @@ impl MethodDefBuilder {
             method_type_params: Vec::new(),
             required_params: 0,
             param_defaults: Vec::new(),
+            defining_module: None,
         }
     }
 
@@ -98,6 +100,15 @@ impl MethodDefBuilder {
         self
     }
 
+    /// Restrict this method to a specific module (file-scoped extension method).
+    ///
+    /// When set, this method is only visible to callers in the given module.
+    /// Used for `extend Type { }` ad-hoc extension methods.
+    pub fn defining_module(mut self, module: ModuleId) -> Self {
+        self.defining_module = Some(module);
+        self
+    }
+
     /// Register the method on the EntityRegistry.
     ///
     /// Returns the newly created `MethodId`.
@@ -115,6 +126,7 @@ impl MethodDefBuilder {
             method_type_params: self.method_type_params,
             required_params: self.required_params,
             param_defaults: self.param_defaults,
+            defining_module: self.defining_module,
         });
         registry.method_by_full_name.insert(self.full_name_id, id);
 

@@ -414,11 +414,28 @@ impl Analyzer {
             );
         }
 
+        // Method not found — check if it's a file-scoped extension method from another module.
+        // This produces a clearer error than a generic "unknown method" message.
+        let method_name_str = interner.resolve(method_call.method).to_string();
+        if self.check_for_extension_method_visibility_error(
+            object_type_id,
+            method_call.method,
+            &type_name,
+            &method_name_str,
+            method_call.method_span,
+            interner,
+        ) {
+            for arg in &method_call.args {
+                self.check_expr(arg, interner)?;
+            }
+            return Ok(ArenaTypeId::INVALID);
+        }
+
         // No method found - report error
         self.add_error(
             SemanticError::UnknownMethod {
                 ty: type_name,
-                method: interner.resolve(method_call.method).to_string(),
+                method: method_name_str,
                 span: method_call.method_span.into(),
             },
             method_call.method_span,
@@ -428,6 +445,50 @@ impl Analyzer {
             self.check_expr(arg, interner)?;
         }
         Ok(ArenaTypeId::INVALID)
+    }
+
+    /// Check if the failed method resolution was due to a file-scoped extension method.
+    /// Returns true and emits `ExtensionMethodNotVisible` if the method exists but is
+    /// defined in another module via `extend Type { }`. Returns false otherwise.
+    fn check_for_extension_method_visibility_error(
+        &mut self,
+        object_type_id: ArenaTypeId,
+        method_name: Symbol,
+        type_name: &str,
+        method_name_str: &str,
+        method_span: Span,
+        interner: &Interner,
+    ) -> bool {
+        // Only applies to nominal types with a TypeDefId
+        let type_def_id = {
+            let arena = self.type_arena();
+            arena.unwrap_nominal(object_type_id).map(|(id, _, _)| id)
+        };
+        let Some(type_def_id) = type_def_id else {
+            return false;
+        };
+        let method_name_id = self.method_name_id(method_name, interner);
+        let not_visible = self.find_extension_method_not_visible(type_def_id, method_name_id);
+        if !not_visible {
+            return false;
+        }
+        // Use the short type name (last segment only) for clarity.
+        // The full module path (from type_name) includes the source file path which is noisy.
+        let short_type_name = {
+            let name_id = self.entity_registry().name_id(type_def_id);
+            self.name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_else(|| type_name.to_string())
+        };
+        self.add_error(
+            SemanticError::ExtensionMethodNotVisible {
+                ty: short_type_name,
+                method: method_name_str.to_string(),
+                span: method_span.into(),
+            },
+            method_span,
+        );
+        true
     }
 
     /// Try to resolve a static method call target from an expression.

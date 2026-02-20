@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E2112]: method 'speak' on type 'Animal' is only visible within its defining module
+   ╭─[<path>/extend_ad_hoc_cross_module.vole:8:14]
+ 7 │     let a = lib.make_animal()
+ 8 │     return a.speak()
+   ·              ──┬──
+   ·                ╰── this method is not visible here
+ 9 │ }
+   ╰────
+  help: extension methods defined with `extend Type { }` are file-scoped

@@ -872,8 +872,8 @@ impl<'src> Parser<'src> {
 
     /// Parse extend block: extend Type [with Interface] { methods }
     ///
-    /// - `extend Type with Interface { }` → ImplementBlock { trait_type: Some(Interface), target_type: Type }
-    /// - `extend Type { }` → ImplementBlock { trait_type: None, target_type: Type }
+    /// - `extend Type with Interface { }` → ImplementBlock { trait_type: Some(Interface), target_type: Type, is_file_scoped: false }
+    /// - `extend Type { }` → ImplementBlock { trait_type: None, target_type: Type, is_file_scoped: true }
     ///
     /// Note the argument order compared to the old `implement Interface for Type`:
     /// the **Type comes first**, the interface comes after `with`.
@@ -900,6 +900,10 @@ impl<'src> Parser<'src> {
             None
         };
 
+        // `extend Type { }` (no interface) is file-scoped.
+        // `extend Type with Interface { }` is globally visible.
+        let is_file_scoped = trait_type.is_none();
+
         self.consume(TokenType::LBrace, "expected '{' in extend block")?;
         self.skip_newlines();
 
@@ -915,6 +919,7 @@ impl<'src> Parser<'src> {
             methods: body.methods,
             statics: body.statics,
             span,
+            is_file_scoped,
         }))
     }
 
@@ -1013,6 +1018,7 @@ impl<'src> Parser<'src> {
             methods: body.methods,
             statics: body.statics,
             span,
+            is_file_scoped: false, // `implement Type { }` is always global
         }))
     }
 

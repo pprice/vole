@@ -148,6 +148,10 @@ pub struct MethodDef {
     /// Index corresponds to parameter index.
     /// Required params have None, defaulted params have Some.
     pub param_defaults: Vec<Option<Box<Expr>>>,
+    /// If Some, this method is only visible within the specified module (file-scoped).
+    /// Used for `extend Type { }` ad-hoc extension methods, which are not globally visible.
+    /// None means the method is globally visible (normal methods and interface implementations).
+    pub defining_module: Option<ModuleId>,
 }
 
 /// A field definition (always belongs to a type)

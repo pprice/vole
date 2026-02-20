@@ -95,3 +95,63 @@ tests "extend with expression-bodied method" {
         assert(t.triple() == 42)
     }
 }
+
+// ---- File-scoped ad-hoc extension methods: extend Type { } (no interface) ----
+// Methods added this way are only callable within the same file/module.
+
+class Point {
+    x: i64,
+    y: i64,
+}
+
+extend Point {
+    func magnitude_sq() -> i64 {
+        return self.x * self.x + self.y * self.y
+    }
+}
+
+tests "extend Type ad-hoc (file-scoped)" {
+    test "ad-hoc extension method callable in same file" {
+        let p = Point { x: 3, y: 4 }
+        assert(p.magnitude_sq() == 25)
+    }
+}
+
+class Counter {
+    value: i64,
+}
+
+extend Counter {
+    func doubled() -> i64 => self.value * 2
+}
+
+tests "extend Type ad-hoc expression body" {
+    test "expression-bodied ad-hoc extension method works" {
+        let c = Counter { value: 7 }
+        assert(c.doubled() == 14)
+    }
+}
+
+class Box {
+    width: i64,
+    height: i64,
+    depth: i64,
+}
+
+extend Box {
+    func volume() -> i64 {
+        return self.width * self.height * self.depth
+    }
+
+    func surface_area() -> i64 {
+        return 2 * (self.width * self.height + self.height * self.depth + self.width * self.depth)
+    }
+}
+
+tests "extend Type ad-hoc multiple methods" {
+    test "multiple ad-hoc extension methods on same type" {
+        let b = Box { width: 2, height: 3, depth: 4 }
+        assert(b.volume() == 24)
+        assert(b.surface_area() == 52)
+    }
+}

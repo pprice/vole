@@ -271,16 +271,24 @@ impl Analyzer {
                 let func_type = FunctionType::from_ids(&params_id, return_type_id, false);
 
                 let method_name_id = self.method_name_id(method.name, interner);
-                let method_impl = MethodImpl::user_defined(func_type.clone());
-                let method_impl = match trait_name {
-                    Some(name) => method_impl.with_trait_name(name),
-                    None => method_impl,
-                };
-                self.implement_registry_mut().register_method(
-                    impl_type_id,
-                    method_name_id,
-                    method_impl,
-                );
+
+                // Only register in the ImplementRegistry for non-file-scoped methods.
+                // File-scoped extension methods (extend Type {}) are registered only in
+                // EntityRegistry with a module restriction. Registering them in the
+                // ImplementRegistry would bypass the module restriction check since that
+                // registry has no module awareness.
+                if !impl_block.is_file_scoped {
+                    let method_impl = MethodImpl::user_defined(func_type.clone());
+                    let method_impl = match trait_name {
+                        Some(name) => method_impl.with_trait_name(name),
+                        None => method_impl,
+                    };
+                    self.implement_registry_mut().register_method(
+                        impl_type_id,
+                        method_name_id,
+                        method_impl,
+                    );
+                }
 
                 // Register in EntityRegistry.methods_by_type for all implement blocks
                 // This enables codegen to look up method signatures via find_method_on_type
@@ -305,14 +313,20 @@ impl Analyzer {
                     // Intern the signature in the arena
                     let signature_id = func_type.clone().intern(&mut self.type_arena_mut());
 
-                    // Register the method in entity_registry.methods_by_type
-                    self.entity_registry_mut().register_method(
+                    // `extend Type { }` (no interface) produces file-scoped methods:
+                    // only visible within the defining module. Mark with defining_module.
+                    let is_file_scoped = impl_block.is_file_scoped;
+                    let mut method_builder = MethodDefBuilder::new(
                         entity_type_id,
                         method_name_id,
                         full_method_name_id,
                         signature_id,
-                        false, // implement block methods don't have defaults
-                    );
+                    )
+                    .has_default(false); // implement block methods don't have defaults
+                    if is_file_scoped {
+                        method_builder = method_builder.defining_module(self.module.current_module);
+                    }
+                    method_builder.register(&mut self.entity_registry_mut());
 
                     // Also add method binding if implementing an interface
                     if let Some(interface_type_id) = interface_type_id {

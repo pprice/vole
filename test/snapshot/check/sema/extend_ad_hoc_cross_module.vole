@@ -1,0 +1,9 @@
+// Error: calling a file-scoped extension method from another module.
+// `extend Type { }` (no interface) defines methods visible only within the defining file.
+
+let lib = import "./_extend_ad_hoc_lib.vole"
+
+func test_cross_module() -> string {
+    let a = lib.make_animal()
+    return a.speak()
+}

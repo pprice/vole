@@ -235,6 +235,10 @@ pub struct ImplementBlock {
     pub methods: Vec<FuncDecl>,
     pub statics: Option<StaticsBlock>, // Static methods
     pub span: Span,
+    /// True when the block was written as `extend Type { }` (no interface).
+    /// These methods are file-scoped: only visible within the defining module.
+    /// False when written as `implement Type { }` (global ad-hoc methods).
+    pub is_file_scoped: bool,
 }
 
 /// External block: external("provider:module") { func declarations }

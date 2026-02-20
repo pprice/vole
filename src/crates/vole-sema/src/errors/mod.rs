@@ -753,6 +753,18 @@ pub enum SemanticError {
         help("the standard library file may be corrupted or from an incompatible version")
     )]
     PreludeParseError { path: String, message: String },
+
+    #[error("method '{method}' on type '{ty}' is only visible within its defining module")]
+    #[diagnostic(
+        code(E2112),
+        help("extension methods defined with `extend Type {{ }}` are file-scoped")
+    )]
+    ExtensionMethodNotVisible {
+        ty: String,
+        method: String,
+        #[label("this method is not visible here")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues
