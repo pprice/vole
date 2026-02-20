@@ -452,7 +452,7 @@ pub(crate) fn compile_function_inner_with_params<'ctx>(
     // the signature has a hidden sret pointer as the first parameter.
     let config = if let Some(ret_type_id) = config.return_type_id {
         let arena = env.analyzed.type_arena();
-        let entities = env.analyzed.query().registry();
+        let entities = env.analyzed.entity_registry();
         if let Some(flat_count) =
             crate::structs::struct_flat_slot_count(ret_type_id, arena, entities)
         {

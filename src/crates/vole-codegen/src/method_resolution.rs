@@ -43,11 +43,11 @@ pub(crate) fn get_type_def_id_from_type_id(
                 PrimitiveType::Bool => name_table.primitives.bool,
                 PrimitiveType::String => name_table.primitives.string,
             };
-            analyzed.entity_registry().type_by_name(name_id)
+            analyzed.query().try_type_def_id(name_id)
         }
         SemaType::Handle => {
             let name_id = analyzed.name_table().primitives.handle;
-            analyzed.entity_registry().type_by_name(name_id)
+            analyzed.query().try_type_def_id(name_id)
         }
         _ => None,
     }
