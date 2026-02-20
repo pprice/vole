@@ -176,7 +176,8 @@ impl Analyzer {
                 if let Some(s) = suffix {
                     return self.suffix_to_type_id(*s);
                 }
-                if hint == ArenaTypeId::F32 || hint == ArenaTypeId::F64 {
+                if hint == ArenaTypeId::F32 || hint == ArenaTypeId::F64 || hint == ArenaTypeId::F128
+                {
                     hint
                 } else {
                     self.ty_f64_id() // Default

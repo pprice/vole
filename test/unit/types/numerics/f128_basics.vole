@@ -82,3 +82,14 @@ tests "f128 unary operations" {
         assert(-x == 3.0_f128)
     }
 }
+
+tests "f128 literal type inference from hint" {
+    test "float literal infers f128 from annotation" {
+        let x: f128 = 3.14
+        assert(x is f128)
+    }
+
+    test "float literal infers f128 in is expression" {
+        assert(3.14 is f128)
+    }
+}
