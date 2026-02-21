@@ -1,13 +1,9 @@
-// Tests for the `extend Type with Interface { }` syntax (retroactive interface implementation).
-// The parser produces the same ImplementBlock AST as `implement Interface for Type { }`,
-// so sema handles both identically.
-
 interface Greetable {
     func greet() -> string
 }
 
 class Dog {
-    name: string
+    name: string,
 }
 
 extend Dog with Greetable {
@@ -37,7 +33,6 @@ tests "extend Type with Interface" {
     }
 }
 
-// Verify interface method checking works: all required methods must be present.
 interface Measurable {
     func length() -> i64
     func area() -> i64
@@ -45,7 +40,7 @@ interface Measurable {
 
 class Rectangle {
     width: i64,
-    height: i64
+    height: i64,
 }
 
 extend Rectangle with Measurable {
@@ -71,13 +66,12 @@ tests "extend with multi-method interface" {
     }
 }
 
-// Verify extend works with expression-bodied methods.
 interface Tripler {
     func triple() -> i64
 }
 
 class Amount {
-    value: i64
+    value: i64,
 }
 
 extend Amount with Tripler {
@@ -95,9 +89,6 @@ tests "extend with expression-bodied method" {
         assert(t.triple() == 42)
     }
 }
-
-// ---- File-scoped ad-hoc extension methods: extend Type { } (no interface) ----
-// Methods added this way are only callable within the same file/module.
 
 class Point {
     x: i64,
@@ -156,10 +147,6 @@ tests "extend Type ad-hoc multiple methods" {
     }
 }
 
-// ---- Generics: extend with a concrete type specialization ----
-// extend Wrapper<i64> with Printable implements the interface only for
-// the i64 instantiation.
-
 interface Printable {
     func display() -> string
 }
@@ -179,7 +166,7 @@ tests "extend generic concrete specialization" {
     }
 
     test "extend Wrapper<i64> with Printable - accepted as interface argument" {
-        func print_it(p: Printable) -> string => p.display()
+        let print_it = (p: Printable) -> string => p.display()
         let w = Wrapper { value: 100 }
         assert(print_it(w) == "100")
     }
