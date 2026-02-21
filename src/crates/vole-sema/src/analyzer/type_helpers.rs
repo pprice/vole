@@ -5,6 +5,7 @@
 #![allow(unused)] // Some methods used conditionally
 
 use super::*;
+use crate::expression_data::StringConversion;
 use crate::type_arena::TypeId as ArenaTypeId;
 
 // ========== Sequence type info ==========
@@ -430,6 +431,97 @@ impl Analyzer {
             NumericSuffix::F32 => "f32 range".to_string(),
             NumericSuffix::F64 => "f64 range".to_string(),
             NumericSuffix::F128 => "f128 range".to_string(),
+        }
+    }
+
+    // =========================================================================
+    // String interpolation conversion classification
+    // =========================================================================
+
+    /// Classify the string conversion needed for a value of the given type.
+    ///
+    /// Determines the correct runtime conversion based on the type. The result
+    /// is stored in ExpressionData so codegen can apply the conversion via
+    /// `apply_string_conversion` without re-detecting types.
+    pub(crate) fn classify_string_conversion(&self, type_id: ArenaTypeId) -> StringConversion {
+        // Already a string
+        if type_id == ArenaTypeId::STRING {
+            return StringConversion::Identity;
+        }
+
+        // Array
+        if self.is_array_id(type_id) {
+            return StringConversion::ArrayToString;
+        }
+
+        // Nil
+        if type_id.is_nil() {
+            return StringConversion::NilToString;
+        }
+
+        // Union types (optional or general)
+        let arena = self.type_arena();
+        if let Some(variants) = arena.unwrap_union(type_id) {
+            let variants_vec: Vec<ArenaTypeId> = variants.to_vec();
+            let nil_idx = variants_vec.iter().position(|v| v.is_nil());
+            drop(arena); // release borrow before recursive calls
+
+            if let Some(nil_idx) = nil_idx {
+                return self.classify_optional_conversion(&variants_vec, nil_idx);
+            }
+            return self.classify_union_conversion(&variants_vec);
+        }
+        drop(arena);
+
+        // Primitive types
+        self.classify_primitive_conversion(type_id)
+    }
+
+    /// Classify conversion for an optional (union with nil variant).
+    fn classify_optional_conversion(
+        &self,
+        variants: &[ArenaTypeId],
+        nil_idx: usize,
+    ) -> StringConversion {
+        // Find the non-nil variant's type and classify its conversion
+        let inner_type = variants
+            .iter()
+            .find(|v| !v.is_nil())
+            .copied()
+            .expect("INTERNAL: optional union must have non-nil variant");
+
+        let inner_conversion = self.classify_string_conversion(inner_type);
+
+        StringConversion::OptionalToString {
+            nil_index: nil_idx,
+            variants: variants.to_vec(),
+            inner_conversion: Box::new(inner_conversion),
+        }
+    }
+
+    /// Classify conversion for a general (non-optional) union.
+    fn classify_union_conversion(&self, variants: &[ArenaTypeId]) -> StringConversion {
+        let variant_conversions: Vec<(ArenaTypeId, StringConversion)> = variants
+            .iter()
+            .map(|&v| (v, self.classify_string_conversion(v)))
+            .collect();
+
+        StringConversion::UnionToString {
+            variants: variant_conversions,
+        }
+    }
+
+    /// Classify conversion for a primitive (non-composite) type.
+    fn classify_primitive_conversion(&self, type_id: ArenaTypeId) -> StringConversion {
+        match type_id {
+            ArenaTypeId::F64 => StringConversion::F64ToString,
+            ArenaTypeId::F32 => StringConversion::F32ToString,
+            ArenaTypeId::F128 => StringConversion::F128ToString,
+            ArenaTypeId::I128 => StringConversion::I128ToString,
+            ArenaTypeId::BOOL => StringConversion::BoolToString,
+            _ if type_id.is_integer() => StringConversion::I64ToString,
+            // Fallback: treat as i64 (matches codegen's default)
+            _ => StringConversion::I64ToString,
         }
     }
 }

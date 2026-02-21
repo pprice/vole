@@ -196,6 +196,7 @@ impl Analyzer {
         let iterable_kinds = results.iterable_kinds;
         let coercion_kinds = results.coercion_kinds;
         let lowered_optional_chains = results.lowered_optional_chains;
+        let string_conversions = results.string_conversions;
         // Build main-program expression data, then merge in module data
         let mut expression_data = ExpressionData {
             types: expr_types,
@@ -215,6 +216,7 @@ impl Analyzer {
             iterable_kinds,
             coercion_kinds,
             lowered_optional_chains,
+            string_conversions,
         };
         // Merge module analysis data (globally unique NodeIds, no collisions)
         expression_data.merge(merged_expr_data);

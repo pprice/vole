@@ -35,6 +35,47 @@ pub enum IterableKind {
     CustomIterable { elem_type: TypeId },
 }
 
+/// String conversion annotation for interpolation parts, annotated by sema.
+///
+/// Codegen reads this to apply the correct conversion without type inspection.
+/// For union/optional types, per-variant conversion info is carried so codegen
+/// can generate branching code without re-detecting types.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StringConversion {
+    /// Already a string — no conversion needed.
+    Identity,
+    /// i64 (or smaller integer widths that sext to i64) → string
+    I64ToString,
+    /// i128 → string
+    I128ToString,
+    /// f32 → string
+    F32ToString,
+    /// f64 → string
+    F64ToString,
+    /// f128 → string (passed as i128 bits)
+    F128ToString,
+    /// bool → string
+    BoolToString,
+    /// nil → string (always "nil")
+    NilToString,
+    /// Array → string
+    ArrayToString,
+    /// Optional (union with nil) → branches on tag, converts inner value.
+    /// `nil_index` is the tag index for nil in the union variants.
+    /// `variants` is the full variant type list for codegen layout.
+    /// `inner_conversion` is the conversion for the non-nil variant.
+    OptionalToString {
+        nil_index: usize,
+        variants: Vec<TypeId>,
+        inner_conversion: Box<StringConversion>,
+    },
+    /// General union → branches on tag, converts each variant.
+    /// Each entry is `(variant_type_id, conversion)`.
+    UnionToString {
+        variants: Vec<(TypeId, StringConversion)>,
+    },
+}
+
 /// Interface coercion annotation, stored by sema at sites where a value
 /// needs boxing or wrapping to satisfy an interface type.
 ///
@@ -155,6 +196,11 @@ pub struct ExpressionData {
     /// Codegen compiles optional chains via the standard match path instead of
     /// a separate optional_chain implementation.
     pub(crate) lowered_optional_chains: FxHashMap<NodeId, vole_frontend::MatchExpr>,
+    /// String conversion annotations for interpolation expression parts.
+    ///
+    /// Keyed by the interpolation expression's NodeId. Tells codegen which
+    /// runtime conversion function to call without type-based dispatch.
+    pub(crate) string_conversions: FxHashMap<NodeId, StringConversion>,
 }
 
 impl ExpressionData {
@@ -191,6 +237,7 @@ impl ExpressionData {
         self.coercion_kinds.extend(other.coercion_kinds);
         self.lowered_optional_chains
             .extend(other.lowered_optional_chains);
+        self.string_conversions.extend(other.string_conversions);
     }
 
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
@@ -441,5 +488,15 @@ impl ExpressionData {
     /// Get the lowered match expression for an optional chain, if one was synthesized.
     pub fn get_lowered_optional_chain(&self, node: NodeId) -> Option<&vole_frontend::MatchExpr> {
         self.lowered_optional_chains.get(&node)
+    }
+
+    /// Get the string conversion annotation for an interpolation expression part.
+    pub fn get_string_conversion(&self, node: NodeId) -> Option<&StringConversion> {
+        self.string_conversions.get(&node)
+    }
+
+    /// Set the string conversion annotation for an interpolation expression part.
+    pub fn set_string_conversion(&mut self, node: NodeId, conv: StringConversion) {
+        self.string_conversions.insert(node, conv);
     }
 }

@@ -7,6 +7,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{DataDescription, Linkage, Module};
 
 use vole_frontend::ast::StringPart;
+use vole_sema::StringConversion;
 use vole_sema::type_arena::TypeId;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -98,10 +99,14 @@ impl Cg<'_, '_, '_> {
                 StringPart::Literal(s) => (self.string_literal(s)?.value, true),
                 StringPart::Expr(expr) => {
                     let compiled = self.expr(expr)?;
-                    if compiled.type_id == TypeId::STRING {
-                        (compiled.value, compiled.is_owned())
-                    } else {
-                        (self.value_to_string(compiled)?, true)
+                    // Read the sema-annotated conversion for this expression part
+                    let conversion = self
+                        .get_string_conversion(expr.id)
+                        .cloned()
+                        .unwrap_or(StringConversion::Identity);
+                    match conversion {
+                        StringConversion::Identity => (compiled.value, compiled.is_owned()),
+                        _ => (self.apply_string_conversion(compiled, &conversion)?, true),
                     }
                 }
             };
@@ -142,82 +147,75 @@ impl Cg<'_, '_, '_> {
         Ok(self.string_temp(result))
     }
 
-    /// Convert a value to a string
-    pub(super) fn value_to_string(&mut self, val: CompiledValue) -> CodegenResult<Value> {
-        if val.type_id == TypeId::STRING {
-            return Ok(val.value);
-        }
-
-        // Handle arrays
-        if self.arena().is_array(val.type_id) {
-            return self.call_runtime(RuntimeKey::ArrayI64ToString, &[val.value]);
-        }
-
-        // Handle nil type directly
-        if val.type_id.is_nil() {
-            return self.call_runtime(RuntimeKey::NilToString, &[]);
-        }
-
-        // Handle optionals (unions with nil variant)
-        if let Some(nil_idx) = self.find_nil_variant(val.type_id) {
-            let arena = self.arena();
-            if let Some(variants) = arena.unwrap_union(val.type_id) {
-                let variants_vec: Vec<TypeId> = variants.to_vec();
-                return self.optional_to_string_by_id(val.value, &variants_vec, nil_idx);
+    /// Apply a sema-annotated string conversion to a compiled value.
+    ///
+    /// Reads the `StringConversion` annotation (set by sema) and applies the
+    /// corresponding runtime call or branching logic. No type inspection needed.
+    fn apply_string_conversion(
+        &mut self,
+        val: CompiledValue,
+        conversion: &StringConversion,
+    ) -> CodegenResult<Value> {
+        match conversion {
+            StringConversion::Identity => Ok(val.value),
+            StringConversion::I64ToString => {
+                let extended = if val.ty.is_int() && val.ty != types::I64 {
+                    sextend_const(self.builder, types::I64, val.value)
+                } else {
+                    val.value
+                };
+                self.call_runtime(RuntimeKey::I64ToString, &[extended])
+            }
+            StringConversion::I128ToString => {
+                self.call_runtime(RuntimeKey::I128ToString, &[val.value])
+            }
+            StringConversion::F32ToString => {
+                self.call_runtime(RuntimeKey::F32ToString, &[val.value])
+            }
+            StringConversion::F64ToString => {
+                self.call_runtime(RuntimeKey::F64ToString, &[val.value])
+            }
+            StringConversion::F128ToString => {
+                let bits = self
+                    .builder
+                    .ins()
+                    .bitcast(types::I128, MemFlags::new(), val.value);
+                self.call_runtime(RuntimeKey::F128ToString, &[bits])
+            }
+            StringConversion::BoolToString => {
+                self.call_runtime(RuntimeKey::BoolToString, &[val.value])
+            }
+            StringConversion::NilToString => self.call_runtime(RuntimeKey::NilToString, &[]),
+            StringConversion::ArrayToString => {
+                self.call_runtime(RuntimeKey::ArrayI64ToString, &[val.value])
+            }
+            StringConversion::OptionalToString {
+                nil_index,
+                variants,
+                inner_conversion,
+            } => self.optional_to_string(val.value, variants, *nil_index, inner_conversion),
+            StringConversion::UnionToString { variants } => {
+                self.union_to_string(val.value, variants)
             }
         }
-
-        // Handle general union types (non-optional, e.g. bool | i64)
-        {
-            let arena = self.arena();
-            if let Some(variants) = arena.unwrap_union(val.type_id) {
-                let variants_vec: Vec<TypeId> = variants.to_vec();
-                return self.union_to_string(val.value, &variants_vec);
-            }
-        }
-
-        let (runtime, call_val) = if val.ty == types::F64 {
-            (RuntimeKey::F64ToString, val.value)
-        } else if val.ty == types::F32 {
-            (RuntimeKey::F32ToString, val.value)
-        } else if val.ty == types::F128 {
-            let bits = self
-                .builder
-                .ins()
-                .bitcast(types::I128, MemFlags::new(), val.value);
-            (RuntimeKey::F128ToString, bits)
-        } else if val.ty == types::I128 {
-            (RuntimeKey::I128ToString, val.value)
-        } else if val.ty == types::I8 {
-            (RuntimeKey::BoolToString, val.value)
-        } else {
-            let extended = if val.ty.is_int() && val.ty != types::I64 {
-                sextend_const(self.builder, types::I64, val.value)
-            } else {
-                val.value
-            };
-            (RuntimeKey::I64ToString, extended)
-        };
-
-        self.call_runtime(runtime, &[call_val])
     }
 
-    /// Convert an optional (union with nil) to string using TypeId variants
-    fn optional_to_string_by_id(
+    /// Convert an optional (union with nil) to string.
+    ///
+    /// Branches on the tag: nil -> "nil", otherwise extracts the inner value
+    /// and applies the sema-annotated inner conversion.
+    fn optional_to_string(
         &mut self,
         ptr: Value,
         variants: &[TypeId],
         nil_idx: usize,
+        inner_conversion: &StringConversion,
     ) -> CodegenResult<Value> {
-        // Check if the tag equals nil
         let is_nil = self.tag_eq(ptr, nil_idx as i64);
 
-        // Create blocks for branching
         let nil_block = self.builder.create_block();
         let some_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
-
-        // Add block param for the result string
         self.builder
             .append_block_param(merge_block, self.ptr_type());
 
@@ -228,19 +226,15 @@ impl Cg<'_, '_, '_> {
         let nil_str = self.call_runtime(RuntimeKey::NilToString, &[])?;
         self.builder.ins().jump(merge_block, &[nil_str.into()]);
 
-        // Some case: extract inner value and convert to string
+        // Some case: extract inner value and apply annotated conversion
         self.switch_to_block(some_block);
-        // Find the non-nil variant using arena
-        let arena = self.arena();
         let inner_type_id = variants
             .iter()
-            .find(|&&v| !arena.is_nil(v))
+            .find(|v| !v.is_nil())
             .copied()
-            .expect("INTERNAL: non-sentinel union must have non-nil variant");
-        let inner_cr_type = type_id_to_cranelift(inner_type_id, arena, self.ptr_type());
+            .expect("INTERNAL: optional must have non-nil variant");
+        let inner_cr_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
 
-        // Only load payload if inner type has data (non-zero size).
-        // Sentinel-only unions have no payload bytes allocated at offset 8.
         let inner_size = self.type_size(inner_type_id);
         let inner_val = if inner_size > 0 {
             self.builder.ins().load(
@@ -254,33 +248,35 @@ impl Cg<'_, '_, '_> {
         };
 
         let inner_compiled = CompiledValue::new(inner_val, inner_cr_type, inner_type_id);
-        let some_str = self.value_to_string(inner_compiled)?;
+        let some_str = self.apply_string_conversion(inner_compiled, inner_conversion)?;
         self.builder.ins().jump(merge_block, &[some_str.into()]);
 
-        // Merge and return result
         self.switch_to_block(merge_block);
         Ok(self.builder.block_params(merge_block)[0])
     }
 
-    /// Convert a general (non-optional) union value to string.
-    /// Loads the tag, branches on each variant, converts each to string, then merges.
-    fn union_to_string(&mut self, ptr: Value, variants: &[TypeId]) -> CodegenResult<Value> {
+    /// Convert a general union value to string.
+    ///
+    /// Branches on the tag for each variant, applies the sema-annotated
+    /// conversion for each, then merges results.
+    fn union_to_string(
+        &mut self,
+        ptr: Value,
+        variants: &[(TypeId, StringConversion)],
+    ) -> CodegenResult<Value> {
         let merge_block = self.builder.create_block();
         self.builder
             .append_block_param(merge_block, self.ptr_type());
 
-        // For each variant, create a block that extracts and converts
-        let mut variant_blocks: Vec<_> = Vec::new();
-        for _ in variants {
-            variant_blocks.push(self.builder.create_block());
-        }
-        // Load the tag
+        let variant_blocks: Vec<_> = (0..variants.len())
+            .map(|_| self.builder.create_block())
+            .collect();
+
         let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
 
         // Chain of brif checks for each variant
         for (i, &block) in variant_blocks.iter().enumerate() {
             if i == variants.len() - 1 {
-                // Last variant: unconditional jump
                 self.builder.ins().jump(block, &[]);
             } else {
                 let expected = self.iconst_cached(types::I8, i as i64);
@@ -291,12 +287,12 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        // For each variant block, extract the payload and convert to string
+        // For each variant block, extract payload and apply annotated conversion
         for (i, &block) in variant_blocks.iter().enumerate() {
             self.switch_to_block(block);
-            let variant_type_id = variants[i];
-            let arena = self.arena();
-            let inner_cr_type = type_id_to_cranelift(variant_type_id, arena, self.ptr_type());
+            let (variant_type_id, ref conv) = variants[i];
+            let inner_cr_type =
+                type_id_to_cranelift(variant_type_id, self.arena(), self.ptr_type());
             let inner_size = self.type_size(variant_type_id);
 
             let inner_val = if inner_size > 0 {
@@ -311,7 +307,7 @@ impl Cg<'_, '_, '_> {
             };
 
             let inner_compiled = CompiledValue::new(inner_val, inner_cr_type, variant_type_id);
-            let str_val = self.value_to_string(inner_compiled)?;
+            let str_val = self.apply_string_conversion(inner_compiled, conv)?;
             self.builder.ins().jump(merge_block, &[str_val.into()]);
         }
 

@@ -617,6 +617,7 @@ impl Analyzer {
             iterable_kinds: sub_analyzer.results.iterable_kinds,
             coercion_kinds: sub_analyzer.results.coercion_kinds,
             lowered_optional_chains: sub_analyzer.results.lowered_optional_chains,
+            string_conversions: sub_analyzer.results.string_conversions,
             ..Default::default()
         };
         self.ctx.merged_expr_data.borrow_mut().merge(module_data);
@@ -1026,6 +1027,13 @@ impl Analyzer {
         self.results.lowered_optional_chains.extend(
             sub.results
                 .lowered_optional_chains
+                .iter()
+                .map(|(&k, v)| (k, v.clone())),
+        );
+        // Merge string_conversions
+        self.results.string_conversions.extend(
+            sub.results
+                .string_conversions
                 .iter()
                 .map(|(&k, v)| (k, v.clone())),
         );

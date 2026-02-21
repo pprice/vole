@@ -462,6 +462,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get_coercion_kind(expr_node_id)
     }
 
+    /// Get the string conversion annotation for an interpolation expression part.
+    #[inline]
+    pub fn get_string_conversion(
+        &self,
+        expr_node_id: vole_frontend::NodeId,
+    ) -> Option<&vole_sema::StringConversion> {
+        self.env
+            .analyzed
+            .query()
+            .expr_data()
+            .get_string_conversion(expr_node_id)
+    }
+
     /// Get type metadata map
     #[inline]
     pub fn type_metadata(&self) -> &'ctx TypeMetadataMap {

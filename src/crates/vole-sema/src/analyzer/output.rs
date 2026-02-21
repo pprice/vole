@@ -113,6 +113,9 @@ pub(crate) struct AnalysisResults {
     /// Lowered optional chains: obj?.field lowered to synthetic match expressions.
     /// Maps optional chain expression NodeId -> synthetic MatchExpr for codegen.
     pub lowered_optional_chains: FxHashMap<NodeId, vole_frontend::MatchExpr>,
+    /// String conversion annotations for interpolation expression parts.
+    /// Maps interpolation expression NodeId -> StringConversion for codegen dispatch.
+    pub string_conversions: FxHashMap<NodeId, crate::expression_data::StringConversion>,
 }
 
 /// Function and global variable symbol tables.

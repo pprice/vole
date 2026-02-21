@@ -52,10 +52,14 @@ impl Analyzer {
             ExprKind::BoolLiteral(_) => Ok(ArenaTypeId::BOOL),
             ExprKind::StringLiteral(_) => Ok(ArenaTypeId::STRING),
             ExprKind::InterpolatedString(parts) => {
-                // Type-check each embedded expression so their types are recorded for codegen
+                // Type-check each embedded expression and annotate string conversions
                 for part in parts {
-                    if let StringPart::Expr(expr) = part {
-                        self.check_expr(expr, interner)?;
+                    if let StringPart::Expr(inner_expr) = part {
+                        let part_type = self.check_expr(inner_expr, interner)?;
+                        let conversion = self.classify_string_conversion(part_type);
+                        self.results
+                            .string_conversions
+                            .insert(inner_expr.id, conversion);
                     }
                 }
                 Ok(ArenaTypeId::STRING)
