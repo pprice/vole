@@ -100,6 +100,14 @@ impl FunctionRegistry {
         self.entries.get(key.0 as usize)?.func_id
     }
 
+    /// Get the NameId for a FunctionKey, if it was registered with a qualified name.
+    pub fn name_id(&self, key: FunctionKey) -> Option<NameId> {
+        match &self.entries.get(key.0 as usize)?.name {
+            FunctionName::Qualified(name_id) => Some(*name_id),
+            _ => None,
+        }
+    }
+
     pub fn set_return_type(&mut self, key: FunctionKey, ty: TypeId) {
         if let Some(entry) = self.entries.get_mut(key.0 as usize) {
             entry.return_type = Some(ty);

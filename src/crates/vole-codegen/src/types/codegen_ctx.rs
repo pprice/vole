@@ -7,6 +7,35 @@ use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
 use crate::FunctionRegistry;
+use vole_identity::NameId;
+
+/// A monomorphized instance that was lazily declared on FuncId miss and needs
+/// compilation later. The pending queue is drained by a fixpoint loop in a
+/// follow-up ticket (vol-4nd6).
+#[derive(Debug, Clone)]
+pub enum PendingMonomorph {
+    /// A free-function monomorph (from monomorph_cache).
+    #[allow(dead_code)] // consumed by the fixpoint compilation loop (vol-4nd6)
+    Function(vole_sema::generic::MonomorphInstance),
+    /// A class instance method monomorph (from class_method_monomorph_cache).
+    #[allow(dead_code)] // consumed by the fixpoint compilation loop (vol-4nd6)
+    ClassMethod(vole_sema::generic::ClassMethodMonomorphInstance),
+    /// A static method monomorph (from static_method_monomorph_cache).
+    #[allow(dead_code)] // consumed by the fixpoint compilation loop (vol-4nd6)
+    StaticMethod(vole_sema::generic::StaticMethodMonomorphInstance),
+}
+
+impl PendingMonomorph {
+    /// Get the mangled name NameId of this pending monomorph.
+    #[allow(dead_code)] // used by the fixpoint compilation loop (vol-4nd6)
+    pub fn mangled_name(&self) -> NameId {
+        match self {
+            PendingMonomorph::Function(inst) => inst.mangled_name,
+            PendingMonomorph::ClassMethod(inst) => inst.mangled_name,
+            PendingMonomorph::StaticMethod(inst) => inst.mangled_name,
+        }
+    }
+}
 
 /// Codegen context - mutable infrastructure for code generation.
 ///
@@ -21,6 +50,10 @@ pub struct CodegenCtx<'a> {
     pub module: &'a mut JITModule,
     /// Function identity and ID management
     pub func_registry: &'a mut FunctionRegistry,
+    /// Monomorphs lazily declared on demand (FuncId miss fallback).
+    /// These have been declared (assigned a FuncId) but not yet compiled.
+    /// Drained by the fixpoint compilation loop.
+    pub pending_monomorphs: Vec<PendingMonomorph>,
 }
 
 impl<'a> CodegenCtx<'a> {
@@ -28,6 +61,7 @@ impl<'a> CodegenCtx<'a> {
         Self {
             module,
             func_registry,
+            pending_monomorphs: Vec::new(),
         }
     }
 

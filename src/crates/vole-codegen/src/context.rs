@@ -10,8 +10,8 @@ use std::rc::Rc;
 use cranelift::prelude::{
     Block, FunctionBuilder, Imm64, InstBuilder, MemFlags, Type, Value, Variable, types,
 };
-use cranelift_codegen::ir::{InstructionData, Opcode};
-use cranelift_module::{FuncId, Module};
+use cranelift_codegen::ir::{AbiParam, InstructionData, Opcode};
+use cranelift_module::{FuncId, Linkage, Module};
 use rustc_hash::FxHashMap;
 
 use crate::callable_registry::CallableBackendPreference;
@@ -20,13 +20,14 @@ use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId};
+use vole_sema::generic::MonomorphInstanceTrait;
 use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::TypeId;
 
 use super::lambda::CaptureBinding;
 use super::rc_cleanup::RcScopeStack;
 use super::rc_state::RcState;
-use super::types::{CodegenCtx, CompileEnv, CompiledValue, TypeMetadataMap};
+use super::types::{CodegenCtx, CompileEnv, CompiledValue, PendingMonomorph, TypeMetadataMap};
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -530,7 +531,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let symbol_name = self.env.state.ptr_to_symbol.get(&(native_ptr as usize))?;
         let module = self.codegen_ctx.jit_module();
         let func_id = module
-            .declare_function(symbol_name, cranelift_module::Linkage::Import, sig)
+            .declare_function(symbol_name, Linkage::Import, sig)
             .ok()?;
         Some(module.declare_func_in_func(func_id, self.builder.func))
     }
@@ -712,12 +713,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Runtime function helpers ==========
 
-    /// Get a function ID by key
-    pub fn func_id(&self, key: FunctionKey) -> CodegenResult<FuncId> {
+    /// Get a function ID by key, with demand-driven monomorph declaration fallback.
+    ///
+    /// If the key has no FuncId yet, checks the entity_registry monomorph caches
+    /// for a matching instance. If found, declares the function on the spot and
+    /// queues it for later compilation via `pending_monomorphs`.
+    pub fn func_id(&mut self, key: FunctionKey) -> CodegenResult<FuncId> {
+        // Fast path: already declared
+        if let Some(id) = self.funcs_ref().func_id(key) {
+            return Ok(id);
+        }
+        // Demand-driven fallback: try to declare from monomorph caches
+        if let Some(id) = self.try_demand_declare_monomorph(key) {
+            return Ok(id);
+        }
         let display = self.funcs_ref().display(key);
-        self.funcs_ref()
-            .func_id(key)
-            .ok_or_else(|| CodegenError::not_found("function id", format!("{key:?} ({display})")))
+        Err(CodegenError::not_found(
+            "function id",
+            format!("{key:?} ({display})"),
+        ))
     }
 
     /// Get a function reference for calling
@@ -875,6 +889,156 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.ins().call(func_ref, &coerced);
         Ok(())
     }
+
+    // ========== Demand-driven monomorph declaration ==========
+
+    /// Attempt to declare a monomorphized function on demand when its FuncId is missing.
+    ///
+    /// Searches the entity_registry's monomorph caches (monomorph_cache,
+    /// class_method_monomorph_cache, static_method_monomorph_cache) for an instance
+    /// whose `mangled_name` matches the key's NameId. If found, builds a Cranelift
+    /// signature from the instance's codegen-ready data, declares the function in the
+    /// JIT module, and queues it in `pending_monomorphs` for later compilation.
+    ///
+    /// Returns `Some(FuncId)` if the monomorph was found and declared, `None` otherwise.
+    fn try_demand_declare_monomorph(&mut self, key: FunctionKey) -> Option<FuncId> {
+        // Only qualified (NameId-based) keys can be monomorphs
+        let name_id = self.codegen_ctx.func_registry.name_id(key)?;
+
+        let registry = self.registry();
+        let arena = self.arena();
+        let ptr_type = self.ptr_type();
+
+        // Search free-function monomorph cache
+        for (_, instance) in registry.monomorph_cache.instances() {
+            if instance.mangled_name == name_id {
+                let mangled_name = self.query().display_name(instance.mangled_name);
+                let sig = build_monomorph_signature(
+                    instance.func_type(),
+                    false,
+                    arena,
+                    registry,
+                    ptr_type,
+                    self.codegen_ctx.module,
+                );
+                let func_id = self
+                    .codegen_ctx
+                    .module
+                    .declare_function(&mangled_name, Linkage::Export, &sig)
+                    .unwrap_or_else(|e| {
+                        panic!("demand-declare monomorph '{}': {:?}", mangled_name, e)
+                    });
+                self.codegen_ctx.func_registry.set_func_id(key, func_id);
+                self.codegen_ctx
+                    .func_registry
+                    .set_return_type(key, instance.func_type.return_type_id);
+                self.codegen_ctx
+                    .pending_monomorphs
+                    .push(PendingMonomorph::Function(instance.clone()));
+                tracing::debug!(
+                    name = %mangled_name,
+                    "demand-declared free-function monomorph"
+                );
+                return Some(func_id);
+            }
+        }
+
+        // Search class method monomorph cache
+        for (_, instance) in registry.class_method_monomorph_cache.instances() {
+            if instance.mangled_name == name_id {
+                // Skip external methods — they are runtime functions
+                if instance.external_info.is_some() {
+                    continue;
+                }
+                // Skip abstract templates (TypeParam substitutions)
+                if instance
+                    .substitutions
+                    .values()
+                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+                {
+                    continue;
+                }
+                let mangled_name = self.query().display_name(instance.mangled_name);
+                let sig = build_monomorph_signature(
+                    instance.func_type(),
+                    true, // class methods have self param
+                    arena,
+                    registry,
+                    ptr_type,
+                    self.codegen_ctx.module,
+                );
+                let func_id = self
+                    .codegen_ctx
+                    .module
+                    .declare_function(&mangled_name, Linkage::Export, &sig)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "demand-declare class method monomorph '{}': {:?}",
+                            mangled_name, e
+                        )
+                    });
+                self.codegen_ctx.func_registry.set_func_id(key, func_id);
+                self.codegen_ctx
+                    .func_registry
+                    .set_return_type(key, instance.func_type.return_type_id);
+                self.codegen_ctx
+                    .pending_monomorphs
+                    .push(PendingMonomorph::ClassMethod(instance.clone()));
+                tracing::debug!(
+                    name = %mangled_name,
+                    "demand-declared class method monomorph"
+                );
+                return Some(func_id);
+            }
+        }
+
+        // Search static method monomorph cache
+        for (_, instance) in registry.static_method_monomorph_cache.instances() {
+            if instance.mangled_name == name_id {
+                // Skip abstract templates (TypeParam substitutions)
+                if instance
+                    .substitutions
+                    .values()
+                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+                {
+                    continue;
+                }
+                let mangled_name = self.query().display_name(instance.mangled_name);
+                let sig = build_monomorph_signature(
+                    instance.func_type(),
+                    false, // static methods don't have self param
+                    arena,
+                    registry,
+                    ptr_type,
+                    self.codegen_ctx.module,
+                );
+                let func_id = self
+                    .codegen_ctx
+                    .module
+                    .declare_function(&mangled_name, Linkage::Export, &sig)
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "demand-declare static method monomorph '{}': {:?}",
+                            mangled_name, e
+                        )
+                    });
+                self.codegen_ctx.func_registry.set_func_id(key, func_id);
+                self.codegen_ctx
+                    .func_registry
+                    .set_return_type(key, instance.func_type.return_type_id);
+                self.codegen_ctx
+                    .pending_monomorphs
+                    .push(PendingMonomorph::StaticMethod(instance.clone()));
+                tracing::debug!(
+                    name = %mangled_name,
+                    "demand-declared static method monomorph"
+                );
+                return Some(func_id);
+            }
+        }
+
+        None
+    }
 }
 
 impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
@@ -953,4 +1117,80 @@ pub(crate) fn resolve_external_names(
         .last_segment_str(external_info.native_name)
         .ok_or_else(|| CodegenError::internal("native_name NameId has no segment"))?;
     Ok((module_path, native_name))
+}
+
+/// Build a Cranelift signature for a monomorph instance using its codegen-ready data.
+///
+/// Replicates the logic of `Compiler::build_signature_from_type_ids` but operates
+/// on raw references to the arena, registry, and JIT module — no `Compiler` needed.
+///
+/// Handles:
+/// - Self pointer for class methods (`has_self_param`)
+/// - Fallible return types (multi-value: tag + payload, or 3-register for wide i128)
+/// - Struct return types (multi-value for small structs, sret pointer for large structs)
+fn build_monomorph_signature(
+    func_type: &vole_sema::types::FunctionType,
+    has_self_param: bool,
+    arena: &vole_sema::type_arena::TypeArena,
+    registry: &vole_sema::EntityRegistry,
+    ptr_type: Type,
+    module: &cranelift_jit::JITModule,
+) -> cranelift::prelude::Signature {
+    use crate::types::{is_wide_fallible, type_id_to_cranelift};
+
+    let mut sig = module.make_signature();
+
+    // Self pointer for class methods
+    if has_self_param {
+        sig.params.push(AbiParam::new(ptr_type));
+    }
+
+    // Parameter types
+    for &param_type_id in &func_type.params_id {
+        let cranelift_type = type_id_to_cranelift(param_type_id, arena, ptr_type);
+        sig.params.push(AbiParam::new(cranelift_type));
+    }
+
+    let return_type_id = func_type.return_type_id;
+
+    // Fallible return type -> multi-value returns
+    if arena.unwrap_fallible(return_type_id).is_some() {
+        if is_wide_fallible(return_type_id, arena) {
+            // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
+            sig.returns.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+        } else {
+            // Fallible returns: (tag: i64, payload: i64)
+            sig.returns.push(AbiParam::new(types::I64));
+            sig.returns.push(AbiParam::new(types::I64));
+        }
+        return sig;
+    }
+
+    // Struct return type -> multi-value or sret
+    if let Some(field_count) =
+        crate::structs::struct_flat_slot_count(return_type_id, arena, registry)
+    {
+        if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
+            // Small struct: return in registers, padded to MAX_SMALL_STRUCT_FIELDS
+            for _ in 0..crate::MAX_SMALL_STRUCT_FIELDS {
+                sig.returns.push(AbiParam::new(types::I64));
+            }
+        } else {
+            // Large struct: sret convention — hidden first param for return buffer
+            // Insert the sret pointer before all other params
+            sig.params.insert(0, AbiParam::new(ptr_type));
+            sig.returns.push(AbiParam::new(ptr_type));
+        }
+        return sig;
+    }
+
+    // Normal return type
+    if !return_type_id.is_void() {
+        let ret_cranelift = type_id_to_cranelift(return_type_id, arena, ptr_type);
+        sig.returns.push(AbiParam::new(ret_cranelift));
+    }
+
+    sig
 }
