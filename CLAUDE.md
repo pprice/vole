@@ -3,17 +3,29 @@ Vole is a fast little scripting language, with fancy types
 
 This project uses a CLI ticket system for task management. Run `tk help` when you need to use it.
 
-## Rules
+## General Rules
 
 <IMPORTANT>
-- Use tools to investigate (run tests, use debuggers)
-- Use tools to modify where needed (e.g. ast-grep)
-- When planning work, do not write markdown files, use tickets with `tk`
-- NEVER "simplfy" tests in `vole/test`; you are hiding  bugs doing so
-- NEVER assume "pre-existing failures", you likely broke it.
-- NEVER opt out of work, simplify, for think tasks are too complex, _especially_ from tickets
-- NEVER add new just file commands unless the user asks you to
-- If you take shortcuts, track them in tickets with `tk`
+  - Use tools to investigate (run tests, use debuggers)
+  - Use tools to modify where needed (e.g. ast-grep)
+  - When planning work, do not write markdown files, use tickets with `tk`
+  - NEVER "simplfy" tests in `vole/test`; you are hiding  bugs doing so
+  - NEVER assume "pre-existing failures", you likely broke it.
+  - NEVER opt out of work, simplify, for think tasks are too complex, _especially_ from tickets
+  - NEVER add new just file commands unless the user asks you to
+  - If you take shortcuts, track them in tickets with `tk`
+</IMPORTANT>
+
+## Project Rules
+
+<IMPORTANT>
+  - Parser: Syntax only.
+  - Sema: All type-driven decisions. Annotates, lowers, and normalizes. Codegen never reaches back into sema.
+  - Codegen: Instruction selection and memory layout only. Reads sema annotations, never re-detects types or
+    inspects interface names.
+  - Desugar early. when codegen needs type-specific behavior, add annotations/lowering in sema 
+    rather than type-detection special cases in codegen — codegen should read decisions, 
+    not make them.
 </IMPORTANT>
 
 
