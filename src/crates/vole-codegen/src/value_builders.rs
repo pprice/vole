@@ -37,17 +37,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a zero/default value of the given Cranelift type.
     ///
-    /// Used for empty match arms and other cases where a typed default is needed.
+    /// Used for empty match arms, loop variable initialization, and other cases
+    /// where a typed default is needed.
+    ///
+    /// Note: Cranelift's `iconst` does not support i128, so i128/f128 zeros are
+    /// created by sign-extending an i64 zero.
     pub fn typed_zero(&mut self, ty: cranelift::prelude::Type) -> Value {
         if ty == types::F64 {
             self.builder.ins().f64const(0.0)
         } else if ty == types::F32 {
             self.builder.ins().f32const(0.0)
+        } else if ty == types::I128 {
+            let zero_i64 = self.iconst_cached(types::I64, 0);
+            sextend_const(self.builder, types::I128, zero_i64)
         } else if ty == types::F128 {
-            let zero_bits = self.iconst_cached(types::I128, 0);
+            let zero_i64 = self.iconst_cached(types::I64, 0);
+            let zero_i128 = sextend_const(self.builder, types::I128, zero_i64);
             self.builder
                 .ins()
-                .bitcast(types::F128, MemFlags::new(), zero_bits)
+                .bitcast(types::F128, MemFlags::new(), zero_i128)
         } else {
             self.iconst_cached(ty, 0)
         }

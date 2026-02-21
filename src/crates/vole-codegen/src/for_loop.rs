@@ -15,7 +15,6 @@ use vole_sema::IterableKind;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
-use crate::ops::sextend_const;
 
 /// Check if a block contains a `continue` statement (recursively).
 ///
@@ -80,14 +79,11 @@ impl Cg<'_, '_, '_> {
                 self.for_array(for_stmt)
             }
             IterableKind::Array { .. } => self.for_array(for_stmt),
-            IterableKind::String => self.for_string(for_stmt),
-            IterableKind::IteratorInterface { .. } => self.for_iterator(for_stmt),
-            IterableKind::CustomIterator { elem_type } => {
-                self.for_custom_iterator(for_stmt, elem_type)
-            }
-            IterableKind::CustomIterable { elem_type } => self.for_iterable(for_stmt, elem_type),
+            _ => self.for_runtime_iterator(for_stmt, kind),
         }
     }
+
+    // ===== Range loops =====
 
     /// Compile a for loop over a range.
     ///
@@ -230,7 +226,13 @@ impl Cg<'_, '_, '_> {
         Ok(false)
     }
 
-    /// Compile a for loop over an array
+    // ===== Array loops (index-based, not RuntimeIterator) =====
+
+    /// Compile a for loop over an array using direct index-based access.
+    ///
+    /// Kept separate from the RuntimeIterator path because arrays use optimized
+    /// direct element access with union/wide-type handling that the runtime
+    /// iterator API doesn't support.
     pub(crate) fn for_array(
         &mut self,
         for_stmt: &vole_frontend::ast::ForStmt,
@@ -275,22 +277,7 @@ impl Cg<'_, '_, '_> {
         // type (e.g. bool -> i8, i32, etc.) so we must narrow after the call.
         let elem_cr_type = self.cranelift_type(elem_type_id);
         let elem_var = self.builder.declare_var(elem_cr_type);
-        let elem_zero = if elem_cr_type == types::F64 {
-            self.builder.ins().f64const(0.0)
-        } else if elem_cr_type == types::F32 {
-            self.builder.ins().f32const(0.0)
-        } else if elem_cr_type == types::F128 {
-            let zero_bits = sextend_const(self.builder, types::I128, zero);
-            self.builder
-                .ins()
-                .bitcast(types::F128, MemFlags::new(), zero_bits)
-        } else if elem_cr_type == types::I128 {
-            sextend_const(self.builder, types::I128, zero)
-        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
-            self.iconst_cached(elem_cr_type, 0)
-        } else {
-            zero
-        };
+        let elem_zero = self.typed_zero(elem_cr_type);
         self.builder.def_var(elem_var, elem_zero);
         self.vars
             .insert(for_stmt.var_name, (elem_var, elem_type_id));
@@ -372,49 +359,194 @@ impl Cg<'_, '_, '_> {
         Ok(false)
     }
 
-    /// Compile a for loop over a user-defined Iterable<T> type.
+    // ===== RuntimeIterator loops (unified path) =====
+
+    /// Unified for-loop over any RuntimeIterator-based iterable.
     ///
-    /// Calls `.iter()` on the iterable to get an Iterator<T>, wraps it via InterfaceIter,
-    /// then iterates using the standard RuntimeIterator loop.
-    pub(crate) fn for_iterable(
+    /// Handles String, Iterator<T> interfaces, custom Iterator<T> implementors,
+    /// and custom Iterable<T> types. All paths produce a RuntimeIterator, then
+    /// share a single iter_next loop.
+    fn for_runtime_iterator(
         &mut self,
         for_stmt: &vole_frontend::ast::ForStmt,
-        elem_type_id: TypeId,
+        kind: IterableKind,
     ) -> CodegenResult<bool> {
-        let iterable = self.expr(&for_stmt.iterable)?;
+        // Phase 1: Evaluate iterable and convert to RuntimeIterator.
+        // The setup returns the actual elem_type_id extracted from the compiled
+        // iterator's type, which is more reliable than IterableKind's elem_type
+        // in monomorphized generic contexts where sema annotations may be stale.
+        let (iter_val, elem_type_id, needs_elem_rc_dec) =
+            self.setup_runtime_iter(for_stmt, kind)?;
 
-        // Look up the .iter() method for this type and call it.
-        let iter_value = self.call_iterable_iter_method(&iterable, elem_type_id)?;
+        // Phase 2: Set up stack slot and element variable
+        let slot_data = self.alloc_stack(8);
+        let ptr_type = self.ptr_type();
+        let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
 
-        // iter_value is an Iterator<T> interface. Wrap in RcIterator via InterfaceIter
-        // so the native loop dispatch works.
-        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter_value.value])?;
-        // Release the caller's reference to the interface data_ptr
-        let mut iter_iface = iter_value;
-        self.consume_rc_value(&mut iter_iface)?;
+        let elem_cr_type = self.cranelift_type(elem_type_id);
+        let elem_var = self.builder.declare_var(elem_cr_type);
+        let elem_zero = self.typed_zero(elem_cr_type);
+        self.builder.def_var(elem_var, elem_zero);
+        self.vars
+            .insert(for_stmt.var_name, (elem_var, elem_type_id));
 
-        let runtime_iter_type_id = self
-            .arena()
-            .lookup_runtime_iterator(elem_type_id)
-            .unwrap_or(TypeId::STRING);
-        let iter = CompiledValue::owned(wrapped, types::I64, runtime_iter_type_id);
+        // Phase 3: The iter_next loop
+        let header = self.builder.create_block();
+        let body_block = self.builder.create_block();
+        let continue_block = self.builder.create_block();
+        let exit_block = self.builder.create_block();
 
-        // From here, identical to the for_iterator loop body.
-        self.for_iterator_from_runtime_iter(for_stmt, iter, elem_type_id)
+        self.builder.ins().jump(header, &[]);
+
+        // Header: call iter_next, check result
+        self.switch_to_block(header);
+        let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter_val, slot_addr])?;
+        self.emit_brif(has_value, body_block, exit_block);
+
+        // Body: load value from stack slot, convert type, run body
+        self.switch_to_block(body_block);
+        let raw_val = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), slot_addr, 0);
+        let elem_val = self.convert_iter_elem(raw_val, elem_type_id, elem_cr_type)?;
+        self.builder.def_var(elem_var, elem_val);
+
+        self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
+
+        // Continue: optionally free per-iteration element, then loop back
+        self.switch_to_block(continue_block);
+        if needs_elem_rc_dec {
+            let cur_elem = self.builder.use_var(elem_var);
+            self.call_runtime_void(RuntimeKey::RcDec, &[cur_elem])?;
+        }
+        self.builder.ins().jump(header, &[]);
+
+        self.finalize_for_loop(header, body_block, continue_block, exit_block);
+        self.pop_rc_scope_with_cleanup(None)?;
+
+        Ok(false)
     }
 
-    /// Compile a for loop over a custom Iterator<T> implementor.
+    /// Evaluate the iterable expression and convert it to a RuntimeIterator.
     ///
-    /// Boxes the class instance as an Iterator<T> interface, wraps it via InterfaceIter,
-    /// then iterates using the standard RuntimeIterator loop.
-    pub(crate) fn for_custom_iterator(
+    /// Returns `(iter_value, elem_type_id, needs_elem_rc_dec)`:
+    /// - `iter_value`: raw Cranelift Value for the RuntimeIterator pointer
+    /// - `elem_type_id`: element type extracted from the compiled iterator's type
+    /// - `needs_elem_rc_dec`: true for string chars (each char is a new allocation)
+    fn setup_runtime_iter(
+        &mut self,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        kind: IterableKind,
+    ) -> CodegenResult<(Value, TypeId, bool)> {
+        let hint_elem_type = match kind {
+            IterableKind::String => TypeId::STRING,
+            IterableKind::IteratorInterface { elem_type } => elem_type,
+            IterableKind::CustomIterator { elem_type } => elem_type,
+            IterableKind::CustomIterable { elem_type } => elem_type,
+            IterableKind::Range | IterableKind::Array { .. } => {
+                unreachable!("Range/Array handled before setup_runtime_iter")
+            }
+        };
+        match kind {
+            IterableKind::String => {
+                let (v, rc) = self.setup_string_iter(for_stmt)?;
+                Ok((v, TypeId::STRING, rc))
+            }
+            IterableKind::IteratorInterface { .. } => {
+                let (v, elem) = self.setup_interface_iter(for_stmt, hint_elem_type)?;
+                Ok((v, elem, false))
+            }
+            IterableKind::CustomIterator { .. } => {
+                let v = self.setup_custom_iterator(for_stmt, hint_elem_type)?;
+                Ok((v, hint_elem_type, false))
+            }
+            IterableKind::CustomIterable { .. } => {
+                let v = self.setup_custom_iterable(for_stmt, hint_elem_type)?;
+                Ok((v, hint_elem_type, false))
+            }
+            IterableKind::Range | IterableKind::Array { .. } => {
+                unreachable!("Range/Array handled before setup_runtime_iter")
+            }
+        }
+    }
+
+    /// Set up a string chars RuntimeIterator. Tracks source string and iterator
+    /// in RC scope. Returns (iter_val, needs_elem_rc_dec=true).
+    fn setup_string_iter(
+        &mut self,
+        for_stmt: &vole_frontend::ast::ForStmt,
+    ) -> CodegenResult<(Value, bool)> {
+        let string_val = self.expr(&for_stmt.iterable)?;
+        let iter_val = self.call_runtime(RuntimeKey::StringCharsIter, &[string_val.value])?;
+
+        self.push_rc_scope();
+        if string_val.is_owned() && self.rc_state(string_val.type_id).needs_cleanup() {
+            let tracked_string = self
+                .builder
+                .declare_var(self.cranelift_type(string_val.type_id));
+            self.builder.def_var(tracked_string, string_val.value);
+            let drop_flag = self.register_rc_local(tracked_string, string_val.type_id);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        }
+        let iter_type_id = self
+            .arena()
+            .lookup_runtime_iterator(TypeId::STRING)
+            .unwrap_or(TypeId::STRING);
+        let tracked_iter = self.builder.declare_var(self.cranelift_type(iter_type_id));
+        self.builder.def_var(tracked_iter, iter_val);
+        let iter_drop_flag = self.register_rc_local(tracked_iter, iter_type_id);
+        crate::rc_cleanup::set_drop_flag_live(self, iter_drop_flag);
+
+        // Each char is a new allocation that needs per-element cleanup.
+        Ok((iter_val, true))
+    }
+
+    /// Set up an Iterator<T> interface or RuntimeIterator for iteration.
+    /// Wraps interface values via InterfaceIter; RuntimeIterators pass through.
+    ///
+    /// Returns `(iter_value, elem_type_id)` where elem_type_id is extracted from
+    /// the iterator's actual type, not the IterableKind hint (which may be stale
+    /// in monomorphized generic contexts).
+    fn setup_interface_iter(
+        &mut self,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        hint_elem_type: TypeId,
+    ) -> CodegenResult<(Value, TypeId)> {
+        let mut iter = self.expr(&for_stmt.iterable)?;
+
+        // Extract elem_type from the iterator's actual type, falling back to hint
+        let (elem_type_id, is_interface_iter) = {
+            let arena = self.arena();
+            if let Some(elem_id) = arena.unwrap_runtime_iterator(iter.type_id) {
+                (elem_id, false)
+            } else if let Some((_, type_args)) = arena.unwrap_interface(iter.type_id) {
+                (type_args.first().copied().unwrap_or(hint_elem_type), true)
+            } else {
+                (hint_elem_type, false)
+            }
+        };
+
+        if is_interface_iter {
+            let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter.value])?;
+            self.consume_rc_value(&mut iter)?;
+            iter = self.make_runtime_iter_value(wrapped, elem_type_id);
+        }
+
+        self.push_rc_scope();
+        self.track_iter_in_rc_scope(&iter);
+        Ok((iter.value, elem_type_id))
+    }
+
+    /// Set up a custom Iterator<T> implementor by boxing to interface, then
+    /// wrapping via InterfaceIter.
+    fn setup_custom_iterator(
         &mut self,
         for_stmt: &vole_frontend::ast::ForStmt,
         elem_type_id: TypeId,
-    ) -> CodegenResult<bool> {
+    ) -> CodegenResult<Value> {
         let iterable = self.expr(&for_stmt.iterable)?;
 
-        // Look up the Iterator<T> interface type (already interned by sema)
         let iterator_type_def = self
             .name_table()
             .well_known
@@ -427,23 +559,93 @@ impl Cg<'_, '_, '_> {
                 CodegenError::internal("Iterator<T> interface type not found in arena")
             })?;
 
-        // Box the class instance as Iterator<T>
         let boxed = self.box_interface_value(iterable, interface_type_id)?;
-
-        // Wrap in RcIterator via InterfaceIter so the native loop dispatch works.
         let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[boxed.value])?;
-        // Release the caller's reference to the boxed interface data_ptr
         let mut boxed_iface = boxed;
         self.consume_rc_value(&mut boxed_iface)?;
 
+        let iter = self.make_runtime_iter_value(wrapped, elem_type_id);
+        self.push_rc_scope();
+        self.track_iter_in_rc_scope(&iter);
+        Ok(iter.value)
+    }
+
+    /// Set up a custom Iterable<T> by calling .iter() to get Iterator<T>,
+    /// then wrapping via InterfaceIter.
+    fn setup_custom_iterable(
+        &mut self,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        elem_type_id: TypeId,
+    ) -> CodegenResult<Value> {
+        let iterable = self.expr(&for_stmt.iterable)?;
+        let iter_value = self.call_iterable_iter_method(&iterable, elem_type_id)?;
+
+        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter_value.value])?;
+        let mut iter_iface = iter_value;
+        self.consume_rc_value(&mut iter_iface)?;
+
+        let iter = self.make_runtime_iter_value(wrapped, elem_type_id);
+        self.push_rc_scope();
+        self.track_iter_in_rc_scope(&iter);
+        Ok(iter.value)
+    }
+
+    // ===== Helpers =====
+
+    /// Create a CompiledValue for a RuntimeIterator wrapping the given raw pointer.
+    fn make_runtime_iter_value(&self, raw: Value, elem_type_id: TypeId) -> CompiledValue {
         let runtime_iter_type_id = self
             .arena()
             .lookup_runtime_iterator(elem_type_id)
             .unwrap_or(TypeId::STRING);
-        let iter = CompiledValue::owned(wrapped, types::I64, runtime_iter_type_id);
+        CompiledValue::owned(raw, types::I64, runtime_iter_type_id)
+    }
 
-        // From here, identical to the for_iterator loop body.
-        self.for_iterator_from_runtime_iter(for_stmt, iter, elem_type_id)
+    /// Track an owned iterator in the current RC scope for cleanup.
+    fn track_iter_in_rc_scope(&mut self, iter: &CompiledValue) {
+        if iter.is_owned() && self.rc_state(iter.type_id).needs_cleanup() {
+            let tracked_var = self.builder.declare_var(self.cranelift_type(iter.type_id));
+            self.builder.def_var(tracked_var, iter.value);
+            let drop_flag = self.register_rc_local(tracked_var, iter.type_id);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        }
+    }
+
+    /// Convert a raw i64 value from iter_next to the element's Cranelift type.
+    fn convert_iter_elem(
+        &mut self,
+        raw_val: Value,
+        elem_type_id: TypeId,
+        elem_cr_type: Type,
+    ) -> CodegenResult<Value> {
+        let is_i128 = elem_type_id == self.arena().i128();
+        let is_f128 = elem_type_id == self.arena().f128();
+        if is_i128 || is_f128 {
+            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
+            if is_f128 {
+                Ok(self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide_bits))
+            } else {
+                Ok(wide_bits)
+            }
+        } else if elem_cr_type == types::F64 {
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F64, MemFlags::new(), raw_val))
+        } else if elem_cr_type == types::F32 {
+            let i32_val = self.builder.ins().ireduce(types::I32, raw_val);
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F32, MemFlags::new(), i32_val))
+        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            Ok(self.builder.ins().ireduce(elem_cr_type, raw_val))
+        } else {
+            Ok(raw_val)
+        }
     }
 
     /// Call the `.iter()` method on an Iterable value, returning the Iterator<T> interface.
@@ -493,245 +695,5 @@ impl Cg<'_, '_, '_> {
         self.field_cache.clear();
 
         self.call_result(call_inst, return_type_id)
-    }
-
-    /// Compile a for loop over an iterator
-    pub(crate) fn for_iterator(
-        &mut self,
-        for_stmt: &vole_frontend::ast::ForStmt,
-    ) -> CodegenResult<bool> {
-        let mut iter = self.expr(&for_stmt.iterable)?;
-
-        // Get element type using arena methods
-        let (elem_type_id, is_interface_iter) = {
-            let arena = self.arena();
-            if let Some(elem_id) = arena.unwrap_runtime_iterator(iter.type_id) {
-                (elem_id, false)
-            } else if let Some((_, type_args)) = arena.unwrap_interface(iter.type_id) {
-                (
-                    type_args.first().copied().unwrap_or_else(|| arena.i64()),
-                    true,
-                )
-            } else {
-                (arena.i64(), false)
-            }
-        };
-
-        // For interface-boxed iterators (user-defined Iterator<T> implementations),
-        // wrap in an RcIterator via vole_interface_iter so the native loop dispatch works.
-        if is_interface_iter {
-            let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter.value])?;
-            // vole_interface_iter rc_inc'd the data_ptr inside the boxed interface,
-            // so the iterator now owns its own reference. Release the caller's
-            // reference to the boxed interface data_ptr to avoid leaking it.
-            self.consume_rc_value(&mut iter)?;
-            // Track as RuntimeIterator<T> so loop cleanup can register and release
-            // it like any other RC temporary.
-            let runtime_iter_type_id = self
-                .arena()
-                .lookup_runtime_iterator(elem_type_id)
-                .unwrap_or(TypeId::STRING);
-            iter = CompiledValue::owned(wrapped, types::I64, runtime_iter_type_id);
-        }
-
-        self.for_iterator_from_runtime_iter(for_stmt, iter, elem_type_id)
-    }
-
-    /// Shared loop body for iterating a RuntimeIterator value.
-    ///
-    /// Used by both `for_iterator` (after interface wrapping) and `for_iterable`
-    /// (after calling .iter() and wrapping). Handles RC tracking, the
-    /// header/body/continue/exit block structure, and element type conversion.
-    fn for_iterator_from_runtime_iter(
-        &mut self,
-        for_stmt: &vole_frontend::ast::ForStmt,
-        iter: CompiledValue,
-        elem_type_id: TypeId,
-    ) -> CodegenResult<bool> {
-        // Track owned iterator temporaries in a dedicated scope so they are
-        // cleaned up even if the loop body returns early.
-        self.push_rc_scope();
-        if iter.is_owned() && self.rc_state(iter.type_id).needs_cleanup() {
-            let tracked_var = self.builder.declare_var(self.cranelift_type(iter.type_id));
-            self.builder.def_var(tracked_var, iter.value);
-            let drop_flag = self.register_rc_local(tracked_var, iter.type_id);
-            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
-        }
-
-        // Create a stack slot for the out_value parameter
-        let slot_data = self.alloc_stack(8);
-        let ptr_type = self.ptr_type();
-        let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
-
-        // Initialize element variable with its correct Cranelift type.
-        // ArrayIterNext returns i64, but the element may be a different type
-        // (e.g. f64, f32, bool) so we must narrow/bitcast after the call,
-        // matching what for_array does.
-        let elem_cr_type = self.cranelift_type(elem_type_id);
-        let elem_var = self.builder.declare_var(elem_cr_type);
-        let zero_i64 = self.iconst_cached(types::I64, 0);
-        let elem_zero = if elem_cr_type == types::F64 {
-            self.builder.ins().f64const(0.0)
-        } else if elem_cr_type == types::F32 {
-            self.builder.ins().f32const(0.0)
-        } else if elem_cr_type == types::F128 {
-            let zero_bits = sextend_const(self.builder, types::I128, zero_i64);
-            self.builder
-                .ins()
-                .bitcast(types::F128, MemFlags::new(), zero_bits)
-        } else if elem_cr_type == types::I128 {
-            sextend_const(self.builder, types::I128, zero_i64)
-        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
-            self.iconst_cached(elem_cr_type, 0)
-        } else {
-            zero_i64
-        };
-        self.builder.def_var(elem_var, elem_zero);
-        self.vars
-            .insert(for_stmt.var_name, (elem_var, elem_type_id));
-
-        let header = self.builder.create_block();
-        let body_block = self.builder.create_block();
-        let continue_block = self.builder.create_block();
-        let exit_block = self.builder.create_block();
-
-        self.builder.ins().jump(header, &[]);
-
-        // Header: call iter_next, check result
-        self.switch_to_block(header);
-        let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter.value, slot_addr])?;
-        // `has_value` is nonzero when the iterator produced a value;
-        // `brif` treats nonzero as true, so branch directly without icmp_imm.
-        self.emit_brif(has_value, body_block, exit_block);
-
-        // Body: load value from stack slot, narrow to element type, run body
-        self.switch_to_block(body_block);
-        let raw_val = self
-            .builder
-            .ins()
-            .load(types::I64, MemFlags::new(), slot_addr, 0);
-        // Convert from i64 storage to the element's actual Cranelift type
-        let elem_val = if elem_type_id == self.arena().i128() || elem_type_id == self.arena().f128()
-        {
-            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
-            if elem_type_id == self.arena().f128() {
-                self.builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_bits)
-            } else {
-                wide_bits
-            }
-        } else if elem_cr_type == types::F64 {
-            self.builder
-                .ins()
-                .bitcast(types::F64, MemFlags::new(), raw_val)
-        } else if elem_cr_type == types::F32 {
-            let i32_val = self.builder.ins().ireduce(types::I32, raw_val);
-            self.builder
-                .ins()
-                .bitcast(types::F32, MemFlags::new(), i32_val)
-        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
-            self.builder.ins().ireduce(elem_cr_type, raw_val)
-        } else {
-            raw_val
-        };
-        self.builder.def_var(elem_var, elem_val);
-
-        self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
-
-        // Continue: jump back to header
-        self.switch_to_block(continue_block);
-        self.builder.ins().jump(header, &[]);
-
-        self.finalize_for_loop(header, body_block, continue_block, exit_block);
-
-        self.pop_rc_scope_with_cleanup(None)?;
-
-        Ok(false)
-    }
-
-    /// Compile a for loop over a string (iterating characters)
-    pub(crate) fn for_string(
-        &mut self,
-        for_stmt: &vole_frontend::ast::ForStmt,
-    ) -> CodegenResult<bool> {
-        // Compile the string expression
-        let string_val = self.expr(&for_stmt.iterable)?;
-
-        // Create a string chars iterator from the string
-        let iter_val = self.call_runtime(RuntimeKey::StringCharsIter, &[string_val.value])?;
-
-        // Track owned temporaries in a dedicated scope so early returns from
-        // the loop body still clean up the iterator and source string.
-        self.push_rc_scope();
-        if string_val.is_owned() && self.rc_state(string_val.type_id).needs_cleanup() {
-            let tracked_string = self
-                .builder
-                .declare_var(self.cranelift_type(string_val.type_id));
-            self.builder.def_var(tracked_string, string_val.value);
-            let drop_flag = self.register_rc_local(tracked_string, string_val.type_id);
-            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
-        }
-        let iter_type_id = self
-            .arena()
-            .lookup_runtime_iterator(TypeId::STRING)
-            .unwrap_or(TypeId::STRING);
-        let tracked_iter = self.builder.declare_var(self.cranelift_type(iter_type_id));
-        self.builder.def_var(tracked_iter, iter_val);
-        let iter_drop_flag = self.register_rc_local(tracked_iter, iter_type_id);
-        crate::rc_cleanup::set_drop_flag_live(self, iter_drop_flag);
-
-        // Create a stack slot for the out_value parameter
-        let slot_data = self.alloc_stack(8);
-        let ptr_type = self.ptr_type();
-        let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
-
-        // Initialize element variable (each character is returned as a string)
-        let elem_var = self.builder.declare_var(types::I64);
-        let zero = self.iconst_cached(types::I64, 0);
-        self.builder.def_var(elem_var, zero);
-        self.vars
-            .insert(for_stmt.var_name, (elem_var, TypeId::STRING));
-
-        let header = self.builder.create_block();
-        let body_block = self.builder.create_block();
-        let continue_block = self.builder.create_block();
-        let exit_block = self.builder.create_block();
-
-        self.builder.ins().jump(header, &[]);
-
-        // Header: call iter_next, check result
-        self.switch_to_block(header);
-        let has_value = self.call_runtime(RuntimeKey::ArrayIterNext, &[iter_val, slot_addr])?;
-        // `has_value` is nonzero when the iterator produced a value;
-        // `brif` treats nonzero as true, so branch directly without icmp_imm.
-        self.emit_brif(has_value, body_block, exit_block);
-
-        // Body: load value from stack slot, run body
-        self.switch_to_block(body_block);
-        let elem_val = self
-            .builder
-            .ins()
-            .load(types::I64, MemFlags::new(), slot_addr, 0);
-        self.builder.def_var(elem_var, elem_val);
-
-        self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
-
-        // Continue: free the current iteration's char string before looping back.
-        // Each iteration produces a new owned string from string_chars_next.
-        self.switch_to_block(continue_block);
-        let cur_elem = self.builder.use_var(elem_var);
-        self.call_runtime_void(RuntimeKey::RcDec, &[cur_elem])?;
-        self.builder.ins().jump(header, &[]);
-
-        self.finalize_for_loop(header, body_block, continue_block, exit_block);
-
-        // No dangling char string on exit: the exit branch is taken when
-        // iter_next returns 0 (no new value loaded), and the continue block
-        // already freed the previous iteration's char string.
-
-        self.pop_rc_scope_with_cleanup(None)?;
-
-        Ok(false)
     }
 }
