@@ -30,10 +30,10 @@ update:
 pre-commit:
     @just ci pre-commit
 
-# Bump CalVer version (YYYY.M.{incremental}) and generate RELEASE_NOTES.md
+# Bump CalVer version (YYYY.M.{incremental})
 bump:
     @just/scripts/bump-version.sh
-    @echo ""
-    @cat RELEASE_NOTES.md
-    @echo "---"
-    @echo "Review RELEASE_NOTES.md, edit if needed, then commit and push."
+
+# Generate release notes for a commit range (default: last tag..HEAD)
+release-notes range="":
+    @just/scripts/release-notes.sh {{range}}

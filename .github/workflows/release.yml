@@ -135,40 +135,40 @@ jobs:
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
           cd release && sha256sum * > checksums.sha256
 
+      - name: Generate changelog
+        run: |
+          TAG="${{ needs.validate.outputs.tag }}"
+          PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -2 | tail -1)
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" "$PREV_TAG".."$TAG" --no-merges)
+          else
+            COMMITS=$(git log --pretty=format:"- %s" --no-merges -20)
+          fi
+          echo "$COMMITS" > /tmp/changelog.txt
+
       - name: Build release notes
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
-          if [ -f RELEASE_NOTES.md ]; then
-            NOTES=$(cat RELEASE_NOTES.md)
-          else
-            echo "::warning::RELEASE_NOTES.md not found, using commit log"
-            TAG="${{ needs.validate.outputs.tag }}"
-            PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -2 | tail -1)
-            if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
-              NOTES=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG".."$TAG" --no-merges)
-            else
-              NOTES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
-            fi
-          fi
-
-          cat > /tmp/release_body.md << ENDOFBODY
-          ${NOTES}
-
-          ### Checksums
-          \`\`\`
-          $(cat release/checksums.sha256)
-          \`\`\`
-
-          ### Installation
-
-          Download the archive for your platform, extract it, and add the directory to your PATH:
-
-          \`\`\`bash
-          tar xzf vole-${VERSION}-linux-x86_64.tar.gz
-          export PATH="\$PWD/vole-${VERSION}-linux-x86_64:\$PATH"
-          vole version
-          \`\`\`
-          ENDOFBODY
+          {
+            echo "## Vole ${VERSION}"
+            echo ""
+            cat /tmp/changelog.txt
+            echo ""
+            echo "### Checksums"
+            echo '```'
+            cat release/checksums.sha256
+            echo '```'
+            echo ""
+            echo "### Installation"
+            echo ""
+            echo "Download the archive for your platform, extract, and add to PATH:"
+            echo ""
+            echo '```bash'
+            echo "tar xzf vole-${VERSION}-linux-x86_64.tar.gz"
+            echo "export PATH=\"\$PWD/vole-${VERSION}-linux-x86_64:\$PATH\""
+            echo "vole version"
+            echo '```'
+          } > /tmp/release_body.md
 
       - name: Create release
         run: |
