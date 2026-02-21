@@ -152,12 +152,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(value, ty, type_id)
     }
 
-    /// Create a nil value
-    pub fn nil_value(&mut self) -> CompiledValue {
-        let value = self.iconst_cached(types::I8, 0);
-        CompiledValue::new(value, types::I8, TypeId::NIL)
-    }
-
     // ========== Tag helpers ==========
 
     /// Load a tag byte from a union/optional pointer and compare to expected value.

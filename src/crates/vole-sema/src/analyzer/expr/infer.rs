@@ -104,7 +104,7 @@ impl Analyzer {
                 self.check_field_access_expr(field_access, interner)
             }
             ExprKind::OptionalChain(opt_chain) => {
-                self.check_optional_chain_expr(opt_chain, interner)
+                self.check_optional_chain_expr(opt_chain, expr.id, interner)
             }
             ExprKind::MethodCall(method_call) => {
                 self.check_method_call_expr(expr, method_call, interner)

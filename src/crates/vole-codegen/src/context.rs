@@ -402,6 +402,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get_synthetic_it_lambda(node_id)
     }
 
+    /// Get the lowered match expression for an optional chain, if sema synthesized one.
+    #[inline]
+    pub fn get_lowered_optional_chain(
+        &self,
+        node_id: vole_frontend::NodeId,
+    ) -> Option<&vole_frontend::MatchExpr> {
+        self.env
+            .analyzed
+            .expression_data
+            .get_lowered_optional_chain(node_id)
+    }
+
     /// Get substituted return type for generic method calls.
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {

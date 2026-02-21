@@ -453,7 +453,7 @@ impl Analyzer {
 
     /// Compute IsCheckResult for a type pattern.
     /// Determines whether the check can be resolved at compile time or needs a runtime tag check.
-    fn compute_type_pattern_check_result(
+    pub(crate) fn compute_type_pattern_check_result(
         &self,
         pattern_type_id: ArenaTypeId,
         scrutinee_type_id: ArenaTypeId,

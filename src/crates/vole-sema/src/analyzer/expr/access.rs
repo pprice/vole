@@ -175,6 +175,7 @@ impl Analyzer {
     pub(super) fn check_optional_chain_expr(
         &mut self,
         opt_chain: &OptionalChainExpr,
+        expr_id: NodeId,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let object_type_id = self.check_expr(&opt_chain.object, interner)?;
@@ -222,11 +223,24 @@ impl Analyzer {
         {
             // Result is always optional (field_type | nil)
             // But if field type is already optional (contains nil), don't double-wrap
-            if self.is_optional_id(field_type_id) {
-                Ok(field_type_id)
+            let result_type_id = if self.is_optional_id(field_type_id) {
+                field_type_id
             } else {
-                Ok(self.ty_optional_id(field_type_id))
-            }
+                self.ty_optional_id(field_type_id)
+            };
+
+            // --- Lower to synthetic match expression for codegen ---
+            // Build: match obj { nil => nil, $oc => $oc.field }
+            self.lower_optional_chain_to_match(
+                opt_chain,
+                expr_id,
+                object_type_id,
+                inner_type_id,
+                field_type_id,
+                interner,
+            );
+
+            Ok(result_type_id)
         } else {
             // Get type name for error message using type_def_id
             let name_id = self.entity_registry().name_id(type_def_id);
@@ -244,6 +258,119 @@ impl Analyzer {
             );
             Ok(self.ty_invalid_traced_id("unknown_optional_field"))
         }
+    }
+
+    /// Lower an optional chain expression `obj?.field` to a synthetic match expression:
+    /// ```text
+    /// match obj {
+    ///     nil => nil,
+    ///     $oc => $oc.field,
+    /// }
+    /// ```
+    /// The synthetic match is stored in `lowered_optional_chains` for codegen to compile
+    /// via the standard match compilation path.
+    fn lower_optional_chain_to_match(
+        &mut self,
+        opt_chain: &OptionalChainExpr,
+        expr_id: NodeId,
+        object_type_id: ArenaTypeId,
+        inner_type_id: ArenaTypeId,
+        field_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) {
+        use vole_frontend::ast::*;
+
+        let module = expr_id.module;
+        let span = opt_chain.field_span;
+
+        // Look up pre-interned symbols
+        let nil_sym = interner.lookup("nil").expect("nil must be interned");
+        let oc_sym = interner.lookup("$oc").expect("$oc must be interned");
+
+        // Generate fresh NodeIds for all synthetic AST nodes
+        let nil_pattern_id = self.diagnostics.fresh_node_id(module);
+        let nil_body_id = self.diagnostics.fresh_node_id(module);
+        let nil_arm_id = self.diagnostics.fresh_node_id(module);
+        let binding_pattern_id = self.diagnostics.fresh_node_id(module);
+        let binding_ident_id = self.diagnostics.fresh_node_id(module);
+        let field_access_body_id = self.diagnostics.fresh_node_id(module);
+        let field_arm_id = self.diagnostics.fresh_node_id(module);
+
+        // --- Register type annotations for codegen ---
+
+        // 1. Nil pattern: IsCheckResult so codegen emits a tag check
+        let nil_type_id = self.type_arena().nil();
+        let is_check_result = self.compute_type_pattern_check_result(nil_type_id, object_type_id);
+        self.record_is_check_result(nil_pattern_id, is_check_result);
+
+        // 2. Nil body: register as nil type so codegen's identifier() produces i8(0)
+        self.results.expr_types.insert(nil_body_id, nil_type_id);
+
+        // 3. Binding identifier in field access body: register narrowed type
+        //    so codegen's identifier() extracts union payload
+        self.results
+            .expr_types
+            .insert(binding_ident_id, inner_type_id);
+
+        // 4. Field access body: register the field's type
+        self.results
+            .expr_types
+            .insert(field_access_body_id, field_type_id);
+
+        // --- Build the synthetic MatchExpr AST ---
+
+        // Arm 1: nil => nil
+        let nil_arm = MatchArm {
+            id: nil_arm_id,
+            pattern: Pattern {
+                id: nil_pattern_id,
+                kind: PatternKind::Identifier { name: nil_sym },
+                span,
+            },
+            guard: None,
+            body: Expr {
+                id: nil_body_id,
+                kind: ExprKind::Identifier(nil_sym),
+                span,
+            },
+            span,
+        };
+
+        // Arm 2: $oc => $oc.field
+        let field_arm = MatchArm {
+            id: field_arm_id,
+            pattern: Pattern {
+                id: binding_pattern_id,
+                kind: PatternKind::Identifier { name: oc_sym },
+                span,
+            },
+            guard: None,
+            body: Expr {
+                id: field_access_body_id,
+                kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                    object: Expr {
+                        id: binding_ident_id,
+                        kind: ExprKind::Identifier(oc_sym),
+                        span,
+                    },
+                    field: opt_chain.field,
+                    field_span: opt_chain.field_span,
+                })),
+                span,
+            },
+            span,
+        };
+
+        let match_expr = MatchExpr {
+            scrutinee: opt_chain.object.clone(),
+            arms: vec![nil_arm, field_arm],
+            span,
+        };
+
+        // Store the lowered match for codegen
+        self.results
+            .lowered_optional_chains
+            .insert(expr_id, match_expr);
     }
 
     pub(super) fn check_method_call_expr(

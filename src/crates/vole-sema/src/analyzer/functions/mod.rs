@@ -227,13 +227,14 @@ impl Analyzer {
         // If this function is a generator (has yield and Iterator<T> return type),
         // store the element type on the FunctionDef so codegen can read it directly.
         if self.env.has_yield
-            && let Some(elem_type) = self.env.current_generator_element_type {
-                let func_id = self.entity_registry().function_by_name(name_id);
-                if let Some(func_id) = func_id {
-                    self.entity_registry_mut()
-                        .set_generator_element_type(func_id, elem_type);
-                }
+            && let Some(elem_type) = self.env.current_generator_element_type
+        {
+            let func_id = self.entity_registry().function_by_name(name_id);
+            if let Some(func_id) = func_id {
+                self.entity_registry_mut()
+                    .set_generator_element_type(func_id, elem_type);
             }
+        }
 
         // Restore scope
         self.pop_scope();

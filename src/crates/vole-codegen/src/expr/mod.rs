@@ -104,7 +104,14 @@ impl Cg<'_, '_, '_> {
                 Ok(self.mark_rc_owned(result))
             }
             ExprKind::FieldAccess(fa) => self.field_access(fa),
-            ExprKind::OptionalChain(oc) => self.optional_chain(oc, expr.id),
+            ExprKind::OptionalChain(_) => {
+                // Optional chains are lowered to match expressions by sema.
+                let lowered = self
+                    .get_lowered_optional_chain(expr.id)
+                    .cloned()
+                    .expect("INTERNAL: optional chain must have lowered match from sema");
+                self.match_expr(&lowered, expr.id)
+            }
             ExprKind::MethodCall(mc) => {
                 let result = self.method_call(mc, expr.id)?;
                 Ok(self.mark_rc_owned(result))
@@ -230,8 +237,8 @@ impl Cg<'_, '_, '_> {
             self.mark_borrowed_if_rc(&mut cv);
             // Union variables with RC variants are managed by scope-level
             // union cleanup (UnionRcLocal). Mark them Borrowed so that
-            // optional_chain knows the inner payload will be dec'd at scope
-            // exit and does not emit a redundant rc_dec.
+            // match arm payload extraction knows the inner payload will be
+            // dec'd at scope exit and does not emit a redundant rc_dec.
             if cv.rc_lifecycle == RcLifecycle::Untracked
                 && self.rc_state(*type_id).union_variants().is_some()
             {

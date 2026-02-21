@@ -119,4 +119,19 @@ pub(crate) struct ModuleContext {
 pub(crate) struct Diagnostics {
     pub errors: Vec<TypeError>,
     pub warnings: Vec<TypeWarning>,
+    /// Counter for synthetic NodeIds (starts at a high base to avoid collisions
+    /// with parser-generated IDs). Used for lowered optional chains and other
+    /// compiler-generated AST nodes.
+    pub next_synthetic_id: u32,
+}
+
+impl Diagnostics {
+    /// Generate a fresh synthetic NodeId for compiler-generated AST nodes.
+    /// Uses a high base offset to avoid collisions with parser-generated IDs.
+    pub fn fresh_node_id(&mut self, module: ModuleId) -> NodeId {
+        const SYNTHETIC_BASE: u32 = u32::MAX / 2;
+        let id = NodeId::new(module, SYNTHETIC_BASE + self.next_synthetic_id);
+        self.next_synthetic_id += 1;
+        id
+    }
 }

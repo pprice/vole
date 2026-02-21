@@ -76,7 +76,7 @@ impl Interner {
     pub fn seed_builtin_symbols(&mut self) {
         for name in [
             "i8", "i16", "i32", "i64", "i128", "u8", "u16", "u32", "u64", "f32", "f64", "bool",
-            "string", "range", "array", "Iterator", "Iterable",
+            "string", "range", "array", "Iterator", "Iterable", "nil", "$oc",
         ] {
             let _ = self.intern(name);
         }

@@ -110,6 +110,9 @@ pub(crate) struct AnalysisResults {
     /// Interface coercion annotations for method call receivers.
     /// Maps method call NodeId -> CoercionKind for codegen dispatch.
     pub coercion_kinds: FxHashMap<NodeId, crate::expression_data::CoercionKind>,
+    /// Lowered optional chains: obj?.field lowered to synthetic match expressions.
+    /// Maps optional chain expression NodeId -> synthetic MatchExpr for codegen.
+    pub lowered_optional_chains: FxHashMap<NodeId, vole_frontend::MatchExpr>,
 }
 
 /// Function and global variable symbol tables.

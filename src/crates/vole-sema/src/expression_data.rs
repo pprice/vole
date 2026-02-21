@@ -148,6 +148,13 @@ pub struct ExpressionData {
     /// a coercion (e.g., boxing a custom Iterator<T> as RuntimeIterator)
     /// before dispatching the method, without re-detecting types.
     pub(crate) coercion_kinds: FxHashMap<NodeId, CoercionKind>,
+    /// Lowered optional chains: obj?.field lowered to synthetic match expressions.
+    ///
+    /// When sema encounters `obj?.field`, it creates a synthetic match expression:
+    /// `match obj { nil => nil, _inner => _inner.field }` and stores it here.
+    /// Codegen compiles optional chains via the standard match path instead of
+    /// a separate optional_chain implementation.
+    pub(crate) lowered_optional_chains: FxHashMap<NodeId, vole_frontend::MatchExpr>,
 }
 
 impl ExpressionData {
@@ -182,6 +189,8 @@ impl ExpressionData {
         self.synthetic_it_lambdas.extend(other.synthetic_it_lambdas);
         self.iterable_kinds.extend(other.iterable_kinds);
         self.coercion_kinds.extend(other.coercion_kinds);
+        self.lowered_optional_chains
+            .extend(other.lowered_optional_chains);
     }
 
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
@@ -427,5 +436,10 @@ impl ExpressionData {
     /// Set the coercion kind for a method call expression's receiver.
     pub fn set_coercion_kind(&mut self, node: NodeId, kind: CoercionKind) {
         self.coercion_kinds.insert(node, kind);
+    }
+
+    /// Get the lowered match expression for an optional chain, if one was synthesized.
+    pub fn get_lowered_optional_chain(&self, node: NodeId) -> Option<&vole_frontend::MatchExpr> {
+        self.lowered_optional_chains.get(&node)
     }
 }
