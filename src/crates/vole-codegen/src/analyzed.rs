@@ -15,11 +15,11 @@ use vole_sema::{
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
     pub program: Program,
-    pub interner: Interner,
+    pub interner: Rc<Interner>,
     /// All expression-level metadata (types, method resolutions, generic calls)
     pub expression_data: ExpressionData,
     /// Parsed module programs for compiling pure Vole functions
-    pub module_programs: FxHashMap<String, (Program, Interner)>,
+    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     /// Compilation database converted for codegen use (Rc-shared, immutable)
     pub db: CodegenDb,
     /// The module ID for the main program (may differ from main_module when using shared cache)
@@ -44,7 +44,7 @@ impl AnalyzedProgram {
         };
         Self {
             program,
-            interner,
+            interner: Rc::new(interner),
             expression_data: output.expression_data,
             module_programs: output.module_programs,
             db,

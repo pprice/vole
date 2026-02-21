@@ -56,7 +56,8 @@ pub struct AnalysisOutput {
     /// All expression-level metadata (types, method resolutions, generic calls)
     pub expression_data: ExpressionData,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
-    pub module_programs: FxHashMap<String, (vole_frontend::ast::Program, vole_frontend::Interner)>,
+    pub module_programs:
+        FxHashMap<String, (vole_frontend::ast::Program, Rc<vole_frontend::Interner>)>,
     /// Shared compilation database containing all registries.
     /// Each field within CompilationDb has its own RefCell for independent borrows.
     pub db: Rc<CompilationDb>,

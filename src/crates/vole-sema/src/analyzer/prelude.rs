@@ -7,6 +7,8 @@
 //! Prelude files can use relative imports to import from sibling files
 //! (e.g., `let { Equatable } = import "./traits"`).
 
+use std::rc::Rc;
+
 use super::Analyzer;
 use crate::analysis_cache::CachedModule;
 use crate::errors::{SemanticError, SemanticWarning};
@@ -202,6 +204,7 @@ impl Analyzer {
 
         let mut prelude_interner = parser.into_interner();
         prelude_interner.seed_builtin_symbols();
+        let prelude_interner = Rc::new(prelude_interner);
 
         // Create a sub-analyzer that shares the same context
         let mut sub_analyzer = self.fork_for_prelude(prelude_module, module_info.path.clone());

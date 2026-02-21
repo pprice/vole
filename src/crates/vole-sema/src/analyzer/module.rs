@@ -821,10 +821,10 @@ impl Analyzer {
         // Phase 5f: Store the program and interner for compiling pure Vole functions.
         // IMPORTANT: This must happen AFTER sub_analyzer.analyze() because analysis
         // populates lambda capture lists (stored in RefCell<Vec<Capture>> on AST nodes).
-        self.ctx
-            .module_programs
-            .borrow_mut()
-            .insert(module_key.to_string(), (data.program, data.interner));
+        self.ctx.module_programs.borrow_mut().insert(
+            module_key.to_string(),
+            (data.program, Rc::new(data.interner)),
+        );
 
         // Phase 5g: Create TypeId from exports and register module metadata
         let exports_vec: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =

@@ -2063,6 +2063,7 @@ impl Compiler<'_> {
     /// the interner that owns those symbols, and the module_id (if from a module).
     ///
     /// Returns None if the interface or method is not found.
+    #[allow(clippy::type_complexity)]
     fn collect_interface_method_body(
         &self,
         interface_name_str: &str,
@@ -2070,7 +2071,7 @@ impl Compiler<'_> {
     ) -> Option<(
         vole_frontend::FuncBody,
         Vec<Symbol>,
-        Interner,
+        Rc<Interner>,
         Option<ModuleId>,
     )> {
         // Search main program first

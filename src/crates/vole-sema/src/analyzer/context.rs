@@ -84,7 +84,7 @@ pub(crate) struct AnalyzerContext {
     /// Cached module TypeIds by import path (avoids re-parsing).
     pub(crate) module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
     /// Parsed module programs and their interners (for compiling pure Vole functions).
-    pub(crate) module_programs: RefCell<FxHashMap<String, (Program, Interner)>>,
+    pub(crate) module_programs: RefCell<FxHashMap<String, (Program, Rc<Interner>)>>,
     /// Merged expression data from all sub-analyzers (module analysis results).
     /// Because NodeIds are now globally unique (they embed a ModuleId), results
     /// from different modules can be merged into a single flat map without collision.
@@ -135,7 +135,7 @@ impl AnalyzerContext {
     fn pre_merge_cached_prelude(
         cache: &Option<Rc<RefCell<ModuleCache>>>,
         merged_expr_data: &mut crate::expression_data::ExpressionData,
-        module_programs: &mut FxHashMap<String, (Program, Interner)>,
+        module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     ) -> bool {
         let Some(cache_rc) = cache else {
             return false;

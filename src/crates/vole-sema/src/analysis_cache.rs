@@ -51,8 +51,8 @@ pub enum IsCheckResult {
 pub struct CachedModule {
     /// Parsed program (needed for codegen)
     pub program: Program,
-    /// Interner with symbols from this module
-    pub interner: Interner,
+    /// Interner with symbols from this module (Rc-wrapped to avoid deep clones)
+    pub interner: Rc<Interner>,
     /// Expression types from analysis (NodeId → TypeId).
     /// TypeIds are valid because all analyzers share the same TypeArena.
     pub expr_types: FxHashMap<NodeId, TypeId>,

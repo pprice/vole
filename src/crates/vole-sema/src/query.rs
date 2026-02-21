@@ -36,7 +36,7 @@ pub struct ProgramQuery<'a> {
     name_table: &'a Rc<NameTable>,
     interner: &'a Interner,
     implement_registry: &'a ImplementRegistry,
-    module_programs: &'a FxHashMap<String, (Program, Interner)>,
+    module_programs: &'a FxHashMap<String, (Program, Rc<Interner>)>,
     /// Type arena (immutable reference)
     type_arena: &'a TypeArena,
 }
@@ -49,7 +49,7 @@ impl<'a> ProgramQuery<'a> {
         name_table: &'a Rc<NameTable>,
         interner: &'a Interner,
         implement_registry: &'a ImplementRegistry,
-        module_programs: &'a FxHashMap<String, (Program, Interner)>,
+        module_programs: &'a FxHashMap<String, (Program, Rc<Interner>)>,
         type_arena: &'a TypeArena,
     ) -> Self {
         Self {
@@ -830,6 +830,6 @@ impl<'a> ProgramQuery<'a> {
     pub fn module_program(&self, path: &str) -> Option<(&'a Program, &'a Interner)> {
         self.module_programs
             .get(path)
-            .map(|(prog, int)| (prog, int))
+            .map(|(prog, int)| (prog, &**int))
     }
 }
