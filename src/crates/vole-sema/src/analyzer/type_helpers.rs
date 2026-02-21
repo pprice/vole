@@ -5,7 +5,7 @@
 #![allow(unused)] // Some methods used conditionally
 
 use super::*;
-use crate::expression_data::StringConversion;
+use crate::node_map::StringConversion;
 use crate::type_arena::TypeId as ArenaTypeId;
 
 // ========== Sequence type info ==========

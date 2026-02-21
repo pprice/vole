@@ -6,7 +6,6 @@ pub mod compilation_db;
 pub mod entity_defs;
 pub mod entity_registry;
 pub mod errors;
-pub mod expression_data;
 pub mod generic;
 pub mod implement_registry;
 pub mod memory_kind;
@@ -35,16 +34,16 @@ pub use compilation_db::{CodegenDb, CompilationDb};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::{EntityRegistry, MethodDefBuilder};
 pub use errors::{SemanticError, SemanticWarning};
-pub use expression_data::{
-    CoercionKind, ExpressionData, ItLambdaInfo, IterableKind, LambdaAnalysis, OptionalChainInfo,
-    OptionalChainKind, StringConversion,
-};
 pub use implement_registry::{
     ImplTypeId, ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId,
 };
 pub use memory_kind::MemoryKind;
 pub use module::{LoadError, ModuleInfo, ModuleLoader};
 pub use node_map::NodeMap;
+pub use node_map::{
+    CoercionKind, ItLambdaInfo, IterableKind, LambdaAnalysis, LambdaDefaults, NodeData,
+    OptionalChainInfo, OptionalChainKind, StringConversion,
+};
 pub use numeric_model::{
     NumericCoercion, integer_result_type, numeric_coercion, numeric_result_type,
 };

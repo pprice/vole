@@ -7,7 +7,7 @@ mod destructuring;
 mod error_handling;
 
 use super::*;
-use crate::expression_data::IterableKind;
+use crate::node_map::IterableKind;
 use crate::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {

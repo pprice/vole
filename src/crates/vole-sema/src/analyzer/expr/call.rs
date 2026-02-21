@@ -1,6 +1,6 @@
 use super::super::*;
-use crate::expression_data::LambdaDefaults;
 use crate::implement_registry::TypeMappingKind;
+use crate::node_map::LambdaDefaults;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{NameId, Namer};

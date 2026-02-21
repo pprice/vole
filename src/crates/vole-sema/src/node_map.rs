@@ -1,27 +1,193 @@
 //! Vec-backed per-node metadata store.
 //!
-//! `NodeMap` replaces the 16 separate `FxHashMap<NodeId, T>` maps in
-//! [`ExpressionData`](crate::expression_data::ExpressionData) with a single
-//! `FxHashMap<ModuleId, Vec<NodeData>>`. Because `NodeId` embeds a `ModuleId`
-//! and a sequential `local` counter, lookup is O(1): hash the module, index
-//! the vec.
+//! `NodeMap` is the single source of truth for all per-node metadata produced
+//! by semantic analysis. It maps `ModuleId -> Vec<NodeData>`, where each
+//! `NodeId`'s embedded `ModuleId` selects the vec and its `local` field
+//! indexes into it, giving O(1) lookup.
 //!
 //! Both sema writes and codegen reads go through `NodeMap`. Sub-analyzer
 //! results are merged directly into the shared `NodeMap` on `AnalyzerContext`,
 //! using `NodeMap::merge()` which moves each module's `Vec<NodeData>` in O(1).
+//!
+//! This module also defines the supporting enum/struct types that are stored
+//! as fields of `NodeData`: `IterableKind`, `StringConversion`, `CoercionKind`,
+//! `OptionalChainKind`, `OptionalChainInfo`, `LambdaAnalysis`, `LambdaDefaults`,
+//! and `ItLambdaInfo`.
 
 use rustc_hash::FxHashMap;
 
 use crate::analysis_cache::IsCheckResult;
-use crate::expression_data::{
-    CoercionKind, ItLambdaInfo, IterableKind, LambdaAnalysis, LambdaDefaults, OptionalChainInfo,
-    StringConversion,
-};
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
-use vole_frontend::NodeId;
+use vole_frontend::{Capture, LambdaPurity, NodeId, Symbol};
 use vole_identity::ModuleId;
+
+// ---------------------------------------------------------------------------
+// Supporting types (previously in expression_data.rs)
+// ---------------------------------------------------------------------------
+
+/// Classification of a for-loop's iterable, annotated by sema.
+///
+/// Codegen uses this to dispatch to the correct loop compilation strategy
+/// without re-detecting types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IterableKind {
+    /// `0..10` or `0..=10` — range iteration (i64 loop var)
+    Range,
+    /// `[1, 2, 3]` — dynamic array iteration
+    Array { elem_type: TypeId },
+    /// `"hello"` — string character iteration (yields string)
+    String,
+    /// Direct `Iterator<T>` interface value (e.g. from a function returning Iterator<T>)
+    IteratorInterface { elem_type: TypeId },
+    /// Class/struct implementing `Iterator<T>` via extend
+    CustomIterator { elem_type: TypeId },
+    /// Class/struct implementing `Iterable<T>` — codegen calls `.iter()` first
+    CustomIterable { elem_type: TypeId },
+}
+
+/// String conversion annotation for interpolation parts, annotated by sema.
+///
+/// Codegen reads this to apply the correct conversion without type inspection.
+/// For union/optional types, per-variant conversion info is carried so codegen
+/// can generate branching code without re-detecting types.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StringConversion {
+    /// Already a string — no conversion needed.
+    Identity,
+    /// i64 (or smaller integer widths that sext to i64) → string
+    I64ToString,
+    /// i128 → string
+    I128ToString,
+    /// f32 → string
+    F32ToString,
+    /// f64 → string
+    F64ToString,
+    /// f128 → string (passed as i128 bits)
+    F128ToString,
+    /// bool → string
+    BoolToString,
+    /// nil → string (always "nil")
+    NilToString,
+    /// Array → string
+    ArrayToString,
+    /// Optional (union with nil) → branches on tag, converts inner value.
+    /// `nil_index` is the tag index for nil in the union variants.
+    /// `variants` is the full variant type list for codegen layout.
+    /// `inner_conversion` is the conversion for the non-nil variant.
+    OptionalToString {
+        nil_index: usize,
+        variants: Vec<TypeId>,
+        inner_conversion: Box<StringConversion>,
+    },
+    /// General union → branches on tag, converts each variant.
+    /// Each entry is `(variant_type_id, conversion)`.
+    UnionToString {
+        variants: Vec<(TypeId, StringConversion)>,
+    },
+}
+
+/// Interface coercion annotation, stored by sema at sites where a value
+/// needs boxing or wrapping to satisfy an interface type.
+///
+/// Codegen reads this to apply the correct coercion without re-detecting types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoercionKind {
+    /// Method call receiver is a custom `Iterator<T>` implementor.
+    /// Codegen should box to `Iterator<T>` interface, then wrap via
+    /// `InterfaceIter` into a `RuntimeIterator` before dispatching the method.
+    IteratorWrap { elem_type: TypeId },
+}
+
+/// What kind of optional chain this is (field access or method call).
+#[derive(Debug, Clone)]
+pub enum OptionalChainKind {
+    /// `obj?.field` — field access on the unwrapped inner value.
+    FieldAccess { field: Symbol },
+    /// `obj?.method(args)` — method call on the unwrapped inner value.
+    /// Method resolution and related metadata (coercion_kinds, class_method_generics,
+    /// substituted_return_types) are stored on the OptionalMethodCallExpr's own NodeId.
+    MethodCall,
+}
+
+/// Compact codegen-ready info for optional chain expressions (`?.`).
+///
+/// Replaces the previous approach of building a full synthetic MatchExpr AST
+/// with 6+ fresh NodeIds. Instead, stores just the essential type info needed
+/// for codegen to emit the nil-check branch directly.
+#[derive(Debug, Clone)]
+pub struct OptionalChainInfo {
+    /// Type of the scrutinee expression (e.g. `T | nil`).
+    pub object_type: TypeId,
+    /// Non-nil inner type after unwrapping the optional (e.g. `T`).
+    pub inner_type: TypeId,
+    /// Type of the body expression (field access result or method return type),
+    /// before wrapping as optional.
+    pub result_type: TypeId,
+    /// Whether this is a field access or method call.
+    pub kind: OptionalChainKind,
+}
+
+/// Analysis results for a lambda expression (captures and side effects).
+/// Stored in NodeMap keyed by the lambda expression's NodeId.
+#[derive(Debug, Clone, Default)]
+pub struct LambdaAnalysis {
+    pub captures: Vec<Capture>,
+    pub has_side_effects: bool,
+}
+
+impl LambdaAnalysis {
+    /// Compute the purity level of this lambda based on its captures and side effects.
+    ///
+    /// Returns the most restrictive purity classification:
+    /// - `HasSideEffects`: Calls print/println/assert or user functions
+    /// - `MutatesCaptures`: Assigns to captured variables
+    /// - `CapturesMutable`: Captures mutable variables (may observe external changes)
+    /// - `CapturesImmutable`: Captures exist, but none are mutable
+    /// - `Pure`: No captures, no side effects
+    pub fn purity(&self) -> LambdaPurity {
+        if self.has_side_effects {
+            return LambdaPurity::HasSideEffects;
+        }
+        if self.captures.iter().any(|c| c.is_mutated) {
+            return LambdaPurity::MutatesCaptures;
+        }
+        if self.captures.iter().any(|c| c.is_mutable) {
+            return LambdaPurity::CapturesMutable;
+        }
+        if !self.captures.is_empty() {
+            return LambdaPurity::CapturesImmutable;
+        }
+        LambdaPurity::Pure
+    }
+}
+
+/// Information about a lambda's parameter defaults.
+/// Used to support calling closures with default arguments.
+#[derive(Debug, Clone)]
+pub struct LambdaDefaults {
+    /// Number of required parameters (those without defaults)
+    pub required_params: usize,
+    /// NodeId of the lambda expression (for accessing default expressions in AST)
+    pub lambda_node_id: NodeId,
+}
+
+/// Compact codegen-ready info for implicit `it` lambdas.
+///
+/// When sema synthesizes `it => expr` for a call argument matching a function-type
+/// parameter, it analyzes the full synthetic lambda for type checking but stores
+/// only this compact representation. Codegen reconstructs a lambda from the original
+/// expression AST node with `it` bound as the single parameter.
+#[derive(Debug, Clone, Copy)]
+pub struct ItLambdaInfo {
+    /// Type of the `it` parameter.
+    pub param_type: TypeId,
+    /// Return type of the lambda.
+    pub return_type: TypeId,
+    /// The original expression's NodeId (used as the lambda body).
+    pub body_node: NodeId,
+}
 
 // ---------------------------------------------------------------------------
 // NodeData
@@ -172,7 +338,7 @@ impl NodeMap {
     }
 
     // ======================================================================
-    // Typed getters — mirror ExpressionData's public API
+    // Typed getters
     // ======================================================================
 
     // -- ty ----------------------------------------------------------------
@@ -414,72 +580,97 @@ impl NodeMap {
         }
     }
 
-    /// Convert this `NodeMap` into an [`ExpressionData`](crate::ExpressionData),
-    /// consuming `self`.
+    /// Merge cached module data directly into this `NodeMap`.
     ///
-    /// Used at the boundary between sema and codegen: sema writes to `NodeMap`,
-    /// then this method materialises the flat `FxHashMap`-based layout that
-    /// codegen currently expects.
-    pub fn into_expression_data(self) -> crate::ExpressionData {
-        use crate::ExpressionData;
-        let mut ed = ExpressionData::new();
-        for (module, nodes) in self.modules {
-            for (local, data) in nodes.into_iter().enumerate() {
+    /// Reads the per-node `FxHashMap` fields from a
+    /// [`CachedModule`](crate::analysis_cache::CachedModule) and inserts them
+    /// into the Vec-backed store.
+    pub fn merge_cached(&mut self, cached: &crate::analysis_cache::CachedModule) {
+        for (&node, &ty) in &cached.expr_types {
+            self.set_type(node, ty);
+        }
+        for (&node, method) in &cached.method_resolutions {
+            self.set_method(node, method.clone());
+        }
+        for (&node, key) in &cached.generic_calls {
+            self.set_generic(node, key.clone());
+        }
+        for (&node, key) in &cached.class_method_generics {
+            self.set_class_method_generic(node, key.clone());
+        }
+        for (&node, key) in &cached.static_method_generics {
+            self.set_static_method_generic(node, key.clone());
+        }
+        for (&node, &result) in &cached.is_check_results {
+            self.set_is_check_result(node, result);
+        }
+        for (&node, &ty) in &cached.declared_var_types {
+            self.set_declared_var_type(node, ty);
+        }
+    }
+
+    /// Extract the subset of per-node data needed by
+    /// [`CachedModule`](crate::analysis_cache::CachedModule) as individual
+    /// `FxHashMap`s.
+    ///
+    /// Returns `(types, methods, generics, class_method_generics,
+    /// static_method_generics, is_check_results, declared_var_types)`.
+    #[allow(clippy::type_complexity)]
+    pub fn extract_cached_maps(
+        &self,
+    ) -> (
+        FxHashMap<NodeId, TypeId>,
+        FxHashMap<NodeId, ResolvedMethod>,
+        FxHashMap<NodeId, MonomorphKey>,
+        FxHashMap<NodeId, ClassMethodMonomorphKey>,
+        FxHashMap<NodeId, StaticMethodMonomorphKey>,
+        FxHashMap<NodeId, IsCheckResult>,
+        FxHashMap<NodeId, TypeId>,
+    ) {
+        let mut types = FxHashMap::default();
+        let mut methods = FxHashMap::default();
+        let mut generics = FxHashMap::default();
+        let mut class_method_generics = FxHashMap::default();
+        let mut static_method_generics = FxHashMap::default();
+        let mut is_check_results = FxHashMap::default();
+        let mut declared_var_types = FxHashMap::default();
+
+        for (&module, nodes) in &self.modules {
+            for (local, data) in nodes.iter().enumerate() {
                 let node = NodeId::new(module, local as u32);
                 if let Some(ty) = data.ty {
-                    ed.set_type_handle(node, ty);
+                    types.insert(node, ty);
                 }
-                if let Some(method) = data.method {
-                    ed.set_method(node, *method);
+                if let Some(ref method) = data.method {
+                    methods.insert(node, (**method).clone());
                 }
-                if let Some(key) = data.generic {
-                    ed.set_generic(node, *key);
+                if let Some(ref key) = data.generic {
+                    generics.insert(node, (**key).clone());
                 }
-                if let Some(key) = data.class_method_generic {
-                    ed.set_class_method_generic(node, *key);
+                if let Some(ref key) = data.class_method_generic {
+                    class_method_generics.insert(node, (**key).clone());
                 }
-                if let Some(key) = data.static_method_generic {
-                    ed.set_static_method_generic(node, *key);
-                }
-                if let Some(ty) = data.substituted_return_type {
-                    ed.set_substituted_return_type(node, ty);
-                }
-                if let Some(defaults) = data.lambda_defaults {
-                    ed.set_lambda_defaults(node, defaults);
+                if let Some(ref key) = data.static_method_generic {
+                    static_method_generics.insert(node, (**key).clone());
                 }
                 if let Some(result) = data.is_check_result {
-                    ed.set_is_check_result(node, result);
+                    is_check_results.insert(node, result);
                 }
                 if let Some(ty) = data.declared_var_type {
-                    ed.set_declared_var_type(node, ty);
-                }
-                if let Some(analysis) = data.lambda_analysis {
-                    ed.set_lambda_analysis(node, *analysis);
-                }
-                if let Some(key) = data.intrinsic_key {
-                    ed.intrinsic_keys.insert(node, *key);
-                }
-                if let Some(mapping) = data.resolved_call_args {
-                    ed.set_resolved_call_args(node, *mapping);
-                }
-                if let Some(kind) = data.iterable_kind {
-                    ed.set_iterable_kind(node, kind);
-                }
-                if let Some(kind) = data.coercion_kind {
-                    ed.set_coercion_kind(node, kind);
-                }
-                if let Some(conv) = data.string_conversion {
-                    ed.set_string_conversion(node, *conv);
-                }
-                if let Some(info) = data.optional_chain {
-                    ed.lowered_optional_chains.insert(node, info);
-                }
-                if let Some(info) = data.it_lambda {
-                    ed.synthetic_it_lambdas.insert(node, info);
+                    declared_var_types.insert(node, ty);
                 }
             }
         }
-        ed
+
+        (
+            types,
+            methods,
+            generics,
+            class_method_generics,
+            static_method_generics,
+            is_check_results,
+            declared_var_types,
+        )
     }
 }
 

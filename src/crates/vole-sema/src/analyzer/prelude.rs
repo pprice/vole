@@ -149,21 +149,7 @@ impl Analyzer {
                     import_path.to_string(),
                     (cached.program.clone(), cached.interner.clone()),
                 );
-                use crate::expression_data::ExpressionData;
-                let cached_data = ExpressionData {
-                    types: cached.expr_types.clone(),
-                    methods: cached.method_resolutions.clone(),
-                    generics: cached.generic_calls.clone(),
-                    class_method_generics: cached.class_method_generics.clone(),
-                    static_method_generics: cached.static_method_generics.clone(),
-                    is_check_results: cached.is_check_results.clone(),
-                    declared_var_types: cached.declared_var_types,
-                    ..Default::default()
-                };
-                self.ctx
-                    .merged_node_map
-                    .borrow_mut()
-                    .merge(cached_data.into_node_map());
+                self.ctx.merged_node_map.borrow_mut().merge_cached(&cached);
             }
             return;
         }
@@ -233,26 +219,33 @@ impl Analyzer {
         // valid and needed by codegen. Methods that reference unknown types
         // (like Iterator) simply won't be callable, but everything else works.
 
-        // Cache the analysis results. CachedModule still stores individual
-        // FxHashMaps (keyed by NodeId), so we convert to ExpressionData for
-        // the cache, then merge the sub-analyzer's NodeMap directly into the
-        // shared merged_node_map.
+        // Cache the analysis results. Extract the subset of per-node data
+        // that CachedModule needs as individual FxHashMaps, then merge the
+        // sub-analyzer's NodeMap directly into the shared merged_node_map.
         let prelude_node_map = sub_analyzer.results.node_map;
         if let Some(ref cache) = self.ctx.module_cache {
-            let prelude_data = prelude_node_map.clone().into_expression_data();
+            let (
+                expr_types,
+                method_resolutions,
+                generic_calls,
+                class_method_generics,
+                static_method_generics,
+                is_check_results,
+                declared_var_types,
+            ) = prelude_node_map.extract_cached_maps();
             cache.borrow_mut().insert(
                 import_path.to_string(),
                 CachedModule {
                     program: program.clone(),
                     interner: prelude_interner.clone(),
-                    expr_types: prelude_data.types().clone(),
-                    method_resolutions: prelude_data.methods().clone(),
-                    generic_calls: prelude_data.generics().clone(),
-                    class_method_generics: prelude_data.class_method_generics().clone(),
-                    static_method_generics: prelude_data.static_method_generics().clone(),
+                    expr_types,
+                    method_resolutions,
+                    generic_calls,
+                    class_method_generics,
+                    static_method_generics,
                     functions_by_name: sub_analyzer.symbols.functions_by_name.clone(),
-                    is_check_results: prelude_data.is_check_results().clone(),
-                    declared_var_types: prelude_data.declared_var_types().clone(),
+                    is_check_results,
+                    declared_var_types,
                     partial_error_count,
                 },
             );

@@ -233,11 +233,11 @@ impl Analyzer {
             // Store compact codegen-ready info (no synthetic AST or fresh NodeIds)
             self.results.node_map.set_optional_chain(
                 expr_id,
-                crate::expression_data::OptionalChainInfo {
+                crate::node_map::OptionalChainInfo {
                     object_type: object_type_id,
                     inner_type: inner_type_id,
                     result_type: field_type_id,
-                    kind: crate::expression_data::OptionalChainKind::FieldAccess {
+                    kind: crate::node_map::OptionalChainKind::FieldAccess {
                         field: opt_chain.field,
                     },
                 },
@@ -316,11 +316,11 @@ impl Analyzer {
         // Store compact codegen-ready info (no synthetic AST or fresh NodeIds)
         self.results.node_map.set_optional_chain(
             expr_id,
-            crate::expression_data::OptionalChainInfo {
+            crate::node_map::OptionalChainInfo {
                 object_type: object_type_id,
                 inner_type: inner_type_id,
                 result_type: method_return_type_id,
-                kind: crate::expression_data::OptionalChainKind::MethodCall,
+                kind: crate::node_map::OptionalChainKind::MethodCall,
             },
         );
 
@@ -399,7 +399,7 @@ impl Analyzer {
             if let Some(elem_type) = self.extract_custom_iterator_element_type_id(inner_type_id) {
                 self.results.node_map.set_coercion_kind(
                     resolution_id,
-                    crate::expression_data::CoercionKind::IteratorWrap { elem_type },
+                    crate::node_map::CoercionKind::IteratorWrap { elem_type },
                 );
             }
             // Build a synthetic Expr wrapper for process_resolved_instance_method
@@ -615,7 +615,7 @@ impl Analyzer {
             if let Some(elem_type) = self.extract_custom_iterator_element_type_id(object_type_id) {
                 self.results.node_map.set_coercion_kind(
                     expr.id,
-                    crate::expression_data::CoercionKind::IteratorWrap { elem_type },
+                    crate::node_map::CoercionKind::IteratorWrap { elem_type },
                 );
             }
             return self.process_resolved_instance_method(

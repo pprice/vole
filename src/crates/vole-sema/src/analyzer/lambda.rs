@@ -155,7 +155,7 @@ impl Analyzer {
         };
         self.results.node_map.set_lambda_analysis(
             node_id,
-            crate::expression_data::LambdaAnalysis {
+            crate::node_map::LambdaAnalysis {
                 captures: capture_list,
                 has_side_effects,
             },

@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::expression_data::ItLambdaInfo;
+use crate::node_map::ItLambdaInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use vole_frontend::ast::{CallArg, FuncBody, LambdaExpr, LambdaParam, StringPart};
 

@@ -169,17 +169,7 @@ impl AnalyzerContext {
                 path.to_string(),
                 (cached.program.clone(), cached.interner.clone()),
             );
-            let cached_data = crate::expression_data::ExpressionData {
-                types: cached.expr_types.clone(),
-                methods: cached.method_resolutions.clone(),
-                generics: cached.generic_calls.clone(),
-                class_method_generics: cached.class_method_generics.clone(),
-                static_method_generics: cached.static_method_generics.clone(),
-                is_check_results: cached.is_check_results.clone(),
-                declared_var_types: cached.declared_var_types.clone(),
-                ..Default::default()
-            };
-            merged_node_map.merge(cached_data.into_node_map());
+            merged_node_map.merge_cached(cached);
             merged_any = true;
         }
         merged_any
