@@ -414,6 +414,10 @@ impl Compiler<'_> {
         // compile_array_iterable_default_methods skips those.
         self.compile_array_iterable_default_methods()?;
 
+        // Build monomorph name index for O(1) lookup during body compilation.
+        // Must run after declare_all + expand_abstract so all instances are visible.
+        self.build_monomorph_index();
+
         // Second pass: compile function bodies and tests
         self.compile_program_declarations(program)?;
 
@@ -533,6 +537,10 @@ impl Compiler<'_> {
         // This MUST run before monomorph body compilation because compiled bodies
         // (e.g. Task.stream<i64>) may call these expanded methods (e.g. ch.close()).
         self.expand_abstract_class_method_monomorphs()?;
+
+        // Build monomorph name index for O(1) lookup during body compilation.
+        // Must run after declare_all + expand_abstract so all instances are visible.
+        self.build_monomorph_index();
 
         // Pass 1.7: Compile monomorphized instances whose ASTs live in modules.
         // Passes None for program — instances from the main program are silently

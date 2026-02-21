@@ -20,14 +20,15 @@ use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId};
-use vole_sema::generic::MonomorphInstanceTrait;
 use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::TypeId;
 
 use super::lambda::CaptureBinding;
 use super::rc_cleanup::RcScopeStack;
 use super::rc_state::RcState;
-use super::types::{CodegenCtx, CompileEnv, CompiledValue, PendingMonomorph, TypeMetadataMap};
+use super::types::{
+    CodegenCtx, CompileEnv, CompiledValue, MonomorphIndexEntry, PendingMonomorph, TypeMetadataMap,
+};
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -945,150 +946,84 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Attempt to declare a monomorphized function on demand when its FuncId is missing.
     ///
-    /// Searches the entity_registry's monomorph caches (monomorph_cache,
-    /// class_method_monomorph_cache, static_method_monomorph_cache) for an instance
-    /// whose `mangled_name` matches the key's NameId. If found, builds a Cranelift
-    /// signature from the instance's codegen-ready data, declares the function in the
-    /// JIT module, and queues it in `pending_monomorphs` for later compilation.
+    /// Uses the pre-built monomorph name index (`state.monomorph_index`) for O(1) lookup
+    /// by NameId. If found, builds a Cranelift signature from the instance's codegen-ready
+    /// data, declares the function in the JIT module, and queues it in `pending_monomorphs`
+    /// for later compilation.
     ///
     /// Returns `Some(FuncId)` if the monomorph was found and declared, `None` otherwise.
     fn try_demand_declare_monomorph(&mut self, key: FunctionKey) -> Option<FuncId> {
         // Only qualified (NameId-based) keys can be monomorphs
         let name_id = self.codegen_ctx.func_registry.name_id(key)?;
 
+        let entry = self.env.state.monomorph_index.get(&name_id)?.clone();
+        self.declare_monomorph_from_index(key, &entry)
+    }
+
+    /// Declare a monomorph from an index entry: build signature, declare in JIT, queue.
+    fn declare_monomorph_from_index(
+        &mut self,
+        key: FunctionKey,
+        entry: &MonomorphIndexEntry,
+    ) -> Option<FuncId> {
         let registry = self.registry();
         let arena = self.arena();
         let ptr_type = self.ptr_type();
 
-        // Search free-function monomorph cache
-        for (_, instance) in registry.monomorph_cache.instances() {
-            if instance.mangled_name == name_id {
-                let mangled_name = self.query().display_name(instance.mangled_name);
-                let sig = build_monomorph_signature(
-                    instance.func_type(),
-                    false,
-                    arena,
-                    registry,
-                    ptr_type,
-                    self.codegen_ctx.module,
-                );
-                let func_id = self
-                    .codegen_ctx
-                    .module
-                    .declare_function(&mangled_name, Linkage::Export, &sig)
-                    .unwrap_or_else(|e| {
-                        panic!("demand-declare monomorph '{}': {:?}", mangled_name, e)
-                    });
-                self.codegen_ctx.func_registry.set_func_id(key, func_id);
-                self.codegen_ctx
-                    .func_registry
-                    .set_return_type(key, instance.func_type.return_type_id);
-                self.codegen_ctx
-                    .pending_monomorphs
-                    .push(PendingMonomorph::Function(instance.clone()));
-                tracing::debug!(
-                    name = %mangled_name,
-                    "demand-declared free-function monomorph"
-                );
-                return Some(func_id);
-            }
-        }
+        let (func_type, has_self, mangled_name_id, pending, label) = match entry {
+            MonomorphIndexEntry::Function(inst) => (
+                &inst.func_type,
+                false,
+                inst.mangled_name,
+                PendingMonomorph::Function(inst.clone()),
+                "free-function",
+            ),
+            MonomorphIndexEntry::ClassMethod(inst) => (
+                &inst.func_type,
+                true,
+                inst.mangled_name,
+                PendingMonomorph::ClassMethod(inst.clone()),
+                "class method",
+            ),
+            MonomorphIndexEntry::StaticMethod(inst) => (
+                &inst.func_type,
+                false,
+                inst.mangled_name,
+                PendingMonomorph::StaticMethod(inst.clone()),
+                "static method",
+            ),
+        };
+        let return_type_id = func_type.return_type_id;
+        let mangled_name = self.query().display_name(mangled_name_id);
 
-        // Search class method monomorph cache
-        for (_, instance) in registry.class_method_monomorph_cache.instances() {
-            if instance.mangled_name == name_id {
-                // Skip external methods — they are runtime functions
-                if instance.external_info.is_some() {
-                    continue;
-                }
-                // Skip abstract templates (TypeParam substitutions)
-                if instance
-                    .substitutions
-                    .values()
-                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
-                {
-                    continue;
-                }
-                let mangled_name = self.query().display_name(instance.mangled_name);
-                let sig = build_monomorph_signature(
-                    instance.func_type(),
-                    true, // class methods have self param
-                    arena,
-                    registry,
-                    ptr_type,
-                    self.codegen_ctx.module,
-                );
-                let func_id = self
-                    .codegen_ctx
-                    .module
-                    .declare_function(&mangled_name, Linkage::Export, &sig)
-                    .unwrap_or_else(|e| {
-                        panic!(
-                            "demand-declare class method monomorph '{}': {:?}",
-                            mangled_name, e
-                        )
-                    });
-                self.codegen_ctx.func_registry.set_func_id(key, func_id);
-                self.codegen_ctx
-                    .func_registry
-                    .set_return_type(key, instance.func_type.return_type_id);
-                self.codegen_ctx
-                    .pending_monomorphs
-                    .push(PendingMonomorph::ClassMethod(instance.clone()));
-                tracing::debug!(
-                    name = %mangled_name,
-                    "demand-declared class method monomorph"
-                );
-                return Some(func_id);
-            }
-        }
-
-        // Search static method monomorph cache
-        for (_, instance) in registry.static_method_monomorph_cache.instances() {
-            if instance.mangled_name == name_id {
-                // Skip abstract templates (TypeParam substitutions)
-                if instance
-                    .substitutions
-                    .values()
-                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
-                {
-                    continue;
-                }
-                let mangled_name = self.query().display_name(instance.mangled_name);
-                let sig = build_monomorph_signature(
-                    instance.func_type(),
-                    false, // static methods don't have self param
-                    arena,
-                    registry,
-                    ptr_type,
-                    self.codegen_ctx.module,
-                );
-                let func_id = self
-                    .codegen_ctx
-                    .module
-                    .declare_function(&mangled_name, Linkage::Export, &sig)
-                    .unwrap_or_else(|e| {
-                        panic!(
-                            "demand-declare static method monomorph '{}': {:?}",
-                            mangled_name, e
-                        )
-                    });
-                self.codegen_ctx.func_registry.set_func_id(key, func_id);
-                self.codegen_ctx
-                    .func_registry
-                    .set_return_type(key, instance.func_type.return_type_id);
-                self.codegen_ctx
-                    .pending_monomorphs
-                    .push(PendingMonomorph::StaticMethod(instance.clone()));
-                tracing::debug!(
-                    name = %mangled_name,
-                    "demand-declared static method monomorph"
-                );
-                return Some(func_id);
-            }
-        }
-
-        None
+        let sig = build_monomorph_signature(
+            func_type,
+            has_self,
+            arena,
+            registry,
+            ptr_type,
+            self.codegen_ctx.module,
+        );
+        let func_id = self
+            .codegen_ctx
+            .module
+            .declare_function(&mangled_name, Linkage::Export, &sig)
+            .unwrap_or_else(|e| {
+                panic!(
+                    "demand-declare {} monomorph '{}': {:?}",
+                    label, mangled_name, e
+                )
+            });
+        self.codegen_ctx.func_registry.set_func_id(key, func_id);
+        self.codegen_ctx
+            .func_registry
+            .set_return_type(key, return_type_id);
+        self.codegen_ctx.pending_monomorphs.push(pending);
+        tracing::debug!(
+            name = %mangled_name,
+            "demand-declared {label} monomorph"
+        );
+        Some(func_id)
     }
 }
 

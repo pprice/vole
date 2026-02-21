@@ -7,7 +7,10 @@ use std::cell::{Cell, RefCell};
 
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
-use vole_sema::generic::ClassMethodMonomorphKey;
+use vole_sema::generic::{
+    ClassMethodMonomorphInstance, ClassMethodMonomorphKey, MonomorphInstance,
+    StaticMethodMonomorphInstance,
+};
 use vole_sema::type_arena::TypeId;
 
 use crate::FunctionKey;
@@ -79,6 +82,20 @@ pub(crate) struct ExpandedClassMethodInfo {
     pub return_type_id: TypeId,
 }
 
+/// An entry in the monomorph name index, distinguishing the 3 cache variants.
+///
+/// Built once per compilation phase from the entity_registry's monomorph caches,
+/// keyed by `mangled_name` (NameId) for O(1) lookup in `try_demand_declare_monomorph`.
+#[derive(Debug, Clone)]
+pub(crate) enum MonomorphIndexEntry {
+    /// A free-function monomorph (from monomorph_cache).
+    Function(MonomorphInstance),
+    /// A class instance method monomorph (from class_method_monomorph_cache).
+    ClassMethod(ClassMethodMonomorphInstance),
+    /// A static method monomorph (from static_method_monomorph_cache).
+    StaticMethod(StaticMethodMonomorphInstance),
+}
+
 /// Key for monomorphized generic class type_id cache.
 /// Combines the base class TypeDefId with concrete type arguments.
 type MonoTypeKey = (TypeDefId, Vec<TypeId>);
@@ -128,6 +145,12 @@ pub(crate) struct CodegenState {
     /// read during pass 2 compilation when Cg resolves method calls.
     pub expanded_class_method_monomorphs:
         FxHashMap<ClassMethodMonomorphKey, ExpandedClassMethodInfo>,
+    /// Index of monomorph instances by mangled NameId for O(1) lookup.
+    ///
+    /// Built from the entity_registry's 3 monomorph caches before body compilation.
+    /// Entries that would be skipped (external methods, abstract templates) are excluded.
+    /// Used by `Cg::try_demand_declare_monomorph` to replace O(K×N) linear scans.
+    pub monomorph_index: FxHashMap<NameId, MonomorphIndexEntry>,
 }
 
 impl CodegenState {
@@ -152,6 +175,7 @@ impl CodegenState {
             mono_type_ids: RefCell::new(FxHashMap::default()),
             ptr_to_symbol,
             expanded_class_method_monomorphs: FxHashMap::default(),
+            monomorph_index: FxHashMap::default(),
         }
     }
 }

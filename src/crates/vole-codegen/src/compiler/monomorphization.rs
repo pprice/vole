@@ -17,6 +17,7 @@ use vole_sema::generic::{
 };
 use vole_sema::type_arena::TypeId;
 
+use crate::types::MonomorphIndexEntry;
 use crate::types::function_name_id_with_interner;
 
 /// Data for an expanded class method monomorph (used during template expansion).
@@ -1731,5 +1732,64 @@ impl Compiler<'_> {
             "pending monomorph: static method",
             format!("{} in class {}", method_name_str, class_name),
         ))
+    }
+
+    /// Build the monomorph name index from the entity_registry's 3 caches.
+    ///
+    /// Creates a `FxHashMap<NameId, MonomorphIndexEntry>` keyed by `mangled_name`
+    /// for O(1) lookup in `try_demand_declare_monomorph`. Entries that would be
+    /// skipped during demand-declaration (external methods, abstract templates)
+    /// are excluded.
+    ///
+    /// Called before body compilation in both `compile_module_functions` and
+    /// `compile_program_body`.
+    pub(super) fn build_monomorph_index(&mut self) {
+        let registry = self.registry();
+        let arena = self.arena();
+        let mut index = FxHashMap::default();
+
+        // Index free-function monomorphs (no filtering needed)
+        for (_, instance) in registry.monomorph_cache.instances() {
+            index.insert(
+                instance.mangled_name,
+                MonomorphIndexEntry::Function(instance.clone()),
+            );
+        }
+
+        // Index class method monomorphs (skip external + abstract templates)
+        for (_, instance) in registry.class_method_monomorph_cache.instances() {
+            if instance.external_info.is_some() {
+                continue;
+            }
+            if instance
+                .substitutions
+                .values()
+                .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+            {
+                continue;
+            }
+            index.insert(
+                instance.mangled_name,
+                MonomorphIndexEntry::ClassMethod(instance.clone()),
+            );
+        }
+
+        // Index static method monomorphs (skip abstract templates)
+        for (_, instance) in registry.static_method_monomorph_cache.instances() {
+            if instance
+                .substitutions
+                .values()
+                .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+            {
+                continue;
+            }
+            index.insert(
+                instance.mangled_name,
+                MonomorphIndexEntry::StaticMethod(instance.clone()),
+            );
+        }
+
+        tracing::debug!(entry_count = index.len(), "built monomorph name index");
+        self.state.monomorph_index = index;
     }
 }
