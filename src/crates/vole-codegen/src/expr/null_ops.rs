@@ -13,7 +13,7 @@ use crate::types::{
 };
 use crate::union_layout;
 
-use vole_frontend::{Expr, NodeId};
+use vole_frontend::{Expr, ExprKind, NodeId};
 use vole_sema::type_arena::TypeId;
 
 use super::super::context::Cg;
@@ -174,6 +174,182 @@ impl Cg<'_, '_, '_> {
         let result_ptr = self.builder.block_params(merge_block)[0];
         let cv = CompiledValue::new(result_ptr, ptr_type, inner_type_id);
         Ok(cv)
+    }
+
+    /// Compile an optional chain expression (`?.`).
+    ///
+    /// For `obj?.field`: compiles scrutinee, branches on nil tag, on not-nil
+    /// extracts inner value and does field access, wraps result as optional.
+    ///
+    /// For `obj?.method(args)`: same pattern, but calls the method on the
+    /// inner value. Method resolution is stored at `expr_id` by sema.
+    pub(super) fn optional_chain(
+        &mut self,
+        expr: &Expr,
+        expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        let info = self
+            .get_optional_chain(expr_id)
+            .cloned()
+            .expect("INTERNAL: optional chain must have OptionalChainInfo from sema");
+
+        // Compile the scrutinee (the object before `?.`)
+        let scrutinee_expr = match &expr.kind {
+            ExprKind::OptionalChain(oc) => &oc.object,
+            ExprKind::OptionalMethodCall(omc) => &omc.object,
+            _ => unreachable!("optional_chain called on non-optional-chain expr"),
+        };
+        let scrutinee = self.expr(scrutinee_expr)?;
+
+        // Find nil variant tag in the union
+        let nil_tag = self.find_nil_variant(scrutinee.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("optional chain operator", "optional type", "non-optional")
+        })?;
+
+        // Get the overall result type from sema (e.g. string | nil)
+        let result_type_id = self
+            .get_expr_type_substituted(&expr_id)
+            .unwrap_or(TypeId::VOID);
+        let result_cranelift_type = self.cranelift_type(result_type_id);
+        let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
+
+        // Create blocks for branching
+        let nil_block = self.builder.create_block();
+        let not_nil_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder
+            .append_block_param(merge_block, result_cranelift_type);
+
+        // Branch on nil tag
+        let is_nil = self.tag_eq(scrutinee.value, nil_tag as i64);
+        self.emit_brif(is_nil, nil_block, not_nil_block);
+
+        // --- Nil branch: produce nil wrapped as the result type ---
+        self.switch_and_seal(nil_block);
+        let nil_val = self.compile_nil_for_optional(result_type_id)?;
+        self.jump_with_owned_result(
+            nil_val,
+            result_type_id,
+            result_cranelift_type,
+            result_needs_rc,
+            merge_block,
+        )?;
+
+        // --- Not-nil branch: extract inner, do field/method access ---
+        self.switch_and_seal(not_nil_block);
+        self.field_cache.clear();
+
+        // Extract inner value from union payload
+        let inner_type_id = self.try_substitute_type(info.inner_type);
+        let inner_cranelift_type = self.cranelift_type(inner_type_id);
+        let union_size = self.type_size(scrutinee.type_id);
+        let inner_val = if union_size > union_layout::TAG_ONLY_SIZE {
+            let loaded = self.builder.ins().load(
+                inner_cranelift_type,
+                MemFlags::new(),
+                scrutinee.value,
+                union_layout::PAYLOAD_OFFSET,
+            );
+            CompiledValue::new(loaded, inner_cranelift_type, inner_type_id)
+        } else {
+            // Sentinel-only union (tag only, no payload)
+            let zero = self.iconst_cached(inner_cranelift_type, 0);
+            CompiledValue::new(zero, inner_cranelift_type, inner_type_id)
+        };
+
+        // Compute the body value depending on chain kind
+        let body_val = match &info.kind {
+            vole_sema::OptionalChainKind::FieldAccess { field } => {
+                self.optional_chain_field_access(inner_val, *field)?
+            }
+            vole_sema::OptionalChainKind::MethodCall => {
+                self.optional_chain_method_call(expr, inner_val, expr_id)?
+            }
+        };
+
+        // Coerce body to the result type (wraps scalar in optional union if needed)
+        let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
+        self.jump_with_owned_result(
+            body_coerced,
+            result_type_id,
+            result_cranelift_type,
+            result_needs_rc,
+            merge_block,
+        )?;
+
+        // --- Merge ---
+        self.switch_and_seal(merge_block);
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, false)
+    }
+
+    /// Compile field access on the unwrapped inner value of an optional chain.
+    fn optional_chain_field_access(
+        &mut self,
+        inner: CompiledValue,
+        field: vole_frontend::Symbol,
+    ) -> CodegenResult<CompiledValue> {
+        let field_name = self.interner().resolve(field);
+        let (slot, field_type_id) = super::super::structs::helpers::get_field_slot_and_type_id_cg(
+            inner.type_id,
+            field_name,
+            self,
+        )?;
+        self.extract_field(inner, slot, field_type_id)
+    }
+
+    /// Compile a method call on the unwrapped inner value of an optional chain.
+    ///
+    /// Temporarily inserts the inner value into vars so `method_call` can compile
+    /// the synthetic receiver expression normally.
+    fn optional_chain_method_call(
+        &mut self,
+        expr: &Expr,
+        inner: CompiledValue,
+        expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        let omc = match &expr.kind {
+            ExprKind::OptionalMethodCall(omc) => omc,
+            _ => unreachable!("optional_chain_method_call called on non-OptionalMethodCall"),
+        };
+
+        // Create a Cranelift variable for the inner value
+        let inner_var = self.builder.declare_var(inner.ty);
+        self.builder.def_var(inner_var, inner.value);
+
+        // Insert into vars under the $oc symbol
+        let oc_sym = self.interner().lookup("$oc").expect("$oc must be interned");
+        let saved_entry = self.vars.insert(oc_sym, (inner_var, inner.type_id));
+
+        // Build a MethodCallExpr with $oc as receiver
+        let mc = vole_frontend::MethodCallExpr {
+            object: Expr {
+                id: expr_id,
+                kind: ExprKind::Identifier(oc_sym),
+                span: omc.method_span,
+            },
+            method: omc.method,
+            type_args: omc.type_args.clone(),
+            args: omc.args.clone(),
+            method_span: omc.method_span,
+        };
+
+        let result = self.method_call(&mc, expr_id);
+
+        // Restore vars
+        if let Some(old) = saved_entry {
+            self.vars.insert(oc_sym, old);
+        } else {
+            self.vars.remove(&oc_sym);
+        }
+
+        result
+    }
+
+    /// Produce a nil value wrapped in the given optional result type.
+    fn compile_nil_for_optional(&mut self, result_type_id: TypeId) -> CodegenResult<CompiledValue> {
+        let nil_type_id = self.arena().nil();
+        let nil_val = CompiledValue::new(self.iconst_cached(types::I8, 0), types::I8, nil_type_id);
+        self.coerce_to_type(nil_val, result_type_id)
     }
 
     /// Compile a try expression (propagation)

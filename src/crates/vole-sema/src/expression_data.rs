@@ -12,7 +12,7 @@ use crate::analysis_cache::IsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
-use vole_frontend::{Capture, LambdaExpr, LambdaPurity, NodeId, Span};
+use vole_frontend::{Capture, LambdaExpr, LambdaPurity, NodeId, Span, Symbol};
 use vole_identity::ModuleId;
 
 /// Classification of a for-loop's iterable, annotated by sema.
@@ -86,6 +86,35 @@ pub enum CoercionKind {
     /// Codegen should box to `Iterator<T>` interface, then wrap via
     /// `InterfaceIter` into a `RuntimeIterator` before dispatching the method.
     IteratorWrap { elem_type: TypeId },
+}
+
+/// What kind of optional chain this is (field access or method call).
+#[derive(Debug, Clone)]
+pub enum OptionalChainKind {
+    /// `obj?.field` — field access on the unwrapped inner value.
+    FieldAccess { field: Symbol },
+    /// `obj?.method(args)` — method call on the unwrapped inner value.
+    /// Method resolution and related metadata (coercion_kinds, class_method_generics,
+    /// substituted_return_types) are stored on the OptionalMethodCallExpr's own NodeId.
+    MethodCall,
+}
+
+/// Compact codegen-ready info for optional chain expressions (`?.`).
+///
+/// Replaces the previous approach of building a full synthetic MatchExpr AST
+/// with 6+ fresh NodeIds. Instead, stores just the essential type info needed
+/// for codegen to emit the nil-check branch directly.
+#[derive(Debug, Clone)]
+pub struct OptionalChainInfo {
+    /// Type of the scrutinee expression (e.g. `T | nil`).
+    pub object_type: TypeId,
+    /// Non-nil inner type after unwrapping the optional (e.g. `T`).
+    pub inner_type: TypeId,
+    /// Type of the body expression (field access result or method return type),
+    /// before wrapping as optional.
+    pub result_type: TypeId,
+    /// Whether this is a field access or method call.
+    pub kind: OptionalChainKind,
 }
 
 /// Analysis results for a lambda expression (captures and side effects).
@@ -189,13 +218,12 @@ pub struct ExpressionData {
     /// a coercion (e.g., boxing a custom Iterator<T> as RuntimeIterator)
     /// before dispatching the method, without re-detecting types.
     pub(crate) coercion_kinds: FxHashMap<NodeId, CoercionKind>,
-    /// Lowered optional chains: obj?.field lowered to synthetic match expressions.
+    /// Lowered optional chains: compact codegen-ready info for `?.` expressions.
     ///
-    /// When sema encounters `obj?.field`, it creates a synthetic match expression:
-    /// `match obj { nil => nil, _inner => _inner.field }` and stores it here.
-    /// Codegen compiles optional chains via the standard match path instead of
-    /// a separate optional_chain implementation.
-    pub(crate) lowered_optional_chains: FxHashMap<NodeId, vole_frontend::MatchExpr>,
+    /// When sema encounters `obj?.field` or `obj?.method(args)`, it stores an
+    /// `OptionalChainInfo` here with the essential type info. Codegen uses this
+    /// to emit a nil-check branch directly, without a synthetic MatchExpr AST.
+    pub(crate) lowered_optional_chains: FxHashMap<NodeId, OptionalChainInfo>,
     /// String conversion annotations for interpolation expression parts.
     ///
     /// Keyed by the interpolation expression's NodeId. Tells codegen which
@@ -512,8 +540,8 @@ impl ExpressionData {
         self.coercion_kinds.insert(node, kind);
     }
 
-    /// Get the lowered match expression for an optional chain, if one was synthesized.
-    pub fn get_lowered_optional_chain(&self, node: NodeId) -> Option<&vole_frontend::MatchExpr> {
+    /// Get the optional chain info for an optional chain expression.
+    pub fn get_optional_chain(&self, node: NodeId) -> Option<&OptionalChainInfo> {
         self.lowered_optional_chains.get(&node)
     }
 

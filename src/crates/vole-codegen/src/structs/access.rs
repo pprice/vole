@@ -121,7 +121,7 @@ impl Cg<'_, '_, '_> {
     /// and RC cleanup. If the container is an owned RC temporary, the field is
     /// rc_inc'd (if RC) and the container is rc_dec'd so intermediate objects
     /// don't leak.
-    fn extract_field(
+    pub(crate) fn extract_field(
         &mut self,
         obj: CompiledValue,
         slot: usize,

@@ -8,16 +8,6 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{NameId, TypeDefId};
 
-/// Bundled type information for `lower_optional_to_match`.
-struct OptionalLowerTypes {
-    object_type_id: ArenaTypeId,
-    inner_type_id: ArenaTypeId,
-    body_type_id: ArenaTypeId,
-    /// Pre-allocated body NodeId (for method calls where resolution is
-    /// already registered on a specific id). `None` for field-access chains.
-    pre_body_id: Option<NodeId>,
-}
-
 impl Analyzer {
     /// Get field type from a struct-like type by looking up the type definition
     /// and substituting type arguments if needed. Returns TypeId directly.
@@ -240,31 +230,16 @@ impl Analyzer {
                 self.ty_optional_id(field_type_id)
             };
 
-            // --- Lower to synthetic match expression for codegen ---
-            // Build: match obj { nil => nil, $oc => $oc.field }
-            let field_sym = opt_chain.field;
-            let field_span = opt_chain.field_span;
-            self.lower_optional_to_match(
-                &opt_chain.object,
+            // Store compact codegen-ready info (no synthetic AST or fresh NodeIds)
+            self.results.lowered_optional_chains.insert(
                 expr_id,
-                opt_chain.field_span,
-                OptionalLowerTypes {
-                    object_type_id,
-                    inner_type_id,
-                    body_type_id: field_type_id,
-                    pre_body_id: None,
-                },
-                interner,
-                |oc_sym, binding_ident_id, span| {
-                    ExprKind::FieldAccess(Box::new(FieldAccessExpr {
-                        object: Expr {
-                            id: binding_ident_id,
-                            kind: ExprKind::Identifier(oc_sym),
-                            span,
-                        },
-                        field: field_sym,
-                        field_span,
-                    }))
+                crate::expression_data::OptionalChainInfo {
+                    object_type: object_type_id,
+                    inner_type: inner_type_id,
+                    result_type: field_type_id,
+                    kind: crate::expression_data::OptionalChainKind::FieldAccess {
+                        field: opt_chain.field,
+                    },
                 },
             );
 
@@ -312,20 +287,13 @@ impl Analyzer {
             return Ok(ArenaTypeId::INVALID);
         }
 
-        // Build synthetic method call expr for type checking + lowered match body.
-        // The synthetic body node ID is where method resolution gets registered.
-        let module = expr_id.module;
-        let span = omc.method_span;
-        let binding_ident_id = self.diagnostics.fresh_node_id(module);
-        let method_call_body_id = self.diagnostics.fresh_node_id(module);
-
-        let oc_sym = interner.lookup("$oc").expect("$oc must be interned");
-
+        // Build a minimal MethodCallExpr for type resolution. The object
+        // expression is a placeholder — only the method/args/type_args matter.
         let synthetic_mc = MethodCallExpr {
             object: Expr {
-                id: binding_ident_id,
-                kind: ExprKind::Identifier(oc_sym),
-                span,
+                id: expr_id,
+                kind: ExprKind::Identifier(interner.lookup("$oc").expect("$oc must be interned")),
+                span: omc.method_span,
             },
             method: omc.method,
             type_args: omc.type_args.clone(),
@@ -333,15 +301,10 @@ impl Analyzer {
             method_span: omc.method_span,
         };
 
-        let synthetic_expr = Expr {
-            id: method_call_body_id,
-            kind: ExprKind::MethodCall(Box::new(synthetic_mc.clone())),
-            span,
-        };
-
-        // Resolve the method on the inner (unwrapped) type
+        // Resolve the method on the inner (unwrapped) type.
+        // Method resolution is stored on expr_id (the OptionalMethodCallExpr node).
         let method_return_type_id =
-            self.resolve_optional_method(&synthetic_expr, &synthetic_mc, inner_type_id, interner)?;
+            self.resolve_optional_method(expr_id, &synthetic_mc, inner_type_id, interner)?;
 
         // Wrap return type in optional (T -> T?)
         let result_type_id = if self.is_optional_id(method_return_type_id) {
@@ -350,30 +313,14 @@ impl Analyzer {
             self.ty_optional_id(method_return_type_id)
         };
 
-        // Lower to match: match obj { nil => nil, $oc => $oc.method(args) }
-        self.lower_optional_to_match(
-            &omc.object,
+        // Store compact codegen-ready info (no synthetic AST or fresh NodeIds)
+        self.results.lowered_optional_chains.insert(
             expr_id,
-            omc.method_span,
-            OptionalLowerTypes {
-                object_type_id,
-                inner_type_id,
-                body_type_id: method_return_type_id,
-                pre_body_id: Some(method_call_body_id),
-            },
-            interner,
-            |oc_sym, binding_ident_id, span| {
-                ExprKind::MethodCall(Box::new(MethodCallExpr {
-                    object: Expr {
-                        id: binding_ident_id,
-                        kind: ExprKind::Identifier(oc_sym),
-                        span,
-                    },
-                    method: synthetic_mc.method,
-                    type_args: synthetic_mc.type_args.clone(),
-                    args: synthetic_mc.args.clone(),
-                    method_span: synthetic_mc.method_span,
-                }))
+            crate::expression_data::OptionalChainInfo {
+                object_type: object_type_id,
+                inner_type: inner_type_id,
+                result_type: method_return_type_id,
+                kind: crate::expression_data::OptionalChainKind::MethodCall,
             },
         );
 
@@ -383,14 +330,18 @@ impl Analyzer {
     /// Resolve and type-check a method call on the inner (unwrapped) type of an
     /// optional method call. This mirrors the instance-method path from
     /// `check_method_call_expr` but operates on a pre-resolved object type.
+    ///
+    /// `resolution_id` is the NodeId where method resolution and coercion info
+    /// will be stored (the original OptionalMethodCallExpr's NodeId).
     fn resolve_optional_method(
         &mut self,
-        synthetic_expr: &Expr,
+        resolution_id: NodeId,
         method_call: &MethodCallExpr,
         inner_type_id: ArenaTypeId,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         let method_name = interner.resolve(method_call.method);
+        let span = method_call.method_span;
 
         // Try structural type methods
         let structural_opt = self.type_arena().unwrap_structural(inner_type_id).cloned();
@@ -403,9 +354,9 @@ impl Analyzer {
                             SemanticError::WrongArgumentCount {
                                 expected: method.params.len(),
                                 found: method_call.args.len(),
-                                span: synthetic_expr.span.into(),
+                                span: span.into(),
                             },
-                            synthetic_expr.span,
+                            span,
                         );
                         for arg in &method_call.args {
                             self.check_expr(arg.expr(), interner)?;
@@ -424,7 +375,7 @@ impl Analyzer {
                     let return_type_id = func_type.return_type_id;
                     let func_type_id = func_type.intern(&mut self.type_arena_mut());
                     self.results.method_resolutions.insert(
-                        synthetic_expr.id,
+                        resolution_id,
                         ResolvedMethod::Implemented {
                             type_def_id: None,
                             method_name_id: method.name,
@@ -447,12 +398,19 @@ impl Analyzer {
         {
             if let Some(elem_type) = self.extract_custom_iterator_element_type_id(inner_type_id) {
                 self.results.coercion_kinds.insert(
-                    synthetic_expr.id,
+                    resolution_id,
                     crate::expression_data::CoercionKind::IteratorWrap { elem_type },
                 );
             }
+            // Build a synthetic Expr wrapper for process_resolved_instance_method
+            // (it reads expr.id to store resolution and expr.span for diagnostics).
+            let synthetic_expr = Expr {
+                id: resolution_id,
+                kind: ExprKind::MethodCall(Box::new(method_call.clone())),
+                span,
+            };
             return self.process_resolved_instance_method(
-                synthetic_expr,
+                &synthetic_expr,
                 method_call,
                 inner_type_id,
                 resolved,
@@ -489,100 +447,6 @@ impl Analyzer {
             self.check_expr(arg.expr(), interner)?;
         }
         Ok(ArenaTypeId::INVALID)
-    }
-
-    /// Lower an optional expression to a synthetic match:
-    /// ```text
-    /// match scrutinee {
-    ///     nil => nil,
-    ///     $oc => <body_builder($oc, ...)>,
-    /// }
-    /// ```
-    /// `body_builder` receives `(oc_sym, binding_ident_id, span)` and returns
-    /// the `ExprKind` for the non-nil arm body.
-    fn lower_optional_to_match(
-        &mut self,
-        scrutinee: &Expr,
-        expr_id: NodeId,
-        span: Span,
-        types: OptionalLowerTypes,
-        interner: &Interner,
-        body_builder: impl FnOnce(Symbol, NodeId, Span) -> ExprKind,
-    ) {
-        use vole_frontend::ast::*;
-
-        let module = expr_id.module;
-
-        let nil_sym = interner.lookup("nil").expect("nil must be interned");
-        let oc_sym = interner.lookup("$oc").expect("$oc must be interned");
-
-        let nil_pattern_id = self.diagnostics.fresh_node_id(module);
-        let nil_body_id = self.diagnostics.fresh_node_id(module);
-        let nil_arm_id = self.diagnostics.fresh_node_id(module);
-        let binding_pattern_id = self.diagnostics.fresh_node_id(module);
-        let binding_ident_id = self.diagnostics.fresh_node_id(module);
-        let body_id = types
-            .pre_body_id
-            .unwrap_or_else(|| self.diagnostics.fresh_node_id(module));
-        let body_arm_id = self.diagnostics.fresh_node_id(module);
-
-        // Register type annotations
-        let nil_type_id = self.type_arena().nil();
-        let is_check_result =
-            self.compute_type_pattern_check_result(nil_type_id, types.object_type_id);
-        self.record_is_check_result(nil_pattern_id, is_check_result);
-        self.results.expr_types.insert(nil_body_id, nil_type_id);
-        self.results
-            .expr_types
-            .insert(binding_ident_id, types.inner_type_id);
-        self.results.expr_types.insert(body_id, types.body_type_id);
-
-        // Build the body expression via the provided builder
-        let body_kind = body_builder(oc_sym, binding_ident_id, span);
-
-        // Arm 1: nil => nil
-        let nil_arm = MatchArm {
-            id: nil_arm_id,
-            pattern: Pattern {
-                id: nil_pattern_id,
-                kind: PatternKind::Identifier { name: nil_sym },
-                span,
-            },
-            guard: None,
-            body: Expr {
-                id: nil_body_id,
-                kind: ExprKind::Identifier(nil_sym),
-                span,
-            },
-            span,
-        };
-
-        // Arm 2: $oc => <body>
-        let body_arm = MatchArm {
-            id: body_arm_id,
-            pattern: Pattern {
-                id: binding_pattern_id,
-                kind: PatternKind::Identifier { name: oc_sym },
-                span,
-            },
-            guard: None,
-            body: Expr {
-                id: body_id,
-                kind: body_kind,
-                span,
-            },
-            span,
-        };
-
-        let match_expr = MatchExpr {
-            scrutinee: scrutinee.clone(),
-            arms: vec![nil_arm, body_arm],
-            span,
-        };
-
-        self.results
-            .lowered_optional_chains
-            .insert(expr_id, match_expr);
     }
 
     pub(super) fn check_method_call_expr(

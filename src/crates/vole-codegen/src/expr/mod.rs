@@ -105,12 +105,7 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::FieldAccess(fa) => self.field_access(fa),
             ExprKind::OptionalChain(_) | ExprKind::OptionalMethodCall(_) => {
-                // Optional chains/method calls are lowered to match expressions by sema.
-                let lowered = self
-                    .get_lowered_optional_chain(expr.id)
-                    .cloned()
-                    .expect("INTERNAL: optional chain must have lowered match from sema");
-                self.match_expr(&lowered, expr.id)
+                self.optional_chain(expr, expr.id)
             }
             ExprKind::MethodCall(mc) => {
                 let result = self.method_call(mc, expr.id)?;
