@@ -107,6 +107,9 @@ pub(crate) struct AnalysisResults {
     /// Iterable classification for for-loops.
     /// Maps iterable expression NodeId -> IterableKind for codegen dispatch.
     pub iterable_kinds: FxHashMap<NodeId, crate::expression_data::IterableKind>,
+    /// Interface coercion annotations for method call receivers.
+    /// Maps method call NodeId -> CoercionKind for codegen dispatch.
+    pub coercion_kinds: FxHashMap<NodeId, crate::expression_data::CoercionKind>,
 }
 
 /// Function and global variable symbol tables.

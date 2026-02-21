@@ -140,13 +140,16 @@ impl Cg<'_, '_, '_> {
 
         // Handle custom Iterator<T> implementors: box as Iterator<T> interface,
         // wrap via InterfaceIter into RuntimeIterator, then dispatch the method.
-        if let Some(elem_type_id) = self.iterator_element_type(obj.type_id) {
-            let runtime_iter = self.box_custom_iterator_to_runtime(&obj, elem_type_id)?;
+        // Driven by sema's CoercionKind annotation — no type re-detection needed.
+        if let Some(vole_sema::CoercionKind::IteratorWrap { elem_type }) =
+            self.get_coercion_kind(expr_id)
+        {
+            let runtime_iter = self.box_custom_iterator_to_runtime(&obj, elem_type)?;
             return self.runtime_iterator_method(
                 &runtime_iter,
                 mc,
                 method_name_str,
-                elem_type_id,
+                elem_type,
                 expr_id,
             );
         }
@@ -1874,25 +1877,5 @@ impl Cg<'_, '_, '_> {
         is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         self.compile_method_defaults(method_id, start_index, expected_types, is_generic_class)
-    }
-
-    /// Check if a type implements Iterator<T> (a class/struct with `extend ... with Iterator<T>`).
-    ///
-    /// Returns the element type T if the type implements Iterator<T>, or None otherwise.
-    /// Used by method dispatch to box custom Iterator implementors as RuntimeIterators.
-    pub(crate) fn iterator_element_type(&self, ty: TypeId) -> Option<TypeId> {
-        let type_def_id = {
-            let arena = self.arena();
-            arena.unwrap_class_or_struct(ty).map(|(id, _, _)| id)
-        }?;
-        let well_known = &self.name_table().well_known;
-        let iterator_id = well_known.iterator_type_def?;
-        let registry = self.registry();
-        let implemented = registry.get_implemented_interfaces(type_def_id);
-        if !implemented.contains(&iterator_id) {
-            return None;
-        }
-        let type_args = registry.get_implementation_type_args(type_def_id, iterator_id);
-        type_args.first().copied()
     }
 }

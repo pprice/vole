@@ -35,6 +35,18 @@ pub enum IterableKind {
     CustomIterable { elem_type: TypeId },
 }
 
+/// Interface coercion annotation, stored by sema at sites where a value
+/// needs boxing or wrapping to satisfy an interface type.
+///
+/// Codegen reads this to apply the correct coercion without re-detecting types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoercionKind {
+    /// Method call receiver is a custom `Iterator<T>` implementor.
+    /// Codegen should box to `Iterator<T>` interface, then wrap via
+    /// `InterfaceIter` into a `RuntimeIterator` before dispatching the method.
+    IteratorWrap { elem_type: TypeId },
+}
+
 /// Analysis results for a lambda expression (captures and side effects).
 /// Stored in ExpressionData keyed by the lambda expression's NodeId.
 #[derive(Debug, Clone, Default)]
@@ -130,6 +142,12 @@ pub struct ExpressionData {
     /// Keyed by the iterable expression's NodeId. Tells codegen which loop
     /// compilation strategy to use without re-detecting the iterable type.
     pub(crate) iterable_kinds: FxHashMap<NodeId, IterableKind>,
+    /// Interface coercion annotations for method call receivers.
+    ///
+    /// Keyed by the method call expression's NodeId. Tells codegen to apply
+    /// a coercion (e.g., boxing a custom Iterator<T> as RuntimeIterator)
+    /// before dispatching the method, without re-detecting types.
+    pub(crate) coercion_kinds: FxHashMap<NodeId, CoercionKind>,
 }
 
 impl ExpressionData {
@@ -163,6 +181,7 @@ impl ExpressionData {
         self.resolved_call_args.extend(other.resolved_call_args);
         self.synthetic_it_lambdas.extend(other.synthetic_it_lambdas);
         self.iterable_kinds.extend(other.iterable_kinds);
+        self.coercion_kinds.extend(other.coercion_kinds);
     }
 
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
@@ -398,5 +417,15 @@ impl ExpressionData {
     /// Set the iterable kind for a for-loop's iterable expression.
     pub fn set_iterable_kind(&mut self, node: NodeId, kind: IterableKind) {
         self.iterable_kinds.insert(node, kind);
+    }
+
+    /// Get the coercion kind for a method call expression's receiver.
+    pub fn get_coercion_kind(&self, node: NodeId) -> Option<CoercionKind> {
+        self.coercion_kinds.get(&node).copied()
+    }
+
+    /// Set the coercion kind for a method call expression's receiver.
+    pub fn set_coercion_kind(&mut self, node: NodeId, kind: CoercionKind) {
+        self.coercion_kinds.insert(node, kind);
     }
 }

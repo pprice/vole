@@ -615,6 +615,7 @@ impl Analyzer {
             intrinsic_keys: sub_analyzer.results.intrinsic_keys,
             resolved_call_args: sub_analyzer.results.resolved_call_args,
             iterable_kinds: sub_analyzer.results.iterable_kinds,
+            coercion_kinds: sub_analyzer.results.coercion_kinds,
             ..Default::default()
         };
         self.ctx.merged_expr_data.borrow_mut().merge(module_data);
@@ -1016,6 +1017,10 @@ impl Analyzer {
         self.results
             .iterable_kinds
             .extend(sub.results.iterable_kinds.iter().map(|(&k, &v)| (k, v)));
+        // Merge coercion_kinds
+        self.results
+            .coercion_kinds
+            .extend(sub.results.coercion_kinds.iter().map(|(&k, &v)| (k, v)));
         // Merge errors and warnings
         self.diagnostics
             .errors

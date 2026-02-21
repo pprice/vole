@@ -194,6 +194,7 @@ impl Analyzer {
         let resolved_call_args = results.resolved_call_args;
         let synthetic_it_lambdas = results.synthetic_it_lambdas;
         let iterable_kinds = results.iterable_kinds;
+        let coercion_kinds = results.coercion_kinds;
         // Build main-program expression data, then merge in module data
         let mut expression_data = ExpressionData {
             types: expr_types,
@@ -211,6 +212,7 @@ impl Analyzer {
             resolved_call_args,
             synthetic_it_lambdas,
             iterable_kinds,
+            coercion_kinds,
         };
         // Merge module analysis data (globally unique NodeIds, no collisions)
         expression_data.merge(merged_expr_data);

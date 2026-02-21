@@ -437,6 +437,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get_iterable_kind(iterable_node_id)
     }
 
+    /// Get the coercion kind annotation for a method call expression.
+    #[inline]
+    pub fn get_coercion_kind(
+        &self,
+        expr_node_id: vole_frontend::NodeId,
+    ) -> Option<vole_sema::CoercionKind> {
+        self.env
+            .analyzed
+            .query()
+            .expr_data()
+            .get_coercion_kind(expr_node_id)
+    }
+
     /// Get type metadata map
     #[inline]
     pub fn type_metadata(&self) -> &'ctx TypeMetadataMap {

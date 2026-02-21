@@ -407,6 +407,14 @@ impl Analyzer {
         if let Some(resolved) =
             self.resolve_method_via_entity_registry_id(object_type_id, method_call.method, interner)
         {
+            // Annotate custom Iterator<T> receivers so codegen can box/wrap them
+            // as RuntimeIterator without re-detecting the type.
+            if let Some(elem_type) = self.extract_custom_iterator_element_type_id(object_type_id) {
+                self.results.coercion_kinds.insert(
+                    expr.id,
+                    crate::expression_data::CoercionKind::IteratorWrap { elem_type },
+                );
+            }
             return self.process_resolved_instance_method(
                 expr,
                 method_call,
