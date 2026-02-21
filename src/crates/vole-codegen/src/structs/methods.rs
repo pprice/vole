@@ -601,6 +601,17 @@ impl Cg<'_, '_, '_> {
                     let monomorph_func_key = self.funcs().intern_name_id(instance.mangled_name);
                     // Monomorphized methods have concrete types, no i64 conversion needed
                     (self.func_ref(monomorph_func_key)?, false)
+                } else if let Some(expanded_info) = self
+                    .env
+                    .state
+                    .expanded_class_method_monomorphs
+                    .get(&effective_key)
+                {
+                    // Found in codegen-side expanded monomorphs table.
+                    // This handles methods on generic module types (e.g. Channel<T>.close())
+                    // called from within monomorphized code (e.g. Task.stream<i64>).
+                    return_type_id = expanded_info.return_type_id;
+                    (self.func_ref(expanded_info.func_key)?, false)
                 } else {
                     // Fallback to regular method if monomorph not found
                     let func_key = func_key.ok_or_else(|| {

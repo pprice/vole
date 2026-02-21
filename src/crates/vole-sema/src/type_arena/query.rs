@@ -506,6 +506,35 @@ impl TypeArena {
         }
     }
 
+    /// Check if a type contains any TypeParam anywhere in its structure.
+    /// Recursively walks through compound types (classes, arrays, unions, etc.).
+    pub fn contains_type_param(&self, id: TypeId) -> bool {
+        match self.get(id) {
+            SemaType::TypeParam(_) => true,
+            SemaType::TypeParamRef(_) => true,
+            SemaType::Class { type_args, .. }
+            | SemaType::Struct { type_args, .. }
+            | SemaType::Interface { type_args, .. } => {
+                type_args.iter().any(|&arg| self.contains_type_param(arg))
+            }
+            SemaType::Union(types) | SemaType::Tuple(types) => {
+                types.iter().any(|&t| self.contains_type_param(t))
+            }
+            SemaType::Array(elem) | SemaType::RuntimeIterator(elem) => {
+                self.contains_type_param(*elem)
+            }
+            SemaType::FixedArray { element, .. } => self.contains_type_param(*element),
+            SemaType::Function { params, ret, .. } => {
+                params.iter().any(|&p| self.contains_type_param(p))
+                    || self.contains_type_param(*ret)
+            }
+            SemaType::Fallible { success, error } => {
+                self.contains_type_param(*success) || self.contains_type_param(*error)
+            }
+            _ => false,
+        }
+    }
+
     /// Unwrap a type parameter reference, returning its TypeParamId
     pub fn unwrap_type_param_ref(&self, id: TypeId) -> Option<TypeParamId> {
         match self.get(id) {

@@ -411,6 +411,11 @@ impl Compiler<'_> {
         // Declare monomorphized function instances before second pass
         self.declare_all_monomorphized_instances()?;
 
+        // Expand abstract class method templates for program-level generics.
+        // MUST run after declarations (which provide concrete substitutions) but
+        // before any body compilation (which may call expanded methods).
+        self.expand_abstract_class_method_monomorphs()?;
+
         // Compile array Iterable default methods for program-level element types.
         // Module-level types already have methods from the module cache (imported
         // via import_array_iterable_default_methods); the sentinel check inside
@@ -522,6 +527,14 @@ impl Compiler<'_> {
         self.declare_monomorphized_instances(true)?;
         self.compile_module_monomorphized_instances()?;
         self.compile_module_class_method_monomorphized_instances()?;
+
+        // Pass 1.6: Expand abstract class method templates into concrete instances.
+        // Abstract templates are created by sema when generic code (e.g. Task.stream<T>)
+        // calls instance methods on generic classes (e.g. Channel<T>.close()).
+        // This MUST run before static method monomorph compilation because static method
+        // bodies (e.g. Task.stream<i64>) may call these expanded methods (e.g. ch.close()).
+        self.expand_abstract_class_method_monomorphs()?;
+
         self.compile_module_static_method_monomorphized_instances()?;
 
         // Pass 2: Compile all function bodies (cross-module calls now resolved)

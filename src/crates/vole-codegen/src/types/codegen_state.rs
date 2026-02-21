@@ -7,6 +7,7 @@ use std::cell::{Cell, RefCell};
 
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
+use vole_sema::generic::ClassMethodMonomorphKey;
 use vole_sema::type_arena::TypeId;
 
 use crate::FunctionKey;
@@ -68,6 +69,16 @@ impl Default for TypeMetadataMap {
     }
 }
 
+/// Info for an expanded class method monomorph (codegen-side, not in sema cache).
+/// Created by expanding abstract class method templates with concrete substitutions.
+#[derive(Debug, Clone)]
+pub(crate) struct ExpandedClassMethodInfo {
+    /// FunctionKey registered in func_registry (using raw string name)
+    pub func_key: FunctionKey,
+    /// Concrete return type
+    pub return_type_id: TypeId,
+}
+
 /// Key for monomorphized generic class type_id cache.
 /// Combines the base class TypeDefId with concrete type arguments.
 type MonoTypeKey = (TypeDefId, Vec<TypeId>);
@@ -109,6 +120,14 @@ pub(crate) struct CodegenState {
     /// direct `call` instructions. Built from both `LINKABLE_RUNTIME_SYMBOLS` and
     /// native stdlib functions registered in the `NativeRegistry`.
     pub ptr_to_symbol: FxHashMap<usize, String>,
+    /// Expanded class method monomorphs: concrete instances created by expanding
+    /// abstract class method templates with substitutions from concrete static/function
+    /// monomorphs. Used when the sema cache only has abstract templates (e.g.,
+    /// Channel<T>.close() called inside Task.stream<T>).
+    /// Populated during the module monomorphization expansion phase (pass 1.5),
+    /// read during pass 2 compilation when Cg resolves method calls.
+    pub expanded_class_method_monomorphs:
+        FxHashMap<ClassMethodMonomorphKey, ExpandedClassMethodInfo>,
 }
 
 impl CodegenState {
@@ -132,6 +151,7 @@ impl CodegenState {
             lambda_counter: Cell::new(0),
             mono_type_ids: RefCell::new(FxHashMap::default()),
             ptr_to_symbol,
+            expanded_class_method_monomorphs: FxHashMap::default(),
         }
     }
 }

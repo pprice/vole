@@ -18,6 +18,20 @@ use vole_sema::type_arena::TypeId;
 
 use crate::types::function_name_id_with_interner;
 
+/// Data for an expanded class method monomorph (used during template expansion).
+struct ExpandedMethodData {
+    concrete_key: vole_sema::generic::ClassMethodMonomorphKey,
+    mangled_name_str: String,
+    func_type: vole_sema::types::FunctionType,
+    substitutions: FxHashMap<NameId, TypeId>,
+    class_name: NameId,
+    method_name: NameId,
+    self_type: TypeId,
+    external_info: Option<vole_sema::implement_registry::ExternalMethodInfo>,
+    /// FunctionKey assigned during JIT declaration (set in step 4)
+    func_key: Option<crate::FunctionKey>,
+}
+
 impl Compiler<'_> {
     /// Declare a single monomorphized instance using the common trait interface.
     /// `has_self_param` indicates if a self pointer should be prepended to parameters.
@@ -1022,6 +1036,508 @@ impl Compiler<'_> {
                 format!("{} in class {}", method_name_str, class_name),
             ));
         }
+
+        Ok(())
+    }
+
+    // ===================================================================
+    // Abstract class method template expansion
+    // ===================================================================
+
+    /// Expand abstract class method monomorph templates into concrete instances.
+    ///
+    /// When a module-internal generic function/static method (e.g. `Task.stream<T>`)
+    /// calls instance methods on a generic class (e.g. `Channel<T>.close()`),
+    /// sema only creates abstract templates with TypeParam substitutions.
+    /// This method finds those abstract templates, matches them with concrete
+    /// substitutions from other monomorph caches, creates concrete instances,
+    /// declares them in JIT, compiles their bodies, and registers them in
+    /// `expanded_class_method_monomorphs` for lookup by `Cg`.
+    pub(super) fn expand_abstract_class_method_monomorphs(&mut self) -> CodegenResult<()> {
+        use vole_sema::generic::ClassMethodMonomorphKey;
+        use vole_sema::types::FunctionType;
+
+        let arena = self.arena();
+
+        // Step 1: Collect abstract class method templates (those with TypeParam in substitutions)
+        let all_class_method_count = self
+            .registry()
+            .class_method_monomorph_cache
+            .collect_instances()
+            .len();
+        tracing::debug!(
+            all_class_method_count,
+            "expand_abstract_class_method_monomorphs: checking cache"
+        );
+
+        let abstract_templates: Vec<(ClassMethodMonomorphKey, ClassMethodMonomorphInstance)> = self
+            .registry()
+            .class_method_monomorph_cache
+            .instances()
+            .filter(|(_, inst)| {
+                inst.substitutions
+                    .values()
+                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+            })
+            .map(|(key, inst)| (key.clone(), inst.clone()))
+            .collect();
+
+        tracing::debug!(
+            abstract_count = abstract_templates.len(),
+            "expand_abstract_class_method_monomorphs: found abstract templates"
+        );
+
+        if abstract_templates.is_empty() {
+            return Ok(());
+        }
+
+        // Step 2: Collect concrete type argument vectors per class.
+        //
+        // IMPORTANT: Type parameter NameIds (e.g. "T") are shared across all classes
+        // that use the same parameter name (they're interned in the builtin module).
+        // A substitution from Array.filled<Entry> ({T -> Entry}) has the SAME key NameId
+        // as one from Channel<i64> ({T -> i64}). To prevent false cross-class expansion,
+        // we collect concrete type argument vectors PER CLASS from the monomorph caches,
+        // then in step 3 only expand a template with type args known for THAT class.
+        //
+        // Sources of concrete type arguments per class:
+        // - Static method monomorphs: (class_name, class_type_keys)
+        // - Class method monomorphs: (class_name, type_keys)
+        let mut class_concrete_type_args: FxHashMap<NameId, Vec<Vec<TypeId>>> =
+            FxHashMap::default();
+
+        // Collect from concrete static method monomorphs
+        for (key, inst) in self.registry().static_method_monomorph_cache.instances() {
+            // Skip abstract entries (TypeParam in substitutions)
+            if inst
+                .substitutions
+                .values()
+                .any(|&ty| arena.unwrap_type_param(ty).is_some())
+            {
+                continue;
+            }
+            // Skip entries with no class type keys (non-generic class)
+            if key.class_type_keys.is_empty() {
+                continue;
+            }
+            // Skip entries where type keys still contain TypeParams
+            if key
+                .class_type_keys
+                .iter()
+                .any(|&tk| arena.contains_type_param(tk))
+            {
+                continue;
+            }
+            // Skip entries where type args reference program-defined types.
+            //
+            // Sema's `derive_concrete_static_method_monomorphs` cross-pollinates
+            // substitutions across ALL classes sharing the same TypeParam name (e.g. "T").
+            // This creates false entries like `Set.new<Entry|Empty>()` from
+            // `Array.filled<Entry|Empty>()` — different classes sharing NameId("T").
+            // These false entries are harmless as static methods (they compile fine)
+            // but cause errors when we expand them into class method templates
+            // (e.g. `Set<Entry|Empty>.equals()` fails because Entry|Empty doesn't
+            // satisfy Set's `T: Equatable` constraint).
+            //
+            // Filtering out program-defined types is safe because:
+            // - Module-internal generic code doesn't know about program types
+            // - Legitimate program-type monomorphs are created directly by sema
+            //   at the call site and exist as concrete (non-abstract) entries
+            if key
+                .class_type_keys
+                .iter()
+                .any(|&tk| self.type_depends_on_program_definitions(tk))
+            {
+                continue;
+            }
+            class_concrete_type_args
+                .entry(key.class_name)
+                .or_default()
+                .push(key.class_type_keys.clone());
+        }
+
+        // Collect from concrete class method monomorphs
+        for (key, inst) in self.registry().class_method_monomorph_cache.instances() {
+            // Skip abstract entries
+            if inst
+                .substitutions
+                .values()
+                .any(|&ty| arena.unwrap_type_param(ty).is_some())
+            {
+                continue;
+            }
+            if key.type_keys.is_empty() {
+                continue;
+            }
+            if key
+                .type_keys
+                .iter()
+                .any(|&tk| arena.contains_type_param(tk))
+            {
+                continue;
+            }
+            class_concrete_type_args
+                .entry(key.class_name)
+                .or_default()
+                .push(key.type_keys.clone());
+        }
+
+        // Deduplicate type arg vectors per class using a set.
+        // TypeId doesn't implement Ord, so we use a HashSet for dedup.
+        for type_arg_vecs in class_concrete_type_args.values_mut() {
+            let mut seen = rustc_hash::FxHashSet::default();
+            type_arg_vecs.retain(|v| seen.insert(v.clone()));
+        }
+
+        if tracing::enabled!(tracing::Level::DEBUG) {
+            for (class_name, type_arg_vecs) in &class_concrete_type_args {
+                let class_name_str = self.query().display_name(*class_name);
+                tracing::debug!(
+                    class = %class_name_str,
+                    type_arg_count = type_arg_vecs.len(),
+                    type_args = ?type_arg_vecs,
+                    "expand: per-class concrete type args"
+                );
+            }
+        }
+        tracing::debug!(
+            class_count = class_concrete_type_args.len(),
+            "expand_abstract_class_method_monomorphs: collected per-class concrete type args"
+        );
+
+        // Step 3: For each abstract template, expand with concrete type args for its class.
+        //
+        // Look up concrete type argument vectors for the template's class, then build
+        // substitutions by mapping each vector position to the template's TypeParam.
+        let mut expanded: Vec<ExpandedMethodData> = Vec::new();
+        let mut expanded_keys: rustc_hash::FxHashSet<ClassMethodMonomorphKey> =
+            rustc_hash::FxHashSet::default();
+
+        for (abstract_key, tmpl) in &abstract_templates {
+            // Extract the TypeParam positions from the abstract type_keys.
+            // These tell us which positions in the type_keys are TypeParams
+            // and what their NameIds are (for building substitutions).
+            let abstract_type_param_positions: Vec<(usize, NameId)> = abstract_key
+                .type_keys
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &tk)| arena.unwrap_type_param(tk).map(|name| (i, name)))
+                .collect();
+            if abstract_type_param_positions.is_empty() {
+                continue;
+            }
+
+            // Look up concrete type arg vectors for this class
+            let empty_vec = Vec::new();
+            let concrete_type_arg_vecs = class_concrete_type_args
+                .get(&abstract_key.class_name)
+                .unwrap_or(&empty_vec);
+
+            for concrete_type_args in concrete_type_arg_vecs {
+                // Build concrete type_keys by replacing TypeParams with concrete args
+                if concrete_type_args.len() != abstract_key.type_keys.len() {
+                    continue; // Arity mismatch
+                }
+
+                let concrete_type_keys: Vec<TypeId> = abstract_key
+                    .type_keys
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &tk)| {
+                        if arena.unwrap_type_param(tk).is_some() {
+                            concrete_type_args[i]
+                        } else {
+                            tk
+                        }
+                    })
+                    .collect();
+
+                // Skip if any concrete type_keys still contain TypeParams
+                if concrete_type_keys
+                    .iter()
+                    .any(|&tk| arena.contains_type_param(tk))
+                {
+                    continue;
+                }
+
+                let concrete_key = ClassMethodMonomorphKey::new(
+                    abstract_key.class_name,
+                    abstract_key.method_name,
+                    concrete_type_keys,
+                );
+
+                // Skip if already in sema cache or already expanded
+                if self
+                    .registry()
+                    .class_method_monomorph_cache
+                    .get(&concrete_key)
+                    .is_some()
+                {
+                    continue;
+                }
+                if expanded_keys.contains(&concrete_key) {
+                    continue;
+                }
+
+                // Build a substitution map from TypeParam NameIds to concrete types
+                // using the abstract template's substitution structure.
+                let concrete_subs: FxHashMap<NameId, TypeId> = abstract_type_param_positions
+                    .iter()
+                    .map(|&(i, param_name)| (param_name, concrete_type_args[i]))
+                    .collect();
+
+                // Build concrete substitutions for the class method (key_name -> concrete_ty)
+                let concrete_class_subs: FxHashMap<NameId, TypeId> = tmpl
+                    .substitutions
+                    .iter()
+                    .map(|(&key_name, &value_type_id)| {
+                        if let Some(param_name) = arena.unwrap_type_param(value_type_id)
+                            && let Some(&concrete_ty) = concrete_subs.get(&param_name)
+                        {
+                            return (key_name, concrete_ty);
+                        }
+                        (key_name, value_type_id)
+                    })
+                    .collect();
+
+                // Substitute func_type for concrete param/return types
+                let concrete_params: Vec<TypeId> = tmpl
+                    .func_type
+                    .params_id
+                    .iter()
+                    .map(|&param_ty| {
+                        arena
+                            .lookup_substitute(param_ty, &concrete_class_subs)
+                            .unwrap_or(param_ty)
+                    })
+                    .collect();
+                let concrete_return = arena
+                    .lookup_substitute(tmpl.func_type.return_type_id, &concrete_class_subs)
+                    .unwrap_or(tmpl.func_type.return_type_id);
+                let concrete_func_type = FunctionType::from_ids(
+                    &concrete_params,
+                    concrete_return,
+                    tmpl.func_type.is_closure,
+                );
+
+                let concrete_self_type = arena
+                    .lookup_substitute(tmpl.self_type, &concrete_class_subs)
+                    .unwrap_or(tmpl.self_type);
+
+                // Skip if any resolved types still contain TypeParams.
+                // This catches cases where the method body references types from
+                // other generic contexts that our substitution set doesn't cover.
+                if concrete_params
+                    .iter()
+                    .any(|&p| arena.contains_type_param(p))
+                    || arena.contains_type_param(concrete_return)
+                    || arena.contains_type_param(concrete_self_type)
+                {
+                    continue;
+                }
+
+                // Generate mangled name string (no NameId needed)
+                let class_name_str = self.query().display_name(tmpl.class_name);
+                let method_name_str = self.query().display_name(tmpl.method_name);
+                let type_keys_str: Vec<String> = concrete_key
+                    .type_keys
+                    .iter()
+                    .map(|&ty| format!("{:?}", ty))
+                    .collect();
+                let mangled_name_str = format!(
+                    "{}__method_{}__expand_{}",
+                    class_name_str,
+                    method_name_str,
+                    type_keys_str.join("_")
+                );
+
+                tracing::debug!(
+                    name = %mangled_name_str,
+                    class = %class_name_str,
+                    method = %method_name_str,
+                    "expanding abstract class method monomorph template"
+                );
+
+                expanded_keys.insert(concrete_key.clone());
+                expanded.push(ExpandedMethodData {
+                    concrete_key,
+                    mangled_name_str,
+                    func_type: concrete_func_type,
+                    substitutions: concrete_class_subs,
+                    class_name: tmpl.class_name,
+                    method_name: tmpl.method_name,
+                    self_type: concrete_self_type,
+                    external_info: tmpl.external_info,
+                    func_key: None,
+                });
+            }
+        }
+
+        if expanded.is_empty() {
+            return Ok(());
+        }
+
+        // Step 4: Declare all expanded instances in JIT and register for Cg lookup.
+        // Registration MUST happen here (before compilation) so that other monomorph
+        // bodies compiled later (e.g. Task.stream<i64>) can resolve calls to these
+        // expanded methods (e.g. Channel<i64>.close()) via expanded_class_method_monomorphs.
+        for data in &mut expanded {
+            if data.external_info.is_some() {
+                continue;
+            }
+            let param_type_ids: Vec<TypeId> = data.func_type.params_id.to_vec();
+            let sig = self.build_signature_from_type_ids(
+                &param_type_ids,
+                Some(data.func_type.return_type_id),
+                super::signatures::SelfParam::Pointer,
+            );
+            let func_id = self.jit.declare_function(&data.mangled_name_str, &sig);
+            let func_key = self.func_registry.intern_raw(data.mangled_name_str.clone());
+            self.func_registry.set_func_id(func_key, func_id);
+            self.func_registry
+                .set_return_type(func_key, data.func_type.return_type_id);
+            data.func_key = Some(func_key);
+
+            // Register for Cg lookup immediately so that method dispatch can
+            // find this expanded method when compiling other monomorph bodies.
+            self.state.expanded_class_method_monomorphs.insert(
+                data.concrete_key.clone(),
+                crate::types::ExpandedClassMethodInfo {
+                    func_key,
+                    return_type_id: data.func_type.return_type_id,
+                },
+            );
+        }
+
+        // Step 5: Compile each expanded instance body
+        for data in expanded {
+            if data.external_info.is_some() {
+                continue;
+            }
+
+            let method_name_str = self.query().display_name(data.method_name);
+            let func_key = data.func_key.expect("func_key should be set in step 4");
+            let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                CodegenError::not_found("expanded class method", &data.mangled_name_str)
+            })?;
+
+            if self.defined_functions.contains(&func_id) {
+                continue;
+            }
+
+            // Find the method body AST
+            let method_ast = self
+                .find_class_method_in_modules(data.class_name, &method_name_str)
+                .cloned();
+
+            let method_ast = if let Some(ast) = method_ast {
+                ast
+            } else {
+                // Try implement block methods
+                let module_id = self.analyzed.name_table().module_of(data.class_name);
+                let module_path = self
+                    .analyzed
+                    .name_table()
+                    .module_path(module_id)
+                    .to_string();
+                if let Some((module_program, _)) = self.analyzed.module_programs.get(&module_path) {
+                    self.find_implement_block_method(
+                        &module_program.declarations,
+                        data.class_name,
+                        &method_name_str,
+                        module_id,
+                    )
+                    .cloned()
+                    .ok_or_else(|| {
+                        let class_name = self.query().display_name(data.class_name);
+                        CodegenError::not_found(
+                            "expanded class method",
+                            format!("{} in class {}", method_name_str, class_name),
+                        )
+                    })?
+                } else {
+                    let class_name = self.query().display_name(data.class_name);
+                    return Err(CodegenError::not_found(
+                        "expanded class method",
+                        format!("{} in class {}", method_name_str, class_name),
+                    ));
+                }
+            };
+
+            // Compile the method body (adapted from compile_monomorphized_class_method)
+            let module_id = self.analyzed.name_table().module_of(data.class_name);
+            let module_path = self
+                .analyzed
+                .name_table()
+                .module_path(module_id)
+                .to_string();
+
+            let saved_bindings = Some(std::mem::take(&mut self.global_module_bindings));
+            let compile_result = (|| -> CodegenResult<()> {
+                let param_type_ids: Vec<TypeId> = data.func_type.params_id.to_vec();
+                let return_type_id = data.func_type.return_type_id;
+                let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
+                let params: Vec<_> = method_ast
+                    .params
+                    .iter()
+                    .zip(param_type_ids.iter())
+                    .zip(param_cranelift_types.iter())
+                    .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                    .collect();
+
+                let sig = self.build_signature_from_type_ids(
+                    &param_type_ids,
+                    Some(return_type_id),
+                    super::signatures::SelfParam::Pointer,
+                );
+                self.jit.ctx.func.signature = sig;
+
+                let self_type_id = data.self_type;
+                let self_sym = self.self_symbol();
+                let self_binding = (self_sym, self_type_id, self.pointer_type);
+
+                let source_file_ptr = self.source_file_ptr();
+                let empty_inits = FxHashMap::default();
+                let mut builder_ctx = FunctionBuilderContext::new();
+                let cg_module_id = Some(module_id);
+                {
+                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+                    let env = if let Some((_, interner)) =
+                        self.analyzed.module_programs.get(&module_path)
+                    {
+                        compile_env!(self, interner, &empty_inits, source_file_ptr)
+                    } else {
+                        compile_env!(self, source_file_ptr)
+                    };
+                    let mut codegen_ctx =
+                        CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+
+                    let config = FunctionCompileConfig::method(
+                        &method_ast.body,
+                        params,
+                        self_binding,
+                        Some(return_type_id),
+                    );
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        cg_module_id,
+                        Some(&data.substitutions),
+                    )?;
+                }
+
+                self.finalize_function(func_id)?;
+                Ok(())
+            })();
+            if let Some(bindings) = saved_bindings {
+                self.global_module_bindings = bindings;
+            }
+            compile_result?;
+        }
+
+        tracing::debug!("expanded abstract class method monomorphs complete");
 
         Ok(())
     }
