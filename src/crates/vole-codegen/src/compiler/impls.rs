@@ -1341,7 +1341,12 @@ impl Compiler<'_> {
                     // the outer call-site (used_array_iterable_path) transfers closure
                     // ownership to the body, so pipeline methods must NOT rc_inc and
                     // terminal methods must emit rc_dec after the runtime call.
-                    if iface_name_str == "Iterable" {
+                    if self
+                        .analyzed
+                        .name_table()
+                        .well_known
+                        .is_iterable_type_def(interface_tdef_id)
+                    {
                         config = config.with_iterable_default_body();
                     }
                     // Pass type parameter substitutions so that abstract type params
@@ -1665,7 +1670,12 @@ impl Compiler<'_> {
                     // the outer call-site (used_array_iterable_path) transfers closure
                     // ownership to the body, so pipeline methods must NOT rc_inc and
                     // terminal methods must emit rc_dec after the runtime call.
-                    if iface_name_str == "Iterable" {
+                    if self
+                        .analyzed
+                        .name_table()
+                        .well_known
+                        .is_iterable_type_def(interface_tdef_id)
+                    {
                         config = config.with_iterable_default_body();
                     }
                     // Pass type parameter substitutions so that abstract type params

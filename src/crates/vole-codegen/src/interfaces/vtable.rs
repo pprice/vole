@@ -43,6 +43,8 @@ struct VtableBuildState {
     data_id: DataId,
     /// Interface name ID for method resolution
     interface_name_id: NameId,
+    /// TypeDefId of the interface (for well-known type checks)
+    interface_type_def_id: TypeDefId,
     /// Concrete type for wrapper compilation (interned TypeId)
     concrete_type: TypeId,
     /// Type substitutions for generic interfaces (interned TypeIds)
@@ -59,6 +61,11 @@ pub(crate) struct InterfaceVtableRegistry {
     pending: FxHashMap<InterfaceVtableKey, VtableBuildState>,
     wrapper_counter: u32,
 }
+
+/// Iterator-specific vtable info passed from `ensure_compiled` to wrapper compilation.
+/// `None` means the interface is not Iterator.
+/// `Some(tag)` means Iterator with optional element type tag.
+type IteratorVtableInfo = Option<Option<u64>>;
 
 /// Wrapper struct containing the resolved method target and signature info.
 /// We store param_count and returns_void instead of FunctionType because the method
@@ -209,6 +216,7 @@ impl InterfaceVtableRegistry {
             VtableBuildState {
                 data_id,
                 interface_name_id,
+                interface_type_def_id,
                 concrete_type: concrete_type_id,
                 substitutions,
                 method_ids,
@@ -269,15 +277,21 @@ impl InterfaceVtableRegistry {
         // For Iterator<T> interfaces, compute the elem type tag from the
         // substitution for the first type parameter (T) so that the vtable
         // thunk can set it on the created RcIterator.
-        let iter_elem_tag: Option<u64> = if interface_name_str == "Iterator" {
-            state
-                .substitutions
-                .values()
-                .next()
-                .map(|&elem_type_id| crate::types::unknown_type_tag(elem_type_id, ctx.arena()))
-        } else {
-            None
-        };
+        let iterator_info: IteratorVtableInfo =
+            if ctx
+                .analyzed()
+                .name_table()
+                .well_known
+                .is_iterator_type_def(state.interface_type_def_id)
+            {
+                Some(
+                    state.substitutions.values().next().map(|&elem_type_id| {
+                        crate::types::unknown_type_tag(elem_type_id, ctx.arena())
+                    }),
+                )
+            } else {
+                None
+            };
 
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.query().get_method(method_id);
@@ -295,7 +309,7 @@ impl InterfaceVtableRegistry {
                 &method_name_str,
                 state.concrete_type,
                 &target,
-                iter_elem_tag,
+                iterator_info,
             )?;
             let func_ref = ctx.jit_module().declare_func_in_data(wrapper_id, &mut data);
             data.write_function_addr((index * word_bytes) as u32, func_ref);
@@ -334,7 +348,7 @@ impl InterfaceVtableRegistry {
         method_name: &str,
         concrete_type_id: TypeId,
         method: &VtableMethod,
-        iter_elem_tag: Option<u64>,
+        iterator_info: IteratorVtableInfo,
     ) -> CodegenResult<cranelift_module::FuncId> {
         // Build wrapper signature using param_count and returns_void directly
         let word_type = ctx.ptr_type();
@@ -401,10 +415,9 @@ impl InterfaceVtableRegistry {
                     box_ptr,
                     &params,
                     external_info,
-                    interface_name,
+                    iterator_info,
                     &method.param_type_ids,
                     method.return_type_id,
-                    iter_elem_tag,
                 )?,
             };
 
@@ -724,14 +737,13 @@ fn compile_external_wrapper<C: VtableCtx>(
     box_ptr: Value,
     params: &[Value],
     external_info: &ExternalMethodInfo,
-    interface_name: &str,
+    iterator_info: IteratorVtableInfo,
     param_type_ids: &[TypeId],
     return_type_id: TypeId,
-    iter_elem_tag: Option<u64>,
 ) -> CodegenResult<Vec<Value>> {
     // For Iterator interface, wrap the boxed interface in a RcIterator
     // so external functions like vole_iter_collect can iterate via vtable.
-    let self_val = if interface_name == "Iterator" {
+    let self_val = if let Some(iter_elem_tag) = iterator_info {
         // Use tagged variant when we know the element type, so that terminal
         // methods (reduce, count, first, last) can determine RC cleanup needs.
         let (native_name, use_tag) = match iter_elem_tag {
@@ -816,7 +828,7 @@ fn compile_external_wrapper<C: VtableCtx>(
     let mut native_sig = ctx.jit_module().make_signature();
     // For Iterator, the self param is now *mut RcIterator (pointer)
     let arena = ctx.arena();
-    let self_param_type = if interface_name == "Iterator" {
+    let self_param_type = if iterator_info.is_some() {
         ctx.ptr_type()
     } else {
         type_id_to_cranelift(concrete_type_id, arena, ctx.ptr_type())

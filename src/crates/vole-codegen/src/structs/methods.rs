@@ -1227,9 +1227,11 @@ impl Cg<'_, '_, '_> {
         expr_id: NodeId,
         fallback_elem_type: Option<TypeId>,
     ) -> CodegenResult<(ExternalMethodInfo, TypeId)> {
-        // Look up the Iterator interface
+        // Look up the Iterator interface via well-known type metadata
         let iter_type_id = self
-            .resolve_type_str_or_interface("Iterator")
+            .name_table()
+            .well_known
+            .iterator_type_def
             .ok_or_else(|| CodegenError::not_found("interface", "Iterator"))?;
 
         let iter_def = self.query().get_type(iter_type_id);
@@ -1607,12 +1609,11 @@ impl Cg<'_, '_, '_> {
         self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
     }
 
-    /// Convert Iterator<T> return types to RuntimeIterator(T), looking up Iterator interface by name
+    /// Convert Iterator<T> return types to RuntimeIterator(T), using well-known type metadata
     /// Takes and returns TypeId for O(1) equality; converts internally for matching
     pub(crate) fn maybe_convert_iterator_return_type(&self, ty: TypeId) -> TypeId {
-        // Look up the Iterator interface
-        let iterator_type_id = self.resolve_type_str_or_interface("Iterator");
-        if let Some(iterator_type_id) = iterator_type_id {
+        // Look up the Iterator interface via well-known type metadata
+        if let Some(iterator_type_id) = self.name_table().well_known.iterator_type_def {
             self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
         } else {
             ty
