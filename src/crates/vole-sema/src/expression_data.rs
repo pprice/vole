@@ -215,28 +215,56 @@ impl ExpressionData {
     /// into the top-level flat maps. Because NodeIds are globally unique
     /// (they embed a ModuleId), there are no collisions.
     pub fn merge(&mut self, other: ExpressionData) {
+        self.types.reserve(other.types.len());
         self.types.extend(other.types);
+        self.methods.reserve(other.methods.len());
         self.methods.extend(other.methods);
+        self.generics.reserve(other.generics.len());
         self.generics.extend(other.generics);
+        self.class_method_generics
+            .reserve(other.class_method_generics.len());
         self.class_method_generics
             .extend(other.class_method_generics);
         self.static_method_generics
+            .reserve(other.static_method_generics.len());
+        self.static_method_generics
             .extend(other.static_method_generics);
         self.substituted_return_types
+            .reserve(other.substituted_return_types.len());
+        self.substituted_return_types
             .extend(other.substituted_return_types);
+        self.lambda_defaults.reserve(other.lambda_defaults.len());
         self.lambda_defaults.extend(other.lambda_defaults);
         self.tests_virtual_modules
+            .reserve(other.tests_virtual_modules.len());
+        self.tests_virtual_modules
             .extend(other.tests_virtual_modules);
+        self.is_check_results
+            .reserve(other.is_check_results.len());
         self.is_check_results.extend(other.is_check_results);
+        self.declared_var_types
+            .reserve(other.declared_var_types.len());
         self.declared_var_types.extend(other.declared_var_types);
+        self.lambda_analysis.reserve(other.lambda_analysis.len());
         self.lambda_analysis.extend(other.lambda_analysis);
+        self.intrinsic_keys.reserve(other.intrinsic_keys.len());
         self.intrinsic_keys.extend(other.intrinsic_keys);
+        self.resolved_call_args
+            .reserve(other.resolved_call_args.len());
         self.resolved_call_args.extend(other.resolved_call_args);
+        self.synthetic_it_lambdas
+            .reserve(other.synthetic_it_lambdas.len());
         self.synthetic_it_lambdas.extend(other.synthetic_it_lambdas);
+        self.iterable_kinds.reserve(other.iterable_kinds.len());
         self.iterable_kinds.extend(other.iterable_kinds);
+        self.coercion_kinds.reserve(other.coercion_kinds.len());
         self.coercion_kinds.extend(other.coercion_kinds);
         self.lowered_optional_chains
+            .reserve(other.lowered_optional_chains.len());
+        self.lowered_optional_chains
             .extend(other.lowered_optional_chains);
+        self.string_conversions
+            .reserve(other.string_conversions.len());
         self.string_conversions.extend(other.string_conversions);
     }
 
