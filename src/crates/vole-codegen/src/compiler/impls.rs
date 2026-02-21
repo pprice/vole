@@ -2968,9 +2968,9 @@ impl Compiler<'_> {
                     .state
                     .array_iterable_func_keys
                     .contains_key(&(*first_name_id, self_type_id))
-                {
-                    continue;
-                }
+            {
+                continue;
+            }
 
             // Build concrete substitution: T_name_id -> elem_type
             let mut concrete_subs = FxHashMap::default();

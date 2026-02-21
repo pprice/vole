@@ -407,6 +407,16 @@ impl TypeArena {
         self.intern_map.get(&ty).copied()
     }
 
+    /// Look up an existing Interface type by type_def_id and type_args (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_interface(&self, type_def_id: TypeDefId, type_args: TypeIdVec) -> Option<TypeId> {
+        let ty = SemaType::Interface {
+            type_def_id,
+            type_args,
+        };
+        self.intern_map.get(&ty).copied()
+    }
+
     /// Return all concrete (non-TypeParam) element types for which a RuntimeIterator exists.
     ///
     /// Used by codegen to find the concrete array element types that need array Iterable

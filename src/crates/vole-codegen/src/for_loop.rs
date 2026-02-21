@@ -4,6 +4,7 @@
 // Extracted from stmt.rs for module organization.
 
 use cranelift::prelude::*;
+use smallvec::smallvec;
 
 use crate::IntrinsicKey;
 use crate::RuntimeKey;
@@ -347,6 +348,25 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Check if a type implements Iterator<T> (a class/struct with `extend ... with Iterator<T>`).
+    ///
+    /// Returns the element type T if the type implements Iterator<T>, or None otherwise.
+    pub(crate) fn iterator_element_type(&self, ty: TypeId) -> Option<TypeId> {
+        let type_def_id = {
+            let arena = self.arena();
+            arena.unwrap_class_or_struct(ty).map(|(id, _, _)| id)
+        }?;
+        let well_known = &self.name_table().well_known;
+        let iterator_id = well_known.iterator_type_def?;
+        let registry = self.registry();
+        let implemented = registry.get_implemented_interfaces(type_def_id);
+        if !implemented.contains(&iterator_id) {
+            return None;
+        }
+        let type_args = registry.get_implementation_type_args(type_def_id, iterator_id);
+        type_args.first().copied()
+    }
+
     /// Check if a type implements Iterable<T> (a class/struct with `extend ... with Iterable<T>`).
     ///
     /// Returns the element type T if the type implements Iterable<T>, or None otherwise.
@@ -386,6 +406,49 @@ impl Cg<'_, '_, '_> {
         // Release the caller's reference to the interface data_ptr
         let mut iter_iface = iter_value;
         self.consume_rc_value(&mut iter_iface)?;
+
+        let runtime_iter_type_id = self
+            .arena()
+            .lookup_runtime_iterator(elem_type_id)
+            .unwrap_or(TypeId::STRING);
+        let iter = CompiledValue::owned(wrapped, types::I64, runtime_iter_type_id);
+
+        // From here, identical to the for_iterator loop body.
+        self.for_iterator_from_runtime_iter(for_stmt, iter, elem_type_id)
+    }
+
+    /// Compile a for loop over a custom Iterator<T> implementor.
+    ///
+    /// Boxes the class instance as an Iterator<T> interface, wraps it via InterfaceIter,
+    /// then iterates using the standard RuntimeIterator loop.
+    pub(crate) fn for_custom_iterator(
+        &mut self,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        elem_type_id: TypeId,
+    ) -> CodegenResult<bool> {
+        let iterable = self.expr(&for_stmt.iterable)?;
+
+        // Look up the Iterator<T> interface type (already interned by sema)
+        let iterator_type_def = self
+            .name_table()
+            .well_known
+            .iterator_type_def
+            .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
+        let interface_type_id = self
+            .arena()
+            .lookup_interface(iterator_type_def, smallvec![elem_type_id])
+            .ok_or_else(|| {
+                CodegenError::internal("Iterator<T> interface type not found in arena")
+            })?;
+
+        // Box the class instance as Iterator<T>
+        let boxed = self.box_interface_value(iterable, interface_type_id)?;
+
+        // Wrap in RcIterator via InterfaceIter so the native loop dispatch works.
+        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[boxed.value])?;
+        // Release the caller's reference to the boxed interface data_ptr
+        let mut boxed_iface = boxed;
+        self.consume_rc_value(&mut boxed_iface)?;
 
         let runtime_iter_type_id = self
             .arena()

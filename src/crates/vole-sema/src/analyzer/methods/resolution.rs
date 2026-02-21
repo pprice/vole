@@ -640,6 +640,26 @@ impl Analyzer {
                     external_info,
                 }
             }
+            // Direct methods copied from interfaces (via
+            // register_interface_default_methods_on_implementing_type)
+            // also need interface type param substitution.
+            ResolvedMethod::Direct {
+                type_def_id,
+                method_name_id,
+                func_type_id,
+                return_type_id,
+                method_id,
+            } => {
+                let new_func_type_id = self.type_arena_mut().substitute(func_type_id, subs);
+                let new_return_type_id = self.type_arena_mut().substitute(return_type_id, subs);
+                ResolvedMethod::Direct {
+                    type_def_id,
+                    method_name_id,
+                    func_type_id: new_func_type_id,
+                    return_type_id: new_return_type_id,
+                    method_id,
+                }
+            }
             other => other,
         }
     }

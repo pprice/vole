@@ -1,0 +1,133 @@
+// Test: custom Iterator<T> implementations used directly and with method chains.
+// Covers for-in on raw Iterator<T>, break/continue, string element types, and chaining.
+//
+// DO NOT SIMPLIFY this test.
+
+class Counter {
+    current: i64,
+    max: i64,
+}
+
+extend Counter with Iterator<i64> {
+    func next() -> i64 | Done {
+        if self.current >= self.max {
+            return Done {}
+        }
+        let v = self.current
+        self.current = self.current + 1
+        return v
+    }
+}
+
+class WordIter {
+    index: i64,
+    words: [string],
+}
+
+extend WordIter with Iterator<string> {
+    func next() -> string | Done {
+        if self.index >= self.words.length() {
+            return Done {}
+        }
+        let w = self.words[self.index]
+        self.index = self.index + 1
+        return w
+    }
+}
+
+tests "custom Iterator<T>" {
+    test "for-in over custom Iterator<i64>" {
+        let c = Counter { current: 0, max: 4 }
+        var total = 0
+        for x in c {
+            total = total + x
+        }
+        assert(total == 6) // 0+1+2+3
+    }
+
+    test "for-in with break" {
+        let c = Counter { current: 0, max: 100 }
+        var total = 0
+        for x in c {
+            if x >= 5 {
+                break
+            }
+            total = total + x
+        }
+        assert(total == 10) // 0+1+2+3+4
+    }
+
+    test "for-in with continue" {
+        let c = Counter { current: 0, max: 6 }
+        var total = 0
+        for x in c {
+            if x % 2 == 0 {
+                continue
+            }
+            total = total + x
+        }
+        assert(total == 9) // 1+3+5
+    }
+
+    test "for-in over custom Iterator<string>" {
+        let w = WordIter { index: 0, words: ["hello", "world"] }
+        var result = ""
+        for word in w {
+            result = result + word + " "
+        }
+        assert(result == "hello world ")
+    }
+
+    test "custom iterator collect" {
+        let c = Counter { current: 1, max: 4 }
+        let items = c.collect()
+        assert(items.length() == 3)
+        assert(items[0] == 1)
+        assert(items[1] == 2)
+        assert(items[2] == 3)
+    }
+
+    test "custom iterator map and collect" {
+        let c = Counter { current: 0, max: 3 }
+        let doubled = c.map(it * 2).collect()
+        assert(doubled.length() == 3)
+        assert(doubled[0] == 0)
+        assert(doubled[1] == 2)
+        assert(doubled[2] == 4)
+    }
+
+    test "custom iterator filter and collect" {
+        let c = Counter { current: 0, max: 6 }
+        let odds = c.filter(it % 2 != 0).collect()
+        assert(odds.length() == 3)
+        assert(odds[0] == 1)
+        assert(odds[1] == 3)
+        assert(odds[2] == 5)
+    }
+
+    test "custom iterator count" {
+        let c = Counter { current: 0, max: 5 }
+        assert(c.count() == 5)
+    }
+
+    test "custom string iterator collect" {
+        let w = WordIter { index: 0, words: ["a", "b", "c"] }
+        let all = w.collect()
+        assert(all.length() == 3)
+        assert(all[0] == "a")
+        assert(all[2] == "c")
+    }
+
+    test "nested for-in with custom iterators" {
+        var total = 0
+        let outer = Counter { current: 0, max: 3 }
+        for i in outer {
+            let inner = Counter { current: 0, max: 3 }
+            for j in inner {
+                total = total + i * 10 + j
+            }
+        }
+        // (0+1+2) + (10+11+12) + (20+21+22) = 3 + 33 + 63 = 99
+        assert(total == 99)
+    }
+}

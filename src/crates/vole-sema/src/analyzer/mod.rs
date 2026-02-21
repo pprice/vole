@@ -789,22 +789,40 @@ impl Analyzer {
     }
 
     /// Extract the element type from an Iterator<T> type.
+    ///
+    /// Handles both direct Iterator<T> interface types and class/struct types
+    /// that implement Iterator<T> via `extend ... with Iterator<T>`.
     fn extract_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
+        // First, check if the type IS an Iterator<T> interface directly
         let interface_info = {
             let arena = self.type_arena();
             arena
                 .unwrap_interface(ty_id)
                 .map(|(id, args)| (id, args.first().copied()))
         };
-        let (type_def_id, first_arg) = interface_info?;
-        if !self
-            .name_table()
-            .well_known
-            .is_iterator_type_def(type_def_id)
-        {
+        if let Some((type_def_id, first_arg)) = interface_info
+            && self
+                .name_table()
+                .well_known
+                .is_iterator_type_def(type_def_id)
+            {
+                return first_arg;
+            }
+
+        // Second, check if it's a class/struct that implements Iterator<T>
+        let type_def_id = {
+            let arena = self.type_arena();
+            arena.unwrap_class_or_struct(ty_id).map(|(id, _, _)| id)
+        }?;
+        let well_known = &self.name_table().well_known;
+        let iterator_id = well_known.iterator_type_def?;
+        let registry = self.entity_registry();
+        let implemented = registry.get_implemented_interfaces(type_def_id);
+        if !implemented.contains(&iterator_id) {
             return None;
         }
-        first_arg
+        let type_args = registry.get_implementation_type_args(type_def_id, iterator_id);
+        type_args.first().copied()
     }
 
     /// Extract the element type T from a type that implements Iterable<T>.

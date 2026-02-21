@@ -138,6 +138,19 @@ impl Cg<'_, '_, '_> {
             return self.runtime_iterator_method(&obj, mc, method_name_str, elem_type_id, expr_id);
         }
 
+        // Handle custom Iterator<T> implementors: box as Iterator<T> interface,
+        // wrap via InterfaceIter into RuntimeIterator, then dispatch the method.
+        if let Some(elem_type_id) = self.iterator_element_type(obj.type_id) {
+            let runtime_iter = self.box_custom_iterator_to_runtime(&obj, elem_type_id)?;
+            return self.runtime_iterator_method(
+                &runtime_iter,
+                mc,
+                method_name_str,
+                elem_type_id,
+                expr_id,
+            );
+        }
+
         let method_name_id = self.method_name_id(mc.method)?;
 
         // Resolution was already looked up earlier (before builtin_method call)
@@ -1322,6 +1335,49 @@ impl Cg<'_, '_, '_> {
             // Unknown method: can't derive
             _ => None,
         }
+    }
+
+    /// Box a custom Iterator<T> implementor as a RuntimeIterator.
+    ///
+    /// Boxes the class instance as an Iterator<T> interface, then wraps it via
+    /// InterfaceIter to create a RuntimeIterator that can be dispatched via
+    /// the standard runtime iterator methods (collect, map, filter, count, etc.).
+    fn box_custom_iterator_to_runtime(
+        &mut self,
+        obj: &CompiledValue,
+        elem_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        // Look up the Iterator<T> interface type (already interned by sema)
+        let iterator_type_def = self
+            .name_table()
+            .well_known
+            .iterator_type_def
+            .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
+        let interface_type_id = self
+            .arena()
+            .lookup_interface(iterator_type_def, smallvec![elem_type_id])
+            .ok_or_else(|| {
+                CodegenError::internal("Iterator<T> interface type not found in arena")
+            })?;
+
+        // Box the class instance as Iterator<T>
+        let boxed = self.box_interface_value(*obj, interface_type_id)?;
+
+        // Wrap in RcIterator via InterfaceIter
+        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[boxed.value])?;
+        // Release the boxed interface ref (InterfaceIter took its own reference)
+        let mut boxed_iface = boxed;
+        self.consume_rc_value(&mut boxed_iface)?;
+
+        let runtime_iter_type_id = self
+            .arena()
+            .lookup_runtime_iterator(elem_type_id)
+            .unwrap_or(TypeId::STRING);
+        Ok(CompiledValue::owned(
+            wrapped,
+            types::I64,
+            runtime_iter_type_id,
+        ))
     }
 
     /// Handle method calls on RuntimeIterator - calls external Iterator functions directly

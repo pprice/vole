@@ -235,10 +235,14 @@ impl Cg<'_, '_, '_> {
                     let is_iterator =
                         iterable_type_id.is_some_and(|id| self.is_iterator_type_id(id));
                     let is_string = iterable_type_id.is_some_and(|id| self.arena().is_string(id));
+                    let iterator_elem =
+                        iterable_type_id.and_then(|id| self.iterator_element_type(id));
                     let iterable_elem =
                         iterable_type_id.and_then(|id| self.iterable_element_type(id));
                     if is_iterator {
                         self.for_iterator(for_stmt)
+                    } else if let Some(elem_type_id) = iterator_elem {
+                        self.for_custom_iterator(for_stmt, elem_type_id)
                     } else if is_string {
                         self.for_string(for_stmt)
                     } else if let Some(elem_type_id) = iterable_elem {
