@@ -426,7 +426,7 @@ impl Compiler<'_> {
         self.compile_program_declarations(program)?;
 
         // Compile monomorphized instances
-        self.compile_all_monomorphized_instances(program)?;
+        self.compile_all_monomorphized_instances(Some(program))?;
 
         // Compile any monomorphs that were lazily declared during expression compilation.
         // This fixpoint loop handles transitive demand-declarations: compiling one pending
@@ -528,19 +528,24 @@ impl Compiler<'_> {
         // element type (e.g. count/map/filter on [i64], [string], etc.).
         self.compile_array_iterable_default_methods()?;
 
-        // Pass 1.5: Declare and compile monomorphized generic instances used by modules.
-        self.declare_monomorphized_instances(true)?;
-        self.compile_module_monomorphized_instances()?;
-        self.compile_module_class_method_monomorphized_instances()?;
+        // Pass 1.5: Declare all monomorphized instances (functions, class methods,
+        // static methods). This pre-declares known monomorphs so they have FuncIds
+        // before any body compilation begins. Instances whose ASTs live in the main
+        // program are declared but not compiled here — the program phase or the
+        // demand-driven fixpoint loop handles them.
+        self.declare_all_monomorphized_instances()?;
 
         // Pass 1.6: Expand abstract class method templates into concrete instances.
         // Abstract templates are created by sema when generic code (e.g. Task.stream<T>)
         // calls instance methods on generic classes (e.g. Channel<T>.close()).
-        // This MUST run before static method monomorph compilation because static method
-        // bodies (e.g. Task.stream<i64>) may call these expanded methods (e.g. ch.close()).
+        // This MUST run before monomorph body compilation because compiled bodies
+        // (e.g. Task.stream<i64>) may call these expanded methods (e.g. ch.close()).
         self.expand_abstract_class_method_monomorphs()?;
 
-        self.compile_module_static_method_monomorphized_instances()?;
+        // Pass 1.7: Compile monomorphized instances whose ASTs live in modules.
+        // Passes None for program — instances from the main program are silently
+        // skipped and compiled later in compile_program_body.
+        self.compile_all_monomorphized_instances(None)?;
 
         // Pass 2: Compile all function bodies (cross-module calls now resolved)
         for module_path in &module_paths {

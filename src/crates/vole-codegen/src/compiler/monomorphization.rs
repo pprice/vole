@@ -67,10 +67,7 @@ impl Compiler<'_> {
     }
 
     /// Declare all monomorphized function instances
-    pub(super) fn declare_monomorphized_instances(
-        &mut self,
-        modules_only: bool,
-    ) -> CodegenResult<()> {
+    pub(super) fn declare_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
@@ -85,42 +82,35 @@ impl Compiler<'_> {
                 continue;
             }
 
-            // When compiling modules only, skip monomorphs whose original function
-            // lives in the main program — they would be declared but never compiled.
-            if modules_only {
-                let module_id = self.analyzed.name_table().module_of(instance.original_name);
-                let module_path = self
-                    .analyzed
-                    .name_table()
-                    .module_path(module_id)
-                    .to_string();
-                if !self.analyzed.module_programs.contains_key(&module_path) {
-                    continue;
-                }
-            }
-
             self.declare_monomorph_instance(&instance, false);
         }
 
         Ok(())
     }
 
-    /// Compile all monomorphized function instances
+    /// Compile all monomorphized function instances.
+    ///
+    /// When `program` is `Some`, main-program generic function ASTs are checked first.
+    /// When `program` is `None` (module-only phase), only module programs are searched
+    /// and instances whose ASTs aren't found are silently skipped — they will be
+    /// compiled later by the program phase or the demand-driven fixpoint loop.
     pub(super) fn compile_monomorphized_instances(
         &mut self,
-        program: &Program,
+        program: Option<&Program>,
     ) -> CodegenResult<()> {
         // Build a map of generic function names to their ASTs
         // Include both explicit generics (type_params in AST) and implicit generics
         // (structural type params that create generic_info in entity registry)
         // Recursively walks into tests blocks to find scoped generic functions.
         let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
-        let program_module = self.program_module();
-        self.collect_generic_func_asts(
-            &program.declarations,
-            program_module,
-            &mut generic_func_asts,
-        );
+        if let Some(program) = program {
+            let program_module = self.program_module();
+            self.collect_generic_func_asts(
+                &program.declarations,
+                program_module,
+                &mut generic_func_asts,
+            );
+        }
 
         // Collect instances to avoid borrow issues
         let instances = self
@@ -144,44 +134,15 @@ impl Compiler<'_> {
 
             // Then try module programs (for prelude generic functions like print/println)
             let found = self.compile_monomorphized_module_function(&instance)?;
-            if !found {
+            if !found && program.is_some() {
+                // Only error when the main program is available — during the module-only
+                // phase, missing ASTs are expected for program-originating monomorphs.
                 let func_name = self.query().display_name(instance.original_name);
                 return Err(CodegenError::internal_with_context(
                     "generic function AST not found",
                     func_name,
                 ));
             }
-        }
-
-        Ok(())
-    }
-
-    /// Compile monomorphized function instances that belong to modules.
-    /// Skips external functions and main-program functions (those are compiled later).
-    pub(super) fn compile_module_monomorphized_instances(&mut self) -> CodegenResult<()> {
-        let instances = self
-            .analyzed
-            .entity_registry()
-            .monomorph_cache
-            .collect_instances();
-
-        for instance in instances {
-            if self.is_external_func(instance.original_name) {
-                continue;
-            }
-
-            // Only compile instances whose original function lives in a module
-            let module_id = self.analyzed.name_table().module_of(instance.original_name);
-            let module_path = self
-                .analyzed
-                .name_table()
-                .module_path(module_id)
-                .to_string();
-            if !self.analyzed.module_programs.contains_key(&module_path) {
-                continue;
-            }
-
-            self.compile_monomorphized_module_function(&instance)?;
         }
 
         Ok(())
@@ -474,6 +435,8 @@ impl Compiler<'_> {
     }
 
     /// Returns true when any substitution type depends on main-program definitions.
+    /// Used during the module-only phase to skip monomorphs that reference program
+    /// types — their implement-block methods aren't available yet.
     fn substitutions_depend_on_program_definitions(
         &self,
         substitutions: &FxHashMap<NameId, TypeId>,
@@ -516,12 +479,18 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile all monomorphized class method instances
+    /// Compile all monomorphized class method instances.
+    ///
+    /// When `program` is `Some`, main-program class ASTs and implement blocks are
+    /// checked. When `None` (module-only phase), only module programs are searched
+    /// and instances whose ASTs aren't found are silently skipped.
     pub(super) fn compile_class_method_monomorphized_instances(
         &mut self,
-        program: &Program,
+        program: Option<&Program>,
     ) -> CodegenResult<()> {
-        let class_asts = self.build_generic_type_asts(program);
+        let class_asts = program
+            .map(|p| self.build_generic_type_asts(p))
+            .unwrap_or_default();
 
         // Collect instances to avoid borrow issues
         let instances = self
@@ -548,6 +517,16 @@ impl Compiler<'_> {
 
             // Skip abstract monomorph templates (e.g., T -> TypeParam(T)).
             if self.is_abstract_class_method_monomorph(&instance) {
+                continue;
+            }
+
+            // During the module-only phase, skip instances whose substitutions
+            // reference program-defined types. Their implement-block methods
+            // (e.g. Color.hash()) aren't declared yet and compilation would fail.
+            // These are compiled later during the program phase.
+            if program.is_none()
+                && self.substitutions_depend_on_program_definitions(&instance.substitutions)
+            {
                 continue;
             }
 
@@ -596,23 +575,55 @@ impl Compiler<'_> {
             }
 
             // Fallback: search implement blocks for methods on generic classes
-            let program_module = self.program_module();
-            if let Some(method) = self.find_implement_block_method(
-                &program.declarations,
-                instance.class_name,
-                &method_name_str,
-                program_module,
-            ) {
-                self.compile_monomorphized_class_method(method, &instance, None)?;
-                continue;
+            if let Some(program) = program {
+                let program_module = self.program_module();
+                if let Some(method) = self.find_implement_block_method(
+                    &program.declarations,
+                    instance.class_name,
+                    &method_name_str,
+                    program_module,
+                ) {
+                    self.compile_monomorphized_class_method(method, &instance, None)?;
+                    continue;
+                }
             }
 
-            // Method not found - this shouldn't happen if sema was correct
-            let class_name = self.query().display_name(instance.class_name);
-            return Err(CodegenError::not_found(
-                "method",
-                format!("{} in class {}", method_name_str, class_name),
-            ));
+            // Fallback: search implement blocks in modules
+            {
+                let module_id = self.analyzed.name_table().module_of(instance.class_name);
+                let module_path = self
+                    .analyzed
+                    .name_table()
+                    .module_path(module_id)
+                    .to_string();
+                if let Some((module_program, _)) = self.analyzed.module_programs.get(&module_path)
+                    && let Some(method) = self
+                        .find_implement_block_method(
+                            &module_program.declarations,
+                            instance.class_name,
+                            &method_name_str,
+                            module_id,
+                        )
+                        .cloned()
+                {
+                    self.compile_monomorphized_class_method(
+                        &method,
+                        &instance,
+                        Some(&module_path),
+                    )?;
+                    continue;
+                }
+            }
+
+            if program.is_some() {
+                // Only error when the main program is available — during the module-only
+                // phase, missing ASTs are expected for program-originating monomorphs.
+                let class_name = self.query().display_name(instance.class_name);
+                return Err(CodegenError::not_found(
+                    "method",
+                    format!("{} in class {}", method_name_str, class_name),
+                ));
+            }
         }
 
         Ok(())
@@ -743,12 +754,18 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile all monomorphized static method instances
+    /// Compile all monomorphized static method instances.
+    ///
+    /// When `program` is `Some`, main-program class ASTs are checked first.
+    /// When `None` (module-only phase), only module programs are searched
+    /// and instances whose ASTs aren't found are silently skipped.
     pub(super) fn compile_static_method_monomorphized_instances(
         &mut self,
-        program: &Program,
+        program: Option<&Program>,
     ) -> CodegenResult<()> {
-        let class_asts = self.build_generic_type_asts(program);
+        let class_asts = program
+            .map(|p| self.build_generic_type_asts(p))
+            .unwrap_or_default();
 
         // Collect instances to avoid borrow issues
         let instances = self
@@ -766,6 +783,16 @@ impl Compiler<'_> {
             if self.is_abstract_static_method_monomorph(&instance) {
                 continue;
             }
+
+            // During the module-only phase, skip instances whose substitutions
+            // reference program-defined types. Their implement-block methods
+            // aren't declared yet and compilation would fail.
+            if program.is_none()
+                && self.substitutions_depend_on_program_definitions(&instance.substitutions)
+            {
+                continue;
+            }
+
             let class_name_str = self.query().display_name(instance.class_name);
             tracing::debug!(
                 class_name = %class_name_str,
@@ -811,13 +838,16 @@ impl Compiler<'_> {
                 }
             }
 
-            // Method not found - this shouldn't happen if sema was correct
-            let class_name = self.query().display_name(instance.class_name);
-            let method_name = self.query().display_name(instance.method_name);
-            return Err(CodegenError::not_found(
-                "static method",
-                format!("{} in class {}", method_name, class_name),
-            ));
+            if program.is_some() {
+                // Only error when the main program is available — during the module-only
+                // phase, missing ASTs are expected for program-originating monomorphs.
+                let class_name = self.query().display_name(instance.class_name);
+                let method_name = self.query().display_name(instance.method_name);
+                return Err(CodegenError::not_found(
+                    "static method",
+                    format!("{} in class {}", method_name, class_name),
+                ));
+            }
         }
 
         Ok(())
@@ -916,141 +946,6 @@ impl Compiler<'_> {
             self.global_module_bindings = bindings;
         }
         compile_result
-    }
-
-    /// Compile only class method monomorphized instances that belong to imported modules.
-    pub(super) fn compile_module_class_method_monomorphized_instances(
-        &mut self,
-    ) -> CodegenResult<()> {
-        let instances = self
-            .analyzed
-            .entity_registry()
-            .class_method_monomorph_cache
-            .collect_instances();
-
-        let mut module_instances: Vec<(ClassMethodMonomorphInstance, String)> = Vec::new();
-        for instance in instances {
-            if instance.external_info.is_some()
-                || self.is_abstract_class_method_monomorph(&instance)
-            {
-                continue;
-            }
-            let module_id = self.analyzed.name_table().module_of(instance.class_name);
-            let module_path = self
-                .analyzed
-                .name_table()
-                .module_path(module_id)
-                .to_string();
-            if !self.analyzed.module_programs.contains_key(&module_path) {
-                continue;
-            }
-            if self.substitutions_depend_on_program_definitions(&instance.substitutions) {
-                continue;
-            }
-
-            module_instances.push((instance, module_path));
-        }
-
-        // Declare all module-safe instances first so cross-calls between generic
-        // methods resolve regardless of compilation order.
-        for (instance, _) in &module_instances {
-            self.declare_monomorph_instance(instance, true);
-        }
-
-        for (instance, module_path) in module_instances {
-            let method_name_str = self.query().display_name(instance.method_name);
-
-            // Class body methods
-            if let Some(method) = self
-                .find_class_method_in_modules(instance.class_name, &method_name_str)
-                .cloned()
-            {
-                self.compile_monomorphized_class_method(&method, &instance, Some(&module_path))?;
-                continue;
-            }
-
-            // Implement block methods in the module
-            let module_id = self.analyzed.name_table().module_of(instance.class_name);
-            let method_from_impl = {
-                let (module_program, _) = &self.analyzed.module_programs[&module_path];
-                self.find_implement_block_method(
-                    &module_program.declarations,
-                    instance.class_name,
-                    &method_name_str,
-                    module_id,
-                )
-                .cloned()
-            };
-            if let Some(method) = method_from_impl {
-                self.compile_monomorphized_class_method(&method, &instance, Some(&module_path))?;
-                continue;
-            }
-
-            let class_name = self.query().display_name(instance.class_name);
-            return Err(CodegenError::not_found(
-                "module class method",
-                format!("{} in class {}", method_name_str, class_name),
-            ));
-        }
-
-        Ok(())
-    }
-
-    /// Compile only static method monomorphized instances that belong to imported modules.
-    pub(super) fn compile_module_static_method_monomorphized_instances(
-        &mut self,
-    ) -> CodegenResult<()> {
-        let instances = self
-            .analyzed
-            .entity_registry()
-            .static_method_monomorph_cache
-            .collect_instances();
-
-        let mut module_instances: Vec<(StaticMethodMonomorphInstance, String)> = Vec::new();
-        for instance in instances {
-            if self.is_abstract_static_method_monomorph(&instance) {
-                continue;
-            }
-            let module_id = self.analyzed.name_table().module_of(instance.class_name);
-            let module_path = self
-                .analyzed
-                .name_table()
-                .module_path(module_id)
-                .to_string();
-            if !self.analyzed.module_programs.contains_key(&module_path) {
-                continue;
-            }
-            if self.substitutions_depend_on_program_definitions(&instance.substitutions) {
-                continue;
-            }
-
-            module_instances.push((instance, module_path));
-        }
-
-        // Declare all module-safe instances first so static methods can call
-        // other generic static methods independent of compile order.
-        for (instance, _) in &module_instances {
-            self.declare_monomorph_instance(instance, false);
-        }
-
-        for (instance, module_path) in module_instances {
-            let method_name_str = self.query().display_name(instance.method_name);
-            if let Some(method) = self
-                .find_static_method_in_modules(instance.class_name, &method_name_str)
-                .cloned()
-            {
-                self.compile_monomorphized_static_method(&method, &instance, Some(&module_path))?;
-                continue;
-            }
-
-            let class_name = self.query().display_name(instance.class_name);
-            return Err(CodegenError::not_found(
-                "module static method",
-                format!("{} in class {}", method_name_str, class_name),
-            ));
-        }
-
-        Ok(())
     }
 
     // ===================================================================
@@ -1566,16 +1461,21 @@ impl Compiler<'_> {
     pub(super) fn declare_all_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Note: Nested generic calls are now discovered during sema analysis,
         // so we don't need to expand instances here.
-        self.declare_monomorphized_instances(false)?;
+        self.declare_monomorphized_instances()?;
         self.declare_class_method_monomorphized_instances()?;
         self.declare_static_method_monomorphized_instances()?;
         Ok(())
     }
 
-    /// Compile all monomorphized instances (functions, class methods, static methods)
+    /// Compile all monomorphized instances (functions, class methods, static methods).
+    ///
+    /// When `program` is `Some`, main-program ASTs are available for lookup.
+    /// When `None` (module-only phase), only module programs are searched and
+    /// instances whose ASTs aren't found are silently skipped — they will be
+    /// compiled later by the program phase or the demand-driven fixpoint loop.
     pub(super) fn compile_all_monomorphized_instances(
         &mut self,
-        program: &Program,
+        program: Option<&Program>,
     ) -> CodegenResult<()> {
         self.compile_monomorphized_instances(program)?;
         self.compile_class_method_monomorphized_instances(program)?;
@@ -1754,10 +1654,10 @@ impl Compiler<'_> {
                     module_id,
                 )
                 .cloned()
-            {
-                self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
-                return Ok(());
-            }
+        {
+            self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
+            return Ok(());
+        }
 
         let class_name = self.query().display_name(instance.class_name);
         Err(CodegenError::not_found(

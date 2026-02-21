@@ -41,10 +41,13 @@ impl CompiledModules {
         // Finalize to get function pointers
         jit.finalize()?;
 
-        // Extract all function pointers
+        // Extract function pointers for compiled (defined) functions only.
+        // Some functions may have been declared but not compiled during this
+        // phase (e.g. monomorphs whose ASTs live in the main program).
         let functions: FxHashMap<String, *const u8> = jit
             .func_ids
             .iter()
+            .filter(|&(_, &func_id)| jit.defined_func_ids.contains(&func_id))
             .map(|(name, &func_id)| {
                 let ptr = jit.module.get_finalized_function(func_id);
                 (name.clone(), ptr)
@@ -65,10 +68,12 @@ impl CompiledModules {
         // Finalize to get function pointers
         jit.finalize()?;
 
-        // Extract and merge function pointers (new functions override old ones)
+        // Extract and merge function pointers for compiled functions only
         for (name, &func_id) in &jit.func_ids {
-            let ptr = jit.module.get_finalized_function(func_id);
-            self.functions.insert(name.clone(), ptr);
+            if jit.defined_func_ids.contains(&func_id) {
+                let ptr = jit.module.get_finalized_function(func_id);
+                self.functions.insert(name.clone(), ptr);
+            }
         }
 
         // Merge module paths
@@ -157,6 +162,9 @@ pub struct JitContext {
     capture_ir: bool,
     /// Collected IR output from compiled functions (func_name, ir_text)
     ir_output: Vec<(String, String)>,
+    /// Functions that have been compiled (defined) in this JIT context.
+    /// Used by `CompiledModules::new` to only extract pointers for compiled functions.
+    defined_func_ids: FxHashSet<FuncId>,
     /// Names of pre-compiled module functions registered as JIT symbols.
     /// Used to check if a function exists before importing it (e.g. array
     /// iterable methods that may not have been compiled for all element types).
@@ -256,6 +264,7 @@ impl JitContext {
             loop_param_opt: options.loop_param_opt,
             capture_ir: options.capture_ir,
             ir_output: Vec::new(),
+            defined_func_ids: FxHashSet::default(),
             precompiled_symbol_names,
         };
 
@@ -399,6 +408,7 @@ impl JitContext {
         self.module
             .define_function(func_id, &mut self.ctx)
             .map_err(CodegenError::cranelift)?;
+        self.defined_func_ids.insert(func_id);
 
         // Capture disassembly if enabled
         if self.disasm
