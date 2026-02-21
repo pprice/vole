@@ -98,9 +98,9 @@ impl Cg<'_, '_, '_> {
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         let named_mapping = self
             .analyzed()
-            .expression_data
+            .node_map
             .get_resolved_call_args(expr_id)
-            .cloned();
+            .map(|s| s.to_vec());
         if let Some(ref mapping) = named_mapping {
             // Named arg reordering: compile each slot in parameter order using the mapping.
             for (slot, opt_call_idx) in mapping.iter().enumerate() {

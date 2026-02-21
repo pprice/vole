@@ -441,7 +441,7 @@ impl Analyzer {
     /// Classify the string conversion needed for a value of the given type.
     ///
     /// Determines the correct runtime conversion based on the type. The result
-    /// is stored in ExpressionData so codegen can apply the conversion via
+    /// is stored in the NodeMap so codegen can apply the conversion via
     /// `apply_string_conversion` without re-detecting types.
     pub(crate) fn classify_string_conversion(&self, type_id: ArenaTypeId) -> StringConversion {
         // Already a string

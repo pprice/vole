@@ -8,18 +8,18 @@ use std::rc::Rc;
 use vole_frontend::{Interner, Program, Span};
 use vole_identity::{ModuleId, NameTable};
 use vole_sema::{
-    AnalysisOutput, CodegenDb, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery,
-    TypeArena,
+    AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
     pub program: Program,
     pub interner: Rc<Interner>,
-    /// All expression-level metadata (types, method resolutions, generic calls)
-    pub expression_data: ExpressionData,
+    /// All expression-level metadata (types, method resolutions, generic calls).
+    /// Vec-backed per-node store, keyed by `NodeId`.
+    pub node_map: NodeMap,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed ExpressionData.
+    /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed NodeMap.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
@@ -48,7 +48,7 @@ impl AnalyzedProgram {
         Self {
             program,
             interner: Rc::new(interner),
-            expression_data: output.expression_data,
+            node_map: output.node_map,
             tests_virtual_modules: output.tests_virtual_modules,
             module_programs: output.module_programs,
             db,
@@ -61,7 +61,7 @@ impl AnalyzedProgram {
     pub fn query(&self) -> ProgramQuery<'_> {
         ProgramQuery::new(
             self.entity_registry(),
-            &self.expression_data,
+            &self.node_map,
             &self.tests_virtual_modules,
             self.name_table_ref(),
             &self.interner,

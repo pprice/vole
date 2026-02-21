@@ -347,7 +347,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// lookup covers both main-program and module nodes.
     #[inline]
     pub fn get_expr_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
-        self.env.analyzed.query().expr_data().get_type(*node_id)
+        self.env.analyzed.node_map.get_type(*node_id)
     }
 
     /// Get expression type by NodeId, applying type param substitution for module code.
@@ -371,11 +371,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         node_id: vole_frontend::NodeId,
     ) -> Option<vole_sema::IsCheckResult> {
-        self.env
-            .analyzed
-            .query()
-            .expr_data()
-            .get_is_check_result(node_id)
+        self.env.analyzed.node_map.get_is_check_result(node_id)
     }
 
     /// Get lambda analysis results (captures and side effects) for a lambda expression
@@ -384,11 +380,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         node_id: vole_frontend::NodeId,
     ) -> Option<&vole_sema::LambdaAnalysis> {
-        self.env
-            .analyzed
-            .query()
-            .expr_data()
-            .get_lambda_analysis(node_id)
+        self.env.analyzed.node_map.get_lambda_analysis(node_id)
     }
 
     /// Get the compact info for an implicit `it`-expression, if one was synthesized.
@@ -397,10 +389,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         node_id: vole_frontend::NodeId,
     ) -> Option<&vole_sema::ItLambdaInfo> {
-        self.env
-            .analyzed
-            .expression_data
-            .get_it_lambda_info(node_id)
+        self.env.analyzed.node_map.get_it_lambda_info(node_id)
     }
 
     /// Get the optional chain info for an optional chain expression.
@@ -409,10 +398,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         node_id: vole_frontend::NodeId,
     ) -> Option<&vole_sema::OptionalChainInfo> {
-        self.env
-            .analyzed
-            .expression_data
-            .get_optional_chain(node_id)
+        self.env.analyzed.node_map.get_optional_chain(node_id)
     }
 
     /// Get substituted return type for generic method calls.
@@ -420,8 +406,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
         self.env
             .analyzed
-            .query()
-            .expr_data()
+            .node_map
             .get_substituted_return_type(*node_id)
             .map(|ty| self.try_substitute_type(ty))
     }
@@ -432,8 +417,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn get_declared_var_type(&self, init_node_id: &vole_frontend::NodeId) -> Option<TypeId> {
         self.env
             .analyzed
-            .query()
-            .expr_data()
+            .node_map
             .get_declared_var_type(*init_node_id)
     }
 
@@ -445,8 +429,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<vole_sema::IterableKind> {
         self.env
             .analyzed
-            .query()
-            .expr_data()
+            .node_map
             .get_iterable_kind(iterable_node_id)
     }
 
@@ -456,11 +439,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         expr_node_id: vole_frontend::NodeId,
     ) -> Option<vole_sema::CoercionKind> {
-        self.env
-            .analyzed
-            .query()
-            .expr_data()
-            .get_coercion_kind(expr_node_id)
+        self.env.analyzed.node_map.get_coercion_kind(expr_node_id)
     }
 
     /// Get the string conversion annotation for an interpolation expression part.
@@ -471,8 +450,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<&vole_sema::StringConversion> {
         self.env
             .analyzed
-            .query()
-            .expr_data()
+            .node_map
             .get_string_conversion(expr_node_id)
     }
 

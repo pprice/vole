@@ -656,9 +656,9 @@ impl Cg<'_, '_, '_> {
         // us which call.args[j] fills each parameter slot i (and None means use the default).
         let named_mapping = self
             .analyzed()
-            .expression_data
+            .node_map
             .get_resolved_call_args(expr_id)
-            .cloned();
+            .map(|s| s.to_vec());
         if let Some(ref mapping) = named_mapping {
             let method_id_for_defaults = resolution.and_then(|r| r.method_id());
             if let Some(param_type_ids) = &param_type_ids {

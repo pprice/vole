@@ -19,7 +19,7 @@
 //! let x = 2.0 * y * 0.00025  // 1/4000
 //! ```
 
-use crate::ExpressionData;
+use crate::node_map::NodeMap;
 use crate::types::ConstantValue;
 use std::collections::HashMap;
 use vole_frontend::ast::{BlockExpr, MethodCallExpr, NumericSuffix, StringPart, UnaryExpr};
@@ -102,11 +102,8 @@ impl From<&ConstantValue> for ConstValue {
 }
 
 /// Run constant folding on the program.
-pub(crate) fn fold_constants(
-    program: &mut Program,
-    expr_data: &mut ExpressionData,
-) -> FoldingStats {
-    let mut folder = ConstantFolder::new(expr_data);
+pub(crate) fn fold_constants(program: &mut Program, node_map: &mut NodeMap) -> FoldingStats {
+    let mut folder = ConstantFolder::new(node_map);
     folder.fold_program(program);
     folder.stats
 }
@@ -263,7 +260,7 @@ fn fold_float_binary(
 
 /// The constant folder visitor.
 struct ConstantFolder<'a> {
-    expr_data: &'a mut ExpressionData,
+    node_map: &'a mut NodeMap,
     stats: FoldingStats,
     /// Map from immutable variable symbols to their constant values.
     /// Used for constant propagation.
@@ -271,9 +268,9 @@ struct ConstantFolder<'a> {
 }
 
 impl<'a> ConstantFolder<'a> {
-    fn new(expr_data: &'a mut ExpressionData) -> Self {
+    fn new(node_map: &'a mut NodeMap) -> Self {
         Self {
-            expr_data,
+            node_map,
             stats: FoldingStats::default(),
             constant_bindings: HashMap::new(),
         }
@@ -816,7 +813,7 @@ impl<'a> ConstantFolder<'a> {
         mc: &MethodCallExpr,
     ) -> Option<ConstValue> {
         // Look up the sema-resolved intrinsic key for this call site
-        let intrinsic_key = self.expr_data.get_intrinsic_key(expr_id)?;
+        let intrinsic_key = self.node_map.get_intrinsic_key(expr_id)?;
 
         match mc.args.len() {
             1 => {
@@ -864,7 +861,7 @@ impl<'a> ConstantFolder<'a> {
         }
 
         // Get the type of the expression to determine if it's floating-point
-        let type_id = self.expr_data.get_type(expr.id);
+        let type_id = self.node_map.get_type(expr.id);
 
         // Check if the divisor is a constant
         let Some(divisor) = self.get_const_value(&bin.right) else {

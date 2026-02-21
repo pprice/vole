@@ -10,12 +10,12 @@ use std::rc::Rc;
 
 use crate::entity_defs::{FieldDef, GlobalDef, Implementation, MethodBinding, MethodDef, TypeDef};
 use crate::entity_registry::EntityRegistry;
-use crate::expression_data::ExpressionData;
 use crate::generic::{
     ClassMethodMonomorphKey, MonomorphCache, MonomorphInstance, MonomorphKey,
     StaticMethodMonomorphKey,
 };
 use crate::implement_registry::{ExternalMethodInfo, ImplementRegistry};
+use crate::node_map::NodeMap;
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::{TypeArena, TypeId};
 use vole_frontend::{Expr, Interner, NodeId, Program, Span, Symbol};
@@ -32,8 +32,8 @@ use crate::resolve::ResolverEntityExt;
 /// boilerplate in codegen by encapsulating common multi-step lookups.
 pub struct ProgramQuery<'a> {
     registry: &'a EntityRegistry,
-    expr_data: &'a ExpressionData,
-    /// Virtual module IDs for tests blocks (Span-keyed, separate from NodeId-keyed ExpressionData)
+    node_map: &'a NodeMap,
+    /// Virtual module IDs for tests blocks (Span-keyed, separate from NodeId-keyed NodeMap)
     tests_virtual_modules: &'a FxHashMap<Span, ModuleId>,
     name_table: &'a Rc<NameTable>,
     interner: &'a Interner,
@@ -48,7 +48,7 @@ impl<'a> ProgramQuery<'a> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         registry: &'a EntityRegistry,
-        expr_data: &'a ExpressionData,
+        node_map: &'a NodeMap,
         tests_virtual_modules: &'a FxHashMap<Span, ModuleId>,
         name_table: &'a Rc<NameTable>,
         interner: &'a Interner,
@@ -58,7 +58,7 @@ impl<'a> ProgramQuery<'a> {
     ) -> Self {
         Self {
             registry,
-            expr_data,
+            node_map,
             tests_virtual_modules,
             name_table,
             interner,
@@ -75,31 +75,31 @@ impl<'a> ProgramQuery<'a> {
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
     #[must_use]
     pub fn type_of(&self, node: NodeId) -> Option<TypeId> {
-        self.expr_data.get_type(node)
+        self.node_map.get_type(node)
     }
 
     /// Get the resolved method at a call site
     #[must_use]
     pub fn method_at(&self, node: NodeId) -> Option<&'a ResolvedMethod> {
-        self.expr_data.get_method(node)
+        self.node_map.get_method(node)
     }
 
     /// Get the monomorphization key for a generic call
     #[must_use]
     pub fn monomorph_for(&self, node: NodeId) -> Option<&'a MonomorphKey> {
-        self.expr_data.get_generic(node)
+        self.node_map.get_generic(node)
     }
 
     /// Get the monomorphization key for a generic class method call
     #[must_use]
     pub fn class_method_generic_at(&self, node: NodeId) -> Option<&'a ClassMethodMonomorphKey> {
-        self.expr_data.get_class_method_generic(node)
+        self.node_map.get_class_method_generic(node)
     }
 
     /// Get the monomorphization key for a generic static method call
     #[must_use]
     pub fn static_method_generic_at(&self, node: NodeId) -> Option<&'a StaticMethodMonomorphKey> {
-        self.expr_data.get_static_method_generic(node)
+        self.node_map.get_static_method_generic(node)
     }
 
     /// Get the virtual module ID for a tests block by its span.
@@ -796,9 +796,9 @@ impl<'a> ProgramQuery<'a> {
         self.registry
     }
 
-    /// Get direct access to expression data for advanced queries
-    pub fn expr_data(&self) -> &'a ExpressionData {
-        self.expr_data
+    /// Get direct access to the node map for advanced queries
+    pub fn node_map(&self) -> &'a NodeMap {
+        self.node_map
     }
 
     /// Get direct access to the name table Rc for advanced queries

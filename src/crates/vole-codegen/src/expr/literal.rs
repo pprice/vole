@@ -114,7 +114,7 @@ impl Cg<'_, '_, '_> {
             compiled.mark_consumed();
         }
 
-        // Use type from ExpressionData - sema always records array/tuple types
+        // Use type from NodeMap - sema always records array/tuple types
         let array_type_id = inferred_type_id.or(expected_array_type).unwrap_or_else(|| {
             unreachable!(
                 "array literal at line {} has no type from sema",
@@ -156,7 +156,7 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        // Use TypeId from ExpressionData (passed from caller)
+        // Use TypeId from NodeMap (passed from caller)
         Ok(CompiledValue::new(ptr, ptr_type, tuple_type_id))
     }
 

@@ -85,7 +85,7 @@
 
 pub mod constant_folding;
 
-use crate::ExpressionData;
+use crate::node_map::NodeMap;
 use vole_frontend::Program;
 
 /// Configuration for the optimizer.
@@ -128,7 +128,7 @@ pub struct OptimizerStats {
 /// # Arguments
 ///
 /// * `program` - The parsed program AST (will be modified in place)
-/// * `expr_data` - Expression type information from sema (may be updated)
+/// * `node_map` - Expression type information from sema (may be updated)
 /// * `config` - Which optimizations to enable
 ///
 /// # Returns
@@ -136,13 +136,13 @@ pub struct OptimizerStats {
 /// Statistics about what optimizations were applied.
 fn optimize(
     program: &mut Program,
-    expr_data: &mut ExpressionData,
+    node_map: &mut NodeMap,
     config: &OptimizerConfig,
 ) -> OptimizerStats {
     let mut stats = OptimizerStats::default();
 
     if config.constant_folding {
-        let folding_stats = constant_folding::fold_constants(program, expr_data);
+        let folding_stats = constant_folding::fold_constants(program, node_map);
         stats.constants_folded = folding_stats.constants_folded;
         stats.div_to_mul = folding_stats.div_to_mul;
         stats.div_to_shift = folding_stats.div_to_shift;
@@ -154,6 +154,6 @@ fn optimize(
 }
 
 /// Run all optimizations with default configuration (all enabled).
-pub fn optimize_all(program: &mut Program, expr_data: &mut ExpressionData) -> OptimizerStats {
-    optimize(program, expr_data, &OptimizerConfig::all())
+pub fn optimize_all(program: &mut Program, node_map: &mut NodeMap) -> OptimizerStats {
+    optimize(program, node_map, &OptimizerConfig::all())
 }

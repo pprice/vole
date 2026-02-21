@@ -117,7 +117,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Check if this call has lambda defaults
         let lambda_defaults = self
             .analyzed()
-            .expression_data
+            .node_map
             .get_lambda_defaults(call_expr_id)
             .cloned();
 
@@ -127,9 +127,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let mut rc_temp_args = Vec::new();
         let named_mapping = self
             .analyzed()
-            .expression_data
+            .node_map
             .get_resolved_call_args(call_expr_id)
-            .cloned();
+            .map(|s| s.to_vec());
         if let Some(ref mapping) = named_mapping {
             // Named arg reordering: compile each slot in parameter order using the mapping.
             // For None slots, look up the lambda's default expression for that parameter.

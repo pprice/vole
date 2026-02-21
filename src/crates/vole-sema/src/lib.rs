@@ -11,8 +11,6 @@ pub mod generic;
 pub mod implement_registry;
 pub mod memory_kind;
 pub mod module;
-// Not wired to any callers yet — will become the primary store once
-// ExpressionData callers are migrated (vol-yaix).
 pub mod node_map;
 pub mod numeric_model;
 pub mod optimizer;
@@ -46,6 +44,7 @@ pub use implement_registry::{
 };
 pub use memory_kind::MemoryKind;
 pub use module::{LoadError, ModuleInfo, ModuleLoader};
+pub use node_map::NodeMap;
 pub use numeric_model::{
     NumericCoercion, integer_result_type, numeric_coercion, numeric_result_type,
 };

@@ -6,8 +6,9 @@
 //! and a sequential `local` counter, lookup is O(1): hash the module, index
 //! the vec.
 //!
-//! **Migration status**: sema writes go through `NodeMap`; codegen still reads
-//! from `ExpressionData` (built via [`NodeMap::into_expression_data`]).
+//! Both sema writes and codegen reads go through `NodeMap`. Sub-analyzer
+//! results are still temporarily stored as `ExpressionData` in the shared
+//! context and converted back to `NodeMap` at output time (see vol-mop6).
 
 use rustc_hash::FxHashMap;
 

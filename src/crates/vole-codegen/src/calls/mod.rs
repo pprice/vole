@@ -422,10 +422,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // `mapping[i] = Some(j)` means call.args[j] fills slot i.
         // `mapping[i] = None` means slot i uses its default value.
         let named_arg_mapping = self
-            .query()
-            .expr_data()
+            .analyzed()
+            .node_map
             .get_resolved_call_args(call_expr_id)
-            .cloned();
+            .map(|s| s.to_vec());
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
         if let Some(ref mapping) = named_arg_mapping {

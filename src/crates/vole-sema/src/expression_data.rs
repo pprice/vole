@@ -553,4 +553,67 @@ impl ExpressionData {
     pub fn set_string_conversion(&mut self, node: NodeId, conv: StringConversion) {
         self.string_conversions.insert(node, conv);
     }
+
+    /// Convert this `ExpressionData` into a [`NodeMap`](crate::node_map::NodeMap),
+    /// consuming `self`.
+    ///
+    /// This is the reverse of [`NodeMap::into_expression_data`]. Used during the
+    /// migration to consolidate sub-analyzer results (still stored as ExpressionData
+    /// in the shared context) back into the Vec-backed NodeMap.
+    pub fn into_node_map(self) -> crate::node_map::NodeMap {
+        use crate::node_map::NodeMap;
+        let mut nm = NodeMap::new();
+        for (node, ty) in self.types {
+            nm.set_type(node, ty);
+        }
+        for (node, method) in self.methods {
+            nm.set_method(node, method);
+        }
+        for (node, key) in self.generics {
+            nm.set_generic(node, key);
+        }
+        for (node, key) in self.class_method_generics {
+            nm.set_class_method_generic(node, key);
+        }
+        for (node, key) in self.static_method_generics {
+            nm.set_static_method_generic(node, key);
+        }
+        for (node, ty) in self.substituted_return_types {
+            nm.set_substituted_return_type(node, ty);
+        }
+        for (node, defaults) in self.lambda_defaults {
+            nm.set_lambda_defaults(node, defaults);
+        }
+        for (node, result) in self.is_check_results {
+            nm.set_is_check_result(node, result);
+        }
+        for (node, ty) in self.declared_var_types {
+            nm.set_declared_var_type(node, ty);
+        }
+        for (node, analysis) in self.lambda_analysis {
+            nm.set_lambda_analysis(node, analysis);
+        }
+        for (node, key) in self.intrinsic_keys {
+            nm.set_intrinsic_key(node, key);
+        }
+        for (node, mapping) in self.resolved_call_args {
+            nm.set_resolved_call_args(node, mapping);
+        }
+        for (node, kind) in self.iterable_kinds {
+            nm.set_iterable_kind(node, kind);
+        }
+        for (node, kind) in self.coercion_kinds {
+            nm.set_coercion_kind(node, kind);
+        }
+        for (node, conv) in self.string_conversions {
+            nm.set_string_conversion(node, conv);
+        }
+        for (node, info) in self.lowered_optional_chains {
+            nm.set_optional_chain(node, info);
+        }
+        for (node, info) in self.synthetic_it_lambdas {
+            nm.set_it_lambda_info(node, info);
+        }
+        nm
+    }
 }

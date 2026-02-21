@@ -1,6 +1,5 @@
 // Analysis output, builder, and diagnostic types for the analyzer.
 
-use crate::ExpressionData;
 use crate::FunctionType;
 use crate::analysis_cache::ModuleCache;
 use crate::compilation_db::CompilationDb;
@@ -52,10 +51,11 @@ impl TypeWarning {
 /// Output from semantic analysis, bundling all analysis results.
 /// Used to construct AnalyzedProgram with program and interner.
 pub struct AnalysisOutput {
-    /// All expression-level metadata (types, method resolutions, generic calls)
-    pub expression_data: ExpressionData,
+    /// All expression-level metadata (types, method resolutions, generic calls).
+    /// Vec-backed per-node store, keyed by `NodeId`.
+    pub node_map: NodeMap,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed ExpressionData.
+    /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed NodeMap.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     pub module_programs:
@@ -82,7 +82,7 @@ pub(crate) struct AnalysisResults {
     pub node_map: NodeMap,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
     /// Keyed by Span (not NodeId), accumulated here during analysis, then moved to
-    /// AnalysisOutput (not ExpressionData) since ExpressionData is purely NodeId-keyed.
+    /// AnalysisOutput (not NodeMap) since NodeMap is purely NodeId-keyed.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
 }
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ExpressionData;
+use crate::node_map::NodeMap;
 use vole_frontend::Parser;
 use vole_frontend::ast::LambdaPurity;
 
@@ -205,15 +205,15 @@ fn analyze_i64_to_i32_narrowing_error() {
     assert!(result.is_err());
 }
 
-// Helper to parse and analyze, returning the AST and expression data for capture inspection
-fn parse_and_analyze(source: &str) -> (Program, Interner, ExpressionData) {
+// Helper to parse and analyze, returning the AST and node map for capture inspection
+fn parse_and_analyze(source: &str) -> (Program, Interner, NodeMap) {
     let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
     let interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
     analyzer.analyze(&program, &interner).unwrap();
     let output = analyzer.into_analysis_results();
-    (program, interner, output.expression_data)
+    (program, interner, output.node_map)
 }
 
 // Helper to extract lambda and its NodeId from first statement of main function

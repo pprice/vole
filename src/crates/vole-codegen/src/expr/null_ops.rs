@@ -30,7 +30,7 @@ impl Cg<'_, '_, '_> {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
         })?;
 
-        // The inner type (non-nil result) is stored in the sema expr_data as the result
+        // The inner type (non-nil result) is stored in the sema node_map as the result
         // type of the ?? expression. For T | nil it's T; for A | B | nil it's A | B.
         let inner_type_id = self.get_expr_type(&expr_id).unwrap_or_else(|| {
             // Fallback for simple T | nil where sema result type equals unwrapped inner type.

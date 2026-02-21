@@ -132,7 +132,7 @@ impl Analyzer {
 
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
-        let node_map = self.results.node_map;
+        let mut node_map = self.results.node_map;
         let tests_virtual_modules = self.results.tests_virtual_modules;
         let current_module = self.module.current_module;
 
@@ -160,12 +160,14 @@ impl Analyzer {
                 }
             };
 
-        // Build ExpressionData from main-program NodeMap, then merge module data.
-        let mut expression_data = node_map.into_expression_data();
-        expression_data.merge(merged_expr_data);
+        // Convert merged module ExpressionData to NodeMap and merge into
+        // the main-program NodeMap. Sub-analyzer results are still accumulated
+        // as ExpressionData (see vol-mop6 for removing that indirection).
+        let merged_node_map = merged_expr_data.into_node_map();
+        node_map.merge(merged_node_map);
 
         AnalysisOutput {
-            expression_data,
+            node_map,
             tests_virtual_modules,
             module_programs,
             db,

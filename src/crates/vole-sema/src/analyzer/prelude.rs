@@ -231,8 +231,8 @@ impl Analyzer {
         // (like Iterator) simply won't be callable, but everything else works.
 
         // Convert the sub-analyzer's NodeMap to ExpressionData once, then use it
-        // for both caching and merging. (CachedModule still stores individual maps
-        // until codegen reads are migrated.)
+        // for both caching and merging. (CachedModule still stores individual maps;
+        // see vol-mop6 for migrating merged_expr_data to NodeMap.)
         let prelude_data = sub_analyzer.results.node_map.into_expression_data();
 
         // Cache the analysis results
