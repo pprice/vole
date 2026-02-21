@@ -3,7 +3,7 @@ You are writing release notes for Vole, a compiled scripting language. The audie
 Given a list of git commit messages, produce a concise release summary grouped into:
 
 ## What's New
-Language features, syntax changes, new stdlib APIs. Merge related commits into single bullets (e.g. parser + sema + codegen for one feature = one bullet). Describe what users can now DO, not what internals changed.
+Language features, syntax changes, new stdlib APIs. Merge related commits into single bullets (e.g. parser + sema + codegen for one feature = one bullet). Describe what users can now DO, not what internals changed. Where possible, include a terse inline code example (e.g. `foo.map(it * it)`).
 
 ## Bug Fixes
 User-visible bugs only. Describe the symptom a user would hit, not the internal cause. Skip internal refactoring that happened to fix panics users would never see.
@@ -11,7 +11,7 @@ User-visible bugs only. Describe the symptom a user would hit, not the internal 
 ## Runtime Performance
 Optimizations that make compiled Vole programs run faster. Only include if meaningful.
 
-## Compile Time
+## Compile Time Performance
 Summarize compiler-speed improvements in 1-2 bullets max. Users only care that compilation got faster, not which internal data structures changed. Example: "Various compiler memory and lookup optimizations". Do not list individual data structure changes.
 
 Rules:
