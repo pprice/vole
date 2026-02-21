@@ -8,8 +8,11 @@ Language features, syntax changes, new stdlib APIs. Merge related commits into s
 ## Bug Fixes
 User-visible bugs only. Describe the symptom a user would hit, not the internal cause. Skip internal refactoring that happened to fix panics users would never see.
 
-## Performance
-Only include if there are meaningful gains. Describe what got faster in user terms (e.g. "faster compilation", "reduced memory usage"). Mention specific techniques only if they're interesting (e.g. "constant folding" or "dead code elimination"). Skip micro-optimizations.
+## Runtime Performance
+Optimizations that make compiled Vole programs run faster. Only include if meaningful.
+
+## Compile Time
+Summarize compiler-speed improvements in 1-2 bullets max. Users only care that compilation got faster, not which internal data structures changed. Example: "Various compiler memory and lookup optimizations". Do not list individual data structure changes.
 
 Rules:
 - Be terse. One line per bullet, no filler words.
