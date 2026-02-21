@@ -239,8 +239,7 @@ impl ExpressionData {
             .reserve(other.tests_virtual_modules.len());
         self.tests_virtual_modules
             .extend(other.tests_virtual_modules);
-        self.is_check_results
-            .reserve(other.is_check_results.len());
+        self.is_check_results.reserve(other.is_check_results.len());
         self.is_check_results.extend(other.is_check_results);
         self.declared_var_types
             .reserve(other.declared_var_types.len());

@@ -144,4 +144,13 @@ impl ModuleCache {
     pub fn clear(&mut self) {
         self.entries.clear();
     }
+
+    /// Iterate over all cached prelude modules (keys starting with "std:prelude/").
+    /// Used by AnalyzerContext to pre-merge prelude data at init time.
+    pub fn prelude_entries(&self) -> impl Iterator<Item = (&str, &CachedModule)> {
+        self.entries
+            .iter()
+            .filter(|(k, _)| k.starts_with("std:prelude/"))
+            .map(|(k, v)| (k.as_str(), v))
+    }
 }

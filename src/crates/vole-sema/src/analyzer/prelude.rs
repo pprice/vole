@@ -115,7 +115,7 @@ impl Analyzer {
                 );
             }
 
-            // Use cached analysis results.
+            // Use cached analysis results for per-Analyzer symbol tables.
             for (name, func_type) in &cached.functions_by_name {
                 self.symbols
                     .functions_by_name
@@ -140,12 +140,13 @@ impl Analyzer {
                     }
                 }
             }
-            // Use import_path for prelude files (consistent with module_id)
-            self.ctx.module_programs.borrow_mut().insert(
-                import_path.to_string(),
-                (cached.program.clone(), cached.interner.clone()),
-            );
-            {
+            // ExpressionData and module_programs were pre-merged at AnalyzerContext
+            // init time when the cache was provided, so skip redundant deep clones.
+            if !self.ctx.prelude_expr_data_merged.get() {
+                self.ctx.module_programs.borrow_mut().insert(
+                    import_path.to_string(),
+                    (cached.program.clone(), cached.interner.clone()),
+                );
                 use crate::expression_data::ExpressionData;
                 let cached_data = ExpressionData {
                     types: cached.expr_types.clone(),

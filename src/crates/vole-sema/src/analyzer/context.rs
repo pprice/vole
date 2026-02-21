@@ -6,7 +6,7 @@ use crate::entity_registry::EntityRegistry;
 use crate::resolve::ResolverEntityExt;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use vole_frontend::Interner;
 use vole_frontend::ast::Program;
@@ -100,20 +100,67 @@ pub(crate) struct AnalyzerContext {
     /// Codegen should skip compiling function bodies for these modules
     /// to avoid encountering INVALID type IDs from failed type checking.
     pub(crate) modules_with_errors: RefCell<FxHashSet<String>>,
+    /// Whether cached prelude ExpressionData has been pre-merged into merged_expr_data.
+    /// Set once during init when a module cache contains prelude entries, so that
+    /// load_prelude_file skips redundant deep clones on every compiled file.
+    pub(crate) prelude_expr_data_merged: Cell<bool>,
 }
 
 impl AnalyzerContext {
     /// Create a new context with the given db and optional cache.
+    /// When a cache is provided, pre-merges all cached prelude ExpressionData
+    /// and module programs so that load_prelude_file can skip redundant clones.
     pub(super) fn new(db: Rc<CompilationDb>, cache: Option<Rc<RefCell<ModuleCache>>>) -> Self {
+        let mut merged_expr_data = crate::expression_data::ExpressionData::new();
+        let mut module_programs = FxHashMap::default();
+        let prelude_merged =
+            Self::pre_merge_cached_prelude(&cache, &mut merged_expr_data, &mut module_programs);
         Self {
             db,
             module_type_ids: RefCell::new(FxHashMap::default()),
-            module_programs: RefCell::new(FxHashMap::default()),
-            merged_expr_data: RefCell::new(crate::expression_data::ExpressionData::new()),
+            module_programs: RefCell::new(module_programs),
+            merged_expr_data: RefCell::new(merged_expr_data),
             module_cache: cache,
             modules_in_progress: RefCell::new(FxHashSet::default()),
             modules_with_errors: RefCell::new(FxHashSet::default()),
+            prelude_expr_data_merged: Cell::new(prelude_merged),
         }
+    }
+
+    /// Pre-merge cached prelude ExpressionData and module programs at init time.
+    ///
+    /// Iterates all `std:prelude/*` entries in the cache and merges their
+    /// ExpressionData into `merged_expr_data` and programs into `module_programs`.
+    /// Returns true if any prelude entries were merged.
+    fn pre_merge_cached_prelude(
+        cache: &Option<Rc<RefCell<ModuleCache>>>,
+        merged_expr_data: &mut crate::expression_data::ExpressionData,
+        module_programs: &mut FxHashMap<String, (Program, Interner)>,
+    ) -> bool {
+        let Some(cache_rc) = cache else {
+            return false;
+        };
+        let cache_ref = cache_rc.borrow();
+        let mut merged_any = false;
+        for (path, cached) in cache_ref.prelude_entries() {
+            module_programs.insert(
+                path.to_string(),
+                (cached.program.clone(), cached.interner.clone()),
+            );
+            let cached_data = crate::expression_data::ExpressionData {
+                types: cached.expr_types.clone(),
+                methods: cached.method_resolutions.clone(),
+                generics: cached.generic_calls.clone(),
+                class_method_generics: cached.class_method_generics.clone(),
+                static_method_generics: cached.static_method_generics.clone(),
+                is_check_results: cached.is_check_results.clone(),
+                declared_var_types: cached.declared_var_types.clone(),
+                ..Default::default()
+            };
+            merged_expr_data.merge(cached_data);
+            merged_any = true;
+        }
+        merged_any
     }
 
     /// Create an empty context (for Default impl).
