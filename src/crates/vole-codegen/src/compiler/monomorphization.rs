@@ -4,6 +4,7 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext};
 
 use super::Compiler;
 use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
+use super::generic_collection::GenericTypeMethodsAst;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
@@ -1506,6 +1507,21 @@ impl Compiler<'_> {
 
         const MAX_FIXPOINT_ITERATIONS: usize = 100;
 
+        // Build AST lookup maps once before the fixpoint loop to avoid
+        // O(M x |decls|) per pending monomorph.
+        let class_asts: FxHashMap<NameId, GenericTypeMethodsAst<'_>> = program
+            .map(|p| self.build_generic_type_asts(p))
+            .unwrap_or_default();
+
+        let generic_func_asts: FxHashMap<NameId, &FuncDecl> = if let Some(program) = program {
+            let mut map = FxHashMap::default();
+            let program_module = self.program_module();
+            self.collect_generic_func_asts(&program.declarations, program_module, &mut map);
+            map
+        } else {
+            FxHashMap::default()
+        };
+
         for iteration in 0..MAX_FIXPOINT_ITERATIONS {
             let batch = std::mem::take(&mut self.pending_monomorphs);
             if batch.is_empty() {
@@ -1525,13 +1541,13 @@ impl Compiler<'_> {
             for pending in batch {
                 match pending {
                     PendingMonomorph::Function(instance) => {
-                        self.compile_pending_function(&instance, program)?;
+                        self.compile_pending_function(&instance, &generic_func_asts)?;
                     }
                     PendingMonomorph::ClassMethod(instance) => {
-                        self.compile_pending_class_method(&instance, program)?;
+                        self.compile_pending_class_method(&instance, program, &class_asts)?;
                     }
                     PendingMonomorph::StaticMethod(instance) => {
-                        self.compile_pending_static_method(&instance, program)?;
+                        self.compile_pending_static_method(&instance, &class_asts)?;
                     }
                 }
             }
@@ -1546,26 +1562,17 @@ impl Compiler<'_> {
     fn compile_pending_function(
         &mut self,
         instance: &MonomorphInstance,
-        program: Option<&Program>,
+        generic_func_asts: &FxHashMap<NameId, &FuncDecl>,
     ) -> CodegenResult<()> {
         // Skip external functions
         if self.is_external_func(instance.original_name) {
             return Ok(());
         }
 
-        // Try main program generic functions first
-        if let Some(program) = program {
-            let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
-            let program_module = self.program_module();
-            self.collect_generic_func_asts(
-                &program.declarations,
-                program_module,
-                &mut generic_func_asts,
-            );
-            if let Some(func) = generic_func_asts.get(&instance.original_name) {
-                self.compile_monomorphized_function(func, instance)?;
-                return Ok(());
-            }
+        // Try main program generic functions first (using pre-built map)
+        if let Some(func) = generic_func_asts.get(&instance.original_name) {
+            self.compile_monomorphized_function(func, instance)?;
+            return Ok(());
         }
 
         // Fallback: search module programs
@@ -1585,6 +1592,7 @@ impl Compiler<'_> {
         &mut self,
         instance: &ClassMethodMonomorphInstance,
         program: Option<&Program>,
+        class_asts: &FxHashMap<NameId, GenericTypeMethodsAst<'_>>,
     ) -> CodegenResult<()> {
         // Skip external and abstract instances
         if instance.external_info.is_some() {
@@ -1596,21 +1604,20 @@ impl Compiler<'_> {
 
         let method_name_str = self.query().display_name(instance.method_name);
 
-        // Try main program class ASTs
-        if let Some(program) = program {
-            let class_asts = self.build_generic_type_asts(program);
-            if let Some(class) = class_asts.get(&instance.class_name) {
-                let method = class
-                    .methods
-                    .iter()
-                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
-                if let Some(method) = method {
-                    self.compile_monomorphized_class_method(method, instance, None)?;
-                    return Ok(());
-                }
+        // Try main program class ASTs (using pre-built map)
+        if let Some(class) = class_asts.get(&instance.class_name) {
+            let method = class
+                .methods
+                .iter()
+                .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+            if let Some(method) = method {
+                self.compile_monomorphized_class_method(method, instance, None)?;
+                return Ok(());
             }
+        }
 
-            // Try implement blocks in the main program
+        // Try implement blocks in the main program
+        if let Some(program) = program {
             let program_module = self.program_module();
             if let Some(method) = self.find_implement_block_method(
                 &program.declarations,
@@ -1670,7 +1677,7 @@ impl Compiler<'_> {
     fn compile_pending_static_method(
         &mut self,
         instance: &StaticMethodMonomorphInstance,
-        program: Option<&Program>,
+        class_asts: &FxHashMap<NameId, GenericTypeMethodsAst<'_>>,
     ) -> CodegenResult<()> {
         if self.is_abstract_static_method_monomorph(instance) {
             return Ok(());
@@ -1678,20 +1685,17 @@ impl Compiler<'_> {
 
         let method_name_str = self.query().display_name(instance.method_name);
 
-        // Try main program class ASTs
-        if let Some(program) = program {
-            let class_asts = self.build_generic_type_asts(program);
-            if let Some(class) = class_asts.get(&instance.class_name)
-                && let Some(statics) = class.statics
-            {
-                let method = statics
-                    .methods
-                    .iter()
-                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
-                if let Some(method) = method {
-                    self.compile_monomorphized_static_method(method, instance, None)?;
-                    return Ok(());
-                }
+        // Try main program class ASTs (using pre-built map)
+        if let Some(class) = class_asts.get(&instance.class_name)
+            && let Some(statics) = class.statics
+        {
+            let method = statics
+                .methods
+                .iter()
+                .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+            if let Some(method) = method {
+                self.compile_monomorphized_static_method(method, instance, None)?;
+                return Ok(());
             }
         }
 
