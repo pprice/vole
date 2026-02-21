@@ -11,6 +11,9 @@ pub mod generic;
 pub mod implement_registry;
 pub mod memory_kind;
 pub mod module;
+// Not wired to any callers yet — will become the primary store once
+// ExpressionData callers are migrated (vol-yaix).
+pub mod node_map;
 pub mod numeric_model;
 pub mod optimizer;
 pub mod query;
