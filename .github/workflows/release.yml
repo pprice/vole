@@ -135,28 +135,24 @@ jobs:
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
           cd release && sha256sum * > checksums.sha256
 
-      - name: Generate changelog
-        id: changelog
-        run: |
-          TAG="${{ needs.validate.outputs.tag }}"
-          PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -2 | tail -1)
-          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
-            echo "Generating changelog from $PREV_TAG to $TAG"
-            CHANGES=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG".."$TAG" --no-merges)
-          else
-            echo "First release, including all commits"
-            CHANGES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
-          fi
-          echo "$CHANGES" > /tmp/changelog.txt
-
-      - name: Create release
+      - name: Build release notes
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
-          TAG="${{ needs.validate.outputs.tag }}"
-          BODY="## Vole ${VERSION}
+          if [ -f RELEASE_NOTES.md ]; then
+            NOTES=$(cat RELEASE_NOTES.md)
+          else
+            echo "::warning::RELEASE_NOTES.md not found, using commit log"
+            TAG="${{ needs.validate.outputs.tag }}"
+            PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -2 | tail -1)
+            if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
+              NOTES=$(git log --pretty=format:"- %s (%h)" "$PREV_TAG".."$TAG" --no-merges)
+            else
+              NOTES=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+            fi
+          fi
 
-          ### Changes
-          $(cat /tmp/changelog.txt)
+          cat > /tmp/release_body.md << ENDOFBODY
+          ${NOTES}
 
           ### Checksums
           \`\`\`
@@ -169,13 +165,18 @@ jobs:
 
           \`\`\`bash
           tar xzf vole-${VERSION}-linux-x86_64.tar.gz
-          export PATH=\"\$PWD/vole-${VERSION}-linux-x86_64:\$PATH\"
+          export PATH="\$PWD/vole-${VERSION}-linux-x86_64:\$PATH"
           vole version
-          \`\`\`"
+          \`\`\`
+          ENDOFBODY
 
+      - name: Create release
+        run: |
+          TAG="${{ needs.validate.outputs.tag }}"
+          VERSION="${{ needs.validate.outputs.version }}"
           gh release create "$TAG" \
             --title "Vole ${VERSION}" \
-            --notes "$BODY" \
+            --notes-file /tmp/release_body.md \
             release/*
         env:
           GH_TOKEN: ${{ github.token }}
