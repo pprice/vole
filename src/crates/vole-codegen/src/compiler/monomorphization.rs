@@ -972,8 +972,8 @@ impl Compiler<'_> {
         let all_class_method_count = self
             .registry()
             .class_method_monomorph_cache
-            .collect_instances()
-            .len();
+            .instances()
+            .count();
         tracing::debug!(
             all_class_method_count,
             "expand_abstract_class_method_monomorphs: checking cache"
