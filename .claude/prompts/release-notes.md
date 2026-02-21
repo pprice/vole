@@ -19,4 +19,6 @@ Rules:
 - Skip chore-only commits (version bumps, CI config) entirely.
 - If a section would be empty, omit it.
 - Use backticks for code/syntax references.
+- Do NOT invent syntax examples. Only use syntax that appears in the commit messages.
+- Vole uses parentheses for calls: `list.map(it * 2)` not `list.map { it * 2 }`.
 - Output markdown only, no preamble.
