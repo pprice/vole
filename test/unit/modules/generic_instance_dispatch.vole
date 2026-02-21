@@ -1,23 +1,14 @@
 // Isolation test: Generic instance method calls on module-imported types
 // Related to vol-96jm and vol-dknq
 //
-// This test fails when run in isolation:
-//   cargo run -- test test/unit/modules/_generic_instance_dispatch.vole
-//
 // When a module-internal type (Channel<T>) has its instance methods
 // called from within module code (Task.stream calls Channel.close()),
 // the method dispatch fails because the instance method monomorphizations
 // weren't registered during codegen.
-//
-// This is the instance-method counterpart to the static-method bug in
-// vol-4wn9. Both are caused by the same root issue: monomorphization
-// instances from module-internal code aren't declared before compilation.
-//
-// When fixed: remove the _ prefix to include in normal test runs.
 let { Task, Channel } = import "std:task"
 
 tests {
-    // Direct instance method calls on Channel work fine (sanity check)
+    // Direct instance method calls on Channel (sanity check)
     test "Channel.buffered<i64>() direct instance methods work" {
         let ch = Channel.buffered<i64>(4)
         assert(!ch.is_closed())
@@ -36,8 +27,8 @@ tests {
         assert(ch.is_closed())
     }
 
-    // Internal instance method calls via Task.stream fail
-    test "Task.stream calls Channel.close() internally — instance dispatch fails" {
+    // Internal instance method calls via Task.stream — the actual bug
+    test "Task.stream calls Channel.close() internally" {
         let s = Task.stream((emit: (i64) -> void) => {
             emit(1)
             emit(2)
@@ -50,7 +41,7 @@ tests {
         assert(result[2] == 3)
     }
 
-    test "Task.stream with string calls Channel methods internally — dispatch fails" {
+    test "Task.stream with string calls Channel methods internally" {
         let s = Task.stream((emit: (string) -> void) => {
             emit("hello")
             emit("world")
@@ -61,7 +52,7 @@ tests {
         assert(result[1] == "world")
     }
 
-    test "Task.stream with f64 calls Channel methods internally — dispatch fails" {
+    test "Task.stream with f64 calls Channel methods internally" {
         let s = Task.stream((emit: (f64) -> void) => {
             emit(3.14)
             emit(2.72)
