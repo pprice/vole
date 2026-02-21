@@ -38,6 +38,9 @@ pub fn any_child_expr(expr: &Expr, visit: &mut impl FnMut(&Expr) -> bool) -> boo
         ExprKind::Is(is_expr) => visit(&is_expr.value),
         ExprKind::FieldAccess(fa) => visit(&fa.object),
         ExprKind::OptionalChain(oc) => visit(&oc.object),
+        ExprKind::OptionalMethodCall(omc) => {
+            visit(&omc.object) || omc.args.iter().any(|a| visit(a.expr()))
+        }
         ExprKind::MethodCall(mc) => visit(&mc.object) || mc.args.iter().any(|a| visit(a.expr())),
         ExprKind::StructLiteral(sl) => sl.fields.iter().any(|f| visit(&f.value)),
         ExprKind::Assign(assign) => visit(&assign.value),

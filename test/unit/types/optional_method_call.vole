@@ -1,0 +1,92 @@
+// Test optional method chaining: obj?.method()
+
+class Counter {
+    count: i32,
+
+    func get_count() -> i32 {
+        return self.count
+    }
+
+    func add(n: i32) -> Counter {
+        return Counter { count: self.count + n }
+    }
+
+    func is_positive() -> bool {
+        return self.count > 0
+    }
+
+    func increment() -> Counter {
+        return Counter { count: self.count + 1 }
+    }
+}
+
+tests {
+
+    test "optional method call - non-nil" {
+        let c: Counter? = Counter { count: 10 }
+        let result = c?.get_count()
+        assert((result ?? 0) == 10)
+    }
+
+    test "optional method call - nil" {
+        let c: Counter? = nil
+        let result = c?.get_count()
+        assert(result is nil)
+    }
+
+    test "optional method call with args - non-nil" {
+        let c: Counter? = Counter { count: 5 }
+        let result = c?.add(3)
+        let v = result?.get_count()
+        assert((v ?? 0) == 8)
+    }
+
+    test "optional method call with args - nil" {
+        let c: Counter? = nil
+        let result = c?.add(3)
+        assert(result is nil)
+    }
+
+    test "optional method call returning bool" {
+        let c: Counter? = Counter { count: 5 }
+        let result = c?.is_positive()
+        assert((result ?? false) == true)
+    }
+
+    test "optional method call then field access" {
+        let c: Counter? = Counter { count: 42 }
+        let inc = c?.increment()
+        let v = inc?.count
+        assert((v ?? 0) == 43)
+    }
+
+    test "optional method call with null coalescing" {
+        let c: Counter? = nil
+        let v = c?.get_count() ?? -1
+        assert(v == -1)
+    }
+
+    test "optional method call with null coalescing - non-nil" {
+        let c: Counter? = Counter { count: 99 }
+        let v = c?.get_count() ?? -1
+        assert(v == 99)
+    }
+
+    test "chained optional method calls" {
+        let c: Counter? = Counter { count: 1 }
+        let result = c?.increment()?.increment()?.get_count()
+        assert((result ?? 0) == 3)
+    }
+
+    test "chained optional method calls - nil" {
+        let c: Counter? = nil
+        let result = c?.increment()?.increment()?.get_count()
+        assert(result is nil)
+    }
+
+    test "method call then field chain" {
+        let c: Counter? = Counter { count: 10 }
+        let result = c?.add(5)?.count
+        assert((result ?? 0) == 15)
+    }
+}

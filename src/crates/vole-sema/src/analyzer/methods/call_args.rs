@@ -547,6 +547,13 @@ fn expr_contains_it(expr: &Expr, it_sym: Symbol) -> bool {
         // Field access: check the object
         ExprKind::FieldAccess(fa) => expr_contains_it(&fa.object, it_sym),
         ExprKind::OptionalChain(oc) => expr_contains_it(&oc.object, it_sym),
+        ExprKind::OptionalMethodCall(omc) => {
+            expr_contains_it(&omc.object, it_sym)
+                || omc
+                    .args
+                    .iter()
+                    .any(|a: &CallArg| expr_contains_it(a.expr(), it_sym))
+        }
         ExprKind::Range(r) => {
             expr_contains_it(&r.start, it_sym) || expr_contains_it(&r.end, it_sym)
         }

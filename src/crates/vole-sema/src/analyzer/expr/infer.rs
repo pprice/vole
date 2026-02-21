@@ -110,6 +110,9 @@ impl Analyzer {
             ExprKind::OptionalChain(opt_chain) => {
                 self.check_optional_chain_expr(opt_chain, expr.id, interner)
             }
+            ExprKind::OptionalMethodCall(omc) => {
+                self.check_optional_method_call_expr(omc, expr.id, interner)
+            }
             ExprKind::MethodCall(method_call) => {
                 self.check_method_call_expr(expr, method_call, interner)
             }

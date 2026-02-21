@@ -20,8 +20,8 @@ pub use ast::{
     AssignTarget, BinaryExpr, BinaryOp, Block, CallArg, Capture, CompoundAssignExpr, Decl, Expr,
     ExprId, ExprKind, FieldAccessExpr, FieldDef, FuncBody, FuncDecl, LambdaExpr, LambdaParam,
     LambdaPurity, LetInit, LetStmt, MatchExpr, MethodCallExpr, ModuleId, NodeId, OptionalChainExpr,
-    Param, Pattern, PatternKind, PrimitiveType, Program, Stmt, StructLiteralExpr, Symbol, TypeExpr,
-    TypeExprKind, UnaryOp,
+    OptionalMethodCallExpr, Param, Pattern, PatternKind, PrimitiveType, Program, Stmt,
+    StructLiteralExpr, Symbol, TypeExpr, TypeExprKind, UnaryOp,
 };
 pub use ast_display::AstPrinter;
 pub use errors::{LexerError, ParserError};

@@ -62,6 +62,7 @@ pub(super) fn print_expr<'a>(
         ExprKind::StructLiteral(struct_lit) => print_struct_literal(arena, struct_lit, interner),
         ExprKind::FieldAccess(field) => print_field_access(arena, field, interner),
         ExprKind::OptionalChain(chain) => print_optional_chain(arena, chain, interner),
+        ExprKind::OptionalMethodCall(omc) => print_optional_method_call(arena, omc, interner),
         ExprKind::MethodCall(method) => print_method_call(arena, method, interner),
         ExprKind::Try(inner) => arena
             .text("try")
@@ -706,6 +707,22 @@ fn print_optional_chain<'a>(
     print_expr(arena, &chain.object, interner)
         .append(arena.text("?."))
         .append(arena.text(interner.resolve(chain.field).to_string()))
+}
+
+/// Print an optional method call expression.
+fn print_optional_method_call<'a>(
+    arena: &'a Arena<'a>,
+    omc: &OptionalMethodCallExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let object = print_expr(arena, &omc.object, interner);
+    let method_name = interner.resolve(omc.method).to_string();
+    let args = print_call_args(arena, &omc.args, interner);
+
+    object
+        .append(arena.text("?."))
+        .append(arena.text(method_name))
+        .append(args)
 }
 
 /// Print a method call expression.

@@ -7,6 +7,17 @@ use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{NameId, TypeDefId};
+
+/// Bundled type information for `lower_optional_to_match`.
+struct OptionalLowerTypes {
+    object_type_id: ArenaTypeId,
+    inner_type_id: ArenaTypeId,
+    body_type_id: ArenaTypeId,
+    /// Pre-allocated body NodeId (for method calls where resolution is
+    /// already registered on a specific id). `None` for field-access chains.
+    pre_body_id: Option<NodeId>,
+}
+
 impl Analyzer {
     /// Get field type from a struct-like type by looking up the type definition
     /// and substituting type arguments if needed. Returns TypeId directly.
@@ -231,13 +242,30 @@ impl Analyzer {
 
             // --- Lower to synthetic match expression for codegen ---
             // Build: match obj { nil => nil, $oc => $oc.field }
-            self.lower_optional_chain_to_match(
-                opt_chain,
+            let field_sym = opt_chain.field;
+            let field_span = opt_chain.field_span;
+            self.lower_optional_to_match(
+                &opt_chain.object,
                 expr_id,
-                object_type_id,
-                inner_type_id,
-                field_type_id,
+                opt_chain.field_span,
+                OptionalLowerTypes {
+                    object_type_id,
+                    inner_type_id,
+                    body_type_id: field_type_id,
+                    pre_body_id: None,
+                },
                 interner,
+                |oc_sym, binding_ident_id, span| {
+                    ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                        object: Expr {
+                            id: binding_ident_id,
+                            kind: ExprKind::Identifier(oc_sym),
+                            span,
+                        },
+                        field: field_sym,
+                        field_span,
+                    }))
+                },
             );
 
             Ok(result_type_id)
@@ -260,64 +288,257 @@ impl Analyzer {
         }
     }
 
-    /// Lower an optional chain expression `obj?.field` to a synthetic match expression:
+    pub(super) fn check_optional_method_call_expr(
+        &mut self,
+        omc: &OptionalMethodCallExpr,
+        expr_id: NodeId,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let object_type_id = self.check_expr(&omc.object, interner)?;
+
+        if object_type_id.is_invalid() {
+            return Ok(ArenaTypeId::INVALID);
+        }
+
+        // Unwrap optional to get inner type
+        let inner_type_id = if let Some(inner_id) = self.unwrap_optional_non_nil_id(object_type_id)
+        {
+            inner_id
+        } else {
+            object_type_id
+        };
+
+        if inner_type_id.is_invalid() {
+            return Ok(ArenaTypeId::INVALID);
+        }
+
+        // Build synthetic method call expr for type checking + lowered match body.
+        // The synthetic body node ID is where method resolution gets registered.
+        let module = expr_id.module;
+        let span = omc.method_span;
+        let binding_ident_id = self.diagnostics.fresh_node_id(module);
+        let method_call_body_id = self.diagnostics.fresh_node_id(module);
+
+        let oc_sym = interner.lookup("$oc").expect("$oc must be interned");
+
+        let synthetic_mc = MethodCallExpr {
+            object: Expr {
+                id: binding_ident_id,
+                kind: ExprKind::Identifier(oc_sym),
+                span,
+            },
+            method: omc.method,
+            type_args: omc.type_args.clone(),
+            args: omc.args.clone(),
+            method_span: omc.method_span,
+        };
+
+        let synthetic_expr = Expr {
+            id: method_call_body_id,
+            kind: ExprKind::MethodCall(Box::new(synthetic_mc.clone())),
+            span,
+        };
+
+        // Resolve the method on the inner (unwrapped) type
+        let method_return_type_id =
+            self.resolve_optional_method(&synthetic_expr, &synthetic_mc, inner_type_id, interner)?;
+
+        // Wrap return type in optional (T -> T?)
+        let result_type_id = if self.is_optional_id(method_return_type_id) {
+            method_return_type_id
+        } else {
+            self.ty_optional_id(method_return_type_id)
+        };
+
+        // Lower to match: match obj { nil => nil, $oc => $oc.method(args) }
+        self.lower_optional_to_match(
+            &omc.object,
+            expr_id,
+            omc.method_span,
+            OptionalLowerTypes {
+                object_type_id,
+                inner_type_id,
+                body_type_id: method_return_type_id,
+                pre_body_id: Some(method_call_body_id),
+            },
+            interner,
+            |oc_sym, binding_ident_id, span| {
+                ExprKind::MethodCall(Box::new(MethodCallExpr {
+                    object: Expr {
+                        id: binding_ident_id,
+                        kind: ExprKind::Identifier(oc_sym),
+                        span,
+                    },
+                    method: synthetic_mc.method,
+                    type_args: synthetic_mc.type_args.clone(),
+                    args: synthetic_mc.args.clone(),
+                    method_span: synthetic_mc.method_span,
+                }))
+            },
+        );
+
+        Ok(result_type_id)
+    }
+
+    /// Resolve and type-check a method call on the inner (unwrapped) type of an
+    /// optional method call. This mirrors the instance-method path from
+    /// `check_method_call_expr` but operates on a pre-resolved object type.
+    fn resolve_optional_method(
+        &mut self,
+        synthetic_expr: &Expr,
+        method_call: &MethodCallExpr,
+        inner_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let method_name = interner.resolve(method_call.method);
+
+        // Try structural type methods
+        let structural_opt = self.type_arena().unwrap_structural(inner_type_id).cloned();
+        if let Some(structural) = structural_opt {
+            for method in &structural.methods {
+                let m_name = self.name_table().last_segment_str(method.name);
+                if m_name.as_deref() == Some(method_name) {
+                    if method_call.args.len() != method.params.len() {
+                        self.add_error(
+                            SemanticError::WrongArgumentCount {
+                                expected: method.params.len(),
+                                found: method_call.args.len(),
+                                span: synthetic_expr.span.into(),
+                            },
+                            synthetic_expr.span,
+                        );
+                        for arg in &method_call.args {
+                            self.check_expr(arg.expr(), interner)?;
+                        }
+                        return Ok(ArenaTypeId::INVALID);
+                    }
+                    for (arg, &param_type) in method_call.args.iter().zip(method.params.iter()) {
+                        let expr = arg.expr();
+                        let arg_type = self.check_expr(expr, interner)?;
+                        if !self.types_compatible_id(arg_type, param_type, interner) {
+                            self.add_type_mismatch_id(param_type, arg_type, expr.span);
+                        }
+                    }
+                    let func_type =
+                        FunctionType::from_ids(&method.params, method.return_type, false);
+                    let return_type_id = func_type.return_type_id;
+                    let func_type_id = func_type.intern(&mut self.type_arena_mut());
+                    self.results.method_resolutions.insert(
+                        synthetic_expr.id,
+                        ResolvedMethod::Implemented {
+                            type_def_id: None,
+                            method_name_id: method.name,
+                            trait_name: None,
+                            func_type_id,
+                            return_type_id,
+                            is_builtin: false,
+                            external_info: None,
+                            concrete_return_hint: None,
+                        },
+                    );
+                    return Ok(method.return_type);
+                }
+            }
+        }
+
+        // Try entity registry resolution
+        if let Some(resolved) =
+            self.resolve_method_via_entity_registry_id(inner_type_id, method_call.method, interner)
+        {
+            if let Some(elem_type) = self.extract_custom_iterator_element_type_id(inner_type_id) {
+                self.results.coercion_kinds.insert(
+                    synthetic_expr.id,
+                    crate::expression_data::CoercionKind::IteratorWrap { elem_type },
+                );
+            }
+            return self.process_resolved_instance_method(
+                synthetic_expr,
+                method_call,
+                inner_type_id,
+                resolved,
+                interner,
+            );
+        }
+
+        // Method not found
+        let type_name = self.type_display_id(inner_type_id);
+        let method_name_str = interner.resolve(method_call.method).to_string();
+        if self.check_for_extension_method_visibility_error(
+            inner_type_id,
+            method_call.method,
+            &type_name,
+            &method_name_str,
+            method_call.method_span,
+            interner,
+        ) {
+            for arg in &method_call.args {
+                self.check_expr(arg.expr(), interner)?;
+            }
+            return Ok(ArenaTypeId::INVALID);
+        }
+
+        self.add_error(
+            SemanticError::UnknownMethod {
+                ty: type_name,
+                method: method_name_str,
+                span: method_call.method_span.into(),
+            },
+            method_call.method_span,
+        );
+        for arg in &method_call.args {
+            self.check_expr(arg.expr(), interner)?;
+        }
+        Ok(ArenaTypeId::INVALID)
+    }
+
+    /// Lower an optional expression to a synthetic match:
     /// ```text
-    /// match obj {
+    /// match scrutinee {
     ///     nil => nil,
-    ///     $oc => $oc.field,
+    ///     $oc => <body_builder($oc, ...)>,
     /// }
     /// ```
-    /// The synthetic match is stored in `lowered_optional_chains` for codegen to compile
-    /// via the standard match compilation path.
-    fn lower_optional_chain_to_match(
+    /// `body_builder` receives `(oc_sym, binding_ident_id, span)` and returns
+    /// the `ExprKind` for the non-nil arm body.
+    fn lower_optional_to_match(
         &mut self,
-        opt_chain: &OptionalChainExpr,
+        scrutinee: &Expr,
         expr_id: NodeId,
-        object_type_id: ArenaTypeId,
-        inner_type_id: ArenaTypeId,
-        field_type_id: ArenaTypeId,
+        span: Span,
+        types: OptionalLowerTypes,
         interner: &Interner,
+        body_builder: impl FnOnce(Symbol, NodeId, Span) -> ExprKind,
     ) {
         use vole_frontend::ast::*;
 
         let module = expr_id.module;
-        let span = opt_chain.field_span;
 
-        // Look up pre-interned symbols
         let nil_sym = interner.lookup("nil").expect("nil must be interned");
         let oc_sym = interner.lookup("$oc").expect("$oc must be interned");
 
-        // Generate fresh NodeIds for all synthetic AST nodes
         let nil_pattern_id = self.diagnostics.fresh_node_id(module);
         let nil_body_id = self.diagnostics.fresh_node_id(module);
         let nil_arm_id = self.diagnostics.fresh_node_id(module);
         let binding_pattern_id = self.diagnostics.fresh_node_id(module);
         let binding_ident_id = self.diagnostics.fresh_node_id(module);
-        let field_access_body_id = self.diagnostics.fresh_node_id(module);
-        let field_arm_id = self.diagnostics.fresh_node_id(module);
+        let body_id = types
+            .pre_body_id
+            .unwrap_or_else(|| self.diagnostics.fresh_node_id(module));
+        let body_arm_id = self.diagnostics.fresh_node_id(module);
 
-        // --- Register type annotations for codegen ---
-
-        // 1. Nil pattern: IsCheckResult so codegen emits a tag check
+        // Register type annotations
         let nil_type_id = self.type_arena().nil();
-        let is_check_result = self.compute_type_pattern_check_result(nil_type_id, object_type_id);
+        let is_check_result =
+            self.compute_type_pattern_check_result(nil_type_id, types.object_type_id);
         self.record_is_check_result(nil_pattern_id, is_check_result);
-
-        // 2. Nil body: register as nil type so codegen's identifier() produces i8(0)
         self.results.expr_types.insert(nil_body_id, nil_type_id);
-
-        // 3. Binding identifier in field access body: register narrowed type
-        //    so codegen's identifier() extracts union payload
         self.results
             .expr_types
-            .insert(binding_ident_id, inner_type_id);
+            .insert(binding_ident_id, types.inner_type_id);
+        self.results.expr_types.insert(body_id, types.body_type_id);
 
-        // 4. Field access body: register the field's type
-        self.results
-            .expr_types
-            .insert(field_access_body_id, field_type_id);
-
-        // --- Build the synthetic MatchExpr AST ---
+        // Build the body expression via the provided builder
+        let body_kind = body_builder(oc_sym, binding_ident_id, span);
 
         // Arm 1: nil => nil
         let nil_arm = MatchArm {
@@ -336,9 +557,9 @@ impl Analyzer {
             span,
         };
 
-        // Arm 2: $oc => $oc.field
-        let field_arm = MatchArm {
-            id: field_arm_id,
+        // Arm 2: $oc => <body>
+        let body_arm = MatchArm {
+            id: body_arm_id,
             pattern: Pattern {
                 id: binding_pattern_id,
                 kind: PatternKind::Identifier { name: oc_sym },
@@ -346,28 +567,19 @@ impl Analyzer {
             },
             guard: None,
             body: Expr {
-                id: field_access_body_id,
-                kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
-                    object: Expr {
-                        id: binding_ident_id,
-                        kind: ExprKind::Identifier(oc_sym),
-                        span,
-                    },
-                    field: opt_chain.field,
-                    field_span: opt_chain.field_span,
-                })),
+                id: body_id,
+                kind: body_kind,
                 span,
             },
             span,
         };
 
         let match_expr = MatchExpr {
-            scrutinee: opt_chain.object.clone(),
-            arms: vec![nil_arm, field_arm],
+            scrutinee: scrutinee.clone(),
+            arms: vec![nil_arm, body_arm],
             span,
         };
 
-        // Store the lowered match for codegen
         self.results
             .lowered_optional_chains
             .insert(expr_id, match_expr);

@@ -23,9 +23,9 @@ use crate::Interner;
 use crate::ast::{
     AssignTarget, BinaryOp, Block, CallArg, ClassDecl, CompoundOp, Decl, ErrorDecl, Expr, ExprKind,
     ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, LetInit,
-    LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, Param, Program, RaiseStmt,
-    SentinelDecl, Stmt, StringPart, StructDecl, StructLiteralExpr, TestCase, TestsDecl, TypeExpr,
-    UnaryOp,
+    LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, OptionalMethodCallExpr, Param,
+    Program, RaiseStmt, SentinelDecl, Stmt, StringPart, StructDecl, StructLiteralExpr, TestCase,
+    TestsDecl, TypeExpr, UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -1015,6 +1015,8 @@ impl<'a> AstPrinter<'a> {
 
             ExprKind::OptionalChain(oc) => self.write_optional_chain(out, oc),
 
+            ExprKind::OptionalMethodCall(omc) => self.write_optional_method_call(out, omc),
+
             ExprKind::MethodCall(mc) => self.write_method_call(out, mc),
 
             ExprKind::Try(inner) => {
@@ -1152,6 +1154,38 @@ impl<'a> AstPrinter<'a> {
         inner.write_indent(out);
         out.push_str("object:\n");
         inner.indented().write_expr(out, &oc.object);
+    }
+
+    fn write_optional_method_call(&self, out: &mut String, omc: &OptionalMethodCallExpr) {
+        self.write_indent(out);
+        let method_name = self.interner.resolve(omc.method);
+        wln!(out, "OptionalMethodCall \"{}\"", method_name);
+        let inner = self.indented();
+
+        inner.write_indent(out);
+        out.push_str("object:\n");
+        inner.indented().write_expr(out, &omc.object);
+
+        if !omc.type_args.is_empty() {
+            inner.write_indent(out);
+            out.push_str("type_args: [");
+            for (i, ty) in omc.type_args.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                self.write_type_inline(out, ty);
+            }
+            out.push_str("]\n");
+        }
+
+        if !omc.args.is_empty() {
+            inner.write_indent(out);
+            out.push_str("args:\n");
+            let args_inner = inner.indented();
+            for arg in &omc.args {
+                self.write_call_arg(out, &args_inner, arg);
+            }
+        }
     }
 
     fn write_method_call(&self, out: &mut String, mc: &MethodCallExpr) {

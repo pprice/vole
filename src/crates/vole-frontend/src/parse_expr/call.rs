@@ -236,21 +236,8 @@ impl<'src> Parser<'src> {
             } else if self.match_token(TokenType::Dot) {
                 expr = self.parse_dot_postfix(expr)?;
             } else if self.match_token(TokenType::QuestionDot) {
-                // Optional chaining: expr?.field
-                let field_span = self.current.span;
-                self.consume(TokenType::Identifier, "expected field name after '?.'")?;
-                let field = self.interner.intern(&self.previous.lexeme);
-
-                let span = expr.span.merge(field_span);
-                expr = Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::OptionalChain(Box::new(OptionalChainExpr {
-                        object: expr,
-                        field,
-                        field_span,
-                    })),
-                    span,
-                };
+                // Optional chaining: expr?.field or expr?.method(args)
+                expr = self.parse_optional_chain_postfix(expr)?;
             } else {
                 break;
             }
@@ -343,6 +330,64 @@ impl<'src> Parser<'src> {
             Ok(Expr {
                 id: self.next_id(),
                 kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                    object: expr,
+                    field,
+                    field_span,
+                })),
+                span,
+            })
+        }
+    }
+
+    /// Parse a `?.` postfix: optional field access or optional method call.
+    /// Called after the `?.` token has been consumed.
+    fn parse_optional_chain_postfix(&mut self, expr: Expr) -> Result<Expr, ParseError> {
+        let field_span = self.current.span;
+        self.consume(TokenType::Identifier, "expected field name after '?.'")?;
+        let field = self.interner.intern(&self.previous.lexeme);
+
+        // Check for type args: expr?.method<T, U>(...)
+        let type_args = if self.check(TokenType::Lt) {
+            self.try_parse_call_type_args()?
+        } else {
+            Vec::new()
+        };
+
+        if self.check(TokenType::LParen) {
+            // Optional method call: expr?.method(args)
+            self.advance(); // consume '('
+            self.skip_newlines();
+            let args = self.parse_call_args()?;
+            let end_span = self.current.span;
+            self.consume(TokenType::RParen, "expected ')' after arguments")?;
+
+            let span = expr.span.merge(end_span);
+            Ok(Expr {
+                id: self.next_id(),
+                kind: ExprKind::OptionalMethodCall(Box::new(OptionalMethodCallExpr {
+                    object: expr,
+                    method: field,
+                    type_args,
+                    args,
+                    method_span: field_span,
+                })),
+                span,
+            })
+        } else if !type_args.is_empty() {
+            Err(ParseError::new(
+                ParserError::ExpectedToken {
+                    expected: "'(' after type arguments".to_string(),
+                    found: self.current.ty.as_str().to_string(),
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            ))
+        } else {
+            // Optional field access: expr?.field
+            let span = expr.span.merge(field_span);
+            Ok(Expr {
+                id: self.next_id(),
+                kind: ExprKind::OptionalChain(Box::new(OptionalChainExpr {
                     object: expr,
                     field,
                     field_span,

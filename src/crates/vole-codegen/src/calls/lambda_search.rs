@@ -289,6 +289,17 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
             None
         }
         ExprKind::OptionalChain(oc) => find_lambda_in_expr(&oc.object, node_id),
+        ExprKind::OptionalMethodCall(omc) => {
+            if let Some(lambda) = find_lambda_in_expr(&omc.object, node_id) {
+                return Some(lambda);
+            }
+            for arg in &omc.args {
+                if let Some(lambda) = find_lambda_in_expr(arg.expr(), node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
         ExprKind::Try(inner) => find_lambda_in_expr(inner, node_id),
         ExprKind::Yield(y) => find_lambda_in_expr(&y.value, node_id),
         ExprKind::Match(m) => {

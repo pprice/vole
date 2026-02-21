@@ -104,8 +104,8 @@ impl Cg<'_, '_, '_> {
                 Ok(self.mark_rc_owned(result))
             }
             ExprKind::FieldAccess(fa) => self.field_access(fa),
-            ExprKind::OptionalChain(_) => {
-                // Optional chains are lowered to match expressions by sema.
+            ExprKind::OptionalChain(_) | ExprKind::OptionalMethodCall(_) => {
+                // Optional chains/method calls are lowered to match expressions by sema.
                 let lowered = self
                     .get_lowered_optional_chain(expr.id)
                     .cloned()

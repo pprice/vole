@@ -711,6 +711,12 @@ impl<'a> ConstantFolder<'a> {
             ExprKind::OptionalChain(oc) => {
                 self.fold_expr(&mut oc.object);
             }
+            ExprKind::OptionalMethodCall(omc) => {
+                self.fold_expr(&mut omc.object);
+                for arg in &mut omc.args {
+                    self.fold_expr(arg.expr_mut());
+                }
+            }
             ExprKind::MethodCall(mc) => {
                 self.fold_expr(&mut mc.object);
                 for arg in &mut mc.args {

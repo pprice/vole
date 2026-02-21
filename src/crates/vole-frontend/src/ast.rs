@@ -617,6 +617,7 @@ impl Expr {
             | ExprKind::Try(_)
             | ExprKind::NullCoalesce(_)
             | ExprKind::OptionalChain(_)
+            | ExprKind::OptionalMethodCall(_)
             | ExprKind::Is(_)
             | ExprKind::InterpolatedString(_)
             | ExprKind::Range(_)
@@ -784,6 +785,9 @@ pub enum ExprKind {
 
     /// Optional chaining: obj?.field
     OptionalChain(Box<OptionalChainExpr>),
+
+    /// Optional method call: obj?.method(args)
+    OptionalMethodCall(Box<OptionalMethodCallExpr>),
 
     /// Method call: point.distance()
     MethodCall(Box<MethodCallExpr>),
@@ -1056,6 +1060,16 @@ pub struct OptionalChainExpr {
     pub object: Expr,
     pub field: Symbol,
     pub field_span: Span,
+}
+
+/// Optional method call expression: expr?.method(args)
+#[derive(Debug, Clone)]
+pub struct OptionalMethodCallExpr {
+    pub object: Expr,
+    pub method: Symbol,
+    pub type_args: Vec<TypeExpr>,
+    pub args: Vec<CallArg>,
+    pub method_span: Span,
 }
 
 /// Method call expression: expr.method(args)
