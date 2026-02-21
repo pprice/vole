@@ -501,9 +501,14 @@ impl Analyzer {
             // Check for interface implementing Iterator (uses TypeId directly)
             if let Some(elem_id) = self.extract_iterator_element_type_id(iterable_ty_id) {
                 elem_id
+            } else if let Some(elem_id) = self.extract_iterable_element_type_id(iterable_ty_id) {
+                // Type implements Iterable<T> — for-in will call .iter() at codegen.
+                // Pre-create RuntimeIterator<T> so codegen can look it up.
+                self.type_arena_mut().runtime_iterator(elem_id);
+                elem_id
             } else {
                 self.type_error_id(
-                    "iterable (range, array, string, or Iterator<T>)",
+                    "iterable (range, array, string, Iterator<T>, or Iterable<T>)",
                     iterable_ty_id,
                     for_stmt.iterable.span,
                 );

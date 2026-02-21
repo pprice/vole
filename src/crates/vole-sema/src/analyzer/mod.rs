@@ -806,6 +806,26 @@ impl Analyzer {
         }
         first_arg
     }
+
+    /// Extract the element type T from a type that implements Iterable<T>.
+    ///
+    /// This checks if the given type is a class/struct that has an `extend ... with Iterable<T>`
+    /// implementation, and if so returns the concrete element type T.
+    fn extract_iterable_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
+        let type_def_id = {
+            let arena = self.type_arena();
+            arena.unwrap_class_or_struct(ty_id).map(|(id, _, _)| id)
+        }?;
+        let well_known = &self.name_table().well_known;
+        let iterable_id = well_known.iterable_type_def?;
+        let registry = self.entity_registry();
+        let implemented = registry.get_implemented_interfaces(type_def_id);
+        if !implemented.contains(&iterable_id) {
+            return None;
+        }
+        let type_args = registry.get_implementation_type_args(type_def_id, iterable_id);
+        type_args.first().copied()
+    }
 }
 
 impl Default for Analyzer {

@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 
 use crate::IntrinsicKey;
 use crate::RuntimeKey;
-use crate::errors::CodegenResult;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 use vole_frontend::{self, Stmt};
 use vole_sema::type_arena::TypeId;
@@ -347,6 +347,105 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Check if a type implements Iterable<T> (a class/struct with `extend ... with Iterable<T>`).
+    ///
+    /// Returns the element type T if the type implements Iterable<T>, or None otherwise.
+    pub(crate) fn iterable_element_type(&self, ty: TypeId) -> Option<TypeId> {
+        let type_def_id = {
+            let arena = self.arena();
+            arena.unwrap_class_or_struct(ty).map(|(id, _, _)| id)
+        }?;
+        let well_known = &self.name_table().well_known;
+        let iterable_id = well_known.iterable_type_def?;
+        let registry = self.registry();
+        let implemented = registry.get_implemented_interfaces(type_def_id);
+        if !implemented.contains(&iterable_id) {
+            return None;
+        }
+        let type_args = registry.get_implementation_type_args(type_def_id, iterable_id);
+        type_args.first().copied()
+    }
+
+    /// Compile a for loop over a user-defined Iterable<T> type.
+    ///
+    /// Calls `.iter()` on the iterable to get an Iterator<T>, wraps it via InterfaceIter,
+    /// then iterates using the standard RuntimeIterator loop.
+    pub(crate) fn for_iterable(
+        &mut self,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        elem_type_id: TypeId,
+    ) -> CodegenResult<bool> {
+        let iterable = self.expr(&for_stmt.iterable)?;
+
+        // Look up the .iter() method for this type and call it.
+        let iter_value = self.call_iterable_iter_method(&iterable, elem_type_id)?;
+
+        // iter_value is an Iterator<T> interface. Wrap in RcIterator via InterfaceIter
+        // so the native loop dispatch works.
+        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter_value.value])?;
+        // Release the caller's reference to the interface data_ptr
+        let mut iter_iface = iter_value;
+        self.consume_rc_value(&mut iter_iface)?;
+
+        let runtime_iter_type_id = self
+            .arena()
+            .lookup_runtime_iterator(elem_type_id)
+            .unwrap_or(TypeId::STRING);
+        let iter = CompiledValue::owned(wrapped, types::I64, runtime_iter_type_id);
+
+        // From here, identical to the for_iterator loop body.
+        self.for_iterator_from_runtime_iter(for_stmt, iter, elem_type_id)
+    }
+
+    /// Call the `.iter()` method on an Iterable value, returning the Iterator<T> interface.
+    fn call_iterable_iter_method(
+        &mut self,
+        iterable: &CompiledValue,
+        _elem_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        // Get the TypeDefId and NameId for the iterable's type
+        let type_def_id = {
+            let arena = self.arena();
+            let (tdef, _, _) = arena
+                .unwrap_class_or_struct(iterable.type_id)
+                .ok_or_else(|| {
+                    CodegenError::internal("for_iterable: expected class/struct type")
+                })?;
+            tdef
+        };
+        let type_name_id = self.query().get_type(type_def_id).name_id;
+
+        // Look up the "iter" method's NameId
+        let iter_name_id = self
+            .query()
+            .try_method_name_id_by_str("iter")
+            .ok_or_else(|| CodegenError::not_found("method name_id", "iter"))?;
+
+        // Look up the compiled function key for type::iter()
+        let func_key = self
+            .method_func_keys()
+            .get(&(type_name_id, iter_name_id))
+            .copied()
+            .ok_or_else(|| {
+                CodegenError::not_found("iter method func_key", format!("{type_def_id:?}::iter"))
+            })?;
+
+        // Get the return type from the method binding (Iterator<T> interface)
+        let return_type_id = self
+            .query()
+            .method_binding(type_def_id, iter_name_id)
+            .map(|b| b.func_type.return_type_id)
+            .unwrap_or(TypeId::VOID);
+
+        let func_ref = self.func_ref(func_key)?;
+        let args = &[iterable.value];
+        let coerced = self.coerce_call_args(func_ref, args);
+        let call_inst = self.builder.ins().call(func_ref, &coerced);
+        self.field_cache.clear();
+
+        self.call_result(call_inst, return_type_id)
+    }
+
     /// Compile a for loop over an iterator
     pub(crate) fn for_iterator(
         &mut self,
@@ -386,6 +485,20 @@ impl Cg<'_, '_, '_> {
             iter = CompiledValue::owned(wrapped, types::I64, runtime_iter_type_id);
         }
 
+        self.for_iterator_from_runtime_iter(for_stmt, iter, elem_type_id)
+    }
+
+    /// Shared loop body for iterating a RuntimeIterator value.
+    ///
+    /// Used by both `for_iterator` (after interface wrapping) and `for_iterable`
+    /// (after calling .iter() and wrapping). Handles RC tracking, the
+    /// header/body/continue/exit block structure, and element type conversion.
+    fn for_iterator_from_runtime_iter(
+        &mut self,
+        for_stmt: &vole_frontend::ast::ForStmt,
+        iter: CompiledValue,
+        elem_type_id: TypeId,
+    ) -> CodegenResult<bool> {
         // Track owned iterator temporaries in a dedicated scope so they are
         // cleaned up even if the loop body returns early.
         self.push_rc_scope();
