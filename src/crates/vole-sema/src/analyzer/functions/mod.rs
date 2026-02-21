@@ -11,6 +11,7 @@ pub(super) struct FunctionCheckContext {
     return_type: Option<ArenaTypeId>,
     error_type: Option<ArenaTypeId>,
     generator_element_type: Option<ArenaTypeId>,
+    has_yield: bool,
     static_method: Option<String>,
     /// How many scopes were on the stack when we entered this context
     type_param_stack_depth: usize,
@@ -28,6 +29,7 @@ impl Analyzer {
             return_type: self.env.current_function_return.take(),
             error_type: self.env.current_function_error_type.take(),
             generator_element_type: self.env.current_generator_element_type.take(),
+            has_yield: std::mem::replace(&mut self.env.has_yield, false),
             static_method: self.env.current_static_method.take(),
             type_param_stack_depth: self.env.type_param_stack.depth(),
         };
@@ -62,6 +64,7 @@ impl Analyzer {
             return_type: self.env.current_function_return.take(),
             error_type: self.env.current_function_error_type.take(),
             generator_element_type: self.env.current_generator_element_type.take(),
+            has_yield: std::mem::replace(&mut self.env.has_yield, false),
             static_method: self.env.current_static_method.take(),
             type_param_stack_depth: self.env.type_param_stack.depth(),
         }
@@ -72,6 +75,7 @@ impl Analyzer {
         self.env.current_function_return = saved.return_type;
         self.env.current_function_error_type = saved.error_type;
         self.env.current_generator_element_type = saved.generator_element_type;
+        self.env.has_yield = saved.has_yield;
         self.env.current_static_method = saved.static_method;
         // Pop any scopes that were pushed during this context
         while self.env.type_param_stack.depth() > saved.type_param_stack_depth {
@@ -219,6 +223,17 @@ impl Analyzer {
                 );
             }
         }
+
+        // If this function is a generator (has yield and Iterator<T> return type),
+        // store the element type on the FunctionDef so codegen can read it directly.
+        if self.env.has_yield
+            && let Some(elem_type) = self.env.current_generator_element_type {
+                let func_id = self.entity_registry().function_by_name(name_id);
+                if let Some(func_id) = func_id {
+                    self.entity_registry_mut()
+                        .set_generator_element_type(func_id, elem_type);
+                }
+            }
 
         // Restore scope
         self.pop_scope();

@@ -53,6 +53,9 @@ pub(crate) struct TypeCheckEnv {
     /// Generator context: if inside a generator function, this holds the Iterator element type.
     /// None means we're not in a generator (or not in a function at all).
     pub current_generator_element_type: Option<ArenaTypeId>,
+    /// Whether a `yield` expression was encountered in the current function body.
+    /// Reset when entering a function context, used to mark generators in the entity registry.
+    pub has_yield: bool,
     /// If we're inside a static method, this holds the method name (for error reporting).
     /// None means we're not in a static method.
     pub current_static_method: Option<String>,

@@ -203,6 +203,9 @@ pub struct FunctionDef {
     /// Whether this function is an external (FFI) function.
     /// Named arguments are not supported for external functions.
     pub is_external: bool,
+    /// If this function is a generator (returns Iterator<T> and body contains yield),
+    /// stores the element type T. Codegen reads this instead of walking the AST.
+    pub generator_element_type: Option<TypeId>,
 }
 
 /// A global variable definition (module-level let/var)

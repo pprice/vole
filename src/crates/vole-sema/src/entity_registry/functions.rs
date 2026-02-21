@@ -54,6 +54,7 @@ impl EntityRegistry {
             param_defaults,
             param_names,
             is_external,
+            generator_element_type: None,
         });
         self.function_by_name.insert(full_name_id, id);
         // Also register under name_id if different (for renamed imports like `sqrt as squareRoot`)
@@ -91,6 +92,15 @@ impl EntityRegistry {
         self.function_defs[func_id.index() as usize]
             .signature
             .return_type_id = return_type;
+    }
+
+    /// Mark a function as a generator and store its element type.
+    pub fn set_generator_element_type(
+        &mut self,
+        func_id: FunctionId,
+        element_type: crate::type_arena::TypeId,
+    ) {
+        self.function_defs[func_id.index() as usize].generator_element_type = Some(element_type);
     }
 
     /// Iterate over all function definitions

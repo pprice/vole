@@ -37,6 +37,9 @@ impl Analyzer {
             return Ok(ArenaTypeId::VOID);
         };
 
+        // Mark that this function body contains a yield expression
+        self.env.has_yield = true;
+
         // Type check the yield expression against the Iterator element type (TypeId-based)
         let yield_type_id =
             self.check_expr_expecting_id(&yield_expr.value, Some(element_type), interner)?;
