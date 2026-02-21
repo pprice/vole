@@ -135,24 +135,27 @@ jobs:
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec mv {} release/ \;
           cd release && sha256sum * > checksums.sha256
 
-      - name: Generate changelog
-        run: |
-          TAG="${{ needs.validate.outputs.tag }}"
-          PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -2 | tail -1)
-          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
-            COMMITS=$(git log --pretty=format:"- %s" "$PREV_TAG".."$TAG" --no-merges)
-          else
-            COMMITS=$(git log --pretty=format:"- %s" --no-merges -20)
-          fi
-          echo "$COMMITS" > /tmp/changelog.txt
-
-      - name: Build release notes
+      - name: Extract release notes
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
+          TAG="${{ needs.validate.outputs.tag }}"
+
+          # Extract notes from tagged commit message (<RELEASE-NOTES>...</RELEASE-NOTES>)
+          COMMIT_MSG=$(git log -1 --format=%b "$TAG" 2>/dev/null || true)
+          NOTES=$(echo "$COMMIT_MSG" | sed -n '/<RELEASE-NOTES>/,/<\/RELEASE-NOTES>/{//d;p}')
+
+          if [ -z "$NOTES" ]; then
+            echo "::warning::No <RELEASE-NOTES> in commit message, falling back to commit log"
+            PREV_TAG=$(git tag --sort=-version:refname | grep '^v' | head -2 | tail -1)
+            if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
+              NOTES=$(git log --pretty=format:"- %s" "$PREV_TAG".."$TAG" --no-merges)
+            else
+              NOTES=$(git log --pretty=format:"- %s" --no-merges -20)
+            fi
+          fi
+
           {
-            echo "## Vole ${VERSION}"
-            echo ""
-            cat /tmp/changelog.txt
+            echo "$NOTES"
             echo ""
             echo "### Checksums"
             echo '```'
