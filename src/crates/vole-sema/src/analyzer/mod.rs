@@ -138,12 +138,12 @@ impl Analyzer {
 
         // Try to take ownership of the shared context to avoid cloning AST trees.
         // By this point all sub-analyzers should be dropped, so Rc strong count is 1.
-        let (merged_expr_data, module_programs, db, modules_with_errors) =
+        let (merged_node_map, module_programs, db, modules_with_errors) =
             match Rc::try_unwrap(self.ctx) {
                 Ok(ctx) => {
                     let errored = ctx.modules_with_errors.into_inner();
                     (
-                        ctx.merged_expr_data.into_inner(),
+                        ctx.merged_node_map.into_inner(),
                         ctx.module_programs.into_inner(),
                         ctx.db,
                         errored,
@@ -152,7 +152,7 @@ impl Analyzer {
                 Err(ctx) => {
                     let errored = ctx.modules_with_errors.borrow().clone();
                     (
-                        ctx.merged_expr_data.borrow().clone(),
+                        ctx.merged_node_map.borrow().clone(),
                         ctx.module_programs.borrow().clone(),
                         Rc::clone(&ctx.db),
                         errored,
@@ -160,10 +160,7 @@ impl Analyzer {
                 }
             };
 
-        // Convert merged module ExpressionData to NodeMap and merge into
-        // the main-program NodeMap. Sub-analyzer results are still accumulated
-        // as ExpressionData (see vol-mop6 for removing that indirection).
-        let merged_node_map = merged_expr_data.into_node_map();
+        // Merge sub-analyzer NodeMap data into the main-program NodeMap.
         node_map.merge(merged_node_map);
 
         AnalysisOutput {

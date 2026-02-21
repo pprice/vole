@@ -597,15 +597,16 @@ impl Analyzer {
         decls
     }
 
-    /// Phase 5a (partial): Merge sub-analyzer results into the shared flat maps.
+    /// Phase 5a (partial): Merge sub-analyzer results into the shared NodeMap.
     ///
     /// Because NodeIds are now globally unique (they embed a ModuleId), there are
-    /// no collisions when merging results from different modules.
+    /// no collisions when merging results from different modules. Each module's
+    /// Vec is moved directly into the shared NodeMap via `NodeMap::merge()`.
     fn store_sub_analyzer_results(&mut self, _module_key: &str, sub_analyzer: Analyzer) {
-        // Convert sub-analyzer's NodeMap to ExpressionData for the shared merged store.
-        // (merged_expr_data is still ExpressionData; see vol-mop6 for direct NodeMap merge.)
-        let module_data = sub_analyzer.results.node_map.into_expression_data();
-        self.ctx.merged_expr_data.borrow_mut().merge(module_data);
+        self.ctx
+            .merged_node_map
+            .borrow_mut()
+            .merge(sub_analyzer.results.node_map);
     }
 
     /// Resolve parameter and return types into a function ArenaTypeId.

@@ -7,8 +7,8 @@
 //! the vec.
 //!
 //! Both sema writes and codegen reads go through `NodeMap`. Sub-analyzer
-//! results are still temporarily stored as `ExpressionData` in the shared
-//! context and converted back to `NodeMap` at output time (see vol-mop6).
+//! results are merged directly into the shared `NodeMap` on `AnalyzerContext`,
+//! using `NodeMap::merge()` which moves each module's `Vec<NodeData>` in O(1).
 
 use rustc_hash::FxHashMap;
 
@@ -132,6 +132,23 @@ impl NodeMap {
             prev.is_none(),
             "insert_module: module {module:?} already present"
         );
+    }
+
+    /// Remove and return the `Vec<NodeData>` for a module, or an empty Vec
+    /// if the module is not present.
+    ///
+    /// Used to extract a single module's data from a sub-analyzer's NodeMap
+    /// for O(1) insertion into the parent's merged NodeMap.
+    pub fn take_module(&mut self, module: ModuleId) -> Vec<NodeData> {
+        self.modules.remove(&module).unwrap_or_default()
+    }
+
+    /// Drain all `(ModuleId, Vec<NodeData>)` pairs, consuming the map.
+    ///
+    /// Used when merging a sub-analyzer that may contain data for multiple
+    /// modules (e.g., a tests-block sub-analyzer that also imported modules).
+    pub fn drain_modules(self) -> impl Iterator<Item = (ModuleId, Vec<NodeData>)> {
+        self.modules.into_iter()
     }
 
     // -- low-level accessors -----------------------------------------------
@@ -645,6 +662,39 @@ mod tests {
 
         assert_eq!(map.get_type(a), Some(TypeId::I64));
         assert_eq!(map.get_type(b), Some(TypeId::BOOL));
+    }
+
+    #[test]
+    fn take_module_returns_data_and_removes() {
+        let mut map = NodeMap::new();
+        let module = ModuleId::new(20);
+        let mut data = vec![NodeData::default(); 2];
+        data[0].ty = Some(TypeId::I64);
+        map.insert_module(module, data);
+
+        let taken = map.take_module(module);
+        assert_eq!(taken.len(), 2);
+        assert_eq!(taken[0].ty, Some(TypeId::I64));
+
+        // Module is now gone
+        assert!(map.get_type(nid(20, 0)).is_none());
+    }
+
+    #[test]
+    fn take_module_missing_returns_empty() {
+        let mut map = NodeMap::new();
+        let taken = map.take_module(ModuleId::new(99));
+        assert!(taken.is_empty());
+    }
+
+    #[test]
+    fn drain_modules_yields_all() {
+        let mut map = NodeMap::new();
+        map.set_type(nid(30, 0), TypeId::I64);
+        map.set_type(nid(31, 0), TypeId::BOOL);
+
+        let drained: Vec<_> = map.drain_modules().collect();
+        assert_eq!(drained.len(), 2);
     }
 
     #[test]

@@ -142,7 +142,7 @@ impl Analyzer {
                     }
                 }
             }
-            // ExpressionData and module_programs were pre-merged at AnalyzerContext
+            // NodeMap and module_programs were pre-merged at AnalyzerContext
             // init time when the cache was provided, so skip redundant deep clones.
             if !self.ctx.prelude_expr_data_merged.get() {
                 self.ctx.module_programs.borrow_mut().insert(
@@ -160,7 +160,10 @@ impl Analyzer {
                     declared_var_types: cached.declared_var_types,
                     ..Default::default()
                 };
-                self.ctx.merged_expr_data.borrow_mut().merge(cached_data);
+                self.ctx
+                    .merged_node_map
+                    .borrow_mut()
+                    .merge(cached_data.into_node_map());
             }
             return;
         }
@@ -230,13 +233,13 @@ impl Analyzer {
         // valid and needed by codegen. Methods that reference unknown types
         // (like Iterator) simply won't be callable, but everything else works.
 
-        // Convert the sub-analyzer's NodeMap to ExpressionData once, then use it
-        // for both caching and merging. (CachedModule still stores individual maps;
-        // see vol-mop6 for migrating merged_expr_data to NodeMap.)
-        let prelude_data = sub_analyzer.results.node_map.into_expression_data();
-
-        // Cache the analysis results
+        // Cache the analysis results. CachedModule still stores individual
+        // FxHashMaps (keyed by NodeId), so we convert to ExpressionData for
+        // the cache, then merge the sub-analyzer's NodeMap directly into the
+        // shared merged_node_map.
+        let prelude_node_map = sub_analyzer.results.node_map;
         if let Some(ref cache) = self.ctx.module_cache {
+            let prelude_data = prelude_node_map.clone().into_expression_data();
             cache.borrow_mut().insert(
                 import_path.to_string(),
                 CachedModule {
@@ -310,7 +313,10 @@ impl Analyzer {
             .module_programs
             .borrow_mut()
             .insert(import_path.to_string(), (program, prelude_interner));
-        self.ctx.merged_expr_data.borrow_mut().merge(prelude_data);
+        self.ctx
+            .merged_node_map
+            .borrow_mut()
+            .merge(prelude_node_map);
     }
 
     /// Check if a function name refers to a generic function in a prelude module.

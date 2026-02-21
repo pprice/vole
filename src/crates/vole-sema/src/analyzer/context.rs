@@ -3,6 +3,7 @@
 use crate::analysis_cache::ModuleCache;
 use crate::compilation_db::CompilationDb;
 use crate::entity_registry::EntityRegistry;
+use crate::node_map::NodeMap;
 use crate::resolve::ResolverEntityExt;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -99,10 +100,12 @@ pub(crate) struct AnalyzerContext {
     pub(crate) module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
     /// Parsed module programs and their interners (for compiling pure Vole functions).
     pub(crate) module_programs: RefCell<FxHashMap<String, (Program, Rc<Interner>)>>,
-    /// Merged expression data from all sub-analyzers (module analysis results).
+    /// Merged per-node metadata from all sub-analyzers (module analysis results).
     /// Because NodeIds are now globally unique (they embed a ModuleId), results
-    /// from different modules can be merged into a single flat map without collision.
-    pub(crate) merged_expr_data: RefCell<crate::expression_data::ExpressionData>,
+    /// from different modules can be merged into a single NodeMap without collision.
+    /// Each sub-analyzer's module Vec is moved in directly via `NodeMap::insert_module`,
+    /// making merge O(1) per module instead of O(N) per entry.
+    pub(crate) merged_node_map: RefCell<NodeMap>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub(crate) module_cache: Option<Rc<RefCell<ModuleCache>>>,
@@ -114,7 +117,7 @@ pub(crate) struct AnalyzerContext {
     /// Codegen should skip compiling function bodies for these modules
     /// to avoid encountering INVALID type IDs from failed type checking.
     pub(crate) modules_with_errors: RefCell<FxHashSet<String>>,
-    /// Whether cached prelude ExpressionData has been pre-merged into merged_expr_data.
+    /// Whether cached prelude data has been pre-merged into merged_node_map.
     /// Set once during init when a module cache contains prelude entries, so that
     /// load_prelude_file skips redundant deep clones on every compiled file.
     pub(crate) prelude_expr_data_merged: Cell<bool>,
@@ -126,18 +129,18 @@ pub(crate) struct AnalyzerContext {
 
 impl AnalyzerContext {
     /// Create a new context with the given db and optional cache.
-    /// When a cache is provided, pre-merges all cached prelude ExpressionData
+    /// When a cache is provided, pre-merges all cached prelude metadata
     /// and module programs so that load_prelude_file can skip redundant clones.
     pub(super) fn new(db: Rc<CompilationDb>, cache: Option<Rc<RefCell<ModuleCache>>>) -> Self {
-        let mut merged_expr_data = crate::expression_data::ExpressionData::new();
+        let mut merged_node_map = NodeMap::new();
         let mut module_programs = FxHashMap::default();
         let prelude_merged =
-            Self::pre_merge_cached_prelude(&cache, &mut merged_expr_data, &mut module_programs);
+            Self::pre_merge_cached_prelude(&cache, &mut merged_node_map, &mut module_programs);
         Self {
             db,
             module_type_ids: RefCell::new(FxHashMap::default()),
             module_programs: RefCell::new(module_programs),
-            merged_expr_data: RefCell::new(merged_expr_data),
+            merged_node_map: RefCell::new(merged_node_map),
             module_cache: cache,
             modules_in_progress: RefCell::new(FxHashSet::default()),
             modules_with_errors: RefCell::new(FxHashSet::default()),
@@ -146,14 +149,14 @@ impl AnalyzerContext {
         }
     }
 
-    /// Pre-merge cached prelude ExpressionData and module programs at init time.
+    /// Pre-merge cached prelude metadata and module programs at init time.
     ///
     /// Iterates all `std:prelude/*` entries in the cache and merges their
-    /// ExpressionData into `merged_expr_data` and programs into `module_programs`.
+    /// per-node data into `merged_node_map` and programs into `module_programs`.
     /// Returns true if any prelude entries were merged.
     fn pre_merge_cached_prelude(
         cache: &Option<Rc<RefCell<ModuleCache>>>,
-        merged_expr_data: &mut crate::expression_data::ExpressionData,
+        merged_node_map: &mut NodeMap,
         module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     ) -> bool {
         let Some(cache_rc) = cache else {
@@ -176,7 +179,7 @@ impl AnalyzerContext {
                 declared_var_types: cached.declared_var_types.clone(),
                 ..Default::default()
             };
-            merged_expr_data.merge(cached_data);
+            merged_node_map.merge(cached_data.into_node_map());
             merged_any = true;
         }
         merged_any
