@@ -922,128 +922,83 @@ impl Analyzer {
         sub
     }
 
-    /// Restore scope from a tests module sub-analyzer.
-    /// The sub-analyzer's scope chain has the parent scope at its root.
-    /// We pop back to recover the original parent scope.
-    pub(super) fn restore_scope_from_tests_module(&mut self, mut sub: Analyzer) {
+    /// Merge analysis results from a tests module sub-analyzer back into the parent,
+    /// consuming the sub-analyzer. Also restores the parent scope from the sub-analyzer's
+    /// scope chain.
+    pub(super) fn merge_tests_module_results(&mut self, mut sub: Analyzer) {
+        // Restore the parent scope before consuming the sub-analyzer's fields.
         // The sub-analyzer scope chain: sub.scope -> parent_scope
-        // We want the parent scope back.
         if let Some(parent) = std::mem::take(&mut sub.env.scope).into_parent() {
             self.env.scope = parent;
         }
-    }
 
-    /// Merge analysis results from a tests module sub-analyzer back into the parent.
-    pub(super) fn merge_tests_module_results(&mut self, sub: &Analyzer) {
         // Merge expr_types
-        self.results
-            .expr_types
-            .extend(sub.results.expr_types.iter().map(|(&k, &v)| (k, v)));
+        self.results.expr_types.extend(sub.results.expr_types);
         // Merge method_resolutions
-        for (k, v) in sub.results.method_resolutions.clone_inner() {
+        for (k, v) in sub.results.method_resolutions.into_inner() {
             self.results.method_resolutions.insert(k, v);
         }
         // Merge generic_calls
-        self.results.generic_calls.extend(
-            sub.results
-                .generic_calls
-                .iter()
-                .map(|(&k, v)| (k, v.clone())),
-        );
+        self.results.generic_calls.extend(sub.results.generic_calls);
         // Merge class_method_calls
-        self.results.class_method_calls.extend(
-            sub.results
-                .class_method_calls
-                .iter()
-                .map(|(&k, v)| (k, v.clone())),
-        );
+        self.results
+            .class_method_calls
+            .extend(sub.results.class_method_calls);
         // Merge static_method_calls
-        self.results.static_method_calls.extend(
-            sub.results
-                .static_method_calls
-                .iter()
-                .map(|(&k, v)| (k, v.clone())),
-        );
+        self.results
+            .static_method_calls
+            .extend(sub.results.static_method_calls);
         // Merge substituted_return_types
-        self.results.substituted_return_types.extend(
-            sub.results
-                .substituted_return_types
-                .iter()
-                .map(|(&k, &v)| (k, v)),
-        );
+        self.results
+            .substituted_return_types
+            .extend(sub.results.substituted_return_types);
         // Merge lambda_defaults
-        self.lambda
-            .defaults
-            .extend(sub.lambda.defaults.iter().map(|(&k, v)| (k, v.clone())));
+        self.lambda.defaults.extend(sub.lambda.defaults);
         // Merge is_check_results
         self.results
             .is_check_results
-            .extend(sub.results.is_check_results.iter().map(|(&k, v)| (k, *v)));
+            .extend(sub.results.is_check_results);
         // Merge declared_var_types
         self.results
             .declared_var_types
-            .extend(sub.results.declared_var_types.iter().map(|(&k, &v)| (k, v)));
+            .extend(sub.results.declared_var_types);
         // Merge tests_virtual_modules
-        self.results.tests_virtual_modules.extend(
-            sub.results
-                .tests_virtual_modules
-                .iter()
-                .map(|(&k, &v)| (k, v)),
-        );
+        self.results
+            .tests_virtual_modules
+            .extend(sub.results.tests_virtual_modules);
         // Merge lambda_analysis
-        self.lambda
-            .analysis
-            .extend(sub.lambda.analysis.iter().map(|(&k, v)| (k, v.clone())));
+        self.lambda.analysis.extend(sub.lambda.analysis);
         // Merge resolved_call_args
-        self.results.resolved_call_args.extend(
-            sub.results
-                .resolved_call_args
-                .iter()
-                .map(|(&k, v)| (k, v.clone())),
-        );
+        self.results
+            .resolved_call_args
+            .extend(sub.results.resolved_call_args);
         // Merge intrinsic_keys
-        self.results.intrinsic_keys.extend(
-            sub.results
-                .intrinsic_keys
-                .iter()
-                .map(|(k, v)| (*k, v.clone())),
-        );
+        self.results
+            .intrinsic_keys
+            .extend(sub.results.intrinsic_keys);
         // Merge synthetic_it_lambdas
-        self.results.synthetic_it_lambdas.extend(
-            sub.results
-                .synthetic_it_lambdas
-                .iter()
-                .map(|(&k, v)| (k, v.clone())),
-        );
+        self.results
+            .synthetic_it_lambdas
+            .extend(sub.results.synthetic_it_lambdas);
         // Merge iterable_kinds
         self.results
             .iterable_kinds
-            .extend(sub.results.iterable_kinds.iter().map(|(&k, &v)| (k, v)));
+            .extend(sub.results.iterable_kinds);
         // Merge coercion_kinds
         self.results
             .coercion_kinds
-            .extend(sub.results.coercion_kinds.iter().map(|(&k, &v)| (k, v)));
+            .extend(sub.results.coercion_kinds);
         // Merge lowered_optional_chains
-        self.results.lowered_optional_chains.extend(
-            sub.results
-                .lowered_optional_chains
-                .iter()
-                .map(|(&k, v)| (k, v.clone())),
-        );
+        self.results
+            .lowered_optional_chains
+            .extend(sub.results.lowered_optional_chains);
         // Merge string_conversions
-        self.results.string_conversions.extend(
-            sub.results
-                .string_conversions
-                .iter()
-                .map(|(&k, v)| (k, v.clone())),
-        );
+        self.results
+            .string_conversions
+            .extend(sub.results.string_conversions);
         // Merge errors and warnings
-        self.diagnostics
-            .errors
-            .extend(sub.diagnostics.errors.iter().cloned());
-        self.diagnostics
-            .warnings
-            .extend(sub.diagnostics.warnings.iter().cloned());
+        self.diagnostics.errors.extend(sub.diagnostics.errors);
+        self.diagnostics.warnings.extend(sub.diagnostics.warnings);
     }
 
     /// Fork for analyzing a prelude file.

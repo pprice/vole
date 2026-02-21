@@ -454,11 +454,8 @@ impl Analyzer {
             sub.exit_function_context(saved_ctx);
         }
 
-        // Merge analysis results back to parent
-        self.merge_tests_module_results(&sub);
-
-        // Restore the parent scope from the sub-analyzer
-        self.restore_scope_from_tests_module(sub);
+        // Merge analysis results back to parent and restore parent scope
+        self.merge_tests_module_results(sub);
 
         Ok(())
     }
