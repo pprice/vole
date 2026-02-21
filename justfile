@@ -29,3 +29,7 @@ update:
 # Pre-commit checks with auto-fixes
 pre-commit:
     @just ci pre-commit
+
+# Bump CalVer version (YYYY.M.{incremental}), commit, and tag
+bump:
+    @just/scripts/bump-version.sh
