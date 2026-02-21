@@ -2960,6 +2960,18 @@ impl Compiler<'_> {
                 None => continue, // No array of this elem type in arena, skip
             };
 
+            // Skip element types whose iterable methods were already imported from
+            // the module cache. Check the first default method as a sentinel — all
+            // methods for an element type are imported/compiled as a batch.
+            if let Some((_, first_name_id, _)) = default_methods.first()
+                && self
+                    .state
+                    .array_iterable_func_keys
+                    .contains_key(&(*first_name_id, self_type_id))
+                {
+                    continue;
+                }
+
             // Build concrete substitution: T_name_id -> elem_type
             let mut concrete_subs = FxHashMap::default();
             concrete_subs.insert(t_name_id, elem_type);
@@ -3199,7 +3211,12 @@ impl Compiler<'_> {
                     SelfParam::TypedId(self_type_id),
                 );
 
-                // Import (not declare) the JIT function from the pre-compiled module cache
+                // Only import functions that exist in the pre-compiled module cache.
+                // Element types from non-module code (e.g. test files) won't have
+                // compiled iterable methods in the cache.
+                if !self.jit.has_precompiled_symbol(&mangled_name) {
+                    continue;
+                }
                 let func_id = self.jit.import_function(&mangled_name, &sig);
                 let func_key = self.func_registry.intern_raw(mangled_name);
                 self.func_registry.set_func_id(func_key, func_id);

@@ -411,6 +411,12 @@ impl Compiler<'_> {
         // Declare monomorphized function instances before second pass
         self.declare_all_monomorphized_instances()?;
 
+        // Compile array Iterable default methods for program-level element types.
+        // Module-level types already have methods from the module cache (imported
+        // via import_array_iterable_default_methods); the sentinel check inside
+        // compile_array_iterable_default_methods skips those.
+        self.compile_array_iterable_default_methods()?;
+
         // Second pass: compile function bodies and tests
         self.compile_program_declarations(program)?;
 

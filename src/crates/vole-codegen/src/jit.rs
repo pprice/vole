@@ -157,6 +157,10 @@ pub struct JitContext {
     capture_ir: bool,
     /// Collected IR output from compiled functions (func_name, ir_text)
     ir_output: Vec<(String, String)>,
+    /// Names of pre-compiled module functions registered as JIT symbols.
+    /// Used to check if a function exists before importing it (e.g. array
+    /// iterable methods that may not have been compiled for all element types).
+    precompiled_symbol_names: FxHashSet<String>,
 }
 
 impl JitContext {
@@ -228,11 +232,15 @@ impl JitContext {
         }
 
         // Register pre-compiled module functions as external symbols
-        if let Some(functions) = precompiled {
+        let precompiled_symbol_names = if let Some(functions) = precompiled {
+            let names: FxHashSet<String> = functions.keys().cloned().collect();
             for (name, &ptr) in functions {
                 builder.symbol(name, ptr);
             }
-        }
+            names
+        } else {
+            FxHashSet::default()
+        };
 
         let module = JITModule::new(builder);
         let ctx = module.make_context();
@@ -248,6 +256,7 @@ impl JitContext {
             loop_param_opt: options.loop_param_opt,
             capture_ir: options.capture_ir,
             ir_output: Vec::new(),
+            precompiled_symbol_names,
         };
 
         // Import runtime functions so they can be called
@@ -451,6 +460,16 @@ impl JitContext {
     /// Check if a function exists by name (exported functions only).
     pub fn has_function(&self, name: &str) -> bool {
         self.func_ids.contains_key(name)
+    }
+
+    /// Check if a pre-compiled module symbol is available for import.
+    ///
+    /// Returns `true` if the symbol name was registered from `CompiledModules`
+    /// when this JIT context was created. Used to guard `import_function` calls
+    /// for functions that may not exist (e.g. array iterable methods for element
+    /// types not compiled in the module cache).
+    pub fn has_precompiled_symbol(&self, name: &str) -> bool {
+        self.precompiled_symbol_names.contains(name)
     }
 
     /// Check if a FuncId corresponds to a locally-declared (Export linkage) function.

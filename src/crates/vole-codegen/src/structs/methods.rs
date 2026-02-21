@@ -472,7 +472,17 @@ impl Cg<'_, '_, '_> {
             let func_key = self
                 .method_func_keys()
                 .get(&(type_name_id, method_name_id))
-                .copied();
+                .copied()
+                .or_else(|| {
+                    // Fallback: check array_iterable_func_keys for Iterable default
+                    // methods (filter, map, etc.) on arrays in monomorphized context.
+                    self.array_iterable_func_keys()
+                        .get(&(method_name_id, resolved_obj_type_id))
+                        .copied()
+                        .inspect(|_| {
+                            used_array_iterable_path = true;
+                        })
+                });
 
             // Get return type and param types from entity registry
             let (return_type_id, fb_param_ids) = self

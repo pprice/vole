@@ -1,0 +1,67 @@
+// Tests for implicit `it` parameter with generic constrained types.
+// When a function has a generic parameter T: Interface, and the body uses
+// implicit `it` on a collection of T, the `it` synthesis must correctly
+// resolve the generic element type and its interface methods.
+
+interface Scorable {
+    func score() -> i32
+}
+
+class Player {
+    name: string,
+    value: i32,
+}
+
+extend Player with Scorable {
+    func score() -> i32 {
+        self.value
+    }
+}
+
+// Generic function with constrained type using implicit `it` — core bug scenario
+func filter_positive<T: Scorable>(items: [T]) -> [T] {
+    return items.filter(it.score() > 0).collect()
+}
+
+// Generic function with constrained type using explicit lambda — also affected
+func filter_positive_explicit<T: Scorable>(items: [T]) -> [T] {
+    return items.filter(p => p.score() > 0).collect()
+}
+
+// Non-generic version for comparison (should already work)
+func top_scorers(players: [Player]) -> [Player] {
+    return players.filter(it.score() > 0).collect()
+}
+
+tests "it with generic constrained types" {
+    test "it with interface method on concrete type (baseline)" {
+        let players = [Player { name: "a", value: 5 }, Player { name: "b", value: 0 }]
+        let result = top_scorers(players)
+        assert(result.length() == 1)
+    }
+
+    test "it with interface method on generic T: Scorable in filter" {
+        let players = [Player { name: "a", value: 5 }, Player { name: "b", value: 0 }]
+        let result = filter_positive(players)
+        assert(result.length() == 1)
+    }
+
+    test "explicit lambda with generic T: Scorable in filter" {
+        let players = [Player { name: "a", value: 5 }, Player { name: "b", value: 0 }]
+        let result = filter_positive_explicit(players)
+        assert(result.length() == 1)
+    }
+
+    test "it field access on extended type in filter" {
+        let players = [Player { name: "a", value: 5 }, Player { name: "b", value: 0 }, Player { name: "c", value: 3 }]
+        let result = players.filter(it.value > 0).collect()
+        assert(result.length() == 2)
+    }
+
+    test "it with interface method in map (non-generic)" {
+        let players = [Player { name: "a", value: 5 }, Player { name: "b", value: 3 }]
+        let scores = players.map(it.score()).collect()
+        assert(scores[0] == 5)
+        assert(scores[1] == 3)
+    }
+}
