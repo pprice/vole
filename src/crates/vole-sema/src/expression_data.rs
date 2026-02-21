@@ -12,8 +12,7 @@ use crate::analysis_cache::IsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
-use vole_frontend::{Capture, LambdaPurity, NodeId, Span, Symbol};
-use vole_identity::ModuleId;
+use vole_frontend::{Capture, LambdaPurity, NodeId, Symbol};
 
 /// Classification of a for-loop's iterable, annotated by sema.
 ///
@@ -197,8 +196,6 @@ pub struct ExpressionData {
     pub(crate) substituted_return_types: FxHashMap<NodeId, TypeId>,
     /// Lambda defaults for closure calls.
     pub(crate) lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
-    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    pub(crate) tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Type check results for `is` expressions and type patterns.
     pub(crate) is_check_results: FxHashMap<NodeId, IsCheckResult>,
     /// Declared variable types for let statements with explicit type annotations.
@@ -279,10 +276,6 @@ impl ExpressionData {
             .extend(other.substituted_return_types);
         self.lambda_defaults.reserve(other.lambda_defaults.len());
         self.lambda_defaults.extend(other.lambda_defaults);
-        self.tests_virtual_modules
-            .reserve(other.tests_virtual_modules.len());
-        self.tests_virtual_modules
-            .extend(other.tests_virtual_modules);
         self.is_check_results.reserve(other.is_check_results.len());
         self.is_check_results.extend(other.is_check_results);
         self.declared_var_types
@@ -451,16 +444,6 @@ impl ExpressionData {
     /// Get mutable access to lambda defaults
     pub fn lambda_defaults_mut(&mut self) -> &mut FxHashMap<NodeId, LambdaDefaults> {
         &mut self.lambda_defaults
-    }
-
-    /// Get the virtual module ID for a tests block by its span
-    pub fn get_tests_virtual_module(&self, span: Span) -> Option<ModuleId> {
-        self.tests_virtual_modules.get(&span).copied()
-    }
-
-    /// Set the virtual module ID for a tests block
-    pub fn set_tests_virtual_module(&mut self, span: Span, module_id: ModuleId) {
-        self.tests_virtual_modules.insert(span, module_id);
     }
 
     /// Get the IsCheckResult for a type check node (is expression or type pattern)

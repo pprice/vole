@@ -33,6 +33,8 @@ use crate::resolve::ResolverEntityExt;
 pub struct ProgramQuery<'a> {
     registry: &'a EntityRegistry,
     expr_data: &'a ExpressionData,
+    /// Virtual module IDs for tests blocks (Span-keyed, separate from NodeId-keyed ExpressionData)
+    tests_virtual_modules: &'a FxHashMap<Span, ModuleId>,
     name_table: &'a Rc<NameTable>,
     interner: &'a Interner,
     implement_registry: &'a ImplementRegistry,
@@ -43,9 +45,11 @@ pub struct ProgramQuery<'a> {
 
 impl<'a> ProgramQuery<'a> {
     /// Create a new query interface
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         registry: &'a EntityRegistry,
         expr_data: &'a ExpressionData,
+        tests_virtual_modules: &'a FxHashMap<Span, ModuleId>,
         name_table: &'a Rc<NameTable>,
         interner: &'a Interner,
         implement_registry: &'a ImplementRegistry,
@@ -55,6 +59,7 @@ impl<'a> ProgramQuery<'a> {
         Self {
             registry,
             expr_data,
+            tests_virtual_modules,
             name_table,
             interner,
             implement_registry,
@@ -101,7 +106,7 @@ impl<'a> ProgramQuery<'a> {
     /// Each tests block gets its own virtual ModuleId for type registration.
     #[must_use]
     pub fn tests_virtual_module(&self, span: Span) -> Option<ModuleId> {
-        self.expr_data.get_tests_virtual_module(span)
+        self.tests_virtual_modules.get(&span).copied()
     }
 
     // =========================================================================

@@ -55,6 +55,9 @@ impl TypeWarning {
 pub struct AnalysisOutput {
     /// All expression-level metadata (types, method resolutions, generic calls)
     pub expression_data: ExpressionData,
+    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
+    /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed ExpressionData.
+    pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     pub module_programs:
         FxHashMap<String, (vole_frontend::ast::Program, Rc<vole_frontend::Interner>)>,
@@ -94,7 +97,8 @@ pub(crate) struct AnalysisResults {
     /// Maps init expression NodeId -> declared TypeId for codegen to use.
     pub declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    /// Used by codegen to compile scoped type declarations (records, classes) within tests blocks.
+    /// Keyed by Span (not NodeId), accumulated here during analysis, then moved to
+    /// AnalysisOutput (not ExpressionData) since ExpressionData is purely NodeId-keyed.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Resolved intrinsic keys for compiler intrinsic calls (for optimizer constant folding).
     /// Maps call-site NodeId to the resolved intrinsic key (e.g., "f64_sqrt").

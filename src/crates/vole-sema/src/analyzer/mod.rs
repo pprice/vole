@@ -156,7 +156,6 @@ impl Analyzer {
         let class_method_calls = results.class_method_calls;
         let static_method_calls = results.static_method_calls;
         let substituted_return_types = results.substituted_return_types;
-        let tests_virtual_modules = results.tests_virtual_modules;
         let is_check_results = results.is_check_results;
         let declared_var_types = results.declared_var_types;
         let lambda = self.lambda;
@@ -197,6 +196,8 @@ impl Analyzer {
         let coercion_kinds = results.coercion_kinds;
         let lowered_optional_chains = results.lowered_optional_chains;
         let string_conversions = results.string_conversions;
+        // Extract tests_virtual_modules (Span-keyed, separate from NodeId-keyed ExpressionData)
+        let tests_virtual_modules = results.tests_virtual_modules;
         // Build main-program expression data, then merge in module data
         let mut expression_data = ExpressionData {
             types: expr_types,
@@ -206,7 +207,6 @@ impl Analyzer {
             static_method_generics: static_method_calls,
             substituted_return_types,
             lambda_defaults,
-            tests_virtual_modules,
             is_check_results,
             declared_var_types,
             lambda_analysis,
@@ -223,6 +223,7 @@ impl Analyzer {
 
         AnalysisOutput {
             expression_data,
+            tests_virtual_modules,
             module_programs,
             db,
             module_id: current_module,

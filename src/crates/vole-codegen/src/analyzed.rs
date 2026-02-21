@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use vole_frontend::{Interner, Program};
+use vole_frontend::{Interner, Program, Span};
 use vole_identity::{ModuleId, NameTable};
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery,
@@ -18,6 +18,9 @@ pub struct AnalyzedProgram {
     pub interner: Rc<Interner>,
     /// All expression-level metadata (types, method resolutions, generic calls)
     pub expression_data: ExpressionData,
+    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
+    /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed ExpressionData.
+    pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     /// Compilation database converted for codegen use (Rc-shared, immutable)
@@ -46,6 +49,7 @@ impl AnalyzedProgram {
             program,
             interner: Rc::new(interner),
             expression_data: output.expression_data,
+            tests_virtual_modules: output.tests_virtual_modules,
             module_programs: output.module_programs,
             db,
             module_id: output.module_id,
@@ -58,6 +62,7 @@ impl AnalyzedProgram {
         ProgramQuery::new(
             self.entity_registry(),
             &self.expression_data,
+            &self.tests_virtual_modules,
             self.name_table_ref(),
             &self.interner,
             self.implement_registry(),
