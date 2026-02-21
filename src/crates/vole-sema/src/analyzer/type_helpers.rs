@@ -524,4 +524,58 @@ impl Analyzer {
             _ => StringConversion::I64ToString,
         }
     }
+
+    /// Fast lookup of well-known interface TypeDefIds by name.
+    /// Returns the cached TypeDefId for Stringable/Iterator/Iterable etc. without
+    /// going through the full resolve_type_str_or_interface path.
+    ///
+    /// These are lazily cached on first use by resolving through the normal
+    /// resolver path once and then storing the result in AnalyzerContext.
+    pub(crate) fn lookup_well_known_interface(&self, name: &str) -> Option<TypeDefId> {
+        let cache = self.ctx.well_known_cache.borrow();
+        match name {
+            "Stringable" => cache.stringable,
+            "Iterator" => cache.iterator,
+            "Iterable" => cache.iterable,
+            "Equatable" => cache.equatable,
+            "Comparable" => cache.comparable,
+            "Hashable" => cache.hashable,
+            "Transferable" => cache.transferable,
+            _ => None,
+        }
+    }
+
+    /// Resolve an interface by name, using the well-known cache for known names.
+    /// Falls back to full resolution for unknown names.
+    pub(crate) fn resolve_well_known_or_full(
+        &self,
+        name: &str,
+        interner: &Interner,
+    ) -> Option<TypeDefId> {
+        self.lookup_well_known_interface(name).or_else(|| {
+            self.resolver(interner)
+                .resolve_type_str_or_interface(name, &self.entity_registry())
+        })
+    }
+
+    /// Populate the well-known interface cache by resolving each name once
+    /// through the normal resolver path. Called after prelude loading and
+    /// signature collection to ensure the EntityRegistry is fully populated.
+    pub(crate) fn populate_well_known_cache(&self, interner: &Interner) {
+        use super::context::WellKnownCache;
+        let resolve = |name: &str| {
+            self.resolver(interner)
+                .resolve_type_str_or_interface(name, &self.entity_registry())
+        };
+        let cache = WellKnownCache {
+            stringable: resolve("Stringable"),
+            iterator: resolve("Iterator"),
+            iterable: resolve("Iterable"),
+            equatable: resolve("Equatable"),
+            comparable: resolve("Comparable"),
+            hashable: resolve("Hashable"),
+            transferable: resolve("Transferable"),
+        };
+        *self.ctx.well_known_cache.borrow_mut() = cache;
+    }
 }

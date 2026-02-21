@@ -314,9 +314,8 @@ impl Analyzer {
             inferred_elem
         };
 
-        let iterator_interface_id = self
-            .resolver(interner)
-            .resolve_type_str_or_interface("Iterator", &self.entity_registry());
+        // Use cached well-known TypeDefId (populated after prelude analysis)
+        let iterator_interface_id = self.lookup_well_known_interface("Iterator");
         if let Some(iface_id) = iterator_interface_id {
             self.type_arena_mut()
                 .interface(iface_id, smallvec::smallvec![new_elem_type])

@@ -324,10 +324,13 @@ impl Analyzer {
             let interface_name_str = &iface_item.name;
             tracing::trace!(interface_name = %interface_name_str, "checking interface");
 
-            // Resolve interface by string name (cross-interner safe)
+            // Fast path: check well-known cached TypeDefIds before full resolution
             let interface_type_id = self
-                .resolver(interner)
-                .resolve_type_str_or_interface(interface_name_str, &self.entity_registry());
+                .lookup_well_known_interface(interface_name_str)
+                .or_else(|| {
+                    self.resolver(interner)
+                        .resolve_type_str_or_interface(interface_name_str, &self.entity_registry())
+                });
 
             let Some(interface_type_id) = interface_type_id else {
                 tracing::trace!(interface_name = %interface_name_str, "could not resolve interface");

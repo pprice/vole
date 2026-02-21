@@ -9,10 +9,11 @@ use super::super::*;
 impl Analyzer {
     /// Check if a type implements Stringable (TypeId version)
     pub fn satisfies_stringable_id(&mut self, ty_id: ArenaTypeId, interner: &Interner) -> bool {
-        // Look up Stringable interface
-        let type_def_id = self
-            .resolver(interner)
-            .resolve_type_str_or_interface("Stringable", &self.entity_registry());
+        // Use cached well-known TypeDefId (populated after prelude analysis)
+        let type_def_id = self.lookup_well_known_interface("Stringable").or_else(|| {
+            self.resolver(interner)
+                .resolve_type_str_or_interface("Stringable", &self.entity_registry())
+        });
         if let Some(type_def_id) = type_def_id {
             return self.satisfies_interface_by_type_def_id_typeid(ty_id, type_def_id, interner);
         }
@@ -251,9 +252,13 @@ impl Analyzer {
         interface_name_str: &str,
         interner: &Interner,
     ) -> bool {
+        // Fast path: check well-known cached TypeDefIds before full resolution
         let interface_type_def_id = self
-            .resolver(interner)
-            .resolve_type_str_or_interface(interface_name_str, &self.entity_registry());
+            .lookup_well_known_interface(interface_name_str)
+            .or_else(|| {
+                self.resolver(interner)
+                    .resolve_type_str_or_interface(interface_name_str, &self.entity_registry())
+            });
 
         let Some(interface_type_def_id) = interface_type_def_id else {
             return false;
@@ -318,10 +323,13 @@ impl Analyzer {
         required_type_args: &[ArenaTypeId],
         interner: &Interner,
     ) -> bool {
-        // First, the type must structurally satisfy the base interface
+        // Fast path: check well-known cached TypeDefIds before full resolution
         let interface_type_def_id = self
-            .resolver(interner)
-            .resolve_type_str_or_interface(interface_name_str, &self.entity_registry());
+            .lookup_well_known_interface(interface_name_str)
+            .or_else(|| {
+                self.resolver(interner)
+                    .resolve_type_str_or_interface(interface_name_str, &self.entity_registry())
+            });
 
         let Some(interface_type_def_id) = interface_type_def_id else {
             return false;

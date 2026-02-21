@@ -436,10 +436,11 @@ impl Analyzer {
         type_args_id: &[crate::type_arena::TypeId],
         interner: &Interner,
     ) -> Option<crate::type_arena::TypeId> {
-        // Look up interface by string name using resolver with interface fallback
-        let type_def_id = self
-            .resolver(interner)
-            .resolve_type_str_or_interface(name, &self.entity_registry())?;
+        // Fast path: check well-known cached TypeDefIds before full resolution
+        let type_def_id = self.lookup_well_known_interface(name).or_else(|| {
+            self.resolver(interner)
+                .resolve_type_str_or_interface(name, &self.entity_registry())
+        })?;
         let type_params_len = self.entity_registry().type_params(type_def_id).len();
 
         // Check type params match
@@ -565,6 +566,11 @@ impl Analyzer {
             let mut names = self.name_table_mut();
             crate::well_known::populate_type_def_ids(&mut names, &entities);
         }
+
+        // Cache well-known interface TypeDefIds for fast lookup during body checking.
+        // Uses the resolver (which includes short_name fallback) to get the exact same
+        // TypeDefIds that resolve_type_str_or_interface would return.
+        self.populate_well_known_cache(interner);
 
         // Process global let declarations
         self.process_global_lets(program, interner)?;

@@ -14,6 +14,20 @@ use vole_identity::{ModuleId, NameTable, Resolver, TypeDefId};
 
 use vole_frontend::ast::Symbol;
 
+/// Cached TypeDefIds for well-known interfaces (Stringable, Iterator, etc.).
+/// Populated lazily on first use by resolving through the normal resolver path.
+/// Shared across all sub-analyzers via Rc<AnalyzerContext>.
+#[derive(Default)]
+pub(crate) struct WellKnownCache {
+    pub(crate) stringable: Option<TypeDefId>,
+    pub(crate) iterator: Option<TypeDefId>,
+    pub(crate) iterable: Option<TypeDefId>,
+    pub(crate) equatable: Option<TypeDefId>,
+    pub(crate) comparable: Option<TypeDefId>,
+    pub(crate) hashable: Option<TypeDefId>,
+    pub(crate) transferable: Option<TypeDefId>,
+}
+
 /// Guard that holds a borrow of the name table and provides resolver access.
 /// The name table borrow is independent of other CompilationDb fields,
 /// so entities/types/implements can be borrowed simultaneously.
@@ -104,6 +118,10 @@ pub(crate) struct AnalyzerContext {
     /// Set once during init when a module cache contains prelude entries, so that
     /// load_prelude_file skips redundant deep clones on every compiled file.
     pub(crate) prelude_expr_data_merged: Cell<bool>,
+    /// Cached TypeDefIds for well-known interfaces.
+    /// Populated once after prelude loading and signature collection, then reused
+    /// for every satisfies_stringable_id / Iterator check / constraint check.
+    pub(crate) well_known_cache: RefCell<WellKnownCache>,
 }
 
 impl AnalyzerContext {
@@ -124,6 +142,7 @@ impl AnalyzerContext {
             modules_in_progress: RefCell::new(FxHashSet::default()),
             modules_with_errors: RefCell::new(FxHashSet::default()),
             prelude_expr_data_merged: Cell::new(prelude_merged),
+            well_known_cache: RefCell::new(WellKnownCache::default()),
         }
     }
 
