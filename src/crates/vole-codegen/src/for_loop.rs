@@ -10,7 +10,8 @@ use crate::IntrinsicKey;
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
-use vole_frontend::{self, Stmt};
+use vole_frontend::{self, ExprKind, Stmt};
+use vole_sema::IterableKind;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
@@ -53,6 +54,41 @@ fn stmt_contains_continue(stmt: &Stmt) -> bool {
 }
 
 impl Cg<'_, '_, '_> {
+    /// Dispatch a for-loop to the correct compilation strategy based on sema's
+    /// `IterableKind` annotation.
+    pub(crate) fn compile_for_stmt(
+        &mut self,
+        for_stmt: &vole_frontend::ast::ForStmt,
+    ) -> CodegenResult<bool> {
+        // Range literals can be detected syntactically — they don't need sema annotation
+        if let ExprKind::Range(range) = &for_stmt.iterable.kind {
+            return self.for_range(for_stmt, range);
+        }
+
+        let kind = self.get_iterable_kind(for_stmt.iterable.id).unwrap_or({
+            // Fallback for invalid/error types: treat as array
+            IterableKind::Array {
+                elem_type: TypeId::I64,
+            }
+        });
+
+        match kind {
+            IterableKind::Range => {
+                // Range expressions are handled above via syntactic check.
+                // This branch covers the edge case where sema marks a non-literal
+                // expression as Range (shouldn't happen in practice).
+                self.for_array(for_stmt)
+            }
+            IterableKind::Array { .. } => self.for_array(for_stmt),
+            IterableKind::String => self.for_string(for_stmt),
+            IterableKind::IteratorInterface { .. } => self.for_iterator(for_stmt),
+            IterableKind::CustomIterator { elem_type } => {
+                self.for_custom_iterator(for_stmt, elem_type)
+            }
+            IterableKind::CustomIterable { elem_type } => self.for_iterable(for_stmt, elem_type),
+        }
+    }
+
     /// Compile a for loop over a range.
     ///
     /// Uses an optimized 3-block structure (header, body, exit) when the loop body
@@ -334,56 +370,6 @@ impl Cg<'_, '_, '_> {
         self.pop_rc_scope_with_cleanup(None)?;
 
         Ok(false)
-    }
-
-    /// Check if a type is an Iterator<T> type using TypeId
-    pub(crate) fn is_iterator_type_id(&self, ty: TypeId) -> bool {
-        let arena = self.arena();
-        if let Some((type_def_id, _)) = arena.unwrap_interface(ty) {
-            self.name_table()
-                .well_known
-                .is_iterator_type_def(type_def_id)
-        } else {
-            false
-        }
-    }
-
-    /// Check if a type implements Iterator<T> (a class/struct with `extend ... with Iterator<T>`).
-    ///
-    /// Returns the element type T if the type implements Iterator<T>, or None otherwise.
-    pub(crate) fn iterator_element_type(&self, ty: TypeId) -> Option<TypeId> {
-        let type_def_id = {
-            let arena = self.arena();
-            arena.unwrap_class_or_struct(ty).map(|(id, _, _)| id)
-        }?;
-        let well_known = &self.name_table().well_known;
-        let iterator_id = well_known.iterator_type_def?;
-        let registry = self.registry();
-        let implemented = registry.get_implemented_interfaces(type_def_id);
-        if !implemented.contains(&iterator_id) {
-            return None;
-        }
-        let type_args = registry.get_implementation_type_args(type_def_id, iterator_id);
-        type_args.first().copied()
-    }
-
-    /// Check if a type implements Iterable<T> (a class/struct with `extend ... with Iterable<T>`).
-    ///
-    /// Returns the element type T if the type implements Iterable<T>, or None otherwise.
-    pub(crate) fn iterable_element_type(&self, ty: TypeId) -> Option<TypeId> {
-        let type_def_id = {
-            let arena = self.arena();
-            arena.unwrap_class_or_struct(ty).map(|(id, _, _)| id)
-        }?;
-        let well_known = &self.name_table().well_known;
-        let iterable_id = well_known.iterable_type_def?;
-        let registry = self.registry();
-        let implemented = registry.get_implemented_interfaces(type_def_id);
-        if !implemented.contains(&iterable_id) {
-            return None;
-        }
-        let type_args = registry.get_implementation_type_args(type_def_id, iterable_id);
-        type_args.first().copied()
     }
 
     /// Compile a for loop over a user-defined Iterable<T> type.

@@ -614,6 +614,7 @@ impl Analyzer {
             lambda_analysis: sub_analyzer.lambda.analysis,
             intrinsic_keys: sub_analyzer.results.intrinsic_keys,
             resolved_call_args: sub_analyzer.results.resolved_call_args,
+            iterable_kinds: sub_analyzer.results.iterable_kinds,
             ..Default::default()
         };
         self.ctx.merged_expr_data.borrow_mut().merge(module_data);
@@ -1011,6 +1012,10 @@ impl Analyzer {
                 .iter()
                 .map(|(&k, v)| (k, v.clone())),
         );
+        // Merge iterable_kinds
+        self.results
+            .iterable_kinds
+            .extend(sub.results.iterable_kinds.iter().map(|(&k, &v)| (k, v)));
         // Merge errors and warnings
         self.diagnostics
             .errors

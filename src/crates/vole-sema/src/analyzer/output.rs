@@ -104,6 +104,9 @@ pub(crate) struct AnalysisResults {
     /// Synthetic lambdas for implicit `it` expressions.
     /// Maps original expression NodeId -> synthetic LambdaExpr for codegen.
     pub synthetic_it_lambdas: FxHashMap<NodeId, vole_frontend::LambdaExpr>,
+    /// Iterable classification for for-loops.
+    /// Maps iterable expression NodeId -> IterableKind for codegen dispatch.
+    pub iterable_kinds: FxHashMap<NodeId, crate::expression_data::IterableKind>,
 }
 
 /// Function and global variable symbol tables.

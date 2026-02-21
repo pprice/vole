@@ -1875,4 +1875,24 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         self.compile_method_defaults(method_id, start_index, expected_types, is_generic_class)
     }
+
+    /// Check if a type implements Iterator<T> (a class/struct with `extend ... with Iterator<T>`).
+    ///
+    /// Returns the element type T if the type implements Iterator<T>, or None otherwise.
+    /// Used by method dispatch to box custom Iterator implementors as RuntimeIterators.
+    pub(crate) fn iterator_element_type(&self, ty: TypeId) -> Option<TypeId> {
+        let type_def_id = {
+            let arena = self.arena();
+            arena.unwrap_class_or_struct(ty).map(|(id, _, _)| id)
+        }?;
+        let well_known = &self.name_table().well_known;
+        let iterator_id = well_known.iterator_type_def?;
+        let registry = self.registry();
+        let implemented = registry.get_implemented_interfaces(type_def_id);
+        if !implemented.contains(&iterator_id) {
+            return None;
+        }
+        let type_args = registry.get_implementation_type_args(type_def_id, iterator_id);
+        type_args.first().copied()
+    }
 }

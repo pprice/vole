@@ -193,6 +193,7 @@ impl Analyzer {
         let intrinsic_keys = results.intrinsic_keys;
         let resolved_call_args = results.resolved_call_args;
         let synthetic_it_lambdas = results.synthetic_it_lambdas;
+        let iterable_kinds = results.iterable_kinds;
         // Build main-program expression data, then merge in module data
         let mut expression_data = ExpressionData {
             types: expr_types,
@@ -209,6 +210,7 @@ impl Analyzer {
             intrinsic_keys,
             resolved_call_args,
             synthetic_it_lambdas,
+            iterable_kinds,
         };
         // Merge module analysis data (globally unique NodeIds, no collisions)
         expression_data.merge(merged_expr_data);
@@ -788,12 +790,15 @@ impl Analyzer {
         }
     }
 
-    /// Extract the element type from an Iterator<T> type.
+    /// Extract the element type from a direct Iterator<T> interface type.
     ///
-    /// Handles both direct Iterator<T> interface types and class/struct types
-    /// that implement Iterator<T> via `extend ... with Iterator<T>`.
-    fn extract_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
-        // First, check if the type IS an Iterator<T> interface directly
+    /// Returns `Some(T)` if the type IS an `Iterator<T>` interface, `None` otherwise.
+    /// Does NOT check class/struct implementations — use
+    /// `extract_custom_iterator_element_type_id` for that.
+    fn extract_iterator_interface_element_type_id(
+        &self,
+        ty_id: ArenaTypeId,
+    ) -> Option<ArenaTypeId> {
         let interface_info = {
             let arena = self.type_arena();
             arena
@@ -808,8 +813,14 @@ impl Analyzer {
         {
             return first_arg;
         }
+        None
+    }
 
-        // Second, check if it's a class/struct that implements Iterator<T>
+    /// Extract the element type from a class/struct implementing Iterator<T>.
+    ///
+    /// Returns `Some(T)` if the type is a class/struct with
+    /// `extend ... with Iterator<T>`, `None` otherwise.
+    fn extract_custom_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let type_def_id = {
             let arena = self.type_arena();
             arena.unwrap_class_or_struct(ty_id).map(|(id, _, _)| id)
@@ -823,6 +834,15 @@ impl Analyzer {
         }
         let type_args = registry.get_implementation_type_args(type_def_id, iterator_id);
         type_args.first().copied()
+    }
+
+    /// Extract the element type from an Iterator<T> type.
+    ///
+    /// Handles both direct Iterator<T> interface types and class/struct types
+    /// that implement Iterator<T> via `extend ... with Iterator<T>`.
+    fn extract_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
+        self.extract_iterator_interface_element_type_id(ty_id)
+            .or_else(|| self.extract_custom_iterator_element_type_id(ty_id))
     }
 
     /// Extract the element type T from a type that implements Iterable<T>.

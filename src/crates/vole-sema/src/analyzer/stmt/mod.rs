@@ -7,6 +7,7 @@ mod destructuring;
 mod error_handling;
 
 use super::*;
+use crate::expression_data::IterableKind;
 use crate::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
@@ -486,38 +487,15 @@ impl Analyzer {
     ) -> Result<ReturnInfo, Vec<TypeError>> {
         let iterable_ty_id = self.check_expr(&for_stmt.iterable, interner)?;
 
-        // Determine element type based on iterable type using TypeId
-        let elem_ty_id = if self.is_range_id(iterable_ty_id) {
-            self.ty_i64_id()
-        } else if let Some(elem_id) = self.unwrap_array_id(iterable_ty_id) {
-            elem_id
-        } else if self.is_string_id(iterable_ty_id) {
-            // String is iterable - yields string (individual characters)
-            self.ty_string_id()
-        } else if let Some(elem_id) = self.unwrap_runtime_iterator_id(iterable_ty_id) {
-            // Runtime iterators have their element type directly
-            elem_id
-        } else {
-            // Check for interface implementing Iterator (uses TypeId directly)
-            if let Some(elem_id) = self.extract_iterator_element_type_id(iterable_ty_id) {
-                // Pre-create RuntimeIterator<T> so codegen can look it up
-                // (needed for custom Iterator<T> implementors).
-                self.type_arena_mut().runtime_iterator(elem_id);
-                elem_id
-            } else if let Some(elem_id) = self.extract_iterable_element_type_id(iterable_ty_id) {
-                // Type implements Iterable<T> — for-in will call .iter() at codegen.
-                // Pre-create RuntimeIterator<T> so codegen can look it up.
-                self.type_arena_mut().runtime_iterator(elem_id);
-                elem_id
-            } else {
-                self.type_error_id(
-                    "iterable (range, array, string, Iterator<T>, or Iterable<T>)",
-                    iterable_ty_id,
-                    for_stmt.iterable.span,
-                );
-                self.ty_invalid_id()
-            }
-        };
+        // Determine element type and iterable kind based on iterable type
+        let (elem_ty_id, iterable_kind) = self.classify_iterable(iterable_ty_id, for_stmt);
+
+        // Store the iterable kind annotation for codegen
+        if let Some(kind) = iterable_kind {
+            self.results
+                .iterable_kinds
+                .insert(for_stmt.iterable.id, kind);
+        }
 
         self.push_scope();
         self.env.scope.define(
@@ -538,6 +516,61 @@ impl Analyzer {
         self.pop_scope();
 
         Ok(ReturnInfo::default())
+    }
+
+    /// Classify the iterable type for a for-loop, returning the element type
+    /// and the `IterableKind` annotation for codegen dispatch.
+    fn classify_iterable(
+        &mut self,
+        iterable_ty_id: ArenaTypeId,
+        for_stmt: &ForStmt,
+    ) -> (ArenaTypeId, Option<IterableKind>) {
+        if self.is_range_id(iterable_ty_id) {
+            return (self.ty_i64_id(), Some(IterableKind::Range));
+        }
+        if let Some(elem_id) = self.unwrap_array_id(iterable_ty_id) {
+            return (elem_id, Some(IterableKind::Array { elem_type: elem_id }));
+        }
+        if self.is_string_id(iterable_ty_id) {
+            return (self.ty_string_id(), Some(IterableKind::String));
+        }
+        if let Some(elem_id) = self.unwrap_runtime_iterator_id(iterable_ty_id) {
+            return (
+                elem_id,
+                Some(IterableKind::IteratorInterface { elem_type: elem_id }),
+            );
+        }
+        // Direct Iterator<T> interface (e.g. from arr.iter(), or a function returning Iterator<T>)
+        if let Some(elem_id) = self.extract_iterator_interface_element_type_id(iterable_ty_id) {
+            self.type_arena_mut().runtime_iterator(elem_id);
+            return (
+                elem_id,
+                Some(IterableKind::IteratorInterface { elem_type: elem_id }),
+            );
+        }
+        // Class/struct implementing Iterator<T> via extend
+        if let Some(elem_id) = self.extract_custom_iterator_element_type_id(iterable_ty_id) {
+            self.type_arena_mut().runtime_iterator(elem_id);
+            return (
+                elem_id,
+                Some(IterableKind::CustomIterator { elem_type: elem_id }),
+            );
+        }
+        // Class/struct implementing Iterable<T> — codegen calls .iter() first
+        if let Some(elem_id) = self.extract_iterable_element_type_id(iterable_ty_id) {
+            self.type_arena_mut().runtime_iterator(elem_id);
+            return (
+                elem_id,
+                Some(IterableKind::CustomIterable { elem_type: elem_id }),
+            );
+        }
+
+        self.type_error_id(
+            "iterable (range, array, string, Iterator<T>, or Iterable<T>)",
+            iterable_ty_id,
+            for_stmt.iterable.span,
+        );
+        (self.ty_invalid_id(), None)
     }
 
     /// Check a return statement.

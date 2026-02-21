@@ -15,6 +15,26 @@ use crate::type_arena::TypeId;
 use vole_frontend::{Capture, LambdaExpr, LambdaPurity, NodeId, Span};
 use vole_identity::ModuleId;
 
+/// Classification of a for-loop's iterable, annotated by sema.
+///
+/// Codegen uses this to dispatch to the correct loop compilation strategy
+/// without re-detecting types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IterableKind {
+    /// `0..10` or `0..=10` — range iteration (i64 loop var)
+    Range,
+    /// `[1, 2, 3]` — dynamic array iteration
+    Array { elem_type: TypeId },
+    /// `"hello"` — string character iteration (yields string)
+    String,
+    /// Direct `Iterator<T>` interface value (e.g. from a function returning Iterator<T>)
+    IteratorInterface { elem_type: TypeId },
+    /// Class/struct implementing `Iterator<T>` via extend
+    CustomIterator { elem_type: TypeId },
+    /// Class/struct implementing `Iterable<T>` — codegen calls `.iter()` first
+    CustomIterable { elem_type: TypeId },
+}
+
 /// Analysis results for a lambda expression (captures and side effects).
 /// Stored in ExpressionData keyed by the lambda expression's NodeId.
 #[derive(Debug, Clone, Default)]
@@ -105,6 +125,11 @@ pub struct ExpressionData {
     /// here keyed by the original expression's NodeId. Codegen uses this map to
     /// generate proper lambda closures for these expressions.
     pub(crate) synthetic_it_lambdas: FxHashMap<NodeId, LambdaExpr>,
+    /// Iterable classification for for-loops.
+    ///
+    /// Keyed by the iterable expression's NodeId. Tells codegen which loop
+    /// compilation strategy to use without re-detecting the iterable type.
+    pub(crate) iterable_kinds: FxHashMap<NodeId, IterableKind>,
 }
 
 impl ExpressionData {
@@ -137,6 +162,7 @@ impl ExpressionData {
         self.intrinsic_keys.extend(other.intrinsic_keys);
         self.resolved_call_args.extend(other.resolved_call_args);
         self.synthetic_it_lambdas.extend(other.synthetic_it_lambdas);
+        self.iterable_kinds.extend(other.iterable_kinds);
     }
 
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).
@@ -362,5 +388,15 @@ impl ExpressionData {
     /// Get the synthetic lambda for an implicit `it`-expression, if one was synthesized.
     pub fn get_synthetic_it_lambda(&self, node: NodeId) -> Option<&LambdaExpr> {
         self.synthetic_it_lambdas.get(&node)
+    }
+
+    /// Get the iterable kind for a for-loop's iterable expression.
+    pub fn get_iterable_kind(&self, node: NodeId) -> Option<IterableKind> {
+        self.iterable_kinds.get(&node).copied()
+    }
+
+    /// Set the iterable kind for a for-loop's iterable expression.
+    pub fn set_iterable_kind(&mut self, node: NodeId, kind: IterableKind) {
+        self.iterable_kinds.insert(node, kind);
     }
 }

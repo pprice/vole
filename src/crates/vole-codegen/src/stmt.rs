@@ -226,32 +226,7 @@ impl Cg<'_, '_, '_> {
                 Ok(then_terminated && else_terminated)
             }
 
-            Stmt::For(for_stmt) => {
-                if let ExprKind::Range(range) = &for_stmt.iterable.kind {
-                    self.for_range(for_stmt, range)
-                } else {
-                    // Check if iterable is an Iterator type or string type using TypeId (module-aware)
-                    let iterable_type_id = self.get_expr_type(&for_stmt.iterable.id);
-                    let is_iterator =
-                        iterable_type_id.is_some_and(|id| self.is_iterator_type_id(id));
-                    let is_string = iterable_type_id.is_some_and(|id| self.arena().is_string(id));
-                    let iterator_elem =
-                        iterable_type_id.and_then(|id| self.iterator_element_type(id));
-                    let iterable_elem =
-                        iterable_type_id.and_then(|id| self.iterable_element_type(id));
-                    if is_iterator {
-                        self.for_iterator(for_stmt)
-                    } else if let Some(elem_type_id) = iterator_elem {
-                        self.for_custom_iterator(for_stmt, elem_type_id)
-                    } else if is_string {
-                        self.for_string(for_stmt)
-                    } else if let Some(elem_type_id) = iterable_elem {
-                        self.for_iterable(for_stmt, elem_type_id)
-                    } else {
-                        self.for_array(for_stmt)
-                    }
-                }
-            }
+            Stmt::For(for_stmt) => self.compile_for_stmt(for_stmt),
 
             Stmt::Break(_) => {
                 if let Some(exit_block) = self.cf.loop_exit() {

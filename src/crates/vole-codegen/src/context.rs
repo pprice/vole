@@ -424,6 +424,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get_declared_var_type(*init_node_id)
     }
 
+    /// Get the iterable kind annotation for a for-loop's iterable expression.
+    #[inline]
+    pub fn get_iterable_kind(
+        &self,
+        iterable_node_id: vole_frontend::NodeId,
+    ) -> Option<vole_sema::IterableKind> {
+        self.env
+            .analyzed
+            .query()
+            .expr_data()
+            .get_iterable_kind(iterable_node_id)
+    }
+
     /// Get type metadata map
     #[inline]
     pub fn type_metadata(&self) -> &'ctx TypeMetadataMap {
