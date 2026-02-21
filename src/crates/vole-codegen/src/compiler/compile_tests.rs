@@ -75,7 +75,11 @@ impl Compiler<'_> {
 
             // Create split contexts
             let env = compile_env!(self, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             // Compile scoped let declarations and test body
             let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env)
@@ -372,7 +376,11 @@ impl Compiler<'_> {
                 source_file_ptr,
                 global_module_bindings: &self.global_module_bindings,
             };
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
             compile_function_inner_with_params(
@@ -429,7 +437,11 @@ impl Compiler<'_> {
                 source_file_ptr,
                 global_module_bindings: &self.global_module_bindings,
             };
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
             let (terminated, _) = Cg::new(&mut builder, &mut codegen_ctx, &env)
                 .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
                 .compile_body(&test.body)?;

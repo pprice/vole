@@ -428,6 +428,11 @@ impl Compiler<'_> {
         // Compile monomorphized instances
         self.compile_all_monomorphized_instances(program)?;
 
+        // Compile any monomorphs that were lazily declared during expression compilation.
+        // This fixpoint loop handles transitive demand-declarations: compiling one pending
+        // monomorph body may trigger demand-declaration of another.
+        self.compile_pending_monomorphs(Some(program))?;
+
         Ok(())
     }
 
@@ -541,6 +546,11 @@ impl Compiler<'_> {
         for module_path in &module_paths {
             self.compile_module_function_bodies(module_path)?;
         }
+
+        // Compile any monomorphs that were lazily declared during module body compilation.
+        // No main-program AST is available here; all pending monomorphs should originate
+        // from module code.
+        self.compile_pending_monomorphs(None)?;
 
         tracing::debug!("compile_module_functions complete");
         Ok(())
@@ -798,7 +808,11 @@ impl Compiler<'_> {
                 elem_type_id,
                 module_id: Some(module_id),
             };
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
             crate::generator::compile_generator_function(&gen_params, &mut codegen_ctx, &env)?;
             self.jit.clear();
             return Ok(());
@@ -832,7 +846,11 @@ impl Compiler<'_> {
 
             // Create split contexts
             let env = compile_env!(self, module_interner, module_global_inits, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
             compile_function_inner_with_params(
@@ -885,7 +903,11 @@ impl Compiler<'_> {
                 elem_type_id,
                 module_id: None,
             };
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
             crate::generator::compile_generator_function(&gen_params, &mut codegen_ctx, &env)?;
             self.jit.clear();
             return Ok(());
@@ -917,7 +939,11 @@ impl Compiler<'_> {
 
             // Create split contexts
             let env = compile_env!(self, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             // Use pre-resolved return type (None for void)
             let return_type_opt = Some(return_type_id).filter(|id| !id.is_void());

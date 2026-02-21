@@ -1326,8 +1326,11 @@ impl Compiler<'_> {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                     let env =
                         compile_env!(self, &iface_interner, &no_global_inits, source_file_ptr);
-                    let mut codegen_ctx =
-                        CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                    let mut codegen_ctx = CodegenCtx::new(
+                        &mut self.jit.module,
+                        &mut self.func_registry,
+                        &mut self.pending_monomorphs,
+                    );
                     let mut config = FunctionCompileConfig::method(
                         &body,
                         params,
@@ -1647,8 +1650,11 @@ impl Compiler<'_> {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                     let env =
                         compile_env!(self, &iface_interner, &no_global_inits, source_file_ptr);
-                    let mut codegen_ctx =
-                        CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                    let mut codegen_ctx = CodegenCtx::new(
+                        &mut self.jit.module,
+                        &mut self.func_registry,
+                        &mut self.pending_monomorphs,
+                    );
                     let mut config = FunctionCompileConfig::method(
                         &body,
                         params,
@@ -1791,7 +1797,11 @@ impl Compiler<'_> {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             // Use module interner for compilation
             let env = compile_env!(self, interner, &no_global_inits, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
             let config = FunctionCompileConfig::method(
@@ -1896,8 +1906,11 @@ impl Compiler<'_> {
                 } else {
                     compile_env!(self, source_file_ptr)
                 };
-                let mut codegen_ctx =
-                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
 
                 let config = FunctionCompileConfig::top_level(body, params, return_type_id);
                 compile_function_inner_with_params(
@@ -2004,7 +2017,11 @@ impl Compiler<'_> {
 
             // Create split contexts
             let env = compile_env!(self, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
             let config = FunctionCompileConfig::method(
@@ -2182,7 +2199,11 @@ impl Compiler<'_> {
 
             // Create split contexts
             let env = compile_env!(self, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
             let self_binding = (self_sym, self_type_id, self.pointer_type);
             let config = FunctionCompileConfig::method(
                 &method.body,
@@ -2284,7 +2305,11 @@ impl Compiler<'_> {
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = compile_env!(self, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             let config =
                 FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
@@ -2393,7 +2418,11 @@ impl Compiler<'_> {
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = compile_env!(self, interner, &no_global_inits, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             let config =
                 FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
@@ -2501,8 +2530,11 @@ impl Compiler<'_> {
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = compile_env!(self, source_file_ptr);
-                let mut codegen_ctx =
-                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
                 compile_function_inner_with_params(
@@ -2695,8 +2727,11 @@ impl Compiler<'_> {
                     module_info.global_inits,
                     source_file_ptr
                 );
-                let mut codegen_ctx =
-                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
 
                 let config = FunctionCompileConfig::method(
                     &method.body,
@@ -2814,8 +2849,11 @@ impl Compiler<'_> {
                     module_info.global_inits,
                     source_file_ptr
                 );
-                let mut codegen_ctx =
-                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
 
                 let config = FunctionCompileConfig::top_level(body, params, return_type_id);
                 compile_function_inner_with_params(
@@ -3067,8 +3105,11 @@ impl Compiler<'_> {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                     let env =
                         compile_env!(self, &iface_interner, &no_global_inits, source_file_ptr);
-                    let mut codegen_ctx =
-                        CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                    let mut codegen_ctx = CodegenCtx::new(
+                        &mut self.jit.module,
+                        &mut self.func_registry,
+                        &mut self.pending_monomorphs,
+                    );
                     let config = FunctionCompileConfig::method(
                         &body,
                         params,

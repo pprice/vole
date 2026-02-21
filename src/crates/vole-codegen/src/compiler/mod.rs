@@ -61,6 +61,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenState;
 
 use crate::AnalyzedProgram;
+use crate::types::PendingMonomorph;
 use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId};
@@ -95,6 +96,10 @@ pub struct Compiler<'a> {
     /// by multiple implement blocks (e.g., `implement IFace26 for Class30`
     /// and `implement IFace25 for Class30` both providing `method137`).
     defined_functions: FxHashSet<FuncId>,
+    /// Monomorphs lazily declared on demand during expression compilation.
+    /// These have been declared (assigned a FuncId) but their bodies have not
+    /// yet been compiled. Drained by the fixpoint loop after each compilation phase.
+    pending_monomorphs: Vec<PendingMonomorph>,
 }
 
 impl<'a> Compiler<'a> {
@@ -126,6 +131,7 @@ impl<'a> Compiler<'a> {
             global_module_bindings: FxHashMap::default(),
             skip_tests: false,
             defined_functions: FxHashSet::default(),
+            pending_monomorphs: Vec::new(),
         }
     }
 

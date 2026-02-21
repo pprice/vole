@@ -278,8 +278,11 @@ impl Compiler<'_> {
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = compile_env!(self, module_interner, &no_global_inits, source_file_ptr);
-                let mut codegen_ctx =
-                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
 
                 let config =
                     FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
@@ -342,7 +345,11 @@ impl Compiler<'_> {
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = compile_env!(self, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+            let mut codegen_ctx = CodegenCtx::new(
+                &mut self.jit.module,
+                &mut self.func_registry,
+                &mut self.pending_monomorphs,
+            );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
             compile_function_inner_with_params(
@@ -679,8 +686,11 @@ impl Compiler<'_> {
                 } else {
                     compile_env!(self, source_file_ptr)
                 };
-                let mut codegen_ctx =
-                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
 
                 let config = FunctionCompileConfig::method(
                     &method.body,
@@ -881,8 +891,11 @@ impl Compiler<'_> {
                 } else {
                     compile_env!(self, source_file_ptr)
                 };
-                let mut codegen_ctx =
-                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
                 compile_function_inner_with_params(
@@ -1509,8 +1522,11 @@ impl Compiler<'_> {
                     } else {
                         compile_env!(self, source_file_ptr)
                     };
-                    let mut codegen_ctx =
-                        CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+                    let mut codegen_ctx = CodegenCtx::new(
+                        &mut self.jit.module,
+                        &mut self.func_registry,
+                        &mut self.pending_monomorphs,
+                    );
 
                     let config = FunctionCompileConfig::method(
                         &method_ast.body,
@@ -1565,5 +1581,239 @@ impl Compiler<'_> {
         self.compile_class_method_monomorphized_instances(program)?;
         self.compile_static_method_monomorphized_instances(program)?;
         Ok(())
+    }
+
+    // ===================================================================
+    // Fixpoint loop for pending (demand-declared) monomorphs
+    // ===================================================================
+
+    /// Compile any monomorphs that were lazily declared during expression compilation.
+    ///
+    /// During compilation of function bodies, calls to undeclared monomorphs trigger
+    /// demand-declaration (via `Cg::try_demand_declare_monomorph`) which assigns a
+    /// FuncId but does not compile the body. This method drains those pending
+    /// monomorphs and compiles their bodies. Since compiling one body may trigger
+    /// further demand-declarations, this repeats until the queue is empty (fixpoint).
+    ///
+    /// `program` is `Some` when called from `compile_program_body` (needed to find
+    /// main-program generic function ASTs) and `None` when called from
+    /// `compile_module_functions` (all monomorphs live in modules).
+    pub(super) fn compile_pending_monomorphs(
+        &mut self,
+        program: Option<&Program>,
+    ) -> CodegenResult<()> {
+        use crate::types::PendingMonomorph;
+
+        const MAX_FIXPOINT_ITERATIONS: usize = 100;
+
+        for iteration in 0..MAX_FIXPOINT_ITERATIONS {
+            let batch = std::mem::take(&mut self.pending_monomorphs);
+            if batch.is_empty() {
+                tracing::debug!(
+                    iterations = iteration,
+                    "compile_pending_monomorphs: fixpoint reached"
+                );
+                return Ok(());
+            }
+
+            tracing::debug!(
+                iteration,
+                count = batch.len(),
+                "compile_pending_monomorphs: compiling batch"
+            );
+
+            for pending in batch {
+                match pending {
+                    PendingMonomorph::Function(instance) => {
+                        self.compile_pending_function(&instance, program)?;
+                    }
+                    PendingMonomorph::ClassMethod(instance) => {
+                        self.compile_pending_class_method(&instance, program)?;
+                    }
+                    PendingMonomorph::StaticMethod(instance) => {
+                        self.compile_pending_static_method(&instance, program)?;
+                    }
+                }
+            }
+        }
+
+        Err(CodegenError::internal(
+            "pending monomorph fixpoint loop exceeded 100 iterations",
+        ))
+    }
+
+    /// Compile a single pending free-function monomorph.
+    fn compile_pending_function(
+        &mut self,
+        instance: &MonomorphInstance,
+        program: Option<&Program>,
+    ) -> CodegenResult<()> {
+        // Skip external functions
+        if self.is_external_func(instance.original_name) {
+            return Ok(());
+        }
+
+        // Try main program generic functions first
+        if let Some(program) = program {
+            let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
+            let program_module = self.program_module();
+            self.collect_generic_func_asts(
+                &program.declarations,
+                program_module,
+                &mut generic_func_asts,
+            );
+            if let Some(func) = generic_func_asts.get(&instance.original_name) {
+                self.compile_monomorphized_function(func, instance)?;
+                return Ok(());
+            }
+        }
+
+        // Fallback: search module programs
+        let found = self.compile_monomorphized_module_function(instance)?;
+        if !found {
+            let func_name = self.query().display_name(instance.original_name);
+            return Err(CodegenError::internal_with_context(
+                "pending monomorph: generic function AST not found",
+                func_name,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Compile a single pending class method monomorph.
+    fn compile_pending_class_method(
+        &mut self,
+        instance: &ClassMethodMonomorphInstance,
+        program: Option<&Program>,
+    ) -> CodegenResult<()> {
+        // Skip external and abstract instances
+        if instance.external_info.is_some() {
+            return Ok(());
+        }
+        if self.is_abstract_class_method_monomorph(instance) {
+            return Ok(());
+        }
+
+        let method_name_str = self.query().display_name(instance.method_name);
+
+        // Try main program class ASTs
+        if let Some(program) = program {
+            let class_asts = self.build_generic_type_asts(program);
+            if let Some(class) = class_asts.get(&instance.class_name) {
+                let method = class
+                    .methods
+                    .iter()
+                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+                if let Some(method) = method {
+                    self.compile_monomorphized_class_method(method, instance, None)?;
+                    return Ok(());
+                }
+            }
+
+            // Try implement blocks in the main program
+            let program_module = self.program_module();
+            if let Some(method) = self.find_implement_block_method(
+                &program.declarations,
+                instance.class_name,
+                &method_name_str,
+                program_module,
+            ) {
+                self.compile_monomorphized_class_method(method, instance, None)?;
+                return Ok(());
+            }
+        }
+
+        // Fallback: search module programs for class methods
+        if let Some(method) = self
+            .find_class_method_in_modules(instance.class_name, &method_name_str)
+            .cloned()
+        {
+            let module_id = self.analyzed.name_table().module_of(instance.class_name);
+            let module_path = self
+                .analyzed
+                .name_table()
+                .module_path(module_id)
+                .to_string();
+            self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
+            return Ok(());
+        }
+
+        // Fallback: search implement blocks in modules
+        let module_id = self.analyzed.name_table().module_of(instance.class_name);
+        let module_path = self
+            .analyzed
+            .name_table()
+            .module_path(module_id)
+            .to_string();
+        if let Some((module_program, _)) = self.analyzed.module_programs.get(&module_path)
+            && let Some(method) = self
+                .find_implement_block_method(
+                    &module_program.declarations,
+                    instance.class_name,
+                    &method_name_str,
+                    module_id,
+                )
+                .cloned()
+            {
+                self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
+                return Ok(());
+            }
+
+        let class_name = self.query().display_name(instance.class_name);
+        Err(CodegenError::not_found(
+            "pending monomorph: class method",
+            format!("{} in class {}", method_name_str, class_name),
+        ))
+    }
+
+    /// Compile a single pending static method monomorph.
+    fn compile_pending_static_method(
+        &mut self,
+        instance: &StaticMethodMonomorphInstance,
+        program: Option<&Program>,
+    ) -> CodegenResult<()> {
+        if self.is_abstract_static_method_monomorph(instance) {
+            return Ok(());
+        }
+
+        let method_name_str = self.query().display_name(instance.method_name);
+
+        // Try main program class ASTs
+        if let Some(program) = program {
+            let class_asts = self.build_generic_type_asts(program);
+            if let Some(class) = class_asts.get(&instance.class_name)
+                && let Some(statics) = class.statics
+            {
+                let method = statics
+                    .methods
+                    .iter()
+                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+                if let Some(method) = method {
+                    self.compile_monomorphized_static_method(method, instance, None)?;
+                    return Ok(());
+                }
+            }
+        }
+
+        // Fallback: search module programs
+        if let Some(method) = self
+            .find_static_method_in_modules(instance.class_name, &method_name_str)
+            .cloned()
+        {
+            let module_id = self.analyzed.name_table().module_of(instance.class_name);
+            let module_path = self
+                .analyzed
+                .name_table()
+                .module_path(module_id)
+                .to_string();
+            self.compile_monomorphized_static_method(&method, instance, Some(&module_path))?;
+            return Ok(());
+        }
+
+        let class_name = self.query().display_name(instance.class_name);
+        Err(CodegenError::not_found(
+            "pending monomorph: static method",
+            format!("{} in class {}", method_name_str, class_name),
+        ))
     }
 }
