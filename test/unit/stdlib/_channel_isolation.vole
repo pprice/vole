@@ -1,0 +1,77 @@
+// Isolation test for vol-96jm: Channel.close() method not found
+// "method not found: close (no regular function key)"
+//
+// This test fails when run in isolation:
+//   cargo run -- test test/unit/stdlib/_channel_isolation.vole
+//
+// But passes in the full suite because shared ModuleCache pre-compiles
+// Channel's monomorphizations from earlier test files (task.vole etc).
+//
+// The bug triggers when Task.stream internally creates and uses a
+// Channel<T>, calling close() on it. The Channel type's instance
+// methods aren't registered for the monomorphized generic type when
+// the Channel is created indirectly (inside Task.stream) rather than
+// directly by user code.
+//
+// When fixed: remove the _ prefix to include in normal test runs.
+let { Task } = import "std:task"
+
+tests {
+    test "task.stream close triggers channel method dispatch bug (vol-96jm)" {
+        let s = Task.stream((emit: (i64) -> void) => {
+            emit(1)
+            emit(2)
+            emit(3)
+        })
+        var sum = 0
+        for v in s {
+            sum = sum + v
+        }
+        assert(sum == 6)
+    }
+
+    test "task.stream collect triggers channel close (vol-96jm)" {
+        let s = Task.stream((emit: (i64) -> void) => {
+            emit(10)
+            emit(20)
+            emit(30)
+        })
+        let result = s.collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+        assert(result[1] == 20)
+        assert(result[2] == 30)
+    }
+
+    test "task.stream empty triggers channel close (vol-96jm)" {
+        let s = Task.stream((emit: (i64) -> void) => {
+            // produce nothing
+        })
+        let result = s.collect()
+        assert(result.length() == 0)
+    }
+
+    test "task.stream with string type (vol-96jm)" {
+        let s = Task.stream((emit: (string) -> void) => {
+            emit("one")
+            emit("two")
+            emit("three")
+        })
+        let out = s.collect()
+        assert(out.length() == 3)
+        assert(out[0] == "one")
+        assert(out[1] == "two")
+        assert(out[2] == "three")
+    }
+
+    test "task.stream with captured values (vol-96jm)" {
+        let base = 100
+        let s = Task.stream((emit: (i64) -> void) => {
+            emit(base + 1)
+            emit(base + 2)
+        })
+        let result = s.collect()
+        assert(result[0] == 101)
+        assert(result[1] == 102)
+    }
+}

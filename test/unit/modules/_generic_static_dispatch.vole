@@ -1,0 +1,89 @@
+// Isolation test: Generic static method calls on module-imported types
+// Related to vol-4wn9 and vol-dknq
+//
+// This test fails when run in isolation:
+//   cargo run -- test test/unit/modules/_generic_static_dispatch.vole
+//
+// Generic static methods like Set.new<T>() and Set.with_capacity<T>()
+// work fine when called directly from user code. The bug triggers when
+// module-internal code calls these static methods (e.g., Set.union()
+// internally calls Set.new<T>() to create the result set).
+//
+// The monomorphized FuncId for the internal Set.new<T>() call is never
+// declared during codegen because declare_all_monomorphized_instances()
+// runs before the internal call sites are discovered.
+//
+// When fixed: remove the _ prefix to include in normal test runs.
+let { Set } = import "std:collections/set"
+
+tests {
+    // Direct static calls work fine in isolation (sanity check)
+    test "Set.new<i64>() direct static call works" {
+        let s = Set.new<i64>()
+        assert(s.is_empty())
+        assert(s.len() == 0)
+    }
+
+    test "Set.with_capacity<i64>() direct static call works" {
+        let s = Set.with_capacity<i64>(16)
+        assert(s.is_empty())
+    }
+
+    // Internal static calls via module methods fail
+    test "Set.union() calls Set.new<T>() internally — monomorph dispatch fails" {
+        let a = Set.new<i64>()
+        _ = a.add(10)
+        _ = a.add(20)
+
+        let b = Set.new<i64>()
+        _ = b.add(20)
+        _ = b.add(30)
+
+        // union() internally does Set.new<T>() to create the result
+        let u = a.union(b)
+        assert(u.len() == 3)
+    }
+
+    test "Set.intersection() calls Set.new<T>() internally — monomorph dispatch fails" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = Set.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+
+        // intersection() internally does Set.new<T>() to create the result
+        let i = a.intersection(b)
+        assert(i.len() == 1)
+        assert(i.contains(2))
+    }
+
+    test "Set.difference() calls Set.new<T>() internally — monomorph dispatch fails" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = Set.new<i64>()
+        _ = b.add(2)
+
+        let d = a.difference(b)
+        assert(d.len() == 1)
+        assert(d.contains(1))
+    }
+
+    test "Set.symmetric_difference() calls Set.new<T>() internally — dispatch fails" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = Set.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+
+        let sd = a.symmetric_difference(b)
+        assert(sd.len() == 2)
+        assert(sd.contains(1))
+        assert(sd.contains(3))
+    }
+}

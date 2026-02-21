@@ -1,0 +1,100 @@
+// Isolation test for vol-4wn9: Set.new<i64>() codegen crash
+// "function id not found: FunctionKey(...) (Set__static_new__mono_6)"
+//
+// This test fails when run in isolation:
+//   cargo run -- test test/unit/collections/sets/_set_isolation.vole
+//
+// But passes in the full suite because shared ModuleCache pre-compiles
+// the Set monomorphizations from earlier test files.
+//
+// The bug triggers when Set methods (union, intersection, difference,
+// symmetric_difference) internally call Set.new<T>(), which requires a
+// monomorphized FuncId that was never declared during codegen.
+//
+// When fixed: remove the _ prefix to include in normal test runs.
+let { Set } = import "std:collections/set"
+
+tests {
+    test "set::union triggers internal Set.new<T>() monomorph (vol-4wn9)" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = Set.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+
+        let u = a.union(b)
+        assert(u.len() == 3)
+        assert(u.contains(1))
+        assert(u.contains(2))
+        assert(u.contains(3))
+    }
+
+    test "set::intersection triggers internal Set.new<T>() monomorph (vol-4wn9)" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = Set.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let i = a.intersection(b)
+        assert(i.len() == 2)
+        assert(i.contains(2))
+        assert(i.contains(3))
+    }
+
+    test "set::difference triggers internal Set.new<T>() monomorph (vol-4wn9)" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = Set.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let d = a.difference(b)
+        assert(d.len() == 1)
+        assert(d.contains(1))
+        assert(!d.contains(2))
+    }
+
+    test "set::symmetric_difference triggers internal Set.new<T>() monomorph (vol-4wn9)" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = Set.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let sd = a.symmetric_difference(b)
+        assert(sd.len() == 2)
+        assert(sd.contains(1))
+        assert(sd.contains(4))
+    }
+
+    test "set<string>::union also triggers monomorph bug" {
+        let a = Set.new<string>()
+        _ = a.add("alpha")
+        _ = a.add("beta")
+
+        let b = Set.new<string>()
+        _ = b.add("beta")
+        _ = b.add("gamma")
+
+        let u = a.union(b)
+        assert(u.len() == 3)
+        assert(u.contains("alpha"))
+        assert(u.contains("beta"))
+        assert(u.contains("gamma"))
+    }
+}
