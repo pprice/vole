@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{Capture, LambdaExpr, NodeId, Symbol};
+use vole_frontend::{Block, Capture, Expr, FuncBody, LambdaExpr, NodeId, Stmt, Symbol};
 use vole_sema::type_arena::{TypeArena, TypeId};
 
 use super::RuntimeKey;
@@ -116,10 +116,15 @@ impl Cg<'_, '_, '_> {
         sig
     }
 
-    /// Compile a lambda expression (pure or capturing) - returns a closure pointer.
-    fn compile_lambda_inner(
+    /// Compile a closure from a body and params, handling captures, signature,
+    /// body compilation, and closure allocation.
+    ///
+    /// Shared by both `compile_lambda_inner` (explicit lambdas) and
+    /// `compile_it_lambda` (implicit `it` lambdas).
+    fn compile_closure(
         &mut self,
-        lambda: &LambdaExpr,
+        body: &FuncBody,
+        params: Vec<(Symbol, TypeId, Type)>,
         node_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let captures = self
@@ -132,12 +137,12 @@ impl Cg<'_, '_, '_> {
         let lambda_id = self.next_lambda_id();
 
         // Get param and return types from sema
-        let (func_type_id, param_type_ids, return_type_id) = self.get_lambda_types(node_id)?;
+        let (func_type_id, _, return_type_id) = self.get_lambda_types(node_id)?;
 
         // Convert to Cranelift types
-        let param_types = self.cranelift_types(&param_type_ids);
         let return_type = self.cranelift_type(return_type_id);
         let ptr_type = self.ptr_type();
+        let param_types: Vec<Type> = params.iter().map(|&(_, _, cr_ty)| cr_ty).collect();
 
         let sig = self.build_lambda_signature(&param_types, return_type, return_type_id);
 
@@ -167,14 +172,6 @@ impl Cg<'_, '_, '_> {
         let mut lambda_ctx = self.jit_module().make_context();
         lambda_ctx.func.signature = sig;
 
-        // Build params: Vec<(Symbol, TypeId, Type)>
-        let params: Vec<(Symbol, TypeId, Type)> = lambda
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
-            .collect();
-
         // Compile the lambda body
         {
             let mut lambda_builder_ctx = FunctionBuilderContext::new();
@@ -182,7 +179,7 @@ impl Cg<'_, '_, '_> {
                 FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
 
             let config = FunctionCompileConfig::lambda(
-                &lambda.body,
+                body,
                 params,
                 return_type_id,
                 capture_bindings.as_ref(),
@@ -225,8 +222,28 @@ impl Cg<'_, '_, '_> {
             self.setup_closure_captures(&captures, closure_ptr)?;
         }
 
-        // Use the type ID from sema (already computed during type checking)
         Ok(CompiledValue::new(closure_ptr, ptr_type, func_type_id))
+    }
+
+    /// Compile a lambda expression (pure or capturing) - returns a closure pointer.
+    fn compile_lambda_inner(
+        &mut self,
+        lambda: &LambdaExpr,
+        node_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        // Get param and return types from sema
+        let (_, param_type_ids, _) = self.get_lambda_types(node_id)?;
+        let param_types = self.cranelift_types(&param_type_ids);
+
+        // Build params: Vec<(Symbol, TypeId, Type)>
+        let params: Vec<(Symbol, TypeId, Type)> = lambda
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
+            .collect();
+
+        self.compile_closure(&lambda.body, params, node_id)
     }
 
     /// Set up the capture values in an allocated closure.
@@ -389,6 +406,46 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .store(MemFlags::new(), value, heap_ptr, 0);
         }
+    }
+
+    /// Compile an implicit `it` lambda from the original expression.
+    ///
+    /// Reconstructs a lambda with `it` as the single parameter and the original
+    /// expression as the body, using types from sema's analysis. The original
+    /// expression is wrapped in `FuncBody::Expr` (or `FuncBody::Block` for void
+    /// returns) so it can be compiled through the standard lambda machinery.
+    pub fn compile_it_lambda(
+        &mut self,
+        expr: &Expr,
+        node_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        // Get param and return types from sema
+        let (_, param_type_ids, return_type_id) = self.get_lambda_types(node_id)?;
+        let param_types = self.cranelift_types(&param_type_ids);
+
+        // Resolve the `it` symbol -- must exist since sema already synthesized this
+        let it_sym = self
+            .interner()
+            .lookup("it")
+            .ok_or_else(|| CodegenError::not_found("it symbol", "interner"))?;
+
+        // Build params: single `it` parameter
+        let params: Vec<(Symbol, TypeId, Type)> = vec![(it_sym, param_type_ids[0], param_types[0])];
+
+        // Build body from the original expression
+        let body = if self.arena().is_void(return_type_id) {
+            FuncBody::Block(Block {
+                stmts: vec![Stmt::Expr(vole_frontend::ast::ExprStmt {
+                    expr: expr.clone(),
+                    span: expr.span,
+                })],
+                span: expr.span,
+            })
+        } else {
+            FuncBody::Expr(Box::new(expr.clone()))
+        };
+
+        self.compile_closure(&body, params, node_id)
     }
 
     /// Compile a lambda expression

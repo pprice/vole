@@ -35,7 +35,7 @@ pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::{EntityRegistry, MethodDefBuilder};
 pub use errors::{SemanticError, SemanticWarning};
 pub use expression_data::{
-    CoercionKind, ExpressionData, IterableKind, LambdaAnalysis, OptionalChainInfo,
+    CoercionKind, ExpressionData, ItLambdaInfo, IterableKind, LambdaAnalysis, OptionalChainInfo,
     OptionalChainKind, StringConversion,
 };
 pub use implement_registry::{

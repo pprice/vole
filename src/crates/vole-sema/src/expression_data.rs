@@ -12,7 +12,7 @@ use crate::analysis_cache::IsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
-use vole_frontend::{Capture, LambdaExpr, LambdaPurity, NodeId, Span, Symbol};
+use vole_frontend::{Capture, LambdaPurity, NodeId, Span, Symbol};
 use vole_identity::ModuleId;
 
 /// Classification of a for-loop's iterable, annotated by sema.
@@ -161,6 +161,22 @@ pub struct LambdaDefaults {
     pub lambda_node_id: NodeId,
 }
 
+/// Compact codegen-ready info for implicit `it` lambdas.
+///
+/// When sema synthesizes `it => expr` for a call argument matching a function-type
+/// parameter, it analyzes the full synthetic lambda for type checking but stores
+/// only this compact representation. Codegen reconstructs a lambda from the original
+/// expression AST node with `it` bound as the single parameter.
+#[derive(Debug, Clone, Copy)]
+pub struct ItLambdaInfo {
+    /// Type of the `it` parameter.
+    pub param_type: TypeId,
+    /// Return type of the lambda.
+    pub return_type: TypeId,
+    /// The original expression's NodeId (used as the lambda body).
+    pub body_node: NodeId,
+}
+
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
 ///
 /// Because NodeId is globally unique (it embeds a ModuleId), all maps are
@@ -200,13 +216,13 @@ pub struct ExpressionData {
     /// Only present when named arguments were used (or arg reordering was needed).
     /// Absent for purely positional calls (codegen uses call.args directly).
     pub(crate) resolved_call_args: FxHashMap<NodeId, Vec<Option<usize>>>,
-    /// Synthetic lambdas synthesized from implicit `it` expressions.
+    /// Compact info for implicit `it` lambdas synthesized by sema.
     ///
     /// When sema synthesizes an implicit `it => expr` lambda for a call argument
-    /// that matches a function-type parameter, the synthetic `LambdaExpr` is stored
-    /// here keyed by the original expression's NodeId. Codegen uses this map to
-    /// generate proper lambda closures for these expressions.
-    pub(crate) synthetic_it_lambdas: FxHashMap<NodeId, LambdaExpr>,
+    /// that matches a function-type parameter, the compact `ItLambdaInfo` is stored
+    /// here keyed by the original expression's NodeId. Codegen uses this to
+    /// reconstruct and compile the lambda from the original expression AST.
+    pub(crate) synthetic_it_lambdas: FxHashMap<NodeId, ItLambdaInfo>,
     /// Iterable classification for for-loops.
     ///
     /// Keyed by the iterable expression's NodeId. Tells codegen which loop
@@ -515,8 +531,8 @@ impl ExpressionData {
         self.resolved_call_args.insert(node, mapping);
     }
 
-    /// Get the synthetic lambda for an implicit `it`-expression, if one was synthesized.
-    pub fn get_synthetic_it_lambda(&self, node: NodeId) -> Option<&LambdaExpr> {
+    /// Get the compact info for an implicit `it`-expression, if one was synthesized.
+    pub fn get_it_lambda_info(&self, node: NodeId) -> Option<&ItLambdaInfo> {
         self.synthetic_it_lambdas.get(&node)
     }
 

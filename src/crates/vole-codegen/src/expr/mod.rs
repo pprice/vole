@@ -41,11 +41,11 @@ impl Cg<'_, '_, '_> {
         // If so, compile it as a lambda (closure) instead of a bare expression.
         // Skip this check if `it` is already bound in scope — that means we're
         // inside the lambda body itself, compiling the inner expression.
-        if let Some(synthetic_lambda) = self.get_synthetic_it_lambda(expr.id).cloned() {
+        if self.get_it_lambda_info(expr.id).is_some() {
             let it_sym = self.interner().lookup("it");
             let it_already_bound = it_sym.is_some_and(|sym| self.vars.contains_key(&sym));
             if !it_already_bound {
-                let result = self.lambda(&synthetic_lambda, expr.id)?;
+                let result = self.compile_it_lambda(expr, expr.id)?;
                 return Ok(self.mark_rc_owned(result));
             }
         }

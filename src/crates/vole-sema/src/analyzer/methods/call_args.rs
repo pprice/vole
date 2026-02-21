@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::expression_data::ItLambdaInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use vole_frontend::ast::{CallArg, FuncBody, LambdaExpr, LambdaParam, StringPart};
 
@@ -494,10 +495,15 @@ impl Analyzer {
             self.analyze_lambda(&synthetic_lambda, expr.id, Some(&expected_fn), interner);
         self.lambda.it_lambda_depth -= 1;
 
-        // Store the synthetic lambda so codegen can generate a proper closure
-        self.results
-            .synthetic_it_lambdas
-            .insert(expr.id, synthetic_lambda);
+        // Store compact info so codegen can reconstruct the lambda
+        self.results.synthetic_it_lambdas.insert(
+            expr.id,
+            ItLambdaInfo {
+                param_type: param_types[0],
+                return_type: ret_type,
+                body_node: expr.id,
+            },
+        );
 
         Some(lambda_ty)
     }

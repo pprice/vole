@@ -391,16 +391,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get_lambda_analysis(node_id)
     }
 
-    /// Get the synthetic lambda for an implicit `it`-expression, if one was synthesized.
+    /// Get the compact info for an implicit `it`-expression, if one was synthesized.
     #[inline]
-    pub fn get_synthetic_it_lambda(
+    pub fn get_it_lambda_info(
         &self,
         node_id: vole_frontend::NodeId,
-    ) -> Option<&vole_frontend::LambdaExpr> {
+    ) -> Option<&vole_sema::ItLambdaInfo> {
         self.env
             .analyzed
             .expression_data
-            .get_synthetic_it_lambda(node_id)
+            .get_it_lambda_info(node_id)
     }
 
     /// Get the optional chain info for an optional chain expression.
