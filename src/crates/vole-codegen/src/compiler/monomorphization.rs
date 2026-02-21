@@ -966,16 +966,28 @@ impl Compiler<'_> {
         use vole_sema::generic::ClassMethodMonomorphKey;
         use vole_sema::types::FunctionType;
 
-        let arena = self.arena();
-
-        // Step 1: Collect abstract class method templates (those with TypeParam in substitutions)
-        let all_class_method_count = self
+        // Early-exit if monomorph caches haven't grown since last expansion
+        let current_cache_size = self
             .registry()
             .class_method_monomorph_cache
             .instances()
-            .count();
+            .count()
+            + self
+                .registry()
+                .static_method_monomorph_cache
+                .instances()
+                .count();
+        if current_cache_size == self.last_expansion_cache_size {
+            tracing::debug!("expand_abstract_class_method_monomorphs: caches unchanged, skipping");
+            return Ok(());
+        }
+        self.last_expansion_cache_size = current_cache_size;
+
+        let arena = self.arena();
+
+        // Step 1: Collect abstract class method templates (those with TypeParam in substitutions)
         tracing::debug!(
-            all_class_method_count,
+            current_cache_size,
             "expand_abstract_class_method_monomorphs: checking cache"
         );
 

@@ -100,6 +100,9 @@ pub struct Compiler<'a> {
     /// These have been declared (assigned a FuncId) but their bodies have not
     /// yet been compiled. Drained by the fixpoint loop after each compilation phase.
     pending_monomorphs: Vec<PendingMonomorph>,
+    /// Combined monomorph cache size at last abstract expansion.
+    /// Used to early-exit when caches haven't grown.
+    last_expansion_cache_size: usize,
 }
 
 impl<'a> Compiler<'a> {
@@ -132,6 +135,7 @@ impl<'a> Compiler<'a> {
             skip_tests: false,
             defined_functions: FxHashSet::default(),
             pending_monomorphs: Vec::new(),
+            last_expansion_cache_size: 0,
         }
     }
 
