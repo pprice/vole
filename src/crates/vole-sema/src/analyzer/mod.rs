@@ -805,9 +805,9 @@ impl Analyzer {
                 .name_table()
                 .well_known
                 .is_iterator_type_def(type_def_id)
-            {
-                return first_arg;
-            }
+        {
+            return first_arg;
+        }
 
         // Second, check if it's a class/struct that implements Iterator<T>
         let type_def_id = {
