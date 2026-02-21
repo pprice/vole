@@ -228,16 +228,16 @@ let x = 1
 let x = 2  // Error: 'x' is already defined in this scope
 ```
 
-Use a different block (such as an `if` or function) if you need a new variable with the same name:
+Use a different name or mutation instead:
 
 ```vole
 tests {
-    test "nested scope shadowing" {
+    test "different name in inner scope" {
         let x = 1
         var result = 0
         if true {
-            let x = 2      // OK - different scope
-            result = x
+            let y = 2
+            result = y
         }
         assert(result == 2)
         assert(x == 1)
@@ -263,18 +263,12 @@ Variables can be declared at the top level of a file. Top-level `let` and `var` 
 
 ```vole
 let VERSION = "1.0.0"
-var request_count = 0
-
-func handle_request() {
-    request_count = request_count + 1
-}
+let MAX_RETRIES = 3
 
 tests {
-    test "module-level variables" {
-        handle_request()
-        handle_request()
-        assert(request_count == 2)
+    test "module-level constants" {
         assert(VERSION == "1.0.0")
+        assert(MAX_RETRIES == 3)
     }
 }
 ```

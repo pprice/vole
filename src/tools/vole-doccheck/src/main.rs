@@ -1,9 +1,15 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
+use std::time::Instant;
 
 use glob::glob;
+
+use vole::cli::ColorMode;
+use vole::commands::common::{
+    PipelineOptions, RunOptions, compile_and_run, compile_source, render_pipeline_error,
+};
 
 /// A code block extracted from a markdown file.
 struct CodeBlock {
@@ -13,6 +19,26 @@ struct CodeBlock {
     line: usize,
     /// The raw source code inside the fence.
     code: String,
+    /// How to validate this block.
+    mode: BlockMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockMode {
+    Check,
+    Test,
+    Run,
+}
+
+/// Determine how to validate a code block based on its content.
+fn block_mode(code: &str) -> BlockMode {
+    if code.contains("tests ") || code.contains("tests{") {
+        BlockMode::Test
+    } else if code.contains("func main(") || code.contains("func main()") {
+        BlockMode::Run
+    } else {
+        BlockMode::Check
+    }
 }
 
 /// Extract all ```vole code blocks from a markdown file.
@@ -39,10 +65,12 @@ fn extract_blocks(path: &Path) -> Vec<CodeBlock> {
 
         if in_vole_block {
             if trimmed == "```" {
+                let mode = block_mode(&current_code);
                 blocks.push(CodeBlock {
                     file: path.to_path_buf(),
                     line: block_start,
                     code: current_code.clone(),
+                    mode,
                 });
                 current_code.clear();
                 in_vole_block = false;
@@ -66,7 +94,6 @@ fn extract_blocks(path: &Path) -> Vec<CodeBlock> {
                     block_start = lineno;
                     current_code.clear();
                 } else {
-                    // Something like ```volexyz - not a vole block
                     in_other_block = true;
                 }
             } else {
@@ -78,45 +105,85 @@ fn extract_blocks(path: &Path) -> Vec<CodeBlock> {
     blocks
 }
 
-/// Check a single code block by writing it to a temp file and running `vole check`.
-fn check_block(block: &CodeBlock, vole_bin: &Path, temp_dir: &Path) -> bool {
-    let temp_file = temp_dir.join("doccheck.vole");
-    if let Err(e) = fs::write(&temp_file, &block.code) {
-        eprintln!("  error: cannot write temp file: {e}");
-        return false;
-    }
+/// Check a code block using the in-process compiler.
+fn check_block(block: &CodeBlock) -> bool {
+    let file_label = format!("{}:{}", block.file.display(), block.line);
 
-    let output = Command::new(vole_bin).arg("check").arg(&temp_file).output();
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                true
-            } else {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                eprintln!(
-                    "  FAIL {}:{}\n{}",
-                    block.file.display(),
-                    block.line,
-                    indent_stderr(&stderr, &temp_file, &block.file, block.line),
-                );
-                false
-            }
-        }
-        Err(e) => {
-            eprintln!("  error: cannot run vole: {e}");
-            false
-        }
+    match block.mode {
+        BlockMode::Check => check_block_compile(&block.code, &file_label, "check", false),
+        BlockMode::Test => check_block_compile(&block.code, &file_label, "test", false),
+        BlockMode::Run => check_block_run(&block.code, &file_label),
     }
 }
 
-/// Rewrite temp file paths in error output to show the original markdown location.
-fn indent_stderr(stderr: &str, temp_path: &Path, md_file: &Path, _block_line: usize) -> String {
-    let temp_str = temp_path.display().to_string();
-    let md_str = md_file.display().to_string();
-    stderr
-        .lines()
-        .map(|l| format!("    {}", l.replace(&temp_str, &md_str)))
+/// Validate a block with `compile_source` (parse + type check only).
+fn check_block_compile(code: &str, file_label: &str, mode: &str, skip_tests: bool) -> bool {
+    let mut warnings = Vec::new();
+    let result = compile_source(
+        PipelineOptions {
+            source: code,
+            file_path: file_label,
+            skip_tests,
+            project_root: None,
+            module_cache: None,
+            color_mode: ColorMode::Never,
+        },
+        &mut warnings,
+    );
+    if let Err(ref e) = result {
+        let mut buf = Vec::new();
+        render_pipeline_error(e, file_label, code, &mut buf, ColorMode::Never, false);
+        let msg = String::from_utf8_lossy(&buf);
+        eprintln!("  FAIL {file_label} (mode: {mode})\n{}", indent(&msg));
+        return false;
+    }
+    true
+}
+
+/// Validate a block by compiling and running `main`.
+fn check_block_run(code: &str, file_label: &str) -> bool {
+    let mut warnings = Vec::new();
+    let analyzed = match compile_source(
+        PipelineOptions {
+            source: code,
+            file_path: file_label,
+            skip_tests: true,
+            project_root: None,
+            module_cache: None,
+            color_mode: ColorMode::Never,
+        },
+        &mut warnings,
+    ) {
+        Ok(a) => a,
+        Err(ref e) => {
+            let mut buf = Vec::new();
+            render_pipeline_error(e, file_label, code, &mut buf, ColorMode::Never, true);
+            let msg = String::from_utf8_lossy(&buf);
+            eprintln!("  FAIL {file_label} (mode: run)\n{}", indent(&msg));
+            return false;
+        }
+    };
+
+    let opts = RunOptions {
+        file_path: file_label,
+        jit_options: Default::default(),
+        skip_tests: true,
+    };
+
+    if let Err(ref e) = compile_and_run(&analyzed, &opts) {
+        let mut buf = Vec::new();
+        render_pipeline_error(e, file_label, code, &mut buf, ColorMode::Never, true);
+        let msg = String::from_utf8_lossy(&buf);
+        eprintln!("  FAIL {file_label} (mode: run)\n{}", indent(&msg));
+        return false;
+    }
+    true
+}
+
+/// Indent each line of a string for display.
+fn indent(text: &str) -> String {
+    text.lines()
+        .map(|l| format!("    {l}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -131,8 +198,8 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
-    // Find the vole binary
-    let vole_bin = find_vole_binary();
+    // Install signal handler for JIT code
+    vole::install_segfault_handler();
 
     // Collect all markdown files from arguments
     let mut md_files: Vec<PathBuf> = Vec::new();
@@ -145,7 +212,6 @@ fn main() -> ExitCode {
                             md_files.push(p);
                         }
                         Ok(p) => {
-                            // If it's a directory, glob for *.md inside it
                             if p.is_dir() {
                                 let dir_pattern = format!("{}/**/*.md", p.display());
                                 if let Ok(inner) = glob(&dir_pattern) {
@@ -173,10 +239,7 @@ fn main() -> ExitCode {
 
     md_files.sort();
 
-    // Create temp directory
-    let temp_dir = env::temp_dir().join("vole-doccheck");
-    let _ = fs::create_dir_all(&temp_dir);
-
+    let start = Instant::now();
     let mut total_blocks = 0;
     let mut passed = 0;
     let mut failed = 0;
@@ -196,7 +259,7 @@ fn main() -> ExitCode {
         let mut file_failed = 0;
 
         for block in &blocks {
-            if check_block(block, &vole_bin, &temp_dir) {
+            if check_block(block) {
                 file_passed += 1;
                 passed += 1;
             } else {
@@ -210,16 +273,14 @@ fn main() -> ExitCode {
         println!("{status} {file_name} ({file_passed}/{block_count} blocks)");
     }
 
-    // Clean up
-    let _ = fs::remove_dir_all(&temp_dir);
-
     // Summary
+    let elapsed = start.elapsed();
     println!();
     if failed == 0 {
-        println!("All {total_blocks} code blocks passed.");
+        println!("All {total_blocks} code blocks passed in {elapsed:.2?}.");
         ExitCode::SUCCESS
     } else {
-        println!("{passed} passed, {failed} failed out of {total_blocks} blocks.");
+        println!("{passed} passed, {failed} failed out of {total_blocks} blocks in {elapsed:.2?}.");
         println!();
         println!("Failed blocks:");
         for loc in &failed_locations {
@@ -227,24 +288,4 @@ fn main() -> ExitCode {
         }
         ExitCode::FAILURE
     }
-}
-
-/// Find the vole binary, preferring the cargo target directory.
-fn find_vole_binary() -> PathBuf {
-    // Check if VOLE_BIN is set
-    if let Ok(bin) = env::var("VOLE_BIN") {
-        return PathBuf::from(bin);
-    }
-
-    // Try to find it relative to the current exe
-    if let Ok(exe) = env::current_exe() {
-        let dir = exe.parent().unwrap_or(Path::new("."));
-        let candidate = dir.join("vole");
-        if candidate.exists() {
-            return candidate;
-        }
-    }
-
-    // Fall back to PATH
-    PathBuf::from("vole")
 }

@@ -298,14 +298,16 @@ func find(id: i64) -> fallible(i64, NotFound) {
 tests {
     test "error handling" {
         let item = match find(42) {
-            x => x
+            success x => x
             error NotFound => -1
+            _ => -2
         }
         assert(item == 420)
 
         let missing = match find(-1) {
-            x => x
+            success x => x
             error NotFound => -1
+            _ => -2
         }
         assert(missing == -1)
     }

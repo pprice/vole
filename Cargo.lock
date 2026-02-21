@@ -1728,6 +1728,7 @@ name = "vole-doccheck"
 version = "2026.2.2"
 dependencies = [
  "glob",
+ "vole",
 ]
 
 [[package]]

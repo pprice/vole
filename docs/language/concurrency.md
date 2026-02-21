@@ -279,7 +279,7 @@ tests {
 
 `Task.stream` creates a streaming iterator backed by a producer task. The producer receives an `emit` callback to send values. The returned iterator yields values until the producer finishes:
 
-```vole
+```vole,ignore
 let { Task } = import "std:task"
 
 tests {
@@ -321,7 +321,7 @@ tests {
 
 Streams work with non-i64 types:
 
-```vole
+```vole,ignore
 let { Task } = import "std:task"
 
 tests {

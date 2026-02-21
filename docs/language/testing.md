@@ -275,16 +275,18 @@ func divide(a: i64, b: i64) -> fallible(i64, DivByZero) {
 tests "divide function" {
     test "divides correctly" {
         let result = match divide(10, 2) {
-            x => x
+            success x => x
             error DivByZero => -1
+            _ => -2
         }
         assert(result == 5)
     }
 
     test "raises on zero divisor" {
         let result = match divide(10, 0) {
-            x => x
+            success x => x
             error DivByZero => -999
+            _ => -2
         }
         assert(result == -999)
     }

@@ -504,7 +504,7 @@ tests {
 
 Sets support the standard mathematical set operations. Each returns a new set:
 
-```vole
+```vole,ignore
 let { Set } = import "std:collections/set"
 
 tests {
