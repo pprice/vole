@@ -152,7 +152,7 @@ impl Analyzer {
                             self.lambda.variables.get(sym).cloned()
                         {
                             // Store lambda defaults info for codegen
-                            self.lambda.defaults.insert(
+                            self.results.node_map.set_lambda_defaults(
                                 expr.id,
                                 LambdaDefaults {
                                     required_params,
@@ -390,7 +390,7 @@ impl Analyzer {
                 }
 
                 // Record the call -> monomorph key mapping for codegen
-                self.results.generic_calls.insert(expr.id, key);
+                self.results.node_map.set_generic(expr.id, key);
 
                 // Resolve intrinsic key for constant folding.
                 // If this is a generic external with compiler intrinsic mappings
@@ -408,7 +408,7 @@ impl Analyzer {
                         if let Some(ikey) =
                             resolve_intrinsic_key_from_mappings(&ext_info.type_mappings, &sub_types)
                         {
-                            self.results.intrinsic_keys.insert(expr.id, ikey);
+                            self.results.node_map.set_intrinsic_key(expr.id, ikey);
                         }
                     }
                 }

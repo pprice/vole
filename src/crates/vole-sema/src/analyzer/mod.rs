@@ -22,7 +22,6 @@ mod type_resolution;
 
 use type_constraints::validate_defaults;
 
-use crate::ExpressionData;
 use crate::analysis_cache::IsCheckResult;
 use crate::entity_defs::{GenericFuncInfo, TypeDefKind};
 use crate::entity_registry::{EntityRegistry, MethodDefBuilder};
@@ -102,16 +101,6 @@ impl Analyzer {
     // Error/display helpers: errors.rs
     // Type inference: inference.rs
 
-    /// Get the resolved expression types as interned ArenaTypeId handles.
-    pub fn expr_types(&self) -> &FxHashMap<NodeId, ArenaTypeId> {
-        &self.results.expr_types
-    }
-
-    /// Get the type check results for `is` expressions and type patterns.
-    pub fn is_check_results(&self) -> &FxHashMap<NodeId, IsCheckResult> {
-        &self.results.is_check_results
-    }
-
     /// Get a resolver configured for the current module context.
     /// Create a resolver for name resolution.
     /// Note: The returned resolver holds a borrow of the db's name_table.
@@ -136,11 +125,6 @@ impl Analyzer {
         ResolverGuard::new(&self.ctx.db, interner, module_id, &[], None)
     }
 
-    /// Take ownership of the expression types (consuming self)
-    pub fn into_expr_types(self) -> FxHashMap<NodeId, ArenaTypeId> {
-        self.results.expr_types
-    }
-
     /// Take accumulated warnings, leaving the warnings list empty
     pub fn take_warnings(&mut self) -> Vec<TypeWarning> {
         std::mem::take(&mut self.diagnostics.warnings)
@@ -148,19 +132,8 @@ impl Analyzer {
 
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
-        // Extract per-analysis fields before consuming ctx
-        let results = self.results;
-        let expr_types = results.expr_types;
-        let method_resolutions = results.method_resolutions.into_inner();
-        let generic_calls = results.generic_calls;
-        let class_method_calls = results.class_method_calls;
-        let static_method_calls = results.static_method_calls;
-        let substituted_return_types = results.substituted_return_types;
-        let is_check_results = results.is_check_results;
-        let declared_var_types = results.declared_var_types;
-        let lambda = self.lambda;
-        let lambda_defaults = lambda.defaults;
-        let lambda_analysis = lambda.analysis;
+        let node_map = self.results.node_map;
+        let tests_virtual_modules = self.results.tests_virtual_modules;
         let current_module = self.module.current_module;
 
         // Try to take ownership of the shared context to avoid cloning AST trees.
@@ -168,7 +141,6 @@ impl Analyzer {
         let (merged_expr_data, module_programs, db, modules_with_errors) =
             match Rc::try_unwrap(self.ctx) {
                 Ok(ctx) => {
-                    // Sole owner: move data out of RefCells without cloning
                     let errored = ctx.modules_with_errors.into_inner();
                     (
                         ctx.merged_expr_data.into_inner(),
@@ -178,7 +150,6 @@ impl Analyzer {
                     )
                 }
                 Err(ctx) => {
-                    // Other references exist: fall back to cloning (should not happen in practice)
                     let errored = ctx.modules_with_errors.borrow().clone();
                     (
                         ctx.merged_expr_data.borrow().clone(),
@@ -189,36 +160,8 @@ impl Analyzer {
                 }
             };
 
-        let intrinsic_keys = results.intrinsic_keys;
-        let resolved_call_args = results.resolved_call_args;
-        let synthetic_it_lambdas = results.synthetic_it_lambdas;
-        let iterable_kinds = results.iterable_kinds;
-        let coercion_kinds = results.coercion_kinds;
-        let lowered_optional_chains = results.lowered_optional_chains;
-        let string_conversions = results.string_conversions;
-        // Extract tests_virtual_modules (Span-keyed, separate from NodeId-keyed ExpressionData)
-        let tests_virtual_modules = results.tests_virtual_modules;
-        // Build main-program expression data, then merge in module data
-        let mut expression_data = ExpressionData {
-            types: expr_types,
-            methods: method_resolutions,
-            generics: generic_calls,
-            class_method_generics: class_method_calls,
-            static_method_generics: static_method_calls,
-            substituted_return_types,
-            lambda_defaults,
-            is_check_results,
-            declared_var_types,
-            lambda_analysis,
-            intrinsic_keys,
-            resolved_call_args,
-            synthetic_it_lambdas,
-            iterable_kinds,
-            coercion_kinds,
-            lowered_optional_chains,
-            string_conversions,
-        };
-        // Merge module analysis data (globally unique NodeIds, no collisions)
+        // Build ExpressionData from main-program NodeMap, then merge module data.
+        let mut expression_data = node_map.into_expression_data();
         expression_data.merge(merged_expr_data);
 
         AnalysisOutput {
@@ -237,13 +180,13 @@ impl Analyzer {
     fn record_expr_type_id(&mut self, expr: &Expr, type_id: ArenaTypeId) -> ArenaTypeId {
         // Pre-create RuntimeIterator(T) for Iterator<T> types so codegen can look them up
         self.ensure_runtime_iterator_for_iterator(type_id);
-        self.results.expr_types.insert(expr.id, type_id);
+        self.results.node_map.set_type(expr.id, type_id);
         type_id
     }
 
     /// Record the result of a type check (is expression or type pattern) for codegen.
     fn record_is_check_result(&mut self, node_id: NodeId, result: IsCheckResult) {
-        self.results.is_check_results.insert(node_id, result);
+        self.results.node_map.set_is_check_result(node_id, result);
     }
 
     /// Get the display name for a type parameter.

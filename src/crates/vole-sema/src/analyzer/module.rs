@@ -602,24 +602,9 @@ impl Analyzer {
     /// Because NodeIds are now globally unique (they embed a ModuleId), there are
     /// no collisions when merging results from different modules.
     fn store_sub_analyzer_results(&mut self, _module_key: &str, sub_analyzer: Analyzer) {
-        use crate::expression_data::ExpressionData;
-        let module_data = ExpressionData {
-            types: sub_analyzer.results.expr_types,
-            methods: sub_analyzer.results.method_resolutions.into_inner(),
-            generics: sub_analyzer.results.generic_calls,
-            class_method_generics: sub_analyzer.results.class_method_calls,
-            static_method_generics: sub_analyzer.results.static_method_calls,
-            is_check_results: sub_analyzer.results.is_check_results,
-            declared_var_types: sub_analyzer.results.declared_var_types,
-            lambda_analysis: sub_analyzer.lambda.analysis,
-            intrinsic_keys: sub_analyzer.results.intrinsic_keys,
-            resolved_call_args: sub_analyzer.results.resolved_call_args,
-            iterable_kinds: sub_analyzer.results.iterable_kinds,
-            coercion_kinds: sub_analyzer.results.coercion_kinds,
-            lowered_optional_chains: sub_analyzer.results.lowered_optional_chains,
-            string_conversions: sub_analyzer.results.string_conversions,
-            ..Default::default()
-        };
+        // Convert sub-analyzer's NodeMap to ExpressionData for the shared merged store.
+        // (merged_expr_data is still ExpressionData until codegen reads are migrated.)
+        let module_data = sub_analyzer.results.node_map.into_expression_data();
         self.ctx.merged_expr_data.borrow_mut().merge(module_data);
     }
 
@@ -932,70 +917,14 @@ impl Analyzer {
             self.env.scope = parent;
         }
 
-        // Merge expr_types
-        self.results.expr_types.extend(sub.results.expr_types);
-        // Merge method_resolutions
-        for (k, v) in sub.results.method_resolutions.into_inner() {
-            self.results.method_resolutions.insert(k, v);
-        }
-        // Merge generic_calls
-        self.results.generic_calls.extend(sub.results.generic_calls);
-        // Merge class_method_calls
-        self.results
-            .class_method_calls
-            .extend(sub.results.class_method_calls);
-        // Merge static_method_calls
-        self.results
-            .static_method_calls
-            .extend(sub.results.static_method_calls);
-        // Merge substituted_return_types
-        self.results
-            .substituted_return_types
-            .extend(sub.results.substituted_return_types);
-        // Merge lambda_defaults
-        self.lambda.defaults.extend(sub.lambda.defaults);
-        // Merge is_check_results
-        self.results
-            .is_check_results
-            .extend(sub.results.is_check_results);
-        // Merge declared_var_types
-        self.results
-            .declared_var_types
-            .extend(sub.results.declared_var_types);
-        // Merge tests_virtual_modules
+        // Merge the sub-analyzer's NodeMap into the parent's NodeMap.
+        self.results.node_map.merge(sub.results.node_map);
+
+        // Merge tests_virtual_modules (Span-keyed, not NodeId-keyed)
         self.results
             .tests_virtual_modules
             .extend(sub.results.tests_virtual_modules);
-        // Merge lambda_analysis
-        self.lambda.analysis.extend(sub.lambda.analysis);
-        // Merge resolved_call_args
-        self.results
-            .resolved_call_args
-            .extend(sub.results.resolved_call_args);
-        // Merge intrinsic_keys
-        self.results
-            .intrinsic_keys
-            .extend(sub.results.intrinsic_keys);
-        // Merge synthetic_it_lambdas
-        self.results
-            .synthetic_it_lambdas
-            .extend(sub.results.synthetic_it_lambdas);
-        // Merge iterable_kinds
-        self.results
-            .iterable_kinds
-            .extend(sub.results.iterable_kinds);
-        // Merge coercion_kinds
-        self.results
-            .coercion_kinds
-            .extend(sub.results.coercion_kinds);
-        // Merge lowered_optional_chains
-        self.results
-            .lowered_optional_chains
-            .extend(sub.results.lowered_optional_chains);
-        // Merge string_conversions
-        self.results
-            .string_conversions
-            .extend(sub.results.string_conversions);
+
         // Merge errors and warnings
         self.diagnostics.errors.extend(sub.diagnostics.errors);
         self.diagnostics.warnings.extend(sub.diagnostics.warnings);

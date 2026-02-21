@@ -6,7 +6,8 @@
 //! and a sequential `local` counter, lookup is O(1): hash the module, index
 //! the vec.
 //!
-//! **This module only defines the types** — no callers are converted yet.
+//! **Migration status**: sema writes go through `NodeMap`; codegen still reads
+//! from `ExpressionData` (built via [`NodeMap::into_expression_data`]).
 
 use rustc_hash::FxHashMap;
 
@@ -364,6 +365,158 @@ impl NodeMap {
     /// Set the compact info for an implicit `it`-expression lambda.
     pub fn set_it_lambda_info(&mut self, node: NodeId, info: ItLambdaInfo) {
         self.get_mut_or_insert(node).it_lambda = Some(info);
+    }
+
+    // ======================================================================
+    // Bulk operations
+    // ======================================================================
+
+    /// Merge all entries from `other` into `self`.
+    ///
+    /// For each module in `other`:
+    /// - If `self` does not have that module, the vec is moved in directly.
+    /// - If `self` already has the module, entries are merged element-wise
+    ///   (non-None fields in `other` overwrite the corresponding fields in `self`).
+    pub fn merge(&mut self, other: NodeMap) {
+        for (module, other_vec) in other.modules {
+            match self.modules.entry(module) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(other_vec);
+                }
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    let self_vec = e.get_mut();
+                    if other_vec.len() > self_vec.len() {
+                        self_vec.resize_with(other_vec.len(), NodeData::default);
+                    }
+                    for (i, other_data) in other_vec.into_iter().enumerate() {
+                        merge_node_data(&mut self_vec[i], other_data);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Convert this `NodeMap` into an [`ExpressionData`](crate::ExpressionData),
+    /// consuming `self`.
+    ///
+    /// Used at the boundary between sema and codegen: sema writes to `NodeMap`,
+    /// then this method materialises the flat `FxHashMap`-based layout that
+    /// codegen currently expects.
+    pub fn into_expression_data(self) -> crate::ExpressionData {
+        use crate::ExpressionData;
+        let mut ed = ExpressionData::new();
+        for (module, nodes) in self.modules {
+            for (local, data) in nodes.into_iter().enumerate() {
+                let node = NodeId::new(module, local as u32);
+                if let Some(ty) = data.ty {
+                    ed.set_type_handle(node, ty);
+                }
+                if let Some(method) = data.method {
+                    ed.set_method(node, *method);
+                }
+                if let Some(key) = data.generic {
+                    ed.set_generic(node, *key);
+                }
+                if let Some(key) = data.class_method_generic {
+                    ed.set_class_method_generic(node, *key);
+                }
+                if let Some(key) = data.static_method_generic {
+                    ed.set_static_method_generic(node, *key);
+                }
+                if let Some(ty) = data.substituted_return_type {
+                    ed.set_substituted_return_type(node, ty);
+                }
+                if let Some(defaults) = data.lambda_defaults {
+                    ed.set_lambda_defaults(node, defaults);
+                }
+                if let Some(result) = data.is_check_result {
+                    ed.set_is_check_result(node, result);
+                }
+                if let Some(ty) = data.declared_var_type {
+                    ed.set_declared_var_type(node, ty);
+                }
+                if let Some(analysis) = data.lambda_analysis {
+                    ed.set_lambda_analysis(node, *analysis);
+                }
+                if let Some(key) = data.intrinsic_key {
+                    ed.intrinsic_keys.insert(node, *key);
+                }
+                if let Some(mapping) = data.resolved_call_args {
+                    ed.set_resolved_call_args(node, *mapping);
+                }
+                if let Some(kind) = data.iterable_kind {
+                    ed.set_iterable_kind(node, kind);
+                }
+                if let Some(kind) = data.coercion_kind {
+                    ed.set_coercion_kind(node, kind);
+                }
+                if let Some(conv) = data.string_conversion {
+                    ed.set_string_conversion(node, *conv);
+                }
+                if let Some(info) = data.optional_chain {
+                    ed.lowered_optional_chains.insert(node, info);
+                }
+                if let Some(info) = data.it_lambda {
+                    ed.synthetic_it_lambdas.insert(node, info);
+                }
+            }
+        }
+        ed
+    }
+}
+
+/// Merge non-None fields from `src` into `dst`.
+fn merge_node_data(dst: &mut NodeData, src: NodeData) {
+    if src.ty.is_some() {
+        dst.ty = src.ty;
+    }
+    if src.method.is_some() {
+        dst.method = src.method;
+    }
+    if src.generic.is_some() {
+        dst.generic = src.generic;
+    }
+    if src.class_method_generic.is_some() {
+        dst.class_method_generic = src.class_method_generic;
+    }
+    if src.static_method_generic.is_some() {
+        dst.static_method_generic = src.static_method_generic;
+    }
+    if src.substituted_return_type.is_some() {
+        dst.substituted_return_type = src.substituted_return_type;
+    }
+    if src.lambda_defaults.is_some() {
+        dst.lambda_defaults = src.lambda_defaults;
+    }
+    if src.is_check_result.is_some() {
+        dst.is_check_result = src.is_check_result;
+    }
+    if src.declared_var_type.is_some() {
+        dst.declared_var_type = src.declared_var_type;
+    }
+    if src.lambda_analysis.is_some() {
+        dst.lambda_analysis = src.lambda_analysis;
+    }
+    if src.intrinsic_key.is_some() {
+        dst.intrinsic_key = src.intrinsic_key;
+    }
+    if src.resolved_call_args.is_some() {
+        dst.resolved_call_args = src.resolved_call_args;
+    }
+    if src.iterable_kind.is_some() {
+        dst.iterable_kind = src.iterable_kind;
+    }
+    if src.coercion_kind.is_some() {
+        dst.coercion_kind = src.coercion_kind;
+    }
+    if src.string_conversion.is_some() {
+        dst.string_conversion = src.string_conversion;
+    }
+    if src.optional_chain.is_some() {
+        dst.optional_chain = src.optional_chain;
+    }
+    if src.it_lambda.is_some() {
+        dst.it_lambda = src.it_lambda;
     }
 }
 

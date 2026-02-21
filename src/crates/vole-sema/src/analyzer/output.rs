@@ -2,12 +2,11 @@
 
 use crate::ExpressionData;
 use crate::FunctionType;
-use crate::analysis_cache::{IsCheckResult, ModuleCache};
+use crate::analysis_cache::ModuleCache;
 use crate::compilation_db::CompilationDb;
 use crate::errors::{SemanticError, SemanticWarning};
-use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::module::ModuleLoader;
-use crate::resolution::MethodResolutions;
+use crate::node_map::NodeMap;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -15,7 +14,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::rc::Rc;
 use vole_frontend::Span;
-use vole_frontend::ast::{NodeId, Symbol};
+use vole_frontend::ast::Symbol;
 use vole_identity::{MethodId, ModuleId, NameId};
 
 use super::Analyzer;
@@ -73,54 +72,18 @@ pub struct AnalysisOutput {
 }
 
 /// Analysis results collected during type checking for codegen.
+///
+/// All NodeId-keyed metadata is stored in a single [`NodeMap`] (Vec-backed,
+/// O(1) lookup by module + local index).  The only non-NodeId field is
+/// `tests_virtual_modules` (keyed by `Span`).
 #[derive(Default)]
 pub(crate) struct AnalysisResults {
-    /// Resolved types for each expression node (for codegen)
-    /// Maps expression node IDs to their interned type handles for O(1) equality.
-    pub expr_types: FxHashMap<NodeId, ArenaTypeId>,
-    /// Type check results for `is` expressions and type patterns (for codegen)
-    /// Maps NodeId -> IsCheckResult to eliminate runtime type lookups
-    pub is_check_results: FxHashMap<NodeId, IsCheckResult>,
-    /// Resolved method calls for codegen
-    pub method_resolutions: MethodResolutions,
-    /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
-    pub generic_calls: FxHashMap<NodeId, MonomorphKey>,
-    /// Mapping from method call expression NodeId to ClassMethodMonomorphKey (for generic class method calls)
-    pub class_method_calls: FxHashMap<NodeId, ClassMethodMonomorphKey>,
-    /// Mapping from static method call expression NodeId to StaticMethodMonomorphKey (for generic static method calls)
-    pub static_method_calls: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-    /// Substituted return types for generic method calls.
-    /// When a method like `list.head()` is called on `List<i32>`, the generic return type `T`
-    /// is substituted to `i32`. This map stores the concrete type so codegen doesn't recompute.
-    pub substituted_return_types: FxHashMap<NodeId, ArenaTypeId>,
-    /// Declared variable types for let statements with explicit type annotations.
-    /// Maps init expression NodeId -> declared TypeId for codegen to use.
-    pub declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
+    /// All NodeId-keyed expression metadata (types, methods, generics, etc.).
+    pub node_map: NodeMap,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
     /// Keyed by Span (not NodeId), accumulated here during analysis, then moved to
     /// AnalysisOutput (not ExpressionData) since ExpressionData is purely NodeId-keyed.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
-    /// Resolved intrinsic keys for compiler intrinsic calls (for optimizer constant folding).
-    /// Maps call-site NodeId to the resolved intrinsic key (e.g., "f64_sqrt").
-    pub intrinsic_keys: FxHashMap<NodeId, String>,
-    /// Resolved call arg order for calls with named arguments.
-    /// Maps call NodeId to param-slot -> call.args-index mapping.
-    pub resolved_call_args: FxHashMap<NodeId, Vec<Option<usize>>>,
-    /// Compact info for implicit `it` lambdas.
-    /// Maps original expression NodeId -> ItLambdaInfo for codegen.
-    pub synthetic_it_lambdas: FxHashMap<NodeId, crate::expression_data::ItLambdaInfo>,
-    /// Iterable classification for for-loops.
-    /// Maps iterable expression NodeId -> IterableKind for codegen dispatch.
-    pub iterable_kinds: FxHashMap<NodeId, crate::expression_data::IterableKind>,
-    /// Interface coercion annotations for method call receivers.
-    /// Maps method call NodeId -> CoercionKind for codegen dispatch.
-    pub coercion_kinds: FxHashMap<NodeId, crate::expression_data::CoercionKind>,
-    /// Lowered optional chains: compact codegen-ready info for `?.` expressions.
-    /// Maps optional chain expression NodeId -> OptionalChainInfo for codegen.
-    pub lowered_optional_chains: FxHashMap<NodeId, crate::expression_data::OptionalChainInfo>,
-    /// String conversion annotations for interpolation expression parts.
-    /// Maps interpolation expression NodeId -> StringConversion for codegen dispatch.
-    pub string_conversions: FxHashMap<NodeId, crate::expression_data::StringConversion>,
 }
 
 /// Function and global variable symbol tables.

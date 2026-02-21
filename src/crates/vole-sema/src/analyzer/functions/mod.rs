@@ -450,7 +450,7 @@ impl Analyzer {
             && let Some(Stmt::Expr(expr_stmt)) = block.stmts.last()
         {
             // Check if we have a recorded type for this expression
-            if let Some(&expr_type) = self.results.expr_types.get(&expr_stmt.expr.id) {
+            if let Some(expr_type) = self.results.node_map.get_type(expr_stmt.expr.id) {
                 // Check if it matches the expected return type
                 if self.types_compatible_id(expr_type, expected_return_type, interner) {
                     return "did you mean to add `return` before the last expression?".to_string();

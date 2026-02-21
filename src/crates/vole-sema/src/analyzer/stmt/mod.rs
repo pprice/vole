@@ -203,8 +203,8 @@ impl Analyzer {
         // Store declared type for codegen (keyed by init expression id)
         if let Some(decl_type_id) = declared_type_id {
             self.results
-                .declared_var_types
-                .insert(init_expr.id, decl_type_id);
+                .node_map
+                .set_declared_var_type(init_expr.id, decl_type_id);
         }
 
         // For recursive lambdas: if lambda has fully explicit types,
@@ -493,8 +493,8 @@ impl Analyzer {
         // Store the iterable kind annotation for codegen
         if let Some(kind) = iterable_kind {
             self.results
-                .iterable_kinds
-                .insert(for_stmt.iterable.id, kind);
+                .node_map
+                .set_iterable_kind(for_stmt.iterable.id, kind);
         }
 
         self.push_scope();

@@ -58,8 +58,8 @@ impl Analyzer {
                         let part_type = self.check_expr(inner_expr, interner)?;
                         let conversion = self.classify_string_conversion(part_type);
                         self.results
-                            .string_conversions
-                            .insert(inner_expr.id, conversion);
+                            .node_map
+                            .set_string_conversion(inner_expr.id, conversion);
                     }
                 }
                 Ok(ArenaTypeId::STRING)

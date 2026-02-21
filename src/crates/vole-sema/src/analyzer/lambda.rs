@@ -153,7 +153,7 @@ impl Analyzer {
         } else {
             Vec::new()
         };
-        self.lambda.analysis.insert(
+        self.results.node_map.set_lambda_analysis(
             node_id,
             crate::expression_data::LambdaAnalysis {
                 captures: capture_list,

@@ -231,7 +231,7 @@ impl Analyzer {
             };
 
             // Store compact codegen-ready info (no synthetic AST or fresh NodeIds)
-            self.results.lowered_optional_chains.insert(
+            self.results.node_map.set_optional_chain(
                 expr_id,
                 crate::expression_data::OptionalChainInfo {
                     object_type: object_type_id,
@@ -314,7 +314,7 @@ impl Analyzer {
         };
 
         // Store compact codegen-ready info (no synthetic AST or fresh NodeIds)
-        self.results.lowered_optional_chains.insert(
+        self.results.node_map.set_optional_chain(
             expr_id,
             crate::expression_data::OptionalChainInfo {
                 object_type: object_type_id,
@@ -374,7 +374,7 @@ impl Analyzer {
                         FunctionType::from_ids(&method.params, method.return_type, false);
                     let return_type_id = func_type.return_type_id;
                     let func_type_id = func_type.intern(&mut self.type_arena_mut());
-                    self.results.method_resolutions.insert(
+                    self.results.node_map.set_method(
                         resolution_id,
                         ResolvedMethod::Implemented {
                             type_def_id: None,
@@ -397,7 +397,7 @@ impl Analyzer {
             self.resolve_method_via_entity_registry_id(inner_type_id, method_call.method, interner)
         {
             if let Some(elem_type) = self.extract_custom_iterator_element_type_id(inner_type_id) {
-                self.results.coercion_kinds.insert(
+                self.results.node_map.set_coercion_kind(
                     resolution_id,
                     crate::expression_data::CoercionKind::IteratorWrap { elem_type },
                 );
@@ -584,7 +584,7 @@ impl Analyzer {
 
                     // Store resolution as a structural method call
                     // Use method.name as method_name_id for structural methods
-                    self.results.method_resolutions.insert(
+                    self.results.node_map.set_method(
                         expr.id,
                         ResolvedMethod::Implemented {
                             type_def_id: None, // Structural methods don't have a TypeDefId
@@ -613,7 +613,7 @@ impl Analyzer {
             // Annotate custom Iterator<T> receivers so codegen can box/wrap them
             // as RuntimeIterator without re-detecting the type.
             if let Some(elem_type) = self.extract_custom_iterator_element_type_id(object_type_id) {
-                self.results.coercion_kinds.insert(
+                self.results.node_map.set_coercion_kind(
                     expr.id,
                     crate::expression_data::CoercionKind::IteratorWrap { elem_type },
                 );
@@ -966,7 +966,7 @@ impl Analyzer {
                 params_id: final_param_ids.into(),
                 return_type_id: final_return_id,
             };
-            self.results.method_resolutions.insert(
+            self.results.node_map.set_method(
                 expr.id,
                 ResolvedMethod::Static {
                     method_name_id,
@@ -980,8 +980,8 @@ impl Analyzer {
             // Record substituted return type if generic substitution occurred
             if maybe_inferred.is_some() && final_return_id != return_type_id {
                 self.results
-                    .substituted_return_types
-                    .insert(expr.id, final_return_id);
+                    .node_map
+                    .set_substituted_return_type(expr.id, final_return_id);
             }
 
             // Record static method monomorphization whenever the call participates
@@ -1192,7 +1192,7 @@ impl Analyzer {
             None
         };
 
-        self.results.method_resolutions.insert(
+        self.results.node_map.set_method(
             expr.id,
             ResolvedMethod::Implemented {
                 type_def_id: None,
@@ -1297,7 +1297,7 @@ impl Analyzer {
             );
         }
 
-        self.results.generic_calls.insert(expr.id, key);
+        self.results.node_map.set_generic(expr.id, key);
 
         // Resolve intrinsic key for constant folding.
         // If this is a generic external with compiler intrinsic mappings
@@ -1313,7 +1313,7 @@ impl Analyzer {
                 if let Some(ikey) =
                     resolve_intrinsic_key_from_mappings(&ext_info.type_mappings, &sub_types)
                 {
-                    self.results.intrinsic_keys.insert(expr.id, ikey);
+                    self.results.node_map.set_intrinsic_key(expr.id, ikey);
                 }
             }
         }

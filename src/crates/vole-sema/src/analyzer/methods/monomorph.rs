@@ -105,7 +105,7 @@ impl Analyzer {
 
         // Record the call site -> key mapping
         tracing::debug!(expr_id = ?expr.id, key = ?key, "recording call site");
-        self.results.class_method_calls.insert(expr.id, key);
+        self.results.node_map.set_class_method_generic(expr.id, key);
     }
 
     /// Create and cache a class method monomorph instance.
@@ -254,7 +254,9 @@ impl Analyzer {
 
         // Record the call site -> key mapping
         tracing::debug!(expr_id = ?expr.id, key = ?key, "recording static method call site");
-        self.results.static_method_calls.insert(expr.id, key);
+        self.results
+            .node_map
+            .set_static_method_generic(expr.id, key);
     }
 
     /// Create and cache a static method monomorph instance.

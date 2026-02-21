@@ -1,6 +1,5 @@
 // Per-analysis mutable state structs for the analyzer.
 
-use crate::expression_data::LambdaDefaults;
 use crate::generic::TypeParamScopeStack;
 use crate::module::ModuleLoader;
 use crate::scope::Scope;
@@ -85,11 +84,6 @@ pub(crate) struct LambdaState {
     /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
     /// Maps Symbol -> (lambda_node_id, required_params, param_names)
     pub variables: FxHashMap<Symbol, (NodeId, usize, Vec<String>)>,
-    /// Lambda defaults for closure calls. Maps call site NodeId to lambda info.
-    pub defaults: FxHashMap<NodeId, LambdaDefaults>,
-    /// Lambda analysis results (captures and side effects).
-    /// Maps lambda expression NodeId -> LambdaAnalysis.
-    pub analysis: FxHashMap<NodeId, crate::expression_data::LambdaAnalysis>,
     /// Depth counter for implicit `it`-lambda contexts.
     /// Incremented when synthesizing an implicit `it => expr` lambda, decremented after.
     /// Used to detect nested `it` usage and emit E2118.

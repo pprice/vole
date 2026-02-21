@@ -230,6 +230,11 @@ impl Analyzer {
         // valid and needed by codegen. Methods that reference unknown types
         // (like Iterator) simply won't be callable, but everything else works.
 
+        // Convert the sub-analyzer's NodeMap to ExpressionData once, then use it
+        // for both caching and merging. (CachedModule still stores individual maps
+        // until codegen reads are migrated.)
+        let prelude_data = sub_analyzer.results.node_map.into_expression_data();
+
         // Cache the analysis results
         if let Some(ref cache) = self.ctx.module_cache {
             cache.borrow_mut().insert(
@@ -237,14 +242,14 @@ impl Analyzer {
                 CachedModule {
                     program: program.clone(),
                     interner: prelude_interner.clone(),
-                    expr_types: sub_analyzer.results.expr_types.clone(),
-                    method_resolutions: sub_analyzer.results.method_resolutions.clone_inner(),
-                    generic_calls: sub_analyzer.results.generic_calls.clone(),
-                    class_method_generics: sub_analyzer.results.class_method_calls.clone(),
-                    static_method_generics: sub_analyzer.results.static_method_calls.clone(),
+                    expr_types: prelude_data.types().clone(),
+                    method_resolutions: prelude_data.methods().clone(),
+                    generic_calls: prelude_data.generics().clone(),
+                    class_method_generics: prelude_data.class_method_generics().clone(),
+                    static_method_generics: prelude_data.static_method_generics().clone(),
                     functions_by_name: sub_analyzer.symbols.functions_by_name.clone(),
-                    is_check_results: sub_analyzer.results.is_check_results.clone(),
-                    declared_var_types: sub_analyzer.results.declared_var_types.clone(),
+                    is_check_results: prelude_data.is_check_results().clone(),
+                    declared_var_types: prelude_data.declared_var_types().clone(),
                     partial_error_count,
                 },
             );
@@ -305,20 +310,7 @@ impl Analyzer {
             .module_programs
             .borrow_mut()
             .insert(import_path.to_string(), (program, prelude_interner));
-        {
-            use crate::expression_data::ExpressionData;
-            let prelude_data = ExpressionData {
-                types: sub_analyzer.results.expr_types,
-                methods: sub_analyzer.results.method_resolutions.into_inner(),
-                generics: sub_analyzer.results.generic_calls,
-                class_method_generics: sub_analyzer.results.class_method_calls,
-                static_method_generics: sub_analyzer.results.static_method_calls,
-                is_check_results: sub_analyzer.results.is_check_results,
-                declared_var_types: sub_analyzer.results.declared_var_types,
-                ..Default::default()
-            };
-            self.ctx.merged_expr_data.borrow_mut().merge(prelude_data);
-        }
+        self.ctx.merged_expr_data.borrow_mut().merge(prelude_data);
     }
 
     /// Check if a function name refers to a generic function in a prelude module.

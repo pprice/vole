@@ -74,7 +74,7 @@ impl Analyzer {
     /// Parameters from `required_params` up to `param_type_ids.len()` have default values.
     ///
     /// When `named_ctx` is Some, validates and resolves named arguments and stores the
-    /// resolved arg-index mapping in `self.results.resolved_call_args` for codegen.
+    /// resolved arg-index mapping in `self.results.node_map (resolved_call_args)` for codegen.
     ///
     /// Uses check_expr_expecting_id for inference (integer literals, union coercion).
     #[allow(clippy::too_many_arguments)]
@@ -179,7 +179,7 @@ impl Analyzer {
     /// After validation, produces a `Vec<Option<usize>>` of length `total_params` where
     /// entry `i` = `Some(j)` means `call.args[j]` fills slot `i`, and `None` means
     /// the slot uses its default value.  The mapping is stored in
-    /// `self.results.resolved_call_args` for codegen to use when emitting the call.
+    /// `self.results.node_map (resolved_call_args)` for codegen to use when emitting the call.
     #[allow(clippy::too_many_arguments)]
     fn check_call_args_with_named(
         &mut self,
@@ -394,8 +394,8 @@ impl Analyzer {
 
             if !is_pure_positional {
                 self.results
-                    .resolved_call_args
-                    .insert(call_node_id, mapping);
+                    .node_map
+                    .set_resolved_call_args(call_node_id, mapping);
             }
         }
 
@@ -496,7 +496,7 @@ impl Analyzer {
         self.lambda.it_lambda_depth -= 1;
 
         // Store compact info so codegen can reconstruct the lambda
-        self.results.synthetic_it_lambdas.insert(
+        self.results.node_map.set_it_lambda_info(
             expr.id,
             ItLambdaInfo {
                 param_type: param_types[0],

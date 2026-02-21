@@ -1,4 +1,5 @@
 use super::*;
+use crate::ExpressionData;
 use vole_frontend::Parser;
 use vole_frontend::ast::LambdaPurity;
 

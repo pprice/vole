@@ -29,7 +29,7 @@ impl Analyzer {
             )
         {
             let updated = self.apply_builtin_override(resolved, &func_type);
-            self.results.method_resolutions.insert(expr.id, updated);
+            self.results.node_map.set_method(expr.id, updated);
             return Ok(func_type.return_type_id);
         }
 
@@ -102,7 +102,7 @@ impl Analyzer {
         );
 
         // Store resolution
-        self.results.method_resolutions.insert(expr.id, resolved);
+        self.results.node_map.set_method(expr.id, resolved);
 
         // Record class method monomorphization for generic classes/records
         self.record_class_method_monomorph(
@@ -355,8 +355,8 @@ impl Analyzer {
                     .type_arena_mut()
                     .substitute(func_type.return_type_id, &subs);
                 self.results
-                    .substituted_return_types
-                    .insert(expr.id, substituted);
+                    .node_map
+                    .set_substituted_return_type(expr.id, substituted);
                 return substituted;
             }
         }
@@ -364,8 +364,8 @@ impl Analyzer {
         // For interface methods, the return type is already substituted in resolved.
         // Store it for codegen to use.
         self.results
-            .substituted_return_types
-            .insert(expr.id, resolved_return_id);
+            .node_map
+            .set_substituted_return_type(expr.id, resolved_return_id);
         resolved_return_id
     }
 }
