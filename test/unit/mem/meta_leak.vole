@@ -1,0 +1,114 @@
+// Memory leak tests for TypeMeta and FieldMeta reflection values.
+//
+// TypeMeta contains: name (string), fields ([FieldMeta]), construct (closure)
+// FieldMeta contains: name (string), type_name (string), annotations ([unknown]),
+//                     get (closure), set (closure)
+// All of these are RC-tracked and must be properly released.
+
+class Widget {
+    label: string,
+    count: i64,
+}
+
+interface Renderable {
+    func render() -> string
+}
+
+class Button implements Renderable {
+    text: string,
+
+    func render() -> string {
+        return self.text
+    }
+}
+
+class Icon implements Renderable {
+    name: string,
+
+    func render() -> string {
+        return self.name
+    }
+}
+
+func get_renderable_meta(r: Renderable) -> TypeMeta {
+    return r.@meta
+}
+
+tests {
+    test "static class meta no leak" {
+        let meta = Widget.@meta
+        assert(meta.name == "Widget")
+    }
+
+    test "static class meta fields no leak" {
+        let meta = Widget.@meta
+        let fields = meta.fields
+        assert(fields.length() == 2)
+    }
+
+    test "static class meta field name no leak" {
+        let meta = Widget.@meta
+        let name = meta.fields[0].name
+        assert(name == "label")
+    }
+
+    test "static class meta field type_name no leak" {
+        let meta = Widget.@meta
+        let tn = meta.fields[0].type_name
+        assert(tn == "string")
+    }
+
+    test "static class meta getter invocation no leak" {
+        let w = Widget { label: "ok", count: 5 }
+        let meta = Widget.@meta
+        let getter = meta.fields[0].get
+        let box: unknown = w
+        let result = getter(box)
+        assert(result is string)
+    }
+
+    test "static class meta setter invocation no leak" {
+        let w = Widget { label: "old", count: 1 }
+        let meta = Widget.@meta
+        let setter = meta.fields[0].set
+        let box: unknown = w
+        let new_val: unknown = "new"
+        setter(box, new_val)
+        assert(w.label == "new")
+    }
+
+    test "dynamic meta via interface no leak" {
+        let r: Renderable = Button { text: "Click" }
+        let meta = r.@meta
+        assert(meta.name == "Button")
+    }
+
+    test "dynamic meta via function param no leak" {
+        let b = Button { text: "Go" }
+        let meta = get_renderable_meta(b)
+        assert(meta.name == "Button")
+    }
+
+    test "multiple dynamic metas no leak" {
+        let b = Button { text: "A" }
+        let i = Icon { name: "star" }
+        let bm = get_renderable_meta(b)
+        let im = get_renderable_meta(i)
+        assert(bm.name == "Button")
+        assert(im.name == "Icon")
+    }
+
+    test "meta reassignment no leak" {
+        var meta = Widget.@meta
+        assert(meta.name == "Widget")
+        meta = Widget.@meta
+        assert(meta.name == "Widget")
+    }
+
+    test "instance meta on concrete class no leak" {
+        let w = Widget { label: "test", count: 0 }
+        let meta = w.@meta
+        assert(meta.name == "Widget")
+    }
+
+}

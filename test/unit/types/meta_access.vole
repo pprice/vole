@@ -35,8 +35,42 @@ class Cat implements Animal {
     }
 }
 
+// --- Types for multi-field and instance @meta tests ---
+class Profile {
+    username: string,
+    score: i64,
+    active: bool,
+}
+
+// --- Second interface for multiple interface tests ---
+interface Describable {
+    func describe() -> string
+}
+
+class Book implements Describable {
+    title: string,
+    pages: i64,
+
+    func describe() -> string {
+        return self.title
+    }
+}
+
+class Movie implements Describable {
+    title: string,
+    duration: i64,
+
+    func describe() -> string {
+        return self.title
+    }
+}
+
 func get_animal_meta(a: Animal) -> TypeMeta {
     return a.@meta
+}
+
+func get_describable_meta(d: Describable) -> TypeMeta {
+    return d.@meta
 }
 
 tests {
@@ -196,6 +230,230 @@ tests {
         assert(result is string)
         if result is string {
             assert(result == "Rex")
+        }
+    }
+
+    // --- Struct meta field type names ---
+
+    test "struct meta field type names" {
+        let meta = Point.@meta
+        assert(meta.fields[0].type_name == "i64")
+        assert(meta.fields[1].type_name == "i64")
+    }
+
+    // --- Instance @meta on concrete types (not via interface) ---
+
+    test "instance meta on concrete class" {
+        let u = User { name: "Alice", age: 30 }
+        let meta = u.@meta
+        assert(meta.name == "User")
+        assert(meta.fields.length() == 2)
+        assert(meta.fields[0].name == "name")
+        assert(meta.fields[1].name == "age")
+    }
+
+    test "instance meta on concrete struct" {
+        let p = Point { x: 10, y: 20 }
+        let meta = p.@meta
+        assert(meta.name == "Point")
+        assert(meta.fields.length() == 2)
+        assert(meta.fields[0].name == "x")
+        assert(meta.fields[1].name == "y")
+    }
+
+    // --- Getter and setter on different field types ---
+
+    test "getter reads i64 class field" {
+        let u = User { name: "Alice", age: 30 }
+        let meta = User.@meta
+        let getter = meta.fields[1].get
+        let box: unknown = u
+        let result = getter(box)
+        assert(result is i64)
+        if result is i64 {
+            assert(result == 30)
+        }
+    }
+
+    test "setter writes i64 class field" {
+        let u = User { name: "Alice", age: 30 }
+        let meta = User.@meta
+        let setter = meta.fields[1].set
+        let instance_box: unknown = u
+        let new_age: unknown = 42
+        setter(instance_box, new_age)
+        assert(u.age == 42)
+    }
+
+    test "setter on string field then verify" {
+        let u = User { name: "Alice", age: 30 }
+        let meta = User.@meta
+        let setter = meta.fields[0].set
+        let instance_box: unknown = u
+        let new_name: unknown = "Zara"
+        setter(instance_box, new_name)
+        assert(u.name == "Zara")
+    }
+
+    test "setter then getter round-trip on same field" {
+        let u = User { name: "Alice", age: 30 }
+        let meta = User.@meta
+        let setter = meta.fields[1].set
+        let getter = meta.fields[1].get
+        let box: unknown = u
+        let new_val: unknown = 99
+        setter(box, new_val)
+        let read_back = getter(box)
+        assert(read_back is i64)
+        if read_back is i64 {
+            assert(read_back == 99)
+        }
+    }
+
+    // --- Constructor round-trip: construct then verify via getter ---
+
+    test "constructor round-trip via getters" {
+        let meta = User.@meta
+        let ctor = meta.construct
+        let args: [unknown] = ["Bob", 25]
+        let result = ctor(args)
+        assert(result is User)
+        if result is User {
+            let box: unknown = result
+            let name_getter = meta.fields[0].get
+            let age_getter = meta.fields[1].get
+            let name_val = name_getter(box)
+            let age_val = age_getter(box)
+            assert(name_val is string)
+            assert(age_val is i64)
+            if name_val is string {
+                assert(name_val == "Bob")
+            }
+            if age_val is i64 {
+                assert(age_val == 25)
+            }
+        }
+    }
+
+    // --- Dynamic dispatch through function params (Cat variant) ---
+
+    test "dynamic meta via function parameter (Cat)" {
+        let c = Cat { name: "Whiskers", indoor: true }
+        let meta = get_animal_meta(c)
+        assert(meta.name == "Cat")
+        assert(meta.fields.length() == 2)
+        assert(meta.fields[0].name == "name")
+        assert(meta.fields[1].name == "indoor")
+    }
+
+    // --- Multiple interface implementations ---
+
+    test "different concrete types through Describable interface" {
+        let b = Book { title: "Dune", pages: 412 }
+        let m = Movie { title: "Alien", duration: 117 }
+        let book_meta = get_describable_meta(b)
+        let movie_meta = get_describable_meta(m)
+        assert(book_meta.name == "Book")
+        assert(movie_meta.name == "Movie")
+    }
+
+    test "Describable meta fields reflect concrete type" {
+        let b: Describable = Book { title: "Dune", pages: 412 }
+        let meta = b.@meta
+        assert(meta.fields.length() == 2)
+        assert(meta.fields[0].name == "title")
+        assert(meta.fields[0].type_name == "string")
+        assert(meta.fields[1].name == "pages")
+        assert(meta.fields[1].type_name == "i64")
+    }
+
+    test "Describable meta constructor builds Book" {
+        let b: Describable = Book { title: "Dune", pages: 412 }
+        let meta = b.@meta
+        let ctor = meta.construct
+        let args: [unknown] = ["Foundation", 255]
+        let result = ctor(args)
+        assert(result is Book)
+        if result is Book {
+            assert(result.title == "Foundation")
+            assert(result.pages == 255)
+        }
+    }
+
+    // --- Multi-field class with bool field ---
+
+    test "Profile class meta has three fields" {
+        let meta = Profile.@meta
+        assert(meta.name == "Profile")
+        assert(meta.fields.length() == 3)
+        assert(meta.fields[0].name == "username")
+        assert(meta.fields[1].name == "score")
+        assert(meta.fields[2].name == "active")
+    }
+
+    test "Profile meta field type names" {
+        let meta = Profile.@meta
+        assert(meta.fields[0].type_name == "string")
+        assert(meta.fields[1].type_name == "i64")
+        assert(meta.fields[2].type_name == "bool")
+    }
+
+    test "Profile constructor round-trip" {
+        let meta = Profile.@meta
+        let ctor = meta.construct
+        let args: [unknown] = ["admin", 100, true]
+        let result = ctor(args)
+        assert(result is Profile)
+        if result is Profile {
+            assert(result.username == "admin")
+            assert(result.score == 100)
+            assert(result.active == true)
+        }
+    }
+
+    test "Profile getter reads bool field" {
+        let p = Profile { username: "user1", score: 50, active: true }
+        let meta = Profile.@meta
+        let getter = meta.fields[2].get
+        let box: unknown = p
+        let result = getter(box)
+        assert(result is bool)
+        if result is bool {
+            assert(result == true)
+        }
+    }
+
+    test "Profile setter writes bool field" {
+        let p = Profile { username: "user1", score: 50, active: true }
+        let meta = Profile.@meta
+        let setter = meta.fields[2].set
+        let box: unknown = p
+        let new_val: unknown = false
+        setter(box, new_val)
+        assert(p.active == false)
+    }
+
+    // --- Dynamic meta field type names for Cat (bool field) ---
+
+    test "dynamic meta field type names for Cat" {
+        let a: Animal = Cat { name: "Whiskers", indoor: true }
+        let meta = a.@meta
+        assert(meta.fields[0].type_name == "string")
+        assert(meta.fields[1].type_name == "bool")
+    }
+
+    // --- Meta from dynamically-constructed instance ---
+
+    test "meta from dynamically-constructed instance" {
+        let meta = User.@meta
+        let ctor = meta.construct
+        let args: [unknown] = ["Dynamic", 99]
+        let result = ctor(args)
+        assert(result is User)
+        if result is User {
+            let constructed_meta = result.@meta
+            assert(constructed_meta.name == "User")
+            assert(constructed_meta.fields.length() == 2)
         }
     }
 }
