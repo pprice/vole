@@ -110,6 +110,33 @@ class JsonObject {
         }
         return result
     }
+
+    // Get a string value, or return the given default if the key is missing or not a string.
+    func get_string(key: string, default_value: string) -> string {
+        let v = self.data.get(key)
+        if v is string {
+            return v
+        }
+        return default_value
+    }
+
+    // Get an f64 value, or return the given default if the key is missing or not an f64.
+    func get_f64(key: string, default_value: f64) -> f64 {
+        let v = self.data.get(key)
+        if v is f64 {
+            return v
+        }
+        return default_value
+    }
+
+    // Get a bool value, or return the given default if the key is missing or not a bool.
+    func get_bool(key: string, default_value: bool) -> bool {
+        let v = self.data.get(key)
+        if v is bool {
+            return v
+        }
+        return default_value
+    }
 }
 
 // JsonError - represents a JSON parse failure.
@@ -293,7 +320,329 @@ class JSON {
         func parse(text: string) -> JsonParseResult {
             return _parse_top(text)
         }
+
+        // Convert a typed struct/class instance to a JsonObject using reflection.
+        //
+        // Usage:
+        //   let obj = JSON.to_object(User.@meta, user)
+        //   let json_str = JSON.stringify(obj)
+        //
+        // Supported field types: string, i64, f64, bool.
+        // Integer fields (i64, i32, etc.) are stored as f64 in JSON.
+        // Unsupported field types are skipped.
+        func to_object(meta: TypeMeta, instance: unknown) -> JsonObject {
+            return _to_json_object(meta, instance)
+        }
+
+        // Construct a typed struct/class instance from a JsonObject using reflection.
+        //
+        // Usage:
+        //   let result = JSON.parse(json_str)
+        //   if result.ok && result.is_object() {
+        //       let user_unknown = JSON.from_object(User.@meta, result.as_object())
+        //       if user_unknown is User { ... }
+        //   }
+        //
+        // For each field in the TypeMeta, reads the matching key from the JsonObject.
+        // Numeric fields (i64, i32, etc.) are converted from JSON's f64.
+        // Returns the constructed instance as unknown — use `is` to narrow.
+        func from_object(meta: TypeMeta, obj: JsonObject) -> unknown {
+            return _from_json_object(meta, obj)
+        }
     }
+}
+
+// =============================================================================
+// Typed serialization — struct/class ↔ JsonObject via TypeMeta reflection
+// =============================================================================
+
+// Convert a struct/class instance to a JsonObject.
+// Iterates meta.fields, reads each value via the getter, and converts to Json.
+func _to_json_object(meta: TypeMeta, instance: unknown) -> JsonObject {
+    let obj = JsonObject.new()
+    var i: i64 = 0
+    while i < meta.fields.length() {
+        let field = meta.fields[i]
+        let getter = field.get
+        let raw = getter(instance)
+        _serde_set_field_value(obj, field.name, field.type_name, raw)
+        i = i + 1
+    }
+    return obj
+}
+
+// Set a single field on a JsonObject, converting from the native type to Json.
+// Handles string, i64, i32, i16, i8, u64, u32, u16, u8, f64, f32, bool.
+func _serde_set_field_value(obj: JsonObject, name: string, type_name: string, raw: unknown) {
+    if type_name == "string" {
+        if raw is string { obj.set(name, raw) }
+    } else if type_name == "f64" {
+        if raw is f64 { obj.set(name, raw) }
+    } else if type_name == "f32" {
+        if raw is f32 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    } else if type_name == "bool" {
+        if raw is bool { obj.set(name, raw) }
+    } else if type_name == "i64" {
+        if raw is i64 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    } else if type_name == "i32" {
+        if raw is i32 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    } else if type_name == "i16" {
+        if raw is i16 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    } else if type_name == "i8" {
+        if raw is i8 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    } else if type_name == "u64" {
+        if raw is u64 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    } else if type_name == "u32" {
+        if raw is u32 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    } else if type_name == "u16" {
+        if raw is u16 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    } else if type_name == "u8" {
+        if raw is u8 {
+            let f: f64 = raw
+            obj.set(name, f)
+        }
+    }
+    // Unsupported types (nested objects, arrays, etc.) are silently skipped.
+}
+
+// Construct a struct/class instance from a JsonObject.
+// Reads each field from the object, converts from Json to the expected type,
+// and calls meta.construct with the argument array.
+//
+// Note: uses explicit type checking on each Json value rather than passing
+// union-typed values to helper functions, to avoid cross-module union issues.
+func _from_json_object(meta: TypeMeta, obj: JsonObject) -> unknown {
+    // Work around [unknown] array push bug: pushing different values in a loop
+    // causes all entries to point to the last value. Instead, we:
+    // 1. Construct an instance with placeholder values
+    // 2. Use field.set to set each field individually
+    //
+    // Strategy: stringify the whole object to JSON text, then for each field
+    // in meta.fields, search the JSON text for "fieldname": and extract
+    // the value text inline, then set the field via field.set.
+    let json_text = _stringify_value(obj)
+    let text_len: i32 = _str_len_i32(json_text)
+    // Build placeholder defaults array (all nil, same value so push works)
+    let placeholder: unknown = nil
+    var defaults: [unknown] = []
+    var k: i64 = 0
+    while k < meta.fields.length() {
+        defaults.push(placeholder)
+        k = k + 1
+    }
+    let ctor = meta.construct
+    let instance = ctor(defaults)
+    // Now set each field by extracting from JSON text
+    var i: i64 = 0
+    while i < meta.fields.length() {
+        let field = meta.fields[i]
+        let fname = field.name
+        let tname = field.type_name
+        let setter = field.set
+        // --- Inline extraction of field text from json_text ---
+        let pattern = "\"" + fname + "\":"
+        let pattern_len: i32 = _str_len_i32(pattern)
+        var field_text = ""
+        var search_pos: i32 = 0
+        while search_pos + pattern_len <= text_len {
+            let candidate = json_text.substring(search_pos, search_pos + pattern_len)
+            if candidate == pattern {
+                let vs: i32 = search_pos + pattern_len
+                var vi: i32 = vs
+                while vi < text_len {
+                    let wc = json_text.char_at_raw(vi)
+                    if wc != 32 && wc != 9 && wc != 10 && wc != 13 {
+                        search_pos = text_len
+                        let vch = json_text.char_at_raw(vi)
+                        if vch == 34 {
+                            let one32: i32 = 1
+                            let two32: i32 = 2
+                            var sj: i32 = vi + one32
+                            var found_end = false
+                            while sj < text_len && !found_end {
+                                let sc = json_text.char_at_raw(sj)
+                                if sc == 92 {
+                                    sj = sj + two32
+                                } else if sc == 34 {
+                                    field_text = json_text.substring(vi, sj + one32)
+                                    found_end = true
+                                } else {
+                                    sj = sj + one32
+                                }
+                            }
+                            if !found_end {
+                                field_text = json_text.substring(vi, text_len)
+                            }
+                        } else {
+                            let one32: i32 = 1
+                            var nj: i32 = vi
+                            var found_delim = false
+                            while nj < text_len && !found_delim {
+                                let nc = json_text.char_at_raw(nj)
+                                if nc == 44 || nc == 125 || nc == 93 || nc == 32 || nc == 10 {
+                                    field_text = json_text.substring(vi, nj)
+                                    found_delim = true
+                                } else {
+                                    nj = nj + one32
+                                }
+                            }
+                            if !found_delim {
+                                field_text = json_text.substring(vi, text_len)
+                            }
+                        }
+                        vi = text_len
+                    } else {
+                        let one32: i32 = 1
+                        vi = vi + one32
+                    }
+                }
+            }
+            let one32: i32 = 1
+            search_pos = search_pos + one32
+        }
+        // --- Set the field value based on type ---
+        if tname == "string" {
+            let sv = _serde_unquote(field_text)
+            let boxed: unknown = sv
+            setter(instance, boxed)
+        } else if tname == "i64" {
+            let fv = _serde_parse_f64(field_text)
+            let nv: i64 = _serde_f64_to_i64(fv)
+            let boxed: unknown = nv
+            setter(instance, boxed)
+        } else if tname == "f64" {
+            let fv = _serde_parse_f64(field_text)
+            let boxed: unknown = fv
+            setter(instance, boxed)
+        } else if tname == "bool" {
+            if field_text == "true" {
+                let boxed: unknown = true
+                setter(instance, boxed)
+            } else {
+                let boxed: unknown = false
+                setter(instance, boxed)
+            }
+        } else if tname == "i32" {
+            let fv = _serde_parse_f64(field_text)
+            let n64: i64 = _serde_f64_to_i64(fv)
+            let nv: i32 = _serde_i64_to_i32(n64)
+            let boxed: unknown = nv
+            setter(instance, boxed)
+        }
+        i = i + 1
+    }
+    return instance
+}
+
+
+// Parse a JSON number string into f64.
+func _serde_parse_f64(json_str: string) -> f64 {
+    let result = _parse_json_number(json_str, 0)
+    if result.has_error {
+        return 0.0
+    }
+    return result.f64_val
+}
+
+// Strip outer quotes from a JSON-stringified string value.
+// Input: "\"hello\"" (JSON representation with quotes)
+// Output: "hello" (raw string)
+// Falls back to returning "" for non-string JSON values (like "null").
+func _serde_unquote(json_str: string) -> string {
+    let len: i32 = _str_len_i32(json_str)
+    if len < 2 { return "" }
+    // Check first and last chars are quotes (char code 34 = ")
+    if json_str.char_at_raw(0) != 34 { return "" }
+    let last_pos: i32 = len - 1
+    if json_str.char_at_raw(last_pos) != 34 { return "" }
+    // Use the parser to properly unescape the string
+    let result = _parse_json_string(json_str, 0)
+    if result.has_error { return "" }
+    return result.str_val
+}
+
+// Convert f64 to i64 using digit-by-digit extraction.
+// Handles positive, negative, and fractional values (truncates toward zero).
+func _serde_f64_to_i64(x: f64) -> i64 {
+    var negative = false
+    var remaining = x
+    if remaining < 0.0 {
+        negative = true
+        remaining = 0.0 - remaining
+    }
+    var result: i64 = 0
+    // Find the highest power of 10 <= remaining
+    var power: f64 = 1.0
+    while power * 10.0 <= remaining {
+        power = power * 10.0
+    }
+    // Extract digits from most significant to least
+    while power >= 1.0 {
+        var digit: i64 = 0
+        while remaining >= power {
+            remaining = remaining - power
+            digit = digit + 1
+        }
+        result = result * 10 + digit
+        power = power * 0.1
+    }
+    if negative {
+        return 0 - result
+    }
+    return result
+}
+
+// Narrow i64 to i32 via arithmetic (keeps only lower 32 bits in range).
+func _serde_i64_to_i32(n: i64) -> i32 {
+    var result: i32 = 0
+    var remaining = n
+    var negative = false
+    if remaining < 0 {
+        negative = true
+        remaining = 0 - remaining
+    }
+    var power: i64 = 1
+    while power * 10 <= remaining {
+        power = power * 10
+    }
+    while power >= 1 {
+        var digit: i32 = 0
+        while remaining >= power {
+            remaining = remaining - power
+            digit = digit + 1
+        }
+        result = result * 10 + digit
+        power = power / 10
+    }
+    if negative {
+        let zero: i32 = 0
+        return zero - result
+    }
+    return result
 }
 
 // =============================================================================

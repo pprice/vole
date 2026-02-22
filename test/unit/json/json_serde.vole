@@ -1,0 +1,430 @@
+// Tests for JSON typed serialization/deserialization via TypeMeta reflection
+//
+// JSON.to_object(meta, instance) -> JsonObject
+// JSON.from_object(meta, obj) -> unknown
+
+let { JSON, JsonObject } = import "std:json"
+
+class Person {
+    name: string,
+    age: i64,
+}
+
+class Config {
+    host: string,
+    port: i64,
+    debug: bool,
+}
+
+class FloatData {
+    label: string,
+    value: f64,
+}
+
+class BoolOnly {
+    active: bool,
+    visible: bool,
+}
+
+class SingleField {
+    title: string,
+}
+
+class ManyFields {
+    a: string,
+    b: i64,
+    c: f64,
+    d: bool,
+    e: string,
+}
+
+// --- to_object tests ---
+
+tests "JSON.to_object basic" {
+    test "to_object with string and i64 fields" {
+        let p = Person { name: "Alice", age: 30 }
+        let box: unknown = p
+        let obj = JSON.to_object(Person.@meta, box)
+        let name_val = obj.get("name")
+        assert(name_val is string)
+        if name_val is string {
+            assert(name_val == "Alice")
+        }
+        let age_val = obj.get("age")
+        assert(age_val is f64)
+        if age_val is f64 {
+            assert(age_val == 30.0)
+        }
+    }
+
+    test "to_object with bool field" {
+        let c = Config { host: "localhost", port: 8080, debug: true }
+        let box: unknown = c
+        let obj = JSON.to_object(Config.@meta, box)
+        let debug_val = obj.get("debug")
+        assert(debug_val is bool)
+        if debug_val is bool {
+            assert(debug_val == true)
+        }
+    }
+
+    test "to_object produces correct field count" {
+        let p = Person { name: "Bob", age: 25 }
+        let box: unknown = p
+        let obj = JSON.to_object(Person.@meta, box)
+        assert(obj.len() == 2)
+    }
+
+    test "to_object with f64 field" {
+        let d = FloatData { label: "pi", value: 3.14 }
+        let box: unknown = d
+        let obj = JSON.to_object(FloatData.@meta, box)
+        let label_val = obj.get("label")
+        if label_val is string {
+            assert(label_val == "pi")
+        }
+        let value_val = obj.get("value")
+        if value_val is f64 {
+            assert(value_val == 3.14)
+        }
+    }
+
+    test "to_object with bool-only class" {
+        let b = BoolOnly { active: true, visible: false }
+        let box: unknown = b
+        let obj = JSON.to_object(BoolOnly.@meta, box)
+        assert(obj.len() == 2)
+        let active_val = obj.get("active")
+        if active_val is bool {
+            assert(active_val == true)
+        }
+        let visible_val = obj.get("visible")
+        if visible_val is bool {
+            assert(visible_val == false)
+        }
+    }
+
+    test "to_object with single field" {
+        let s = SingleField { title: "Hello" }
+        let box: unknown = s
+        let obj = JSON.to_object(SingleField.@meta, box)
+        assert(obj.len() == 1)
+        let title_val = obj.get("title")
+        if title_val is string {
+            assert(title_val == "Hello")
+        }
+    }
+
+    test "to_object with many fields" {
+        let m = ManyFields { a: "x", b: 42, c: 1.5, d: true, e: "y" }
+        let box: unknown = m
+        let obj = JSON.to_object(ManyFields.@meta, box)
+        assert(obj.len() == 5)
+    }
+}
+
+tests "JSON.to_object stringify integration" {
+    test "to_object result can be stringified and parsed back" {
+        let p = Person { name: "Carol", age: 42 }
+        let box: unknown = p
+        let obj = JSON.to_object(Person.@meta, box)
+        let json_str = JSON.stringify(obj)
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        assert(parsed.is_object())
+        let parsed_obj = parsed.as_object()
+        let name_val = parsed_obj.get("name")
+        if name_val is string {
+            assert(name_val == "Carol")
+        }
+        let age_val = parsed_obj.get("age")
+        if age_val is f64 {
+            assert(age_val == 42.0)
+        }
+    }
+
+    test "to_object with empty string field" {
+        let p = Person { name: "", age: 0 }
+        let box: unknown = p
+        let obj = JSON.to_object(Person.@meta, box)
+        let name_val = obj.get("name")
+        if name_val is string {
+            assert(name_val == "")
+        }
+        let age_val = obj.get("age")
+        if age_val is f64 {
+            assert(age_val == 0.0)
+        }
+    }
+
+    test "to_object with negative number" {
+        let p = Person { name: "Negative", age: -5 }
+        let box: unknown = p
+        let obj = JSON.to_object(Person.@meta, box)
+        let age_val = obj.get("age")
+        if age_val is f64 {
+            assert(age_val == -5.0)
+        }
+    }
+}
+
+// --- from_object tests ---
+
+tests "JSON.from_object basic" {
+    test "from_object reconstructs Person" {
+        let obj = JsonObject.new()
+        obj.set("name", "Dave")
+        obj.set("age", 35.0)
+        let result = JSON.from_object(Person.@meta, obj)
+        assert(result is Person)
+        if result is Person {
+            assert(result.name == "Dave")
+            assert(result.age == 35)
+        }
+    }
+
+    test "from_object reconstructs Config" {
+        let obj = JsonObject.new()
+        obj.set("host", "example.com")
+        obj.set("port", 443.0)
+        obj.set("debug", false)
+        let result = JSON.from_object(Config.@meta, obj)
+        assert(result is Config)
+        if result is Config {
+            assert(result.host == "example.com")
+            assert(result.port == 443)
+            assert(result.debug == false)
+        }
+    }
+
+    test "from_object with missing fields uses defaults" {
+        let obj = JsonObject.new()
+        obj.set("name", "Eve")
+        // age is missing - should default to 0
+        let result = JSON.from_object(Person.@meta, obj)
+        assert(result is Person)
+        if result is Person {
+            assert(result.name == "Eve")
+            assert(result.age == 0)
+        }
+    }
+
+    test "from_object with f64 field" {
+        let obj = JsonObject.new()
+        obj.set("label", "pi")
+        obj.set("value", 3.14)
+        let result = JSON.from_object(FloatData.@meta, obj)
+        assert(result is FloatData)
+        if result is FloatData {
+            assert(result.label == "pi")
+            assert(result.value == 3.14)
+        }
+    }
+
+    test "from_object with bool-only class" {
+        let obj = JsonObject.new()
+        obj.set("active", true)
+        obj.set("visible", false)
+        let result = JSON.from_object(BoolOnly.@meta, obj)
+        assert(result is BoolOnly)
+        if result is BoolOnly {
+            assert(result.active == true)
+            assert(result.visible == false)
+        }
+    }
+
+    test "from_object with single field" {
+        let obj = JsonObject.new()
+        obj.set("title", "World")
+        let result = JSON.from_object(SingleField.@meta, obj)
+        assert(result is SingleField)
+        if result is SingleField {
+            assert(result.title == "World")
+        }
+    }
+
+    test "from_object with zero and empty defaults" {
+        let obj = JsonObject.new()
+        // All fields missing
+        let result = JSON.from_object(Person.@meta, obj)
+        assert(result is Person)
+        if result is Person {
+            assert(result.name == "")
+            assert(result.age == 0)
+        }
+    }
+
+    test "from_object with negative number" {
+        let obj = JsonObject.new()
+        obj.set("name", "Neg")
+        obj.set("age", -10.0)
+        let result = JSON.from_object(Person.@meta, obj)
+        assert(result is Person)
+        if result is Person {
+            assert(result.name == "Neg")
+            assert(result.age == -10)
+        }
+    }
+
+    test "from_object with many fields" {
+        let obj = JsonObject.new()
+        obj.set("a", "alpha")
+        obj.set("b", 99.0)
+        obj.set("c", 2.718)
+        obj.set("d", true)
+        obj.set("e", "epsilon")
+        let result = JSON.from_object(ManyFields.@meta, obj)
+        assert(result is ManyFields)
+        if result is ManyFields {
+            assert(result.a == "alpha")
+            assert(result.b == 99)
+            assert(result.c == 2.718)
+            assert(result.d == true)
+            assert(result.e == "epsilon")
+        }
+    }
+}
+
+// --- Round-trip tests ---
+
+tests "JSON round-trip serialization" {
+    test "Person round-trip via JSON string" {
+        let original = Person { name: "Frank", age: 50 }
+        let box: unknown = original
+        let obj = JSON.to_object(Person.@meta, box)
+        let json_str = JSON.stringify(obj)
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        assert(parsed.is_object())
+        let parsed_obj = parsed.as_object()
+        let reconstructed = JSON.from_object(Person.@meta, parsed_obj)
+        assert(reconstructed is Person)
+        if reconstructed is Person {
+            assert(reconstructed.name == "Frank")
+            assert(reconstructed.age == 50)
+        }
+    }
+
+    test "Config round-trip via JSON string" {
+        let original = Config { host: "api.test.io", port: 9090, debug: true }
+        let box: unknown = original
+        let obj = JSON.to_object(Config.@meta, box)
+        let json_str = JSON.stringify(obj)
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let reconstructed = JSON.from_object(Config.@meta, parsed_obj)
+        assert(reconstructed is Config)
+        if reconstructed is Config {
+            assert(reconstructed.host == "api.test.io")
+            assert(reconstructed.port == 9090)
+            assert(reconstructed.debug == true)
+        }
+    }
+
+    test "FloatData round-trip via JSON string" {
+        let original = FloatData { label: "gravity", value: 9.81 }
+        let box: unknown = original
+        let obj = JSON.to_object(FloatData.@meta, box)
+        let json_str = JSON.stringify(obj)
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let reconstructed = JSON.from_object(FloatData.@meta, parsed_obj)
+        assert(reconstructed is FloatData)
+        if reconstructed is FloatData {
+            assert(reconstructed.label == "gravity")
+            assert(reconstructed.value == 9.81)
+        }
+    }
+
+    test "BoolOnly round-trip" {
+        let original = BoolOnly { active: false, visible: true }
+        let box: unknown = original
+        let obj = JSON.to_object(BoolOnly.@meta, box)
+        let json_str = JSON.stringify(obj)
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let reconstructed = JSON.from_object(BoolOnly.@meta, parsed_obj)
+        assert(reconstructed is BoolOnly)
+        if reconstructed is BoolOnly {
+            assert(reconstructed.active == false)
+            assert(reconstructed.visible == true)
+        }
+    }
+
+    test "ManyFields round-trip" {
+        let original = ManyFields { a: "hello", b: 100, c: 0.5, d: false, e: "world" }
+        let box: unknown = original
+        let obj = JSON.to_object(ManyFields.@meta, box)
+        let json_str = JSON.stringify(obj)
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let reconstructed = JSON.from_object(ManyFields.@meta, parsed_obj)
+        assert(reconstructed is ManyFields)
+        if reconstructed is ManyFields {
+            assert(reconstructed.a == "hello")
+            assert(reconstructed.b == 100)
+            assert(reconstructed.c == 0.5)
+            assert(reconstructed.d == false)
+            assert(reconstructed.e == "world")
+        }
+    }
+}
+
+// --- Typed accessor tests ---
+
+tests "JsonObject typed accessors" {
+    test "get_string returns value for string key" {
+        let obj = JsonObject.new()
+        obj.set("name", "Alice")
+        assert(obj.get_string("name", "default") == "Alice")
+    }
+
+    test "get_string returns default for missing key" {
+        let obj = JsonObject.new()
+        assert(obj.get_string("missing", "fallback") == "fallback")
+    }
+
+    test "get_string returns default for non-string key" {
+        let obj = JsonObject.new()
+        obj.set("count", 42.0)
+        assert(obj.get_string("count", "default") == "default")
+    }
+
+    test "get_f64 returns value for f64 key" {
+        let obj = JsonObject.new()
+        obj.set("pi", 3.14)
+        assert(obj.get_f64("pi", 0.0) == 3.14)
+    }
+
+    test "get_f64 returns default for missing key" {
+        let obj = JsonObject.new()
+        assert(obj.get_f64("missing", -1.0) == -1.0)
+    }
+
+    test "get_f64 returns default for non-f64 key" {
+        let obj = JsonObject.new()
+        obj.set("name", "Alice")
+        assert(obj.get_f64("name", -1.0) == -1.0)
+    }
+
+    test "get_bool returns value for bool key" {
+        let obj = JsonObject.new()
+        obj.set("active", true)
+        assert(obj.get_bool("active", false) == true)
+    }
+
+    test "get_bool returns default for missing key" {
+        let obj = JsonObject.new()
+        assert(obj.get_bool("missing", true) == true)
+    }
+
+    test "get_bool returns default for non-bool key" {
+        let obj = JsonObject.new()
+        obj.set("name", "Alice")
+        assert(obj.get_bool("name", true) == true)
+    }
+}
