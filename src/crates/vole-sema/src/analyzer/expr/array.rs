@@ -6,6 +6,7 @@ impl Analyzer {
     /// Check array literal expression.
     pub(super) fn check_array_literal_expr(
         &mut self,
+        expr_id: NodeId,
         elements: &[Expr],
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
@@ -31,6 +32,8 @@ impl Analyzer {
                 .all(|&ty_id| self.types_compatible_id(ty_id, first_ty_id, interner));
 
             if is_homogeneous {
+                // Annotate union storage kind for union element arrays.
+                self.annotate_union_storage_for_array_elem(expr_id, first_ty_id);
                 // All same type -> dynamic array
                 Ok(self.ty_array_id(first_ty_id))
             } else {

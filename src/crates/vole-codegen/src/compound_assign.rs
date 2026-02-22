@@ -15,6 +15,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         compound: &CompoundAssignExpr,
         line: u32,
+        expr_id: vole_frontend::NodeId,
     ) -> CodegenResult<CompiledValue> {
         match &compound.target {
             AssignTarget::Discard => {
@@ -26,7 +27,7 @@ impl Cg<'_, '_, '_> {
             }
             AssignTarget::Variable(sym) => self.compound_assign_var(*sym, compound, line),
             AssignTarget::Index { object, index } => {
-                self.compound_assign_index(object, index, compound, line)
+                self.compound_assign_index(object, index, compound, line, expr_id)
             }
             AssignTarget::Field { object, field, .. } => {
                 self.compound_assign_field(object, *field, compound, line)
@@ -71,6 +72,7 @@ impl Cg<'_, '_, '_> {
         index: &vole_frontend::Expr,
         compound: &CompoundAssignExpr,
         line: u32,
+        expr_id: vole_frontend::NodeId,
     ) -> CodegenResult<CompiledValue> {
         let arr = self.expr(object)?;
         let idx = self.expr(index)?;
@@ -83,15 +85,24 @@ impl Cg<'_, '_, '_> {
         };
         let resolved_elem_type_id = self.try_substitute_type(elem_type_id);
 
-        // Load current element
+        // Load current element — use sema's union storage annotation when available.
+        let union_storage = self.get_union_storage_kind(expr_id);
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[arr.value, idx.value])?;
-        let current = if self.arena().is_union(resolved_elem_type_id) {
-            if self.union_array_prefers_inline_storage(resolved_elem_type_id) {
-                let raw_tag =
-                    self.call_runtime(RuntimeKey::ArrayGetTag, &[arr.value, idx.value])?;
-                self.decode_dynamic_array_union_element(raw_tag, raw_value, resolved_elem_type_id)
-            } else {
-                self.copy_union_heap_to_stack(raw_value, resolved_elem_type_id)
+        let current = if let Some(storage) = union_storage {
+            use vole_sema::UnionStorageKind;
+            match storage {
+                UnionStorageKind::Inline => {
+                    let raw_tag =
+                        self.call_runtime(RuntimeKey::ArrayGetTag, &[arr.value, idx.value])?;
+                    self.decode_dynamic_array_union_element(
+                        raw_tag,
+                        raw_value,
+                        resolved_elem_type_id,
+                    )
+                }
+                UnionStorageKind::Heap => {
+                    self.copy_union_heap_to_stack(raw_value, resolved_elem_type_id)
+                }
             }
         } else if let Some(wide) =
             crate::types::wide_ops::WideType::from_type_id(resolved_elem_type_id, self.arena())
@@ -106,9 +117,12 @@ impl Cg<'_, '_, '_> {
         let binary_op = compound.op.to_binary_op();
         let result = self.binary_op(current, rhs, binary_op, line)?;
 
-        // Store back
-        let (tag_val, store_value, _stored) =
-            self.prepare_dynamic_array_store(result, resolved_elem_type_id)?;
+        // Store back — pass union storage hint from sema annotation.
+        let (tag_val, store_value, _stored) = self.prepare_dynamic_array_store_with_hint(
+            result,
+            resolved_elem_type_id,
+            union_storage,
+        )?;
         let array_set_ref = self.runtime_func_ref(RuntimeKey::ArraySet)?;
         self.emit_call(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
 

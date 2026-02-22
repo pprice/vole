@@ -71,7 +71,9 @@ impl Cg<'_, '_, '_> {
             ExprKind::Binary(bin) => self.binary(bin, expr.span.line),
             ExprKind::Unary(un) => self.unary(un),
             ExprKind::Assign(assign) => self.assign(assign),
-            ExprKind::CompoundAssign(compound) => self.compound_assign(compound, expr.span.line),
+            ExprKind::CompoundAssign(compound) => {
+                self.compound_assign(compound, expr.span.line, expr.id)
+            }
             ExprKind::Grouping(inner) => self.expr(inner),
             ExprKind::StringLiteral(s) => self.string_literal(s),
             ExprKind::Call(call) => {
@@ -88,7 +90,7 @@ impl Cg<'_, '_, '_> {
                 let result = self.repeat_literal(element, *count, expr)?;
                 Ok(self.mark_rc_owned(result))
             }
-            ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
+            ExprKind::Index(idx) => self.index(&idx.object, &idx.index, expr.id),
             ExprKind::Match(match_expr) => self.match_expr(match_expr, expr.id),
             ExprKind::Is(is_expr) => self.is_expr(is_expr, expr.id),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc, expr.id),

@@ -497,6 +497,10 @@ impl Analyzer {
                 .set_iterable_kind(for_stmt.iterable.id, kind);
         }
 
+        // Annotate union storage kind for array element unions.
+        // Codegen needs to know whether inline or heap storage is used.
+        self.annotate_union_storage_for_array_elem(for_stmt.iterable.id, elem_ty_id);
+
         self.push_scope();
         self.env.scope.define(
             for_stmt.var_name,

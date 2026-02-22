@@ -83,11 +83,13 @@ impl Analyzer {
             ExprKind::Grouping(inner) => self.check_expr_with_ctx(inner, interner, ctx),
 
             // Array and range expressions
-            ExprKind::ArrayLiteral(elements) => self.check_array_literal_expr(elements, interner),
+            ExprKind::ArrayLiteral(elements) => {
+                self.check_array_literal_expr(expr.id, elements, interner)
+            }
             ExprKind::RepeatLiteral { element, count } => {
                 self.check_repeat_literal_expr(element, *count, interner)
             }
-            ExprKind::Index(idx) => self.check_index_expr(idx, interner),
+            ExprKind::Index(idx) => self.check_index_expr(expr.id, idx, interner),
             ExprKind::Range(range) => self.check_range_expr(range, expr.span, interner),
 
             // Pattern matching (existing helper)

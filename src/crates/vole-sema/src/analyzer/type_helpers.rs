@@ -5,7 +5,7 @@
 #![allow(unused)] // Some methods used conditionally
 
 use super::*;
-use crate::node_map::StringConversion;
+use crate::node_map::{StringConversion, UnionStorageKind};
 use crate::type_arena::TypeId as ArenaTypeId;
 
 // ========== Sequence type info ==========
@@ -577,5 +577,25 @@ impl Analyzer {
             transferable: resolve("Transferable"),
         };
         *self.ctx.well_known_cache.borrow_mut() = cache;
+    }
+
+    /// If `elem_type_id` is a union, annotate `node_id` with the union's
+    /// array storage kind (Inline or Heap). No-op for non-union types.
+    pub(crate) fn annotate_union_storage_for_array_elem(
+        &mut self,
+        node_id: NodeId,
+        elem_type_id: ArenaTypeId,
+    ) {
+        let arena = self.type_arena();
+        if !arena.is_union(elem_type_id) {
+            return;
+        }
+        let kind = if arena.union_array_prefers_inline_storage(elem_type_id) {
+            UnionStorageKind::Inline
+        } else {
+            UnionStorageKind::Heap
+        };
+        drop(arena);
+        self.results.node_map.set_union_storage_kind(node_id, kind);
     }
 }

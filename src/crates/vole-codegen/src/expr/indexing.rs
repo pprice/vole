@@ -16,7 +16,12 @@ use super::super::structs::{convert_to_i64_for_storage, reconstruct_i128, split_
 
 impl Cg<'_, '_, '_> {
     /// Compile an index expression
-    pub(super) fn index(&mut self, object: &Expr, index: &Expr) -> CodegenResult<CompiledValue> {
+    pub(super) fn index(
+        &mut self,
+        object: &Expr,
+        index: &Expr,
+        expr_id: vole_frontend::NodeId,
+    ) -> CodegenResult<CompiledValue> {
         let obj = self.expr(object)?;
 
         let arena = self.arena();
@@ -33,7 +38,7 @@ impl Cg<'_, '_, '_> {
 
         // Try dynamic array
         if let Some(element_id) = arena.unwrap_array(obj.type_id) {
-            return self.index_dynamic_array(obj, index, element_id);
+            return self.index_dynamic_array(obj, index, element_id, expr_id);
         }
 
         let type_name = self.arena().display_basic(obj.type_id);
@@ -146,17 +151,23 @@ impl Cg<'_, '_, '_> {
         obj: CompiledValue,
         index: &Expr,
         element_id: TypeId,
+        expr_id: vole_frontend::NodeId,
     ) -> CodegenResult<CompiledValue> {
         let idx = self.expr(index)?;
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[obj.value, idx.value])?;
         let resolved_element_id = self.try_substitute_type(element_id);
-        if self.arena().is_union(resolved_element_id) {
-            let cv = if self.union_array_prefers_inline_storage(resolved_element_id) {
-                let raw_tag =
-                    self.call_runtime(RuntimeKey::ArrayGetTag, &[obj.value, idx.value])?;
-                self.decode_dynamic_array_union_element(raw_tag, raw_value, resolved_element_id)
-            } else {
-                self.copy_union_heap_to_stack(raw_value, resolved_element_id)
+        // Use sema's union storage annotation when available.
+        if let Some(storage) = self.get_union_storage_kind(expr_id) {
+            use vole_sema::UnionStorageKind;
+            let cv = match storage {
+                UnionStorageKind::Inline => {
+                    let raw_tag =
+                        self.call_runtime(RuntimeKey::ArrayGetTag, &[obj.value, idx.value])?;
+                    self.decode_dynamic_array_union_element(raw_tag, raw_value, resolved_element_id)
+                }
+                UnionStorageKind::Heap => {
+                    self.copy_union_heap_to_stack(raw_value, resolved_element_id)
+                }
             };
             return Ok(cv);
         }

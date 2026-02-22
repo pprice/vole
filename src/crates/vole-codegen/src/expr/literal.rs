@@ -80,6 +80,8 @@ impl Cg<'_, '_, '_> {
             .or(inferred_elem_type)
             .or(expected_elem_type_from_array);
 
+        // Use sema's union storage annotation for array literal elements.
+        let union_storage_hint = self.get_union_storage_kind(expr.id);
         for elem in elements {
             let compiled = if let Some(elem_type_id) = expected_elem_type {
                 self.expr_with_expected_type(elem, elem_type_id)?
@@ -88,7 +90,11 @@ impl Cg<'_, '_, '_> {
             };
             let (tag_val, value_bits, mut compiled) = if let Some(elem_type_id) = expected_elem_type
             {
-                self.prepare_dynamic_array_store(compiled, elem_type_id)?
+                self.prepare_dynamic_array_store_with_hint(
+                    compiled,
+                    elem_type_id,
+                    union_storage_hint,
+                )?
             } else {
                 let compiled = if self.arena().is_struct(compiled.type_id) {
                     self.copy_struct_to_heap(compiled)?

@@ -42,7 +42,7 @@ pub use module::{LoadError, ModuleInfo, ModuleLoader};
 pub use node_map::NodeMap;
 pub use node_map::{
     CoercionKind, ItLambdaInfo, IterableKind, LambdaAnalysis, LambdaDefaults, NodeData,
-    OptionalChainInfo, OptionalChainKind, StringConversion,
+    OptionalChainInfo, OptionalChainKind, StringConversion, UnionStorageKind,
 };
 pub use numeric_model::{
     NumericCoercion, integer_result_type, numeric_coercion, numeric_result_type,

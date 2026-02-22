@@ -27,6 +27,26 @@ use vole_identity::ModuleId;
 // Supporting types (previously in expression_data.rs)
 // ---------------------------------------------------------------------------
 
+/// Union storage strategy for array elements, annotated by sema.
+///
+/// When an array's element type is a union, codegen must choose between
+/// inline storage (tag + payload in each TaggedValue slot) and heap-boxed
+/// storage (pointer to a heap-allocated union buffer).
+///
+/// Inline is preferred when each variant maps to a unique runtime tag.
+/// Heap is required when two variants would collide (e.g. `nil | i64`
+/// both map to RuntimeTypeId::I64, making round-trip decode ambiguous).
+///
+/// Sema computes this once during type resolution; codegen reads it
+/// to avoid re-detecting union storage decisions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnionStorageKind {
+    /// Each variant has a unique runtime tag — store inline as (tag, payload).
+    Inline,
+    /// Tag collision — store as a heap-boxed union buffer pointer.
+    Heap,
+}
+
 /// Classification of a for-loop's iterable, annotated by sema.
 ///
 /// Codegen uses this to dispatch to the correct loop compilation strategy
@@ -253,6 +273,9 @@ pub struct NodeData {
 
     /// Codegen-ready info for implicit `it` lambdas.
     pub it_lambda: Option<ItLambdaInfo>,
+
+    /// Union storage kind for array elements (inline vs heap-boxed).
+    pub union_storage_kind: Option<UnionStorageKind>,
 }
 
 // ---------------------------------------------------------------------------
@@ -551,6 +574,18 @@ impl NodeMap {
         self.get_mut_or_insert(node).it_lambda = Some(info);
     }
 
+    // -- union_storage_kind ------------------------------------------------
+
+    /// Get the union storage kind for an expression involving union array elements.
+    pub fn get_union_storage_kind(&self, node: NodeId) -> Option<UnionStorageKind> {
+        self.get(node).and_then(|d| d.union_storage_kind)
+    }
+
+    /// Set the union storage kind for an expression involving union array elements.
+    pub fn set_union_storage_kind(&mut self, node: NodeId, kind: UnionStorageKind) {
+        self.get_mut_or_insert(node).union_storage_kind = Some(kind);
+    }
+
     // ======================================================================
     // Bulk operations
     // ======================================================================
@@ -726,6 +761,9 @@ fn merge_node_data(dst: &mut NodeData, src: NodeData) {
     }
     if src.it_lambda.is_some() {
         dst.it_lambda = src.it_lambda;
+    }
+    if src.union_storage_kind.is_some() {
+        dst.union_storage_kind = src.union_storage_kind;
     }
 }
 

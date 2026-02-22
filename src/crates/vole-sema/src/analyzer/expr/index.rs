@@ -6,6 +6,7 @@ impl Analyzer {
     /// Check index expression (array[index], tuple[index]).
     pub(super) fn check_index_expr(
         &mut self,
+        expr_id: NodeId,
         idx: &IndexExpr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
@@ -21,7 +22,11 @@ impl Analyzer {
         // Use unified sequence unwrapping helper
         if let Some(seq_info) = self.unwrap_sequence_id(obj_ty_id) {
             match seq_info {
-                SequenceInfo::Array(elem_id) | SequenceInfo::FixedArray(elem_id, _) => Ok(elem_id),
+                SequenceInfo::Array(elem_id) | SequenceInfo::FixedArray(elem_id, _) => {
+                    // Annotate union storage kind for array element unions.
+                    self.annotate_union_storage_for_array_elem(expr_id, elem_id);
+                    Ok(elem_id)
+                }
                 SequenceInfo::Tuple(elem_ids) => {
                     // For tuples, try to get element type from constant index
                     if let ExprKind::IntLiteral(i, _) = &idx.index.kind {

@@ -449,6 +449,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.node_map.get_coercion_kind(expr_node_id)
     }
 
+    /// Get the union storage kind annotation for an expression involving
+    /// union array elements (for-loops, indexing, compound assignments).
+    #[inline]
+    pub fn get_union_storage_kind(
+        &self,
+        node_id: vole_frontend::NodeId,
+    ) -> Option<vole_sema::UnionStorageKind> {
+        self.env.analyzed.node_map.get_union_storage_kind(node_id)
+    }
+
     /// Get the string conversion annotation for an interpolation expression part.
     #[inline]
     pub fn get_string_conversion(
@@ -596,10 +606,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Convert a value to dynamic array storage representation for a known element type.
     ///
     /// Returns `(tag, payload_bits, stored_value_for_lifecycle)`.
+    ///
+    /// When `union_storage_hint` is provided (from sema annotation), the union
+    /// storage decision is used directly. Otherwise falls back to runtime
+    /// re-detection via `union_array_prefers_inline_storage`.
     pub fn prepare_dynamic_array_store(
         &mut self,
         value: CompiledValue,
         elem_type_id: TypeId,
+    ) -> CodegenResult<(Value, Value, CompiledValue)> {
+        self.prepare_dynamic_array_store_with_hint(value, elem_type_id, None)
+    }
+
+    /// Convert a value to dynamic array storage representation, with an
+    /// optional sema-provided union storage hint.
+    pub fn prepare_dynamic_array_store_with_hint(
+        &mut self,
+        value: CompiledValue,
+        elem_type_id: TypeId,
+        union_storage_hint: Option<vole_sema::UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
         let mut value = if self.arena().is_struct(value.type_id) {
             self.copy_struct_to_heap(value)?
@@ -608,7 +633,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
 
         let resolved_elem_type = self.try_substitute_type(elem_type_id);
-        if !self.arena().is_union(resolved_elem_type) {
+        // Fast path: sema told us whether this is a union element or not.
+        // If no hint, fall back to arena check.
+        let is_union_elem =
+            union_storage_hint.is_some() || self.arena().is_union(resolved_elem_type);
+        if !is_union_elem {
             value = self.coerce_to_type(value, resolved_elem_type)?;
             if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
                 let i128_bits = wide.to_i128_bits(self.builder, value.value);
@@ -629,8 +658,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok((tag_val, payload_bits, value));
         }
 
-        // Union array element type: choose storage strategy by tag uniqueness.
-        if self.union_array_prefers_inline_storage(resolved_elem_type) {
+        // Union array element type: use sema hint or compute storage strategy.
+        let prefers_inline = match union_storage_hint {
+            Some(vole_sema::UnionStorageKind::Inline) => true,
+            Some(vole_sema::UnionStorageKind::Heap) => false,
+            None => self.union_array_prefers_inline_storage(resolved_elem_type),
+        };
+        if prefers_inline {
             value = self.coerce_to_type(value, resolved_elem_type)?;
             if !self.arena().is_union(value.type_id) {
                 return Err(CodegenError::type_mismatch(

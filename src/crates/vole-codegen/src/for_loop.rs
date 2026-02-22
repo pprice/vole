@@ -303,17 +303,23 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), elem_ptr, value_offset);
-        let elem_val = if self.arena().is_union(elem_type_id) {
-            if self.union_array_prefers_inline_storage(elem_type_id) {
-                let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
-                let elem_tag =
-                    self.builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
-                self.decode_dynamic_array_union_element(elem_tag, elem_val, elem_type_id)
-                    .value
-            } else {
-                self.copy_union_heap_to_stack(elem_val, elem_type_id).value
+        let union_storage = self.get_union_storage_kind(for_stmt.iterable.id);
+        let elem_val = if let Some(storage) = union_storage {
+            use vole_sema::UnionStorageKind;
+            match storage {
+                UnionStorageKind::Inline => {
+                    let tag_offset =
+                        std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
+                    let elem_tag =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
+                    self.decode_dynamic_array_union_element(elem_tag, elem_val, elem_type_id)
+                        .value
+                }
+                UnionStorageKind::Heap => {
+                    self.copy_union_heap_to_stack(elem_val, elem_type_id).value
+                }
             }
         } else if let Some(wide) = elem_wide {
             let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[elem_val])?;

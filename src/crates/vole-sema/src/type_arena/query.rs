@@ -7,6 +7,23 @@ use vole_identity::{NameId, TypeDefId, TypeParamId};
 use super::arena::TypeArena;
 use super::sema_type::*;
 use super::type_id::{NominalKind, TypeId, TypeIdVec};
+use crate::types::PrimitiveType;
+
+/// Runtime tag categories for inline union array storage uniqueness checks.
+///
+/// Mirrors the equivalence classes from codegen's `unknown_type_tag` / `RuntimeTypeId`.
+/// The actual discriminant values don't matter; only distinctness matters for
+/// the hash-based uniqueness check in `union_array_prefers_inline_storage`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum RuntimeTagCategory {
+    String,
+    I64,
+    F64,
+    Bool,
+    Array,
+    Closure,
+    Instance,
+}
 
 impl TypeArena {
     // ========================================================================
@@ -673,6 +690,82 @@ impl TypeArena {
                 )
             }
             SemaType::Placeholder(kind) => format!("{}", kind),
+        }
+    }
+
+    // =========================================================================
+    // Union array storage policy
+    // =========================================================================
+
+    /// Returns true when a union stored as array elements can use inline
+    /// `(runtime_tag, payload)` storage without losing variant identity.
+    ///
+    /// If two variants map to the same runtime tag (e.g. `i64 | nil` ->
+    /// I64 tag for both), inline storage cannot recover the original union
+    /// variant on read, so the array must fall back to heap-boxed union
+    /// buffers.
+    ///
+    /// This mirrors the codegen `union_array_prefers_inline_storage` check
+    /// so that sema can annotate the decision once and codegen can read it.
+    pub fn union_array_prefers_inline_storage(&self, union_type_id: TypeId) -> bool {
+        let Some(variants) = self.unwrap_union(union_type_id) else {
+            return false;
+        };
+
+        let mut seen_tags = rustc_hash::FxHashSet::default();
+        for &variant in variants {
+            if !self.supports_inline_union_array_variant(variant) {
+                return false;
+            }
+
+            let tag = self.runtime_tag_category(variant);
+            // Non-integer/non-sentinel types that would get the I64 tag
+            // are ambiguous — reject inline storage.
+            if tag == RuntimeTagCategory::I64
+                && !self.is_integer(variant)
+                && !self.is_sentinel(variant)
+            {
+                return false;
+            }
+            if !seen_tags.insert(tag) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Check whether a single variant can be stored inline in a union array slot.
+    ///
+    /// Variants that need richer tagging or heap-backed payload wrappers
+    /// (nested unions, interfaces, classes, structs, unknown, tuples,
+    /// fallible, type params) must use boxed union storage.
+    fn supports_inline_union_array_variant(&self, variant: TypeId) -> bool {
+        !(self.is_union(variant)
+            || self.is_interface(variant)
+            || self.is_class(variant)
+            || self.is_struct(variant)
+            || self.is_unknown(variant)
+            || self.unwrap_tuple(variant).is_some()
+            || self.unwrap_fallible(variant).is_some()
+            || self.unwrap_type_param(variant).is_some())
+    }
+
+    /// Map a type to its runtime tag category for inline union array storage.
+    ///
+    /// This mirrors `unknown_type_tag` in codegen — the actual integer values
+    /// don't matter as long as they form the same equivalence classes.
+    fn runtime_tag_category(&self, ty: TypeId) -> RuntimeTagCategory {
+        match self.get(ty) {
+            SemaType::Primitive(PrimitiveType::String) => RuntimeTagCategory::String,
+            SemaType::Primitive(p) if p.is_integer() => RuntimeTagCategory::I64,
+            SemaType::Primitive(PrimitiveType::F64 | PrimitiveType::F32) => RuntimeTagCategory::F64,
+            SemaType::Primitive(PrimitiveType::Bool) => RuntimeTagCategory::Bool,
+            SemaType::Array(_) | SemaType::FixedArray { .. } => RuntimeTagCategory::Array,
+            SemaType::Function { .. } => RuntimeTagCategory::Closure,
+            SemaType::Class { .. } => RuntimeTagCategory::Instance,
+            // Everything else (nil, done, tuples, unions, sentinels, etc.)
+            // defaults to the I64 representation in codegen.
+            _ => RuntimeTagCategory::I64,
         }
     }
 }

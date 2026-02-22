@@ -257,6 +257,8 @@ impl Analyzer {
 
                 // Get element type using TypeId
                 if let Some(elem_id) = self.unwrap_indexable_element_id(obj_type_id) {
+                    // Annotate union storage kind for array element unions.
+                    self.annotate_union_storage_for_array_elem(expr.id, elem_id);
                     elem_id
                 } else {
                     // obj_type_id check already in type_error_id helper
