@@ -1,0 +1,19 @@
+// stdlib/prelude/reflection.vole
+// Reflection metadata types for Vole's type system.
+//
+// These structs describe the shape of types and their fields at runtime,
+// enabling reflection-based patterns like serialization and inspection.
+
+struct FieldMeta {
+    name:        string,
+    type_name:   string,
+    annotations: [unknown],
+    get:         (unknown) -> unknown,
+    set:         (unknown, unknown) -> void,
+}
+
+struct TypeMeta {
+    name:      string,
+    fields:    [FieldMeta],
+    construct: ([unknown]) -> unknown,
+}
