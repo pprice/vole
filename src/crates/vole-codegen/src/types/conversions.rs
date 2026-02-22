@@ -40,6 +40,10 @@ pub struct CompiledValue {
     pub type_id: TypeId,
     /// Lifecycle state for reference-counted values.
     pub rc_lifecycle: RcLifecycle,
+    /// Debug-only flag: set by `mark_consumed()` to catch accidental RC ops
+    /// on values whose ownership has already been transferred to a container.
+    #[cfg(debug_assertions)]
+    consumed: bool,
 }
 
 impl CompiledValue {
@@ -50,6 +54,8 @@ impl CompiledValue {
             ty,
             type_id,
             rc_lifecycle: RcLifecycle::Untracked,
+            #[cfg(debug_assertions)]
+            consumed: false,
         }
     }
 
@@ -60,6 +66,8 @@ impl CompiledValue {
             ty,
             type_id,
             rc_lifecycle: RcLifecycle::Owned,
+            #[cfg(debug_assertions)]
+            consumed: false,
         }
     }
 
@@ -70,6 +78,8 @@ impl CompiledValue {
             ty: self.ty,
             type_id: self.type_id,
             rc_lifecycle: RcLifecycle::Untracked,
+            #[cfg(debug_assertions)]
+            consumed: false,
         }
     }
 
@@ -99,6 +109,22 @@ impl CompiledValue {
     /// Mark this value as consumed — no further RC action needed.
     pub fn mark_consumed(&mut self) {
         self.rc_lifecycle = RcLifecycle::Consumed;
+        #[cfg(debug_assertions)]
+        {
+            self.consumed = true;
+        }
+    }
+
+    /// Debug-only: assert that this value has not been consumed.
+    /// Panics in debug builds if an RC operation is attempted on a consumed value.
+    #[inline]
+    #[cfg(debug_assertions)]
+    pub fn debug_assert_not_consumed(&self, op: &str) {
+        debug_assert!(
+            !self.consumed,
+            "RC op `{op}` on consumed value (type_id={:?}, lifecycle={:?})",
+            self.type_id, self.rc_lifecycle,
+        );
     }
 
     /// Debug assertion that this value's RC lifecycle has been handled.

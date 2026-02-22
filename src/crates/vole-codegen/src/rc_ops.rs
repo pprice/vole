@@ -254,6 +254,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// `compiled.mark_consumed()` to indicate the value has been transferred
     /// to the container.
     pub fn rc_inc_borrowed_for_container(&mut self, compiled: &CompiledValue) -> CodegenResult<()> {
+        #[cfg(debug_assertions)]
+        compiled.debug_assert_not_consumed("rc_inc_borrowed_for_container");
         if self.rc_scopes.has_active_scope()
             && self.rc_state(compiled.type_id).needs_cleanup()
             && compiled.is_borrowed()
