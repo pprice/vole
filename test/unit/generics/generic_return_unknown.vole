@@ -1,0 +1,72 @@
+// Test: return nil/value in generic class methods returning unknown
+// Bug fix (vol-r6a1): bare `return nil` in generic class methods with
+// return type `unknown` segfaulted because nil was not boxed as a
+// TaggedValue before being returned.
+
+class Box<T> {
+    value: T,
+
+    // Returns unknown so callers can use `is` checks.
+    func try_get(ok: bool) -> unknown {
+        if !ok { return nil }
+        return self.value
+    }
+
+    func always_nil() -> unknown {
+        return nil
+    }
+}
+
+tests "generic method return nil as unknown" {
+    test "return nil from generic class method" {
+        let b = Box { value: 42 }
+        let result = b.always_nil()
+        assert(result is nil)
+    }
+
+    test "return nil on false, value on true" {
+        let b = Box { value: 42 }
+        let fail = b.try_get(false)
+        assert(fail is nil)
+        let ok = b.try_get(true)
+        assert(ok is i64)
+        if ok is i64 {
+            assert(ok == 42)
+        }
+    }
+
+    test "return nil with string type param" {
+        let b = Box { value: "hello" }
+        let fail = b.always_nil()
+        assert(fail is nil)
+        let ok = b.try_get(true)
+        assert(ok is string)
+        if ok is string {
+            assert(ok == "hello")
+        }
+    }
+
+    test "return nil with bool type param" {
+        let b = Box { value: true }
+        let fail = b.always_nil()
+        assert(fail is nil)
+    }
+
+    test "return nil with f64 type param" {
+        let b = Box { value: 3.14 }
+        let fail = b.try_get(false)
+        assert(fail is nil)
+        let ok = b.try_get(true)
+        assert(ok is f64)
+        if ok is f64 {
+            assert(ok == 3.14)
+        }
+    }
+
+    test "return nil in early return branch" {
+        let b = Box { value: 99 }
+        // Specifically tests early return with nil (the original bug)
+        let r = b.try_get(false)
+        assert(r is nil)
+    }
+}

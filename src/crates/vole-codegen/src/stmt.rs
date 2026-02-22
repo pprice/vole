@@ -510,6 +510,16 @@ impl Cg<'_, '_, '_> {
                 return Ok(true);
             }
 
+            // Box concrete types to unknown (TaggedValue) if needed
+            if let Some(ret_type_id) = return_type_id
+                && self.arena().is_unknown(ret_type_id)
+                && !self.arena().is_unknown(compiled.type_id)
+            {
+                let boxed = self.box_to_unknown(compiled)?;
+                self.builder.ins().return_(&[boxed.value]);
+                return Ok(true);
+            }
+
             // Check if the function has a fallible return type using arena methods
             if let Some(ret_type_id) = return_type_id
                 && self.arena().unwrap_fallible(ret_type_id).is_some()

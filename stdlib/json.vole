@@ -441,26 +441,20 @@ class JsonSerde<T> {
 
     // Deserialize a JSON string to a typed instance (returned as unknown).
     // Returns nil if parsing fails or the JSON is not an object.
-    // Note: uses explicit unknown binding for nil returns to avoid a codegen
-    // bug with bare `return nil` in generic methods.
     func deserialize(json_str: string) -> unknown {
-        let _nil: unknown = nil
         let r = _parse_top(json_str)
-        if !r.ok { return _nil }
-        if !r.is_object() { return _nil }
+        if !r.ok { return nil }
+        if !r.is_object() { return nil }
         let meta = self.item.@meta
         let parsed_obj = r.as_object()
         return _from_json_object(meta, parsed_obj)
     }
 
     // Deserialize with field renaming (reverse of serialize_mapped renames).
-    // Note: uses explicit unknown binding for nil returns to avoid a codegen
-    // bug with bare `return nil` in generic methods.
     func deserialize_mapped(json_str: string, renames: Map<string, string>) -> unknown {
-        let _nil: unknown = nil
         let r = _parse_top(json_str)
-        if !r.ok { return _nil }
-        if !r.is_object() { return _nil }
+        if !r.ok { return nil }
+        if !r.is_object() { return nil }
         let meta = self.item.@meta
         let parsed_obj = r.as_object()
         return _from_json_object_mapped(meta, parsed_obj, renames)

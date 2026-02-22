@@ -42,10 +42,9 @@ class Serde<T> {
     }
 
     func deserialize(json_str: string) -> unknown {
-        let _nil: unknown = nil
         let r = JSON.parse(json_str)
-        if !r.ok { return _nil }
-        if !r.is_object() { return _nil }
+        if !r.ok { return nil }
+        if !r.is_object() { return nil }
         let meta = self.item.@meta
         let parsed_obj = r.as_object()
         return JSON.from_object(meta, parsed_obj)
