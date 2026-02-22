@@ -170,9 +170,9 @@ pub struct ValidatedAnnotation {
     /// The TypeDefId of the annotation struct (e.g., `json_name`).
     pub type_def_id: TypeDefId,
     /// Validated argument values, in field order.
-    /// Each entry is (field_name, expression_node_id) where the expression
-    /// can be evaluated by codegen at compile time.
-    pub args: Vec<(NameId, NodeId)>,
+    /// Each entry is (field_name, cloned_expression) where the expression
+    /// can be compiled by codegen to produce a value.
+    pub args: Vec<(NameId, Box<Expr>)>,
 }
 
 /// A field definition (always belongs to a type)

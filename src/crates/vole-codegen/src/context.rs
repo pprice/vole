@@ -372,6 +372,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Check if a struct type is actually allocated as a heap instance (annotation type).
+    ///
+    /// Annotation struct types are normally stack-allocated, but when stored in
+    /// FieldMeta.annotations they are heap-allocated via InstanceNew. Field access
+    /// on these values must use InstanceGetField rather than struct offset loads.
+    pub fn is_heap_allocated_annotation(&self, type_id: TypeId) -> bool {
+        if let Some((type_def_id, _)) = self.arena().unwrap_struct(type_id) {
+            self.env
+                .state
+                .annotation_type_ids
+                .borrow()
+                .contains_key(&type_def_id)
+        } else {
+            false
+        }
+    }
+
     /// Get IsCheckResult for an is-expression or type pattern.
     #[inline]
     pub fn get_is_check_result(

@@ -865,7 +865,7 @@ pub(crate) fn unknown_type_tag(ty: TypeId, arena: &TypeArena) -> u64 {
         ArenaType::Array(_) | ArenaType::FixedArray { .. } => RuntimeTypeId::Array as u64,
         ArenaType::Function { .. } => RuntimeTypeId::Closure as u64,
         ArenaType::Class { .. } => RuntimeTypeId::Instance as u64,
-        // For other types (nil, done, tuples, unions, etc.), default to I64 representation
+        // For other types (nil, done, tuples, unions, structs, etc.), default to I64 representation
         _ => RuntimeTypeId::I64 as u64,
     }
 }

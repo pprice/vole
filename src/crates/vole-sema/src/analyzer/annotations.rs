@@ -122,9 +122,10 @@ impl Analyzer {
 
             // Store validated annotations on the entity FieldDef if we have any
             if !validated.is_empty()
-                && let Some(td_id) = type_def_id {
-                    self.store_field_annotations(td_id, field, &validated, interner);
-                }
+                && let Some(td_id) = type_def_id
+            {
+                self.store_field_annotations(td_id, field, &validated, interner);
+            }
         }
     }
 
@@ -361,7 +362,7 @@ impl Analyzer {
                 CallArg::Positional(expr) => {
                     // Positional arg maps to field by index
                     let (name_id, _) = &field_names[i];
-                    result_args.push((*name_id, expr.id));
+                    result_args.push((*name_id, Box::new(expr.clone())));
                     seen_fields[i] = true;
                 }
                 CallArg::Named { name, value, span } => {
@@ -380,7 +381,7 @@ impl Analyzer {
                             has_error = true;
                         } else {
                             let (name_id, _) = &field_names[idx];
-                            result_args.push((*name_id, value.id));
+                            result_args.push((*name_id, Box::new(value.clone())));
                             seen_fields[idx] = true;
                         }
                     } else {

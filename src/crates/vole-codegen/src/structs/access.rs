@@ -127,8 +127,11 @@ impl Cg<'_, '_, '_> {
         slot: usize,
         field_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        // Struct types are stack-allocated: load field directly from pointer + offset
-        let is_struct = self.arena().is_struct(obj.type_id);
+        // Struct types are stack-allocated: load field directly from pointer + offset.
+        // Exception: annotation structs used in FieldMeta.annotations are heap-allocated
+        // class instances (via InstanceNew), so they must use InstanceGetField.
+        let is_struct =
+            self.arena().is_struct(obj.type_id) && !self.is_heap_allocated_annotation(obj.type_id);
         if is_struct {
             return self.struct_field_load(obj.value, slot, field_type_id, obj.type_id);
         }

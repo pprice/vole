@@ -251,7 +251,14 @@ impl Cg<'_, '_, '_> {
                     .builder
                     .ins()
                     .load(types::I64, MemFlags::new(), value.value, 0);
-                let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
+                // Annotation struct types are heap-allocated as class instances
+                // (via InstanceNew) in FieldMeta.annotations, so they use the
+                // Instance tag rather than the default I64 tag for structs.
+                let expected_tag = if self.is_heap_allocated_annotation(tested_type_id) {
+                    vole_runtime::value::RuntimeTypeId::Instance as u64
+                } else {
+                    crate::types::unknown_type_tag(tested_type_id, self.arena())
+                };
                 let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
                 let result = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
                 Ok(self.bool_value(result))
@@ -293,7 +300,11 @@ impl Cg<'_, '_, '_> {
                     .builder
                     .ins()
                     .load(types::I64, MemFlags::new(), scrutinee.value, 0);
-                let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
+                let expected_tag = if self.is_heap_allocated_annotation(tested_type_id) {
+                    vole_runtime::value::RuntimeTypeId::Instance as u64
+                } else {
+                    crate::types::unknown_type_tag(tested_type_id, self.arena())
+                };
                 let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
                 let result = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
                 Ok(Some(result))

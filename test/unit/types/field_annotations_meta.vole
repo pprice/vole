@@ -1,0 +1,156 @@
+// Unit tests for FieldMeta.annotations populated from sema annotations.
+//
+// Verifies that @annotation-decorated struct instances appear in
+// FieldMeta.annotations when accessed via T.@meta.
+
+@annotation
+struct label {
+    text: string,
+}
+
+@annotation
+struct deprecated {}
+
+@annotation
+struct bounds {
+    min: i64,
+    max: i64,
+}
+
+// Class with annotated fields
+class Config {
+    @label(text: "The hostname")
+    host: string,
+
+    @deprecated
+    legacy_port: i64,
+
+    @bounds(min: 0, max: 65535)
+    port: i64,
+
+    // No annotation on this field
+    debug: bool,
+}
+
+// Struct with annotated fields
+struct Point {
+    @label(text: "x-axis")
+    x: i64,
+
+    @label(text: "y-axis")
+    y: i64,
+}
+
+// Multiple annotations on a single field
+class Service {
+    @deprecated
+    @label(text: "old endpoint")
+    url: string,
+}
+
+// Positional arg annotation
+class TaggedItem {
+    @label("pos-tag")
+    value: i64,
+}
+
+tests "field annotations in meta" {
+    test "annotated field has one annotation" {
+        let meta = Config.@meta
+        let host_field = meta.fields[0]
+        assert(host_field.name == "host")
+        assert(host_field.annotations.length() == 1)
+    }
+
+    test "annotation is a label instance" {
+        let meta = Config.@meta
+        let host_field = meta.fields[0]
+        let ann = host_field.annotations[0]
+        assert(ann is label)
+    }
+
+    test "annotation field value is correct" {
+        let meta = Config.@meta
+        let host_field = meta.fields[0]
+        let ann = host_field.annotations[0]
+        if ann is label {
+            assert(ann.text == "The hostname")
+        }
+    }
+
+    test "zero-arg annotation on field" {
+        let meta = Config.@meta
+        let legacy_field = meta.fields[1]
+        assert(legacy_field.name == "legacy_port")
+        assert(legacy_field.annotations.length() == 1)
+        assert(legacy_field.annotations[0] is deprecated)
+    }
+
+    test "multi-arg annotation on field" {
+        let meta = Config.@meta
+        let port_field = meta.fields[2]
+        assert(port_field.name == "port")
+        assert(port_field.annotations.length() == 1)
+        let ann = port_field.annotations[0]
+        assert(ann is bounds)
+        if ann is bounds {
+            assert(ann.min == 0)
+            assert(ann.max == 65535)
+        }
+    }
+
+    test "unannotated field has empty annotations" {
+        let meta = Config.@meta
+        let debug_field = meta.fields[3]
+        assert(debug_field.name == "debug")
+        assert(debug_field.annotations.length() == 0)
+    }
+
+    test "struct field annotations" {
+        let meta = Point.@meta
+        let x_field = meta.fields[0]
+        assert(x_field.annotations.length() == 1)
+        let ann = x_field.annotations[0]
+        assert(ann is label)
+        if ann is label {
+            assert(ann.text == "x-axis")
+        }
+    }
+
+    test "struct both fields annotated" {
+        let meta = Point.@meta
+        assert(meta.fields[0].annotations.length() == 1)
+        assert(meta.fields[1].annotations.length() == 1)
+        let ann_y = meta.fields[1].annotations[0]
+        if ann_y is label {
+            assert(ann_y.text == "y-axis")
+        }
+    }
+
+    test "multiple annotations on one field" {
+        let meta = Service.@meta
+        let url_field = meta.fields[0]
+        assert(url_field.name == "url")
+        assert(url_field.annotations.length() == 2)
+        assert(url_field.annotations[0] is deprecated)
+        assert(url_field.annotations[1] is label)
+    }
+
+    test "multiple annotations field values" {
+        let meta = Service.@meta
+        let ann_label = meta.fields[0].annotations[1]
+        if ann_label is label {
+            assert(ann_label.text == "old endpoint")
+        }
+    }
+
+    test "positional arg annotation" {
+        let meta = TaggedItem.@meta
+        let val_field = meta.fields[0]
+        assert(val_field.annotations.length() == 1)
+        let ann = val_field.annotations[0]
+        if ann is label {
+            assert(ann.text == "pos-tag")
+        }
+    }
+}

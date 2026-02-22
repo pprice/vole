@@ -156,6 +156,7 @@ impl Cg<'_, '_, '_> {
         let idx = self.expr(index)?;
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[obj.value, idx.value])?;
         let resolved_element_id = self.try_substitute_type(element_id);
+
         // Use sema's union storage annotation when available.
         if let Some(storage) = self.get_union_storage_kind(expr_id) {
             use vole_sema::UnionStorageKind;

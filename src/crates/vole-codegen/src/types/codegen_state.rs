@@ -151,6 +151,11 @@ pub(crate) struct CodegenState {
     /// Entries that would be skipped (external methods, abstract templates) are excluded.
     /// Used by `Cg::try_demand_declare_monomorph` to replace O(K×N) linear scans.
     pub monomorph_index: FxHashMap<NameId, MonomorphIndexEntry>,
+    /// Cache of runtime type_ids for annotation struct types used as heap instances.
+    /// Annotation structs are normally stack-allocated (type_id=0), but when they
+    /// appear in FieldMeta.annotations they're heap-allocated class instances.
+    /// This cache maps TypeDefId -> runtime type_id so field cleanup works correctly.
+    pub annotation_type_ids: RefCell<FxHashMap<TypeDefId, u32>>,
 }
 
 impl CodegenState {
@@ -176,6 +181,7 @@ impl CodegenState {
             ptr_to_symbol,
             expanded_class_method_monomorphs: FxHashMap::default(),
             monomorph_index: FxHashMap::default(),
+            annotation_type_ids: RefCell::new(FxHashMap::default()),
         }
     }
 }
