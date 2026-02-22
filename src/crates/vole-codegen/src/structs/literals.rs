@@ -302,7 +302,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Coerce a value to match a field's declared type.
     ///
     /// Handles union wrapping (non-union → union, union → heap copy),
-    /// interface boxing, and interface fat pointer copying for class fields.
+    /// interface boxing, unknown boxing, and interface fat pointer copying
+    /// for class fields.
     fn coerce_field_value(
         &mut self,
         value: CompiledValue,
@@ -311,9 +312,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.arena();
         let field_is_union = arena.is_union(field_type_id);
         let field_is_interface = arena.is_interface(field_type_id);
+        let field_is_unknown = arena.is_unknown(field_type_id);
         let value_is_union = arena.is_union(value.type_id);
+        let value_is_unknown = arena.is_unknown(value.type_id);
 
-        if field_is_union && !value_is_union {
+        if field_is_unknown && !value_is_unknown {
+            // Box the value into a TaggedValue (stack), then copy to heap for
+            // storage in class fields. The heap copy is needed because the
+            // stack slot would be invalidated when the function returns.
+            let boxed = self.box_to_unknown(value)?;
+            self.copy_tagged_value_to_heap(boxed)
+        } else if field_is_unknown && value_is_unknown {
+            // Value is already a TaggedValue pointer. Copy to heap so
+            // instance_drop can free it independently.
+            self.copy_tagged_value_to_heap(value)
+        } else if field_is_union && !value_is_union {
             self.construct_union_heap_id(value, field_type_id)
         } else if field_is_union && value_is_union {
             // Union value stored in class field must be heap-allocated.
@@ -565,6 +578,50 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .store(MemFlags::new(), vtable_ptr, heap_ptr, word_bytes as i32);
 
         Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
+    }
+
+    /// Copy an unknown-typed TaggedValue to a heap allocation.
+    ///
+    /// TaggedValues are 16-byte buffers: `[tag: i64, value: i64]`.
+    /// The source may be a stack slot (from `box_to_unknown`). Class fields
+    /// need heap-allocated copies so `instance_drop` can free them.
+    ///
+    /// If the contained value is RC-managed (e.g. a string), the caller must
+    /// have already incremented the refcount at the class literal init site.
+    pub(crate) fn copy_tagged_value_to_heap(
+        &mut self,
+        value: CompiledValue,
+    ) -> CodegenResult<CompiledValue> {
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
+        let ptr_type = self.ptr_type();
+
+        // Allocate 16 bytes for [tag: i64, value: i64]
+        let size_val = self.iconst_cached(ptr_type, union_layout::STANDARD_SIZE as i64);
+        let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
+        let heap_ptr = self.builder.inst_results(alloc_call)[0];
+
+        // Copy tag (offset 0)
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), value.value, 0);
+        self.builder.ins().store(MemFlags::new(), tag, heap_ptr, 0);
+
+        // Copy value (offset 8)
+        let payload = self.builder.ins().load(
+            types::I64,
+            MemFlags::new(),
+            value.value,
+            union_layout::PAYLOAD_OFFSET,
+        );
+        self.builder.ins().store(
+            MemFlags::new(),
+            payload,
+            heap_ptr,
+            union_layout::PAYLOAD_OFFSET,
+        );
+
+        Ok(CompiledValue::new(heap_ptr, ptr_type, TypeId::UNKNOWN))
     }
 
     /// Compile a struct literal to a stack-allocated value.

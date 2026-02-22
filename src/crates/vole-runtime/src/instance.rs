@@ -174,6 +174,11 @@ unsafe extern "C" fn instance_drop(ptr: *mut u8) {
                         // Free the 16-byte fat pointer allocation (2 * size_of::<u64>()).
                         vole_heap_free(field_value as *mut u8, 16);
                     }
+                    FieldTypeTag::UnknownHeap => {
+                        // Unknown TaggedValue: heap-allocated [tag: u64, value: u64].
+                        // Check tag to determine if value is RC, then free the buffer.
+                        crate::value::unknown_heap_cleanup(field_value as *mut u8);
+                    }
                     FieldTypeTag::Value => {}
                 }
             }

@@ -28,6 +28,10 @@ pub enum FieldTypeTag {
     /// Interface fat pointer field - heap-allocated [data_word, vtable_ptr].
     /// Cleanup must: rc_dec(data_word at offset 0), then free the 16-byte allocation.
     Interface,
+    /// Unknown-typed TaggedValue field - heap-allocated [tag: u64, value: u64].
+    /// Cleanup must: check the tag to see if the value is RC-managed, conditionally
+    /// rc_dec the value, then free the 16-byte allocation.
+    UnknownHeap,
 }
 
 impl FieldTypeTag {
@@ -35,7 +39,10 @@ impl FieldTypeTag {
     pub fn needs_cleanup(&self) -> bool {
         matches!(
             self,
-            FieldTypeTag::Rc | FieldTypeTag::UnionHeap | FieldTypeTag::Interface
+            FieldTypeTag::Rc
+                | FieldTypeTag::UnionHeap
+                | FieldTypeTag::Interface
+                | FieldTypeTag::UnknownHeap
         )
     }
 }
@@ -195,9 +202,9 @@ pub fn force_unlock_type_registry() {
 /// created) so that `instance_drop` knows which fields need RC cleanup.
 ///
 /// `field_types` is an array of `field_count` bytes, where each byte encodes
-/// a `FieldTypeTag`: 0=Value, 1=Rc, 2=UnionHeap, 3=Interface. Invalid byte
-/// values silently fall back to `FieldTypeTag::Value` (no cleanup) in release
-/// builds, but trigger a debug_assert in development to catch codegen bugs.
+/// a `FieldTypeTag`: 0=Value, 1=Rc, 2=UnionHeap, 3=Interface, 4=UnknownHeap.
+/// Invalid byte values silently fall back to `FieldTypeTag::Value` (no cleanup)
+/// in release builds, but trigger a debug_assert in development to catch codegen bugs.
 ///
 /// # JIT contract
 /// - `type_id` is a unique ID from `alloc_type_id()`.
@@ -223,14 +230,15 @@ pub extern "C" fn vole_register_instance_type(
                 .map(|i| {
                     let byte = *field_types.add(i);
                     debug_assert!(
-                        byte <= 3,
+                        byte <= 4,
                         "invalid FieldTypeTag byte {byte} for type_id {type_id}, field {i} \
-                         (expected 0=Value, 1=Rc, 2=UnionHeap, 3=Interface)"
+                         (expected 0=Value, 1=Rc, 2=UnionHeap, 3=Interface, 4=UnknownHeap)"
                     );
                     match byte {
                         1 => FieldTypeTag::Rc,
                         2 => FieldTypeTag::UnionHeap,
                         3 => FieldTypeTag::Interface,
+                        4 => FieldTypeTag::UnknownHeap,
                         _ => FieldTypeTag::Value,
                     }
                 })

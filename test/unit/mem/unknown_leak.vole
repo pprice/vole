@@ -1,0 +1,47 @@
+// Memory leak tests for unknown type
+
+class UnknownBox {
+    value: unknown,
+}
+
+tests {
+    test "unknown let string no leak" {
+        let x: unknown = "hello"
+        assert(x is string)
+    }
+
+    test "unknown reassign string no leak" {
+        var x: unknown = "hello"
+        x = "world"
+        assert(x is string)
+    }
+
+    test "unknown reassign rc types no leak" {
+        var x: unknown = "first"
+        x = "second"
+        x = "third"
+        assert(x is string)
+    }
+
+    test "unknown class field string no leak" {
+        let b = UnknownBox { value: "hello" }
+        assert(b.value is string)
+    }
+
+    test "unknown class field reassign no leak" {
+        var b = UnknownBox { value: "hello" }
+        b.value = "world"
+        assert(b.value is string)
+    }
+
+    test "unknown class field reassign rc to value no leak" {
+        var b = UnknownBox { value: "hello" }
+        b.value = 42
+        assert(b.value is i64)
+    }
+
+    test "unknown array no leak" {
+        let arr: [unknown] = ["hello", "world", "test"]
+        assert(arr[0] is string)
+    }
+}

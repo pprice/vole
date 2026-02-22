@@ -468,12 +468,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get the field type tag for a type, determining how instance fields of this
-    /// type should be cleaned up. Interface types get `FieldTypeTag::Interface`,
-    /// other RC types get `FieldTypeTag::Rc`, union types that contain RC variants
-    /// get `FieldTypeTag::UnionHeap`, everything else is `Value`.
+    /// type should be cleaned up. Unknown types get `FieldTypeTag::UnknownHeap`,
+    /// interface types get `FieldTypeTag::Interface`, other RC types get
+    /// `FieldTypeTag::Rc`, union types that contain RC variants get
+    /// `FieldTypeTag::UnionHeap`, everything else is `Value`.
     pub fn field_type_tag(&self, type_id: TypeId) -> vole_runtime::type_registry::FieldTypeTag {
         use vole_runtime::type_registry::FieldTypeTag;
-        if self.arena().is_interface(type_id) {
+        if self.arena().is_unknown(type_id) {
+            FieldTypeTag::UnknownHeap
+        } else if self.arena().is_interface(type_id) {
             FieldTypeTag::Interface
         } else if self.rc_state(type_id).needs_cleanup() {
             FieldTypeTag::Rc

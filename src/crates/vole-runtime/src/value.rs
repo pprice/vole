@@ -341,6 +341,59 @@ pub fn union_heap_cleanup(ptr: *mut u8) {
     }
 }
 
+/// Clean up an unknown-typed TaggedValue heap allocation.
+///
+/// TaggedValues are 16-byte heap buffers: `[tag: u64 at offset 0, value: u64 at offset 8]`.
+/// The tag identifies the RuntimeTypeId. If the stored type is RC-managed
+/// (String, Array, Closure, Instance), the value is `rc_dec`'d before freeing
+/// the 16-byte buffer.
+///
+/// # Safety
+/// `ptr` must point to a valid TaggedValue heap buffer allocated by `vole_heap_alloc(16)`.
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
+pub fn unknown_heap_cleanup(ptr: *mut u8) {
+    if ptr.is_null() {
+        return;
+    }
+    // SAFETY: Null check above guarantees `ptr` is valid per the function's safety
+    // contract (16-byte TaggedValue buffer). u64 reads at offsets 0 (tag) and 8 (value)
+    // are within the allocation bounds.
+    unsafe {
+        let tag = *(ptr as *const u64);
+        let value = *(ptr.add(8) as *const u64);
+        // RC-managed types: String=1, Array=5, Closure=6, Instance=7
+        let is_rc = matches!(
+            tag,
+            x if x == RuntimeTypeId::String as u64
+                || x == RuntimeTypeId::Array as u64
+                || x == RuntimeTypeId::Closure as u64
+                || x == RuntimeTypeId::Instance as u64
+        );
+        if is_rc && value != 0 {
+            rc_dec(value as *mut u8);
+        }
+        // Free the 16-byte heap buffer
+        const TAGGED_VALUE_LAYOUT: std::alloc::Layout =
+            match std::alloc::Layout::from_size_align(16, 8) {
+                Ok(l) => l,
+                Err(_) => panic!("tagged value heap layout"),
+            };
+        std::alloc::dealloc(ptr, TAGGED_VALUE_LAYOUT);
+    }
+}
+
+/// FFI entry point for `unknown_heap_cleanup`, callable from JIT-compiled code.
+///
+/// Cleans up a heap-allocated TaggedValue: conditionally `rc_dec`'s the payload
+/// if it's an RC type, then frees the 16-byte buffer.
+///
+/// # JIT contract
+/// `ptr` must be null or a valid TaggedValue heap buffer. Null is a no-op.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_unknown_heap_cleanup(ptr: *mut u8) {
+    unknown_heap_cleanup(ptr);
+}
+
 /// Decrement refcount of an i64 value if it represents an RC pointer.
 /// Used by collections that store raw i64 values and know their element types are RC.
 #[inline]

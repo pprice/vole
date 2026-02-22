@@ -256,6 +256,9 @@ runtime_keys! {
     RcInc                  => "rc_inc"                       : (Ptr) -> Void          = vole_runtime::value::rc_inc,
     RcDec                  => "rc_dec"                       : (Ptr) -> Void          = vole_runtime::value::rc_dec,
 
+    // ── Unknown type cleanup ──────────────────────────────────────────
+    UnknownHeapCleanup     => "vole_unknown_heap_cleanup"    : (Ptr) -> Void          = vole_runtime::value::vole_unknown_heap_cleanup,
+
     // ── Task scheduler ─────────────────────────────────────────────────
     TaskSpawn              => "vole_task_spawn"              : (Ptr, Ptr) -> I64      = vole_runtime::scheduler::vole_task_spawn,
     TaskYield              => "vole_task_yield"              : () -> Void             = vole_runtime::scheduler::vole_task_yield,

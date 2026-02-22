@@ -1,0 +1,150 @@
+func accept_unknown(x: unknown) -> bool {
+    return x is i64
+}
+
+func accept_unknown_str(x: unknown) -> bool {
+    return x is string
+}
+
+func accept_unknown_bool(x: unknown) -> bool {
+    return x is bool
+}
+
+func identity_unknown(x: unknown) -> unknown {
+    return x
+}
+
+func multi_unknown(a: unknown, b: unknown) -> bool {
+    return (a is string) && (b is i64)
+}
+
+class UnknownBox {
+    value: unknown,
+}
+
+class MultiUnknownBox {
+    first: unknown,
+    second: unknown,
+}
+
+tests {
+    test "pass i64 to unknown param" {
+        assert(accept_unknown(42))
+    }
+
+    test "pass string to unknown param" {
+        assert(accept_unknown_str("hello"))
+    }
+
+    test "pass bool to unknown param" {
+        assert(accept_unknown_bool(true))
+    }
+
+    test "identity unknown preserves i64" {
+        let result = identity_unknown(42)
+        assert(result is i64)
+    }
+
+    test "identity unknown preserves string" {
+        let result = identity_unknown("world")
+        assert(result is string)
+    }
+
+    test "multi unknown params" {
+        assert(multi_unknown("hi", 99))
+    }
+
+    test "unknown return type" {
+        let x: unknown = identity_unknown(42)
+        assert(x is i64)
+    }
+
+    test "class field stores i64 as unknown" {
+        let b = UnknownBox { value: 42 }
+        assert(b.value is i64)
+    }
+
+    test "class field stores string as unknown" {
+        let b = UnknownBox { value: "hello" }
+        assert(b.value is string)
+    }
+
+    test "class field stores bool as unknown" {
+        let b = UnknownBox { value: true }
+        assert(b.value is bool)
+    }
+
+    test "class with multiple unknown fields" {
+        let m = MultiUnknownBox { first: "hello", second: 42 }
+        assert(m.first is string)
+        assert(m.second is i64)
+    }
+
+    test "class field stores f64 as unknown" {
+        let b = UnknownBox { value: 3.14 }
+        assert(b.value is f64)
+    }
+
+    test "unknown reassignment" {
+        var x: unknown = 42
+        assert(x is i64)
+        x = "hello"
+        assert(x is string)
+    }
+
+    test "unknown in array" {
+        let arr: [unknown] = [42, "hello", true]
+        assert(arr[0] is i64)
+        assert(arr[1] is string)
+        assert(arr[2] is bool)
+    }
+
+    test "unknown array length" {
+        let arr: [unknown] = [1, 2, 3]
+        assert(arr.length() == 3)
+    }
+
+    test "unknown array push" {
+        var arr: [unknown] = [1]
+        arr.push(2)
+        arr.push("hello")
+        assert(arr.length() == 3)
+        assert(arr[2] is string)
+    }
+
+    test "return different types as unknown" {
+        let a: unknown = identity_unknown(42)
+        let b: unknown = identity_unknown("hi")
+        let c: unknown = identity_unknown(true)
+        let d: unknown = identity_unknown(2.71)
+        assert(a is i64)
+        assert(b is string)
+        assert(c is bool)
+        assert(d is f64)
+    }
+
+    test "pass class field unknown to function" {
+        let b = UnknownBox { value: 42 }
+        assert(accept_unknown(b.value))
+    }
+
+    test "unknown class field round-trip" {
+        let b = UnknownBox { value: "hello" }
+        let result = identity_unknown(b.value)
+        assert(result is string)
+    }
+
+    test "class field unknown is check negative" {
+        let b = UnknownBox { value: 42 }
+        assert(!(b.value is string))
+        assert(!(b.value is bool))
+        assert(!(b.value is f64))
+    }
+
+    test "class field unknown reassignment" {
+        var b = UnknownBox { value: 42 }
+        assert(b.value is i64)
+        b.value = "hello"
+        assert(b.value is string)
+    }
+}

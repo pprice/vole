@@ -244,30 +244,42 @@ impl Cg<'_, '_, '_> {
             return Ok(value);
         }
 
-        let value = if self.arena().is_interface(field_type_id) {
+        let value = if self.arena().is_unknown(field_type_id)
+            && !self.arena().is_unknown(value.type_id)
+        {
+            // Box the value into a TaggedValue (stack), then copy to heap.
+            let boxed = self.box_to_unknown(value)?;
+            self.copy_tagged_value_to_heap(boxed)?
+        } else if self.arena().is_unknown(field_type_id) && self.arena().is_unknown(value.type_id) {
+            // Already a TaggedValue pointer; copy to heap for independent cleanup.
+            self.copy_tagged_value_to_heap(value)?
+        } else if self.arena().is_interface(field_type_id) {
             self.box_interface_value(value, field_type_id)?
         } else {
             value
         };
 
-        // RC bookkeeping for instance field overwrite:
+        // Cleanup bookkeeping for instance field overwrite:
         // 1. Load old value (before store) via InstanceGetField
         // 2. rc_inc new if it's a borrow
         // 3. Store new value
-        // 4. rc_dec old (after store, in case old == new)
-        let rc_old =
-            if self.rc_scopes.has_active_scope() && self.rc_state(field_type_id).needs_cleanup() {
-                let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
-                let slot_val = self.iconst_cached(types::I32, slot as i64);
-                let call = self
-                    .builder
-                    .ins()
-                    .call(get_func_ref, &[obj.value, slot_val]);
-                Some(self.builder.inst_results(call)[0])
-            } else {
-                None
-            };
-        if rc_old.is_some() && value.is_borrowed() {
+        // 4. Clean up old value (rc_dec for RC types, unknown_heap_cleanup for unknown)
+        let field_is_unknown = self.arena().is_unknown(field_type_id);
+        let needs_rc_cleanup =
+            self.rc_scopes.has_active_scope() && self.rc_state(field_type_id).needs_cleanup();
+        let needs_unknown_cleanup = self.rc_scopes.has_active_scope() && field_is_unknown;
+        let old_field = if needs_rc_cleanup || needs_unknown_cleanup {
+            let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
+            let slot_val = self.iconst_cached(types::I32, slot as i64);
+            let call = self
+                .builder
+                .ins()
+                .call(get_func_ref, &[obj.value, slot_val]);
+            Some(self.builder.inst_results(call)[0])
+        } else {
+            None
+        };
+        if needs_rc_cleanup && old_field.is_some() && value.is_borrowed() {
             self.emit_rc_inc_for_type(value.value, field_type_id)?;
         }
 
@@ -275,8 +287,15 @@ impl Cg<'_, '_, '_> {
         let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
         super::helpers::store_field_value(self, set_func_ref, obj.value, slot, &value);
 
-        if let Some(old_val) = rc_old {
-            self.emit_rc_dec_for_type(old_val, field_type_id)?;
+        if let Some(old_val) = old_field {
+            if needs_unknown_cleanup {
+                // Unknown fields are heap-allocated TaggedValues. Call
+                // unknown_heap_cleanup to conditionally rc_dec the payload
+                // and free the 16-byte buffer.
+                self.call_runtime_void(RuntimeKey::UnknownHeapCleanup, &[old_val])?;
+            } else {
+                self.emit_rc_dec_for_type(old_val, field_type_id)?;
+            }
         }
 
         // The assignment consumed the temp — ownership transfers
