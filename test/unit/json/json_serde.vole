@@ -374,6 +374,119 @@ tests "JSON round-trip serialization" {
     }
 }
 
+// --- Integration: parse JSON string -> deserialize -> modify -> serialize ---
+
+tests "JSON parse-deserialize-modify-serialize pipeline" {
+    test "parse JSON string then deserialize to Person" {
+        let json_str = "{{\"name\":\"Alice\",\"age\":30}}"
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        assert(parsed.is_object())
+        let person = JSON.from_object(Person.@meta, parsed.as_object())
+        assert(person is Person)
+        if person is Person {
+            assert(person.name == "Alice")
+            assert(person.age == 30)
+        }
+    }
+
+    test "parse then modify and re-serialize Person" {
+        let json_str = "{{\"name\":\"Bob\",\"age\":25}}"
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let person = JSON.from_object(Person.@meta, parsed.as_object())
+        assert(person is Person)
+        if person is Person {
+            // Modify by creating a new person with updated age
+            let updated = Person { name: person.name, age: 26 }
+            let box: unknown = updated
+            let obj = JSON.to_object(Person.@meta, box)
+            let result = JSON.stringify(obj)
+            assert(result.contains("\"name\":\"Bob\""))
+            assert(result.contains("26"))
+        }
+    }
+
+    test "parse then deserialize Config and re-serialize" {
+        let json_str = "{{\"host\":\"localhost\",\"port\":8080,\"debug\":false}}"
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let config = JSON.from_object(Config.@meta, parsed.as_object())
+        assert(config is Config)
+        if config is Config {
+            assert(config.host == "localhost")
+            assert(config.port == 8080)
+            assert(config.debug == false)
+            // Re-serialize with modification
+            let updated = Config { host: config.host, port: 9090, debug: true }
+            let box: unknown = updated
+            let obj = JSON.to_object(Config.@meta, box)
+            let result = JSON.stringify(obj)
+            assert(result.contains("\"host\":\"localhost\""))
+            assert(result.contains("9090"))
+            assert(result.contains("true"))
+        }
+    }
+
+    test "full pipeline: parse -> deserialize -> modify -> serialize -> parse again" {
+        // Step 1: Parse original JSON
+        let original_json = "{{\"label\":\"temperature\",\"value\":20.5}}"
+        let r1 = JSON.parse(original_json)
+        assert(r1.ok)
+
+        // Step 2: Deserialize to FloatData
+        let data = JSON.from_object(FloatData.@meta, r1.as_object())
+        assert(data is FloatData)
+        if data is FloatData {
+            assert(data.label == "temperature")
+            assert(data.value == 20.5)
+
+            // Step 3: Modify
+            let updated = FloatData { label: data.label, value: 22.0 }
+
+            // Step 4: Serialize back
+            let box: unknown = updated
+            let obj = JSON.to_object(FloatData.@meta, box)
+            let updated_json = JSON.stringify(obj)
+
+            // Step 5: Parse again and verify
+            let r2 = JSON.parse(updated_json)
+            assert(r2.ok)
+            let final_data = JSON.from_object(FloatData.@meta, r2.as_object())
+            assert(final_data is FloatData)
+            if final_data is FloatData {
+                assert(final_data.label == "temperature")
+                assert(final_data.value == 22.0)
+            }
+        }
+    }
+
+    test "parse JSON with extra fields ignores unknown fields" {
+        // JSON has more fields than Person struct; unknown fields should be ignored
+        let json_str = "{{\"name\":\"Carol\",\"age\":40,\"email\":\"carol@example.com\"}}"
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let person = JSON.from_object(Person.@meta, parsed.as_object())
+        assert(person is Person)
+        if person is Person {
+            assert(person.name == "Carol")
+            assert(person.age == 40)
+        }
+    }
+
+    test "parse JSON with missing fields uses defaults" {
+        let json_str = "{{\"name\":\"Dave\"}}"
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let person = JSON.from_object(Person.@meta, parsed.as_object())
+        assert(person is Person)
+        if person is Person {
+            assert(person.name == "Dave")
+            assert(person.age == 0)
+        }
+    }
+}
+
 // --- Typed accessor tests ---
 
 tests "JsonObject typed accessors" {

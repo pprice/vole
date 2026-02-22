@@ -1,0 +1,247 @@
+// Memory leak tests for JSON stdlib types.
+//
+// JsonObject, JsonArray, JsonError are heap-allocated and reference-counted.
+// These tests exercise creation, mutation, nesting, stringifying, and
+// reassignment to verify RC inc/dec correctness when JSON values go out
+// of scope.
+//
+// Note: JSON.parse / JsonParseResult tests are excluded here because
+// JsonParseResult allocates placeholder JsonObject/JsonArray for every
+// unused slot, causing known leaks (tracked separately).
+let { JsonObject, JsonArray, JsonError, JSON } = import "std:json"
+
+tests "JsonObject RC" {
+    test "create empty object and scope exit" {
+        let obj = JsonObject.new()
+        assert(obj.len() == 0)
+    }
+
+    test "object with string values scope exit" {
+        let obj = JsonObject.new()
+        obj.set("name", "Alice")
+        obj.set("city", "Wonderland")
+        assert(obj.len() == 2)
+    }
+
+    test "object with mixed value types scope exit" {
+        let obj = JsonObject.new()
+        obj.set("str", "hello")
+        obj.set("num", 42.0)
+        obj.set("flag", true)
+        obj.set("nothing", nil)
+        assert(obj.len() == 4)
+    }
+
+    test "object get returns value without leak" {
+        let obj = JsonObject.new()
+        obj.set("key", "value")
+        let v = obj.get("key")
+        if v is string {
+            assert(v == "value")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "object overwrite key releases old value" {
+        let obj = JsonObject.new()
+        obj.set("key", "first")
+        obj.set("key", "second")
+        let v = obj.get("key")
+        if v is string {
+            assert(v == "second")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "object remove releases value" {
+        let obj = JsonObject.new()
+        obj.set("key", "value")
+        let removed = obj.remove("key")
+        if removed is string {
+            assert(removed == "value")
+        } else {
+            assert(false)
+        }
+        assert(obj.len() == 0)
+    }
+
+    test "object reassignment releases old object" {
+        var obj = JsonObject.new()
+        obj.set("a", "alpha")
+        obj.set("b", "beta")
+        obj = JsonObject.new()
+        assert(obj.len() == 0)
+    }
+
+    test "object keys iterator scope exit" {
+        let obj = JsonObject.new()
+        obj.set("x", 1.0)
+        obj.set("y", 2.0)
+        let count = obj.keys().count()
+        assert(count == 2)
+    }
+
+    test "object copy and scope exit" {
+        let a = JsonObject.new()
+        a.set("key", "val")
+        let b = a
+        assert(b.len() == 1)
+    }
+}
+
+tests "JsonObject nested RC" {
+    test "nested object in object scope exit" {
+        let inner = JsonObject.new()
+        inner.set("x", 10.0)
+        let outer = JsonObject.new()
+        outer.set("inner", inner)
+        assert(outer.len() == 1)
+    }
+
+    test "nested array in object scope exit" {
+        let arr = JsonArray.new()
+        arr.push("hello")
+        arr.push("world")
+        let obj = JsonObject.new()
+        obj.set("items", arr)
+        assert(obj.len() == 1)
+    }
+
+    test "deeply nested objects scope exit" {
+        let l3 = JsonObject.new()
+        l3.set("value", "deep")
+        let l2 = JsonObject.new()
+        l2.set("child", l3)
+        let l1 = JsonObject.new()
+        l1.set("child", l2)
+        let got = l1.get("child")
+        if got is JsonObject {
+            let got2 = got.get("child")
+            if got2 is JsonObject {
+                let v = got2.get("value")
+                if v is string {
+                    assert(v == "deep")
+                } else {
+                    assert(false)
+                }
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+}
+
+tests "JsonArray RC" {
+    test "create empty array and scope exit" {
+        let arr = JsonArray.new()
+        assert(arr.length() == 0)
+    }
+
+    test "array with string elements scope exit" {
+        let arr = JsonArray.new()
+        arr.push("hello")
+        arr.push("world")
+        assert(arr.length() == 2)
+    }
+
+    test "array with mixed types scope exit" {
+        let arr = JsonArray.new()
+        arr.push("text")
+        arr.push(42.0)
+        arr.push(true)
+        arr.push(nil)
+        assert(arr.length() == 4)
+    }
+
+    test "array get returns value without leak" {
+        let arr = JsonArray.new()
+        arr.push("hello")
+        let v = arr.get(0)
+        if v is string {
+            assert(v == "hello")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "array reassignment releases old array" {
+        var arr = JsonArray.new()
+        arr.push("old")
+        arr = JsonArray.new()
+        arr.push("new")
+        assert(arr.length() == 1)
+    }
+
+    test "array copy and scope exit" {
+        let a = JsonArray.new()
+        a.push("item")
+        let b = a
+        assert(b.length() == 1)
+    }
+
+    test "nested array in array scope exit" {
+        let inner = JsonArray.new()
+        inner.push(1.0)
+        inner.push(2.0)
+        let outer = JsonArray.new()
+        outer.push(inner)
+        assert(outer.length() == 1)
+    }
+
+    test "nested object in array scope exit" {
+        let obj = JsonObject.new()
+        obj.set("key", "value")
+        let arr = JsonArray.new()
+        arr.push(obj)
+        assert(arr.length() == 1)
+    }
+}
+
+tests "JsonError RC" {
+    test "create error and scope exit" {
+        let err = JsonError.new("bad input", 5)
+        assert(err.message == "bad input")
+        assert(err.position == 5)
+    }
+
+    test "error to_string and scope exit" {
+        let err = JsonError.new("parse fail", 10)
+        let s = err.to_string()
+        assert(s.contains("parse fail"))
+    }
+
+    test "error reassignment releases old" {
+        var err = JsonError.new("first", 0)
+        err = JsonError.new("second", 1)
+        assert(err.message == "second")
+    }
+}
+
+tests "JSON.stringify RC" {
+    test "stringify object and scope exit" {
+        let obj = JsonObject.new()
+        obj.set("key", "value")
+        let s = JSON.stringify(obj)
+        assert(s.contains("key"))
+    }
+
+    test "stringify array and scope exit" {
+        let arr = JsonArray.new()
+        arr.push(1.0)
+        arr.push(2.0)
+        let s = JSON.stringify(arr)
+        assert(s == "[1,2]")
+    }
+
+    test "stringify_pretty and scope exit" {
+        let obj = JsonObject.new()
+        obj.set("name", "test")
+        let s = JSON.stringify_pretty(obj)
+        assert(s.contains("name"))
+    }
+}
+
