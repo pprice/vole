@@ -157,6 +157,7 @@ pub struct TestsDecl {
     /// Scoped declarations (func, let, class, etc.) and nested tests blocks
     pub decls: Vec<Decl>,
     pub tests: Vec<TestCase>,
+    pub annotations: Vec<Annotation>,
     pub span: Span,
 }
 
@@ -165,6 +166,7 @@ pub struct TestsDecl {
 pub struct TestCase {
     pub name: String,
     pub body: FuncBody,
+    pub annotations: Vec<Annotation>,
     pub span: Span,
 }
 
@@ -174,6 +176,7 @@ pub struct Param {
     pub name: Symbol,
     pub ty: TypeExpr,
     pub default_value: Option<Box<Expr>>,
+    pub annotations: Vec<Annotation>,
     pub span: Span,
 }
 
@@ -183,6 +186,7 @@ pub struct FieldDef {
     pub name: Symbol,
     pub ty: TypeExpr,
     pub default_value: Option<Box<Expr>>,
+    pub annotations: Vec<Annotation>,
     pub span: Span,
 }
 
@@ -246,6 +250,7 @@ pub struct ImplementBlock {
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
     pub statics: Option<StaticsBlock>, // Static methods
+    pub annotations: Vec<Annotation>,
     pub span: Span,
     /// True when the block was written as `extend Type { }` (no interface).
     /// These methods are file-scoped: only visible within the defining module.

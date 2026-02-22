@@ -8,7 +8,7 @@
 use super::Analyzer;
 use crate::errors::SemanticError;
 use vole_frontend::Interner;
-use vole_frontend::ast::{Annotation, Decl, Program, TypeParam};
+use vole_frontend::ast::{Annotation, Decl, FieldDef, FuncDecl, Program, TestsDecl, TypeParam};
 
 impl Analyzer {
     /// Pass 1.5: Process annotations on all declarations.
@@ -43,18 +43,81 @@ impl Analyzer {
         }
 
         // Second pass: validate all annotations reference annotation types.
+        // Visits annotations on declarations and their nested items (fields, params, etc.).
         for decl in &program.declarations {
-            let annotations = match decl {
-                Decl::Struct(s) => &s.annotations,
-                Decl::Class(c) => &c.annotations,
-                Decl::Interface(i) => &i.annotations,
-                Decl::Function(f) => &f.annotations,
-                _ => continue,
-            };
+            self.validate_decl_annotations(decl, interner);
+        }
+    }
 
-            for ann in annotations {
-                self.validate_annotation(ann, interner);
+    /// Validate annotations on a declaration and all its nested annotatable items.
+    fn validate_decl_annotations(&mut self, decl: &Decl, interner: &Interner) {
+        match decl {
+            Decl::Struct(s) => {
+                self.validate_annotations(&s.annotations, interner);
+                self.validate_field_annotations(&s.fields, interner);
+                self.validate_method_annotations(&s.methods, interner);
             }
+            Decl::Class(c) => {
+                self.validate_annotations(&c.annotations, interner);
+                self.validate_field_annotations(&c.fields, interner);
+                self.validate_method_annotations(&c.methods, interner);
+            }
+            Decl::Interface(i) => {
+                self.validate_annotations(&i.annotations, interner);
+                self.validate_field_annotations(&i.fields, interner);
+            }
+            Decl::Function(f) => {
+                self.validate_annotations(&f.annotations, interner);
+                self.validate_param_annotations(f, interner);
+            }
+            Decl::Implement(i) => {
+                self.validate_annotations(&i.annotations, interner);
+                self.validate_method_annotations(&i.methods, interner);
+            }
+            Decl::Tests(t) => {
+                self.validate_tests_annotations(t, interner);
+            }
+            _ => {}
+        }
+    }
+
+    /// Validate annotations on a tests block and its nested test cases and declarations.
+    fn validate_tests_annotations(&mut self, tests: &TestsDecl, interner: &Interner) {
+        self.validate_annotations(&tests.annotations, interner);
+        for test in &tests.tests {
+            self.validate_annotations(&test.annotations, interner);
+        }
+        for decl in &tests.decls {
+            self.validate_decl_annotations(decl, interner);
+        }
+    }
+
+    /// Validate annotations on field definitions.
+    fn validate_field_annotations(&mut self, fields: &[FieldDef], interner: &Interner) {
+        for field in fields {
+            self.validate_annotations(&field.annotations, interner);
+        }
+    }
+
+    /// Validate annotations on methods and their parameters.
+    fn validate_method_annotations(&mut self, methods: &[FuncDecl], interner: &Interner) {
+        for method in methods {
+            self.validate_annotations(&method.annotations, interner);
+            self.validate_param_annotations(method, interner);
+        }
+    }
+
+    /// Validate annotations on function parameters.
+    fn validate_param_annotations(&mut self, func: &FuncDecl, interner: &Interner) {
+        for param in &func.params {
+            self.validate_annotations(&param.annotations, interner);
+        }
+    }
+
+    /// Validate a slice of annotations.
+    fn validate_annotations(&mut self, annotations: &[Annotation], interner: &Interner) {
+        for ann in annotations {
+            self.validate_annotation(ann, interner);
         }
     }
 

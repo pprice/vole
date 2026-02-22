@@ -157,6 +157,7 @@ impl<'a> AstPrinter<'a> {
     }
 
     fn write_tests_decl(&self, out: &mut String, tests: &TestsDecl) {
+        self.write_annotations(out, &tests.annotations);
         self.write_indent(out);
         if let Some(label) = &tests.label {
             wln!(out, "Tests \"{}\"", label);
@@ -402,6 +403,7 @@ impl<'a> AstPrinter<'a> {
     }
 
     fn write_implement_decl(&self, out: &mut String, impl_block: &ImplementBlock) {
+        self.write_annotations(out, &impl_block.annotations);
         self.write_indent(out);
         if let Some(ref trait_type) = impl_block.trait_type {
             out.push_str("Implement ");
@@ -467,6 +469,7 @@ impl<'a> AstPrinter<'a> {
     }
 
     fn write_test_case(&self, out: &mut String, test: &TestCase) {
+        self.write_annotations(out, &test.annotations);
         self.write_indent(out);
         wln!(out, "Test \"{}\"", test.name);
         match &test.body {

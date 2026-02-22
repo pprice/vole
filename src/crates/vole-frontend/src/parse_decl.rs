@@ -185,7 +185,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse annotation list: zero or more @Name or @Name(args) before a declaration.
-    fn parse_annotations(&mut self) -> Result<Vec<Annotation>, ParseError> {
+    pub(super) fn parse_annotations(&mut self) -> Result<Vec<Annotation>, ParseError> {
         let mut annotations = Vec::new();
         while self.check(TokenType::At) {
             let start_span = self.current.span;
@@ -245,6 +245,9 @@ impl<'src> Parser<'src> {
             TokenType::KwClass => self.class_decl_with_annotations(annotations),
             TokenType::KwStruct => self.struct_decl_with_annotations(annotations),
             TokenType::KwInterface => self.interface_decl_with_annotations(false, annotations),
+            TokenType::KwTests => self.tests_decl_with_annotations(annotations),
+            TokenType::KwImplement => self.implement_block_with_annotations(annotations),
+            TokenType::KwExtend => self.parse_extend_block_with_annotations(annotations),
             _ => {
                 let span = annotations
                     .first()
@@ -253,7 +256,7 @@ impl<'src> Parser<'src> {
                 Err(ParseError::new(
                     ParserError::UnexpectedToken {
                         token: format!(
-                            "annotations can only be applied to func, class, struct, or interface declarations, found {}",
+                            "annotations can only be applied to declarations, found {}",
                             self.current.ty.as_str()
                         ),
                         span: span.into(),
@@ -267,15 +270,15 @@ impl<'src> Parser<'src> {
     fn unannotated_declaration(&mut self) -> Result<Decl, ParseError> {
         match self.current.ty {
             TokenType::KwFunc => self.function_decl_with_annotations(Vec::new()),
-            TokenType::KwTests => self.tests_decl(),
+            TokenType::KwTests => self.tests_decl_with_annotations(Vec::new()),
             TokenType::KwLet => self.let_decl(),
             TokenType::KwVar => self.var_decl(),
             TokenType::KwClass => self.class_decl_with_annotations(Vec::new()),
             TokenType::KwStruct => self.struct_decl_with_annotations(Vec::new()),
             TokenType::KwInterface => self.interface_decl_with_annotations(false, Vec::new()),
             TokenType::KwStatic => self.static_interface_decl(),
-            TokenType::KwImplement => self.implement_block(),
-            TokenType::KwExtend => self.parse_extend_block(),
+            TokenType::KwImplement => self.implement_block_with_annotations(Vec::new()),
+            TokenType::KwExtend => self.parse_extend_block_with_annotations(Vec::new()),
             TokenType::KwError => self.error_decl(),
             TokenType::KwSentinel => self.sentinel_decl(),
             TokenType::KwExternal => {
@@ -440,8 +443,14 @@ impl<'src> Parser<'src> {
         }))
     }
 
-    fn tests_decl(&mut self) -> Result<Decl, ParseError> {
-        let start_span = self.current.span;
+    fn tests_decl_with_annotations(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> Result<Decl, ParseError> {
+        let start_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         self.advance(); // consume 'tests'
 
         // Parse optional label
@@ -478,6 +487,7 @@ impl<'src> Parser<'src> {
                 label,
                 decls: Vec::new(),
                 tests: Vec::new(),
+                annotations,
                 span,
             }));
         }
@@ -489,7 +499,15 @@ impl<'src> Parser<'src> {
         let mut tests = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             if self.check(TokenType::KwTest) {
-                tests.push(self.test_case()?);
+                tests.push(self.test_case_with_annotations(Vec::new())?);
+            } else if self.check(TokenType::At) {
+                // Parse annotations, then dispatch to test case or nested declaration
+                let inner_annotations = self.parse_annotations()?;
+                if self.check(TokenType::KwTest) {
+                    tests.push(self.test_case_with_annotations(inner_annotations)?);
+                } else {
+                    decls.push(self.annotated_declaration(inner_annotations)?);
+                }
             } else {
                 decls.push(self.declaration()?);
             }
@@ -503,6 +521,7 @@ impl<'src> Parser<'src> {
             label,
             decls,
             tests,
+            annotations,
             span,
         }))
     }
@@ -649,8 +668,31 @@ impl<'src> Parser<'src> {
                 if let Decl::Function(func) = self.function_decl()? {
                     methods.push(func);
                 }
+            } else if self.check(TokenType::At) {
+                // Parse annotations, then dispatch to field or method
+                let annotations = self.parse_annotations()?;
+                if self.check(TokenType::KwFunc) {
+                    let decl = self.function_decl_with_annotations(annotations)?;
+                    if let Decl::Function(func) = decl {
+                        methods.push(func);
+                    }
+                } else if self.check(TokenType::Identifier) {
+                    fields.push(self.parse_field_def_with_annotations(annotations)?);
+                } else {
+                    let span = annotations
+                        .first()
+                        .map(|a| a.span)
+                        .unwrap_or(self.current.span);
+                    return Err(ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: self.current.ty.as_str().to_string(),
+                            span: span.into(),
+                        },
+                        span,
+                    ));
+                }
             } else if self.check(TokenType::Identifier) {
-                fields.push(self.parse_field_def()?);
+                fields.push(self.parse_field_def_with_annotations(Vec::new())?);
             } else {
                 return Err(ParseError::new(
                     ParserError::UnexpectedToken {
@@ -690,7 +732,7 @@ impl<'src> Parser<'src> {
 
         let mut fields = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            fields.push(self.parse_field_def()?);
+            fields.push(self.parse_field_def_with_annotations(Vec::new())?);
             self.skip_newlines();
         }
 
@@ -872,6 +914,21 @@ impl<'src> Parser<'src> {
                     },
                     self.current.span,
                 ));
+            } else if self.check(TokenType::At) && !is_default {
+                // Parse annotations, then dispatch to field or method
+                let ann = self.parse_annotations()?;
+                if self.check(TokenType::Identifier) && !is_static {
+                    fields.push(self.parse_field_def_with_annotations(ann)?);
+                } else {
+                    let span = ann.first().map(|a| a.span).unwrap_or(self.current.span);
+                    return Err(ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: self.current.ty.as_str().to_string(),
+                            span: span.into(),
+                        },
+                        span,
+                    ));
+                }
             } else if self.check(TokenType::Identifier) {
                 if is_static {
                     // Static interfaces cannot have fields
@@ -883,7 +940,7 @@ impl<'src> Parser<'src> {
                         self.current.span,
                     ));
                 }
-                fields.push(self.parse_field_def()?);
+                fields.push(self.parse_field_def_with_annotations(Vec::new())?);
             } else {
                 return Err(ParseError::new(
                     ParserError::UnexpectedToken {
@@ -989,8 +1046,14 @@ impl<'src> Parser<'src> {
     ///
     /// Note the argument order compared to the old `implement Interface for Type`:
     /// the **Type comes first**, the interface comes after `with`.
-    fn parse_extend_block(&mut self) -> Result<Decl, ParseError> {
-        let start_span = self.current.span;
+    fn parse_extend_block_with_annotations(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> Result<Decl, ParseError> {
+        let start_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         self.advance(); // consume 'extend'
 
         // Parse the target type (always first in `extend`)
@@ -1030,6 +1093,7 @@ impl<'src> Parser<'src> {
             external: body.external,
             methods: body.methods,
             statics: body.statics,
+            annotations,
             span,
             is_file_scoped,
         }))
@@ -1080,8 +1144,14 @@ impl<'src> Parser<'src> {
     ///
     /// The `implement Interface for Type` form is now a parse error;
     /// use `extend Type with Interface { }` instead.
-    fn implement_block(&mut self) -> Result<Decl, ParseError> {
-        let start_span = self.current.span;
+    fn implement_block_with_annotations(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> Result<Decl, ParseError> {
+        let start_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         self.advance(); // consume 'implement'
 
         // Parse: Trait for Type  OR  just Type
@@ -1129,6 +1199,7 @@ impl<'src> Parser<'src> {
             external: body.external,
             methods: body.methods,
             statics: body.statics,
+            annotations,
             span,
             is_file_scoped: false, // `implement Type { }` is always global
         }))
@@ -1208,8 +1279,14 @@ impl<'src> Parser<'src> {
 
     /// Parse a single field definition: `name: Type` or `name: Type = default_expr`
     /// Consumes an optional trailing comma. Used by class, struct, interface, and error declarations.
-    fn parse_field_def(&mut self) -> Result<FieldDef, ParseError> {
-        let field_span = self.current.span;
+    fn parse_field_def_with_annotations(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> Result<FieldDef, ParseError> {
+        let field_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected field name")?;
         let name = self.interner.intern(&name_token.lexeme);
@@ -1233,6 +1310,7 @@ impl<'src> Parser<'src> {
             name,
             ty,
             default_value,
+            annotations,
             span: field_span.merge(self.previous.span),
         })
     }
@@ -1269,8 +1347,28 @@ impl<'src> Parser<'src> {
                 if let Decl::Function(func) = self.function_decl()? {
                     methods.push(func);
                 }
+            } else if self.check(TokenType::At) {
+                // Parse annotations, then dispatch to field or method
+                let ann = self.parse_annotations()?;
+                if self.check(TokenType::KwFunc) {
+                    let decl = self.function_decl_with_annotations(ann)?;
+                    if let Decl::Function(func) = decl {
+                        methods.push(func);
+                    }
+                } else if self.check(TokenType::Identifier) {
+                    fields.push(self.parse_field_def_with_annotations(ann)?);
+                } else {
+                    let span = ann.first().map(|a| a.span).unwrap_or(self.current.span);
+                    return Err(ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: self.current.ty.as_str().to_string(),
+                            span: span.into(),
+                        },
+                        span,
+                    ));
+                }
             } else if self.check(TokenType::Identifier) {
-                fields.push(self.parse_field_def()?);
+                fields.push(self.parse_field_def_with_annotations(Vec::new())?);
             } else {
                 return Err(ParseError::new(
                     ParserError::UnexpectedToken {
@@ -1291,8 +1389,14 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn test_case(&mut self) -> Result<TestCase, ParseError> {
-        let start_span = self.current.span;
+    fn test_case_with_annotations(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> Result<TestCase, ParseError> {
+        let start_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         self.consume(TokenType::KwTest, "expected 'test'")?;
 
         // Get test name (string literal)
@@ -1321,6 +1425,7 @@ impl<'src> Parser<'src> {
             return Ok(TestCase {
                 name,
                 body: FuncBody::Expr(Box::new(expr)),
+                annotations,
                 span,
             });
         } else {
@@ -1331,7 +1436,12 @@ impl<'src> Parser<'src> {
 
         let span = start_span.merge(self.previous.span);
 
-        Ok(TestCase { name, body, span })
+        Ok(TestCase {
+            name,
+            body,
+            annotations,
+            span,
+        })
     }
 
     /// Parse statics block: statics { methods, external blocks }

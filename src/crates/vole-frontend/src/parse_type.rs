@@ -11,6 +11,17 @@ use crate::errors::ParserError;
 impl<'src> Parser<'src> {
     /// Parse a function parameter (name: Type)
     pub(super) fn parse_param(&mut self) -> Result<Param, ParseError> {
+        // Parse optional annotations before the parameter
+        let annotations = if self.check(TokenType::At) {
+            self.parse_annotations()?
+        } else {
+            Vec::new()
+        };
+
+        let param_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected parameter name")?;
         let name = self.interner.intern(&name_token.lexeme);
@@ -39,7 +50,8 @@ impl<'src> Parser<'src> {
             name,
             ty,
             default_value,
-            span: name_token.span,
+            annotations,
+            span: param_span,
         })
     }
 
