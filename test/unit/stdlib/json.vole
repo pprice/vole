@@ -1,5 +1,5 @@
-// Tests for stdlib/json.vole - JsonObject and JsonArray types
-let { JsonObject, JsonArray } = import "std:json"
+// Tests for stdlib/json.vole - JsonObject, JsonArray, and JsonError types
+let { JsonObject, JsonArray, JsonError } = import "std:json"
 
 tests "JsonObject construction" {
     test "new creates empty object" {
@@ -630,5 +630,56 @@ tests "JsonObject edge cases" {
             }
             j = j + 1.0
         }
+    }
+}
+
+tests "JsonError construction" {
+    test "new creates error with message and position" {
+        let err = JsonError.new("unexpected token", 42)
+        assert(err.message == "unexpected token")
+        assert(err.position == 42)
+    }
+
+    test "new with zero position" {
+        let err = JsonError.new("unexpected end of input", 0)
+        assert(err.message == "unexpected end of input")
+        assert(err.position == 0)
+    }
+
+    test "new with large position" {
+        let err = JsonError.new("invalid escape sequence", 10000)
+        assert(err.message == "invalid escape sequence")
+        assert(err.position == 10000)
+    }
+
+    test "new with empty message" {
+        let err = JsonError.new("", 5)
+        assert(err.message == "")
+        assert(err.position == 5)
+    }
+}
+
+tests "JsonError to_string" {
+    test "to_string formats message and position" {
+        let err = JsonError.new("unexpected token", 42)
+        assert(err.to_string() == "JsonError at position 42: unexpected token")
+    }
+
+    test "to_string at position zero" {
+        let err = JsonError.new("unexpected end of input", 0)
+        assert(err.to_string() == "JsonError at position 0: unexpected end of input")
+    }
+
+    test "to_string with empty message" {
+        let err = JsonError.new("", 10)
+        assert(err.to_string() == "JsonError at position 10: ")
+    }
+}
+
+tests "JsonError as Stringable" {
+    test "JsonError accepted as Stringable" {
+        let err = JsonError.new("bad value", 7)
+        let s: Stringable = err
+        assert(s.to_string() == "JsonError at position 7: bad value")
     }
 }

@@ -2,7 +2,7 @@
 //
 // JSON types - pure Vole types for representing JSON data.
 //
-// Usage: let { JsonObject, JsonArray } = import "std:json"
+// Usage: let { JsonObject, JsonArray, JsonError } = import "std:json"
 //
 // Json is a type alias (not exported) for the full union:
 //   string | f64 | bool | nil | JsonObject | JsonArray
@@ -85,6 +85,30 @@ class JsonObject {
             return nil
         }
         return result
+    }
+}
+
+// JsonError - represents a JSON parse failure.
+//
+// Contains a human-readable message and the byte position where the error occurred.
+class JsonError {
+    message: string,
+    position: i64,
+
+    statics {
+        // Create a new JsonError with the given message and byte position.
+        func new(message: string, position: i64) -> JsonError {
+            return JsonError {
+                message: message,
+                position: position,
+            }
+        }
+    }
+}
+
+extend JsonError with Stringable {
+    func to_string() -> string {
+        return "JsonError at position {self.position}: {self.message}"
     }
 }
 
