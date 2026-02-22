@@ -253,13 +253,13 @@ pub enum MetaAccessKind {
     /// The reflected type is only known at runtime (e.g. `val.@meta`
     /// where `val: SomeInterface`).
     Dynamic,
-    /// The reflected type is a generic type parameter (e.g. `T.@meta`
-    /// inside a generic function). Resolution is deferred until
-    /// monomorphization substitutes T with a concrete type — sema
-    /// re-analysis then reclassifies it as `Static`.
+    /// The reflected type is a generic type parameter (e.g. `val.@meta`
+    /// where `val: T` inside a generic class method). Set during initial
+    /// sema analysis of generic class/struct method bodies.
     ///
-    /// Codegen should never encounter this variant because generic
-    /// templates are not compiled directly.
+    /// Codegen resolves this at monomorphization time by looking up the
+    /// concrete type from `FunctionCtx.substitutions` and dispatching to
+    /// `compile_static_meta` or `compile_dynamic_meta`.
     TypeParam { name_id: NameId },
 }
 

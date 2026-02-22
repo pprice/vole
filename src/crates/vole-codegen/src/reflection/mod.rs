@@ -22,7 +22,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 use rustc_hash::FxHashMap;
 use vole_frontend::ast::MetaAccessExpr;
-use vole_identity::TypeDefId;
+use vole_identity::{NameId, TypeDefId};
 use vole_sema::node_map::MetaAccessKind;
 use vole_sema::type_arena::TypeId;
 
@@ -55,10 +55,61 @@ pub fn compile_meta_access(
             compile_static_meta(cg, type_def_id, expr_node_id)
         }
         MetaAccessKind::Dynamic => compile_dynamic_meta(cg, meta_access, expr_node_id),
-        MetaAccessKind::TypeParam { .. } => Err(CodegenError::unsupported(
-            "@meta on unresolved type parameter — generic template should not reach codegen",
-        )),
+        MetaAccessKind::TypeParam { name_id } => {
+            resolve_type_param_meta(cg, name_id, meta_access, expr_node_id)
+        }
     }
+}
+
+/// Resolve a `TypeParam` meta access by looking up the concrete type from
+/// the current monomorphization substitutions.
+///
+/// When codegen compiles a monomorphized generic function (e.g., `get_meta<Point>`),
+/// sema's original annotation for `T.@meta` is `TypeParam { name_id }` because
+/// sema's monomorph re-analysis cannot reclassify it (the identifier `T` isn't
+/// resolvable as a type name or variable during re-analysis). Codegen resolves it
+/// here using the substitution map carried in `FunctionCtx`.
+///
+/// Dispatches to:
+/// - `compile_static_meta` if the concrete type is a nominal (class/struct)
+/// - `compile_dynamic_meta` if the concrete type is an interface
+fn resolve_type_param_meta(
+    cg: &mut Cg,
+    name_id: NameId,
+    meta_access: &MetaAccessExpr,
+    expr_node_id: vole_frontend::NodeId,
+) -> CodegenResult<CompiledValue> {
+    let substitutions = cg.substitutions.ok_or_else(|| {
+        CodegenError::unsupported("T.@meta requires concrete type (not in a monomorphized context)")
+    })?;
+
+    let concrete_type_id = substitutions.get(&name_id).copied().ok_or_else(|| {
+        let param_name = cg
+            .query()
+            .last_segment(name_id)
+            .unwrap_or_else(|| "?".to_string());
+        CodegenError::unsupported_with_context(
+            "T.@meta: no substitution for type parameter",
+            param_name,
+        )
+    })?;
+
+    // Interface types require dynamic dispatch via vtable.
+    if cg.arena().is_interface(concrete_type_id) {
+        return compile_dynamic_meta(cg, meta_access, expr_node_id);
+    }
+
+    // Concrete nominal types (class/struct) are resolved statically.
+    if let Some((type_def_id, _, _)) = cg.arena().unwrap_nominal(concrete_type_id) {
+        return compile_static_meta(cg, type_def_id, expr_node_id);
+    }
+
+    // Unsupported concrete type (primitive, array, function, etc.)
+    let display = cg.arena().display_basic(concrete_type_id);
+    Err(CodegenError::unsupported_with_context(
+        "T.@meta: concrete type does not support reflection",
+        display,
+    ))
 }
 
 /// Build a TypeMeta instance for a statically-known type.

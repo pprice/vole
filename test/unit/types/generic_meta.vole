@@ -1,0 +1,99 @@
+// Unit tests for T.@meta in generic contexts
+//
+// Tests that .@meta works correctly on values whose type is a type parameter,
+// resolved at monomorphization time via codegen substitutions.
+
+class Item {
+    name: string,
+    count: i64,
+}
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+// --- Generic class with T.@meta via instance method ---
+class Wrapper<T> {
+    value: T,
+
+    func value_meta() -> TypeMeta {
+        return self.value.@meta
+    }
+
+    func value_meta_name() -> string {
+        return self.value.@meta.name
+    }
+}
+
+// --- Generic class with T.@meta returning field count ---
+class Inspector<T> {
+    item: T,
+
+    func field_count() -> i64 {
+        return self.item.@meta.fields.length()
+    }
+
+    func type_name() -> string {
+        return self.item.@meta.name
+    }
+}
+
+tests "generic class value.@meta" {
+    test "wrapper class meta name" {
+        let w = Wrapper { value: Item { name: "test", count: 1 } }
+        assert(w.value_meta_name() == "Item")
+    }
+
+    test "wrapper struct meta name" {
+        let w = Wrapper { value: Point { x: 1, y: 2 } }
+        assert(w.value_meta_name() == "Point")
+    }
+
+    test "wrapper class meta object" {
+        let w = Wrapper { value: Item { name: "test", count: 1 } }
+        let meta = w.value_meta()
+        assert(meta.name == "Item")
+    }
+
+    test "inspector class field count" {
+        let insp = Inspector { item: Item { name: "test", count: 1 } }
+        assert(insp.field_count() == 2)
+    }
+
+    test "inspector struct field count" {
+        let insp = Inspector { item: Point { x: 1, y: 2 } }
+        assert(insp.field_count() == 2)
+    }
+
+    test "inspector class type name" {
+        let insp = Inspector { item: Item { name: "hello", count: 42 } }
+        assert(insp.type_name() == "Item")
+    }
+
+    test "inspector struct type name" {
+        let insp = Inspector { item: Point { x: 0, y: 0 } }
+        assert(insp.type_name() == "Point")
+    }
+
+    test "multiple instantiations same generic" {
+        let w1 = Wrapper { value: Item { name: "a", count: 1 } }
+        let w2 = Wrapper { value: Point { x: 1, y: 2 } }
+        assert(w1.value_meta_name() == "Item")
+        assert(w2.value_meta_name() == "Point")
+    }
+}
+
+tests "generic meta field access" {
+    test "wrapper meta fields" {
+        let w = Wrapper { value: Item { name: "test", count: 1 } }
+        let meta = w.value_meta()
+        assert(meta.fields.length() == 2)
+    }
+
+    test "wrapper struct meta fields" {
+        let w = Wrapper { value: Point { x: 1, y: 2 } }
+        let meta = w.value_meta()
+        assert(meta.fields.length() == 2)
+    }
+}
