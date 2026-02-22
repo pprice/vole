@@ -1,0 +1,3 @@
+// Error: annotation types cannot be generic
+@annotation
+struct validator<T> { value: T }

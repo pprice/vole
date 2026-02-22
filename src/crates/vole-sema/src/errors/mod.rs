@@ -837,6 +837,19 @@ pub enum SemanticError {
         #[label("annotation type not found")]
         span: SourceSpan,
     },
+
+    #[error("annotation type '{name}' cannot be generic")]
+    #[diagnostic(
+        code(E2121),
+        help(
+            "remove the type parameters from '{name}'; annotations are simple metadata, not generic abstractions"
+        )
+    )]
+    GenericAnnotationType {
+        name: String,
+        #[label("generic type cannot be used as an annotation type")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

@@ -8,7 +8,7 @@
 use super::Analyzer;
 use crate::errors::SemanticError;
 use vole_frontend::Interner;
-use vole_frontend::ast::{Annotation, Decl, Program};
+use vole_frontend::ast::{Annotation, Decl, Program, TypeParam};
 
 impl Analyzer {
     /// Pass 1.5: Process annotations on all declarations.
@@ -19,10 +19,10 @@ impl Analyzer {
         // First pass: register annotation types.
         // A type is an annotation type if it has @annotation in its annotations list.
         for decl in &program.declarations {
-            let (name_sym, annotations) = match decl {
-                Decl::Struct(s) => (s.name, &s.annotations),
-                Decl::Class(c) => (c.name, &c.annotations),
-                Decl::Interface(i) => (i.name, &i.annotations),
+            let (name_sym, annotations, type_params) = match decl {
+                Decl::Struct(s) => (s.name, &s.annotations, s.type_params.as_slice()),
+                Decl::Class(c) => (c.name, &c.annotations, c.type_params.as_slice()),
+                Decl::Interface(i) => (i.name, &i.annotations, i.type_params.as_slice()),
                 Decl::Function(_) => continue, // functions can't be annotation types
                 _ => continue,
             };
@@ -31,12 +31,13 @@ impl Analyzer {
                 continue;
             }
 
-            let has_annotation_annotation = annotations.iter().any(|ann| {
+            let annotation_ann = annotations.iter().find(|ann| {
                 let ann_name = interner.resolve(ann.name);
                 ann_name == "annotation"
             });
 
-            if has_annotation_annotation {
+            if let Some(ann) = annotation_ann {
+                self.validate_annotation_type_decl(name_sym, type_params, ann, interner);
                 self.mark_as_annotation_type(name_sym, interner);
             }
         }
@@ -54,6 +55,27 @@ impl Analyzer {
             for ann in annotations {
                 self.validate_annotation(ann, interner);
             }
+        }
+    }
+
+    /// Validate that a type declaration is suitable as an annotation type.
+    /// Annotation types cannot be generic (no type parameters).
+    fn validate_annotation_type_decl(
+        &mut self,
+        name_sym: vole_frontend::Symbol,
+        type_params: &[TypeParam],
+        ann: &Annotation,
+        interner: &Interner,
+    ) {
+        if !type_params.is_empty() {
+            let name = interner.resolve(name_sym).to_string();
+            self.add_error(
+                SemanticError::GenericAnnotationType {
+                    name,
+                    span: ann.span.into(),
+                },
+                ann.span,
+            );
         }
     }
 

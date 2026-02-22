@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E2121]: annotation type 'validator' cannot be generic
+   ╭─[<path>/annotation_generic.vole:2:1]
+ 1 │ // Error: annotation types cannot be generic
+ 2 │ @annotation
+   · ─────┬─────
+   ·      ╰── generic type cannot be used as an annotation type
+ 3 │ struct validator<T> { value: T }
+   ╰────
+  help: remove the type parameters from 'validator'; annotations are simple metadata, not generic abstractions
