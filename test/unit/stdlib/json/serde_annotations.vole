@@ -1,0 +1,834 @@
+// Tests for the end-to-end annotation-driven JSON serde workflow.
+//
+// Demonstrates reading field annotations from .@meta.fields, building
+// renames/ignores maps, then passing them to JSON.to_object_mapped()
+// and JSON.from_object_mapped() for annotation-aware serialization.
+//
+// Annotation types are defined locally because cross-module annotation resolution
+// has a known bug with imported types.
+//
+// Note: annotation type narrowing (`ann is T`) only works within the same
+// lexical scope -- not across function boundaries. Therefore the map-building
+// logic is inlined in each test block.
+//
+// Note: mixing different annotation types (e.g. @json_name and @json_ignore)
+// in a loop over fields triggers an RC lifecycle bug. For types that use both
+// rename and ignore, the combined @json_field annotation is used instead.
+// Types that use only one kind of annotation work fine with the separate types.
+
+let { JSON, JsonObject } = import "std:json"
+let { Map } = import "std:collections/map"
+
+// --- Local annotation types mirroring stdlib json annotations ---
+
+@annotation
+struct json_name {
+    name: string,
+}
+
+@annotation
+struct json_ignore {}
+
+// Combined annotation for types that need both rename and ignore on different
+// fields. Avoids the RC lifecycle bug that occurs when narrowing mixed annotation
+// types in a loop (see stdlib/json.vole for the canonical definition).
+@annotation
+struct json_field {
+    name: string,
+    ignore: bool,
+}
+
+// --- Test types with single annotation kind ---
+
+class UserWithRename {
+    @json_name(name: "user_name")
+    name: string,
+
+    age: i64,
+}
+
+class SessionWithIgnore {
+    token: string,
+
+    @json_ignore
+    internal_secret: string,
+}
+
+class SpecialCharsRename {
+    @json_name(name: "user-name")
+    name: string,
+
+    @json_name(name: "first.name")
+    first: string,
+
+    normal: string,
+}
+
+class AllAnnotated {
+    @json_name(name: "full_name")
+    name: string,
+
+    @json_name(name: "years_old")
+    age: i64,
+}
+
+class AllIgnored {
+    @json_ignore
+    secret1: string,
+
+    @json_ignore
+    secret2: string,
+
+    visible: string,
+}
+
+// --- Test types using combined @json_field for mixed rename/ignore ---
+
+class MixedAnnotations {
+    @json_field(name: "display_name", ignore: false)
+    name: string,
+
+    @json_field(name: "", ignore: true)
+    secret: string,
+
+    age: i64,
+
+    @json_field(name: "is_active", ignore: false)
+    active: bool,
+}
+
+// --- Tests: @json_name -> to_object_mapped uses annotated name ---
+
+tests "annotation-driven @json_name serialization" {
+    test "to_object_mapped uses annotated name from @json_name" {
+        let meta = UserWithRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let user = UserWithRename { name: "Alice", age: 30 }
+        let box: unknown = user
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("user_name"))
+        assert(!obj.contains_key("name"))
+        let v = obj.get("user_name")
+        if v is string {
+            assert(v == "Alice")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "non-annotated fields keep original name" {
+        let meta = UserWithRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let user = UserWithRename { name: "Bob", age: 25 }
+        let box: unknown = user
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("age"))
+        let v = obj.get("age")
+        if v is f64 {
+            assert(v == 25.0)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "stringified JSON uses annotated key name" {
+        let meta = UserWithRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let user = UserWithRename { name: "Carol", age: 42 }
+        let box: unknown = user
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(json_str.contains("\"user_name\":\"Carol\""))
+        assert(json_str.contains("\"age\":42"))
+        assert(!json_str.contains("\"name\""))
+    }
+}
+
+// --- Tests: @json_ignore -> to_object_mapped omits the field ---
+
+tests "annotation-driven @json_ignore serialization" {
+    test "to_object_mapped omits @json_ignore field" {
+        let meta = SessionWithIgnore.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_ignore {
+                    ignores.set(field.name, true)
+                }
+            }
+            i = i + 1
+        }
+
+        let session = SessionWithIgnore { token: "abc123", internal_secret: "s3cret" }
+        let box: unknown = session
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("token"))
+        assert(!obj.contains_key("internal_secret"))
+        assert(obj.len() == 1)
+    }
+
+    test "non-ignored field retains its value" {
+        let meta = SessionWithIgnore.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_ignore {
+                    ignores.set(field.name, true)
+                }
+            }
+            i = i + 1
+        }
+
+        let session = SessionWithIgnore { token: "xyz789", internal_secret: "hidden" }
+        let box: unknown = session
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        let v = obj.get("token")
+        if v is string {
+            assert(v == "xyz789")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "stringified JSON omits ignored field" {
+        let meta = SessionWithIgnore.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_ignore {
+                    ignores.set(field.name, true)
+                }
+            }
+            i = i + 1
+        }
+
+        let session = SessionWithIgnore { token: "tok", internal_secret: "shh" }
+        let box: unknown = session
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(json_str.contains("\"token\":\"tok\""))
+        assert(!json_str.contains("internal_secret"))
+        assert(!json_str.contains("shh"))
+    }
+}
+
+// --- Tests: mix of annotated and unannotated fields using @json_field ---
+
+tests "annotation-driven mixed rename and ignore via @json_field" {
+    test "mixed annotations: renames and ignores applied together" {
+        let meta = MixedAnnotations.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_field {
+                    if ann.ignore {
+                        ignores.set(field.name, true)
+                    }
+                    if ann.name != "" {
+                        renames.set(field.name, ann.name)
+                    }
+                }
+            }
+            i = i + 1
+        }
+
+        let item = MixedAnnotations {
+            name: "Dave",
+            secret: "hidden",
+            age: 28,
+            active: true,
+        }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        // "name" renamed to "display_name"
+        assert(obj.contains_key("display_name"))
+        assert(!obj.contains_key("name"))
+
+        // "secret" ignored
+        assert(!obj.contains_key("secret"))
+
+        // "age" unchanged
+        assert(obj.contains_key("age"))
+
+        // "active" renamed to "is_active"
+        assert(obj.contains_key("is_active"))
+        assert(!obj.contains_key("active"))
+
+        // Should have 3 fields (display_name, age, is_active)
+        assert(obj.len() == 3)
+    }
+
+    test "mixed annotations: field values are correct" {
+        let meta = MixedAnnotations.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_field {
+                    if ann.ignore {
+                        ignores.set(field.name, true)
+                    }
+                    if ann.name != "" {
+                        renames.set(field.name, ann.name)
+                    }
+                }
+            }
+            i = i + 1
+        }
+
+        let item = MixedAnnotations {
+            name: "Eve",
+            secret: "password",
+            age: 35,
+            active: false,
+        }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        let dn = obj.get("display_name")
+        if dn is string {
+            assert(dn == "Eve")
+        } else {
+            assert(false)
+        }
+
+        let a = obj.get("age")
+        if a is f64 {
+            assert(a == 35.0)
+        } else {
+            assert(false)
+        }
+
+        let ia = obj.get("is_active")
+        if ia is bool {
+            assert(ia == false)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "mixed annotations: stringify excludes ignored and renames keys" {
+        let meta = MixedAnnotations.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_field {
+                    if ann.ignore {
+                        ignores.set(field.name, true)
+                    }
+                    if ann.name != "" {
+                        renames.set(field.name, ann.name)
+                    }
+                }
+            }
+            i = i + 1
+        }
+
+        let item = MixedAnnotations {
+            name: "Frank",
+            secret: "top-secret",
+            age: 40,
+            active: true,
+        }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(json_str.contains("\"display_name\":\"Frank\""))
+        assert(json_str.contains("\"is_active\":true"))
+        assert(json_str.contains("\"age\":40"))
+        assert(!json_str.contains("secret"))
+        assert(!json_str.contains("top-secret"))
+    }
+}
+
+// --- Tests: @json_name with special characters ---
+
+tests "annotation-driven @json_name with special characters" {
+    test "hyphenated key name via @json_name" {
+        let meta = SpecialCharsRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let item = SpecialCharsRename { name: "Alice", first: "Ali", normal: "plain" }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("user-name"))
+        assert(!obj.contains_key("name"))
+        let v = obj.get("user-name")
+        if v is string {
+            assert(v == "Alice")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "dotted key name via @json_name" {
+        let meta = SpecialCharsRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let item = SpecialCharsRename { name: "Bob", first: "Bobby", normal: "ok" }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("first.name"))
+        assert(!obj.contains_key("first"))
+        let v = obj.get("first.name")
+        if v is string {
+            assert(v == "Bobby")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "non-renamed field with special char renames keeps original name" {
+        let meta = SpecialCharsRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let item = SpecialCharsRename { name: "C", first: "D", normal: "regular" }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("normal"))
+        let v = obj.get("normal")
+        if v is string {
+            assert(v == "regular")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "stringify with special character keys" {
+        let meta = SpecialCharsRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let item = SpecialCharsRename { name: "Test", first: "Testy", normal: "val" }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(json_str.contains("\"user-name\":\"Test\""))
+        assert(json_str.contains("\"first.name\":\"Testy\""))
+        assert(json_str.contains("\"normal\":\"val\""))
+    }
+}
+
+// --- Tests: round-trip with @json_name ---
+
+tests "annotation-driven round-trip with @json_name" {
+    test "serialize with @json_name then parse and from_object_mapped" {
+        let meta = UserWithRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let original = UserWithRename { name: "Grace", age: 55 }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        // json_str should have "user_name" not "name"
+        assert(json_str.contains("user_name"))
+        assert(!json_str.contains("\"name\""))
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        assert(parsed.is_object())
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(meta, parsed_obj, renames)
+        assert(result is UserWithRename)
+        if result is UserWithRename {
+            assert(result.name == "Grace")
+            assert(result.age == 55)
+        }
+    }
+
+    test "round-trip preserves all field values with rename" {
+        let meta = UserWithRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let original = UserWithRename { name: "Heidi", age: 99 }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(meta, parsed_obj, renames)
+        assert(result is UserWithRename)
+        if result is UserWithRename {
+            assert(result.name == "Heidi")
+            assert(result.age == 99)
+        }
+    }
+}
+
+// --- Tests: round-trip with mixed annotations via @json_field ---
+
+tests "annotation-driven round-trip with mixed annotations" {
+    test "mixed round-trip: ignored field gets default on deserialize" {
+        let meta = MixedAnnotations.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_field {
+                    if ann.ignore {
+                        ignores.set(field.name, true)
+                    }
+                    if ann.name != "" {
+                        renames.set(field.name, ann.name)
+                    }
+                }
+            }
+            i = i + 1
+        }
+
+        let original = MixedAnnotations {
+            name: "Ivan",
+            secret: "my-secret",
+            age: 33,
+            active: true,
+        }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        // "secret" should not appear in the JSON
+        assert(!json_str.contains("secret"))
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(meta, parsed_obj, renames)
+        assert(result is MixedAnnotations)
+        if result is MixedAnnotations {
+            assert(result.name == "Ivan")
+            assert(result.age == 33)
+            assert(result.active == true)
+            // secret was ignored during serialization, so it defaults to ""
+            assert(result.secret == "")
+        }
+    }
+
+    test "mixed round-trip: renamed fields survive serialize-deserialize" {
+        let meta = MixedAnnotations.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_field {
+                    if ann.ignore {
+                        ignores.set(field.name, true)
+                    }
+                    if ann.name != "" {
+                        renames.set(field.name, ann.name)
+                    }
+                }
+            }
+            i = i + 1
+        }
+
+        let original = MixedAnnotations {
+            name: "Judy",
+            secret: "pass",
+            age: 45,
+            active: false,
+        }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(meta, parsed_obj, renames)
+        assert(result is MixedAnnotations)
+        if result is MixedAnnotations {
+            assert(result.name == "Judy")
+            assert(result.age == 45)
+            assert(result.active == false)
+        }
+    }
+}
+
+// --- Tests: all fields annotated ---
+
+tests "annotation-driven all fields renamed" {
+    test "all fields renamed: no original field names in output" {
+        let meta = AllAnnotated.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let item = AllAnnotated { name: "Karl", age: 60 }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("full_name"))
+        assert(obj.contains_key("years_old"))
+        assert(!obj.contains_key("name"))
+        assert(!obj.contains_key("age"))
+        assert(obj.len() == 2)
+    }
+
+    test "all fields renamed round-trip" {
+        let meta = AllAnnotated.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let original = AllAnnotated { name: "Laura", age: 70 }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(meta, parsed_obj, renames)
+        assert(result is AllAnnotated)
+        if result is AllAnnotated {
+            assert(result.name == "Laura")
+            assert(result.age == 70)
+        }
+    }
+}
+
+// --- Tests: multiple ignores ---
+
+tests "annotation-driven multiple @json_ignore fields" {
+    test "multiple ignored fields omitted, visible field kept" {
+        let meta = AllIgnored.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_ignore {
+                    ignores.set(field.name, true)
+                }
+            }
+            i = i + 1
+        }
+
+        let item = AllIgnored { secret1: "a", secret2: "b", visible: "shown" }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(!obj.contains_key("secret1"))
+        assert(!obj.contains_key("secret2"))
+        assert(obj.contains_key("visible"))
+        assert(obj.len() == 1)
+        let v = obj.get("visible")
+        if v is string {
+            assert(v == "shown")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "multiple ignores round-trip: ignored fields default" {
+        let meta = AllIgnored.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_ignore {
+                    ignores.set(field.name, true)
+                }
+            }
+            i = i + 1
+        }
+
+        let original = AllIgnored { secret1: "x", secret2: "y", visible: "ok" }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(!json_str.contains("secret1"))
+        assert(!json_str.contains("secret2"))
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(meta, parsed_obj, renames)
+        assert(result is AllIgnored)
+        if result is AllIgnored {
+            assert(result.visible == "ok")
+            assert(result.secret1 == "")
+            assert(result.secret2 == "")
+        }
+    }
+}
