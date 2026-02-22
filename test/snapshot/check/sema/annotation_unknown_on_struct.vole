@@ -1,0 +1,5 @@
+// Error: using an unknown type as an annotation on a struct
+@totally_unknown
+struct Bad {
+    value: i64
+}

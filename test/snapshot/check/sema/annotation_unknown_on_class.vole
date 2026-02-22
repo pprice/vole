@@ -1,0 +1,5 @@
+// Error: using an unknown type as an annotation on a class
+@totally_unknown
+class Bad {
+    value: i64
+}

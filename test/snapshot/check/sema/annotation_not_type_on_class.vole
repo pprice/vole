@@ -1,0 +1,7 @@
+// Error: using a non-annotation type as an annotation on a class
+struct NotAnAnnotation {}
+
+@NotAnAnnotation
+class Bad {
+    value: i64
+}

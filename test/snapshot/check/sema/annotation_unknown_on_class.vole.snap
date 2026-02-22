@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2120]: unknown annotation type '@totally_unknown'
+   ╭─[<path>/annotation_unknown_on_class.vole:2:1]
+ 1 │ // Error: using an unknown type as an annotation on a class
+ 2 │ @totally_unknown
+   · ────────┬───────
+   ·         ╰── annotation type not found
+ 3 │ class Bad {
+   ╰────
