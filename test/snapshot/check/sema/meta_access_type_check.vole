@@ -1,0 +1,51 @@
+// Verify that .@meta expressions type-check correctly.
+// Static meta access (type name on LHS) and instance meta access (value on LHS)
+// should both resolve to TypeMeta, with correct field access on the result.
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+class Counter {
+    count: i64,
+}
+
+interface Showable {
+    func show(self: Self) -> string
+}
+
+// Static meta access: TypeName.@meta
+func test_static_struct() -> void {
+    let meta = Point.@meta
+    let name: string = meta.name
+}
+
+func test_static_class() -> void {
+    let meta = Counter.@meta
+    let name: string = meta.name
+}
+
+// Instance meta access: value.@meta
+func test_instance_struct(p: Point) -> void {
+    let meta = p.@meta
+    let name: string = meta.name
+}
+
+func test_instance_class(c: Counter) -> void {
+    let meta = c.@meta
+    let name: string = meta.name
+}
+
+// Interface meta access (dynamic): interface_val.@meta
+func test_interface_dynamic(s: Showable) -> void {
+    let meta = s.@meta
+    let name: string = meta.name
+}
+
+// Chained field access: T.@meta.name, T.@meta.fields, T.@meta.construct
+func test_chained_access() -> void {
+    let name: string = Point.@meta.name
+    let fields = Point.@meta.fields
+    let ctor = Point.@meta.construct
+}

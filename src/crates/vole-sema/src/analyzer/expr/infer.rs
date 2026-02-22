@@ -136,11 +136,7 @@ impl Analyzer {
             ExprKind::If(if_expr) => self.check_if_expr(if_expr, interner),
             ExprKind::When(when_expr) => self.check_when_expr(when_expr, interner),
 
-            // MetaAccess is not yet supported in sema — placeholder
-            ExprKind::MetaAccess(_) => {
-                // TODO(vol-kn9m): implement type resolution for .@meta
-                Ok(ArenaTypeId::UNKNOWN)
-            }
+            ExprKind::MetaAccess(ma) => self.check_meta_access_expr(expr, ma, interner),
 
             // Unreachable returns never type
             ExprKind::Unreachable => Ok(ArenaTypeId::NEVER),

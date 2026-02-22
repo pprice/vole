@@ -13,6 +13,7 @@ mod index;
 mod infer;
 mod is_expr;
 mod match_expr;
+mod meta_access;
 mod null_coalesce;
 mod struct_literal;
 mod unary;

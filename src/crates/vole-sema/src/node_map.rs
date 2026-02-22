@@ -21,7 +21,7 @@ use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorp
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
 use vole_frontend::{Capture, LambdaPurity, NodeId, Symbol};
-use vole_identity::ModuleId;
+use vole_identity::{ModuleId, TypeDefId};
 
 // ---------------------------------------------------------------------------
 // Supporting types (previously in expression_data.rs)
@@ -239,6 +239,22 @@ pub struct ItLambdaInfo {
     pub body_node: NodeId,
 }
 
+/// Classification of a `.@meta` access expression, annotated by sema.
+///
+/// Codegen reads this to determine whether the `TypeMeta` value can be
+/// constructed at compile time (static — the underlying type is known) or
+/// must be resolved at runtime via a vtable (dynamic — the value is typed
+/// as an interface).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetaAccessKind {
+    /// The reflected type is statically known (e.g. `Point.@meta` or
+    /// `val.@meta` where `val: Point`).
+    Static { type_def_id: TypeDefId },
+    /// The reflected type is only known at runtime (e.g. `val.@meta`
+    /// where `val: SomeInterface`).
+    Dynamic,
+}
+
 // ---------------------------------------------------------------------------
 // NodeData
 // ---------------------------------------------------------------------------
@@ -309,6 +325,9 @@ pub struct NodeData {
 
     /// Method dispatch routing for method call expressions.
     pub method_dispatch_kind: Option<MethodDispatchKind>,
+
+    /// Meta access classification for `.@meta` expressions.
+    pub meta_access: Option<MetaAccessKind>,
 }
 
 // ---------------------------------------------------------------------------
@@ -631,6 +650,18 @@ impl NodeMap {
         self.get_mut_or_insert(node).method_dispatch_kind = Some(kind);
     }
 
+    // -- meta_access -------------------------------------------------------
+
+    /// Get the meta access classification for a `.@meta` expression.
+    pub fn get_meta_access(&self, node: NodeId) -> Option<MetaAccessKind> {
+        self.get(node).and_then(|d| d.meta_access)
+    }
+
+    /// Set the meta access classification for a `.@meta` expression.
+    pub fn set_meta_access(&mut self, node: NodeId, kind: MetaAccessKind) {
+        self.get_mut_or_insert(node).meta_access = Some(kind);
+    }
+
     // ======================================================================
     // Bulk operations
     // ======================================================================
@@ -812,6 +843,9 @@ fn merge_node_data(dst: &mut NodeData, src: NodeData) {
     }
     if src.method_dispatch_kind.is_some() {
         dst.method_dispatch_kind = src.method_dispatch_kind;
+    }
+    if src.meta_access.is_some() {
+        dst.meta_access = src.meta_access;
     }
 }
 
