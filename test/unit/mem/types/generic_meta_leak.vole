@@ -1,0 +1,279 @@
+// RC leak tests for TypeMeta obtained via T.@meta in generic contexts.
+//
+// TypeMeta is a class instance containing name (string), fields ([FieldMeta]),
+// and construct (closure). Each of these is RC'd. These tests verify that
+// obtaining TypeMeta via generic type parameter resolution does not leak
+// any of those allocations.
+
+class User {
+    name: string,
+    age: i64,
+}
+
+struct Coord {
+    x: i64,
+    y: i64,
+}
+
+class Tag {
+    label: string,
+}
+
+class Empty {}
+
+class BigRecord {
+    a: string,
+    b: i64,
+    c: bool,
+    d: string,
+    e: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Generic classes that access T.@meta
+// ---------------------------------------------------------------------------
+
+class Reflector<T> {
+    item: T,
+
+    func meta() -> TypeMeta {
+        return self.item.@meta
+    }
+
+    func meta_name() -> string {
+        return self.item.@meta.name
+    }
+
+    func field_count() -> i64 {
+        return self.item.@meta.fields.length()
+    }
+
+    func field_names() -> [string] {
+        var result: [string] = []
+        let meta = self.item.@meta
+        for field in meta.fields {
+            result.push(field.name)
+        }
+        return result
+    }
+
+    func construct_copy() -> (([unknown]) -> unknown) {
+        return self.item.@meta.construct
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: single call — no leak
+// ---------------------------------------------------------------------------
+
+tests "generic meta single call no leak" {
+    test "reflector class meta name" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        assert(r.meta_name() == "User")
+    }
+
+    test "reflector struct meta name" {
+        let r = Reflector { item: Coord { x: 1, y: 2 } }
+        assert(r.meta_name() == "Coord")
+    }
+
+    test "reflector class meta object" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        let meta = r.meta()
+        assert(meta.name == "User")
+    }
+
+    test "reflector struct meta object" {
+        let r = Reflector { item: Coord { x: 1, y: 2 } }
+        let meta = r.meta()
+        assert(meta.name == "Coord")
+    }
+
+    test "reflector class field count" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        assert(r.field_count() == 2)
+    }
+
+    test "reflector struct field count" {
+        let r = Reflector { item: Coord { x: 1, y: 2 } }
+        assert(r.field_count() == 2)
+    }
+
+    test "reflector empty class" {
+        let r = Reflector { item: Empty {} }
+        assert(r.meta_name() == "Empty")
+        assert(r.field_count() == 0)
+    }
+
+    test "reflector Tag single field" {
+        let r = Reflector { item: Tag { label: "hello" } }
+        assert(r.meta_name() == "Tag")
+        assert(r.field_count() == 1)
+    }
+
+    test "reflector BigRecord many fields" {
+        let r = Reflector { item: BigRecord { a: "x", b: 1, c: true, d: "y", e: 2 } }
+        assert(r.meta_name() == "BigRecord")
+        assert(r.field_count() == 5)
+    }
+
+    test "reflector field names" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        let names = r.field_names()
+        assert(names.length() == 2)
+        assert(names[0] == "name")
+        assert(names[1] == "age")
+    }
+
+    test "reflector struct field names" {
+        let r = Reflector { item: Coord { x: 1, y: 2 } }
+        let names = r.field_names()
+        assert(names.length() == 2)
+        assert(names[0] == "x")
+        assert(names[1] == "y")
+    }
+
+    test "meta assigned to variable then dropped" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        let meta = r.meta()
+        let name = meta.name
+        let fields = meta.fields
+        let ctor = meta.construct
+        assert(name == "User")
+        assert(fields.length() == 2)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: repeated calls — no leak
+// ---------------------------------------------------------------------------
+
+tests "generic meta repeated calls no leak" {
+    test "repeated meta name calls" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        assert(r.meta_name() == "User")
+        assert(r.meta_name() == "User")
+        assert(r.meta_name() == "User")
+    }
+
+    test "repeated meta object calls" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        let m1 = r.meta()
+        let m2 = r.meta()
+        let m3 = r.meta()
+        assert(m1.name == "User")
+        assert(m2.name == "User")
+        assert(m3.name == "User")
+    }
+
+    test "repeated field count calls" {
+        let r = Reflector { item: Coord { x: 1, y: 2 } }
+        assert(r.field_count() == 2)
+        assert(r.field_count() == 2)
+        assert(r.field_count() == 2)
+    }
+
+    test "repeated field names calls" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        let n1 = r.field_names()
+        let n2 = r.field_names()
+        assert(n1.length() == 2)
+        assert(n2.length() == 2)
+    }
+
+    test "repeated construct closure retrieval" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        let c1 = r.construct_copy()
+        let c2 = r.construct_copy()
+        let c3 = r.construct_copy()
+        // Just verify the closures are obtained without leak.
+        // (Invoking construct has a known unknown-typed instance RC leak.)
+        assert(r.meta_name() == "User")
+    }
+
+    test "repeated meta in loop" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        var i = 0
+        while i < 10 {
+            let meta = r.meta()
+            assert(meta.name == "User")
+            i = i + 1
+        }
+    }
+
+    test "repeated meta struct in loop" {
+        let r = Reflector { item: Coord { x: 1, y: 2 } }
+        var i = 0
+        while i < 10 {
+            assert(r.meta_name() == "Coord")
+            assert(r.field_count() == 2)
+            i = i + 1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: multiple instantiations — no leak
+// ---------------------------------------------------------------------------
+
+tests "generic meta multiple instantiations no leak" {
+    test "two different reflectors" {
+        let r1 = Reflector { item: User { name: "Alice", age: 30 } }
+        let r2 = Reflector { item: Coord { x: 1, y: 2 } }
+        assert(r1.meta_name() == "User")
+        assert(r2.meta_name() == "Coord")
+    }
+
+    test "three different reflectors" {
+        let r1 = Reflector { item: User { name: "Alice", age: 30 } }
+        let r2 = Reflector { item: Tag { label: "hello" } }
+        let r3 = Reflector { item: Empty {} }
+        assert(r1.meta_name() == "User")
+        assert(r2.meta_name() == "Tag")
+        assert(r3.meta_name() == "Empty")
+    }
+
+    test "reflectors with same type" {
+        let r1 = Reflector { item: User { name: "Alice", age: 30 } }
+        let r2 = Reflector { item: User { name: "Bob", age: 25 } }
+        assert(r1.meta_name() == "User")
+        assert(r2.meta_name() == "User")
+    }
+
+    test "reflector reassignment" {
+        var r = Reflector { item: User { name: "Alice", age: 30 } }
+        assert(r.meta_name() == "User")
+        r = Reflector { item: User { name: "Bob", age: 25 } }
+        assert(r.meta_name() == "User")
+    }
+
+    test "reflector in array" {
+        let r1 = Reflector { item: User { name: "Alice", age: 30 } }
+        let r2 = Reflector { item: User { name: "Bob", age: 25 } }
+        let arr = [r1, r2]
+        assert(arr[0].meta_name() == "User")
+        assert(arr[1].meta_name() == "User")
+    }
+
+    test "construct closure obtained no leak" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        let ctor = r.construct_copy()
+        // Verify we can obtain the construct closure without leak.
+        // (Invoking construct has a known unknown-typed instance RC leak.)
+        assert(r.meta_name() == "User")
+    }
+
+    test "getter and setter via generic meta" {
+        let r = Reflector { item: User { name: "Alice", age: 30 } }
+        let meta = r.meta()
+        let user = User { name: "Test", age: 10 }
+        let boxed: unknown = user
+        let getter = meta.fields[0].get
+        let setter = meta.fields[0].set
+        let old_name = getter(boxed)
+        assert(old_name is string)
+        let new_name: unknown = "Updated"
+        setter(boxed, new_name)
+        assert(user.name == "Updated")
+    }
+}

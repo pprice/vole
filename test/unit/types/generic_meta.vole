@@ -2,6 +2,18 @@
 //
 // Tests that .@meta works correctly on values whose type is a type parameter,
 // resolved at monomorphization time via codegen substitutions.
+//
+// Since Vole resolves type parameters via monomorphization, `T.@meta` is
+// accessed through a value of type T (e.g., `v.@meta` where v: T).
+//
+// NOTE: Free generic functions that use v.@meta with multiple different type
+// instantiations in the same program have a known caching bug (vol-kjf1).
+// Tests for multi-type instantiation use wrapper classes (which work correctly)
+// to test the same underlying T.@meta resolution mechanism.
+
+// ---------------------------------------------------------------------------
+// Type definitions for tests
+// ---------------------------------------------------------------------------
 
 class Item {
     name: string,
@@ -13,7 +25,50 @@ struct Point {
     y: i64,
 }
 
-// --- Generic class with T.@meta via instance method ---
+class Empty {}
+
+struct EmptyStruct {}
+
+class BigClass {
+    a: string,
+    b: i64,
+    c: bool,
+    d: string,
+    e: i64,
+    f: bool,
+}
+
+class Tag {
+    label: string,
+}
+
+interface Stringable {
+    func to_string() -> string
+}
+
+class Named implements Stringable {
+    name: string,
+    score: i64,
+}
+
+extend Named with Stringable {
+    func to_string() -> string {
+        return self.name
+    }
+}
+
+class Labeled implements Stringable {
+    title: string,
+
+    func to_string() -> string {
+        return self.title
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Generic class with T.@meta via instance method
+// ---------------------------------------------------------------------------
+
 class Wrapper<T> {
     value: T,
 
@@ -24,9 +79,33 @@ class Wrapper<T> {
     func value_meta_name() -> string {
         return self.value.@meta.name
     }
+
+    func value_meta_field_count() -> i64 {
+        return self.value.@meta.fields.length()
+    }
+
+    func value_meta_construct() -> (([unknown]) -> unknown) {
+        return self.value.@meta.construct
+    }
+
+    func value_meta_fields() -> [FieldMeta] {
+        return self.value.@meta.fields
+    }
+
+    func value_field_names() -> [string] {
+        var result: [string] = []
+        let meta = self.value.@meta
+        for field in meta.fields {
+            result.push(field.name)
+        }
+        return result
+    }
 }
 
-// --- Generic class with T.@meta returning field count ---
+// ---------------------------------------------------------------------------
+// Generic class with T.@meta returning field count
+// ---------------------------------------------------------------------------
+
 class Inspector<T> {
     item: T,
 
@@ -37,7 +116,175 @@ class Inspector<T> {
     func type_name() -> string {
         return self.item.@meta.name
     }
+
+    func field_names() -> [string] {
+        var result: [string] = []
+        let meta = self.item.@meta
+        for field in meta.fields {
+            result.push(field.name)
+        }
+        return result
+    }
+
+    func full_meta() -> TypeMeta {
+        return self.item.@meta
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Free generic functions (each used with a single type to avoid vol-kjf1)
+// ---------------------------------------------------------------------------
+
+func get_meta_name_item<T>(v: T) -> string {
+    return v.@meta.name
+}
+
+func get_meta_name_point<T>(v: T) -> string {
+    return v.@meta.name
+}
+
+func get_meta_name_tag<T>(v: T) -> string {
+    return v.@meta.name
+}
+
+func get_meta_name_empty<T>(v: T) -> string {
+    return v.@meta.name
+}
+
+func get_meta_name_empty_s<T>(v: T) -> string {
+    return v.@meta.name
+}
+
+func get_meta_name_big<T>(v: T) -> string {
+    return v.@meta.name
+}
+
+func get_meta_item<T>(v: T) -> TypeMeta {
+    return v.@meta
+}
+
+func get_meta_point<T>(v: T) -> TypeMeta {
+    return v.@meta
+}
+
+func get_meta_big<T>(v: T) -> TypeMeta {
+    return v.@meta
+}
+
+func get_field_count_item<T>(v: T) -> i64 {
+    return v.@meta.fields.length()
+}
+
+func get_field_count_point<T>(v: T) -> i64 {
+    return v.@meta.fields.length()
+}
+
+func get_field_count_empty<T>(v: T) -> i64 {
+    return v.@meta.fields.length()
+}
+
+func get_field_count_empty_s<T>(v: T) -> i64 {
+    return v.@meta.fields.length()
+}
+
+func get_field_count_big<T>(v: T) -> i64 {
+    return v.@meta.fields.length()
+}
+
+func get_meta_construct_item<T>(v: T) -> (([unknown]) -> unknown) {
+    return v.@meta.construct
+}
+
+func get_meta_construct_tag<T>(v: T) -> (([unknown]) -> unknown) {
+    return v.@meta.construct
+}
+
+// ---------------------------------------------------------------------------
+// Multiple type parameter generic class
+// ---------------------------------------------------------------------------
+
+class PairInspector<A, B> {
+    first: A,
+    second: B,
+
+    func names() -> string {
+        return self.first.@meta.name + ", " + self.second.@meta.name
+    }
+
+    func field_counts() -> i64 {
+        return self.first.@meta.fields.length() + self.second.@meta.fields.length()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Constrained type parameter generic class
+// ---------------------------------------------------------------------------
+
+class Container<T: Stringable> {
+    item: T,
+
+    func meta_name() -> string {
+        return self.item.@meta.name
+    }
+
+    func describe() -> string {
+        return self.item.@meta.name + " = " + self.item.to_string()
+    }
+
+    func meta_fields() -> [FieldMeta] {
+        return self.item.@meta.fields
+    }
+}
+
+// Constrained free functions (single instantiation each to avoid vol-kjf1)
+
+func reflect_named<T: Stringable>(v: T) -> TypeMeta {
+    return v.@meta
+}
+
+func reflect_labeled<T: Stringable>(v: T) -> TypeMeta {
+    return v.@meta
+}
+
+func uses_both_named<T: Stringable>(v: T) -> string {
+    return v.@meta.name + ": " + v.to_string()
+}
+
+func uses_both_labeled<T: Stringable>(v: T) -> string {
+    return v.@meta.name + ": " + v.to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Nested / chained generic classes
+// ---------------------------------------------------------------------------
+
+class InnerReader<T> {
+    data: T,
+
+    func meta_name() -> string {
+        return self.data.@meta.name
+    }
+
+    func field_count() -> i64 {
+        return self.data.@meta.fields.length()
+    }
+}
+
+class OuterReader<T> {
+    inner: InnerReader<T>,
+
+    func meta_name() -> string {
+        return self.inner.meta_name()
+    }
+
+    func field_count() -> i64 {
+        return self.inner.field_count()
+    }
+}
+
+// ===========================================================================
+// Tests
+// ===========================================================================
 
 tests "generic class value.@meta" {
     test "wrapper class meta name" {
@@ -76,11 +323,19 @@ tests "generic class value.@meta" {
         assert(insp.type_name() == "Point")
     }
 
-    test "multiple instantiations same generic" {
+    test "multiple instantiations same generic class" {
         let w1 = Wrapper { value: Item { name: "a", count: 1 } }
         let w2 = Wrapper { value: Point { x: 1, y: 2 } }
         assert(w1.value_meta_name() == "Item")
         assert(w2.value_meta_name() == "Point")
+    }
+
+    test "wrapper method uses T.@meta to serialize" {
+        let w = Wrapper { value: Item { name: "Alice", count: 42 } }
+        let name = w.value_meta_name()
+        let count = w.value_meta_field_count()
+        assert(name == "Item")
+        assert(count == 2)
     }
 }
 
@@ -95,5 +350,572 @@ tests "generic meta field access" {
         let w = Wrapper { value: Point { x: 1, y: 2 } }
         let meta = w.value_meta()
         assert(meta.fields.length() == 2)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Free function: v.@meta in generic free functions (single instantiation)
+// ---------------------------------------------------------------------------
+
+tests "free generic function T.@meta" {
+    test "free func meta name with class" {
+        assert(get_meta_name_item(Item { name: "a", count: 1 }) == "Item")
+    }
+
+    test "free func meta name with struct" {
+        assert(get_meta_name_point(Point { x: 1, y: 2 }) == "Point")
+    }
+
+    test "free func meta object with class" {
+        let meta = get_meta_item(Item { name: "a", count: 1 })
+        assert(meta.name == "Item")
+    }
+
+    test "free func meta object with struct" {
+        let meta = get_meta_point(Point { x: 10, y: 20 })
+        assert(meta.name == "Point")
+    }
+
+    test "free func field count with class" {
+        assert(get_field_count_item(Item { name: "x", count: 5 }) == 2)
+    }
+
+    test "free func field count with struct" {
+        assert(get_field_count_point(Point { x: 0, y: 0 }) == 2)
+    }
+
+    test "free func meta name with single-field class" {
+        assert(get_meta_name_tag(Tag { label: "solo" }) == "Tag")
+    }
+
+    test "same generic class function with 2+ different types in one program" {
+        let w1 = Wrapper { value: Item { name: "a", count: 1 } }
+        let w2 = Wrapper { value: Point { x: 1, y: 2 } }
+        let w3 = Wrapper { value: Tag { label: "t" } }
+        assert(w1.value_meta_name() == "Item")
+        assert(w2.value_meta_name() == "Point")
+        assert(w3.value_meta_name() == "Tag")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T.@meta.fields — field count, names, type_names
+// ---------------------------------------------------------------------------
+
+tests "generic T.@meta field inspection" {
+    test "field count via generic inspector class" {
+        let insp = Inspector { item: Item { name: "hi", count: 99 } }
+        assert(insp.field_count() == 2)
+    }
+
+    test "field count via generic inspector struct" {
+        let insp = Inspector { item: Point { x: 3, y: 4 } }
+        assert(insp.field_count() == 2)
+    }
+
+    test "field names via iteration class" {
+        let insp = Inspector { item: Item { name: "hi", count: 99 } }
+        let names = insp.field_names()
+        assert(names.length() == 2)
+        assert(names[0] == "name")
+        assert(names[1] == "count")
+    }
+
+    test "field names via iteration struct" {
+        let insp = Inspector { item: Point { x: 3, y: 4 } }
+        let names = insp.field_names()
+        assert(names.length() == 2)
+        assert(names[0] == "x")
+        assert(names[1] == "y")
+    }
+
+    test "field type names via generic meta class" {
+        let w = Wrapper { value: Item { name: "hi", count: 1 } }
+        let fields = w.value_meta_fields()
+        assert(fields[0].type_name == "string")
+        assert(fields[1].type_name == "i64")
+    }
+
+    test "field type names via generic meta struct" {
+        let w = Wrapper { value: Point { x: 1, y: 2 } }
+        let fields = w.value_meta_fields()
+        assert(fields[0].type_name == "i64")
+        assert(fields[1].type_name == "i64")
+    }
+
+    test "field names via wrapper class" {
+        let w = Wrapper { value: Item { name: "hi", count: 1 } }
+        let names = w.value_field_names()
+        assert(names.length() == 2)
+        assert(names[0] == "name")
+        assert(names[1] == "count")
+    }
+
+    test "field names via wrapper struct" {
+        let w = Wrapper { value: Point { x: 1, y: 2 } }
+        let names = w.value_field_names()
+        assert(names.length() == 2)
+        assert(names[0] == "x")
+        assert(names[1] == "y")
+    }
+
+    test "getter via generic meta reads class string field" {
+        let item = Item { name: "Alice", count: 42 }
+        let insp = Inspector { item: item }
+        let meta = insp.full_meta()
+        let getter = meta.fields[0].get
+        let boxed: unknown = item
+        let result = getter(boxed)
+        assert(result is string)
+        if result is string {
+            assert(result == "Alice")
+        }
+    }
+
+    test "getter via generic meta reads class i64 field" {
+        let item = Item { name: "Alice", count: 42 }
+        let insp = Inspector { item: item }
+        let meta = insp.full_meta()
+        let getter = meta.fields[1].get
+        let boxed: unknown = item
+        let result = getter(boxed)
+        assert(result is i64)
+        if result is i64 {
+            assert(result == 42)
+        }
+    }
+
+    test "setter via generic meta writes class string field" {
+        let item = Item { name: "Alice", count: 42 }
+        let insp = Inspector { item: item }
+        let meta = insp.full_meta()
+        let setter = meta.fields[0].set
+        let boxed: unknown = item
+        let new_name: unknown = "Bob"
+        setter(boxed, new_name)
+        assert(item.name == "Bob")
+    }
+
+    test "setter via generic meta writes class i64 field" {
+        let item = Item { name: "Alice", count: 42 }
+        let insp = Inspector { item: item }
+        let meta = insp.full_meta()
+        let setter = meta.fields[1].set
+        let boxed: unknown = item
+        let new_count: unknown = 99
+        setter(boxed, new_count)
+        assert(item.count == 99)
+    }
+
+    test "getter then setter round-trip via generic meta" {
+        let item = Item { name: "Alice", count: 42 }
+        let insp = Inspector { item: item }
+        let meta = insp.full_meta()
+        let getter = meta.fields[1].get
+        let setter = meta.fields[1].set
+        let boxed: unknown = item
+        let new_val: unknown = 77
+        setter(boxed, new_val)
+        let read_back = getter(boxed)
+        assert(read_back is i64)
+        if read_back is i64 {
+            assert(read_back == 77)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// T.@meta.construct — build instances via generic reflection
+// ---------------------------------------------------------------------------
+
+tests "generic T.@meta.construct" {
+    test "construct class via generic meta" {
+        let ctor = get_meta_construct_item(Item { name: "x", count: 0 })
+        let args: [unknown] = ["Built", 100]
+        let result = ctor(args)
+        assert(result is Item)
+        if result is Item {
+            assert(result.name == "Built")
+            assert(result.count == 100)
+        }
+    }
+
+    test "construct via wrapper class method" {
+        let w = Wrapper { value: Item { name: "x", count: 0 } }
+        let ctor = w.value_meta_construct()
+        let args: [unknown] = ["Wrapped", 77]
+        let result = ctor(args)
+        assert(result is Item)
+        if result is Item {
+            assert(result.name == "Wrapped")
+            assert(result.count == 77)
+        }
+    }
+
+    test "construct single-field class via generic meta" {
+        let ctor = get_meta_construct_tag(Tag { label: "x" })
+        let args: [unknown] = ["NewTag"]
+        let result = ctor(args)
+        assert(result is Tag)
+        if result is Tag {
+            assert(result.label == "NewTag")
+        }
+    }
+
+    test "construct different types via wrapper" {
+        let w_item = Wrapper { value: Item { name: "a", count: 1 } }
+        let w_tag = Wrapper { value: Tag { label: "b" } }
+        let ctor_item = w_item.value_meta_construct()
+        let ctor_tag = w_tag.value_meta_construct()
+        let item_result = ctor_item(["New", 50])
+        let tag_result = ctor_tag(["NewTag"])
+        assert(item_result is Item)
+        assert(tag_result is Tag)
+        if item_result is Item {
+            assert(item_result.name == "New")
+            assert(item_result.count == 50)
+        }
+        if tag_result is Tag {
+            assert(tag_result.label == "NewTag")
+        }
+    }
+
+    test "construct then read via generic getter" {
+        let w = Wrapper { value: Item { name: "x", count: 0 } }
+        let meta = w.value_meta()
+        let ctor = meta.construct
+        let result = ctor(["Built", 55])
+        assert(result is Item)
+        if result is Item {
+            let boxed: unknown = result
+            let name_getter = meta.fields[0].get
+            let count_getter = meta.fields[1].get
+            let name_val = name_getter(boxed)
+            let count_val = count_getter(boxed)
+            assert(name_val is string)
+            assert(count_val is i64)
+            if name_val is string {
+                assert(name_val == "Built")
+            }
+            if count_val is i64 {
+                assert(count_val == 55)
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multiple type parameters
+// ---------------------------------------------------------------------------
+
+tests "multiple type parameter T.@meta" {
+    test "pair names with class and struct" {
+        let p = PairInspector { first: Item { name: "a", count: 1 }, second: Point { x: 0, y: 0 } }
+        assert(p.names() == "Item, Point")
+    }
+
+    test "pair names with struct and class" {
+        let p = PairInspector { first: Point { x: 1, y: 2 }, second: Item { name: "b", count: 2 } }
+        assert(p.names() == "Point, Item")
+    }
+
+    test "pair names with two classes" {
+        let p = PairInspector { first: Item { name: "a", count: 1 }, second: Tag { label: "t" } }
+        assert(p.names() == "Item, Tag")
+    }
+
+    test "pair names with same type" {
+        let p = PairInspector { first: Point { x: 0, y: 0 }, second: Point { x: 1, y: 1 } }
+        assert(p.names() == "Point, Point")
+    }
+
+    test "pair field counts different" {
+        let p = PairInspector { first: Item { name: "a", count: 1 }, second: Tag { label: "t" } }
+        assert(p.field_counts() == 3) // Item has 2, Tag has 1
+    }
+
+    test "pair field counts same" {
+        let p = PairInspector { first: Item { name: "a", count: 1 }, second: Point { x: 0, y: 0 } }
+        assert(p.field_counts() == 4) // Item has 2, Point has 2
+    }
+
+    test "pair multiple instantiations different combos" {
+        let p1 = PairInspector { first: Item { name: "a", count: 1 }, second: Point { x: 0, y: 0 } }
+        let p2 = PairInspector { first: Tag { label: "t" }, second: Item { name: "b", count: 2 } }
+        assert(p1.names() == "Item, Point")
+        assert(p2.names() == "Tag, Item")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Constrained type parameters
+// ---------------------------------------------------------------------------
+
+tests "constrained type parameter T.@meta" {
+    test "reflect returns meta for Named" {
+        let meta = reflect_named(Named { name: "Alice", score: 10 })
+        assert(meta.name == "Named")
+    }
+
+    test "reflect returns meta for Labeled" {
+        let meta = reflect_labeled(Labeled { title: "Hello" })
+        assert(meta.name == "Labeled")
+    }
+
+    test "uses_both meta name and to_string Named" {
+        let result = uses_both_named(Named { name: "Alice", score: 10 })
+        assert(result == "Named: Alice")
+    }
+
+    test "uses_both meta name and to_string Labeled" {
+        let result = uses_both_labeled(Labeled { title: "World" })
+        assert(result == "Labeled: World")
+    }
+
+    test "container constrained meta_name Named" {
+        let c = Container { item: Named { name: "Alice", score: 10 } }
+        assert(c.meta_name() == "Named")
+    }
+
+    test "container constrained describe Named" {
+        let c = Container { item: Named { name: "Alice", score: 10 } }
+        assert(c.describe() == "Named = Alice")
+    }
+
+    test "container constrained meta_name Labeled" {
+        let c = Container { item: Labeled { title: "Howdy" } }
+        assert(c.meta_name() == "Labeled")
+    }
+
+    test "container constrained describe Labeled" {
+        let c = Container { item: Labeled { title: "Howdy" } }
+        assert(c.describe() == "Labeled = Howdy")
+    }
+
+    test "container constrained multiple instantiations" {
+        let c1 = Container { item: Named { name: "Alice", score: 10 } }
+        let c2 = Container { item: Labeled { title: "World" } }
+        assert(c1.meta_name() == "Named")
+        assert(c2.meta_name() == "Labeled")
+    }
+
+    test "reflect fields for Named" {
+        let meta = reflect_named(Named { name: "Alice", score: 10 })
+        assert(meta.fields.length() == 2)
+        assert(meta.fields[0].name == "name")
+        assert(meta.fields[1].name == "score")
+    }
+
+    test "container meta_fields for Named" {
+        let c = Container { item: Named { name: "Alice", score: 10 } }
+        let fields = c.meta_fields()
+        assert(fields.length() == 2)
+        assert(fields[0].name == "name")
+        assert(fields[0].type_name == "string")
+        assert(fields[1].name == "score")
+        assert(fields[1].type_name == "i64")
+    }
+
+    test "container meta_fields for Labeled" {
+        let c = Container { item: Labeled { title: "World" } }
+        let fields = c.meta_fields()
+        assert(fields.length() == 1)
+        assert(fields[0].name == "title")
+        assert(fields[0].type_name == "string")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Nested / chained generics
+// ---------------------------------------------------------------------------
+
+tests "nested generic T.@meta" {
+    test "outer calls inner for class" {
+        let outer = OuterReader { inner: InnerReader { data: Item { name: "a", count: 1 } } }
+        assert(outer.meta_name() == "Item")
+    }
+
+    test "outer calls inner for struct" {
+        let outer = OuterReader { inner: InnerReader { data: Point { x: 1, y: 2 } } }
+        assert(outer.meta_name() == "Point")
+    }
+
+    test "outer field count calls inner for class" {
+        let outer = OuterReader { inner: InnerReader { data: Item { name: "a", count: 1 } } }
+        assert(outer.field_count() == 2)
+    }
+
+    test "outer field count calls inner for struct" {
+        let outer = OuterReader { inner: InnerReader { data: Point { x: 0, y: 0 } } }
+        assert(outer.field_count() == 2)
+    }
+
+    test "nested with two different types" {
+        let o1 = OuterReader { inner: InnerReader { data: Item { name: "a", count: 1 } } }
+        let o2 = OuterReader { inner: InnerReader { data: Point { x: 1, y: 2 } } }
+        assert(o1.meta_name() == "Item")
+        assert(o2.meta_name() == "Point")
+    }
+
+    test "nested with single-field class" {
+        let outer = OuterReader { inner: InnerReader { data: Tag { label: "nested" } } }
+        assert(outer.meta_name() == "Tag")
+        assert(outer.field_count() == 1)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Edge cases
+// ---------------------------------------------------------------------------
+
+tests "edge cases generic T.@meta" {
+    test "class with 0 fields via wrapper" {
+        let w = Wrapper { value: Empty {} }
+        assert(w.value_meta_name() == "Empty")
+        assert(w.value_meta_field_count() == 0)
+    }
+
+    test "struct with 0 fields via wrapper" {
+        let w = Wrapper { value: EmptyStruct {} }
+        assert(w.value_meta_name() == "EmptyStruct")
+        assert(w.value_meta_field_count() == 0)
+    }
+
+    test "class with 0 fields via free func" {
+        assert(get_meta_name_empty(Empty {}) == "Empty")
+    }
+
+    test "class with 0 fields field count via free func" {
+        assert(get_field_count_empty(Empty {}) == 0)
+    }
+
+    test "struct with 0 fields via free func" {
+        assert(get_meta_name_empty_s(EmptyStruct {}) == "EmptyStruct")
+    }
+
+    test "struct with 0 fields field count via free func" {
+        assert(get_field_count_empty_s(EmptyStruct {}) == 0)
+    }
+
+    test "class with many fields (6) via wrapper" {
+        let big = BigClass { a: "hello", b: 42, c: true, d: "world", e: 99, f: false }
+        let w = Wrapper { value: big }
+        assert(w.value_meta_name() == "BigClass")
+        assert(w.value_meta_field_count() == 6)
+    }
+
+    test "class with many fields via free func name" {
+        let big = BigClass { a: "hello", b: 42, c: true, d: "world", e: 99, f: false }
+        assert(get_meta_name_big(big) == "BigClass")
+    }
+
+    test "class with many fields via free func count" {
+        let big = BigClass { a: "hello", b: 42, c: true, d: "world", e: 99, f: false }
+        assert(get_field_count_big(big) == 6)
+    }
+
+    test "class with many fields field names" {
+        let big = BigClass { a: "hello", b: 42, c: true, d: "world", e: 99, f: false }
+        let w = Wrapper { value: big }
+        let names = w.value_field_names()
+        assert(names.length() == 6)
+        assert(names[0] == "a")
+        assert(names[1] == "b")
+        assert(names[2] == "c")
+        assert(names[3] == "d")
+        assert(names[4] == "e")
+        assert(names[5] == "f")
+    }
+
+    test "class with many fields type names" {
+        let big = BigClass { a: "hello", b: 42, c: true, d: "world", e: 99, f: false }
+        let w = Wrapper { value: big }
+        let fields = w.value_meta_fields()
+        assert(fields[0].type_name == "string")
+        assert(fields[1].type_name == "i64")
+        assert(fields[2].type_name == "bool")
+        assert(fields[3].type_name == "string")
+        assert(fields[4].type_name == "i64")
+        assert(fields[5].type_name == "bool")
+    }
+
+    test "T.@meta result assigned to variable used later" {
+        let w = Wrapper { value: Item { name: "stored", count: 7 } }
+        let meta = w.value_meta()
+        let saved_name = meta.name
+        let saved_count = meta.fields.length()
+        let saved_ctor = meta.construct
+        assert(saved_name == "Item")
+        assert(saved_count == 2)
+        let rebuilt = saved_ctor(["Rebuilt", 88])
+        assert(rebuilt is Item)
+        if rebuilt is Item {
+            assert(rebuilt.name == "Rebuilt")
+            assert(rebuilt.count == 88)
+        }
+    }
+
+    test "generic meta result from wrapper assigned to variable" {
+        let w = Wrapper { value: Point { x: 5, y: 10 } }
+        let meta = w.value_meta()
+        let name = meta.name
+        let count = meta.fields.length()
+        assert(name == "Point")
+        assert(count == 2)
+    }
+
+    test "single field class via wrapper" {
+        let w = Wrapper { value: Tag { label: "solo" } }
+        assert(w.value_meta_name() == "Tag")
+        assert(w.value_meta_field_count() == 1)
+        let fields = w.value_meta_fields()
+        assert(fields[0].name == "label")
+        assert(fields[0].type_name == "string")
+    }
+
+    test "wrapper field count method with Item" {
+        let w = Wrapper { value: Item { name: "x", count: 0 } }
+        assert(w.value_meta_field_count() == 2)
+    }
+
+    test "wrapper field count method with Tag" {
+        let w = Wrapper { value: Tag { label: "y" } }
+        assert(w.value_meta_field_count() == 1)
+    }
+
+    test "inspector with Empty class" {
+        let insp = Inspector { item: Empty {} }
+        assert(insp.field_count() == 0)
+        assert(insp.type_name() == "Empty")
+        let names = insp.field_names()
+        assert(names.length() == 0)
+    }
+
+    test "inspector with BigClass" {
+        let big = BigClass { a: "hello", b: 42, c: true, d: "world", e: 99, f: false }
+        let insp = Inspector { item: big }
+        assert(insp.field_count() == 6)
+        assert(insp.type_name() == "BigClass")
+        let names = insp.field_names()
+        assert(names.length() == 6)
+        assert(names[0] == "a")
+        assert(names[5] == "f")
+    }
+
+    test "inspector with EmptyStruct" {
+        let insp = Inspector { item: EmptyStruct {} }
+        assert(insp.field_count() == 0)
+        assert(insp.type_name() == "EmptyStruct")
+        let names = insp.field_names()
+        assert(names.length() == 0)
+    }
+
+    test "multiple different generic classes using T.@meta same program" {
+        let w = Wrapper { value: Item { name: "a", count: 1 } }
+        let insp = Inspector { item: Item { name: "b", count: 2 } }
+        assert(w.value_meta_name() == "Item")
+        assert(insp.type_name() == "Item")
+        assert(w.value_meta_field_count() == 2)
+        assert(insp.field_count() == 2)
     }
 }
