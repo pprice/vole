@@ -166,3 +166,772 @@ class JsonArray {
         self.items.push(value)
     }
 }
+
+// =============================================================================
+// JSON utility class — public API for serialize/parse
+// =============================================================================
+//
+// Usage:
+//   let { JSON, JsonObject, JsonArray, JsonError } = import "std:json"
+//
+//   JSON.stringify(obj)          // compact JSON string
+//   JSON.stringify_pretty(obj)   // pretty-printed with 2-space indent
+//
+//   let result = JSON.parse(text)
+//   if result.ok {
+//       // use result.value (check with `is string`, `is f64`, etc.)
+//   } else {
+//       // result.error has the JsonError
+//   }
+
+// JsonParseResult - result of JSON.parse(), carrying either a value or an error.
+//
+// Usage:
+//   let r = JSON.parse(text)
+//   if r.ok {
+//       if r.is_string() { println(r.as_string()) }
+//       if r.is_object() { let obj = r.as_object(); ... }
+//   } else {
+//       println(r.err.to_string())
+//   }
+//
+// Note: Due to a cross-module union type limitation, this class stores each
+// possible value type in a separate field and uses an explicit type tag string.
+// Use the is_*() / as_*() methods rather than accessing fields directly.
+class JsonParseResult {
+    _tag: string,
+    _str_val: string,
+    _f64_val: f64,
+    _bool_val: bool,
+    _obj_val: JsonObject,
+    _arr_val: JsonArray,
+    err: JsonError,
+    ok: bool,
+
+    statics {
+        func _success_str(v: string) -> JsonParseResult {
+            return JsonParseResult {
+                _tag: "string", _str_val: v, _f64_val: 0.0, _bool_val: false,
+                _obj_val: JsonObject.new(), _arr_val: JsonArray.new(),
+                err: JsonError.new("", 0), ok: true,
+            }
+        }
+        func _success_f64(v: f64) -> JsonParseResult {
+            return JsonParseResult {
+                _tag: "f64", _str_val: "", _f64_val: v, _bool_val: false,
+                _obj_val: JsonObject.new(), _arr_val: JsonArray.new(),
+                err: JsonError.new("", 0), ok: true,
+            }
+        }
+        func _success_bool(v: bool) -> JsonParseResult {
+            return JsonParseResult {
+                _tag: "bool", _str_val: "", _f64_val: 0.0, _bool_val: v,
+                _obj_val: JsonObject.new(), _arr_val: JsonArray.new(),
+                err: JsonError.new("", 0), ok: true,
+            }
+        }
+        func _success_nil() -> JsonParseResult {
+            return JsonParseResult {
+                _tag: "nil", _str_val: "", _f64_val: 0.0, _bool_val: false,
+                _obj_val: JsonObject.new(), _arr_val: JsonArray.new(),
+                err: JsonError.new("", 0), ok: true,
+            }
+        }
+        func _success_obj(v: JsonObject) -> JsonParseResult {
+            return JsonParseResult {
+                _tag: "object", _str_val: "", _f64_val: 0.0, _bool_val: false,
+                _obj_val: v, _arr_val: JsonArray.new(),
+                err: JsonError.new("", 0), ok: true,
+            }
+        }
+        func _success_arr(v: JsonArray) -> JsonParseResult {
+            return JsonParseResult {
+                _tag: "array", _str_val: "", _f64_val: 0.0, _bool_val: false,
+                _obj_val: JsonObject.new(), _arr_val: v,
+                err: JsonError.new("", 0), ok: true,
+            }
+        }
+        func _failure(e: JsonError) -> JsonParseResult {
+            return JsonParseResult {
+                _tag: "error", _str_val: "", _f64_val: 0.0, _bool_val: false,
+                _obj_val: JsonObject.new(), _arr_val: JsonArray.new(),
+                err: e, ok: false,
+            }
+        }
+    }
+
+    // Type checking methods.
+    func is_string() -> bool { return self._tag == "string" }
+    func is_f64() -> bool { return self._tag == "f64" }
+    func is_bool() -> bool { return self._tag == "bool" }
+    func is_nil() -> bool { return self._tag == "nil" }
+    func is_object() -> bool { return self._tag == "object" }
+    func is_array() -> bool { return self._tag == "array" }
+
+    // Type-safe accessor methods.
+    func as_string() -> string { return self._str_val }
+    func as_f64() -> f64 { return self._f64_val }
+    func as_bool() -> bool { return self._bool_val }
+    func as_object() -> JsonObject { return self._obj_val }
+    func as_array() -> JsonArray { return self._arr_val }
+}
+
+class JSON {
+    statics {
+        // Serialize a Json value to a compact JSON string (no extra whitespace).
+        func stringify(value: Json) -> string {
+            return _stringify_value(value)
+        }
+
+        // Serialize a Json value to pretty-printed JSON with 2-space indentation.
+        func stringify_pretty(value: Json) -> string {
+            return _stringify_pretty_top(value)
+        }
+
+        // Parse a JSON string. Returns a JsonParseResult.
+        // Check result.ok, then use result.value or result.error.
+        func parse(text: string) -> JsonParseResult {
+            return _parse_top(text)
+        }
+    }
+}
+
+// =============================================================================
+// Stringify — convert Json values to compact JSON text
+// =============================================================================
+
+// Escape a string for JSON output (handles \", \\, \n, \r, \t, and control chars).
+func _json_escape_string(s: string) -> string {
+    var result = ""
+    var i: i32 = 0
+    let len = s.length()
+    while i < len {
+        let ch = s.char_at_raw(i)
+        if ch == 34 { result = result + "\\\""       // "
+        } else if ch == 92 { result = result + "\\\\" // backslash
+        } else if ch == 10 { result = result + "\\n"  // newline
+        } else if ch == 13 { result = result + "\\r"  // carriage return
+        } else if ch == 9 { result = result + "\\t"   // tab
+        } else if ch == 8 { result = result + "\\b"   // backspace
+        } else if ch == 12 { result = result + "\\f"  // form feed
+        } else if ch < 32 {
+            // Other control characters: emit as \u00XX
+            result = result + "\\u00" + _hex_byte(ch)
+        } else {
+            result = result + s.substring(i, i + 1)
+        }
+        i = i + 1
+    }
+    return result
+}
+
+// Convert a byte value (0-255) to a two-digit hex string.
+func _hex_byte(n: i32) -> string {
+    let high: i32 = n / 16
+    let low: i32 = n - high * 16
+    return _hex_digit(high) + _hex_digit(low)
+}
+
+// Convert a nibble (0-15) to a single hex character.
+func _hex_digit(n: i32) -> string {
+    if n == 0 { return "0" } else if n == 1 { return "1"
+    } else if n == 2 { return "2" } else if n == 3 { return "3"
+    } else if n == 4 { return "4" } else if n == 5 { return "5"
+    } else if n == 6 { return "6" } else if n == 7 { return "7"
+    } else if n == 8 { return "8" } else if n == 9 { return "9"
+    } else if n == 10 { return "a" } else if n == 11 { return "b"
+    } else if n == 12 { return "c" } else if n == 13 { return "d"
+    } else if n == 14 { return "e" } else { return "f" }
+}
+
+// Serialize a Json value to a compact JSON string (no extra whitespace).
+func _stringify_value(value: Json) -> string {
+    if value is string {
+        return "\"" + _json_escape_string(value) + "\""
+    }
+    if value is f64 {
+        return value.to_string()
+    }
+    if value is bool {
+        if value { return "true" }
+        return "false"
+    }
+    if value is nil {
+        return "null"
+    }
+    if value is JsonObject {
+        return _stringify_object(value)
+    }
+    if value is JsonArray {
+        return _stringify_array(value)
+    }
+    return ""
+}
+
+// Serialize a JsonObject to compact JSON.
+func _stringify_object(obj: JsonObject) -> string {
+    var result = "{{"
+    var first = true
+    for key in obj.keys() {
+        if !first {
+            result = result + ","
+        }
+        first = false
+        let v = obj.get(key)
+        result = result + "\"" + _json_escape_string(key) + "\":" + _stringify_value(v)
+    }
+    return result + "}}"
+}
+
+// Serialize a JsonArray to compact JSON.
+func _stringify_array(arr: JsonArray) -> string {
+    var result = "["
+    var i: i64 = 0
+    while i < arr.length() {
+        if i > 0 {
+            result = result + ","
+        }
+        result = result + _stringify_value(arr.get(i))
+        i = i + 1
+    }
+    return result + "]"
+}
+
+// =============================================================================
+// Stringify Pretty — convert Json values to indented JSON text
+// =============================================================================
+
+// Internal entry point for pretty printing (called from JSON class statics).
+func _stringify_pretty_top(value: Json) -> string {
+    return _stringify_pretty_val(value, 0)
+}
+
+// Recursive pretty-printer with indent level tracking.
+func _stringify_pretty_val(value: Json, indent: i64) -> string {
+    if value is string {
+        return "\"" + _json_escape_string(value) + "\""
+    }
+    if value is f64 {
+        return value.to_string()
+    }
+    if value is bool {
+        if value { return "true" }
+        return "false"
+    }
+    if value is nil {
+        return "null"
+    }
+    if value is JsonObject {
+        return _pretty_object(value, indent)
+    }
+    if value is JsonArray {
+        return _pretty_array(value, indent)
+    }
+    return ""
+}
+
+// Build an indentation string (2 spaces per level).
+func _indent_str(level: i64) -> string {
+    var result = ""
+    var i: i64 = 0
+    while i < level {
+        result = result + "  "
+        i = i + 1
+    }
+    return result
+}
+
+// Pretty-print a JsonObject with indentation.
+func _pretty_object(obj: JsonObject, indent: i64) -> string {
+    if obj.len() == 0 {
+        return "{{}}"
+    }
+    let inner = indent + 1
+    let inner_pad = _indent_str(inner)
+    let outer_pad = _indent_str(indent)
+    var result = "{{\n"
+    var first = true
+    for key in obj.keys() {
+        if !first {
+            result = result + ",\n"
+        }
+        first = false
+        let v = obj.get(key)
+        result = result + inner_pad + "\"" + _json_escape_string(key) + "\": " + _stringify_pretty_val(v, inner)
+    }
+    return result + "\n" + outer_pad + "}}"
+}
+
+// Pretty-print a JsonArray with indentation.
+func _pretty_array(arr: JsonArray, indent: i64) -> string {
+    if arr.length() == 0 {
+        return "[]"
+    }
+    let inner = indent + 1
+    let inner_pad = _indent_str(inner)
+    let outer_pad = _indent_str(indent)
+    var result = "[\n"
+    var i: i64 = 0
+    while i < arr.length() {
+        if i > 0 {
+            result = result + ",\n"
+        }
+        result = result + inner_pad + _stringify_pretty_val(arr.get(i), inner)
+        i = i + 1
+    }
+    return result + "\n" + outer_pad + "]"
+}
+
+// =============================================================================
+// Parse — convert JSON text to Json values
+// =============================================================================
+
+// Internal result struct for the recursive descent parser.
+// Stores each value type in separate fields with an explicit tag string
+// to avoid union field type-tag issues when reading values back.
+struct ParseResult {
+    value: Json,
+    str_val: string,
+    f64_val: f64,
+    bool_val: bool,
+    obj_val: JsonObject,
+    arr_val: JsonArray,
+    pos: i32,
+    has_error: bool,
+    err_msg: string,
+    tag: string,
+}
+
+// Default empty values for ParseResult fields.
+func _empty_obj() -> JsonObject { return JsonObject.new() }
+func _empty_arr() -> JsonArray { return JsonArray.new() }
+
+// Convenience: wrap a successful parse result with a type tag.
+func _parse_ok_str(v: string, pos: i32) -> ParseResult {
+    return ParseResult { value: v, str_val: v, f64_val: 0.0, bool_val: false,
+        obj_val: _empty_obj(), arr_val: _empty_arr(),
+        pos: pos, has_error: false, err_msg: "", tag: "string" }
+}
+func _parse_ok_f64(v: f64, pos: i32) -> ParseResult {
+    return ParseResult { value: v, str_val: "", f64_val: v, bool_val: false,
+        obj_val: _empty_obj(), arr_val: _empty_arr(),
+        pos: pos, has_error: false, err_msg: "", tag: "f64" }
+}
+func _parse_ok_bool(v: bool, pos: i32) -> ParseResult {
+    return ParseResult { value: v, str_val: "", f64_val: 0.0, bool_val: v,
+        obj_val: _empty_obj(), arr_val: _empty_arr(),
+        pos: pos, has_error: false, err_msg: "", tag: "bool" }
+}
+func _parse_ok_nil(pos: i32) -> ParseResult {
+    return ParseResult { value: nil, str_val: "", f64_val: 0.0, bool_val: false,
+        obj_val: _empty_obj(), arr_val: _empty_arr(),
+        pos: pos, has_error: false, err_msg: "", tag: "nil" }
+}
+func _parse_ok_obj(v: JsonObject, pos: i32) -> ParseResult {
+    return ParseResult { value: v, str_val: "", f64_val: 0.0, bool_val: false,
+        obj_val: v, arr_val: _empty_arr(),
+        pos: pos, has_error: false, err_msg: "", tag: "object" }
+}
+func _parse_ok_arr(v: JsonArray, pos: i32) -> ParseResult {
+    return ParseResult { value: v, str_val: "", f64_val: 0.0, bool_val: false,
+        obj_val: _empty_obj(), arr_val: v,
+        pos: pos, has_error: false, err_msg: "", tag: "array" }
+}
+
+// Convenience: wrap a parse error.
+func _parse_err(message: string, pos: i32) -> ParseResult {
+    return ParseResult { value: nil, str_val: "", f64_val: 0.0, bool_val: false,
+        obj_val: _empty_obj(), arr_val: _empty_arr(),
+        pos: pos, has_error: true, err_msg: message, tag: "error" }
+}
+
+// Internal parse entry point (called from JSON class statics).
+// Dispatches to typed constructors using explicit tag to avoid cross-module union issues.
+func _parse_top(text: string) -> JsonParseResult {
+    let r = _parse_json_value(text, 0)
+    if r.has_error {
+        return JsonParseResult._failure(JsonError.new(r.err_msg, r.pos))
+    }
+    // Ensure no trailing non-whitespace
+    let end = _skip_whitespace(text, r.pos)
+    if end < text.length() {
+        return JsonParseResult._failure(JsonError.new("unexpected trailing content", end))
+    }
+    return _wrap_tagged_result(r)
+}
+
+// Convert a tagged ParseResult to a typed JsonParseResult using the explicit tag.
+func _wrap_tagged_result(r: ParseResult) -> JsonParseResult {
+    if r.tag == "string" { return JsonParseResult._success_str(r.str_val) }
+    if r.tag == "f64" { return JsonParseResult._success_f64(r.f64_val) }
+    if r.tag == "bool" { return JsonParseResult._success_bool(r.bool_val) }
+    if r.tag == "object" { return JsonParseResult._success_obj(r.obj_val) }
+    if r.tag == "array" { return JsonParseResult._success_arr(r.arr_val) }
+    return JsonParseResult._success_nil()
+}
+
+// =============================================================================
+// Parser internals
+// =============================================================================
+
+// Skip whitespace characters (space, tab, newline, carriage return).
+func _skip_whitespace(text: string, pos: i32) -> i32 {
+    var i: i32 = pos
+    let len = text.length()
+    while i < len {
+        let ch = text.char_at_raw(i)
+        if ch == 32 || ch == 9 || ch == 10 || ch == 13 {
+            i = i + 1
+        } else {
+            return i
+        }
+    }
+    return i
+}
+
+// Parse any JSON value: string, number, object, array, true, false, null.
+func _parse_json_value(text: string, pos: i32) -> ParseResult {
+    let i: i32 = _skip_whitespace(text, pos)
+    let len = text.length()
+    if i >= len {
+        return _parse_err("unexpected end of input", i)
+    }
+    let ch = text.char_at_raw(i)
+    if ch == 34 { return _parse_json_string(text, i) }              // "
+    if ch == 123 { return _parse_json_object(text, i) }             // {
+    if ch == 91 { return _parse_json_array(text, i) }               // [
+    if ch == 116 { return _parse_literal(text, i, "true", true) }   // t
+    if ch == 102 { return _parse_literal(text, i, "false", false) } // f
+    if ch == 110 { return _parse_null_literal(text, i) }            // n
+    if _is_number_start(ch) { return _parse_json_number(text, i) }
+    return _parse_err("unexpected character", i)
+}
+
+// Check if a character can start a JSON number.
+func _is_number_start(ch: i32) -> bool {
+    return (ch >= 48 && ch <= 57) || ch == 45
+}
+
+// Check if a character is an ASCII digit.
+func _is_ascii_digit(ch: i32) -> bool {
+    return ch >= 48 && ch <= 57
+}
+
+// Parse a boolean literal ("true" or "false").
+func _parse_literal(text: string, pos: i32, expected: string, value: bool) -> ParseResult {
+    let elen: i32 = _str_len_i32(expected)
+    let end: i32 = pos + elen
+    if text.substring(pos, end) == expected {
+        return _parse_ok_bool(value, end)
+    }
+    return _parse_err("expected '" + expected + "'", pos)
+}
+
+// Get string length as i32 (for use with substring/char_at_raw).
+func _str_len_i32(s: string) -> i32 {
+    // length() returns i64; substring/char_at_raw need i32.
+    // For typical JSON strings, lengths fit easily in i32.
+    var n: i32 = 0
+    var i: i32 = 0
+    while s.char_at_raw(i) != -1 {
+        n = n + 1
+        i = i + 1
+    }
+    return n
+}
+
+// Parse the "null" literal.
+func _parse_null_literal(text: string, pos: i32) -> ParseResult {
+    if text.substring(pos, pos + 4) == "null" {
+        return _parse_ok_nil(pos + 4)
+    }
+    return _parse_err("expected 'null'", pos)
+}
+
+// Parse a JSON string (opening " already detected at pos).
+func _parse_json_string(text: string, pos: i32) -> ParseResult {
+    var i: i32 = pos + 1
+    var result = ""
+    let len = text.length()
+    while i < len {
+        let ch = text.char_at_raw(i)
+        if ch == 34 {
+            return _parse_ok_str(result, i + 1)
+        } else if ch == 92 {
+            let esc_result = _parse_escape_seq(text, i + 1)
+            if esc_result.has_error {
+                return esc_result
+            }
+            // esc_result.value is always a string on success
+            result = result + esc_result.str_val
+            i = esc_result.pos
+        } else {
+            result = result + text.substring(i, i + 1)
+            i = i + 1
+        }
+    }
+    return _parse_err("unterminated string", pos)
+}
+
+// Parse an escape sequence (pos points to the char after the backslash).
+func _parse_escape_seq(text: string, pos: i32) -> ParseResult {
+    let len = text.length()
+    if pos >= len {
+        return _parse_err("unexpected end of escape sequence", pos)
+    }
+    let ch = text.char_at_raw(pos)
+    if ch == 34 { return _parse_ok_str("\"", pos + 1) }    // \"
+    if ch == 92 { return _parse_ok_str("\\", pos + 1) }    // \\
+    if ch == 47 { return _parse_ok_str("/", pos + 1) }     // \/
+    if ch == 98 { return _parse_ok_str("\b", pos + 1) }    // \b  (backspace)
+    if ch == 102 { return _parse_ok_str("\f", pos + 1) }   // \f  (form feed)
+    if ch == 110 { return _parse_ok_str("\n", pos + 1) }   // \n
+    if ch == 114 { return _parse_ok_str("\r", pos + 1) }   // \r
+    if ch == 116 { return _parse_ok_str("\t", pos + 1) }   // \t
+    if ch == 117 { return _parse_unicode_escape(text, pos + 1) } // \uXXXX
+    return _parse_err("invalid escape character", pos)
+}
+
+// Parse a \uXXXX unicode escape (pos points to first hex digit).
+func _parse_unicode_escape(text: string, pos: i32) -> ParseResult {
+    let len = text.length()
+    if pos + 4 > len {
+        return _parse_err("incomplete unicode escape", pos)
+    }
+    var code: i32 = 0
+    var i: i32 = 0
+    while i < 4 {
+        let hex = _hex_char_val(text.char_at_raw(pos + i))
+        if hex < 0 {
+            return _parse_err("invalid hex digit in unicode escape", pos + i)
+        }
+        code = code * 16 + hex
+        i = i + 1
+    }
+    let char_str = _codepoint_to_string(code)
+    return _parse_ok_str(char_str, pos + 4)
+}
+
+// Convert a hex character to its value (0-15), or -1 if invalid.
+func _hex_char_val(ch: i32) -> i32 {
+    if ch >= 48 && ch <= 57 { return _i32_sub(ch, 48) }   // 0-9
+    if ch >= 97 && ch <= 102 { return _i32_sub(ch, 87) }  // a-f
+    if ch >= 65 && ch <= 70 { return _i32_sub(ch, 55) }   // A-F
+    let neg: i32 = -1
+    return neg
+}
+
+// Subtraction that stays in i32 (avoids i32-literal => i64 promotion).
+func _i32_sub(a: i32, b: i32) -> i32 {
+    return a - b
+}
+
+// Convert a Unicode codepoint to a string.
+// Uses Buffer (from prelude) to build the UTF-8 byte sequence.
+func _codepoint_to_string(code: i32) -> string {
+    let buf = Buffer.new()
+    if code < 128 {
+        buf.append_byte(code)
+    } else if code < 2048 {
+        buf.append_byte(192 + code / 64)
+        buf.append_byte(128 + code - (code / 64) * 64)
+    } else {
+        buf.append_byte(224 + code / 4096)
+        let mid = code - (code / 4096) * 4096
+        buf.append_byte(128 + mid / 64)
+        buf.append_byte(128 + mid - (mid / 64) * 64)
+    }
+    return buf.to_string_raw()
+}
+
+// =============================================================================
+// Number parsing
+// =============================================================================
+
+// Convert a digit character code (48-57) to its f64 value.
+func _digit_to_f64(ch: i32) -> f64 {
+    if ch == 48 { return 0.0 } else if ch == 49 { return 1.0
+    } else if ch == 50 { return 2.0 } else if ch == 51 { return 3.0
+    } else if ch == 52 { return 4.0 } else if ch == 53 { return 5.0
+    } else if ch == 54 { return 6.0 } else if ch == 55 { return 7.0
+    } else if ch == 56 { return 8.0 } else { return 9.0 }
+}
+
+// Parse a JSON number starting at pos.
+func _parse_json_number(text: string, pos: i32) -> ParseResult {
+    var i: i32 = pos
+    let len = text.length()
+    var negative = false
+    if i < len && text.char_at_raw(i) == 45 {
+        negative = true
+        i = i + 1
+    }
+    if i >= len || !_is_ascii_digit(text.char_at_raw(i)) {
+        return _parse_err("expected digit", i)
+    }
+    var result: f64 = 0.0
+    while i < len && _is_ascii_digit(text.char_at_raw(i)) {
+        result = result * 10.0 + _digit_to_f64(text.char_at_raw(i))
+        i = i + 1
+    }
+    // Fractional part
+    if i < len && text.char_at_raw(i) == 46 {
+        i = i + 1
+        if i >= len || !_is_ascii_digit(text.char_at_raw(i)) {
+            return _parse_err("expected digit after decimal point", i)
+        }
+        var frac: f64 = 0.1
+        while i < len && _is_ascii_digit(text.char_at_raw(i)) {
+            result = result + _digit_to_f64(text.char_at_raw(i)) * frac
+            frac = frac * 0.1
+            i = i + 1
+        }
+    }
+    // Exponent part
+    if i < len {
+        let ec = text.char_at_raw(i)
+        if ec == 101 || ec == 69 {
+            i = i + 1
+            let exp_r = _parse_exponent_part(text, i, result)
+            if exp_r.has_error {
+                return _parse_err(exp_r.err_msg, exp_r.pos)
+            }
+            result = exp_r.num_result
+            i = exp_r.pos
+        }
+    }
+    if negative {
+        result = 0.0 - result
+    }
+    return _parse_ok_f64(result, i)
+}
+
+// Result struct for exponent parsing (avoids union narrowing issues).
+struct ExpResult {
+    num_result: f64,
+    pos: i32,
+    has_error: bool,
+    err_msg: string,
+}
+
+// Parse the exponent part of a number (after 'e' or 'E').
+func _parse_exponent_part(text: string, pos: i32, base: f64) -> ExpResult {
+    var i: i32 = pos
+    let len = text.length()
+    var exp_neg = false
+    if i < len {
+        let sign = text.char_at_raw(i)
+        if sign == 45 {
+            exp_neg = true
+            i = i + 1
+        } else if sign == 43 {
+            i = i + 1
+        }
+    }
+    if i >= len || !_is_ascii_digit(text.char_at_raw(i)) {
+        return ExpResult { num_result: 0.0, pos: i, has_error: true, err_msg: "expected digit in exponent" }
+    }
+    var exp: f64 = 0.0
+    while i < len && _is_ascii_digit(text.char_at_raw(i)) {
+        exp = exp * 10.0 + _digit_to_f64(text.char_at_raw(i))
+        i = i + 1
+    }
+    var mult: f64 = 1.0
+    var e: f64 = 0.0
+    while e < exp {
+        mult = mult * 10.0
+        e = e + 1.0
+    }
+    if exp_neg {
+        return ExpResult { num_result: base / mult, pos: i, has_error: false, err_msg: "" }
+    }
+    return ExpResult { num_result: base * mult, pos: i, has_error: false, err_msg: "" }
+}
+
+// =============================================================================
+// Object and array parsing
+// =============================================================================
+
+// Parse a JSON object (pos points to the opening '{').
+func _parse_json_object(text: string, pos: i32) -> ParseResult {
+    var i: i32 = _skip_whitespace(text, pos + 1)
+    let len = text.length()
+    let obj = JsonObject.new()
+    // Empty object
+    if i < len && text.char_at_raw(i) == 125 {
+        return _parse_ok_obj(obj, i + 1)
+    }
+    // Parse key-value pairs
+    while i < len {
+        i = _skip_whitespace(text, i)
+        if i >= len || text.char_at_raw(i) != 34 {
+            return _parse_err("expected string key", i)
+        }
+        let key_r = _parse_json_string(text, i)
+        if key_r.has_error { return key_r }
+        i = _skip_whitespace(text, key_r.pos)
+        if i >= len || text.char_at_raw(i) != 58 {
+            return _parse_err("expected ':'", i)
+        }
+        i = i + 1
+        let val_r = _parse_json_value(text, i)
+        if val_r.has_error { return val_r }
+        // key_r is always a string on success from _parse_json_string
+        _obj_set_tagged(obj, key_r.str_val, val_r)
+        i = _skip_whitespace(text, val_r.pos)
+        if i < len && text.char_at_raw(i) == 125 {
+            return _parse_ok_obj(obj, i + 1)
+        }
+        if i >= len || text.char_at_raw(i) != 44 {
+            return _parse_err("expected ',' or '}}'", i)
+        }
+        i = i + 1
+    }
+    return _parse_err("unterminated object", pos)
+}
+
+// Parse a JSON array (pos points to the opening '[').
+func _parse_json_array(text: string, pos: i32) -> ParseResult {
+    var i: i32 = _skip_whitespace(text, pos + 1)
+    let len = text.length()
+    let arr = JsonArray.new()
+    // Empty array
+    if i < len && text.char_at_raw(i) == 93 {
+        return _parse_ok_arr(arr, i + 1)
+    }
+    // Parse elements
+    while i < len {
+        let elem_r = _parse_json_value(text, i)
+        if elem_r.has_error { return elem_r }
+        _push_tagged(arr, elem_r)
+        i = _skip_whitespace(text, elem_r.pos)
+        if i < len && text.char_at_raw(i) == 93 {
+            return _parse_ok_arr(arr, i + 1)
+        }
+        if i >= len || text.char_at_raw(i) != 44 {
+            return _parse_err("expected ',' or ']'", i)
+        }
+        i = i + 1
+    }
+    return _parse_err("unterminated array", pos)
+}
+
+// Set a parsed value on a JsonObject using the tagged fields.
+func _obj_set_tagged(obj: JsonObject, key: string, r: ParseResult) {
+    if r.tag == "string" { obj.set(key, r.str_val)
+    } else if r.tag == "f64" { obj.set(key, r.f64_val)
+    } else if r.tag == "bool" { obj.set(key, r.bool_val)
+    } else if r.tag == "object" { obj.set(key, r.obj_val)
+    } else if r.tag == "array" { obj.set(key, r.arr_val)
+    } else { obj.set(key, nil) }
+}
+
+// Push a parsed value into a JsonArray using the tagged fields.
+func _push_tagged(arr: JsonArray, r: ParseResult) {
+    if r.tag == "string" { arr.push(r.str_val)
+    } else if r.tag == "f64" { arr.push(r.f64_val)
+    } else if r.tag == "bool" { arr.push(r.bool_val)
+    } else if r.tag == "object" { arr.push(r.obj_val)
+    } else if r.tag == "array" { arr.push(r.arr_val)
+    } else { arr.push(nil) }
+}

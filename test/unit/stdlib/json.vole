@@ -1,5 +1,5 @@
-// Tests for stdlib/json.vole - JsonObject, JsonArray, JsonError, and annotation types
-let { JsonObject, JsonArray, JsonError, json_name, json_ignore } = import "std:json"
+// Tests for stdlib/json.vole - JsonObject, JsonArray, JsonError, JSON, JsonParseResult, and annotation types
+let { JsonObject, JsonArray, JsonError, json_name, json_ignore, JSON, JsonParseResult } = import "std:json"
 
 tests "JsonObject construction" {
     test "new creates empty object" {
@@ -705,5 +705,763 @@ tests "json_ignore annotation" {
     test "json_ignore can be constructed" {
         let ann = json_ignore {}
         _ = ann
+    }
+}
+
+// =============================================================================
+// JSON.stringify tests
+// =============================================================================
+
+tests "JSON.stringify primitives" {
+    test "stringify string" {
+        assert(JSON.stringify("hello") == "\"hello\"")
+    }
+
+    test "stringify empty string" {
+        assert(JSON.stringify("") == "\"\"")
+    }
+
+    test "stringify string with quotes" {
+        assert(JSON.stringify("say \"hi\"") == "\"say \\\"hi\\\"\"")
+    }
+
+    test "stringify string with backslash" {
+        assert(JSON.stringify("a\\b") == "\"a\\\\b\"")
+    }
+
+    test "stringify string with newline" {
+        assert(JSON.stringify("line1\nline2") == "\"line1\\nline2\"")
+    }
+
+    test "stringify string with tab" {
+        assert(JSON.stringify("a\tb") == "\"a\\tb\"")
+    }
+
+    test "stringify string with carriage return" {
+        assert(JSON.stringify("a\rb") == "\"a\\rb\"")
+    }
+
+    test "stringify integer f64" {
+        assert(JSON.stringify(42.0) == "42")
+    }
+
+    test "stringify decimal f64" {
+        assert(JSON.stringify(3.14) == "3.14")
+    }
+
+    test "stringify zero f64" {
+        assert(JSON.stringify(0.0) == "0")
+    }
+
+    test "stringify negative f64" {
+        assert(JSON.stringify(-1.5) == "-1.5")
+    }
+
+    test "stringify true" {
+        assert(JSON.stringify(true) == "true")
+    }
+
+    test "stringify false" {
+        assert(JSON.stringify(false) == "false")
+    }
+
+    test "stringify nil" {
+        assert(JSON.stringify(nil) == "null")
+    }
+}
+
+tests "JSON.stringify objects" {
+    test "stringify empty object" {
+        let obj = JsonObject.new()
+        assert(JSON.stringify(obj) == "{{}}")
+    }
+
+    test "stringify object with string value" {
+        let obj = JsonObject.new()
+        obj.set("name", "Alice")
+        assert(JSON.stringify(obj) == "{{\"name\":\"Alice\"}}")
+    }
+
+    test "stringify object with number value" {
+        let obj = JsonObject.new()
+        obj.set("age", 30.0)
+        assert(JSON.stringify(obj) == "{{\"age\":30}}")
+    }
+
+    test "stringify object with bool value" {
+        let obj = JsonObject.new()
+        obj.set("active", true)
+        assert(JSON.stringify(obj) == "{{\"active\":true}}")
+    }
+
+    test "stringify object with nil value" {
+        let obj = JsonObject.new()
+        obj.set("data", nil)
+        assert(JSON.stringify(obj) == "{{\"data\":null}}")
+    }
+
+    test "stringify object with multiple keys" {
+        let obj = JsonObject.new()
+        obj.set("a", 1.0)
+        obj.set("b", 2.0)
+        // Order depends on Map iteration, but result must be valid JSON
+        let s = JSON.stringify(obj)
+        assert(s.contains("\"a\":1"))
+        assert(s.contains("\"b\":2"))
+    }
+
+    test "stringify nested object" {
+        let inner = JsonObject.new()
+        inner.set("x", 10.0)
+        let outer = JsonObject.new()
+        outer.set("point", inner)
+        assert(JSON.stringify(outer) == "{{\"point\":{{\"x\":10}}}}")
+    }
+}
+
+tests "JSON.stringify arrays" {
+    test "stringify empty array" {
+        let arr = JsonArray.new()
+        assert(JSON.stringify(arr) == "[]")
+    }
+
+    test "stringify array of numbers" {
+        let arr = JsonArray.new()
+        arr.push(1.0)
+        arr.push(2.0)
+        arr.push(3.0)
+        assert(JSON.stringify(arr) == "[1,2,3]")
+    }
+
+    test "stringify array of strings" {
+        let arr = JsonArray.new()
+        arr.push("a")
+        arr.push("b")
+        assert(JSON.stringify(arr) == "[\"a\",\"b\"]")
+    }
+
+    test "stringify mixed array" {
+        let arr = JsonArray.new()
+        arr.push(1.0)
+        arr.push("two")
+        arr.push(true)
+        arr.push(nil)
+        assert(JSON.stringify(arr) == "[1,\"two\",true,null]")
+    }
+
+    test "stringify nested array" {
+        let inner = JsonArray.new()
+        inner.push(1.0)
+        inner.push(2.0)
+        let outer = JsonArray.new()
+        outer.push(inner)
+        assert(JSON.stringify(outer) == "[[1,2]]")
+    }
+
+    test "stringify array with object" {
+        let obj = JsonObject.new()
+        obj.set("id", 1.0)
+        let arr = JsonArray.new()
+        arr.push(obj)
+        assert(JSON.stringify(arr) == "[{{\"id\":1}}]")
+    }
+}
+
+// =============================================================================
+// JSON.stringify_pretty tests
+// =============================================================================
+
+tests "JSON.stringify_pretty" {
+    test "pretty print empty object" {
+        let obj = JsonObject.new()
+        assert(JSON.stringify_pretty(obj) == "{{}}")
+    }
+
+    test "pretty print empty array" {
+        let arr = JsonArray.new()
+        assert(JSON.stringify_pretty(arr) == "[]")
+    }
+
+    test "pretty print primitive" {
+        assert(JSON.stringify_pretty("hello") == "\"hello\"")
+        assert(JSON.stringify_pretty(42.0) == "42")
+        assert(JSON.stringify_pretty(true) == "true")
+        assert(JSON.stringify_pretty(nil) == "null")
+    }
+
+    test "pretty print object with one key" {
+        let obj = JsonObject.new()
+        obj.set("name", "Alice")
+        let s = JSON.stringify_pretty(obj)
+        assert(s.contains("\"name\": \"Alice\""))
+        assert(s.contains("  "))
+    }
+
+    test "pretty print array" {
+        let arr = JsonArray.new()
+        arr.push(1.0)
+        arr.push(2.0)
+        let s = JSON.stringify_pretty(arr)
+        assert(s.contains("  1"))
+        assert(s.contains("  2"))
+    }
+}
+
+// =============================================================================
+// JSON.parse tests
+// =============================================================================
+
+tests "JSON.parse primitives" {
+    test "parse null" {
+        let r = JSON.parse("null")
+        assert(r.ok)
+        assert(r.is_nil())
+    }
+
+    test "parse true" {
+        let r = JSON.parse("true")
+        assert(r.ok)
+        assert(r.is_bool())
+        assert(r.as_bool() == true)
+    }
+
+    test "parse false" {
+        let r = JSON.parse("false")
+        assert(r.ok)
+        assert(r.is_bool())
+        assert(r.as_bool() == false)
+    }
+
+    test "parse integer" {
+        let r = JSON.parse("42")
+        assert(r.ok)
+        assert(r.is_f64())
+        assert(r.as_f64() == 42.0)
+    }
+
+    test "parse negative integer" {
+        let r = JSON.parse("-7")
+        assert(r.ok)
+        assert(r.is_f64())
+        assert(r.as_f64() == -7.0)
+    }
+
+    test "parse decimal" {
+        let r = JSON.parse("3.14")
+        assert(r.ok)
+        assert(r.is_f64())
+        // Compare with tolerance
+        let v = r.as_f64()
+        assert(v > 3.13 && v < 3.15)
+    }
+
+    test "parse negative decimal" {
+        let r = JSON.parse("-0.5")
+        assert(r.ok)
+        assert(r.is_f64())
+        assert(r.as_f64() == -0.5)
+    }
+
+    test "parse zero" {
+        let r = JSON.parse("0")
+        assert(r.ok)
+        assert(r.is_f64())
+        assert(r.as_f64() == 0.0)
+    }
+
+    test "parse string" {
+        let r = JSON.parse("\"hello\"")
+        assert(r.ok)
+        assert(r.is_string())
+        assert(r.as_string() == "hello")
+    }
+
+    test "parse empty string" {
+        let r = JSON.parse("\"\"")
+        assert(r.ok)
+        assert(r.is_string())
+        assert(r.as_string() == "")
+    }
+
+    test "parse string with escapes" {
+        let r = JSON.parse("\"a\\nb\"")
+        assert(r.ok)
+        assert(r.is_string())
+        assert(r.as_string() == "a\nb")
+    }
+
+    test "parse string with escaped quote" {
+        let r = JSON.parse("\"say \\\"hi\\\"\"")
+        assert(r.ok)
+        assert(r.is_string())
+        assert(r.as_string() == "say \"hi\"")
+    }
+
+    test "parse string with backslash" {
+        let r = JSON.parse("\"a\\\\b\"")
+        assert(r.ok)
+        assert(r.is_string())
+        assert(r.as_string() == "a\\b")
+    }
+
+    test "parse string with tab escape" {
+        let r = JSON.parse("\"a\\tb\"")
+        assert(r.ok)
+        assert(r.as_string() == "a\tb")
+    }
+
+    test "parse string with unicode escape" {
+        let r = JSON.parse("\"\\u0041\"")
+        assert(r.ok)
+        assert(r.as_string() == "A")
+    }
+}
+
+tests "JSON.parse numbers" {
+    test "parse number with exponent" {
+        let r = JSON.parse("1e2")
+        assert(r.ok)
+        assert(r.is_f64())
+        assert(r.as_f64() == 100.0)
+    }
+
+    test "parse number with positive exponent" {
+        let r = JSON.parse("1E+2")
+        assert(r.ok)
+        assert(r.as_f64() == 100.0)
+    }
+
+    test "parse number with negative exponent" {
+        let r = JSON.parse("100e-2")
+        assert(r.ok)
+        assert(r.as_f64() == 1.0)
+    }
+
+    test "parse large integer" {
+        let r = JSON.parse("1000000")
+        assert(r.ok)
+        assert(r.as_f64() == 1000000.0)
+    }
+}
+
+tests "JSON.parse arrays" {
+    test "parse empty array" {
+        let r = JSON.parse("[]")
+        assert(r.ok)
+        assert(r.is_array())
+        assert(r.as_array().length() == 0)
+    }
+
+    test "parse array of numbers" {
+        let r = JSON.parse("[1, 2, 3]")
+        assert(r.ok)
+        assert(r.is_array())
+        let arr = r.as_array()
+        assert(arr.length() == 3)
+        let v0 = arr.get(0)
+        if v0 is f64 { assert(v0 == 1.0) } else { assert(false) }
+        let v1 = arr.get(1)
+        if v1 is f64 { assert(v1 == 2.0) } else { assert(false) }
+        let v2 = arr.get(2)
+        if v2 is f64 { assert(v2 == 3.0) } else { assert(false) }
+    }
+
+    test "parse array of strings" {
+        let r = JSON.parse("[\"a\", \"b\"]")
+        assert(r.ok)
+        let arr = r.as_array()
+        assert(arr.length() == 2)
+        let v = arr.get(0)
+        if v is string { assert(v == "a") } else { assert(false) }
+    }
+
+    test "parse mixed array" {
+        let r = JSON.parse("[1, \"two\", true, null]")
+        assert(r.ok)
+        let arr = r.as_array()
+        assert(arr.length() == 4)
+        assert(arr.get(0) is f64)
+        assert(arr.get(1) is string)
+        assert(arr.get(2) is bool)
+        assert(arr.get(3) is nil)
+    }
+
+    test "parse nested array" {
+        let r = JSON.parse("[[1, 2], [3, 4]]")
+        assert(r.ok)
+        let arr = r.as_array()
+        assert(arr.length() == 2)
+        let inner = arr.get(0)
+        if inner is JsonArray {
+            assert(inner.length() == 2)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "parse array with whitespace" {
+        let r = JSON.parse("  [ 1 , 2 , 3 ]  ")
+        assert(r.ok)
+        assert(r.as_array().length() == 3)
+    }
+}
+
+tests "JSON.parse objects" {
+    test "parse empty object" {
+        let r = JSON.parse("{{}}")
+        assert(r.ok)
+        assert(r.is_object())
+        assert(r.as_object().len() == 0)
+    }
+
+    test "parse object with string value" {
+        let r = JSON.parse("{{\"name\": \"Alice\"}}")
+        assert(r.ok)
+        assert(r.is_object())
+        let obj = r.as_object()
+        let v = obj.get("name")
+        if v is string { assert(v == "Alice") } else { assert(false) }
+    }
+
+    test "parse object with number value" {
+        let r = JSON.parse("{{\"age\": 30}}")
+        assert(r.ok)
+        let obj = r.as_object()
+        let v = obj.get("age")
+        if v is f64 { assert(v == 30.0) } else { assert(false) }
+    }
+
+    test "parse object with bool value" {
+        let r = JSON.parse("{{\"active\": true}}")
+        assert(r.ok)
+        let obj = r.as_object()
+        let v = obj.get("active")
+        if v is bool { assert(v == true) } else { assert(false) }
+    }
+
+    test "parse object with null value" {
+        let r = JSON.parse("{{\"data\": null}}")
+        assert(r.ok)
+        let obj = r.as_object()
+        assert(obj.contains_key("data"))
+        assert(obj.get("data") is nil)
+    }
+
+    test "parse object with multiple keys" {
+        let r = JSON.parse("{{\"a\": 1, \"b\": 2, \"c\": 3}}")
+        assert(r.ok)
+        let obj = r.as_object()
+        assert(obj.len() == 3)
+        let a = obj.get("a")
+        if a is f64 { assert(a == 1.0) } else { assert(false) }
+    }
+
+    test "parse nested object" {
+        let r = JSON.parse("{{\"inner\": {{\"x\": 10}}}}")
+        assert(r.ok)
+        let obj = r.as_object()
+        let inner = obj.get("inner")
+        if inner is JsonObject {
+            let x = inner.get("x")
+            if x is f64 { assert(x == 10.0) } else { assert(false) }
+        } else {
+            assert(false)
+        }
+    }
+
+    test "parse object with array value" {
+        let r = JSON.parse("{{\"items\": [1, 2, 3]}}")
+        assert(r.ok)
+        let obj = r.as_object()
+        let items = obj.get("items")
+        if items is JsonArray {
+            assert(items.length() == 3)
+        } else {
+            assert(false)
+        }
+    }
+}
+
+tests "JSON.parse errors" {
+    test "parse empty string" {
+        let r = JSON.parse("")
+        assert(!r.ok)
+    }
+
+    test "parse invalid token" {
+        let r = JSON.parse("bad")
+        assert(!r.ok)
+        assert(r.err.position == 0)
+    }
+
+    test "parse trailing content" {
+        let r = JSON.parse("true false")
+        assert(!r.ok)
+        assert(r.err.message == "unexpected trailing content")
+    }
+
+    test "parse unterminated string" {
+        let r = JSON.parse("\"hello")
+        assert(!r.ok)
+    }
+
+    test "parse unterminated array" {
+        let r = JSON.parse("[1, 2")
+        assert(!r.ok)
+    }
+
+    test "parse unterminated object" {
+        let r = JSON.parse("{{\"a\": 1")
+        assert(!r.ok)
+    }
+
+    test "parse invalid number" {
+        let r = JSON.parse("-")
+        assert(!r.ok)
+    }
+
+    test "parse error has position" {
+        let r = JSON.parse("   bad")
+        assert(!r.ok)
+        assert(r.err.position == 3)
+    }
+
+    test "parse error to_string" {
+        let r = JSON.parse("bad")
+        assert(!r.ok)
+        let s = r.err.to_string()
+        assert(s.contains("position"))
+    }
+}
+
+tests "JSON.parse whitespace handling" {
+    test "parse with leading whitespace" {
+        let r = JSON.parse("  42  ")
+        assert(r.ok)
+        assert(r.as_f64() == 42.0)
+    }
+
+    test "parse with tabs and newlines" {
+        let r = JSON.parse("\t\n42\n\t")
+        assert(r.ok)
+        assert(r.as_f64() == 42.0)
+    }
+}
+
+tests "JSON.parse type checking methods" {
+    test "is_string returns true for strings" {
+        let r = JSON.parse("\"hello\"")
+        assert(r.is_string())
+        assert(!r.is_f64())
+        assert(!r.is_bool())
+        assert(!r.is_nil())
+        assert(!r.is_object())
+        assert(!r.is_array())
+    }
+
+    test "is_f64 returns true for numbers" {
+        let r = JSON.parse("42")
+        assert(!r.is_string())
+        assert(r.is_f64())
+        assert(!r.is_bool())
+        assert(!r.is_nil())
+        assert(!r.is_object())
+        assert(!r.is_array())
+    }
+
+    test "is_bool returns true for booleans" {
+        let r = JSON.parse("true")
+        assert(!r.is_string())
+        assert(!r.is_f64())
+        assert(r.is_bool())
+        assert(!r.is_nil())
+        assert(!r.is_object())
+        assert(!r.is_array())
+    }
+
+    test "is_nil returns true for null" {
+        let r = JSON.parse("null")
+        assert(!r.is_string())
+        assert(!r.is_f64())
+        assert(!r.is_bool())
+        assert(r.is_nil())
+        assert(!r.is_object())
+        assert(!r.is_array())
+    }
+
+    test "is_object returns true for objects" {
+        let r = JSON.parse("{{}}")
+        assert(!r.is_string())
+        assert(!r.is_f64())
+        assert(!r.is_bool())
+        assert(!r.is_nil())
+        assert(r.is_object())
+        assert(!r.is_array())
+    }
+
+    test "is_array returns true for arrays" {
+        let r = JSON.parse("[]")
+        assert(!r.is_string())
+        assert(!r.is_f64())
+        assert(!r.is_bool())
+        assert(!r.is_nil())
+        assert(!r.is_object())
+        assert(r.is_array())
+    }
+}
+
+tests "JSON roundtrip" {
+    test "roundtrip string" {
+        let r = JSON.parse(JSON.stringify("hello"))
+        assert(r.ok)
+        assert(r.as_string() == "hello")
+    }
+
+    test "roundtrip number" {
+        let r = JSON.parse(JSON.stringify(42.0))
+        assert(r.ok)
+        assert(r.as_f64() == 42.0)
+    }
+
+    test "roundtrip bool true" {
+        let r = JSON.parse(JSON.stringify(true))
+        assert(r.ok)
+        assert(r.as_bool() == true)
+    }
+
+    test "roundtrip bool false" {
+        let r = JSON.parse(JSON.stringify(false))
+        assert(r.ok)
+        assert(r.as_bool() == false)
+    }
+
+    test "roundtrip null" {
+        let r = JSON.parse(JSON.stringify(nil))
+        assert(r.ok)
+        assert(r.is_nil())
+    }
+
+    test "roundtrip object" {
+        let obj = JsonObject.new()
+        obj.set("name", "Alice")
+        obj.set("age", 30.0)
+        let text = JSON.stringify(obj)
+        let r = JSON.parse(text)
+        assert(r.ok)
+        assert(r.is_object())
+        let parsed = r.as_object()
+        let name = parsed.get("name")
+        if name is string { assert(name == "Alice") } else { assert(false) }
+        let age = parsed.get("age")
+        if age is f64 { assert(age == 30.0) } else { assert(false) }
+    }
+
+    test "roundtrip array" {
+        let arr = JsonArray.new()
+        arr.push(1.0)
+        arr.push("two")
+        arr.push(true)
+        arr.push(nil)
+        let text = JSON.stringify(arr)
+        let r = JSON.parse(text)
+        assert(r.ok)
+        assert(r.is_array())
+        let parsed = r.as_array()
+        assert(parsed.length() == 4)
+    }
+
+    test "roundtrip nested structure" {
+        let inner = JsonObject.new()
+        inner.set("x", 1.0)
+        inner.set("y", 2.0)
+        let arr = JsonArray.new()
+        arr.push(inner)
+        let outer = JsonObject.new()
+        outer.set("points", arr)
+        let text = JSON.stringify(outer)
+        let r = JSON.parse(text)
+        assert(r.ok)
+        assert(r.is_object())
+        let robj = r.as_object()
+        let pts = robj.get("points")
+        if pts is JsonArray {
+            assert(pts.length() == 1)
+            let p = pts.get(0)
+            if p is JsonObject {
+                let x = p.get("x")
+                if x is f64 { assert(x == 1.0) } else { assert(false) }
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+}
+
+tests "JSON.parse string escapes" {
+    test "parse slash escape" {
+        let r = JSON.parse("\"\\/\"")
+        assert(r.ok)
+        assert(r.as_string() == "/")
+    }
+
+    test "parse backspace escape" {
+        let r = JSON.parse("\"\\b\"")
+        assert(r.ok)
+        assert(r.as_string() == "\b")
+    }
+
+    test "parse form feed escape" {
+        let r = JSON.parse("\"\\f\"")
+        assert(r.ok)
+        assert(r.as_string() == "\f")
+    }
+
+    test "parse carriage return escape" {
+        let r = JSON.parse("\"\\r\"")
+        assert(r.ok)
+        assert(r.as_string() == "\r")
+    }
+
+    test "parse multiple escapes in one string" {
+        let r = JSON.parse("\"a\\nb\\tc\"")
+        assert(r.ok)
+        assert(r.as_string() == "a\nb\tc")
+    }
+}
+
+tests "JSON.parse complex" {
+    test "parse deeply nested" {
+        let r = JSON.parse("{{\"a\": {{\"b\": {{\"c\": 1}}}}}}")
+        assert(r.ok)
+        let obj = r.as_object()
+        let a = obj.get("a")
+        if a is JsonObject {
+            let b = a.get("b")
+            if b is JsonObject {
+                let c = b.get("c")
+                if c is f64 { assert(c == 1.0) } else { assert(false) }
+            } else { assert(false) }
+        } else { assert(false) }
+    }
+
+    test "parse array of objects" {
+        let r = JSON.parse("[{{\"id\": 1}}, {{\"id\": 2}}]")
+        assert(r.ok)
+        let arr = r.as_array()
+        assert(arr.length() == 2)
+        let first = arr.get(0)
+        if first is JsonObject {
+            let id = first.get("id")
+            if id is f64 { assert(id == 1.0) } else { assert(false) }
+        } else { assert(false) }
+    }
+
+    test "parse object with escaped string key" {
+        let r = JSON.parse("{{\"key\\nwith\\nnewlines\": \"value\"}}")
+        assert(r.ok)
+        let obj = r.as_object()
+        assert(obj.contains_key("key\nwith\nnewlines"))
     }
 }
