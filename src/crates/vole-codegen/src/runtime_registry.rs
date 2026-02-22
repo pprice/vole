@@ -239,6 +239,8 @@ runtime_keys! {
     InstanceNew            => "vole_instance_new"            : (I32, I32, I32) -> Ptr = vole_runtime::instance::vole_instance_new,
     InstanceGetField       => "vole_instance_get_field"      : (Ptr, I32) -> I64      = vole_runtime::instance::vole_instance_get_field,
     InstanceSetField       => "vole_instance_set_field"      : (Ptr, I32, I64) -> Void = vole_runtime::instance::vole_instance_set_field,
+    InstanceGetMeta        => "vole_instance_get_meta"       : (Ptr) -> I64            = vole_runtime::instance::vole_instance_get_meta,
+    InstanceSetMeta        => "vole_instance_set_meta"       : (Ptr, I64) -> Void      = vole_runtime::instance::vole_instance_set_meta,
 
     // ── String builder ───────────────────────────────────────────────
     SbNew                  => "vole_sb_new"                  : () -> Ptr              = vole_runtime::string_builder::vole_sb_new,

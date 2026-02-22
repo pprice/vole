@@ -8,13 +8,14 @@ use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
 /// Reference-counted class instance
-/// Layout: RcHeader, then n slots of 64-bit values
+/// Layout: RcHeader, type_id, field_count, meta_ptr, then n slots of 64-bit values
 #[repr(C)]
 pub struct RcInstance {
     pub header: RcHeader,
-    pub type_id: u32, // Type identifier for this class
+    pub type_id: u32,     // Type identifier for this class
     pub field_count: u32, // Number of fields
-                      // Fields follow inline as 64-bit slots
+    pub meta_ptr: u64,    // Pointer to TypeMeta instance (0 if not yet materialized)
+                          // Fields follow inline as 64-bit slots
 }
 
 impl RcInstance {
@@ -38,6 +39,7 @@ impl RcInstance {
             );
             ptr::write(&mut (*ptr).type_id, type_id);
             ptr::write(&mut (*ptr).field_count, field_count);
+            ptr::write(&mut (*ptr).meta_ptr, 0);
 
             // Zero-initialize fields
             let fields_ptr = Self::fields_ptr(ptr);
@@ -140,6 +142,12 @@ unsafe extern "C" fn instance_drop(ptr: *mut u8) {
         let inst = ptr as *mut RcInstance;
         let type_id = (*inst).type_id;
         let field_count = (*inst).field_count as usize;
+
+        // Release the metadata pointer if present (it's an RC instance)
+        let meta = (*inst).meta_ptr;
+        if meta != 0 {
+            rc_dec(meta as *mut u8);
+        }
 
         // Look up field types and clean up reference-typed fields
         if let Some(type_info) = get_instance_type_info(type_id) {
@@ -289,6 +297,41 @@ pub extern "C" fn vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value
     // SAFETY: Null check above guarantees `ptr` is non-null. Per JIT contract,
     // non-null `ptr` is a valid `RcInstance` and `slot` is within bounds.
     unsafe { RcInstance::set_field(ptr, slot as usize, value) };
+}
+
+/// Read the metadata pointer from an instance header.
+///
+/// Returns 0 if `ptr` is null (nil-propagation).
+///
+/// # JIT contract
+/// `ptr` is null or a valid `RcInstance` pointer.
+#[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn vole_instance_get_meta(ptr: *const RcInstance) -> u64 {
+    if ptr.is_null() {
+        return 0;
+    }
+    // SAFETY: Null check above guarantees `ptr` is non-null. Per JIT contract,
+    // non-null `ptr` is a valid `RcInstance`.
+    unsafe { (*ptr).meta_ptr }
+}
+
+/// Write the metadata pointer into an instance header.
+///
+/// No-ops if `ptr` is null (nil-propagation).
+///
+/// # JIT contract
+/// `ptr` is null or a valid `RcInstance` pointer.
+/// `meta` is 0 or a valid pointer to an RC-managed TypeMeta instance.
+#[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn vole_instance_set_meta(ptr: *mut RcInstance, meta: u64) {
+    if ptr.is_null() {
+        return;
+    }
+    // SAFETY: Null check above guarantees `ptr` is non-null. Per JIT contract,
+    // non-null `ptr` is a valid `RcInstance`.
+    unsafe { (*ptr).meta_ptr = meta };
 }
 
 #[cfg(test)]
