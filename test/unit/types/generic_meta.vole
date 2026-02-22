@@ -6,10 +6,8 @@
 // Since Vole resolves type parameters via monomorphization, `T.@meta` is
 // accessed through a value of type T (e.g., `v.@meta` where v: T).
 //
-// NOTE: Free generic functions that use v.@meta with multiple different type
-// instantiations in the same program have a known caching bug (vol-kjf1).
-// Tests for multi-type instantiation use wrapper classes (which work correctly)
-// to test the same underlying T.@meta resolution mechanism.
+// Free generic functions are tested with multiple type instantiations to ensure
+// each monomorphization correctly resolves its own type metadata.
 
 // ---------------------------------------------------------------------------
 // Type definitions for tests
@@ -132,70 +130,22 @@ class Inspector<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Free generic functions (each used with a single type to avoid vol-kjf1)
+// Free generic functions (shared across multiple type instantiations)
 // ---------------------------------------------------------------------------
 
-func get_meta_name_item<T>(v: T) -> string {
+func get_meta_name<T>(v: T) -> string {
     return v.@meta.name
 }
 
-func get_meta_name_point<T>(v: T) -> string {
-    return v.@meta.name
-}
-
-func get_meta_name_tag<T>(v: T) -> string {
-    return v.@meta.name
-}
-
-func get_meta_name_empty<T>(v: T) -> string {
-    return v.@meta.name
-}
-
-func get_meta_name_empty_s<T>(v: T) -> string {
-    return v.@meta.name
-}
-
-func get_meta_name_big<T>(v: T) -> string {
-    return v.@meta.name
-}
-
-func get_meta_item<T>(v: T) -> TypeMeta {
+func get_meta<T>(v: T) -> TypeMeta {
     return v.@meta
 }
 
-func get_meta_point<T>(v: T) -> TypeMeta {
-    return v.@meta
-}
-
-func get_meta_big<T>(v: T) -> TypeMeta {
-    return v.@meta
-}
-
-func get_field_count_item<T>(v: T) -> i64 {
+func get_field_count<T>(v: T) -> i64 {
     return v.@meta.fields.length()
 }
 
-func get_field_count_point<T>(v: T) -> i64 {
-    return v.@meta.fields.length()
-}
-
-func get_field_count_empty<T>(v: T) -> i64 {
-    return v.@meta.fields.length()
-}
-
-func get_field_count_empty_s<T>(v: T) -> i64 {
-    return v.@meta.fields.length()
-}
-
-func get_field_count_big<T>(v: T) -> i64 {
-    return v.@meta.fields.length()
-}
-
-func get_meta_construct_item<T>(v: T) -> (([unknown]) -> unknown) {
-    return v.@meta.construct
-}
-
-func get_meta_construct_tag<T>(v: T) -> (([unknown]) -> unknown) {
+func get_meta_construct<T>(v: T) -> (([unknown]) -> unknown) {
     return v.@meta.construct
 }
 
@@ -236,21 +186,13 @@ class Container<T: Stringable> {
     }
 }
 
-// Constrained free functions (single instantiation each to avoid vol-kjf1)
+// Constrained free functions (shared across multiple type instantiations)
 
-func reflect_named<T: Stringable>(v: T) -> TypeMeta {
+func reflect<T: Stringable>(v: T) -> TypeMeta {
     return v.@meta
 }
 
-func reflect_labeled<T: Stringable>(v: T) -> TypeMeta {
-    return v.@meta
-}
-
-func uses_both_named<T: Stringable>(v: T) -> string {
-    return v.@meta.name + ": " + v.to_string()
-}
-
-func uses_both_labeled<T: Stringable>(v: T) -> string {
+func uses_both<T: Stringable>(v: T) -> string {
     return v.@meta.name + ": " + v.to_string()
 }
 
@@ -354,38 +296,47 @@ tests "generic meta field access" {
 }
 
 // ---------------------------------------------------------------------------
-// Free function: v.@meta in generic free functions (single instantiation)
+// Free function: v.@meta in generic free functions (multi-type instantiation)
 // ---------------------------------------------------------------------------
 
 tests "free generic function T.@meta" {
     test "free func meta name with class" {
-        assert(get_meta_name_item(Item { name: "a", count: 1 }) == "Item")
+        assert(get_meta_name(Item { name: "a", count: 1 }) == "Item")
     }
 
     test "free func meta name with struct" {
-        assert(get_meta_name_point(Point { x: 1, y: 2 }) == "Point")
+        assert(get_meta_name(Point { x: 1, y: 2 }) == "Point")
     }
 
     test "free func meta object with class" {
-        let meta = get_meta_item(Item { name: "a", count: 1 })
+        let meta = get_meta(Item { name: "a", count: 1 })
         assert(meta.name == "Item")
     }
 
     test "free func meta object with struct" {
-        let meta = get_meta_point(Point { x: 10, y: 20 })
+        let meta = get_meta(Point { x: 10, y: 20 })
         assert(meta.name == "Point")
     }
 
     test "free func field count with class" {
-        assert(get_field_count_item(Item { name: "x", count: 5 }) == 2)
+        assert(get_field_count(Item { name: "x", count: 5 }) == 2)
     }
 
     test "free func field count with struct" {
-        assert(get_field_count_point(Point { x: 0, y: 0 }) == 2)
+        assert(get_field_count(Point { x: 0, y: 0 }) == 2)
     }
 
     test "free func meta name with single-field class" {
-        assert(get_meta_name_tag(Tag { label: "solo" }) == "Tag")
+        assert(get_meta_name(Tag { label: "solo" }) == "Tag")
+    }
+
+    test "same free func with 3 different types" {
+        let a = get_meta_name(Item { name: "a", count: 1 })
+        let b = get_meta_name(Point { x: 1, y: 2 })
+        let c = get_meta_name(Tag { label: "t" })
+        assert(a == "Item")
+        assert(b == "Point")
+        assert(c == "Tag")
     }
 
     test "same generic class function with 2+ different types in one program" {
@@ -395,6 +346,23 @@ tests "free generic function T.@meta" {
         assert(w1.value_meta_name() == "Item")
         assert(w2.value_meta_name() == "Point")
         assert(w3.value_meta_name() == "Tag")
+    }
+
+    test "free func get_meta with multiple types" {
+        let meta_item = get_meta(Item { name: "a", count: 1 })
+        let meta_point = get_meta(Point { x: 1, y: 2 })
+        assert(meta_item.name == "Item")
+        assert(meta_point.name == "Point")
+        assert(meta_item.fields.length() == 2)
+        assert(meta_point.fields.length() == 2)
+    }
+
+    test "free func field count with multiple types" {
+        assert(get_field_count(Item { name: "a", count: 1 }) == 2)
+        assert(get_field_count(Point { x: 1, y: 2 }) == 2)
+        assert(get_field_count(Tag { label: "t" }) == 1)
+        assert(get_field_count(Empty {}) == 0)
+        assert(get_field_count(BigClass { a: "h", b: 1, c: true, d: "w", e: 2, f: false }) == 6)
     }
 }
 
@@ -530,7 +498,7 @@ tests "generic T.@meta field inspection" {
 
 tests "generic T.@meta.construct" {
     test "construct class via generic meta" {
-        let ctor = get_meta_construct_item(Item { name: "x", count: 0 })
+        let ctor = get_meta_construct(Item { name: "x", count: 0 })
         let args: [unknown] = ["Built", 100]
         let result = ctor(args)
         assert(result is Item)
@@ -553,12 +521,28 @@ tests "generic T.@meta.construct" {
     }
 
     test "construct single-field class via generic meta" {
-        let ctor = get_meta_construct_tag(Tag { label: "x" })
+        let ctor = get_meta_construct(Tag { label: "x" })
         let args: [unknown] = ["NewTag"]
         let result = ctor(args)
         assert(result is Tag)
         if result is Tag {
             assert(result.label == "NewTag")
+        }
+    }
+
+    test "construct different types via free func" {
+        let ctor_item = get_meta_construct(Item { name: "a", count: 1 })
+        let ctor_tag = get_meta_construct(Tag { label: "b" })
+        let item_result = ctor_item(["New", 50])
+        let tag_result = ctor_tag(["NewTag"])
+        assert(item_result is Item)
+        assert(tag_result is Tag)
+        if item_result is Item {
+            assert(item_result.name == "New")
+            assert(item_result.count == 50)
+        }
+        if tag_result is Tag {
+            assert(tag_result.label == "NewTag")
         }
     }
 
@@ -653,23 +637,37 @@ tests "multiple type parameter T.@meta" {
 
 tests "constrained type parameter T.@meta" {
     test "reflect returns meta for Named" {
-        let meta = reflect_named(Named { name: "Alice", score: 10 })
+        let meta = reflect(Named { name: "Alice", score: 10 })
         assert(meta.name == "Named")
     }
 
     test "reflect returns meta for Labeled" {
-        let meta = reflect_labeled(Labeled { title: "Hello" })
+        let meta = reflect(Labeled { title: "Hello" })
         assert(meta.name == "Labeled")
     }
 
+    test "reflect with multiple types" {
+        let meta_named = reflect(Named { name: "Alice", score: 10 })
+        let meta_labeled = reflect(Labeled { title: "Hello" })
+        assert(meta_named.name == "Named")
+        assert(meta_labeled.name == "Labeled")
+    }
+
     test "uses_both meta name and to_string Named" {
-        let result = uses_both_named(Named { name: "Alice", score: 10 })
+        let result = uses_both(Named { name: "Alice", score: 10 })
         assert(result == "Named: Alice")
     }
 
     test "uses_both meta name and to_string Labeled" {
-        let result = uses_both_labeled(Labeled { title: "World" })
+        let result = uses_both(Labeled { title: "World" })
         assert(result == "Labeled: World")
+    }
+
+    test "uses_both with multiple types" {
+        let result_named = uses_both(Named { name: "Alice", score: 10 })
+        let result_labeled = uses_both(Labeled { title: "World" })
+        assert(result_named == "Named: Alice")
+        assert(result_labeled == "Labeled: World")
     }
 
     test "container constrained meta_name Named" {
@@ -700,7 +698,7 @@ tests "constrained type parameter T.@meta" {
     }
 
     test "reflect fields for Named" {
-        let meta = reflect_named(Named { name: "Alice", score: 10 })
+        let meta = reflect(Named { name: "Alice", score: 10 })
         assert(meta.fields.length() == 2)
         assert(meta.fields[0].name == "name")
         assert(meta.fields[1].name == "score")
@@ -782,19 +780,19 @@ tests "edge cases generic T.@meta" {
     }
 
     test "class with 0 fields via free func" {
-        assert(get_meta_name_empty(Empty {}) == "Empty")
+        assert(get_meta_name(Empty {}) == "Empty")
     }
 
     test "class with 0 fields field count via free func" {
-        assert(get_field_count_empty(Empty {}) == 0)
+        assert(get_field_count(Empty {}) == 0)
     }
 
     test "struct with 0 fields via free func" {
-        assert(get_meta_name_empty_s(EmptyStruct {}) == "EmptyStruct")
+        assert(get_meta_name(EmptyStruct {}) == "EmptyStruct")
     }
 
     test "struct with 0 fields field count via free func" {
-        assert(get_field_count_empty_s(EmptyStruct {}) == 0)
+        assert(get_field_count(EmptyStruct {}) == 0)
     }
 
     test "class with many fields (6) via wrapper" {
@@ -806,12 +804,12 @@ tests "edge cases generic T.@meta" {
 
     test "class with many fields via free func name" {
         let big = BigClass { a: "hello", b: 42, c: true, d: "world", e: 99, f: false }
-        assert(get_meta_name_big(big) == "BigClass")
+        assert(get_meta_name(big) == "BigClass")
     }
 
     test "class with many fields via free func count" {
         let big = BigClass { a: "hello", b: 42, c: true, d: "world", e: 99, f: false }
-        assert(get_field_count_big(big) == 6)
+        assert(get_field_count(big) == 6)
     }
 
     test "class with many fields field names" {

@@ -52,13 +52,55 @@ pub fn compile_meta_access(
 
     match meta_kind {
         MetaAccessKind::Static { type_def_id } => {
-            compile_static_meta(cg, type_def_id, expr_node_id)
+            // In monomorphized contexts, the Static annotation may be stale:
+            // sema re-analyzes each monomorphization of a generic function body
+            // but all share the same NodeId, so the last re-analysis overwrites
+            // earlier ones. Re-derive the TypeDefId from the object expression's
+            // actual type in the current codegen scope.
+            let effective_type_def_id = if cg.substitutions.is_some() {
+                resolve_static_meta_type_def_id(cg, &meta_access.object).unwrap_or(type_def_id)
+            } else {
+                type_def_id
+            };
+            compile_static_meta(cg, effective_type_def_id, expr_node_id)
         }
         MetaAccessKind::Dynamic => compile_dynamic_meta(cg, meta_access, expr_node_id),
         MetaAccessKind::TypeParam { name_id } => {
             resolve_type_param_meta(cg, name_id, meta_access, expr_node_id)
         }
     }
+}
+
+/// Resolve the correct TypeDefId for a value-expression meta access in a
+/// monomorphized context. Returns `None` when the object is a type name
+/// (e.g. `Point.@meta`) or when the type can't be resolved.
+///
+/// For identifiers (the common case: `v.@meta`), looks up the variable's
+/// concrete type in the codegen scope. For other expressions, falls back to
+/// the sema node_map type with type-parameter substitution applied.
+fn resolve_static_meta_type_def_id(
+    cg: &Cg,
+    object: &vole_frontend::ast::Expr,
+) -> Option<TypeDefId> {
+    use vole_frontend::ast::ExprKind;
+
+    let object_type_id = match &object.kind {
+        ExprKind::Identifier(sym) => {
+            // Look up the variable's type in the current codegen scope.
+            // This is set per-monomorphization from the concrete param types.
+            cg.vars.get(sym).map(|(_, ty)| *ty)?
+        }
+        _ => {
+            // For other expressions, use the node_map type with substitution.
+            // `get_expr_type_substituted` applies the current monomorphization's
+            // type-parameter substitutions to the stored type.
+            cg.get_expr_type_substituted(&object.id)?
+        }
+    };
+
+    // Extract the TypeDefId from the concrete nominal type.
+    let (type_def_id, _, _) = cg.arena().unwrap_nominal(object_type_id)?;
+    Some(type_def_id)
 }
 
 /// Resolve a `TypeParam` meta access by looking up the concrete type from
