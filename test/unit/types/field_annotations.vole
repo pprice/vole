@@ -1,0 +1,254 @@
+// Unit tests for field-level annotations accessed via FieldMeta.annotations.
+//
+// Tests annotation access patterns using json_name-like and json_ignore-like
+// annotation types (locally defined, mirroring the stdlib json annotation shapes).
+//
+// Covers: single annotation, multiple annotations, annotation value access,
+// mixed annotated/unannotated fields, struct fields, parameterless shorthand.
+
+// --- Annotation types mirroring stdlib json annotations ---
+// json_name shape: single string field
+@annotation
+struct json_name {
+    name: string,
+}
+
+// json_ignore shape: parameterless marker
+@annotation
+struct json_ignore {}
+
+// --- Class with @json_name on a field ---
+class UserProfile {
+    @json_name(name: "user_name")
+    name: string,
+
+    age: i64,
+}
+
+// --- Class with @json_ignore on a field ---
+class Session {
+    token: string,
+
+    @json_ignore
+    internal_secret: string,
+}
+
+// --- Class with multiple annotations on one field ---
+class LegacyUser {
+    @json_name(name: "old_name")
+    @json_ignore
+    name: string,
+
+    id: i64,
+}
+
+// --- Class with annotations on some fields but not others ---
+class MixedConfig {
+    @json_name(name: "host_name")
+    host: string,
+
+    port: i64,
+
+    @json_ignore
+    debug_mode: bool,
+
+    version: string,
+}
+
+// --- Struct fields with annotations ---
+struct ApiField {
+    @json_name(name: "field_id")
+    id: i64,
+
+    @json_ignore
+    internal: bool,
+
+    label: string,
+}
+
+// --- Parameterless annotation shorthand (@json_ignore with no args) ---
+class SecureData {
+    public_key: string,
+
+    @json_ignore
+    private_key: string,
+}
+
+tests "field annotations with json_name" {
+    test "class with @json_name on a field — annotation appears in field.annotations" {
+        let meta = UserProfile.@meta
+        let name_field = meta.fields[0]
+        assert(name_field.name == "name")
+        assert(name_field.annotations.length() == 1)
+        let ann = name_field.annotations[0]
+        assert(ann is json_name)
+    }
+
+    test "annotation values accessible: (ann as json_name).name == user_name" {
+        let meta = UserProfile.@meta
+        let name_field = meta.fields[0]
+        let ann = name_field.annotations[0]
+        if ann is json_name {
+            assert(ann.name == "user_name")
+        }
+    }
+
+    test "annotation value accessible via narrowed ann" {
+        let meta = UserProfile.@meta
+        let name_field = meta.fields[0]
+        let ann = name_field.annotations[0]
+        if ann is json_name {
+            assert(ann.name == "user_name")
+        }
+    }
+
+    test "unannotated field on UserProfile has empty annotations" {
+        let meta = UserProfile.@meta
+        let age_field = meta.fields[1]
+        assert(age_field.name == "age")
+        assert(age_field.annotations.length() == 0)
+    }
+}
+
+tests "field annotations with json_ignore" {
+    test "class with @json_ignore on a field — annotation appears in field.annotations" {
+        let meta = Session.@meta
+        let secret_field = meta.fields[1]
+        assert(secret_field.name == "internal_secret")
+        assert(secret_field.annotations.length() == 1)
+        let ann = secret_field.annotations[0]
+        assert(ann is json_ignore)
+    }
+
+    test "unannotated field on Session has empty annotations" {
+        let meta = Session.@meta
+        let token_field = meta.fields[0]
+        assert(token_field.name == "token")
+        assert(token_field.annotations.length() == 0)
+    }
+}
+
+tests "multiple annotations on one field" {
+    test "field with @json_name and @json_ignore has two annotations" {
+        let meta = LegacyUser.@meta
+        let name_field = meta.fields[0]
+        assert(name_field.name == "name")
+        assert(name_field.annotations.length() == 2)
+    }
+
+    test "first annotation is json_name" {
+        let meta = LegacyUser.@meta
+        let name_field = meta.fields[0]
+        assert(name_field.annotations[0] is json_name)
+    }
+
+    test "second annotation is json_ignore" {
+        let meta = LegacyUser.@meta
+        let name_field = meta.fields[0]
+        assert(name_field.annotations[1] is json_ignore)
+    }
+
+    test "json_name annotation value is correct on multi-annotated field" {
+        let meta = LegacyUser.@meta
+        let name_field = meta.fields[0]
+        let ann = name_field.annotations[0]
+        if ann is json_name {
+            assert(ann.name == "old_name")
+        }
+    }
+
+    test "unannotated sibling field has empty annotations" {
+        let meta = LegacyUser.@meta
+        let id_field = meta.fields[1]
+        assert(id_field.name == "id")
+        assert(id_field.annotations.length() == 0)
+    }
+}
+
+tests "mix of annotated and unannotated fields" {
+    test "field.annotations.length() matches number of annotations per field" {
+        let meta = MixedConfig.@meta
+        assert(meta.fields[0].annotations.length() == 1) // host: @json_name
+        assert(meta.fields[1].annotations.length() == 0) // port: none
+        assert(meta.fields[2].annotations.length() == 1) // debug_mode: @json_ignore
+        assert(meta.fields[3].annotations.length() == 0) // version: none
+    }
+
+    test "first field has json_name annotation with correct value" {
+        let meta = MixedConfig.@meta
+        let host_field = meta.fields[0]
+        assert(host_field.name == "host")
+        let ann = host_field.annotations[0]
+        assert(ann is json_name)
+        if ann is json_name {
+            assert(ann.name == "host_name")
+        }
+    }
+
+    test "third field has json_ignore annotation" {
+        let meta = MixedConfig.@meta
+        let debug_field = meta.fields[2]
+        assert(debug_field.name == "debug_mode")
+        let ann = debug_field.annotations[0]
+        assert(ann is json_ignore)
+    }
+
+    test "unannotated fields in mixed class have empty annotations" {
+        let meta = MixedConfig.@meta
+        assert(meta.fields[1].name == "port")
+        assert(meta.fields[1].annotations.length() == 0)
+        assert(meta.fields[3].name == "version")
+        assert(meta.fields[3].annotations.length() == 0)
+    }
+}
+
+tests "struct fields with annotations" {
+    test "struct field with @json_name has annotation" {
+        let meta = ApiField.@meta
+        let id_field = meta.fields[0]
+        assert(id_field.name == "id")
+        assert(id_field.annotations.length() == 1)
+        assert(id_field.annotations[0] is json_name)
+    }
+
+    test "struct field @json_name value is accessible" {
+        let meta = ApiField.@meta
+        let id_field = meta.fields[0]
+        let ann = id_field.annotations[0]
+        if ann is json_name {
+            assert(ann.name == "field_id")
+        }
+    }
+
+    test "struct field with @json_ignore has annotation" {
+        let meta = ApiField.@meta
+        let internal_field = meta.fields[1]
+        assert(internal_field.name == "internal")
+        assert(internal_field.annotations.length() == 1)
+        assert(internal_field.annotations[0] is json_ignore)
+    }
+
+    test "struct unannotated field has empty annotations" {
+        let meta = ApiField.@meta
+        let label_field = meta.fields[2]
+        assert(label_field.name == "label")
+        assert(label_field.annotations.length() == 0)
+    }
+}
+
+tests "parameterless annotation shorthand" {
+    test "@json_ignore with no args appears in field.annotations" {
+        let meta = SecureData.@meta
+        let pk_field = meta.fields[1]
+        assert(pk_field.name == "private_key")
+        assert(pk_field.annotations.length() == 1)
+        assert(pk_field.annotations[0] is json_ignore)
+    }
+
+    test "public field without annotation has empty annotations" {
+        let meta = SecureData.@meta
+        let pub_field = meta.fields[0]
+        assert(pub_field.name == "public_key")
+        assert(pub_field.annotations.length() == 0)
+    }
+}
