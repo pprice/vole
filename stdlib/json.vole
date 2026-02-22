@@ -30,7 +30,7 @@ let { Map } = import "std:collections/map"
 
 // json_name - override the JSON key used for a field.
 //
-// Example (once field-level annotations are supported):
+// Example:
 //   class User {
 //       @json_name(name: "user_name")
 //       name: string,
@@ -42,13 +42,38 @@ struct json_name {
 
 // json_ignore - exclude a field from JSON serialization/deserialization.
 //
-// Example (once field-level annotations are supported):
+// Example:
 //   class Session {
 //       @json_ignore
 //       internal_token: string,
 //   }
 @annotation
 struct json_ignore {}
+
+// json_field - combined annotation for JSON field control.
+//
+// Use this annotation to rename or ignore fields during JSON serialization.
+// This single annotation replaces json_name/json_ignore for cases where
+// runtime annotation type dispatch is needed (see annotation narrowing
+// limitation with [unknown] arrays).
+//
+// Example:
+//   class User {
+//       @json_field(name: "user_name", ignore: false)
+//       name: string,
+//
+//       @json_field(name: "", ignore: true)
+//       secret: string,
+//   }
+//
+// Fields:
+//   name:   override JSON key (empty string = use field name)
+//   ignore: if true, skip this field during serialization/deserialization
+@annotation
+struct json_field {
+    name: string,
+    ignore: bool,
+}
 
 // Json union type - represents any valid JSON value.
 // Numbers are represented as f64 (matching the JSON spec's use of IEEE 754).
@@ -349,6 +374,96 @@ class JSON {
         func from_object(meta: TypeMeta, obj: JsonObject) -> unknown {
             return _from_json_object(meta, obj)
         }
+
+        // Convert a typed instance to a JsonObject with field renaming and ignoring.
+        //
+        // Usage:
+        //   let renames = Map.new<string, string>()
+        //   renames.set("name", "user_name")
+        //   let ignores = Map.new<string, bool>()
+        //   ignores.set("secret", true)
+        //   let obj = JSON.to_object_mapped(User.@meta, user, renames, ignores)
+        func to_object_mapped(meta: TypeMeta, instance: unknown, renames: Map<string, string>, ignores: Map<string, bool>) -> JsonObject {
+            return _to_json_object_mapped(meta, instance, renames, ignores)
+        }
+
+        // Construct a typed instance from a JsonObject with field renaming.
+        //
+        // Usage:
+        //   let renames = Map.new<string, string>()
+        //   renames.set("name", "user_name")
+        //   let user = JSON.from_object_mapped(User.@meta, obj, renames)
+        func from_object_mapped(meta: TypeMeta, obj: JsonObject, renames: Map<string, string>) -> unknown {
+            return _from_json_object_mapped(meta, obj, renames)
+        }
+    }
+}
+
+// =============================================================================
+// Generic typed serialization / deserialization via JsonSerde<T>
+// =============================================================================
+//
+// JsonSerde<T> provides type-safe JSON serialization with optional field mapping.
+// Uses a generic wrapper class because free generic functions with T.@meta have
+// a known limitation (vol-kjf1) when instantiated with multiple types.
+//
+// Usage:
+//   let serde = JsonSerde { item: my_user }
+//   let json_str = serde.serialize()
+//   let result = serde.deserialize(json_str)
+//   if result is User { ... }
+//
+// With field mapping:
+//   let renames = Map.new<string, string>()
+//   renames.set("name", "user_name")
+//   let ignores = Map.new<string, bool>()
+//   ignores.set("secret", true)
+//   let json_str = serde.serialize_mapped(renames, ignores)
+//   let result = serde.deserialize_mapped(json_str, renames)
+class JsonSerde<T> {
+    item: T,
+
+    // Serialize the stored item to a compact JSON string.
+    func serialize() -> string {
+        let meta = self.item.@meta
+        let box: unknown = self.item
+        let obj = _to_json_object(meta, box)
+        return _stringify_value(obj)
+    }
+
+    // Serialize with field renaming and ignoring.
+    func serialize_mapped(renames: Map<string, string>, ignores: Map<string, bool>) -> string {
+        let meta = self.item.@meta
+        let box: unknown = self.item
+        let obj = _to_json_object_mapped(meta, box, renames, ignores)
+        return _stringify_value(obj)
+    }
+
+    // Deserialize a JSON string to a typed instance (returned as unknown).
+    // Returns nil if parsing fails or the JSON is not an object.
+    // Note: uses explicit unknown binding for nil returns to avoid a codegen
+    // bug with bare `return nil` in generic methods.
+    func deserialize(json_str: string) -> unknown {
+        let _nil: unknown = nil
+        let r = _parse_top(json_str)
+        if !r.ok { return _nil }
+        if !r.is_object() { return _nil }
+        let meta = self.item.@meta
+        let parsed_obj = r.as_object()
+        return _from_json_object(meta, parsed_obj)
+    }
+
+    // Deserialize with field renaming (reverse of serialize_mapped renames).
+    // Note: uses explicit unknown binding for nil returns to avoid a codegen
+    // bug with bare `return nil` in generic methods.
+    func deserialize_mapped(json_str: string, renames: Map<string, string>) -> unknown {
+        let _nil: unknown = nil
+        let r = _parse_top(json_str)
+        if !r.ok { return _nil }
+        if !r.is_object() { return _nil }
+        let meta = self.item.@meta
+        let parsed_obj = r.as_object()
+        return _from_json_object_mapped(meta, parsed_obj, renames)
     }
 }
 
@@ -369,6 +484,71 @@ func _to_json_object(meta: TypeMeta, instance: unknown) -> JsonObject {
         i = i + 1
     }
     return obj
+}
+
+// Convert a struct/class instance to a JsonObject with field mapping.
+// The renames map maps field names to JSON keys.
+// The ignores map lists field names that should be excluded.
+// Iterates meta.fields directly to avoid RC issues with for-in over keys().
+func _to_json_object_mapped(meta: TypeMeta, instance: unknown, renames: Map<string, string>, ignores: Map<string, bool>) -> JsonObject {
+    let result = JsonObject.new()
+    var i: i64 = 0
+    while i < meta.fields.length() {
+        let field = meta.fields[i]
+        let fname = field.name
+        if !ignores.contains_key(fname) {
+            let getter = field.get
+            let raw = getter(instance)
+            let tname = field.type_name
+            // Resolve the output key name via helper to avoid cache issues in loop.
+            let out_key = _mapped_resolve_key(fname, renames)
+            _serde_set_field_value(result, out_key, tname, raw)
+        }
+        i = i + 1
+    }
+    return result
+}
+
+// Resolve a field name to its mapped JSON key.
+// Returns the renamed key if present in the renames map, otherwise the original name.
+func _mapped_resolve_key(fname: string, renames: Map<string, string>) -> string {
+    if renames.contains_key(fname) {
+        let mapped = renames.get(fname)
+        if mapped is string {
+            return mapped
+        }
+    }
+    return fname
+}
+
+// Construct a struct/class instance from a JsonObject with field mapping.
+// The renames map maps field names to JSON keys (same direction as to_object_mapped).
+// This reverses the renames (json_key -> field_name) before passing to _from_json_object.
+//
+// Implementation: Stringify the source object, replace renamed keys in the
+// JSON string, then parse and pass to _from_json_object. This avoids copying
+// Json union values between JsonObjects, which triggers RC lifecycle bugs.
+func _from_json_object_mapped(meta: TypeMeta, obj: JsonObject, renames: Map<string, string>) -> unknown {
+    var json_str = _stringify_value(obj)
+    // For each field in meta, if it has a rename, replace the renamed key
+    // back to the original field name in the JSON string.
+    var ri: i64 = 0
+    while ri < meta.fields.length() {
+        let field = meta.fields[ri]
+        let fname = field.name
+        let mapped_key = _mapped_resolve_key(fname, renames)
+        if mapped_key != fname {
+            let old_key = "\"" + mapped_key + "\":"
+            let new_key = "\"" + fname + "\":"
+            json_str = json_str.replace(old_key, new_key)
+        }
+        ri = ri + 1
+    }
+    let parsed = _parse_top(json_str)
+    if !parsed.ok { return nil }
+    if !parsed.is_object() { return nil }
+    let parsed_obj = parsed.as_object()
+    return _from_json_object(meta, parsed_obj)
 }
 
 // Set a single field on a JsonObject, converting from the native type to Json.

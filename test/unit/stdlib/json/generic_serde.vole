@@ -1,0 +1,204 @@
+// Tests for generic JSON serialization/deserialization via JsonSerde<T>.
+//
+// JsonSerde<T> wraps a typed item and provides serialize/deserialize methods
+// that use T.@meta for reflection-based JSON conversion.
+//
+// Note: JsonSerde<T> must be defined locally because cross-module generic class
+// construction is not supported. This file defines its own local version.
+
+let { JSON, JsonObject } = import "std:json"
+let { Map } = import "std:collections/map"
+
+class Person {
+    name: string,
+    age: i64,
+}
+
+class Config {
+    host: string,
+    port: i64,
+    debug: bool,
+}
+
+class FloatData {
+    label: string,
+    value: f64,
+}
+
+class SingleField {
+    title: string,
+}
+
+// Local JsonSerde<T> using T.@meta for serialization.
+// This pattern works for same-module generic classes.
+class Serde<T> {
+    item: T,
+
+    func serialize() -> string {
+        let meta = self.item.@meta
+        let box: unknown = self.item
+        let obj = JSON.to_object(meta, box)
+        return JSON.stringify(obj)
+    }
+
+    func deserialize(json_str: string) -> unknown {
+        let _nil: unknown = nil
+        let r = JSON.parse(json_str)
+        if !r.ok { return _nil }
+        if !r.is_object() { return _nil }
+        let meta = self.item.@meta
+        let parsed_obj = r.as_object()
+        return JSON.from_object(meta, parsed_obj)
+    }
+}
+
+// --- serialize tests ---
+
+tests "generic Serde<T> serialize" {
+    test "serialize Person" {
+        let serde = Serde { item: Person { name: "Alice", age: 30 } }
+        let json_str = serde.serialize()
+        assert(json_str.contains("\"name\":\"Alice\""))
+        assert(json_str.contains("\"age\":30"))
+    }
+
+    test "serialize Config" {
+        let serde = Serde { item: Config { host: "localhost", port: 8080, debug: true } }
+        let json_str = serde.serialize()
+        assert(json_str.contains("\"host\":\"localhost\""))
+        assert(json_str.contains("\"port\":8080"))
+        assert(json_str.contains("\"debug\":true"))
+    }
+
+    test "serialize FloatData" {
+        let serde = Serde { item: FloatData { label: "pi", value: 3.14 } }
+        let json_str = serde.serialize()
+        assert(json_str.contains("\"label\":\"pi\""))
+        assert(json_str.contains("3.14"))
+    }
+
+    test "serialize SingleField" {
+        let serde = Serde { item: SingleField { title: "Hello" } }
+        let json_str = serde.serialize()
+        assert(json_str.contains("\"title\":\"Hello\""))
+    }
+
+    test "serialize with empty string field" {
+        let serde = Serde { item: Person { name: "", age: 0 } }
+        let json_str = serde.serialize()
+        assert(json_str.contains("\"name\":\"\""))
+    }
+
+    test "serialize with negative number" {
+        let serde = Serde { item: Person { name: "Neg", age: -5 } }
+        let json_str = serde.serialize()
+        assert(json_str.contains("-5"))
+    }
+}
+
+// --- deserialize tests ---
+
+tests "generic Serde<T> deserialize" {
+    test "deserialize Person" {
+        let serde = Serde { item: Person { name: "", age: 0 } }
+        let result = serde.deserialize("{{\"name\":\"Bob\",\"age\":25}}")
+        assert(result is Person)
+        if result is Person {
+            assert(result.name == "Bob")
+            assert(result.age == 25)
+        }
+    }
+
+    test "deserialize Config" {
+        let serde = Serde { item: Config { host: "", port: 0, debug: false } }
+        let result = serde.deserialize("{{\"host\":\"example.com\",\"port\":443,\"debug\":true}}")
+        assert(result is Config)
+        if result is Config {
+            assert(result.host == "example.com")
+            assert(result.port == 443)
+            assert(result.debug == true)
+        }
+    }
+
+    test "deserialize FloatData" {
+        let serde = Serde { item: FloatData { label: "", value: 0.0 } }
+        let result = serde.deserialize("{{\"label\":\"gravity\",\"value\":9.81}}")
+        assert(result is FloatData)
+        if result is FloatData {
+            assert(result.label == "gravity")
+            assert(result.value == 9.81)
+        }
+    }
+
+    test "deserialize returns nil for invalid JSON" {
+        let serde = Serde { item: Person { name: "", age: 0 } }
+        let result = serde.deserialize("invalid json")
+        assert(result is nil)
+    }
+
+    test "deserialize returns nil for non-object JSON" {
+        let serde = Serde { item: Person { name: "", age: 0 } }
+        let result = serde.deserialize("[1, 2, 3]")
+        assert(result is nil)
+    }
+
+    test "deserialize with missing fields uses defaults" {
+        let serde = Serde { item: Person { name: "", age: 0 } }
+        let result = serde.deserialize("{{\"name\":\"Eve\"}}")
+        assert(result is Person)
+        if result is Person {
+            assert(result.name == "Eve")
+            assert(result.age == 0)
+        }
+    }
+}
+
+// --- round-trip tests ---
+
+tests "generic Serde<T> round-trip" {
+    test "Person round-trip" {
+        let original = Person { name: "Frank", age: 50 }
+        let serde = Serde { item: original }
+        let json_str = serde.serialize()
+        let result = serde.deserialize(json_str)
+        assert(result is Person)
+        if result is Person {
+            assert(result.name == "Frank")
+            assert(result.age == 50)
+        }
+    }
+
+    test "Config round-trip" {
+        let original = Config { host: "api.test", port: 9090, debug: true }
+        let serde = Serde { item: original }
+        let json_str = serde.serialize()
+        let result = serde.deserialize(json_str)
+        assert(result is Config)
+        if result is Config {
+            assert(result.host == "api.test")
+            assert(result.port == 9090)
+            assert(result.debug == true)
+        }
+    }
+
+    test "FloatData round-trip" {
+        let original = FloatData { label: "temperature", value: 20.5 }
+        let serde = Serde { item: original }
+        let json_str = serde.serialize()
+        let result = serde.deserialize(json_str)
+        assert(result is FloatData)
+        if result is FloatData {
+            assert(result.label == "temperature")
+            assert(result.value == 20.5)
+        }
+    }
+
+    test "multiple types in same test" {
+        let serde_p = Serde { item: Person { name: "A", age: 1 } }
+        let serde_c = Serde { item: Config { host: "h", port: 80, debug: false } }
+        let json_p = serde_p.serialize()
+        let json_c = serde_c.serialize()
+        assert(json_p.contains("\"name\":\"A\""))
+        assert(json_c.contains("\"host\":\"h\""))
+    }
+}

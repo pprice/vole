@@ -1,0 +1,307 @@
+// Tests for JSON mapped serialization/deserialization.
+//
+// JSON.to_object_mapped(meta, instance, renames, ignores) -> JsonObject
+// JSON.from_object_mapped(meta, obj, renames) -> unknown
+//
+// These functions support field renaming and ignoring for JSON serde.
+
+let { JSON, JsonObject } = import "std:json"
+let { Map } = import "std:collections/map"
+
+class User {
+    name: string,
+    age: i64,
+    secret: string,
+}
+
+class Config {
+    host: string,
+    port: i64,
+    debug: bool,
+}
+
+class SingleField {
+    title: string,
+}
+
+// --- to_object_mapped tests ---
+
+tests "JSON.to_object_mapped field renaming" {
+    test "to_object_mapped renames a field" {
+        let renames = Map.new<string, string>()
+        renames.set("name", "user_name")
+        let ignores = Map.new<string, bool>()
+
+        let u = User { name: "Alice", age: 30, secret: "s3cret" }
+        let box: unknown = u
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        assert(obj.contains_key("user_name"))
+        assert(!obj.contains_key("name"))
+        let v = obj.get("user_name")
+        if v is string {
+            assert(v == "Alice")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "to_object_mapped keeps non-renamed fields" {
+        let renames = Map.new<string, string>()
+        renames.set("name", "user_name")
+        let ignores = Map.new<string, bool>()
+
+        let u = User { name: "Alice", age: 30, secret: "s3cret" }
+        let box: unknown = u
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        assert(obj.contains_key("age"))
+        let v = obj.get("age")
+        if v is f64 {
+            assert(v == 30.0)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "to_object_mapped with multiple renames" {
+        let renames = Map.new<string, string>()
+        renames.set("host", "hostname")
+        renames.set("debug", "debug_mode")
+        let ignores = Map.new<string, bool>()
+
+        let c = Config { host: "localhost", port: 8080, debug: true }
+        let box: unknown = c
+        let obj = JSON.to_object_mapped(Config.@meta, box, renames, ignores)
+        assert(obj.contains_key("hostname"))
+        assert(obj.contains_key("debug_mode"))
+        assert(obj.contains_key("port"))
+        assert(!obj.contains_key("host"))
+        assert(!obj.contains_key("debug"))
+    }
+
+    test "to_object_mapped with empty renames preserves all fields" {
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+
+        let u = User { name: "Bob", age: 25, secret: "x" }
+        let box: unknown = u
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        assert(obj.contains_key("name"))
+        assert(obj.contains_key("age"))
+        assert(obj.contains_key("secret"))
+        assert(obj.len() == 3)
+    }
+}
+
+tests "JSON.to_object_mapped field ignoring" {
+    test "to_object_mapped ignores a field" {
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        ignores.set("secret", true)
+
+        let u = User { name: "Alice", age: 30, secret: "hidden" }
+        let box: unknown = u
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        assert(!obj.contains_key("secret"))
+        assert(obj.contains_key("name"))
+        assert(obj.contains_key("age"))
+        assert(obj.len() == 2)
+    }
+
+    test "to_object_mapped ignores multiple fields" {
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        ignores.set("secret", true)
+        ignores.set("age", true)
+
+        let u = User { name: "Alice", age: 30, secret: "hidden" }
+        let box: unknown = u
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        assert(!obj.contains_key("secret"))
+        assert(!obj.contains_key("age"))
+        assert(obj.contains_key("name"))
+        assert(obj.len() == 1)
+    }
+
+    test "to_object_mapped with empty ignores preserves all fields" {
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+
+        let u = User { name: "Bob", age: 25, secret: "x" }
+        let box: unknown = u
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        assert(obj.len() == 3)
+    }
+}
+
+tests "JSON.to_object_mapped combined rename and ignore" {
+    test "to_object_mapped renames and ignores simultaneously" {
+        let renames = Map.new<string, string>()
+        renames.set("name", "user_name")
+        let ignores = Map.new<string, bool>()
+        ignores.set("secret", true)
+
+        let u = User { name: "Alice", age: 30, secret: "hidden" }
+        let box: unknown = u
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        assert(obj.contains_key("user_name"))
+        assert(obj.contains_key("age"))
+        assert(!obj.contains_key("name"))
+        assert(!obj.contains_key("secret"))
+        assert(obj.len() == 2)
+    }
+
+    test "to_object_mapped result can be stringified" {
+        let renames = Map.new<string, string>()
+        renames.set("name", "user_name")
+        let ignores = Map.new<string, bool>()
+        ignores.set("secret", true)
+
+        let u = User { name: "Alice", age: 30, secret: "hidden" }
+        let box: unknown = u
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+        assert(json_str.contains("\"user_name\":\"Alice\""))
+        assert(json_str.contains("\"age\":30"))
+        assert(!json_str.contains("secret"))
+    }
+}
+
+// --- from_object_mapped tests ---
+
+tests "JSON.from_object_mapped field renaming" {
+    test "from_object_mapped reverses rename" {
+        let renames = Map.new<string, string>()
+        renames.set("name", "user_name")
+
+        let obj = JsonObject.new()
+        obj.set("user_name", "Bob")
+        obj.set("age", 25.0)
+        obj.set("secret", "x")
+        let result = JSON.from_object_mapped(User.@meta, obj, renames)
+        assert(result is User)
+        if result is User {
+            assert(result.name == "Bob")
+            assert(result.age == 25)
+        }
+    }
+
+    test "from_object_mapped keeps non-renamed fields" {
+        let renames = Map.new<string, string>()
+        renames.set("name", "user_name")
+
+        let obj = JsonObject.new()
+        obj.set("user_name", "Carol")
+        obj.set("age", 42.0)
+        obj.set("secret", "y")
+        let result = JSON.from_object_mapped(User.@meta, obj, renames)
+        assert(result is User)
+        if result is User {
+            assert(result.age == 42)
+            assert(result.secret == "y")
+        }
+    }
+
+    test "from_object_mapped with empty renames passes through" {
+        let renames = Map.new<string, string>()
+
+        let obj = JsonObject.new()
+        obj.set("name", "Dave")
+        obj.set("age", 35.0)
+        obj.set("secret", "z")
+        let result = JSON.from_object_mapped(User.@meta, obj, renames)
+        assert(result is User)
+        if result is User {
+            assert(result.name == "Dave")
+            assert(result.age == 35)
+            assert(result.secret == "z")
+        }
+    }
+
+    test "from_object_mapped with multiple renames" {
+        let renames = Map.new<string, string>()
+        renames.set("host", "hostname")
+        renames.set("debug", "debug_mode")
+
+        let obj = JsonObject.new()
+        obj.set("hostname", "example.com")
+        obj.set("port", 443.0)
+        obj.set("debug_mode", true)
+        let result = JSON.from_object_mapped(Config.@meta, obj, renames)
+        assert(result is Config)
+        if result is Config {
+            assert(result.host == "example.com")
+            assert(result.port == 443)
+            assert(result.debug == true)
+        }
+    }
+}
+
+// --- Round-trip tests ---
+
+tests "JSON mapped round-trip" {
+    test "to_object_mapped then from_object_mapped preserves data" {
+        let renames = Map.new<string, string>()
+        renames.set("name", "user_name")
+        let ignores = Map.new<string, bool>()
+        ignores.set("secret", true)
+
+        let original = User { name: "Alice", age: 30, secret: "hidden" }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(User.@meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        assert(parsed.is_object())
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(User.@meta, parsed_obj, renames)
+        assert(result is User)
+        if result is User {
+            assert(result.name == "Alice")
+            assert(result.age == 30)
+            // secret was ignored, so it should be empty default
+            assert(result.secret == "")
+        }
+    }
+
+    test "Config round-trip with renames" {
+        let renames = Map.new<string, string>()
+        renames.set("host", "hostname")
+        let ignores = Map.new<string, bool>()
+
+        let original = Config { host: "api.test", port: 9090, debug: true }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(Config.@meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        assert(parsed.is_object())
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(Config.@meta, parsed_obj, renames)
+        assert(result is Config)
+        if result is Config {
+            assert(result.host == "api.test")
+            assert(result.port == 9090)
+            assert(result.debug == true)
+        }
+    }
+
+    test "mapped serde from JSON string with renamed fields" {
+        let renames = Map.new<string, string>()
+        renames.set("name", "full_name")
+
+        let json_str = "{{\"full_name\":\"Eve\",\"age\":28,\"secret\":\"pwd\"}}"
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        assert(parsed.is_object())
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(User.@meta, parsed_obj, renames)
+        assert(result is User)
+        if result is User {
+            assert(result.name == "Eve")
+            assert(result.age == 28)
+            assert(result.secret == "pwd")
+        }
+    }
+}
