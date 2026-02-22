@@ -31,6 +31,7 @@ mod value_builders;
 mod control_flow;
 mod for_loop;
 mod interfaces;
+mod reflection;
 
 pub use callable_registry::{
     CallableBackendPreference, CallableKey, CallableResolutionError, ResolvedCallable,

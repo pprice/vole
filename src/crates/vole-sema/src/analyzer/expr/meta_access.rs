@@ -18,7 +18,7 @@ impl Analyzer {
         ma: &MetaAccessExpr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        // Resolve the TypeMeta struct from the prelude so we can return its TypeId.
+        // Resolve the TypeMeta class from the prelude so we can return its TypeId.
         let type_meta_type_id = self.resolve_type_meta_id(interner, expr);
         let Some(type_meta_type_id) = type_meta_type_id else {
             // TypeMeta not found — prelude may not be loaded. Return UNKNOWN
@@ -103,29 +103,28 @@ impl Analyzer {
         MetaAccessKind::Dynamic
     }
 
-    /// Look up the `TypeMeta` struct's TypeId from the prelude.
+    /// Look up the `TypeMeta` class's TypeId from the prelude.
     ///
-    /// TypeMeta is defined in `stdlib/prelude/reflection.vole` as a plain
-    /// struct with fields `name`, `fields`, and `construct`.
+    /// TypeMeta is defined in `stdlib/prelude/reflection.vole` as a class
+    /// with fields `name`, `fields`, and `construct`.
     fn resolve_type_meta_id(&mut self, interner: &Interner, expr: &Expr) -> Option<ArenaTypeId> {
         // First try the resolver chain (handles direct module-scoped resolution).
         let type_def_id = {
             let resolver = self.resolver(interner);
             resolver.resolve_type_str_or_interface("TypeMeta", &self.entity_registry())
         };
-        // Fallback: search all types by short name (TypeMeta is a struct, not
-        // a class/interface, so class_by_short_name would miss it).
+        // Fallback: search all types by short name.
         let type_def_id = type_def_id.or_else(|| {
             self.entity_registry()
                 .type_by_short_name("TypeMeta", &self.name_table())
         });
 
         if let Some(type_def_id) = type_def_id {
-            Some(self.type_arena_mut().struct_type(type_def_id, vec![]))
+            Some(self.type_arena_mut().class(type_def_id, vec![]))
         } else {
             tracing::warn!(
                 line = expr.span.line,
-                "TypeMeta struct not found in prelude — @meta will return unknown"
+                "TypeMeta class not found in prelude — @meta will return unknown"
             );
             None
         }

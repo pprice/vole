@@ -4,7 +4,7 @@
 // These structs describe the shape of types and their fields at runtime,
 // enabling reflection-based patterns like serialization and inspection.
 
-struct FieldMeta {
+class FieldMeta {
     name:        string,
     type_name:   string,
     annotations: [unknown],
@@ -12,7 +12,7 @@ struct FieldMeta {
     set:         (unknown, unknown) -> void,
 }
 
-struct TypeMeta {
+class TypeMeta {
     name:      string,
     fields:    [FieldMeta],
     construct: ([unknown]) -> unknown,

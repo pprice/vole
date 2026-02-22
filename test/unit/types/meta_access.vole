@@ -1,0 +1,87 @@
+// Unit tests for T.@meta static reflection
+//
+// Tests TypeMeta construction via .@meta on class and struct types.
+
+class User {
+    name: string,
+    age: i64,
+}
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+tests {
+    test "class meta name" {
+        let meta = User.@meta
+        assert(meta.name == "User")
+    }
+
+    test "class meta fields length" {
+        let meta = User.@meta
+        assert(meta.fields.length() == 2)
+    }
+
+    test "class meta field names" {
+        let meta = User.@meta
+        assert(meta.fields[0].name == "name")
+        assert(meta.fields[1].name == "age")
+    }
+
+    test "class meta field type names" {
+        let meta = User.@meta
+        assert(meta.fields[0].type_name == "string")
+        assert(meta.fields[1].type_name == "i64")
+    }
+
+    test "struct meta name" {
+        let meta = Point.@meta
+        assert(meta.name == "Point")
+    }
+
+    test "struct meta fields length" {
+        let meta = Point.@meta
+        assert(meta.fields.length() == 2)
+    }
+
+    test "struct meta field names" {
+        let meta = Point.@meta
+        assert(meta.fields[0].name == "x")
+        assert(meta.fields[1].name == "y")
+    }
+
+    test "getter reads class field" {
+        let u = User { name: "Alice", age: 30 }
+        let meta = User.@meta
+        let getter = meta.fields[0].get
+        let name_box: unknown = u
+        let result = getter(name_box)
+        assert(result is string)
+        if result is string {
+            assert(result == "Alice")
+        }
+    }
+
+    test "setter writes class field" {
+        let u = User { name: "Alice", age: 30 }
+        let meta = User.@meta
+        let setter = meta.fields[0].set
+        let instance_box: unknown = u
+        let new_name: unknown = "Bob"
+        setter(instance_box, new_name)
+        assert(u.name == "Bob")
+    }
+
+    test "constructor builds class instance" {
+        let meta = User.@meta
+        let ctor = meta.construct
+        let args: [unknown] = ["Charlie", 25]
+        let result = ctor(args)
+        assert(result is User)
+        if result is User {
+            assert(result.name == "Charlie")
+            assert(result.age == 25)
+        }
+    }
+}
