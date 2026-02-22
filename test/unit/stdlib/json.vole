@@ -1,5 +1,5 @@
-// Tests for stdlib/json.vole - JsonObject, JsonArray, and JsonError types
-let { JsonObject, JsonArray, JsonError } = import "std:json"
+// Tests for stdlib/json.vole - JsonObject, JsonArray, JsonError, and annotation types
+let { JsonObject, JsonArray, JsonError, json_name, json_ignore } = import "std:json"
 
 tests "JsonObject construction" {
     test "new creates empty object" {
@@ -681,5 +681,29 @@ tests "JsonError as Stringable" {
         let err = JsonError.new("bad value", 7)
         let s: Stringable = err
         assert(s.to_string() == "JsonError at position 7: bad value")
+    }
+}
+
+tests "json_name annotation" {
+    test "json_name can be constructed with a name" {
+        let ann = json_name { name: "user_name" }
+        assert(ann.name == "user_name")
+    }
+
+    test "json_name with empty string" {
+        let ann = json_name { name: "" }
+        assert(ann.name == "")
+    }
+
+    test "json_name with special characters" {
+        let ann = json_name { name: "my-field_1" }
+        assert(ann.name == "my-field_1")
+    }
+}
+
+tests "json_ignore annotation" {
+    test "json_ignore can be constructed" {
+        let ann = json_ignore {}
+        _ = ann
     }
 }

@@ -26,6 +26,30 @@
 
 let { Map } = import "std:collections/map"
 
+// --- Annotation types for JSON field mapping ---
+
+// json_name - override the JSON key used for a field.
+//
+// Example (once field-level annotations are supported):
+//   class User {
+//       @json_name(name: "user_name")
+//       name: string,
+//   }
+@annotation
+struct json_name {
+    name: string,
+}
+
+// json_ignore - exclude a field from JSON serialization/deserialization.
+//
+// Example (once field-level annotations are supported):
+//   class Session {
+//       @json_ignore
+//       internal_token: string,
+//   }
+@annotation
+struct json_ignore {}
+
 // Json union type - represents any valid JSON value.
 // Numbers are represented as f64 (matching the JSON spec's use of IEEE 754).
 // Null is represented as nil.
