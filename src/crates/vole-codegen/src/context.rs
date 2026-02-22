@@ -610,15 +610,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let resolved_elem_type = self.try_substitute_type(elem_type_id);
         if !self.arena().is_union(resolved_elem_type) {
             value = self.coerce_to_type(value, resolved_elem_type)?;
-            if value.ty == types::I128 || value.ty == types::F128 {
-                let wide_bits = if value.ty == types::F128 {
-                    self.builder
-                        .ins()
-                        .bitcast(types::I128, MemFlags::new(), value.value)
-                } else {
-                    value.value
-                };
-                let boxed = self.call_runtime(RuntimeKey::Wide128Box, &[wide_bits])?;
+            if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
+                let i128_bits = wide.to_i128_bits(self.builder, value.value);
+                let boxed = self.call_runtime(RuntimeKey::Wide128Box, &[i128_bits])?;
                 let tag = {
                     let arena = self.arena();
                     crate::types::array_element_tag_id(value.type_id, arena)
@@ -834,20 +828,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: usize,
         field_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        if crate::types::is_wide_type(field_type_id, self.arena()) {
+        if let Some(wide) =
+            crate::types::wide_ops::WideType::from_type_id(field_type_id, self.arena())
+        {
             let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
             let wide_i128 =
                 crate::structs::helpers::load_wide_field(self, get_func_ref, instance, slot);
-            let arena = self.arena();
-            if field_type_id == arena.f128() {
-                let value = self
-                    .builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_i128);
-                Ok(CompiledValue::new(value, types::F128, field_type_id))
-            } else {
-                Ok(CompiledValue::new(wide_i128, types::I128, field_type_id))
-            }
+            Ok(wide.compiled_value_from_i128(self.builder, wide_i128, field_type_id))
         } else {
             let slot_val = self.iconst_cached(types::I32, slot as i64);
             let result_raw =

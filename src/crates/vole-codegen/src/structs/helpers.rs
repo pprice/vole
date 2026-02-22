@@ -240,15 +240,9 @@ pub(crate) fn store_value_to_stack(
     slot: codegen::ir::StackSlot,
     offset: i32,
 ) -> i32 {
-    if value.ty == types::I128 || value.ty == types::F128 {
-        let wide = if value.ty == types::F128 {
-            builder
-                .ins()
-                .bitcast(types::I128, MemFlags::new(), value.value)
-        } else {
-            value.value
-        };
-        store_i128_to_stack(builder, wide, slot, offset);
+    if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
+        let i128_bits = wide.to_i128_bits(builder, value.value);
+        store_i128_to_stack(builder, i128_bits, slot, offset);
         16
     } else {
         let store_val = convert_to_i64_for_storage(builder, value);
@@ -272,16 +266,10 @@ pub(crate) fn store_field_value(
 ) {
     let slot_val = cg.iconst_cached(types::I32, slot as i64);
 
-    if value.ty == types::I128 || value.ty == types::F128 {
+    if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
         // Split wide values into low/high halves and store in 2 consecutive slots.
-        let wide = if value.ty == types::F128 {
-            cg.builder
-                .ins()
-                .bitcast(types::I128, MemFlags::new(), value.value)
-        } else {
-            value.value
-        };
-        let (low, high) = split_i128_for_storage(cg.builder, wide);
+        let i128_bits = wide.to_i128_bits(cg.builder, value.value);
+        let (low, high) = split_i128_for_storage(cg.builder, i128_bits);
         cg.builder
             .ins()
             .call(set_func_ref, &[instance_ptr, slot_val, low]);

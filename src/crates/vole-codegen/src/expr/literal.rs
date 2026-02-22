@@ -200,17 +200,8 @@ impl Cg<'_, '_, '_> {
         let needs_rc =
             self.rc_scopes.has_active_scope() && self.rc_state(elem_value.type_id).needs_cleanup();
         let is_borrowed = elem_value.is_borrowed();
-        let wide_bits = if elem_value.ty == types::I128 {
-            Some(elem_value.value)
-        } else if elem_value.ty == types::F128 {
-            Some(
-                self.builder
-                    .ins()
-                    .bitcast(types::I128, MemFlags::new(), elem_value.value),
-            )
-        } else {
-            None
-        };
+        let wide_bits = crate::types::wide_ops::WideType::from_cranelift_type(elem_value.ty)
+            .map(|wide| wide.to_i128_bits(self.builder, elem_value.value));
         for i in 0..count {
             if needs_rc && (i > 0 || is_borrowed) {
                 self.emit_rc_inc_for_type(elem_value.value, elem_value.type_id)?;

@@ -413,16 +413,12 @@ impl Cg<'_, '_, '_> {
                         .ins()
                         .load(types::I64, MemFlags::new(), payload, field_offset + 8);
                 let wide_i128 = super::super::structs::reconstruct_i128(self.builder, low, high);
-                let (wide_val, wide_ty) = if field_ty_id == self.arena().f128() {
-                    (
-                        self.builder
-                            .ins()
-                            .bitcast(types::F128, MemFlags::new(), wide_i128),
-                        types::F128,
-                    )
-                } else {
-                    (wide_i128, types::I128)
-                };
+                // `is_wide` guard above guarantees this is Some.
+                let wide =
+                    crate::types::wide_ops::WideType::from_type_id(field_ty_id, self.arena())
+                        .unwrap();
+                let wide_val = wide.reinterpret_i128(self.builder, wide_i128);
+                let wide_ty = wide.cranelift_type();
                 let var = self.builder.declare_var(wide_ty);
                 self.builder.def_var(var, wide_val);
                 arm_variables.insert(field_pattern.binding, (var, field_ty_id));

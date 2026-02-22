@@ -9,6 +9,7 @@ mod compile_env;
 mod conversions;
 mod function_ctx;
 mod type_ctx;
+pub(crate) mod wide_ops;
 
 // Re-export all public types and functions
 pub use codegen_ctx::{CodegenCtx, PendingMonomorph};

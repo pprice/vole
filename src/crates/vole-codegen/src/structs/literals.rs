@@ -679,16 +679,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         .load(types::I64, MemFlags::new(), value.value, src_off);
                 self.builder.ins().stack_store(val, slot, dst_off);
             }
-        } else if value.ty == types::I128 || value.ty == types::F128 {
+        } else if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
             // Wide types need 2 x 8-byte slots: low bits at offset, high bits at offset+8.
-            let wide = if value.ty == types::F128 {
-                self.builder
-                    .ins()
-                    .bitcast(types::I128, MemFlags::new(), value.value)
-            } else {
-                value.value
-            };
-            let (low, high) = split_i128_for_storage(self.builder, wide);
+            let i128_bits = wide.to_i128_bits(self.builder, value.value);
+            let (low, high) = split_i128_for_storage(self.builder, i128_bits);
             self.builder.ins().stack_store(low, slot, offset);
             self.builder.ins().stack_store(high, slot, offset + 8);
         } else {

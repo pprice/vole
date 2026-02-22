@@ -134,19 +134,11 @@ impl Cg<'_, '_, '_> {
         }
 
         // i128 fields use 2 consecutive slots - load both and reconstruct
-        let is_wide = crate::types::is_wide_type(field_type_id, self.arena());
-        let mut cv = if is_wide {
+        let wide = crate::types::wide_ops::WideType::from_type_id(field_type_id, self.arena());
+        let mut cv = if let Some(wide) = wide {
             let get_func_ref = self.runtime_func_ref(RuntimeKey::InstanceGetField)?;
             let wide_i128 = super::helpers::load_wide_field(self, get_func_ref, obj.value, slot);
-            if field_type_id == self.arena().f128() {
-                let value = self
-                    .builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_i128);
-                CompiledValue::new(value, types::F128, field_type_id)
-            } else {
-                CompiledValue::new(wide_i128, types::I128, field_type_id)
-            }
+            wide.compiled_value_from_i128(self.builder, wide_i128, field_type_id)
         } else {
             let result_raw = self.get_field_cached(obj.value, slot as u32)?;
             self.convert_field_value(result_raw, field_type_id)
@@ -222,16 +214,12 @@ impl Cg<'_, '_, '_> {
                 if rc_old.is_some() && value.is_borrowed() {
                     self.emit_rc_inc_for_type(value.value, field_type_id)?;
                 }
-                if value.ty == types::I128 || value.ty == types::F128 {
+                if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty)
+                {
                     // Wide types need 2 x 8-byte stores (low then high).
-                    let wide = if value.ty == types::F128 {
-                        self.builder
-                            .ins()
-                            .bitcast(types::I128, MemFlags::new(), value.value)
-                    } else {
-                        value.value
-                    };
-                    let (low, high) = super::helpers::split_i128_for_storage(self.builder, wide);
+                    let i128_bits = wide.to_i128_bits(self.builder, value.value);
+                    let (low, high) =
+                        super::helpers::split_i128_for_storage(self.builder, i128_bits);
                     self.builder
                         .ins()
                         .store(MemFlags::new(), low, obj.value, offset);
@@ -326,11 +314,9 @@ impl Cg<'_, '_, '_> {
         }
 
         // i128 fields occupy 2 x 8-byte slots: load low and high halves, reconstruct
-        let is_wide = {
-            let arena = self.arena();
-            crate::types::is_wide_type(field_type_id, arena)
-        };
-        if is_wide {
+        if let Some(wide) =
+            crate::types::wide_ops::WideType::from_type_id(field_type_id, self.arena())
+        {
             let low = self
                 .builder
                 .ins()
@@ -340,14 +326,7 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .load(types::I64, MemFlags::new(), struct_ptr, offset + 8);
             let wide_i128 = reconstruct_i128(self.builder, low, high);
-            if field_type_id == self.arena().f128() {
-                let value = self
-                    .builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_i128);
-                return Ok(CompiledValue::new(value, types::F128, field_type_id));
-            }
-            return Ok(CompiledValue::new(wide_i128, types::I128, field_type_id));
+            return Ok(wide.compiled_value_from_i128(self.builder, wide_i128, field_type_id));
         }
 
         // Non-struct field: load as i64, then convert to proper type

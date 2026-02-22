@@ -2,8 +2,6 @@
 //
 // Compound assignment operations (+=, -=, *=, etc.) — impl Cg methods.
 
-use cranelift::prelude::*;
-
 use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
@@ -95,19 +93,11 @@ impl Cg<'_, '_, '_> {
             } else {
                 self.copy_union_heap_to_stack(raw_value, resolved_elem_type_id)
             }
-        } else if resolved_elem_type_id == self.arena().i128()
-            || resolved_elem_type_id == self.arena().f128()
+        } else if let Some(wide) =
+            crate::types::wide_ops::WideType::from_type_id(resolved_elem_type_id, self.arena())
         {
             let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_value])?;
-            if resolved_elem_type_id == self.arena().f128() {
-                let value = self
-                    .builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_bits);
-                CompiledValue::new(value, types::F128, resolved_elem_type_id)
-            } else {
-                CompiledValue::new(wide_bits, types::I128, resolved_elem_type_id)
-            }
+            wide.compiled_value_from_i128(self.builder, wide_bits, resolved_elem_type_id)
         } else {
             self.convert_field_value(raw_value, resolved_elem_type_id)
         };

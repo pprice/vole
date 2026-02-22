@@ -116,7 +116,9 @@ impl Cg<'_, '_, '_> {
         };
 
         let elem_ptr = self.builder.ins().iadd(obj.value, offset);
-        let value = if elem_cr_type == types::I128 || elem_cr_type == types::F128 {
+        let value = if let Some(wide) =
+            crate::types::wide_ops::WideType::from_cranelift_type(elem_cr_type)
+        {
             let low = self
                 .builder
                 .ins()
@@ -126,13 +128,7 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .load(types::I64, MemFlags::new(), elem_ptr, 8);
             let wide_i128 = reconstruct_i128(self.builder, low, high);
-            if elem_cr_type == types::F128 {
-                self.builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_i128)
-            } else {
-                wide_i128
-            }
+            wide.reinterpret_i128(self.builder, wide_i128)
         } else {
             self.builder
                 .ins()
@@ -154,13 +150,6 @@ impl Cg<'_, '_, '_> {
         let idx = self.expr(index)?;
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[obj.value, idx.value])?;
         let resolved_element_id = self.try_substitute_type(element_id);
-        let (is_i128, is_f128) = {
-            let arena = self.arena();
-            (
-                resolved_element_id == arena.i128(),
-                resolved_element_id == arena.f128(),
-            )
-        };
         if self.arena().is_union(resolved_element_id) {
             let cv = if self.union_array_prefers_inline_storage(resolved_element_id) {
                 let raw_tag =
@@ -171,17 +160,11 @@ impl Cg<'_, '_, '_> {
             };
             return Ok(cv);
         }
-        if is_i128 || is_f128 {
+        if let Some(wide) =
+            crate::types::wide_ops::WideType::from_type_id(resolved_element_id, self.arena())
+        {
             let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_value])?;
-            let value = if is_f128 {
-                self.builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_bits)
-            } else {
-                wide_bits
-            };
-            let ty = if is_f128 { types::F128 } else { types::I128 };
-            return Ok(CompiledValue::new(value, ty, resolved_element_id));
+            return Ok(wide.compiled_value_from_i128(self.builder, wide_bits, resolved_element_id));
         }
         let mut cv = self.convert_field_value(raw_value, resolved_element_id);
         self.mark_borrowed_if_rc(&mut cv);
@@ -252,15 +235,9 @@ impl Cg<'_, '_, '_> {
         if rc_old.is_some() && val.is_borrowed() {
             self.emit_rc_inc_for_type(val.value, elem_type_id)?;
         }
-        if val.ty == types::I128 || val.ty == types::F128 {
-            let wide_bits = if val.ty == types::F128 {
-                self.builder
-                    .ins()
-                    .bitcast(types::I128, MemFlags::new(), val.value)
-            } else {
-                val.value
-            };
-            let (low, high) = split_i128_for_storage(self.builder, wide_bits);
+        if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(val.ty) {
+            let i128_bits = wide.to_i128_bits(self.builder, val.value);
+            let (low, high) = split_i128_for_storage(self.builder, i128_bits);
             self.builder.ins().store(MemFlags::new(), low, elem_ptr, 0);
             self.builder.ins().store(MemFlags::new(), high, elem_ptr, 8);
         } else {

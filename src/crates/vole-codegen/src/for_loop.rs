@@ -254,10 +254,7 @@ impl Cg<'_, '_, '_> {
             .arena()
             .unwrap_array(arr.type_id)
             .unwrap_or_else(|| self.arena().i64());
-        let (elem_is_i128, elem_is_f128) = {
-            let arena = self.arena();
-            (elem_type_id == arena.i128(), elem_type_id == arena.f128())
-        };
+        let elem_wide = crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena());
 
         let len_val = self
             .call_compiler_intrinsic_key_with_line(
@@ -318,15 +315,9 @@ impl Cg<'_, '_, '_> {
             } else {
                 self.copy_union_heap_to_stack(elem_val, elem_type_id).value
             }
-        } else if elem_is_i128 || elem_is_f128 {
+        } else if let Some(wide) = elem_wide {
             let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[elem_val])?;
-            if elem_is_f128 {
-                self.builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_bits)
-            } else {
-                wide_bits
-            }
+            wide.reinterpret_i128(self.builder, wide_bits)
         } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
             // Narrow the i64 runtime value to the element's actual Cranelift type.
             self.builder.ins().ireduce(elem_cr_type, elem_val)
@@ -622,18 +613,11 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
         elem_cr_type: Type,
     ) -> CodegenResult<Value> {
-        let is_i128 = elem_type_id == self.arena().i128();
-        let is_f128 = elem_type_id == self.arena().f128();
-        if is_i128 || is_f128 {
+        if let Some(wide) =
+            crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena())
+        {
             let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
-            if is_f128 {
-                Ok(self
-                    .builder
-                    .ins()
-                    .bitcast(types::F128, MemFlags::new(), wide_bits))
-            } else {
-                Ok(wide_bits)
-            }
+            Ok(wide.reinterpret_i128(self.builder, wide_bits))
         } else if elem_cr_type == types::F64 {
             Ok(self
                 .builder
