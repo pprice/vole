@@ -587,6 +587,9 @@ impl InterfaceVtableRegistry {
         let instance_get = resolve_runtime_in_vtable(ctx, RuntimeKey::InstanceGetField)?;
         let heap_alloc = resolve_runtime_in_vtable(ctx, RuntimeKey::HeapAlloc)?;
         let closure_alloc = resolve_runtime_in_vtable(ctx, RuntimeKey::ClosureAlloc)?;
+        let rc_inc = resolve_runtime_in_vtable(ctx, RuntimeKey::RcInc)?;
+        let cache_get = resolve_runtime_in_vtable(ctx, RuntimeKey::TypeMetaCacheGet)?;
+        let cache_store = resolve_runtime_in_vtable(ctx, RuntimeKey::TypeMetaCacheStore)?;
 
         // Collect field info from the concrete type
         let field_info = collect_concrete_field_info(ctx, type_def_id);
@@ -626,6 +629,16 @@ impl InterfaceVtableRegistry {
             ids
         };
 
+        // Get a unique cache key for this concrete type.
+        // Classes use their nonzero runtime type_id; structs (type_id=0) get a
+        // fresh unique ID so different struct types don't collide in the cache.
+        let cache_key_id = ctx
+            .type_metadata()
+            .get(&type_def_id)
+            .map(|m| m.type_id)
+            .filter(|&id| id != 0)
+            .unwrap_or_else(vole_runtime::type_registry::alloc_type_id);
+
         // Now compile the meta getter function itself
         let getter_name = format!(
             "__vole_iface_meta_{}_{}",
@@ -649,6 +662,12 @@ impl InterfaceVtableRegistry {
             let entry = builder.create_block();
             builder.switch_to_block(entry);
             builder.seal_block(entry);
+
+            // Emit lazy-init cache check (hot path already wired).
+            let (_cold_block, merge_block) =
+                emit_meta_cache_check(&mut builder, ctx, cache_key_id, cache_get, rc_inc);
+
+            // --- Cold path: build TypeMeta and cache it ---
 
             // Allocate TypeMeta instance
             let type_meta_ptr = emit_alloc_instance(
@@ -718,7 +737,22 @@ impl InterfaceVtableRegistry {
                 ptr_type,
             );
 
-            builder.ins().return_(&[type_meta_ptr]);
+            // Store into cache and rc_inc for the caller.
+            emit_meta_cache_store(
+                &mut builder,
+                ctx,
+                cache_key_id,
+                cache_store,
+                rc_inc,
+                type_meta_ptr,
+                merge_block,
+            );
+
+            // Merge: return the TypeMeta pointer (from either path).
+            builder.switch_to_block(merge_block);
+            builder.seal_block(merge_block);
+            let result = builder.block_params(merge_block)[0];
+            builder.ins().return_(&[result]);
             builder.finalize();
         }
 
@@ -755,11 +789,17 @@ impl InterfaceVtableRegistry {
         let instance_set = resolve_runtime_in_vtable(ctx, RuntimeKey::InstanceSetField)?;
         let array_new = resolve_runtime_in_vtable(ctx, RuntimeKey::ArrayNew)?;
         let closure_alloc = resolve_runtime_in_vtable(ctx, RuntimeKey::ClosureAlloc)?;
+        let rc_inc = resolve_runtime_in_vtable(ctx, RuntimeKey::RcInc)?;
+        let cache_get = resolve_runtime_in_vtable(ctx, RuntimeKey::TypeMetaCacheGet)?;
+        let cache_store = resolve_runtime_in_vtable(ctx, RuntimeKey::TypeMetaCacheStore)?;
+
+        // Allocate a unique pseudo-type-id as cache key for function/closure types.
+        let cache_key_id = vole_runtime::type_registry::alloc_type_id();
 
         // Compile a stub constructor that panics
         let ctor_id = compile_stub_constructor(ctx)?;
 
-        // Pre-declare string data
+        // Pre-declare string data before the FunctionBuilder.
         let name_data_id = {
             let (module, funcs) = ctx.jit_module_and_funcs();
             declare_string_data(type_name, module, funcs)?
@@ -787,6 +827,12 @@ impl InterfaceVtableRegistry {
             let entry = builder.create_block();
             builder.switch_to_block(entry);
             builder.seal_block(entry);
+
+            // Emit lazy-init cache check (hot path already wired).
+            let (_cold_block, merge_block) =
+                emit_meta_cache_check(&mut builder, ctx, cache_key_id, cache_get, rc_inc);
+
+            // --- Cold path: build TypeMeta and cache it ---
 
             // Allocate TypeMeta instance
             let type_meta_ptr = emit_alloc_instance(
@@ -846,7 +892,22 @@ impl InterfaceVtableRegistry {
                 ptr_type,
             );
 
-            builder.ins().return_(&[type_meta_ptr]);
+            // Store into cache and rc_inc for the caller.
+            emit_meta_cache_store(
+                &mut builder,
+                ctx,
+                cache_key_id,
+                cache_store,
+                rc_inc,
+                type_meta_ptr,
+                merge_block,
+            );
+
+            // Merge: return the TypeMeta pointer (from either path).
+            builder.switch_to_block(merge_block);
+            builder.seal_block(merge_block);
+            let result = builder.block_params(merge_block)[0];
+            builder.ins().return_(&[result]);
             builder.finalize();
         }
 
@@ -976,6 +1037,87 @@ fn collect_concrete_field_info<C: VtableCtx>(
             }
         })
         .collect()
+}
+
+/// Emit the lazy-init cache check at the start of a meta getter function.
+///
+/// Calls `type_meta_cache_get(cache_key_id)` and branches on the result.
+/// Returns `(cold_block, merge_block)`. The caller should:
+/// 1. Build the TypeMeta in `cold_block` (ending with `emit_meta_cache_store`).
+/// 2. The merge block has a single block param containing the TypeMeta pointer.
+///
+/// Hot path (cache hit) is already wired: rc_incs cached ptr, jumps to merge.
+fn emit_meta_cache_check<C: VtableCtx>(
+    builder: &mut FunctionBuilder,
+    ctx: &mut C,
+    cache_key_id: u32,
+    cache_get_id: FuncId,
+    rc_inc_id: FuncId,
+) -> (Block, Block) {
+    let ptr_type = ctx.ptr_type();
+
+    // Call type_meta_cache_get(cache_key_id)
+    let cache_get_ref = ctx
+        .jit_module()
+        .declare_func_in_func(cache_get_id, builder.func);
+    let key_val = builder.ins().iconst(types::I32, cache_key_id as i64);
+    let get_call = builder.ins().call(cache_get_ref, &[key_val]);
+    let cached_ptr = builder.inst_results(get_call)[0];
+
+    let null = builder.ins().iconst(ptr_type, 0);
+    let is_null = builder.ins().icmp(IntCC::Equal, cached_ptr, null);
+
+    let cold_block = builder.create_block();
+    let hot_block = builder.create_block();
+    let merge_block = builder.create_block();
+    builder.append_block_param(merge_block, ptr_type);
+
+    builder.ins().brif(is_null, cold_block, &[], hot_block, &[]);
+
+    // Hot path: rc_inc and return cached value.
+    builder.switch_to_block(hot_block);
+    builder.seal_block(hot_block);
+    let rc_inc_ref = ctx
+        .jit_module()
+        .declare_func_in_func(rc_inc_id, builder.func);
+    builder.ins().call(rc_inc_ref, &[cached_ptr]);
+    builder.ins().jump(merge_block, &[cached_ptr.into()]);
+
+    // Cold block will be filled by caller.
+    builder.switch_to_block(cold_block);
+    builder.seal_block(cold_block);
+
+    (cold_block, merge_block)
+}
+
+/// Emit the store-and-inc at the end of the cold path after building TypeMeta.
+///
+/// rc_incs `type_meta_ptr` so the cache holds one reference AND the caller gets one,
+/// calls `type_meta_cache_store(cache_key_id, ptr)`, then jumps to merge_block.
+fn emit_meta_cache_store<C: VtableCtx>(
+    builder: &mut FunctionBuilder,
+    ctx: &mut C,
+    cache_key_id: u32,
+    cache_store_id: FuncId,
+    rc_inc_id: FuncId,
+    type_meta_ptr: Value,
+    merge_block: Block,
+) {
+    // rc_inc so the cache holds one reference AND the caller gets one.
+    let rc_inc_ref = ctx
+        .jit_module()
+        .declare_func_in_func(rc_inc_id, builder.func);
+    builder.ins().call(rc_inc_ref, &[type_meta_ptr]);
+
+    // Store into runtime cache (cache takes ownership of one rc reference).
+    let cache_store_ref = ctx
+        .jit_module()
+        .declare_func_in_func(cache_store_id, builder.func);
+    let key_val = builder.ins().iconst(types::I32, cache_key_id as i64);
+    builder
+        .ins()
+        .call(cache_store_ref, &[key_val, type_meta_ptr]);
+    builder.ins().jump(merge_block, &[type_meta_ptr.into()]);
 }
 
 /// Resolve a RuntimeKey to a FuncId through the vtable context's function registry.

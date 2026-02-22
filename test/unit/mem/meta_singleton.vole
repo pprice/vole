@@ -1,0 +1,196 @@
+// Memory leak tests for TypeMeta singleton caching.
+//
+// TypeMeta for a given type is now cached as a singleton: the first .@meta
+// builds and caches the instance, subsequent calls return the cached pointer
+// with an rc_inc. These tests verify that repeated static and dynamic .@meta
+// calls do not leak.
+
+class Widget {
+    label: string,
+    count: i64,
+}
+
+struct Coord {
+    x: i64,
+    y: i64,
+}
+
+interface Shape {
+    func area() -> i64
+}
+
+class Square implements Shape {
+    side: i64,
+
+    func area() -> i64 {
+        return self.side * self.side
+    }
+}
+
+class Circle implements Shape {
+    radius: i64,
+
+    func area() -> i64 {
+        return self.radius * self.radius * 3
+    }
+}
+
+func get_shape_meta(s: Shape) -> TypeMeta {
+    return s.@meta
+}
+
+tests "static meta singleton no leak" {
+    test "repeated static meta on class" {
+        let m1 = Widget.@meta
+        let m2 = Widget.@meta
+        let m3 = Widget.@meta
+        assert(m1.name == "Widget")
+        assert(m2.name == "Widget")
+        assert(m3.name == "Widget")
+    }
+
+    test "repeated static meta on struct" {
+        let m1 = Coord.@meta
+        let m2 = Coord.@meta
+        let m3 = Coord.@meta
+        assert(m1.name == "Coord")
+        assert(m2.name == "Coord")
+        assert(m3.name == "Coord")
+    }
+
+    test "static meta in loop no leak" {
+        var i = 0
+        while i < 20 {
+            let meta = Widget.@meta
+            assert(meta.name == "Widget")
+            assert(meta.fields.length() == 2)
+            i = i + 1
+        }
+    }
+
+    test "static meta struct in loop no leak" {
+        var i = 0
+        while i < 20 {
+            let meta = Coord.@meta
+            assert(meta.name == "Coord")
+            assert(meta.fields.length() == 2)
+            i = i + 1
+        }
+    }
+
+    test "static meta field access after repeated calls" {
+        let _ = Widget.@meta
+        let _ = Widget.@meta
+        let meta = Widget.@meta
+        assert(meta.fields[0].name == "label")
+        assert(meta.fields[1].name == "count")
+        assert(meta.fields[0].type_name == "string")
+        assert(meta.fields[1].type_name == "i64")
+    }
+
+    test "instance meta repeated on same object" {
+        let w = Widget { label: "test", count: 5 }
+        let m1 = w.@meta
+        let m2 = w.@meta
+        let m3 = w.@meta
+        assert(m1.name == "Widget")
+        assert(m2.name == "Widget")
+        assert(m3.name == "Widget")
+    }
+
+    test "instance meta in loop no leak" {
+        let w = Widget { label: "loop", count: 0 }
+        var i = 0
+        while i < 20 {
+            let meta = w.@meta
+            assert(meta.name == "Widget")
+            i = i + 1
+        }
+    }
+
+    test "meta var reassignment in loop" {
+        var meta = Widget.@meta
+        var i = 0
+        while i < 10 {
+            meta = Widget.@meta
+            i = i + 1
+        }
+        assert(meta.name == "Widget")
+    }
+
+    test "different types interleaved" {
+        var i = 0
+        while i < 10 {
+            let wm = Widget.@meta
+            let cm = Coord.@meta
+            assert(wm.name == "Widget")
+            assert(cm.name == "Coord")
+            i = i + 1
+        }
+    }
+}
+
+tests "dynamic meta singleton no leak" {
+    test "repeated dynamic meta same concrete type" {
+        let s: Shape = Square { side: 5 }
+        let m1 = s.@meta
+        let m2 = s.@meta
+        let m3 = s.@meta
+        assert(m1.name == "Square")
+        assert(m2.name == "Square")
+        assert(m3.name == "Square")
+    }
+
+    test "dynamic meta in loop no leak" {
+        let s: Shape = Square { side: 5 }
+        var i = 0
+        while i < 20 {
+            let meta = s.@meta
+            assert(meta.name == "Square")
+            i = i + 1
+        }
+    }
+
+    test "dynamic meta via function repeated" {
+        let sq = Square { side: 3 }
+        let m1 = get_shape_meta(sq)
+        let m2 = get_shape_meta(sq)
+        let m3 = get_shape_meta(sq)
+        assert(m1.name == "Square")
+        assert(m2.name == "Square")
+        assert(m3.name == "Square")
+    }
+
+    test "dynamic meta alternating types in loop" {
+        let sq = Square { side: 3 }
+        let ci = Circle { radius: 4 }
+        var i = 0
+        while i < 10 {
+            let sm = get_shape_meta(sq)
+            let cm = get_shape_meta(ci)
+            assert(sm.name == "Square")
+            assert(cm.name == "Circle")
+            i = i + 1
+        }
+    }
+
+    test "dynamic meta field access after caching" {
+        let s: Shape = Square { side: 5 }
+        let _ = s.@meta
+        let _ = s.@meta
+        let meta = s.@meta
+        assert(meta.fields.length() == 1)
+        assert(meta.fields[0].name == "side")
+    }
+
+    test "dynamic meta var reassignment in loop" {
+        let s: Shape = Circle { radius: 2 }
+        var meta = s.@meta
+        var i = 0
+        while i < 10 {
+            meta = s.@meta
+            i = i + 1
+        }
+        assert(meta.name == "Circle")
+    }
+}

@@ -156,6 +156,10 @@ pub(crate) struct CodegenState {
     /// appear in FieldMeta.annotations they're heap-allocated class instances.
     /// This cache maps TypeDefId -> runtime type_id so field cleanup works correctly.
     pub annotation_type_ids: RefCell<FxHashMap<TypeDefId, u32>>,
+    /// Cache of unique cache keys for TypeMeta singleton caching.
+    /// Classes use their runtime type_id; structs (type_id=0) get a freshly
+    /// allocated ID so that different struct types don't collide in the cache.
+    pub meta_cache_keys: RefCell<FxHashMap<TypeDefId, u32>>,
 }
 
 impl CodegenState {
@@ -182,6 +186,7 @@ impl CodegenState {
             expanded_class_method_monomorphs: FxHashMap::default(),
             monomorph_index: FxHashMap::default(),
             annotation_type_ids: RefCell::new(FxHashMap::default()),
+            meta_cache_keys: RefCell::new(FxHashMap::default()),
         }
     }
 }

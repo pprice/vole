@@ -285,6 +285,10 @@ runtime_keys! {
     ChannelRecv            => "vole_channel_recv"            : (Ptr, Ptr) -> I64      = vole_runtime::channel::vole_channel_recv,
     ChannelClose           => "vole_channel_close"           : (Ptr) -> Void          = vole_runtime::channel::vole_channel_close,
     ChannelIsClosed        => "vole_channel_is_closed"       : (Ptr) -> I8            = vole_runtime::channel::vole_channel_is_closed,
+
+    // ── TypeMeta cache ──────────────────────────────────────────────────
+    TypeMetaCacheGet       => "type_meta_cache_get"          : (I32) -> Ptr           = vole_runtime::type_meta_cache::type_meta_cache_get,
+    TypeMetaCacheStore     => "type_meta_cache_store"        : (I32, Ptr) -> Void     = vole_runtime::type_meta_cache::type_meta_cache_store,
 }
 
 pub fn all_symbols() -> &'static [RuntimeSymbol] {

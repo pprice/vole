@@ -112,7 +112,11 @@ fn resolve_type_param_meta(
     ))
 }
 
-/// Build a TypeMeta instance for a statically-known type.
+/// Build a TypeMeta instance for a statically-known type, with singleton caching.
+///
+/// Uses a runtime-side cache keyed by runtime type_id. On first access the
+/// TypeMeta is built and stored into the cache; subsequent accesses return
+/// the cached pointer with rc_inc so the caller gets an owned reference.
 ///
 /// TypeMeta layout (from reflection.vole):
 ///   - name: string           (slot 0)
@@ -123,9 +127,96 @@ fn compile_static_meta(
     type_def_id: TypeDefId,
     expr_node_id: vole_frontend::NodeId,
 ) -> CodegenResult<CompiledValue> {
+    let ptr_type = cg.ptr_type();
+
+    // Get or allocate a unique cache key for this type.
+    // Classes use their runtime type_id (always nonzero); structs (type_id=0) get
+    // a freshly allocated ID so different struct types don't collide.
+    let cache_key = get_or_alloc_meta_cache_key(cg, type_def_id)?;
+
+    // Call type_meta_cache_get(cache_key) to check the runtime cache.
+    let type_id_val = cg.iconst_cached(types::I32, cache_key as i64);
+    let cached_ptr = cg.call_runtime(RuntimeKey::TypeMetaCacheGet, &[type_id_val])?;
+
+    // Check if the cached pointer is null (first access).
+    let null = cg.iconst_cached(ptr_type, 0);
+    let is_null = cg.builder.ins().icmp(IntCC::Equal, cached_ptr, null);
+
+    let cold_block = cg.builder.create_block();
+    let hot_block = cg.builder.create_block();
+    let merge_block = cg.builder.create_block();
+    cg.builder.append_block_param(merge_block, ptr_type);
+
+    cg.emit_brif(is_null, cold_block, hot_block);
+
+    // --- Cold path: first access, build and cache ---
+    cg.switch_to_block(cold_block);
+    cg.builder.seal_block(cold_block);
+    let fresh_ptr = build_type_meta_instance(cg, type_def_id)?;
+    // rc_inc so the cache holds one reference AND the caller gets one.
+    cg.emit_rc_inc(fresh_ptr)?;
+    // Store into cache (cache takes ownership of one rc reference).
+    let type_id_val2 = cg.iconst_cached(types::I32, cache_key as i64);
+    cg.call_runtime_void(RuntimeKey::TypeMetaCacheStore, &[type_id_val2, fresh_ptr])?;
+    cg.builder.ins().jump(merge_block, &[fresh_ptr.into()]);
+
+    // --- Hot path: cached, rc_inc and return ---
+    cg.switch_to_block(hot_block);
+    cg.builder.seal_block(hot_block);
+    cg.emit_rc_inc(cached_ptr)?;
+    cg.builder.ins().jump(merge_block, &[cached_ptr.into()]);
+
+    cg.switch_to_block(merge_block);
+    cg.builder.seal_block(merge_block);
+    let result_ptr = cg.builder.block_params(merge_block)[0];
+
+    let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
+        resolve_reflection_types(cg)
+            .ok()
+            .map(|i| i.type_meta_type_id)
+            .unwrap_or(TypeId::UNKNOWN)
+    });
+
+    let cv = CompiledValue::new(result_ptr, ptr_type, result_type_id);
+    Ok(cg.mark_rc_owned(cv))
+}
+
+/// Get or allocate a unique cache key for a TypeDefId's TypeMeta singleton.
+///
+/// Classes already have unique nonzero runtime type_ids which we reuse.
+/// Structs have type_id=0, so we allocate a fresh unique ID to avoid collisions.
+/// The mapping is cached in `CodegenState.meta_cache_keys` so the same TypeDefId
+/// always maps to the same key across multiple `.@meta` call sites.
+fn get_or_alloc_meta_cache_key(cg: &Cg, type_def_id: TypeDefId) -> CodegenResult<u32> {
+    // Check cache first.
+    if let Some(&key) = cg.env.state.meta_cache_keys.borrow().get(&type_def_id) {
+        return Ok(key);
+    }
+
+    // For classes, use their existing nonzero runtime type_id.
+    // For structs (type_id=0), allocate a unique ID.
+    let meta = cg
+        .type_metadata()
+        .get(&type_def_id)
+        .ok_or_else(|| CodegenError::not_found("type in type_metadata", "meta_cache_key"))?;
+    let key = if meta.type_id != 0 {
+        meta.type_id
+    } else {
+        vole_runtime::type_registry::alloc_type_id()
+    };
+
+    cg.env
+        .state
+        .meta_cache_keys
+        .borrow_mut()
+        .insert(type_def_id, key);
+    Ok(key)
+}
+
+/// Build a fresh TypeMeta instance for a type (no caching — called by the cold path).
+fn build_type_meta_instance(cg: &mut Cg, type_def_id: TypeDefId) -> CodegenResult<Value> {
     let info = resolve_reflection_types(cg)?;
 
-    // Get the type's name
     let type_name = {
         let type_def = cg.query().get_type(type_def_id);
         cg.query()
@@ -133,20 +224,28 @@ fn compile_static_meta(
             .unwrap_or_else(|| "?".to_string())
     };
 
-    // Build the name string
     let name_cv = cg.string_literal(&type_name)?;
-
-    // Build the fields array
     let fields_cv = fields::build_field_meta_array(cg, type_def_id, &info)?;
-
-    // Build the constructor closure
     let construct_cv = trampolines::build_constructor(cg, type_def_id, &info)?;
 
-    // Allocate a TypeMeta instance and store its fields
-    let type_meta_cv =
-        allocate_type_meta(cg, &info, name_cv, fields_cv, construct_cv, expr_node_id)?;
+    let instance_ptr = allocate_class_instance(cg, info.type_meta_def_id)?;
+    let set_func_ref = cg.runtime_func_ref(RuntimeKey::InstanceSetField)?;
 
-    Ok(cg.mark_rc_owned(type_meta_cv))
+    let name_slot = lookup_slot(&info.type_meta_slots, "name", "TypeMeta")?;
+    let fields_slot = lookup_slot(&info.type_meta_slots, "fields", "TypeMeta")?;
+    let construct_slot = lookup_slot(&info.type_meta_slots, "construct", "TypeMeta")?;
+
+    store_field_value(cg, set_func_ref, instance_ptr, name_slot, &name_cv);
+    store_field_value(cg, set_func_ref, instance_ptr, fields_slot, &fields_cv);
+    store_field_value(
+        cg,
+        set_func_ref,
+        instance_ptr,
+        construct_slot,
+        &construct_cv,
+    );
+
+    Ok(instance_ptr)
 }
 
 /// Build a TypeMeta instance for a dynamically-typed value (interface type).
@@ -215,42 +314,6 @@ fn lookup_slot(
             format!("{}.{}", type_name, field_name),
         )
     })
-}
-
-/// Allocate a TypeMeta instance and store its three fields.
-fn allocate_type_meta(
-    cg: &mut Cg,
-    info: &ReflectionTypeInfo,
-    name_cv: CompiledValue,
-    fields_cv: CompiledValue,
-    construct_cv: CompiledValue,
-    expr_node_id: vole_frontend::NodeId,
-) -> CodegenResult<CompiledValue> {
-    let instance_ptr = allocate_class_instance(cg, info.type_meta_def_id)?;
-    let set_func_ref = cg.runtime_func_ref(RuntimeKey::InstanceSetField)?;
-
-    let name_slot = lookup_slot(&info.type_meta_slots, "name", "TypeMeta")?;
-    let fields_slot = lookup_slot(&info.type_meta_slots, "fields", "TypeMeta")?;
-    let construct_slot = lookup_slot(&info.type_meta_slots, "construct", "TypeMeta")?;
-
-    store_field_value(cg, set_func_ref, instance_ptr, name_slot, &name_cv);
-    store_field_value(cg, set_func_ref, instance_ptr, fields_slot, &fields_cv);
-    store_field_value(
-        cg,
-        set_func_ref,
-        instance_ptr,
-        construct_slot,
-        &construct_cv,
-    );
-
-    let result_type_id = cg
-        .get_expr_type(&expr_node_id)
-        .unwrap_or(info.type_meta_type_id);
-    Ok(CompiledValue::new(
-        instance_ptr,
-        cg.ptr_type(),
-        result_type_id,
-    ))
 }
 
 /// Allocate a class instance using type_metadata for the given TypeDefId.

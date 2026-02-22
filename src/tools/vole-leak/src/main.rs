@@ -335,6 +335,9 @@ fn execute_tests_with_tracking(
         clear_current_test();
         set_stdout_capture(None);
 
+        // Clear TypeMeta singleton cache so cached entries don't appear as leaks.
+        vole_runtime::type_meta_cache::type_meta_cache_clear();
+
         // Check for leaks.
         let d = alloc_track::delta(snap);
         if d != 0 {
