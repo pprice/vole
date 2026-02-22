@@ -36,7 +36,7 @@ echo "$notes"
 echo ""
 
 # --- Commit ---
-git add "$CARGO_TOML"
+git add "$CARGO_TOML" Cargo.lock
 git commit -m "$(cat <<EOF
 release: Vole ${new_version}
 

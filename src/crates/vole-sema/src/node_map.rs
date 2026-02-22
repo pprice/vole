@@ -885,6 +885,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "already present")]
     fn insert_module_double_panics_in_debug() {
         let mut map = NodeMap::new();
