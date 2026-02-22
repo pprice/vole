@@ -45,7 +45,18 @@ fn print_decl<'a>(
     decl: &Decl,
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
-    match decl {
+    // Get annotations for declarations that support them
+    let annotations = match decl {
+        Decl::Function(f) => &f.annotations[..],
+        Decl::Class(c) => &c.annotations[..],
+        Decl::Struct(s) => &s.annotations[..],
+        Decl::Interface(i) => &i.annotations[..],
+        _ => &[],
+    };
+
+    let ann_doc = print_annotations(arena, annotations, interner);
+
+    let decl_doc = match decl {
         Decl::Function(func) => print_func_decl(arena, func, interner),
         Decl::Let(let_stmt) => print_let_stmt(arena, let_stmt, interner),
         Decl::LetTuple(_) => todo!("let tuple decl printing"),
@@ -57,7 +68,46 @@ fn print_decl<'a>(
         Decl::Error(error_decl) => print_error_decl(arena, error_decl, interner),
         Decl::Sentinel(sentinel_decl) => print_sentinel_decl(arena, sentinel_decl, interner),
         Decl::External(_) => todo!("external decl printing"),
+    };
+
+    ann_doc.append(decl_doc)
+}
+
+/// Print annotation list (each on its own line before the declaration).
+fn print_annotations<'a>(
+    arena: &'a Arena<'a>,
+    annotations: &[Annotation],
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if annotations.is_empty() {
+        return arena.nil();
     }
+
+    let ann_docs: Vec<_> = annotations
+        .iter()
+        .map(|ann| {
+            let name = interner.resolve(ann.name).to_string();
+            if ann.args.is_empty() {
+                arena.text("@").append(arena.text(name))
+            } else {
+                let arg_docs: Vec<_> = ann
+                    .args
+                    .iter()
+                    .map(|a| expr::print_call_arg(arena, a, interner))
+                    .collect();
+                let args = arena.intersperse(arg_docs, arena.text(", "));
+                arena
+                    .text("@")
+                    .append(arena.text(name))
+                    .append(arena.text("("))
+                    .append(args)
+                    .append(arena.text(")"))
+            }
+        })
+        .collect();
+
+    let ann_block = arena.intersperse(ann_docs, arena.hardline());
+    ann_block.append(arena.hardline())
 }
 
 /// Print a let statement.

@@ -104,6 +104,14 @@ pub struct Program {
     pub next_node_id: u32,
 }
 
+/// Annotation on a declaration: @Name or @Name(args)
+#[derive(Debug, Clone)]
+pub struct Annotation {
+    pub name: Symbol,
+    pub args: Vec<CallArg>,
+    pub span: Span,
+}
+
 /// Top-level declarations
 #[derive(Debug, Clone)]
 pub enum Decl {
@@ -129,6 +137,7 @@ pub struct FuncDecl {
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
     pub body: FuncBody,
+    pub annotations: Vec<Annotation>,
     pub span: Span,
 }
 
@@ -187,6 +196,7 @@ pub struct ClassDecl {
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
     pub statics: Option<StaticsBlock>, // Static methods
+    pub annotations: Vec<Annotation>,
     pub span: Span,
 }
 
@@ -198,6 +208,7 @@ pub struct StructDecl {
     pub fields: Vec<FieldDef>,
     pub methods: Vec<FuncDecl>,
     pub statics: Option<StaticsBlock>, // Static methods
+    pub annotations: Vec<Annotation>,
     pub span: Span,
 }
 
@@ -211,6 +222,7 @@ pub struct InterfaceDecl {
     pub external_blocks: Vec<ExternalBlock>, // External methods from native code (multiple allowed)
     pub methods: Vec<InterfaceMethod>,
     pub statics: Option<StaticsBlock>, // Static methods
+    pub annotations: Vec<Annotation>,
     pub span: Span,
 }
 

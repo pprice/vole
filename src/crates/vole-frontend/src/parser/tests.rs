@@ -330,7 +330,7 @@ tests {
 // Tests for miette error integration
 #[test]
 fn parse_error_contains_parser_error() {
-    let mut parser = Parser::new("@", ModuleId::new(0));
+    let mut parser = Parser::new("`", ModuleId::new(0));
     let result = parser.parse_expression();
     assert!(result.is_err());
     let err = result.unwrap_err();

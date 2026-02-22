@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2120]: unknown annotation type '@DoesNotExist'
+   ╭─[<path>/annotation_unknown.vole:2:1]
+ 1 │ // Error: using an unknown type as an annotation
+ 2 │ @DoesNotExist
+   · ──────┬──────
+   ·       ╰── annotation type not found
+ 3 │ func bad() -> i64 {
+   ╰────

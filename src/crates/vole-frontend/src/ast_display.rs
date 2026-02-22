@@ -21,11 +21,11 @@ macro_rules! wln {
 
 use crate::Interner;
 use crate::ast::{
-    AssignTarget, BinaryOp, Block, CallArg, ClassDecl, CompoundOp, Decl, ErrorDecl, Expr, ExprKind,
-    ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, LetInit,
-    LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, OptionalMethodCallExpr, Param,
-    Program, RaiseStmt, SentinelDecl, Stmt, StringPart, StructDecl, StructLiteralExpr, TestCase,
-    TestsDecl, TypeExpr, UnaryOp,
+    Annotation, AssignTarget, BinaryOp, Block, CallArg, ClassDecl, CompoundOp, Decl, ErrorDecl,
+    Expr, ExprKind, ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock,
+    InterfaceDecl, LetInit, LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr,
+    OptionalMethodCallExpr, Param, Program, RaiseStmt, SentinelDecl, Stmt, StringPart, StructDecl,
+    StructLiteralExpr, TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -93,7 +93,33 @@ impl<'a> AstPrinter<'a> {
         }
     }
 
+    fn write_annotations(&self, out: &mut String, annotations: &[Annotation]) {
+        for ann in annotations {
+            self.write_indent(out);
+            let name = self.interner.resolve(ann.name);
+            if ann.args.is_empty() {
+                wln!(out, "@{}", name);
+            } else {
+                w!(out, "@{}(", name);
+                for (i, arg) in ann.args.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    match arg {
+                        CallArg::Positional(_) => out.push_str("<expr>"),
+                        CallArg::Named { name, .. } => {
+                            let arg_name = self.interner.resolve(*name);
+                            w!(out, "{}: <expr>", arg_name);
+                        }
+                    }
+                }
+                out.push_str(")\n");
+            }
+        }
+    }
+
     fn write_func_decl(&self, out: &mut String, func: &FuncDecl) {
+        self.write_annotations(out, &func.annotations);
         self.write_indent(out);
         let name = self.interner.resolve(func.name);
         wln!(out, "FunctionDecl \"{}\"", name);
@@ -178,6 +204,7 @@ impl<'a> AstPrinter<'a> {
     }
 
     fn write_struct_decl(&self, out: &mut String, struct_decl: &StructDecl) {
+        self.write_annotations(out, &struct_decl.annotations);
         self.write_indent(out);
         let name = self.interner.resolve(struct_decl.name);
         wln!(out, "StructDecl \"{}\"", name);
@@ -233,6 +260,7 @@ impl<'a> AstPrinter<'a> {
     }
 
     fn write_class_decl(&self, out: &mut String, class_decl: &ClassDecl) {
+        self.write_annotations(out, &class_decl.annotations);
         self.write_indent(out);
         let name = self.interner.resolve(class_decl.name);
         wln!(out, "ClassDecl \"{}\"", name);
@@ -299,6 +327,7 @@ impl<'a> AstPrinter<'a> {
     }
 
     fn write_interface_decl(&self, out: &mut String, iface: &InterfaceDecl) {
+        self.write_annotations(out, &iface.annotations);
         self.write_indent(out);
         let name = self.interner.resolve(iface.name);
         wln!(out, "InterfaceDecl \"{}\"", name);

@@ -250,12 +250,12 @@ impl<'src> Lexer<'src> {
                 self.identifier()
             }
 
-            // Raw string literal: @"..."
+            // Raw string literal: @"..." or annotation: @name
             '@' => {
                 if self.match_byte(b'"') {
                     self.raw_string()
                 } else {
-                    self.error_unexpected_char(c)
+                    self.make_token(TokenType::At)
                 }
             }
 
@@ -597,19 +597,13 @@ mod tests {
     }
 
     #[test]
-    fn lexer_collects_unexpected_char_error() {
+    fn lexer_at_token() {
         let mut lexer = Lexer::new("@");
         let token = lexer.next_token();
 
-        assert_eq!(token.ty, TokenType::Error);
-        assert!(lexer.has_errors());
-
-        let errors = lexer.take_errors();
-        assert_eq!(errors.len(), 1);
-        assert!(matches!(
-            &errors[0],
-            LexerError::UnexpectedCharacter { ch: '@', .. }
-        ));
+        assert_eq!(token.ty, TokenType::At);
+        assert_eq!(token.lexeme, "@");
+        assert!(!lexer.has_errors());
     }
 
     #[test]
@@ -628,10 +622,10 @@ mod tests {
     #[test]
     fn lexer_continues_after_errors() {
         // Test that lexer continues lexing after encountering errors
-        let mut lexer = Lexer::new("let @ x = 42");
+        let mut lexer = Lexer::new("let # x = 42");
 
         assert_eq!(lexer.next_token().ty, TokenType::KwLet);
-        assert_eq!(lexer.next_token().ty, TokenType::Error); // @
+        assert_eq!(lexer.next_token().ty, TokenType::Error); // #
         assert_eq!(lexer.next_token().ty, TokenType::Identifier); // x
         assert_eq!(lexer.next_token().ty, TokenType::Eq);
         assert_eq!(lexer.next_token().ty, TokenType::IntLiteral); // 42
@@ -643,7 +637,7 @@ mod tests {
 
     #[test]
     fn lexer_collects_multiple_errors() {
-        let mut lexer = Lexer::new("@ # $");
+        let mut lexer = Lexer::new("` # $");
 
         assert_eq!(lexer.next_token().ty, TokenType::Error);
         assert_eq!(lexer.next_token().ty, TokenType::Error);
@@ -656,7 +650,7 @@ mod tests {
 
     #[test]
     fn lexer_take_errors_clears_errors() {
-        let mut lexer = Lexer::new("@");
+        let mut lexer = Lexer::new("#");
         lexer.next_token();
 
         assert!(lexer.has_errors());
@@ -670,7 +664,7 @@ mod tests {
 
     #[test]
     fn lexer_new_creates_errors() {
-        let mut lexer = Lexer::new("@");
+        let mut lexer = Lexer::new("#");
         lexer.next_token();
 
         let errors = lexer.take_errors();
@@ -678,7 +672,7 @@ mod tests {
         // File is attached when creating Report, not stored in error
         assert!(matches!(
             &errors[0],
-            LexerError::UnexpectedCharacter { ch: '@', .. }
+            LexerError::UnexpectedCharacter { ch: '#', .. }
         ));
     }
 

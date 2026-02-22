@@ -122,6 +122,9 @@ pub struct TypeDef {
     /// For Class/Struct types - the base TypeId (with empty type args).
     /// Pre-computed by sema so codegen can look up without mutable arena access.
     pub base_type_id: Option<TypeId>,
+    /// Whether this type is an annotation type (decorated with @annotation).
+    /// Annotation types can be used in @X decoration positions.
+    pub is_annotation: bool,
 }
 
 /// A method definition (always belongs to a type)

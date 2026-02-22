@@ -220,6 +220,9 @@ pub enum TokenType {
     Arrow,       // ->
     FatArrow,    // =>
 
+    // Annotation
+    At, // @
+
     // Special
     Newline,
     Eof,
@@ -308,6 +311,7 @@ impl TokenType {
             Self::DotDotEqual => "..=",
             Self::Arrow => "->",
             Self::FatArrow => "=>",
+            Self::At => "@",
             Self::Newline => "newline",
             Self::Eof => "end of file",
             Self::Error => "error",

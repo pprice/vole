@@ -184,15 +184,95 @@ impl<'src> Parser<'src> {
         None
     }
 
+    /// Parse annotation list: zero or more @Name or @Name(args) before a declaration.
+    fn parse_annotations(&mut self) -> Result<Vec<Annotation>, ParseError> {
+        let mut annotations = Vec::new();
+        while self.check(TokenType::At) {
+            let start_span = self.current.span;
+            self.advance(); // consume '@'
+
+            // Expect identifier after @
+            let name_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected annotation name after '@'")?;
+            let name = self.interner.intern(&name_token.lexeme);
+
+            // Optional arguments: @Name(args)
+            let args = if self.check(TokenType::LParen) {
+                self.advance(); // consume '('
+                let mut args = Vec::new();
+                if !self.check(TokenType::RParen) {
+                    loop {
+                        let arg = self.parse_call_arg()?;
+                        args.push(arg);
+                        if !self.match_token(TokenType::Comma) {
+                            break;
+                        }
+                        if self.check(TokenType::RParen) {
+                            break;
+                        }
+                    }
+                }
+                self.consume(TokenType::RParen, "expected ')' after annotation arguments")?;
+                args
+            } else {
+                Vec::new()
+            };
+
+            let span = start_span.merge(self.previous.span);
+            annotations.push(Annotation { name, args, span });
+
+            // Skip newlines between annotations and the declaration
+            self.skip_newlines();
+        }
+        Ok(annotations)
+    }
+
     pub(super) fn declaration(&mut self) -> Result<Decl, ParseError> {
+        // Parse annotations before the declaration
+        if self.check(TokenType::At) {
+            let annotations = self.parse_annotations()?;
+            // Now parse the declaration that follows the annotations
+            return self.annotated_declaration(annotations);
+        }
+
+        self.unannotated_declaration()
+    }
+
+    /// Parse a declaration that follows annotation(s).
+    fn annotated_declaration(&mut self, annotations: Vec<Annotation>) -> Result<Decl, ParseError> {
         match self.current.ty {
-            TokenType::KwFunc => self.function_decl(),
+            TokenType::KwFunc => self.function_decl_with_annotations(annotations),
+            TokenType::KwClass => self.class_decl_with_annotations(annotations),
+            TokenType::KwStruct => self.struct_decl_with_annotations(annotations),
+            TokenType::KwInterface => self.interface_decl_with_annotations(false, annotations),
+            _ => {
+                let span = annotations
+                    .first()
+                    .map(|a| a.span)
+                    .unwrap_or(self.current.span);
+                Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: format!(
+                            "annotations can only be applied to func, class, struct, or interface declarations, found {}",
+                            self.current.ty.as_str()
+                        ),
+                        span: span.into(),
+                    },
+                    span,
+                ))
+            }
+        }
+    }
+
+    fn unannotated_declaration(&mut self) -> Result<Decl, ParseError> {
+        match self.current.ty {
+            TokenType::KwFunc => self.function_decl_with_annotations(Vec::new()),
             TokenType::KwTests => self.tests_decl(),
             TokenType::KwLet => self.let_decl(),
             TokenType::KwVar => self.var_decl(),
-            TokenType::KwClass => self.class_decl(),
-            TokenType::KwStruct => self.struct_decl(),
-            TokenType::KwInterface => self.interface_decl(false),
+            TokenType::KwClass => self.class_decl_with_annotations(Vec::new()),
+            TokenType::KwStruct => self.struct_decl_with_annotations(Vec::new()),
+            TokenType::KwInterface => self.interface_decl_with_annotations(false, Vec::new()),
             TokenType::KwStatic => self.static_interface_decl(),
             TokenType::KwImplement => self.implement_block(),
             TokenType::KwExtend => self.parse_extend_block(),
@@ -292,7 +372,17 @@ impl<'src> Parser<'src> {
     }
 
     fn function_decl(&mut self) -> Result<Decl, ParseError> {
-        let start_span = self.current.span;
+        self.function_decl_with_annotations(Vec::new())
+    }
+
+    fn function_decl_with_annotations(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> Result<Decl, ParseError> {
+        let start_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         self.advance(); // consume 'func'
 
         let name_token = self.current.clone();
@@ -345,6 +435,7 @@ impl<'src> Parser<'src> {
             params,
             return_type,
             body,
+            annotations,
             span,
         }))
     }
@@ -477,8 +568,14 @@ impl<'src> Parser<'src> {
         Ok(Decl::Let(stmt))
     }
 
-    fn class_decl(&mut self) -> Result<Decl, ParseError> {
-        let start_span = self.current.span;
+    fn class_decl_with_annotations(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> Result<Decl, ParseError> {
+        let start_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         self.advance(); // consume 'class'
 
         let name_token = self.current.clone();
@@ -507,12 +604,19 @@ impl<'src> Parser<'src> {
             external: body.external,
             methods: body.methods,
             statics: body.statics,
+            annotations,
             span,
         }))
     }
 
-    fn struct_decl(&mut self) -> Result<Decl, ParseError> {
-        let start_span = self.current.span;
+    fn struct_decl_with_annotations(
+        &mut self,
+        annotations: Vec<Annotation>,
+    ) -> Result<Decl, ParseError> {
+        let start_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         self.advance(); // consume 'struct'
 
         let name_token = self.current.clone();
@@ -568,6 +672,7 @@ impl<'src> Parser<'src> {
             fields,
             methods,
             statics,
+            annotations,
             span,
         }))
     }
@@ -661,15 +766,22 @@ impl<'src> Parser<'src> {
             TokenType::KwInterface,
             "expected 'interface' after 'static'",
         )?;
-        self.interface_decl_inner(true, start_span)
+        self.interface_decl_inner(true, start_span, Vec::new())
     }
 
     /// Parse interface declaration: interface Name [extends Parent] { methods }
     /// If is_static is true, all methods and external blocks are wrapped in a statics block.
-    fn interface_decl(&mut self, is_static: bool) -> Result<Decl, ParseError> {
-        let start_span = self.current.span;
+    fn interface_decl_with_annotations(
+        &mut self,
+        is_static: bool,
+        annotations: Vec<Annotation>,
+    ) -> Result<Decl, ParseError> {
+        let start_span = annotations
+            .first()
+            .map(|a| a.span)
+            .unwrap_or(self.current.span);
         self.advance(); // consume 'interface'
-        self.interface_decl_inner(is_static, start_span)
+        self.interface_decl_inner(is_static, start_span, annotations)
     }
 
     /// Inner implementation of interface parsing, shared by regular and static interfaces
@@ -677,6 +789,7 @@ impl<'src> Parser<'src> {
         &mut self,
         is_static: bool,
         start_span: Span,
+        annotations: Vec<Annotation>,
     ) -> Result<Decl, ParseError> {
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected interface name")?;
@@ -804,6 +917,7 @@ impl<'src> Parser<'src> {
             external_blocks,
             methods,
             statics,
+            annotations,
             span,
         }))
     }

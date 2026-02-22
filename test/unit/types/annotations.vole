@@ -1,0 +1,79 @@
+// Annotation type tests - @annotation marks types usable as annotations
+
+// Define custom annotation types
+@annotation
+struct deprecated {}
+
+@annotation
+struct inline {}
+
+@annotation
+struct tag {
+    name: string,
+}
+
+// Use annotations on functions
+@deprecated
+func old_helper() -> i64 {
+    return 42
+}
+
+// Use annotations on structs
+@deprecated
+struct LegacyData {
+    value: i64,
+}
+
+// Use annotations on classes
+@deprecated
+class OldService {
+    data: i64,
+
+    func get_data(self: Self) -> i64 {
+        return self.data
+    }
+}
+
+// Use annotations on interfaces
+@deprecated
+interface Obsolete {
+    func do_thing(self: Self) -> i64
+}
+
+// Multiple annotations on one declaration
+@deprecated
+@inline
+func doubly_annotated() -> i64 {
+    return 99
+}
+
+// Annotation with arguments
+@tag(name: "important")
+func tagged_func() -> i64 {
+    return 100
+}
+
+// Verify annotated declarations still work normally at runtime
+tests "annotation basics" {
+    test "annotated function works normally" {
+        assert(old_helper() == 42)
+    }
+
+    test "annotated struct works normally" {
+        let d = LegacyData { value: 10 }
+        assert(d.value == 10)
+    }
+
+    test "annotated class works normally" {
+        let svc = OldService { data: 7 }
+        assert(svc.get_data() == 7)
+    }
+
+    test "multiply annotated function works" {
+        assert(doubly_annotated() == 99)
+    }
+
+    test "annotation with args function works" {
+        assert(tagged_func() == 100)
+    }
+}

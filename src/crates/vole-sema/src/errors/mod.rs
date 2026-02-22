@@ -821,6 +821,22 @@ pub enum SemanticError {
         #[label("'it' used here inside nested lambda context")]
         span: SourceSpan,
     },
+
+    #[error("'{name}' is not an annotation type")]
+    #[diagnostic(code(E2119), help("add @annotation to the declaration of '{name}'"))]
+    NotAnAnnotationType {
+        name: String,
+        #[label("not an annotation type")]
+        span: SourceSpan,
+    },
+
+    #[error("unknown annotation type '@{name}'")]
+    #[diagnostic(code(E2120))]
+    UnknownAnnotation {
+        name: String,
+        #[label("annotation type not found")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

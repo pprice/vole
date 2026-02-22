@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E2119]: 'NotAnAnnotation' is not an annotation type
+   ╭─[<path>/annotation_not_type.vole:4:1]
+ 3 │ 
+ 4 │ @NotAnAnnotation
+   · ────────┬───────
+   ·         ╰── not an annotation type
+ 5 │ func bad() -> i64 {
+   ╰────
+  help: add @annotation to the declaration of 'NotAnAnnotation'

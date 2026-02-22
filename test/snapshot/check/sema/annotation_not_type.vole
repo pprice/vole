@@ -1,0 +1,7 @@
+// Error: using a non-annotation type as an annotation
+struct NotAnAnnotation {}
+
+@NotAnAnnotation
+func bad() -> i64 {
+    return 0
+}

@@ -1,5 +1,6 @@
 // src/sema/analyzer/mod.rs
 
+mod annotations;
 mod builtins;
 mod context;
 mod declarations;
@@ -515,6 +516,9 @@ impl Analyzer {
         // TypeDefIds that resolve_type_str_or_interface would return.
         self.populate_well_known_cache(interner);
 
+        // Pass 1.5: Register annotation types and validate annotation usage
+        self.process_annotations(program, interner);
+
         // Process global let declarations
         self.process_global_lets(program, interner)?;
 
@@ -582,6 +586,9 @@ impl Analyzer {
         // find them via program_module() lookups
         self.module.current_module = parent_module;
         self.collect_function_signatures(program, interner);
+
+        // Validate annotations
+        self.process_annotations(program, interner);
 
         // Process global lets (scoped lets in the tests block)
         let _ = self.process_global_lets(program, interner);

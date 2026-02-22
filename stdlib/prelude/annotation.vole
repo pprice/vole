@@ -1,0 +1,9 @@
+// stdlib/prelude/annotation.vole
+// Built-in annotation type: marks structs as usable in annotation positions.
+//
+// The @annotation decorator is bootstrapped by the compiler:
+// annotation itself is special-cased so the self-referential
+// @annotation on the annotation struct is valid.
+
+@annotation
+struct annotation {}

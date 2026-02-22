@@ -259,7 +259,7 @@ fn print_call_expr<'a>(
 }
 
 /// Print a single call argument. Named args are rendered as `name: value`.
-fn print_call_arg<'a>(
+pub(super) fn print_call_arg<'a>(
     arena: &'a Arena<'a>,
     arg: &CallArg,
     interner: &Interner,
