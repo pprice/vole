@@ -246,9 +246,14 @@ impl<'src> Parser<'src> {
         Ok(expr)
     }
 
-    /// Parse a dot-postfix expression: field access, method call, or module-qualified struct literal.
+    /// Parse a dot-postfix expression: field access, method call, meta access, or module-qualified struct literal.
     /// Called after the '.' token has been consumed.
     fn parse_dot_postfix(&mut self, expr: Expr) -> Result<Expr, ParseError> {
+        // Check for .@meta syntax
+        if self.check(TokenType::At) {
+            return self.parse_meta_access(expr);
+        }
+
         let field_span = self.current.span;
         self.consume(TokenType::Identifier, "expected field name after '.'")?;
         let field = self.interner.intern(&self.previous.lexeme);
@@ -337,6 +342,33 @@ impl<'src> Parser<'src> {
                 span,
             })
         }
+    }
+
+    /// Parse `.@meta` syntax after `.` and `@` have been identified.
+    /// The `.` has already been consumed; `@` is the current token.
+    fn parse_meta_access(&mut self, expr: Expr) -> Result<Expr, ParseError> {
+        self.advance(); // consume '@'
+
+        // Expect the identifier `meta`
+        if !self.check(TokenType::Identifier) || self.current.lexeme != "meta" {
+            return Err(ParseError::new(
+                ParserError::ExpectedToken {
+                    expected: "'meta' after '.@'".to_string(),
+                    found: self.current.ty.as_str().to_string(),
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            ));
+        }
+        let end_span = self.current.span;
+        self.advance(); // consume 'meta'
+
+        let span = expr.span.merge(end_span);
+        Ok(Expr {
+            id: self.next_id(),
+            kind: ExprKind::MetaAccess(Box::new(MetaAccessExpr { object: expr })),
+            span,
+        })
     }
 
     /// Parse a `?.` postfix: optional field access or optional method call.

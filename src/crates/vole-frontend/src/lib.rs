@@ -19,9 +19,10 @@ pub mod token;
 pub use ast::{
     AsCastExpr, AsCastKind, AssignTarget, BinaryExpr, BinaryOp, Block, CallArg, Capture,
     CompoundAssignExpr, Decl, Expr, ExprId, ExprKind, FieldAccessExpr, FieldDef, FuncBody,
-    FuncDecl, LambdaExpr, LambdaParam, LambdaPurity, LetInit, LetStmt, MatchExpr, MethodCallExpr,
-    ModuleId, NodeId, OptionalChainExpr, OptionalMethodCallExpr, Param, Pattern, PatternKind,
-    PrimitiveType, Program, Stmt, StructLiteralExpr, Symbol, TypeExpr, TypeExprKind, UnaryOp,
+    FuncDecl, LambdaExpr, LambdaParam, LambdaPurity, LetInit, LetStmt, MatchExpr, MetaAccessExpr,
+    MethodCallExpr, ModuleId, NodeId, OptionalChainExpr, OptionalMethodCallExpr, Param, Pattern,
+    PatternKind, PrimitiveType, Program, Stmt, StructLiteralExpr, Symbol, TypeExpr, TypeExprKind,
+    UnaryOp,
 };
 pub use ast_display::AstPrinter;
 pub use errors::{LexerError, ParserError};

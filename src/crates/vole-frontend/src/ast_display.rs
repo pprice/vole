@@ -1138,6 +1138,15 @@ impl<'a> AstPrinter<'a> {
                     arm_inner.indented().write_expr(out, &arm.body);
                 }
             }
+
+            ExprKind::MetaAccess(ma) => {
+                self.write_indent(out);
+                wln!(out, "MetaAccess");
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("object:\n");
+                inner.indented().write_expr(out, &ma.object);
+            }
         }
     }
 

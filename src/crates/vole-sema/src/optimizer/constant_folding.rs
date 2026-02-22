@@ -708,6 +708,9 @@ impl<'a> ConstantFolder<'a> {
             ExprKind::FieldAccess(fa) => {
                 self.fold_expr(&mut fa.object);
             }
+            ExprKind::MetaAccess(ma) => {
+                self.fold_expr(&mut ma.object);
+            }
             ExprKind::OptionalChain(oc) => {
                 self.fold_expr(&mut oc.object);
             }

@@ -638,7 +638,8 @@ impl Expr {
             | ExprKind::TypeLiteral(_)
             | ExprKind::Import(_)
             | ExprKind::Yield(_)
-            | ExprKind::Unreachable => false,
+            | ExprKind::Unreachable
+            | ExprKind::MetaAccess(_) => false,
         }
     }
 }
@@ -823,6 +824,9 @@ pub enum ExprKind {
     /// When expression (subject-less conditional chains)
     /// Syntax: `when { cond1 => result1, cond2 => result2, _ => default }`
     When(Box<WhenExpr>),
+
+    /// Meta access: expr.@meta
+    MetaAccess(Box<MetaAccessExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -1114,6 +1118,12 @@ pub struct MethodCallExpr {
     pub type_args: Vec<TypeExpr>,
     pub args: Vec<CallArg>,
     pub method_span: Span,
+}
+
+/// Meta access expression: expr.@meta
+#[derive(Debug, Clone)]
+pub struct MetaAccessExpr {
+    pub object: Expr,
 }
 
 /// Yield expression: yield value

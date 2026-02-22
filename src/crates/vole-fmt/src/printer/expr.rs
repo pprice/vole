@@ -126,6 +126,9 @@ pub(super) fn print_expr<'a>(
             doc.append(arena.text("}"))
         }
         ExprKind::Unreachable => arena.text("unreachable"),
+        ExprKind::MetaAccess(ma) => {
+            print_expr(arena, &ma.object, interner).append(arena.text(".@meta"))
+        }
     }
 }
 

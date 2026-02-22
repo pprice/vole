@@ -290,6 +290,7 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
             None
         }
         ExprKind::OptionalChain(oc) => find_lambda_in_expr(&oc.object, node_id),
+        ExprKind::MetaAccess(ma) => find_lambda_in_expr(&ma.object, node_id),
         ExprKind::OptionalMethodCall(omc) => {
             if let Some(lambda) = find_lambda_in_expr(&omc.object, node_id) {
                 return Some(lambda);
