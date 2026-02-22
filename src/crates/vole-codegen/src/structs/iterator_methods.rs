@@ -100,7 +100,7 @@ impl Cg<'_, '_, '_> {
         match method_name {
             // Methods returning Iterator<T> — convert to RuntimeIterator<elem_type_id>
             "map" | "filter" | "take" | "skip" | "reverse" | "sorted" | "unique" | "chain"
-            | "flatten" | "flat_map" => arena.lookup_runtime_iterator(elem_type_id),
+            | "flatten" | "flat_map" | "filter_map" => arena.lookup_runtime_iterator(elem_type_id),
 
             // Methods returning Iterator<[i64, T]> for enumerate
             "enumerate" => {
@@ -245,7 +245,7 @@ impl Cg<'_, '_, '_> {
         //      We MUST emit rc_inc so both cleanup paths can dec independently.
         //    - Terminal methods: runtime borrows and does NOT free. The outer caller
         //      handles dec_ref (scope-exit or return cleanup). No extra action needed.
-        let stores_closure = matches!(method_name, "map" | "filter" | "flat_map");
+        let stores_closure = matches!(method_name, "map" | "filter" | "flat_map" | "filter_map");
         let codegen_frees_closure = matches!(method_name, "find" | "any" | "all");
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();

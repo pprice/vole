@@ -1,0 +1,192 @@
+// Test iterator filter_map() method
+// filter_map maps each element through a function returning T?,
+// skipping nils and yielding unwrapped non-nil values.
+
+tests {
+    test "filter_map basic - keep even doubled" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().filter_map((x) => {
+            if x % 2 == 0 {
+                return x * 2
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 4)
+        assert(result[1] == 8)
+    }
+
+    test "filter_map all nil - empty result" {
+        let arr = [1, 2, 3]
+        let result = arr.iter().filter_map((x) => {
+            if false {
+                return x
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 0)
+    }
+
+    test "filter_map all pass - no filtering" {
+        let arr = [10, 20, 30]
+        let result = arr.iter().filter_map((x) => {
+            if true {
+                return x + 1
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 11)
+        assert(result[1] == 21)
+        assert(result[2] == 31)
+    }
+
+    test "filter_map empty source" {
+        let arr: [i64] = []
+        let result = arr.iter().filter_map((x) => {
+            if true {
+                return x
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 0)
+    }
+
+    test "filter_map single element kept" {
+        let arr = [42]
+        let result = arr.iter().filter_map((x) => {
+            if true {
+                return x * 10
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 1)
+        assert(result[0] == 420)
+    }
+
+    test "filter_map single element skipped" {
+        let arr = [42]
+        let result = arr.iter().filter_map((x) => {
+            if false {
+                return x
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 0)
+    }
+
+    test "filter_map chained with filter" {
+        let arr = [1, 2, 3, 4, 5, 6]
+        // filter_map keeps evens doubled, then filter keeps > 6
+        let result = arr.iter().filter_map((x) => {
+            if x % 2 == 0 {
+                return x * 2
+            }
+            return nil
+        }).filter((x) => x > 6).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 8)
+        assert(result[1] == 12)
+    }
+
+    test "filter_map chained with map" {
+        let arr = [1, 2, 3, 4]
+        let result = arr.iter().filter_map((x) => {
+            if x > 2 {
+                return x
+            }
+            return nil
+        }).map((x) => x * 100).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 300)
+        assert(result[1] == 400)
+    }
+
+    test "filter_map with count" {
+        let arr = [1, 2, 3, 4, 5]
+        let c = arr.iter().filter_map((x) => {
+            if x % 2 == 1 {
+                return x
+            }
+            return nil
+        }).count()
+        assert(c == 3)
+    }
+
+    test "filter_map with sum" {
+        let arr = [1, 2, 3, 4, 5]
+        let s = arr.iter().filter_map((x) => {
+            if x > 3 {
+                return x * 10
+            }
+            return nil
+        }).sum()
+        assert(s == 90)  // 40 + 50
+    }
+
+    test "filter_map with take" {
+        let arr = [1, 2, 3, 4, 5, 6, 7, 8]
+        let result = arr.iter().filter_map((x) => {
+            if x % 2 == 0 {
+                return x
+            }
+            return nil
+        }).take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+    }
+
+    test "filter_map alternating nil and value" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().filter_map((x) => {
+            if x % 2 == 1 {
+                return x * x
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)   // 1*1
+        assert(result[1] == 9)   // 3*3
+        assert(result[2] == 25)  // 5*5
+    }
+
+    test "filter_map on iterable directly" {
+        let arr = [10, 20, 30, 40]
+        let result = arr.filter_map((x) => {
+            if x >= 20 {
+                return x / 10
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 2)
+        assert(result[1] == 3)
+        assert(result[2] == 4)
+    }
+
+    test "filter_map first few then nil" {
+        let arr = [1, 2, 3, 4, 5]
+        let result = arr.iter().filter_map((x) => {
+            if x <= 3 {
+                return x * 100
+            }
+            return nil
+        }).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 100)
+        assert(result[1] == 200)
+        assert(result[2] == 300)
+    }
+
+    test "filter_map with reduce" {
+        let arr = [1, 2, 3, 4, 5]
+        let sum = arr.iter().filter_map((x) => {
+            if x % 2 == 0 {
+                return x
+            }
+            return nil
+        }).reduce(0, (acc, x) => acc + x)
+        assert(sum == 6)  // 2 + 4
+    }
+}

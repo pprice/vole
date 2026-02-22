@@ -574,6 +574,14 @@ pub fn module() -> NativeModule {
         },
     );
     m.register(
+        "iter_filter_map",
+        iterator::vole_filter_map_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+    m.register(
         "iter_reverse",
         iterator::vole_reverse_iter as *const u8,
         NativeSignature {

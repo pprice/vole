@@ -76,6 +76,7 @@ interface Iterator<T> {
     func chain(other: Iterator<T>) -> Iterator<T>
     func flatten() -> Iterator<T>
     func flat_map(f: (T) -> [T]) -> Iterator<T>
+    func filter_map(f: (T) -> T?) -> Iterator<T>
     func reverse() -> Iterator<T>
     func sorted() -> Iterator<T>
     func unique() -> Iterator<T>
@@ -104,6 +105,7 @@ interface Iterator<T> {
         func "iter_chain" as chain(other: Iterator<T>) -> Iterator<T>
         func "iter_flatten" as flatten() -> Iterator<T>
         func "iter_flat_map" as flat_map(f: (T) -> [T]) -> Iterator<T>
+        func "iter_filter_map" as filter_map(f: (T) -> T?) -> Iterator<T>
         func "iter_reverse" as reverse() -> Iterator<T>
         func "iter_sorted" as sorted() -> Iterator<T>
         func "iter_unique" as unique() -> Iterator<T>
@@ -128,6 +130,7 @@ interface Iterable<T> {
     default func reverse() -> Iterator<T> => self.iter().reverse()
     default func flatten() -> Iterator<T> => self.iter().flatten()
     default func flat_map(f: (T) -> [T]) -> Iterator<T> => self.iter().flat_map(f)
+    default func filter_map(f: (T) -> T?) -> Iterator<T> => self.iter().filter_map(f)
     default func sorted() -> Iterator<T> => self.iter().sorted()
     default func unique() -> Iterator<T> => self.iter().unique()
     default func chunks(n: i64) -> Iterator<[T]> => self.iter().chunks(n)

@@ -37,6 +37,7 @@ pub union IteratorSource {
     pub string_codepoints: StringCodepointsSource,
     pub coroutine: CoroutineSource,
     pub channel: ChannelSource,
+    pub filter_map: FilterMapSource,
 }
 
 /// Source data for array iteration
@@ -121,6 +122,16 @@ pub struct FlatMapSource {
     pub transform: *const Closure,
     /// Current inner iterator (null if not started or exhausted)
     pub inner: *mut RcIterator,
+}
+
+/// Source data for filter_map iteration (map then filter nils)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FilterMapSource {
+    /// Source iterator
+    pub source: *mut RcIterator,
+    /// Transform closure that returns T? (optional — nil to skip, value to yield)
+    pub transform: *const Closure,
 }
 
 /// Source data for unique iteration (filters consecutive duplicates)

@@ -366,6 +366,18 @@ const NON_KEYED_LINKABLE_SYMBOLS: &[LinkableRuntimeSymbol] = &[
         ptr: vole_runtime::iterator::vole_flat_map_iter_collect as *const u8,
     },
     LinkableRuntimeSymbol {
+        c_name: "vole_filter_map_iter",
+        ptr: vole_runtime::iterator::vole_filter_map_iter as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_filter_map_iter_next",
+        ptr: vole_runtime::iterator::vole_filter_map_iter_next as *const u8,
+    },
+    LinkableRuntimeSymbol {
+        c_name: "vole_filter_map_iter_collect",
+        ptr: vole_runtime::iterator::vole_filter_map_iter_collect as *const u8,
+    },
+    LinkableRuntimeSymbol {
         c_name: "vole_reverse_iter",
         ptr: vole_runtime::iterator::vole_reverse_iter as *const u8,
     },

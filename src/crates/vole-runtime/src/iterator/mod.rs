@@ -102,6 +102,8 @@ macro_rules! for_all_iterator_kinds {
             Coroutine = 23, source: coroutine, next: vole_coroutine_iter_next, owned: [true];
             // Channel iterator - yields values from an RcChannel until closed+empty
             Channel = 24, source: channel, next: vole_channel_iter_next, owned: [true];
+            // FilterMap iterator - maps then filters nils (yields unwrapped non-nil values)
+            FilterMap = 25, source: filter_map, next: vole_filter_map_iter_next, owned: [true];
         }
     };
 }
@@ -253,6 +255,10 @@ macro_rules! drop_iter_source {
         if !channel.is_null() {
             rc_dec(channel as *mut u8);
         }
+    };
+    (FilterMap, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.filter_map.source);
+        Closure::free($iter_ref.source.filter_map.transform as *mut Closure);
     };
 }
 
