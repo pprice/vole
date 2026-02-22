@@ -5,12 +5,17 @@
 
 use std::cell::{Cell, UnsafeCell};
 use std::collections::{BinaryHeap, VecDeque};
+use std::ptr::NonNull;
 use std::time::Instant;
 
+use corosensei::Yielder;
 use rustc_hash::FxHashMap;
 
 use crate::coroutine::VoleCoroutine;
 use crate::value::{RuntimeTypeId, TaggedValue};
+
+/// Type alias for the corosensei yielder used by Vole coroutines.
+type VoleYielder = Yielder<i64, i64>;
 
 // Thread-local transfer slots for task return values. The coroutine body
 // stores the return tag+value here before exiting, and step_task reads them
@@ -23,12 +28,12 @@ thread_local! {
     static TASK_RESULT_VALUE: Cell<u64> = const { Cell::new(0) };
 }
 
-// Thread-local pointer to the current task's yielder. Set by `step_task`
+// Thread-local typed pointer to the current task's yielder. Set by `step_task`
 // before resuming a coroutine, cleared after. Channel operations use this
 // to yield the current coroutine when they need to block (e.g., send on
 // a full buffer, recv on an empty buffer).
 thread_local! {
-    static CURRENT_YIELDER: Cell<*const u8> = const { Cell::new(std::ptr::null()) };
+    static CURRENT_YIELDER: Cell<Option<NonNull<VoleYielder>>> = const { Cell::new(None) };
 }
 
 // Thread-local slot for passing the task body's return type tag from codegen
@@ -64,16 +69,16 @@ pub fn take_spawn_return_tag() -> u64 {
 ///
 /// Returns `false` if there is no current yielder (main-thread context).
 pub fn yield_current_coroutine() -> bool {
-    let yielder_ptr = CURRENT_YIELDER.with(|cell| cell.get());
-    if yielder_ptr.is_null() {
+    let Some(yielder_nn) = CURRENT_YIELDER.with(|cell| cell.get()) else {
         return false;
-    }
-    // SAFETY: The yielder pointer is valid for the duration of the coroutine's
-    // execution. We are inside that coroutine. The suspend call switches back
-    // to step_task which will handle re-queueing or blocking.
+    };
+    // SAFETY: The NonNull<VoleYielder> is set by step_task (or the spawn
+    // closure) from a live `&Yielder` whose lifetime spans the entire
+    // coroutine execution. We are inside that coroutine right now, so the
+    // pointer is valid. The suspend call switches back to step_task which
+    // will handle re-queueing or blocking.
     unsafe {
-        let yielder = &*(yielder_ptr as *const corosensei::Yielder<i64, i64>);
-        yielder.suspend(1); // Signal 1 = blocked yield (vs 0 = voluntary)
+        yielder_nn.as_ref().suspend(1); // Signal 1 = blocked yield (vs 0 = voluntary)
     }
     true
 }
@@ -158,9 +163,10 @@ pub struct Task {
     pub panicked: bool,
     /// Panic message, if the task panicked.
     pub panic_message: Option<String>,
-    /// Cached yielder pointer for this task's coroutine. Set on first resume,
-    /// restored by step_task on subsequent resumes so channel operations can yield.
-    pub yielder_ptr: *const u8,
+    /// Cached typed yielder pointer for this task's coroutine. Set on first
+    /// resume, restored by step_task on subsequent resumes so channel
+    /// operations can yield.
+    pub yielder_ptr: Option<NonNull<VoleYielder>>,
     /// Set by the wakeup source (channel send or timer) before unblocking
     /// a select-waiting task. Read by the `task_select` FFI after resume.
     pub wakeup_source: Option<WakeupSource>,
@@ -251,9 +257,15 @@ impl Scheduler {
         let is_f64 = return_tag == RuntimeTypeId::F64 as u64;
 
         let coro = VoleCoroutine::new(move |yielder, _input| {
-            let yielder_ptr = yielder as *const corosensei::Yielder<i64, i64> as *const u8;
-            // Set the yielder so channel operations can yield this coroutine.
-            CURRENT_YIELDER.with(|cell| cell.set(yielder_ptr));
+            // SAFETY: `yielder` is a live reference whose lifetime spans the
+            // entire coroutine execution. We convert it to a NonNull here and
+            // store it in CURRENT_YIELDER so channel operations can yield this
+            // coroutine. The raw pointer passed to the FFI body function is
+            // required by the JIT calling convention (out of scope for this
+            // typed wrapper).
+            let yielder_nn = NonNull::from(yielder);
+            let yielder_ptr = yielder_nn.as_ptr() as *const u8;
+            CURRENT_YIELDER.with(|cell| cell.set(Some(yielder_nn)));
 
             // Call the body function with the correct ABI for its return type.
             // f64 returns live in XMM0 (SysV) and must be read through a
@@ -276,7 +288,7 @@ impl Scheduler {
             };
 
             // Clear the yielder before exiting.
-            CURRENT_YIELDER.with(|cell| cell.set(std::ptr::null()));
+            CURRENT_YIELDER.with(|cell| cell.set(None));
             // Store the task's return value in the thread-local transfer slots.
             // step_task reads them after the coroutine completes.
             TASK_RESULT_TAG.with(|cell| cell.set(tag));
@@ -292,7 +304,7 @@ impl Scheduler {
             block_reason: None,
             panicked: false,
             panic_message: None,
-            yielder_ptr: std::ptr::null(),
+            yielder_ptr: None,
             wakeup_source: None,
             transfer_value: None,
         };
@@ -503,10 +515,7 @@ impl Scheduler {
         // This ensures that when tasks interleave, each task's channel
         // operations use the correct yielder for suspension.
         let prev_yielder = CURRENT_YIELDER.with(|cell| cell.get());
-        let task_yielder = self
-            .tasks
-            .get(&task_id)
-            .map_or(std::ptr::null(), |t| t.yielder_ptr);
+        let task_yielder = self.tasks.get(&task_id).and_then(|t| t.yielder_ptr);
         CURRENT_YIELDER.with(|cell| cell.set(task_yielder));
 
         let resume_result = {
@@ -910,7 +919,7 @@ mod tests {
             ORDER.store(1, Ordering::SeqCst);
             // Yield back to scheduler.
             unsafe {
-                let y = &*(yielder as *const corosensei::Yielder<i64, i64>);
+                let y = &*(yielder as *const VoleYielder);
                 y.suspend(0);
             }
             // After resume, task B should have run.
@@ -992,7 +1001,7 @@ mod tests {
             COUNT.fetch_add(1, Ordering::SeqCst);
             // Yield once to test round-robin.
             unsafe {
-                let y = &*(yielder as *const corosensei::Yielder<i64, i64>);
+                let y = &*(yielder as *const VoleYielder);
                 y.suspend(0);
             }
             COUNT.fetch_add(1, Ordering::SeqCst);
