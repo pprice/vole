@@ -21,7 +21,7 @@ use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorp
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
 use vole_frontend::{Capture, LambdaPurity, NodeId, Symbol};
-use vole_identity::{ModuleId, TypeDefId};
+use vole_identity::{ModuleId, NameId, TypeDefId};
 
 // ---------------------------------------------------------------------------
 // Supporting types (previously in expression_data.rs)
@@ -253,6 +253,14 @@ pub enum MetaAccessKind {
     /// The reflected type is only known at runtime (e.g. `val.@meta`
     /// where `val: SomeInterface`).
     Dynamic,
+    /// The reflected type is a generic type parameter (e.g. `T.@meta`
+    /// inside a generic function). Resolution is deferred until
+    /// monomorphization substitutes T with a concrete type — sema
+    /// re-analysis then reclassifies it as `Static`.
+    ///
+    /// Codegen should never encounter this variant because generic
+    /// templates are not compiled directly.
+    TypeParam { name_id: NameId },
 }
 
 // ---------------------------------------------------------------------------

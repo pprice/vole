@@ -55,6 +55,9 @@ pub fn compile_meta_access(
             compile_static_meta(cg, type_def_id, expr_node_id)
         }
         MetaAccessKind::Dynamic => compile_dynamic_meta(cg, meta_access, expr_node_id),
+        MetaAccessKind::TypeParam { .. } => Err(CodegenError::unsupported(
+            "@meta on unresolved type parameter — generic template should not reach codegen",
+        )),
     }
 }
 

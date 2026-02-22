@@ -82,10 +82,17 @@ impl Analyzer {
         }
     }
 
-    /// Classify a value-expression meta access as Static or Dynamic based
-    /// on the value's compile-time type.
+    /// Classify a value-expression meta access as Static, Dynamic, or
+    /// TypeParam based on the value's compile-time type.
     fn classify_meta_access(&self, object_type_id: ArenaTypeId) -> MetaAccessKind {
         let arena = self.type_arena();
+
+        // Type parameters are deferred until monomorphization substitutes
+        // the concrete type. After substitution, sema re-analysis will
+        // reclassify as Static.
+        if let Some(name_id) = arena.unwrap_type_param(object_type_id) {
+            return MetaAccessKind::TypeParam { name_id };
+        }
 
         // Interface types are dynamic — the concrete type is only known at runtime.
         if arena.is_interface(object_type_id) {
