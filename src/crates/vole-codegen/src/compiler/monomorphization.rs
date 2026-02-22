@@ -1535,6 +1535,8 @@ impl Compiler<'_> {
             FxHashMap::default()
         };
 
+        let mut prev_batch_size: usize = 0;
+
         for iteration in 0..MAX_FIXPOINT_ITERATIONS {
             let batch = std::mem::take(&mut self.pending_monomorphs);
             if batch.is_empty() {
@@ -1545,30 +1547,122 @@ impl Compiler<'_> {
                 return Ok(());
             }
 
-            tracing::debug!(
-                iteration,
-                count = batch.len(),
-                "compile_pending_monomorphs: compiling batch"
-            );
+            if tracing::enabled!(tracing::Level::DEBUG) {
+                let names: Vec<String> = batch
+                    .iter()
+                    .map(|p| self.describe_pending_monomorph(p))
+                    .collect();
+                tracing::debug!(
+                    iteration,
+                    count = batch.len(),
+                    monomorphs = ?names,
+                    "compile_pending_monomorphs: compiling batch"
+                );
+            }
 
-            for pending in batch {
+            let defined_before = self.defined_functions.len();
+            let batch_size = batch.len();
+
+            for pending in &batch {
                 match pending {
                     PendingMonomorph::Function(instance) => {
-                        self.compile_pending_function(&instance, &generic_func_asts)?;
+                        self.compile_pending_function(instance, &generic_func_asts)?;
                     }
                     PendingMonomorph::ClassMethod(instance) => {
-                        self.compile_pending_class_method(&instance, program, &class_asts)?;
+                        self.compile_pending_class_method(instance, program, &class_asts)?;
                     }
                     PendingMonomorph::StaticMethod(instance) => {
-                        self.compile_pending_static_method(&instance, &class_asts)?;
+                        self.compile_pending_static_method(instance, &class_asts)?;
                     }
                 }
             }
+
+            let newly_defined = self.defined_functions.len() - defined_before;
+            let next_pending = self.pending_monomorphs.len();
+
+            // No-progress detection: if we compiled nothing new and still have at
+            // least as many pending monomorphs as before, the loop is stuck.
+            if newly_defined == 0 && next_pending >= prev_batch_size && next_pending > 0 {
+                return Err(self.stuck_monomorphs_error(&batch, iteration + 1, "no progress"));
+            }
+
+            prev_batch_size = batch_size;
         }
 
-        Err(CodegenError::internal(
-            "pending monomorph fixpoint loop exceeded 100 iterations",
-        ))
+        // Cap exceeded — build a diagnostic from whatever is still pending.
+        let stuck = std::mem::take(&mut self.pending_monomorphs);
+        Err(self.stuck_monomorphs_error(&stuck, MAX_FIXPOINT_ITERATIONS, "iteration cap exceeded"))
+    }
+
+    /// Return a one-line description of a pending monomorph for tracing / errors.
+    fn describe_pending_monomorph(&self, pending: &crate::types::PendingMonomorph) -> String {
+        use crate::types::PendingMonomorph;
+        match pending {
+            PendingMonomorph::Function(inst) => {
+                let name = self.query().display_name(inst.original_name);
+                let subs = self.format_substitutions(&inst.substitutions);
+                let module = self.module_of_name(inst.original_name);
+                format!("fn {name}<{subs}> (module: {module})")
+            }
+            PendingMonomorph::ClassMethod(inst) => {
+                let class = self.query().display_name(inst.class_name);
+                let method = self.query().display_name(inst.method_name);
+                let subs = self.format_substitutions(&inst.substitutions);
+                let module = self.module_of_name(inst.class_name);
+                format!("{class}.{method}<{subs}> (module: {module})")
+            }
+            PendingMonomorph::StaticMethod(inst) => {
+                let class = self.query().display_name(inst.class_name);
+                let method = self.query().display_name(inst.method_name);
+                let subs = self.format_substitutions(&inst.substitutions);
+                let module = self.module_of_name(inst.class_name);
+                format!("{class}::{method}<{subs}> (module: {module})")
+            }
+        }
+    }
+
+    /// Format a substitution map as `T=TypeId(3), U=TypeId(7)`.
+    fn format_substitutions(&self, subs: &FxHashMap<NameId, TypeId>) -> String {
+        let mut parts: Vec<String> = subs
+            .iter()
+            .map(|(&name_id, &type_id)| {
+                let name = self.query().display_name(name_id);
+                format!("{name}={type_id:?}")
+            })
+            .collect();
+        parts.sort();
+        parts.join(", ")
+    }
+
+    /// Get the module path for a NameId (for diagnostics).
+    fn module_of_name(&self, name_id: NameId) -> String {
+        let module_id = self.analyzed.name_table().module_of(name_id);
+        let path = self.analyzed.name_table().module_path(module_id);
+        if path.is_empty() {
+            "<main>".to_string()
+        } else {
+            path.to_string()
+        }
+    }
+
+    /// Build a structured error for stuck/capped monomorphs.
+    fn stuck_monomorphs_error(
+        &self,
+        stuck: &[crate::types::PendingMonomorph],
+        iterations: usize,
+        reason: &str,
+    ) -> CodegenError {
+        let mut details = format!(
+            "monomorph fixpoint loop failed ({reason}) after {iterations} iteration(s)\n\
+             stuck monomorphs ({count}):\n",
+            count = stuck.len(),
+        );
+        for pending in stuck {
+            details.push_str("  - ");
+            details.push_str(&self.describe_pending_monomorph(pending));
+            details.push('\n');
+        }
+        CodegenError::internal_with_context("monomorph fixpoint loop did not converge", details)
     }
 
     /// Compile a single pending free-function monomorph.
