@@ -8,6 +8,8 @@ Verify `tk` is installed first or **STOP**.
 
 # Workflow
 1. Use `tk dep tree <id>` to get all tickets associated with the specified task/epic.
+   If the ticket is a super-epic (has links but empty dep tree), use `tk show <id>` to
+   find its linked child epics and implement them in dependency order instead.
 2. Pick the first task that we can implement that is not blocked
 3. Follow the Sub-task workflow below, ensure to launch these as sub-agents so they
    have isolated context. Do not launch parallel sub-agents if they will modify 
