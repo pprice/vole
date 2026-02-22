@@ -340,10 +340,7 @@ impl Cg<'_, '_, '_> {
         self.rc_inc_borrowed_for_container(&val)?;
 
         let set_value_ref = self.runtime_func_ref(RuntimeKey::ArraySet)?;
-
-        let set_args =
-            self.coerce_call_args(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
-        self.builder.ins().call(set_value_ref, &set_args);
+        self.emit_call(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
 
         // The assignment consumed the temp — ownership transfers
         // to the dynamic array element.

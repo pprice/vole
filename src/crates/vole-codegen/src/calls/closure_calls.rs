@@ -221,8 +221,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
 
-        let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
-        self.field_cache.clear(); // Callee may mutate instance fields
+        let call_inst = self.emit_call_indirect(sig_ref, func_ptr, &args);
 
         // Dec RC temp args after the call has consumed them
         self.consume_rc_args(&mut rc_temp_args)?;

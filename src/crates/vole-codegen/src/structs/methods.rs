@@ -755,9 +755,7 @@ impl Cg<'_, '_, '_> {
             false
         };
 
-        let coerced = self.coerce_call_args(method_func_ref, &args);
-        let call = self.builder.ins().call(method_func_ref, &coerced);
-        self.field_cache.clear(); // Methods may mutate fields via self
+        let call = self.emit_call(method_func_ref, &args);
 
         // If the return type is a union, copy the data from the callee's stack to our own
         // IMMEDIATELY after the call, before any rc_dec calls (consume_rc_value/consume_rc_args)
@@ -1027,9 +1025,7 @@ impl Cg<'_, '_, '_> {
             false
         };
 
-        let coerced = self.coerce_call_args(func_ref, &call_args);
-        let call_inst = self.builder.ins().call(func_ref, &coerced);
-        self.field_cache.clear(); // Callee may mutate instance fields
+        let call_inst = self.emit_call(func_ref, &call_args);
 
         // For sret, result[0] is the sret pointer we passed in
         let result = if is_sret {
@@ -1204,8 +1200,7 @@ impl Cg<'_, '_, '_> {
         let push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
 
         // Call vole_array_push(arr_ptr, tag, value)
-        let push_args = self.coerce_call_args(push_ref, &[arr_obj.value, tag_val, value_bits]);
-        self.builder.ins().call(push_ref, &push_args);
+        self.emit_call(push_ref, &[arr_obj.value, tag_val, value_bits]);
 
         // Return void
         let void_type_id = self.arena().void();
@@ -1697,7 +1692,7 @@ impl Cg<'_, '_, '_> {
             let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
 
             // Perform the indirect call
-            let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
+            let call_inst = self.emit_call_indirect(sig_ref, func_ptr, &args);
             self.call_result(call_inst, return_type_id)
         } else {
             // It's a pure function - call directly
@@ -1720,10 +1715,7 @@ impl Cg<'_, '_, '_> {
 
             let mut args = self.compile_call_args(&mc.args)?;
             let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
-            let call_inst = self
-                .builder
-                .ins()
-                .call_indirect(sig_ref, func_ptr_or_closure, &args);
+            let call_inst = self.emit_call_indirect(sig_ref, func_ptr_or_closure, &args);
             self.call_result(call_inst, return_type_id)
         }
     }
@@ -1844,11 +1836,7 @@ impl Cg<'_, '_, '_> {
             call_args.push(word);
         }
 
-        let call = self
-            .builder
-            .ins()
-            .call_indirect(sig_ref, func_ptr, &call_args);
-        self.field_cache.clear(); // Interface methods may mutate fields
+        let call = self.emit_call_indirect(sig_ref, func_ptr, &call_args);
         let results = self.builder.inst_results(call);
 
         if is_void_return {

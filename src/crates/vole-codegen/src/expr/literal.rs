@@ -107,8 +107,7 @@ impl Cg<'_, '_, '_> {
             // RC: inc borrowed RC elements so the array gets its own reference.
             self.rc_inc_borrowed_for_container(&compiled)?;
 
-            let push_args = self.coerce_call_args(array_push_ref, &[arr_ptr, tag_val, value_bits]);
-            self.builder.ins().call(array_push_ref, &push_args);
+            self.emit_call(array_push_ref, &[arr_ptr, tag_val, value_bits]);
 
             // The element value is consumed into the array container.
             compiled.mark_consumed();

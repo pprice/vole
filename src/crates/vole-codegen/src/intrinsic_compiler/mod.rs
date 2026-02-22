@@ -117,16 +117,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Try to devirtualize: emit a direct `call` if the symbol name is known.
         let call_inst = if let Some(func_ref) = self.try_import_native_func(func_ptr, &sig) {
-            let coerced = self.coerce_call_args(func_ref, &coerced_args);
-            self.builder.ins().call(func_ref, &coerced)
+            self.emit_call(func_ref, &coerced_args)
         } else {
             let sig_ref = self.builder.import_signature(sig);
             let func_ptr_val = self.iconst_cached(ptr_type, func_ptr as i64);
-            self.builder
-                .ins()
-                .call_indirect(sig_ref, func_ptr_val, &coerced_args)
+            self.emit_call_indirect(sig_ref, func_ptr_val, &coerced_args)
         };
-        self.field_cache.clear(); // External calls may mutate instance fields
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {

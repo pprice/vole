@@ -237,7 +237,6 @@ impl Cg<'_, '_, '_> {
 
         // --- Not-nil branch: extract inner, do field/method access ---
         self.switch_and_seal(not_nil_block);
-        self.field_cache.clear();
 
         // Extract inner value from union payload
         let inner_type_id = self.try_substitute_type(info.inner_type);

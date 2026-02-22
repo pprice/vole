@@ -122,7 +122,14 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub captures: Option<Captures<'a>>,
     /// For recursive lambdas: the binding name that captures itself
     pub self_capture: Option<Symbol>,
-    /// Cache for field access: (instance_ptr, slot) -> field_value
+    /// Cache for field access: (instance_ptr, slot) -> field_value.
+    ///
+    /// Invalidated in two situations:
+    /// 1. **SSA dominance** — `switch_to_block()` clears the cache because
+    ///    `Value`s from a sibling block do not dominate the new block.
+    /// 2. **Mutation** — call-emission helpers (`call_runtime`, `call_runtime_void`,
+    ///    `emit_call`, `emit_call_indirect`) clear the cache because the callee
+    ///    may mutate instance fields, making cached loads stale.
     pub field_cache: FxHashMap<(Value, u32), Value>,
     /// Return type of the current function
     pub return_type: Option<TypeId>,
@@ -784,11 +791,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.func_ref(key)
     }
 
-    /// Call a runtime function and return the first result (or error if no results)
+    /// Call a runtime function and return the first result (or error if no results).
+    ///
+    /// Automatically clears `field_cache` after the call — any runtime call may
+    /// mutate heap objects, invalidating cached field loads.
     pub fn call_runtime(&mut self, runtime: RuntimeKey, args: &[Value]) -> CodegenResult<Value> {
         let func_ref = self.runtime_func_ref(runtime)?;
         let coerced = self.coerce_call_args(func_ref, args);
         let call = self.builder.ins().call(func_ref, &coerced);
+        self.field_cache.clear();
         let results = self.builder.inst_results(call);
         if results.is_empty() {
             Err(CodegenError::internal_with_context(
@@ -900,10 +911,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// should go through this wrapper so that per-block caches are
     /// automatically invalidated.
     ///
-    /// `field_cache` is cleared here because its `Value`s are SSA-local to the
-    /// block they were defined in; a cached value from a sibling block does not
-    /// dominate the new block and would cause a Cranelift verifier error
-    /// ("uses value from non-dominating inst").
+    /// This is the **SSA dominance** invalidation path for `field_cache`:
+    /// cached `Value`s from a sibling block do not dominate the new block
+    /// and would cause a Cranelift verifier error ("uses value from
+    /// non-dominating inst"). The **mutation** invalidation path lives in
+    /// the call-emission helpers (`call_runtime`, `emit_call`, etc.).
     ///
     /// `iconst_cache` is **not** cleared — all cached constants live in the
     /// entry block and dominate every other block.
@@ -912,12 +924,48 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.field_cache.clear();
     }
 
-    /// Call a runtime function that returns void
+    /// Call a runtime function that returns void.
+    ///
+    /// Automatically clears `field_cache` after the call — any runtime call may
+    /// mutate heap objects, invalidating cached field loads.
     pub fn call_runtime_void(&mut self, runtime: RuntimeKey, args: &[Value]) -> CodegenResult<()> {
         let func_ref = self.runtime_func_ref(runtime)?;
         let coerced = self.coerce_call_args(func_ref, args);
         self.builder.ins().call(func_ref, &coerced);
+        self.field_cache.clear();
         Ok(())
+    }
+
+    /// Emit a direct `call` instruction with arg coercion, returning the `Inst`.
+    ///
+    /// Use this for user-defined function calls, method calls, and any call to
+    /// a `FuncRef` that is not a known-pure runtime helper. The `field_cache`
+    /// is cleared automatically — the callee may mutate instance fields.
+    pub fn emit_call(
+        &mut self,
+        func_ref: cranelift::codegen::ir::FuncRef,
+        args: &[Value],
+    ) -> cranelift::codegen::ir::Inst {
+        let coerced = self.coerce_call_args(func_ref, args);
+        let inst = self.builder.ins().call(func_ref, &coerced);
+        self.field_cache.clear();
+        inst
+    }
+
+    /// Emit an indirect `call_indirect` instruction, returning the `Inst`.
+    ///
+    /// Use this for closure calls, interface dispatch, native FFI, or any
+    /// indirect call through a function pointer. The `field_cache` is cleared
+    /// automatically — the callee may mutate instance fields.
+    pub fn emit_call_indirect(
+        &mut self,
+        sig_ref: cranelift::codegen::ir::SigRef,
+        func_ptr: Value,
+        args: &[Value],
+    ) -> cranelift::codegen::ir::Inst {
+        let inst = self.builder.ins().call_indirect(sig_ref, func_ptr, args);
+        self.field_cache.clear();
+        inst
     }
 
     // ========== Demand-driven monomorph declaration ==========

@@ -158,9 +158,7 @@ impl Cg<'_, '_, '_> {
 
         // Get function reference and call
         let func_ref = self.func_ref(func_key)?;
-        let coerced = self.coerce_call_args(func_ref, &args);
-        let call = self.builder.ins().call(func_ref, &coerced);
-        self.field_cache.clear();
+        let call = self.emit_call(func_ref, &args);
 
         // For sret, result[0] is the sret pointer we passed in
         let mut result = if is_sret {
@@ -328,9 +326,7 @@ impl Cg<'_, '_, '_> {
 
         let func_key = self.funcs().intern_name_id(instance.mangled_name);
         let func_ref = self.func_ref(func_key)?;
-        let coerced = self.coerce_call_args(func_ref, &args);
-        let call = self.builder.ins().call(func_ref, &coerced);
-        self.field_cache.clear();
+        let call = self.emit_call(func_ref, &args);
 
         // For sret, result[0] is the sret pointer we passed in
         let mut result = if is_sret {
@@ -463,8 +459,7 @@ impl Cg<'_, '_, '_> {
 
         // Call vole_array_filled(count, tag, value) -> *mut RcArray
         let filled_ref = self.runtime_func_ref(RuntimeKey::ArrayFilled)?;
-        let args = self.coerce_call_args(filled_ref, &[count.value, tag_val, value_bits]);
-        let call = self.builder.ins().call(filled_ref, &args);
+        let call = self.emit_call(filled_ref, &[count.value, tag_val, value_bits]);
         let result_val = self.builder.inst_results(call)[0];
 
         // Array.filled clones the provided element into each slot; release the

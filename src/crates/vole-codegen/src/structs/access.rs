@@ -286,7 +286,6 @@ impl Cg<'_, '_, '_> {
         // Store field value, handling i128 which needs 2 slots
         let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
         super::helpers::store_field_value(self, set_func_ref, obj.value, slot, &value);
-        self.field_cache.clear(); // Invalidate cached field reads
 
         if let Some(old_val) = rc_old {
             self.emit_rc_dec_for_type(old_val, field_type_id)?;

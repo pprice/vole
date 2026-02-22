@@ -434,8 +434,7 @@ impl Cg<'_, '_, '_> {
         let func_ref = self.func_ref(func_key)?;
 
         // Call the method with `self` (the value) as the only argument
-        let coerced = self.coerce_call_args(func_ref, &[val.value]);
-        let call = self.builder.ins().call(func_ref, &coerced);
+        let call = self.emit_call(func_ref, &[val.value]);
         let results = self.builder.inst_results(call);
 
         results

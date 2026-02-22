@@ -689,10 +689,7 @@ impl Cg<'_, '_, '_> {
             .unwrap_or(TypeId::VOID);
 
         let func_ref = self.func_ref(func_key)?;
-        let args = &[iterable.value];
-        let coerced = self.coerce_call_args(func_ref, args);
-        let call_inst = self.builder.ins().call(func_ref, &coerced);
-        self.field_cache.clear();
+        let call_inst = self.emit_call(func_ref, &[iterable.value]);
 
         self.call_result(call_inst, return_type_id)
     }

@@ -260,6 +260,9 @@ pub(crate) fn store_value_to_stack(
 /// Store a field value into a class instance, handling wide types (i128) that need 2 slots.
 /// For i128: stores low 64 bits in `slot`, high 64 bits in `slot+1`.
 /// For all other types: stores via convert_to_i64_for_storage in a single slot.
+///
+/// Clears `field_cache` after the store — the mutation invalidates cached
+/// field reads for the same instance.
 pub(crate) fn store_field_value(
     cg: &mut crate::context::Cg,
     set_func_ref: codegen::ir::FuncRef,
@@ -292,6 +295,7 @@ pub(crate) fn store_field_value(
             .ins()
             .call(set_func_ref, &[instance_ptr, slot_val, store_value]);
     }
+    cg.field_cache.clear();
 }
 
 /// Load a field value from a class instance, handling wide types (i128) that use 2 slots.

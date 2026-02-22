@@ -128,19 +128,14 @@ impl Cg<'_, '_, '_> {
 
         // Try to devirtualize: if we know the symbol name for this function
         // pointer, import it and emit a direct `call` instead of `call_indirect`.
-        let inst = if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
-            let coerced = self.coerce_call_args(func_ref, &coerced_args);
-            self.builder.ins().call(func_ref, &coerced)
+        if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
+            self.emit_call(func_ref, &coerced_args)
         } else {
             let sig_ref = self.builder.import_signature(sig);
             let ptr_type = self.ptr_type();
             let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
-            self.builder
-                .ins()
-                .call_indirect(sig_ref, func_ptr_val, &coerced_args)
-        };
-        self.field_cache.clear(); // Native calls may mutate instance fields
-        inst
+            self.emit_call_indirect(sig_ref, func_ptr_val, &coerced_args)
+        }
     }
 
     /// Emit a native call that returns a C-ABI struct.
@@ -172,18 +167,13 @@ impl Cg<'_, '_, '_> {
                 sig.returns.push(AbiParam::new(types::I64));
             }
 
-            let inst = if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
-                let coerced = self.coerce_call_args(func_ref, args);
-                self.builder.ins().call(func_ref, &coerced)
+            if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
+                self.emit_call(func_ref, args)
             } else {
                 let sig_ref = self.builder.import_signature(sig);
                 let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
-                self.builder
-                    .ins()
-                    .call_indirect(sig_ref, func_ptr_val, args)
-            };
-            self.field_cache.clear(); // Native calls may mutate instance fields
-            inst
+                self.emit_call_indirect(sig_ref, func_ptr_val, args)
+            }
         } else {
             // Large struct: sret convention
             // Add hidden sret pointer as first parameter
@@ -205,18 +195,13 @@ impl Cg<'_, '_, '_> {
             sret_args.push(sret_ptr);
             sret_args.extend_from_slice(args);
 
-            let inst = if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
-                let coerced = self.coerce_call_args(func_ref, &sret_args);
-                self.builder.ins().call(func_ref, &coerced)
+            if let Some(func_ref) = self.try_import_native_func(native_func.ptr, &sig) {
+                self.emit_call(func_ref, &sret_args)
             } else {
                 let sig_ref = self.builder.import_signature(sig);
                 let func_ptr_val = self.iconst_cached(ptr_type, native_func.ptr as i64);
-                self.builder
-                    .ins()
-                    .call_indirect(sig_ref, func_ptr_val, &sret_args)
-            };
-            self.field_cache.clear(); // Native calls may mutate instance fields
-            inst
+                self.emit_call_indirect(sig_ref, func_ptr_val, &sret_args)
+            }
         }
     }
 

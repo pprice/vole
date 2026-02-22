@@ -547,9 +547,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
 
-        let args = self.coerce_call_args(func_ref, &args);
-        let call_inst = self.builder.ins().call(func_ref, &args);
-        self.field_cache.clear(); // Callee may mutate instance fields
+        let call_inst = self.emit_call(func_ref, &args);
 
         // For union returns, copy the value out of the callee's stack frame
         // before RC temp cleanup. rc_dec may clobber the callee return slot.

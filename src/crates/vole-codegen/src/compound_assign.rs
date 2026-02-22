@@ -120,10 +120,7 @@ impl Cg<'_, '_, '_> {
         let (tag_val, store_value, _stored) =
             self.prepare_dynamic_array_store(result, resolved_elem_type_id)?;
         let array_set_ref = self.runtime_func_ref(RuntimeKey::ArraySet)?;
-
-        let set_args =
-            self.coerce_call_args(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
-        self.builder.ins().call(array_set_ref, &set_args);
+        self.emit_call(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
 
         Ok(result)
     }
@@ -151,7 +148,6 @@ impl Cg<'_, '_, '_> {
         // Store back (i128 uses 2 slots)
         let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
         crate::structs::helpers::store_field_value(self, set_func_ref, obj.value, slot, &result);
-        self.field_cache.clear(); // Invalidate cached field reads
 
         Ok(result)
     }
