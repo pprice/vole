@@ -479,24 +479,9 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Value, bool)> {
         let string_val = self.expr(&for_stmt.iterable)?;
         let iter_val = self.call_runtime(RuntimeKey::StringCharsIter, &[string_val.value])?;
+        let iter = self.make_runtime_iter_value(iter_val, TypeId::STRING);
 
-        self.push_rc_scope();
-        if string_val.is_owned() && self.rc_state(string_val.type_id).needs_cleanup() {
-            let tracked_string = self
-                .builder
-                .declare_var(self.cranelift_type(string_val.type_id));
-            self.builder.def_var(tracked_string, string_val.value);
-            let drop_flag = self.register_rc_local(tracked_string, string_val.type_id);
-            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
-        }
-        let iter_type_id = self
-            .arena()
-            .lookup_runtime_iterator(TypeId::STRING)
-            .unwrap_or(TypeId::STRING);
-        let tracked_iter = self.builder.declare_var(self.cranelift_type(iter_type_id));
-        self.builder.def_var(tracked_iter, iter_val);
-        let iter_drop_flag = self.register_rc_local(tracked_iter, iter_type_id);
-        crate::rc_cleanup::set_drop_flag_live(self, iter_drop_flag);
+        self.enter_iter_rc_scope(&iter, Some(&string_val));
 
         // Each char is a new allocation that needs per-element cleanup.
         Ok((iter_val, true))
@@ -528,13 +513,10 @@ impl Cg<'_, '_, '_> {
         };
 
         if is_interface_iter {
-            let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter.value])?;
-            self.consume_rc_value(&mut iter)?;
-            iter = self.make_runtime_iter_value(wrapped, elem_type_id);
+            iter = self.wrap_interface_iter(iter, elem_type_id)?;
         }
 
-        self.push_rc_scope();
-        self.track_iter_in_rc_scope(&iter);
+        self.enter_iter_rc_scope(&iter, None);
         Ok((iter.value, elem_type_id))
     }
 
@@ -560,13 +542,9 @@ impl Cg<'_, '_, '_> {
             })?;
 
         let boxed = self.box_interface_value(iterable, interface_type_id)?;
-        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[boxed.value])?;
-        let mut boxed_iface = boxed;
-        self.consume_rc_value(&mut boxed_iface)?;
+        let iter = self.wrap_interface_iter(boxed, elem_type_id)?;
 
-        let iter = self.make_runtime_iter_value(wrapped, elem_type_id);
-        self.push_rc_scope();
-        self.track_iter_in_rc_scope(&iter);
+        self.enter_iter_rc_scope(&iter, None);
         Ok(iter.value)
     }
 
@@ -579,14 +557,9 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Value> {
         let iterable = self.expr(&for_stmt.iterable)?;
         let iter_value = self.call_iterable_iter_method(&iterable, elem_type_id)?;
+        let iter = self.wrap_interface_iter(iter_value, elem_type_id)?;
 
-        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iter_value.value])?;
-        let mut iter_iface = iter_value;
-        self.consume_rc_value(&mut iter_iface)?;
-
-        let iter = self.make_runtime_iter_value(wrapped, elem_type_id);
-        self.push_rc_scope();
-        self.track_iter_in_rc_scope(&iter);
+        self.enter_iter_rc_scope(&iter, None);
         Ok(iter.value)
     }
 
@@ -609,6 +582,37 @@ impl Cg<'_, '_, '_> {
             let drop_flag = self.register_rc_local(tracked_var, iter.type_id);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
+    }
+
+    /// Push an RC scope for iterator lifetime and track the iterator (and
+    /// optionally a source value) for cleanup on scope exit.
+    ///
+    /// All 4 runtime-iterator setup paths share this boilerplate:
+    /// 1. push_rc_scope()
+    /// 2. optionally track the source iterable (e.g. the string in string iteration)
+    /// 3. track the iterator itself
+    fn enter_iter_rc_scope(&mut self, iter: &CompiledValue, source: Option<&CompiledValue>) {
+        self.push_rc_scope();
+        if let Some(src) = source {
+            self.track_iter_in_rc_scope(src);
+        }
+        self.track_iter_in_rc_scope(iter);
+    }
+
+    /// Wrap an interface value via `InterfaceIter`, consuming the old value and
+    /// returning a `RuntimeIterator` `CompiledValue`.
+    ///
+    /// Shared by `setup_interface_iter`, `setup_custom_iterator`, and
+    /// `setup_custom_iterable` -- all three produce an interface value that must
+    /// be wrapped into a RuntimeIterator for the iter_next loop.
+    fn wrap_interface_iter(
+        &mut self,
+        mut iface: CompiledValue,
+        elem_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iface.value])?;
+        self.consume_rc_value(&mut iface)?;
+        Ok(self.make_runtime_iter_value(wrapped, elem_type_id))
     }
 
     /// Convert a raw i64 value from iter_next to the element's Cranelift type.
