@@ -1,0 +1,11 @@
+// Error: unknown named argument to an annotation
+@annotation
+struct tag {
+    name: string,
+}
+
+// Wrong field name
+@tag(label: "test")
+func bad() -> i64 {
+    return 0
+}

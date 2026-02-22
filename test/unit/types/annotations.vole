@@ -53,6 +53,31 @@ func tagged_func() -> i64 {
     return 100
 }
 
+// Use annotations on fields
+struct AnnotatedPoint {
+    @tag(name: "x_coord")
+    x: i64,
+    @deprecated
+    y: i64,
+}
+
+// Multiple annotations on one field
+class AnnotatedService {
+    @deprecated
+    @tag(name: "old_data")
+    data: i64,
+
+    func get_data(self: Self) -> i64 {
+        return self.data
+    }
+}
+
+// Positional args on field annotation
+struct PositionalAnnotated {
+    @tag("pos_field")
+    value: i64,
+}
+
 // Verify annotated declarations still work normally at runtime
 tests "annotation basics" {
     test "annotated function works normally" {
@@ -75,5 +100,21 @@ tests "annotation basics" {
 
     test "annotation with args function works" {
         assert(tagged_func() == 100)
+    }
+
+    test "annotated field struct works normally" {
+        let p = AnnotatedPoint { x: 3, y: 4 }
+        assert(p.x == 3)
+        assert(p.y == 4)
+    }
+
+    test "annotated field class works normally" {
+        let svc = AnnotatedService { data: 42 }
+        assert(svc.get_data() == 42)
+    }
+
+    test "positional arg annotation on field works" {
+        let v = PositionalAnnotated { value: 7 }
+        assert(v.value == 7)
     }
 }

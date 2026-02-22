@@ -1,0 +1,26 @@
+// Error: wrong number of arguments to an annotation
+@annotation
+struct tag {
+    name: string,
+}
+
+@annotation
+struct empty_ann {}
+
+// Too many args: 1 expected, 2 found
+@tag(name: "x", name: "y")
+func too_many() -> i64 {
+    return 0
+}
+
+// Too few args: 1 expected, 0 found
+struct Data {
+    @tag
+    value: i64,
+}
+
+// Args on zero-field annotation: 0 expected, 1 found
+@empty_ann(name: "oops")
+func extra_arg() -> i64 {
+    return 0
+}

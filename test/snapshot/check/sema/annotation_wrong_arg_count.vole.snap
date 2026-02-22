@@ -1,0 +1,27 @@
+[stdout]
+
+[stderr]
+  × [E2122]: annotation '@tag' expects 1 arguments, found 2
+    ╭─[<path>/annotation_wrong_arg_count.vole:11:1]
+ 10 │ // Too many args: 1 expected, 2 found
+ 11 │ @tag(name: "x", name: "y")
+    · ─────────────┬────────────
+    ·              ╰── wrong number of annotation arguments
+ 12 │ func too_many() -> i64 {
+    ╰────
+  × [E2122]: annotation '@tag' expects 1 arguments, found 0
+    ╭─[<path>/annotation_wrong_arg_count.vole:18:5]
+ 17 │ struct Data {
+ 18 │     @tag
+    ·     ──┬─
+    ·       ╰── wrong number of annotation arguments
+ 19 │     value: i64,
+    ╰────
+  × [E2122]: annotation '@empty_ann' expects 0 arguments, found 1
+    ╭─[<path>/annotation_wrong_arg_count.vole:23:1]
+ 22 │ // Args on zero-field annotation: 0 expected, 1 found
+ 23 │ @empty_ann(name: "oops")
+    · ────────────┬───────────
+    ·             ╰── wrong number of annotation arguments
+ 24 │ func extra_arg() -> i64 {
+    ╰────

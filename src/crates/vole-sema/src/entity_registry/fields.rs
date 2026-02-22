@@ -86,6 +86,7 @@ impl EntityRegistry {
             defining_type,
             ty,
             slot,
+            annotations: Vec::new(),
         });
         self.field_by_full_name.insert(full_name_id, id);
         self.fields_by_type
@@ -101,6 +102,11 @@ impl EntityRegistry {
     /// Get a field definition by ID
     pub fn get_field(&self, id: FieldId) -> &FieldDef {
         &self.field_defs[id.index() as usize]
+    }
+
+    /// Get a mutable field definition by ID
+    pub fn get_field_mut(&mut self, id: FieldId) -> &mut FieldDef {
+        &mut self.field_defs[id.index() as usize]
     }
 
     /// Get all fields defined directly on a type

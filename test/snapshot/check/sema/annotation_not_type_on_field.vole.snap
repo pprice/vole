@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  × [E2119]: 'NotAnAnnotation' is not an annotation type
+   ╭─[<path>/annotation_not_type_on_field.vole:5:5]
+ 4 │ struct Bad {
+ 5 │     @NotAnAnnotation
+   ·     ────────┬───────
+   ·             ╰── not an annotation type
+ 6 │     value: i64,
+   ╰────
+  help: add @annotation to the declaration of 'NotAnAnnotation'

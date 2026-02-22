@@ -1,0 +1,7 @@
+// Error: using a non-annotation type as an annotation on a field
+struct NotAnAnnotation {}
+
+struct Bad {
+    @NotAnAnnotation
+    value: i64,
+}

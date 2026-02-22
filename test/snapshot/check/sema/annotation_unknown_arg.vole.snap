@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2123]: annotation '@tag' has no field named 'label'
+   ╭─[<path>/annotation_unknown_arg.vole:8:6]
+ 7 │ // Wrong field name
+ 8 │ @tag(label: "test")
+   ·      ──────┬──────
+   ·            ╰── unknown annotation field
+ 9 │ func bad() -> i64 {
+   ╰────

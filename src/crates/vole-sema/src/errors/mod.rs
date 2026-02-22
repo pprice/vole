@@ -850,6 +850,34 @@ pub enum SemanticError {
         #[label("generic type cannot be used as an annotation type")]
         span: SourceSpan,
     },
+
+    #[error("annotation '@{name}' expects {expected} arguments, found {found}")]
+    #[diagnostic(code(E2122))]
+    AnnotationWrongArgCount {
+        name: String,
+        expected: usize,
+        found: usize,
+        #[label("wrong number of annotation arguments")]
+        span: SourceSpan,
+    },
+
+    #[error("annotation '@{annotation}' has no field named '{arg_name}'")]
+    #[diagnostic(code(E2123))]
+    AnnotationUnknownArg {
+        annotation: String,
+        arg_name: String,
+        #[label("unknown annotation field")]
+        span: SourceSpan,
+    },
+
+    #[error("annotation '@{annotation}' field '{field}' specified more than once")]
+    #[diagnostic(code(E2124))]
+    AnnotationDuplicateArg {
+        annotation: String,
+        field: String,
+        #[label("duplicate annotation argument")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

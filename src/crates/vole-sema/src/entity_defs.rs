@@ -160,6 +160,21 @@ pub struct MethodDef {
     pub defining_module: Option<ModuleId>,
 }
 
+/// A validated annotation on a field or declaration.
+///
+/// Produced by sema during annotation validation (Pass 1.5) after verifying
+/// that the annotation type exists, is marked `@annotation`, and the arguments
+/// match the annotation struct's fields.
+#[derive(Debug, Clone)]
+pub struct ValidatedAnnotation {
+    /// The TypeDefId of the annotation struct (e.g., `json_name`).
+    pub type_def_id: TypeDefId,
+    /// Validated argument values, in field order.
+    /// Each entry is (field_name, expression_node_id) where the expression
+    /// can be evaluated by codegen at compile time.
+    pub args: Vec<(NameId, NodeId)>,
+}
+
 /// A field definition (always belongs to a type)
 #[derive(Debug, Clone)]
 pub struct FieldDef {
@@ -169,6 +184,9 @@ pub struct FieldDef {
     pub defining_type: TypeDefId,
     pub ty: TypeId,
     pub slot: usize,
+    /// Validated annotations on this field (e.g., `@json_name(name: "user_name")`).
+    /// Populated during annotation validation (Pass 1.5).
+    pub annotations: Vec<ValidatedAnnotation>,
 }
 
 /// Generic function information.
