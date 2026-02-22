@@ -3,8 +3,11 @@
 // Struct/class operations for code generation.
 
 mod access;
+mod builtin_methods;
 pub(crate) mod helpers;
+mod iterator_methods;
 mod literals;
+mod method_dispatch;
 mod methods;
 mod static_methods;
 
