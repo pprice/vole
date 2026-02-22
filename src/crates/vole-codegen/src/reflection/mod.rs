@@ -6,6 +6,11 @@
 // containing the type's name, an array of FieldMeta instances (with getter/setter
 // trampolines), and a constructor function.
 //
+// For `MetaAccessKind::Dynamic`, loads the meta getter function pointer from
+// the interface vtable slot 0, calls it, and returns the resulting TypeMeta.
+// This allows `val.@meta` to return the correct concrete type metadata when
+// `val` has an interface type.
+//
 // TypeMeta and FieldMeta are Vole classes defined in
 // `stdlib/prelude/reflection.vole`. We construct them using the same
 // instance-allocation / field-store patterns that class literal codegen uses.
@@ -14,7 +19,9 @@ mod fields;
 mod trampolines;
 
 use cranelift::prelude::*;
+use cranelift_module::Module;
 use rustc_hash::FxHashMap;
+use vole_frontend::ast::MetaAccessExpr;
 use vole_identity::TypeDefId;
 use vole_sema::node_map::MetaAccessKind;
 use vole_sema::type_arena::TypeId;
@@ -22,6 +29,7 @@ use vole_sema::type_arena::TypeId;
 use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
+use crate::interfaces::vtable::VTABLE_META_SLOT;
 use crate::structs::helpers::store_field_value;
 use crate::types::CompiledValue;
 
@@ -29,10 +37,11 @@ use crate::types::CompiledValue;
 ///
 /// Reads the `MetaAccessKind` annotation from sema and dispatches:
 /// - `Static`: builds a TypeMeta instance for the given TypeDefId
-/// - `Dynamic`: not yet implemented (returns an error)
+/// - `Dynamic`: loads the meta getter from the interface vtable and calls it
 pub fn compile_meta_access(
     cg: &mut Cg,
     expr_node_id: vole_frontend::NodeId,
+    meta_access: &MetaAccessExpr,
 ) -> CodegenResult<CompiledValue> {
     let meta_kind = cg
         .env
@@ -45,9 +54,7 @@ pub fn compile_meta_access(
         MetaAccessKind::Static { type_def_id } => {
             compile_static_meta(cg, type_def_id, expr_node_id)
         }
-        MetaAccessKind::Dynamic => Err(CodegenError::unsupported(
-            "dynamic @meta access (interface-typed values)",
-        )),
+        MetaAccessKind::Dynamic => compile_dynamic_meta(cg, meta_access, expr_node_id),
     }
 }
 
@@ -86,6 +93,60 @@ fn compile_static_meta(
         allocate_type_meta(cg, &info, name_cv, fields_cv, construct_cv, expr_node_id)?;
 
     Ok(cg.mark_rc_owned(type_meta_cv))
+}
+
+/// Build a TypeMeta instance for a dynamically-typed value (interface type).
+///
+/// When `val` has an interface type (e.g., `let val: Animal = Dog {}`),
+/// `val.@meta` must return metadata for the concrete type (`Dog`), not the
+/// interface (`Animal`). This is achieved by loading the meta getter function
+/// pointer from vtable slot 0 and calling it.
+///
+/// Vtable layout: `[meta_getter_fn, method_0, method_1, ...]`
+/// Interface box layout: `[data_ptr, vtable_ptr]`
+fn compile_dynamic_meta(
+    cg: &mut Cg,
+    meta_access: &MetaAccessExpr,
+    expr_node_id: vole_frontend::NodeId,
+) -> CodegenResult<CompiledValue> {
+    // Compile the object expression to get the interface-boxed value
+    let obj = cg.expr(&meta_access.object)?;
+
+    let ptr_type = cg.ptr_type();
+    let word_bytes = ptr_type.bytes() as i32;
+
+    // Load vtable pointer from the boxed interface (offset = word_bytes, i.e. slot 1)
+    let vtable_ptr = cg
+        .builder
+        .ins()
+        .load(ptr_type, MemFlags::new(), obj.value, word_bytes);
+
+    // Load the meta getter function pointer from vtable[VTABLE_META_SLOT] (slot 0)
+    let meta_fn_ptr = cg.builder.ins().load(
+        ptr_type,
+        MemFlags::new(),
+        vtable_ptr,
+        (VTABLE_META_SLOT as i32) * word_bytes,
+    );
+
+    // Build the call signature: () -> ptr (the meta getter takes no arguments and returns a TypeMeta pointer)
+    let mut sig = cg.jit_module().make_signature();
+    sig.returns.push(AbiParam::new(ptr_type));
+    let sig_ref = cg.builder.import_signature(sig);
+
+    // Call the meta getter
+    let call = cg.builder.ins().call_indirect(sig_ref, meta_fn_ptr, &[]);
+    let type_meta_ptr = cg.builder.inst_results(call)[0];
+
+    // Determine the result type (TypeMeta)
+    let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
+        // Fallback: resolve TypeMeta type from entity registry
+        let info = resolve_reflection_types(cg).ok();
+        info.map(|i| i.type_meta_type_id).unwrap_or(TypeId::UNKNOWN)
+    });
+
+    let cv = CompiledValue::new(type_meta_ptr, ptr_type, result_type_id);
+    Ok(cg.mark_rc_owned(cv))
 }
 
 /// Look up a field's physical slot index from a field_slots map.

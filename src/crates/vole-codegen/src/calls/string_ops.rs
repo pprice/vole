@@ -4,7 +4,7 @@
 
 use cranelift::prelude::*;
 use cranelift_jit::JITModule;
-use cranelift_module::{DataDescription, Linkage, Module};
+use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use vole_frontend::ast::StringPart;
 use vole_sema::StringConversion;
@@ -32,26 +32,36 @@ pub(crate) fn compile_string_literal(
     module: &mut JITModule,
     func_registry: &mut FunctionRegistry,
 ) -> CodegenResult<Value> {
+    let data_id = declare_string_data(s, module, func_registry)?;
+    let data_gv = module.declare_data_in_func(data_id, builder.func);
+    Ok(builder.ins().global_value(pointer_type, data_gv))
+}
+
+/// Create a static RcString in the JIT data section and return its DataId.
+///
+/// This is the first half of `compile_string_literal`, separated so that string
+/// data can be created before a `FunctionBuilder` is active (avoiding split-borrow
+/// issues on `VtableCtx` where `jit_module()` and `funcs()` both require `&mut self`).
+///
+/// Use `reference_string_data` to get a `Value` from within a function builder.
+pub(crate) fn declare_string_data(
+    s: &str,
+    module: &mut JITModule,
+    func_registry: &mut FunctionRegistry,
+) -> CodegenResult<DataId> {
     use vole_runtime::{RC_PINNED, RuntimeTypeId, fnv1a_hash};
 
-    // Build complete RcString struct as bytes:
-    //   RcHeader { ref_count: u32, type_id: u32, drop_fn: Option<fn> }  = 16 bytes
-    //   len: usize                                                       =  8 bytes
-    //   char_count: usize                                                =  8 bytes
-    //   hash: u64                                                        =  8 bytes
-    //   data: [u8; s.len()]                                              =  N bytes
     let mut data = Vec::with_capacity(40 + s.len());
     // RcHeader
-    data.extend_from_slice(&RC_PINNED.to_ne_bytes()); // ref_count = pinned (no-op inc/dec)
-    data.extend_from_slice(&(RuntimeTypeId::String as u32).to_ne_bytes()); // type_id
-    data.extend_from_slice(&0u64.to_ne_bytes()); // drop_fn = null (no cleanup needed)
+    data.extend_from_slice(&RC_PINNED.to_ne_bytes());
+    data.extend_from_slice(&(RuntimeTypeId::String as u32).to_ne_bytes());
+    data.extend_from_slice(&0u64.to_ne_bytes()); // drop_fn = null
     // RcString fields
-    data.extend_from_slice(&s.len().to_ne_bytes()); // len (byte length)
-    data.extend_from_slice(&s.chars().count().to_ne_bytes()); // char_count
-    data.extend_from_slice(&fnv1a_hash(s.as_bytes()).to_ne_bytes()); // hash
-    data.extend_from_slice(s.as_bytes()); // inline string data
+    data.extend_from_slice(&s.len().to_ne_bytes());
+    data.extend_from_slice(&s.chars().count().to_ne_bytes());
+    data.extend_from_slice(&fnv1a_hash(s.as_bytes()).to_ne_bytes());
+    data.extend_from_slice(s.as_bytes());
 
-    // Embed in JIT data section
     let data_name = func_registry.next_string_data_name();
     let data_id = module
         .declare_data(&data_name, Linkage::Local, false, false)
@@ -64,9 +74,20 @@ pub(crate) fn compile_string_literal(
         .define_data(data_id, &data_desc)
         .map_err(CodegenError::cranelift)?;
 
-    // The data section pointer IS the RcString pointer
+    Ok(data_id)
+}
+
+/// Reference a previously-declared string DataId from within a function builder.
+///
+/// This is the second half of `compile_string_literal`, used after `declare_string_data`.
+pub(crate) fn reference_string_data(
+    builder: &mut FunctionBuilder,
+    data_id: DataId,
+    pointer_type: Type,
+    module: &mut JITModule,
+) -> Value {
     let data_gv = module.declare_data_in_func(data_id, builder.func);
-    Ok(builder.ins().global_value(pointer_type, data_gv))
+    builder.ins().global_value(pointer_type, data_gv)
 }
 
 impl Cg<'_, '_, '_> {

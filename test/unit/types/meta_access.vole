@@ -1,6 +1,6 @@
-// Unit tests for T.@meta static reflection
+// Unit tests for T.@meta static and dynamic reflection
 //
-// Tests TypeMeta construction via .@meta on class and struct types.
+// Tests TypeMeta construction via .@meta on class, struct, and interface types.
 
 class User {
     name: string,
@@ -10,6 +10,33 @@ class User {
 struct Point {
     x: i64,
     y: i64,
+}
+
+// --- Types for dynamic @meta tests ---
+interface Animal {
+    func speak() -> string
+}
+
+class Dog implements Animal {
+    name: string,
+    breed: string,
+
+    func speak() -> string {
+        return "Woof!"
+    }
+}
+
+class Cat implements Animal {
+    name: string,
+    indoor: bool,
+
+    func speak() -> string {
+        return "Meow!"
+    }
+}
+
+func get_animal_meta(a: Animal) -> TypeMeta {
+    return a.@meta
 }
 
 tests {
@@ -82,6 +109,93 @@ tests {
         if result is User {
             assert(result.name == "Charlie")
             assert(result.age == 25)
+        }
+    }
+
+    // --- Dynamic @meta tests: val.@meta on interface-typed values ---
+
+    test "dynamic meta returns concrete type name (Dog)" {
+        let a: Animal = Dog { name: "Rex", breed: "Lab" }
+        let meta = a.@meta
+        assert(meta.name == "Dog")
+    }
+
+    test "dynamic meta returns concrete type name (Cat)" {
+        let a: Animal = Cat { name: "Whiskers", indoor: true }
+        let meta = a.@meta
+        assert(meta.name == "Cat")
+    }
+
+    test "dynamic meta fields count for Dog" {
+        let a: Animal = Dog { name: "Rex", breed: "Lab" }
+        let meta = a.@meta
+        assert(meta.fields.length() == 2)
+    }
+
+    test "dynamic meta fields count for Cat" {
+        let a: Animal = Cat { name: "Whiskers", indoor: true }
+        let meta = a.@meta
+        assert(meta.fields.length() == 2)
+    }
+
+    test "dynamic meta field names for Dog" {
+        let a: Animal = Dog { name: "Rex", breed: "Lab" }
+        let meta = a.@meta
+        assert(meta.fields[0].name == "name")
+        assert(meta.fields[1].name == "breed")
+    }
+
+    test "dynamic meta field names for Cat" {
+        let a: Animal = Cat { name: "Whiskers", indoor: true }
+        let meta = a.@meta
+        assert(meta.fields[0].name == "name")
+        assert(meta.fields[1].name == "indoor")
+    }
+
+    test "dynamic meta field type names" {
+        let a: Animal = Dog { name: "Rex", breed: "Lab" }
+        let meta = a.@meta
+        assert(meta.fields[0].type_name == "string")
+        assert(meta.fields[1].type_name == "string")
+    }
+
+    test "dynamic meta via function parameter" {
+        let d = Dog { name: "Rex", breed: "Lab" }
+        let meta = get_animal_meta(d)
+        assert(meta.name == "Dog")
+    }
+
+    test "dynamic meta different types through same interface" {
+        let d = Dog { name: "Rex", breed: "Lab" }
+        let c = Cat { name: "Whiskers", indoor: true }
+        let dog_meta = get_animal_meta(d)
+        let cat_meta = get_animal_meta(c)
+        assert(dog_meta.name == "Dog")
+        assert(cat_meta.name == "Cat")
+    }
+
+    test "dynamic meta constructor for Dog" {
+        let a: Animal = Dog { name: "Rex", breed: "Lab" }
+        let meta = a.@meta
+        let ctor = meta.construct
+        let args: [unknown] = ["Buddy", "Poodle"]
+        let result = ctor(args)
+        assert(result is Dog)
+        if result is Dog {
+            assert(result.name == "Buddy")
+            assert(result.breed == "Poodle")
+        }
+    }
+
+    test "dynamic meta getter reads concrete field" {
+        let a: Animal = Dog { name: "Rex", breed: "Lab" }
+        let meta = a.@meta
+        let getter = meta.fields[0].get
+        let dog_box: unknown = Dog { name: "Rex", breed: "Lab" }
+        let result = getter(dog_box)
+        assert(result is string)
+        if result is string {
+            assert(result == "Rex")
         }
     }
 }

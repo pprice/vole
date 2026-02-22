@@ -322,14 +322,19 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(word_type, MemFlags::new(), obj.value, word_bytes);
-        let func_ptr = self.builder.ins().load(
-            word_type,
-            MemFlags::new(),
-            vtable_ptr,
-            (slot as i32) * word_bytes,
-        );
+        // Slot 0 is the meta getter; method slots start at VTABLE_METHOD_OFFSET.
+        let vtable_offset =
+            (slot as i32 + crate::interfaces::vtable::VTABLE_METHOD_OFFSET as i32) * word_bytes;
+        let func_ptr =
+            self.builder
+                .ins()
+                .load(word_type, MemFlags::new(), vtable_ptr, vtable_offset);
 
-        tracing::trace!(slot = slot, "interface vtable dispatch");
+        tracing::trace!(
+            slot = slot,
+            vtable_offset = vtable_offset,
+            "interface vtable dispatch"
+        );
 
         let mut sig = self.jit_module().make_signature();
         sig.params.push(AbiParam::new(word_type));

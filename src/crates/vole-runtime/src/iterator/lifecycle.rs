@@ -221,10 +221,15 @@ unsafe extern "C" fn iterator_drop(ptr: *mut u8) {
 // Generate iterator_drop_sources from the central definition
 for_all_iterator_kinds!(generate_drop_sources);
 
+/// Vtable slot 0 is reserved for the meta getter function pointer.
+/// Method slots start at index 1. This must match VTABLE_METHOD_OFFSET in
+/// vole-codegen/src/interfaces/vtable.rs.
+const VTABLE_METHOD_OFFSET: usize = 1;
+
 iter_next_fn!(
     /// Get next value from interface iterator by calling through the vtable.
     /// The boxed interface has layout: [data_ptr, vtable_ptr]
-    /// The vtable has method pointers, with next() at slot 0.
+    /// The vtable has: [meta_getter, method_0, method_1, ...], with next() at slot VTABLE_METHOD_OFFSET.
     /// The next() wrapper returns a tagged union pointer.
     /// Union variants are sorted descending: Primitive(T) > Done, so tag 0 = value, tag 1 = Done.
     vole_interface_iter_next, Interface, interface, |src, _iter, out| {
@@ -237,8 +242,9 @@ iter_next_fn!(
             // Load vtable pointer from the boxed interface (layout: [data_ptr, vtable_ptr])
             let vtable_ptr = *((boxed as *const i64).add(1));
 
-            // Get the next() method pointer from vtable slot 0
-            let next_fn_ptr = *(vtable_ptr as *const usize);
+            // Get the next() method pointer from vtable slot VTABLE_METHOD_OFFSET
+            // (slot 0 is the meta getter, method slots start at 1)
+            let next_fn_ptr = *((vtable_ptr as *const usize).add(VTABLE_METHOD_OFFSET));
 
             // Call the next() wrapper: fn(box_ptr) -> tagged_union_ptr
             // The wrapper expects the full boxed interface pointer so it can extract data_ptr

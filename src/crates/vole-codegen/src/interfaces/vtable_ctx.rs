@@ -46,6 +46,12 @@ pub trait VtableCtx {
     /// Get mutable function registry
     fn funcs(&mut self) -> &mut FunctionRegistry;
 
+    /// Get both JIT module and function registry simultaneously.
+    ///
+    /// This avoids split-borrow issues when calling functions that need
+    /// both (e.g., `declare_string_data`).
+    fn jit_module_and_funcs(&mut self) -> (&mut JITModule, &mut FunctionRegistry);
+
     /// Get the native function registry
     fn native_registry(&self) -> &NativeRegistry;
 
@@ -106,6 +112,10 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
 
     fn funcs(&mut self) -> &mut FunctionRegistry {
         self.codegen_ctx.funcs()
+    }
+
+    fn jit_module_and_funcs(&mut self) -> (&mut JITModule, &mut FunctionRegistry) {
+        (self.codegen_ctx.module, self.codegen_ctx.func_registry)
     }
 
     fn native_registry(&self) -> &NativeRegistry {

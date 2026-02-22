@@ -134,8 +134,8 @@ impl Cg<'_, '_, '_> {
             ExprKind::Block(block_expr) => self.block_expr(block_expr),
             ExprKind::If(if_expr) => self.if_expr(if_expr, expr.id),
             ExprKind::When(when_expr) => self.when_expr(when_expr, expr.id),
-            ExprKind::MetaAccess(_) => {
-                let result = crate::reflection::compile_meta_access(self, expr.id)?;
+            ExprKind::MetaAccess(meta_access) => {
+                let result = crate::reflection::compile_meta_access(self, expr.id, meta_access)?;
                 Ok(result)
             }
             ExprKind::Unreachable => self.unreachable_expr(expr.span.line),

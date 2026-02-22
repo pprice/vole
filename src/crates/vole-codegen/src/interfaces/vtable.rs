@@ -3,10 +3,11 @@ use std::collections::HashSet;
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
-use cranelift_module::{DataDescription, DataId, Linkage, Module};
+use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 
 use super::vtable_ctx::{VtableCtx, VtableCtxView};
 use crate::RuntimeKey;
+use crate::calls::string_ops::{declare_string_data, reference_string_data};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use crate::types::{
@@ -19,6 +20,12 @@ use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::EntityRegistry;
 use vole_sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use vole_sema::type_arena::{SemaType, TypeId};
+
+/// Vtable slot 0 is reserved for the meta getter function pointer.
+/// Method slots start at index 1.
+pub(crate) const VTABLE_META_SLOT: usize = 0;
+/// Offset applied to method indices to account for the meta getter at slot 0.
+pub(crate) const VTABLE_METHOD_OFFSET: usize = 1;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum InterfaceConcreteType {
@@ -270,9 +277,25 @@ impl InterfaceVtableRegistry {
         let word_bytes = ctx.ptr_type().bytes() as usize;
 
         // Phase 2: Compile wrappers
+        // Slot 0 is reserved for the meta getter function pointer.
+        // Method wrappers occupy slots 1..n+1.
+        let total_slots = VTABLE_METHOD_OFFSET + state.method_ids.len();
         let mut data = DataDescription::new();
-        data.define_zeroinit(word_bytes * state.method_ids.len());
+        data.define_zeroinit(word_bytes * total_slots);
         data.set_align(word_bytes as u64);
+
+        // Compile the meta getter and write it at slot 0.
+        let meta_getter_id =
+            self.compile_meta_getter(ctx, &interface_name_str, state.concrete_type)?;
+        let meta_func_ref = ctx
+            .jit_module()
+            .declare_func_in_data(meta_getter_id, &mut data);
+        data.write_function_addr((VTABLE_META_SLOT * word_bytes) as u32, meta_func_ref);
+        tracing::debug!(
+            slot = VTABLE_META_SLOT,
+            wrapper = ?meta_getter_id,
+            "vtable meta getter (phase 2)"
+        );
 
         // For Iterator<T> interfaces, compute the elem type tag from the
         // substitution for the first type parameter (T) so that the vtable
@@ -311,15 +334,16 @@ impl InterfaceVtableRegistry {
                 &target,
                 iterator_info,
             )?;
+            let vtable_slot = index + VTABLE_METHOD_OFFSET;
             let func_ref = ctx.jit_module().declare_func_in_data(wrapper_id, &mut data);
-            data.write_function_addr((index * word_bytes) as u32, func_ref);
+            data.write_function_addr((vtable_slot * word_bytes) as u32, func_ref);
             let target_type = match &target.target {
                 VtableMethodTarget::Method(_) => "Method",
                 VtableMethodTarget::External(_) => "External",
                 VtableMethodTarget::Function => "Function",
             };
             tracing::debug!(
-                slot = index,
+                slot = vtable_slot,
                 method = %method_name_str,
                 target = target_type,
                 wrapper = ?wrapper_id,
@@ -349,7 +373,7 @@ impl InterfaceVtableRegistry {
         concrete_type_id: TypeId,
         method: &VtableMethod,
         iterator_info: IteratorVtableInfo,
-    ) -> CodegenResult<cranelift_module::FuncId> {
+    ) -> CodegenResult<FuncId> {
         // Build wrapper signature using param_count and returns_void directly
         let word_type = ctx.ptr_type();
         let mut sig = ctx.jit_module().make_signature();
@@ -520,6 +544,951 @@ impl InterfaceVtableRegistry {
 
         Ok(func_id)
     }
+
+    /// Compile a meta getter function for a concrete type.
+    ///
+    /// The meta getter is a standalone JIT function `() -> *TypeMeta` that
+    /// builds a TypeMeta instance containing the concrete type's name, field
+    /// metadata, and constructor. It is stored at vtable slot 0 and called
+    /// when `val.@meta` is accessed on an interface-typed value.
+    ///
+    /// For class/struct types, this includes full field metadata and a
+    /// constructor trampoline. For function/closure types (used in functional
+    /// interfaces), this produces a minimal TypeMeta with just the type name,
+    /// empty fields, and a stub constructor.
+    fn compile_meta_getter<C: VtableCtx>(
+        &mut self,
+        ctx: &mut C,
+        interface_name: &str,
+        concrete_type_id: TypeId,
+    ) -> CodegenResult<FuncId> {
+        let ptr_type = ctx.ptr_type();
+
+        // Check if concrete type is a function/closure (functional interfaces)
+        let is_function_type = ctx.arena().unwrap_function(concrete_type_id).is_some();
+
+        if is_function_type {
+            return self.compile_meta_getter_function(ctx, interface_name, concrete_type_id);
+        }
+
+        // --- Class/struct path: full fields and constructor ---
+
+        // Resolve concrete type name and TypeDefId
+        let (type_def_id, type_name) = resolve_concrete_type_name(ctx, concrete_type_id)?;
+
+        // Resolve TypeMeta and FieldMeta class metadata
+        let type_meta_info = resolve_reflection_meta(ctx)?;
+
+        // Resolve all needed runtime FuncIds upfront
+        let instance_new = resolve_runtime_in_vtable(ctx, RuntimeKey::InstanceNew)?;
+        let instance_set = resolve_runtime_in_vtable(ctx, RuntimeKey::InstanceSetField)?;
+        let array_new = resolve_runtime_in_vtable(ctx, RuntimeKey::ArrayNew)?;
+        let array_push = resolve_runtime_in_vtable(ctx, RuntimeKey::ArrayPush)?;
+        let instance_get = resolve_runtime_in_vtable(ctx, RuntimeKey::InstanceGetField)?;
+        let heap_alloc = resolve_runtime_in_vtable(ctx, RuntimeKey::HeapAlloc)?;
+        let closure_alloc = resolve_runtime_in_vtable(ctx, RuntimeKey::ClosureAlloc)?;
+
+        // Collect field info from the concrete type
+        let field_info = collect_concrete_field_info(ctx, type_def_id);
+
+        // Compile getter, setter, and constructor trampolines as sub-functions
+        let getter_ids = compile_getter_trampolines(ctx, &field_info, instance_get, heap_alloc)?;
+        let setter_ids = compile_setter_trampolines(ctx, &field_info, instance_set)?;
+        let ctor_id = compile_constructor_trampoline(
+            ctx,
+            type_def_id,
+            instance_new,
+            instance_set,
+            heap_alloc,
+        )?;
+
+        // Pre-declare all string data BEFORE creating the FunctionBuilder.
+        // Uses jit_module_and_funcs() to borrow both simultaneously, avoiding
+        // the split-borrow issue where jit_module() and funcs() each need &mut self.
+        let name_data_id = {
+            let (module, funcs) = ctx.jit_module_and_funcs();
+            declare_string_data(&type_name, module, funcs)?
+        };
+        let field_name_data_ids: Vec<DataId> = {
+            let mut ids = Vec::with_capacity(field_info.len());
+            for f in &field_info {
+                let (module, funcs) = ctx.jit_module_and_funcs();
+                ids.push(declare_string_data(&f.name, module, funcs)?);
+            }
+            ids
+        };
+        let field_type_name_data_ids: Vec<DataId> = {
+            let mut ids = Vec::with_capacity(field_info.len());
+            for f in &field_info {
+                let (module, funcs) = ctx.jit_module_and_funcs();
+                ids.push(declare_string_data(&f.type_name, module, funcs)?);
+            }
+            ids
+        };
+
+        // Now compile the meta getter function itself
+        let getter_name = format!(
+            "__vole_iface_meta_{}_{}",
+            interface_name, self.wrapper_counter
+        );
+        self.wrapper_counter += 1;
+
+        let mut sig = ctx.jit_module().make_signature();
+        sig.returns.push(AbiParam::new(ptr_type)); // returns TypeMeta ptr
+
+        let func_id = ctx
+            .jit_module()
+            .declare_function(&getter_name, Linkage::Local, &sig)
+            .map_err(CodegenError::cranelift)?;
+
+        let mut func_ctx = ctx.jit_module().make_context();
+        func_ctx.func.signature = sig;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut func_ctx.func, &mut builder_ctx);
+            let entry = builder.create_block();
+            builder.switch_to_block(entry);
+            builder.seal_block(entry);
+
+            // Allocate TypeMeta instance
+            let type_meta_ptr = emit_alloc_instance(
+                &mut builder,
+                ctx.jit_module(),
+                instance_new,
+                ptr_type,
+                type_meta_info.type_meta_type_id_val,
+                type_meta_info.type_meta_field_count,
+            );
+
+            // Reference pre-declared name string and store it
+            let name_val =
+                reference_string_data(&mut builder, name_data_id, ptr_type, ctx.jit_module());
+            emit_set_field(
+                &mut builder,
+                ctx.jit_module(),
+                instance_set,
+                type_meta_ptr,
+                type_meta_info.name_slot,
+                name_val,
+                ptr_type,
+            );
+
+            // Build fields array with FieldMeta entries
+            let fields_ptr = emit_build_field_array(
+                &mut builder,
+                ctx,
+                &type_meta_info,
+                &field_info,
+                &field_name_data_ids,
+                &field_type_name_data_ids,
+                &getter_ids,
+                &setter_ids,
+                instance_new,
+                instance_set,
+                array_new,
+                array_push,
+                closure_alloc,
+            );
+            emit_set_field(
+                &mut builder,
+                ctx.jit_module(),
+                instance_set,
+                type_meta_ptr,
+                type_meta_info.fields_slot,
+                fields_ptr,
+                ptr_type,
+            );
+
+            // Build constructor closure and store
+            let ctor_fn_ref = ctx.jit_module().declare_func_in_func(ctor_id, builder.func);
+            let ctor_addr = builder.ins().func_addr(ptr_type, ctor_fn_ref);
+            let closure_alloc_ref = ctx
+                .jit_module()
+                .declare_func_in_func(closure_alloc, builder.func);
+            let zero = builder.ins().iconst(types::I64, 0);
+            let ctor_call = builder.ins().call(closure_alloc_ref, &[ctor_addr, zero]);
+            let ctor_closure = builder.inst_results(ctor_call)[0];
+            emit_set_field(
+                &mut builder,
+                ctx.jit_module(),
+                instance_set,
+                type_meta_ptr,
+                type_meta_info.construct_slot,
+                ctor_closure,
+                ptr_type,
+            );
+
+            builder.ins().return_(&[type_meta_ptr]);
+            builder.finalize();
+        }
+
+        ctx.jit_module()
+            .define_function(func_id, &mut func_ctx)
+            .map_err(CodegenError::cranelift)?;
+        ctx.jit_module().clear_context(&mut func_ctx);
+
+        Ok(func_id)
+    }
+
+    /// Compile a minimal meta getter for function/closure concrete types.
+    ///
+    /// Function types have no fields and no meaningful constructor, so this
+    /// produces a TypeMeta with name "function"/"closure", empty fields array,
+    /// and a stub constructor that panics with "cannot construct function type".
+    fn compile_meta_getter_function<C: VtableCtx>(
+        &mut self,
+        ctx: &mut C,
+        interface_name: &str,
+        concrete_type_id: TypeId,
+    ) -> CodegenResult<FuncId> {
+        let ptr_type = ctx.ptr_type();
+
+        let (_, _, is_closure) = ctx
+            .arena()
+            .unwrap_function(concrete_type_id)
+            .expect("INTERNAL: compile_meta_getter_function called for non-function type");
+        let type_name = if is_closure { "closure" } else { "function" };
+
+        let type_meta_info = resolve_reflection_meta(ctx)?;
+
+        let instance_new = resolve_runtime_in_vtable(ctx, RuntimeKey::InstanceNew)?;
+        let instance_set = resolve_runtime_in_vtable(ctx, RuntimeKey::InstanceSetField)?;
+        let array_new = resolve_runtime_in_vtable(ctx, RuntimeKey::ArrayNew)?;
+        let closure_alloc = resolve_runtime_in_vtable(ctx, RuntimeKey::ClosureAlloc)?;
+
+        // Compile a stub constructor that panics
+        let ctor_id = compile_stub_constructor(ctx)?;
+
+        // Pre-declare string data
+        let name_data_id = {
+            let (module, funcs) = ctx.jit_module_and_funcs();
+            declare_string_data(type_name, module, funcs)?
+        };
+
+        let getter_name = format!(
+            "__vole_iface_meta_{}_{}",
+            interface_name, self.wrapper_counter
+        );
+        self.wrapper_counter += 1;
+
+        let mut sig = ctx.jit_module().make_signature();
+        sig.returns.push(AbiParam::new(ptr_type));
+
+        let func_id = ctx
+            .jit_module()
+            .declare_function(&getter_name, Linkage::Local, &sig)
+            .map_err(CodegenError::cranelift)?;
+
+        let mut func_ctx = ctx.jit_module().make_context();
+        func_ctx.func.signature = sig;
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let mut builder = FunctionBuilder::new(&mut func_ctx.func, &mut builder_ctx);
+            let entry = builder.create_block();
+            builder.switch_to_block(entry);
+            builder.seal_block(entry);
+
+            // Allocate TypeMeta instance
+            let type_meta_ptr = emit_alloc_instance(
+                &mut builder,
+                ctx.jit_module(),
+                instance_new,
+                ptr_type,
+                type_meta_info.type_meta_type_id_val,
+                type_meta_info.type_meta_field_count,
+            );
+
+            // Set name
+            let name_val =
+                reference_string_data(&mut builder, name_data_id, ptr_type, ctx.jit_module());
+            emit_set_field(
+                &mut builder,
+                ctx.jit_module(),
+                instance_set,
+                type_meta_ptr,
+                type_meta_info.name_slot,
+                name_val,
+                ptr_type,
+            );
+
+            // Empty fields array
+            let arr_new_ref = ctx
+                .jit_module()
+                .declare_func_in_func(array_new, builder.func);
+            let arr_call = builder.ins().call(arr_new_ref, &[]);
+            let fields_ptr = builder.inst_results(arr_call)[0];
+            emit_set_field(
+                &mut builder,
+                ctx.jit_module(),
+                instance_set,
+                type_meta_ptr,
+                type_meta_info.fields_slot,
+                fields_ptr,
+                ptr_type,
+            );
+
+            // Stub constructor closure
+            let ctor_fn_ref = ctx.jit_module().declare_func_in_func(ctor_id, builder.func);
+            let ctor_addr = builder.ins().func_addr(ptr_type, ctor_fn_ref);
+            let closure_alloc_ref = ctx
+                .jit_module()
+                .declare_func_in_func(closure_alloc, builder.func);
+            let zero = builder.ins().iconst(types::I64, 0);
+            let ctor_call = builder.ins().call(closure_alloc_ref, &[ctor_addr, zero]);
+            let ctor_closure = builder.inst_results(ctor_call)[0];
+            emit_set_field(
+                &mut builder,
+                ctx.jit_module(),
+                instance_set,
+                type_meta_ptr,
+                type_meta_info.construct_slot,
+                ctor_closure,
+                ptr_type,
+            );
+
+            builder.ins().return_(&[type_meta_ptr]);
+            builder.finalize();
+        }
+
+        ctx.jit_module()
+            .define_function(func_id, &mut func_ctx)
+            .map_err(CodegenError::cranelift)?;
+        ctx.jit_module().clear_context(&mut func_ctx);
+
+        Ok(func_id)
+    }
+}
+
+/// Info about a concrete type's field for meta getter compilation.
+struct ConcreteFieldInfo {
+    name: String,
+    type_name: String,
+    slot: usize,
+    runtime_tag: i64,
+}
+
+/// Pre-resolved TypeMeta/FieldMeta class info for meta getter compilation.
+struct ReflectionMetaInfo {
+    type_meta_type_id_val: u32,
+    type_meta_field_count: u32,
+    name_slot: usize,
+    fields_slot: usize,
+    construct_slot: usize,
+    field_meta_type_id_val: u32,
+    field_meta_field_count: u32,
+    fm_name_slot: usize,
+    fm_type_name_slot: usize,
+    fm_annotations_slot: usize,
+    fm_get_slot: usize,
+    fm_set_slot: usize,
+}
+
+/// Resolve the concrete type's name and TypeDefId from a TypeId.
+fn resolve_concrete_type_name<C: VtableCtx>(
+    ctx: &C,
+    concrete_type_id: TypeId,
+) -> CodegenResult<(TypeDefId, String)> {
+    let arena = ctx.arena();
+    // Try class first, then struct/nominal
+    let type_def_id = arena
+        .unwrap_class(concrete_type_id)
+        .map(|(id, _)| id)
+        .or_else(|| arena.unwrap_nominal(concrete_type_id).map(|(id, _, _)| id))
+        .ok_or_else(|| {
+            CodegenError::internal_with_context(
+                "meta getter: cannot resolve concrete type",
+                format!("{:?}", concrete_type_id),
+            )
+        })?;
+    let type_def = ctx.query().get_type(type_def_id);
+    let type_name = ctx
+        .query()
+        .last_segment(type_def.name_id)
+        .unwrap_or_else(|| "?".to_string());
+    Ok((type_def_id, type_name))
+}
+
+/// Resolve TypeMeta and FieldMeta class metadata from type_metadata.
+fn resolve_reflection_meta<C: VtableCtx>(ctx: &C) -> CodegenResult<ReflectionMetaInfo> {
+    let registry = ctx.registry();
+    let name_table = ctx.analyzed().name_table();
+
+    let type_meta_def_id = registry
+        .type_by_short_name("TypeMeta", name_table)
+        .ok_or_else(|| CodegenError::not_found("TypeMeta class", "entity registry"))?;
+    let field_meta_def_id = registry
+        .type_by_short_name("FieldMeta", name_table)
+        .ok_or_else(|| CodegenError::not_found("FieldMeta class", "entity registry"))?;
+
+    let tm_meta = ctx
+        .type_metadata()
+        .get(&type_meta_def_id)
+        .ok_or_else(|| CodegenError::not_found("TypeMeta", "type_metadata"))?;
+    let fm_meta = ctx
+        .type_metadata()
+        .get(&field_meta_def_id)
+        .ok_or_else(|| CodegenError::not_found("FieldMeta", "type_metadata"))?;
+
+    let lookup = |slots: &FxHashMap<String, usize>, name: &str, ty: &str| -> CodegenResult<usize> {
+        slots.get(name).copied().ok_or_else(|| {
+            CodegenError::not_found("reflection field slot", format!("{}.{}", ty, name))
+        })
+    };
+
+    Ok(ReflectionMetaInfo {
+        type_meta_type_id_val: tm_meta.type_id,
+        type_meta_field_count: tm_meta.physical_slot_count as u32,
+        name_slot: lookup(&tm_meta.field_slots, "name", "TypeMeta")?,
+        fields_slot: lookup(&tm_meta.field_slots, "fields", "TypeMeta")?,
+        construct_slot: lookup(&tm_meta.field_slots, "construct", "TypeMeta")?,
+        field_meta_type_id_val: fm_meta.type_id,
+        field_meta_field_count: fm_meta.physical_slot_count as u32,
+        fm_name_slot: lookup(&fm_meta.field_slots, "name", "FieldMeta")?,
+        fm_type_name_slot: lookup(&fm_meta.field_slots, "type_name", "FieldMeta")?,
+        fm_annotations_slot: lookup(&fm_meta.field_slots, "annotations", "FieldMeta")?,
+        fm_get_slot: lookup(&fm_meta.field_slots, "get", "FieldMeta")?,
+        fm_set_slot: lookup(&fm_meta.field_slots, "set", "FieldMeta")?,
+    })
+}
+
+/// Collect field info from a concrete type for meta getter compilation.
+fn collect_concrete_field_info<C: VtableCtx>(
+    ctx: &C,
+    type_def_id: TypeDefId,
+) -> Vec<ConcreteFieldInfo> {
+    let query = ctx.query();
+    let arena = ctx.arena();
+    let name_table = ctx.analyzed().name_table();
+    query
+        .fields_on_type(type_def_id)
+        .map(|field_id| {
+            let field = query.get_field(field_id);
+            let name = name_table
+                .last_segment_str(field.name_id)
+                .unwrap_or_default();
+            let type_name = arena.display_basic(field.ty);
+            let runtime_tag = crate::types::unknown_type_tag(field.ty, arena) as i64;
+            ConcreteFieldInfo {
+                name,
+                type_name,
+                slot: field.slot,
+                runtime_tag,
+            }
+        })
+        .collect()
+}
+
+/// Resolve a RuntimeKey to a FuncId through the vtable context's function registry.
+fn resolve_runtime_in_vtable<C: VtableCtx>(ctx: &mut C, key: RuntimeKey) -> CodegenResult<FuncId> {
+    let func_key = ctx
+        .funcs()
+        .runtime_key(key)
+        .ok_or_else(|| CodegenError::not_found("runtime function", key.name()))?;
+    ctx.funcs()
+        .func_id(func_key)
+        .ok_or_else(|| CodegenError::not_found("runtime func_id", key.name()))
+}
+
+/// Compile getter trampoline functions for each field.
+/// Returns a Vec of FuncIds, one per field.
+fn compile_getter_trampolines<C: VtableCtx>(
+    ctx: &mut C,
+    fields: &[ConcreteFieldInfo],
+    instance_get: FuncId,
+    heap_alloc: FuncId,
+) -> CodegenResult<Vec<FuncId>> {
+    let ptr_type = ctx.ptr_type();
+    let mut ids = Vec::with_capacity(fields.len());
+
+    for field in fields {
+        let func_name = ctx
+            .funcs()
+            .next_string_data_name()
+            .replace("string_data", "meta_getter");
+
+        // Signature: (closure_ptr, unknown_ptr) -> unknown_ptr
+        let mut sig = ctx.jit_module().make_signature();
+        sig.params.push(AbiParam::new(ptr_type)); // closure
+        sig.params.push(AbiParam::new(ptr_type)); // instance as unknown
+        sig.returns.push(AbiParam::new(ptr_type)); // field value as unknown
+
+        let func_id = ctx
+            .jit_module()
+            .declare_function(&func_name, Linkage::Local, &sig)
+            .map_err(CodegenError::cranelift)?;
+
+        let mut func_ctx = ctx.jit_module().make_context();
+        func_ctx.func.signature = sig;
+        {
+            let mut fbc = FunctionBuilderContext::new();
+            let mut builder = FunctionBuilder::new(&mut func_ctx.func, &mut fbc);
+            let entry = builder.create_block();
+            builder.append_block_params_for_function_params(entry);
+            builder.switch_to_block(entry);
+            builder.seal_block(entry);
+            let params = builder.block_params(entry).to_vec();
+            let unknown_ptr = params[1];
+
+            // Extract instance pointer from TaggedValue payload (offset 8)
+            let instance_raw = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), unknown_ptr, 8);
+            let instance_ptr = builder
+                .ins()
+                .bitcast(ptr_type, MemFlags::new(), instance_raw);
+
+            // Read field
+            let get_ref = ctx
+                .jit_module()
+                .declare_func_in_func(instance_get, builder.func);
+            let slot_val = builder.ins().iconst(types::I32, field.slot as i64);
+            let call = builder.ins().call(get_ref, &[instance_ptr, slot_val]);
+            let field_raw = builder.inst_results(call)[0];
+
+            // Box result as unknown (16-byte TaggedValue on heap)
+            let alloc_ref = ctx
+                .jit_module()
+                .declare_func_in_func(heap_alloc, builder.func);
+            let size_val = builder.ins().iconst(ptr_type, 16);
+            let alloc_call = builder.ins().call(alloc_ref, &[size_val]);
+            let tagged_ptr = builder.inst_results(alloc_call)[0];
+            let tag_val = builder.ins().iconst(types::I64, field.runtime_tag);
+            builder.ins().store(MemFlags::new(), tag_val, tagged_ptr, 0);
+            builder
+                .ins()
+                .store(MemFlags::new(), field_raw, tagged_ptr, 8);
+
+            builder.ins().return_(&[tagged_ptr]);
+            builder.finalize();
+        }
+
+        ctx.jit_module()
+            .define_function(func_id, &mut func_ctx)
+            .map_err(CodegenError::cranelift)?;
+        ctx.jit_module().clear_context(&mut func_ctx);
+
+        ids.push(func_id);
+    }
+
+    Ok(ids)
+}
+
+/// Compile setter trampoline functions for each field.
+/// Returns a Vec of FuncIds, one per field.
+fn compile_setter_trampolines<C: VtableCtx>(
+    ctx: &mut C,
+    fields: &[ConcreteFieldInfo],
+    instance_set: FuncId,
+) -> CodegenResult<Vec<FuncId>> {
+    let ptr_type = ctx.ptr_type();
+    let mut ids = Vec::with_capacity(fields.len());
+
+    for field in fields {
+        let func_name = ctx
+            .funcs()
+            .next_string_data_name()
+            .replace("string_data", "meta_setter");
+
+        // Signature: (closure_ptr, unknown_ptr, unknown_ptr) -> i64 (void)
+        let mut sig = ctx.jit_module().make_signature();
+        sig.params.push(AbiParam::new(ptr_type)); // closure
+        sig.params.push(AbiParam::new(ptr_type)); // instance as unknown
+        sig.params.push(AbiParam::new(ptr_type)); // value as unknown
+        sig.returns.push(AbiParam::new(types::I64)); // void return
+
+        let func_id = ctx
+            .jit_module()
+            .declare_function(&func_name, Linkage::Local, &sig)
+            .map_err(CodegenError::cranelift)?;
+
+        let mut func_ctx = ctx.jit_module().make_context();
+        func_ctx.func.signature = sig;
+        {
+            let mut fbc = FunctionBuilderContext::new();
+            let mut builder = FunctionBuilder::new(&mut func_ctx.func, &mut fbc);
+            let entry = builder.create_block();
+            builder.append_block_params_for_function_params(entry);
+            builder.switch_to_block(entry);
+            builder.seal_block(entry);
+            let params = builder.block_params(entry).to_vec();
+            let unknown_instance = params[1];
+            let unknown_value = params[2];
+
+            // Extract instance pointer from TaggedValue payload
+            let inst_raw = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), unknown_instance, 8);
+            let instance_ptr = builder.ins().bitcast(ptr_type, MemFlags::new(), inst_raw);
+
+            // Extract field value from TaggedValue payload
+            let field_val = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), unknown_value, 8);
+
+            // Write field
+            let set_ref = ctx
+                .jit_module()
+                .declare_func_in_func(instance_set, builder.func);
+            let slot_val = builder.ins().iconst(types::I32, field.slot as i64);
+            builder
+                .ins()
+                .call(set_ref, &[instance_ptr, slot_val, field_val]);
+
+            let zero = builder.ins().iconst(types::I64, 0);
+            builder.ins().return_(&[zero]);
+            builder.finalize();
+        }
+
+        ctx.jit_module()
+            .define_function(func_id, &mut func_ctx)
+            .map_err(CodegenError::cranelift)?;
+        ctx.jit_module().clear_context(&mut func_ctx);
+
+        ids.push(func_id);
+    }
+
+    Ok(ids)
+}
+
+/// Compile a constructor trampoline for the concrete type.
+/// Signature: (closure_ptr, [unknown]) -> unknown_ptr
+fn compile_constructor_trampoline<C: VtableCtx>(
+    ctx: &mut C,
+    type_def_id: TypeDefId,
+    instance_new: FuncId,
+    instance_set: FuncId,
+    heap_alloc: FuncId,
+) -> CodegenResult<FuncId> {
+    let ptr_type = ctx.ptr_type();
+
+    let meta = ctx
+        .type_metadata()
+        .get(&type_def_id)
+        .ok_or_else(|| CodegenError::not_found("target type", "type_metadata for constructor"))?;
+    let runtime_type_id = meta.type_id;
+    let field_count = meta.physical_slot_count;
+
+    let array_get_val = resolve_runtime_in_vtable(ctx, RuntimeKey::ArrayGetValue)?;
+
+    let func_name = ctx
+        .funcs()
+        .next_string_data_name()
+        .replace("string_data", "meta_ctor");
+
+    // Signature: (closure_ptr, array_ptr) -> unknown_ptr
+    let mut sig = ctx.jit_module().make_signature();
+    sig.params.push(AbiParam::new(ptr_type)); // closure
+    sig.params.push(AbiParam::new(ptr_type)); // [unknown] array
+    sig.returns.push(AbiParam::new(ptr_type)); // result as unknown ptr
+
+    let func_id = ctx
+        .jit_module()
+        .declare_function(&func_name, Linkage::Local, &sig)
+        .map_err(CodegenError::cranelift)?;
+
+    let mut func_ctx = ctx.jit_module().make_context();
+    func_ctx.func.signature = sig;
+    {
+        let mut fbc = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut func_ctx.func, &mut fbc);
+        let entry = builder.create_block();
+        builder.append_block_params_for_function_params(entry);
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+        let params = builder.block_params(entry).to_vec();
+        let array_ptr = params[1];
+
+        // Allocate instance
+        let new_ref = ctx
+            .jit_module()
+            .declare_func_in_func(instance_new, builder.func);
+        let type_id_val = builder.ins().iconst(types::I32, runtime_type_id as i64);
+        let field_count_val = builder.ins().iconst(types::I32, field_count as i64);
+        let rt_type = builder.ins().iconst(
+            types::I32,
+            vole_runtime::value::RuntimeTypeId::Instance as i64,
+        );
+        let new_call = builder
+            .ins()
+            .call(new_ref, &[type_id_val, field_count_val, rt_type]);
+        let instance_ptr = builder.inst_results(new_call)[0];
+
+        // For each field, read from [unknown] array and store to instance
+        let get_val_ref = ctx
+            .jit_module()
+            .declare_func_in_func(array_get_val, builder.func);
+        let set_ref = ctx
+            .jit_module()
+            .declare_func_in_func(instance_set, builder.func);
+
+        for slot in 0..field_count {
+            let idx = builder.ins().iconst(types::I64, slot as i64);
+            let elem_call = builder.ins().call(get_val_ref, &[array_ptr, idx]);
+            let tagged_ptr_raw = builder.inst_results(elem_call)[0];
+
+            let tagged_ptr = builder
+                .ins()
+                .bitcast(ptr_type, MemFlags::new(), tagged_ptr_raw);
+            let field_val = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), tagged_ptr, 8);
+
+            let slot_val = builder.ins().iconst(types::I32, slot as i64);
+            builder
+                .ins()
+                .call(set_ref, &[instance_ptr, slot_val, field_val]);
+        }
+
+        // Box instance as unknown
+        let instance_as_i64 = builder
+            .ins()
+            .bitcast(types::I64, MemFlags::new(), instance_ptr);
+        let alloc_ref = ctx
+            .jit_module()
+            .declare_func_in_func(heap_alloc, builder.func);
+        let size_val = builder.ins().iconst(ptr_type, 16);
+        let alloc_call = builder.ins().call(alloc_ref, &[size_val]);
+        let tagged_ptr = builder.inst_results(alloc_call)[0];
+        let tag_val = builder.ins().iconst(
+            types::I64,
+            vole_runtime::value::RuntimeTypeId::Instance as i64,
+        );
+        builder.ins().store(MemFlags::new(), tag_val, tagged_ptr, 0);
+        builder
+            .ins()
+            .store(MemFlags::new(), instance_as_i64, tagged_ptr, 8);
+
+        builder.ins().return_(&[tagged_ptr]);
+        builder.finalize();
+    }
+
+    ctx.jit_module()
+        .define_function(func_id, &mut func_ctx)
+        .map_err(CodegenError::cranelift)?;
+    ctx.jit_module().clear_context(&mut func_ctx);
+
+    Ok(func_id)
+}
+
+/// Compile a stub constructor for function/closure types.
+/// Signature: (closure_ptr, [unknown]) -> unknown_ptr
+/// Simply traps -- function types cannot be constructed via @meta.
+fn compile_stub_constructor<C: VtableCtx>(ctx: &mut C) -> CodegenResult<FuncId> {
+    let ptr_type = ctx.ptr_type();
+    let func_name = ctx
+        .funcs()
+        .next_string_data_name()
+        .replace("string_data", "meta_ctor_stub");
+
+    let mut sig = ctx.jit_module().make_signature();
+    sig.params.push(AbiParam::new(ptr_type)); // closure
+    sig.params.push(AbiParam::new(ptr_type)); // [unknown] array
+    sig.returns.push(AbiParam::new(ptr_type)); // result (never reached)
+
+    let func_id = ctx
+        .jit_module()
+        .declare_function(&func_name, Linkage::Local, &sig)
+        .map_err(CodegenError::cranelift)?;
+
+    let mut func_ctx = ctx.jit_module().make_context();
+    func_ctx.func.signature = sig;
+    {
+        let mut fbc = FunctionBuilderContext::new();
+        let mut builder = FunctionBuilder::new(&mut func_ctx.func, &mut fbc);
+        let entry = builder.create_block();
+        builder.append_block_params_for_function_params(entry);
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+
+        builder.ins().trap(crate::trap_codes::PANIC);
+        builder.finalize();
+    }
+
+    ctx.jit_module()
+        .define_function(func_id, &mut func_ctx)
+        .map_err(CodegenError::cranelift)?;
+    ctx.jit_module().clear_context(&mut func_ctx);
+
+    Ok(func_id)
+}
+
+/// Emit IR to allocate a class instance via InstanceNew.
+fn emit_alloc_instance(
+    builder: &mut FunctionBuilder,
+    module: &mut cranelift_jit::JITModule,
+    instance_new: FuncId,
+    _ptr_type: Type,
+    type_id: u32,
+    field_count: u32,
+) -> Value {
+    let new_ref = module.declare_func_in_func(instance_new, builder.func);
+    let type_id_val = builder.ins().iconst(types::I32, type_id as i64);
+    let field_count_val = builder.ins().iconst(types::I32, field_count as i64);
+    let rt_type = builder.ins().iconst(
+        types::I32,
+        vole_runtime::value::RuntimeTypeId::Instance as i64,
+    );
+    let call = builder
+        .ins()
+        .call(new_ref, &[type_id_val, field_count_val, rt_type]);
+    builder.inst_results(call)[0]
+}
+
+/// Emit IR to set a field on an instance via InstanceSetField.
+fn emit_set_field(
+    builder: &mut FunctionBuilder,
+    module: &mut cranelift_jit::JITModule,
+    instance_set: FuncId,
+    instance_ptr: Value,
+    slot: usize,
+    value: Value,
+    _ptr_type: Type,
+) {
+    let set_ref = module.declare_func_in_func(instance_set, builder.func);
+    let slot_val = builder.ins().iconst(types::I32, slot as i64);
+    let value_as_i64 = builder.ins().bitcast(types::I64, MemFlags::new(), value);
+    builder
+        .ins()
+        .call(set_ref, &[instance_ptr, slot_val, value_as_i64]);
+}
+
+/// Emit IR to build the [FieldMeta] array inside the meta getter function.
+///
+/// String DataIds are pre-declared before the FunctionBuilder is created to avoid
+/// split-borrow issues on VtableCtx.
+#[expect(clippy::too_many_arguments)]
+fn emit_build_field_array<C: VtableCtx>(
+    builder: &mut FunctionBuilder,
+    ctx: &mut C,
+    info: &ReflectionMetaInfo,
+    fields: &[ConcreteFieldInfo],
+    field_name_data_ids: &[DataId],
+    field_type_name_data_ids: &[DataId],
+    getter_ids: &[FuncId],
+    setter_ids: &[FuncId],
+    instance_new: FuncId,
+    instance_set: FuncId,
+    array_new: FuncId,
+    array_push: FuncId,
+    closure_alloc: FuncId,
+) -> Value {
+    let ptr_type = ctx.ptr_type();
+
+    // Create empty array
+    let arr_new_ref = ctx
+        .jit_module()
+        .declare_func_in_func(array_new, builder.func);
+    let arr_call = builder.ins().call(arr_new_ref, &[]);
+    let arr_ptr = builder.inst_results(arr_call)[0];
+
+    let arr_push_ref = ctx
+        .jit_module()
+        .declare_func_in_func(array_push, builder.func);
+
+    for (i, _field) in fields.iter().enumerate() {
+        // Allocate FieldMeta instance
+        let fm_ptr = emit_alloc_instance(
+            builder,
+            ctx.jit_module(),
+            instance_new,
+            ptr_type,
+            info.field_meta_type_id_val,
+            info.field_meta_field_count,
+        );
+
+        // Set name (from pre-declared string data)
+        let name_val =
+            reference_string_data(builder, field_name_data_ids[i], ptr_type, ctx.jit_module());
+        emit_set_field(
+            builder,
+            ctx.jit_module(),
+            instance_set,
+            fm_ptr,
+            info.fm_name_slot,
+            name_val,
+            ptr_type,
+        );
+
+        // Set type_name (from pre-declared string data)
+        let type_name_val = reference_string_data(
+            builder,
+            field_type_name_data_ids[i],
+            ptr_type,
+            ctx.jit_module(),
+        );
+        emit_set_field(
+            builder,
+            ctx.jit_module(),
+            instance_set,
+            fm_ptr,
+            info.fm_type_name_slot,
+            type_name_val,
+            ptr_type,
+        );
+
+        // Set annotations (empty array)
+        let ann_new_ref = ctx
+            .jit_module()
+            .declare_func_in_func(array_new, builder.func);
+        let ann_call = builder.ins().call(ann_new_ref, &[]);
+        let ann_ptr = builder.inst_results(ann_call)[0];
+        emit_set_field(
+            builder,
+            ctx.jit_module(),
+            instance_set,
+            fm_ptr,
+            info.fm_annotations_slot,
+            ann_ptr,
+            ptr_type,
+        );
+
+        // Set getter closure
+        let getter_fn_ref = ctx
+            .jit_module()
+            .declare_func_in_func(getter_ids[i], builder.func);
+        let getter_addr = builder.ins().func_addr(ptr_type, getter_fn_ref);
+        let closure_ref = ctx
+            .jit_module()
+            .declare_func_in_func(closure_alloc, builder.func);
+        let zero = builder.ins().iconst(types::I64, 0);
+        let getter_call = builder.ins().call(closure_ref, &[getter_addr, zero]);
+        let getter_closure = builder.inst_results(getter_call)[0];
+        emit_set_field(
+            builder,
+            ctx.jit_module(),
+            instance_set,
+            fm_ptr,
+            info.fm_get_slot,
+            getter_closure,
+            ptr_type,
+        );
+
+        // Set setter closure
+        let setter_fn_ref = ctx
+            .jit_module()
+            .declare_func_in_func(setter_ids[i], builder.func);
+        let setter_addr = builder.ins().func_addr(ptr_type, setter_fn_ref);
+        let setter_call = builder.ins().call(closure_ref, &[setter_addr, zero]);
+        let setter_closure = builder.inst_results(setter_call)[0];
+        emit_set_field(
+            builder,
+            ctx.jit_module(),
+            instance_set,
+            fm_ptr,
+            info.fm_set_slot,
+            setter_closure,
+            ptr_type,
+        );
+
+        // Push FieldMeta to array
+        let tag = builder.ins().iconst(
+            types::I64,
+            vole_runtime::value::RuntimeTypeId::Instance as i64,
+        );
+        builder.ins().call(arr_push_ref, &[arr_ptr, tag, fm_ptr]);
+    }
+
+    arr_ptr
 }
 
 /// Collect all method IDs for an interface using the vtable context.

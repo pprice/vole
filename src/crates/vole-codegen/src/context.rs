@@ -1134,6 +1134,12 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
     fn ptr_to_symbol(&self) -> &FxHashMap<usize, String> {
         &self.env.state.ptr_to_symbol
     }
+
+    fn jit_module_and_funcs(
+        &mut self,
+    ) -> (&mut cranelift_jit::JITModule, &mut crate::FunctionRegistry) {
+        (self.codegen_ctx.module, self.codegen_ctx.func_registry)
+    }
 }
 
 /// Mask an `i64` immediate to the bit width of a Cranelift integer type.
