@@ -1,0 +1,634 @@
+// Tests for stdlib/json.vole - JsonObject and JsonArray types
+let { JsonObject, JsonArray } = import "std:json"
+
+tests "JsonObject construction" {
+    test "new creates empty object" {
+        let obj = JsonObject.new()
+        assert(obj.len() == 0)
+    }
+}
+
+tests "JsonObject set and get" {
+    test "set and get string value" {
+        let obj = JsonObject.new()
+        obj.set("name", "Alice")
+        let v = obj.get("name")
+        if v is string {
+            assert(v == "Alice")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "set and get f64 value" {
+        let obj = JsonObject.new()
+        obj.set("pi", 3.14)
+        let v = obj.get("pi")
+        if v is f64 {
+            assert(v == 3.14)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "set and get bool true" {
+        let obj = JsonObject.new()
+        obj.set("flag", true)
+        let v = obj.get("flag")
+        if v is bool {
+            assert(v == true)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "set and get bool false" {
+        let obj = JsonObject.new()
+        obj.set("disabled", false)
+        let v = obj.get("disabled")
+        if v is bool {
+            assert(v == false)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "set and get nil value" {
+        let obj = JsonObject.new()
+        obj.set("nothing", nil)
+        // Note: get returns nil for both absent keys and null values.
+        // Use contains_key to distinguish.
+        assert(obj.contains_key("nothing"))
+        assert(obj.get("nothing") is nil)
+    }
+
+    test "get missing key returns nil" {
+        let obj = JsonObject.new()
+        assert(obj.get("missing") is nil)
+    }
+
+    test "overwrite existing key" {
+        let obj = JsonObject.new()
+        obj.set("key", "first")
+        obj.set("key", "second")
+        assert(obj.len() == 1)
+        let v = obj.get("key")
+        if v is string {
+            assert(v == "second")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "overwrite string with f64" {
+        let obj = JsonObject.new()
+        obj.set("x", "hello")
+        obj.set("x", 42.0)
+        let v = obj.get("x")
+        if v is f64 {
+            assert(v == 42.0)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "multiple keys" {
+        let obj = JsonObject.new()
+        obj.set("a", "alpha")
+        obj.set("b", "beta")
+        obj.set("c", "gamma")
+        assert(obj.len() == 3)
+
+        let a = obj.get("a")
+        let b = obj.get("b")
+        let c = obj.get("c")
+        if a is string {
+            assert(a == "alpha")
+        } else {
+            assert(false)
+        }
+        if b is string {
+            assert(b == "beta")
+        } else {
+            assert(false)
+        }
+        if c is string {
+            assert(c == "gamma")
+        } else {
+            assert(false)
+        }
+    }
+}
+
+tests "JsonObject contains_key" {
+    test "contains_key for present key" {
+        let obj = JsonObject.new()
+        obj.set("x", 1.0)
+        assert(obj.contains_key("x"))
+    }
+
+    test "contains_key for absent key" {
+        let obj = JsonObject.new()
+        assert(!obj.contains_key("x"))
+    }
+
+    test "contains_key after remove" {
+        let obj = JsonObject.new()
+        obj.set("x", 1.0)
+        _ = obj.remove("x")
+        assert(!obj.contains_key("x"))
+    }
+
+    test "contains_key for nil value" {
+        let obj = JsonObject.new()
+        obj.set("null_val", nil)
+        assert(obj.contains_key("null_val"))
+    }
+}
+
+tests "JsonObject remove" {
+    test "remove existing key returns value" {
+        let obj = JsonObject.new()
+        obj.set("key", "value")
+        let removed = obj.remove("key")
+        if removed is string {
+            assert(removed == "value")
+        } else {
+            assert(false)
+        }
+        assert(obj.len() == 0)
+    }
+
+    test "remove missing key returns nil" {
+        let obj = JsonObject.new()
+        assert(obj.remove("missing") is nil)
+    }
+
+    test "remove does not affect other keys" {
+        let obj = JsonObject.new()
+        obj.set("a", 1.0)
+        obj.set("b", 2.0)
+        obj.set("c", 3.0)
+        _ = obj.remove("b")
+        assert(obj.len() == 2)
+        assert(obj.contains_key("a"))
+        assert(!obj.contains_key("b"))
+        assert(obj.contains_key("c"))
+    }
+}
+
+tests "JsonObject keys" {
+    test "keys count on empty object" {
+        let obj = JsonObject.new()
+        assert(obj.keys().count() == 0)
+    }
+
+    test "keys count matches len" {
+        let obj = JsonObject.new()
+        obj.set("a", 1.0)
+        obj.set("b", 2.0)
+        obj.set("c", 3.0)
+        assert(obj.keys().count() == 3)
+        assert(obj.keys().count() == obj.len())
+    }
+}
+
+tests "JsonObject nested objects" {
+    test "nested JsonObject" {
+        let inner = JsonObject.new()
+        inner.set("x", 10.0)
+        inner.set("y", 20.0)
+
+        let outer = JsonObject.new()
+        outer.set("point", inner)
+
+        let got = outer.get("point")
+        if got is JsonObject {
+            let x = got.get("x")
+            if x is f64 {
+                assert(x == 10.0)
+            } else {
+                assert(false)
+            }
+            let y = got.get("y")
+            if y is f64 {
+                assert(y == 20.0)
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+
+    test "nested JsonArray in object" {
+        let arr = JsonArray.new()
+        arr.push(1.0)
+        arr.push(2.0)
+        arr.push(3.0)
+
+        let obj = JsonObject.new()
+        obj.set("nums", arr)
+
+        let got = obj.get("nums")
+        if got is JsonArray {
+            assert(got.length() == 3)
+            let first = got.get(0)
+            if first is f64 {
+                assert(first == 1.0)
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+}
+
+tests "JsonArray construction" {
+    test "new creates empty array" {
+        let arr = JsonArray.new()
+        assert(arr.length() == 0)
+    }
+}
+
+tests "JsonArray push and get" {
+    test "push and get string" {
+        let arr = JsonArray.new()
+        arr.push("hello")
+        assert(arr.length() == 1)
+        let v = arr.get(0)
+        if v is string {
+            assert(v == "hello")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "push and get f64" {
+        let arr = JsonArray.new()
+        arr.push(42.0)
+        let v = arr.get(0)
+        if v is f64 {
+            assert(v == 42.0)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "push and get bool" {
+        let arr = JsonArray.new()
+        arr.push(true)
+        arr.push(false)
+        let v0 = arr.get(0)
+        let v1 = arr.get(1)
+        if v0 is bool {
+            assert(v0 == true)
+        } else {
+            assert(false)
+        }
+        if v1 is bool {
+            assert(v1 == false)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "push and get nil" {
+        let arr = JsonArray.new()
+        arr.push(nil)
+        assert(arr.get(0) is nil)
+    }
+
+    test "mixed type array" {
+        let arr = JsonArray.new()
+        arr.push("hello")
+        arr.push(42.0)
+        arr.push(true)
+        arr.push(nil)
+        assert(arr.length() == 4)
+
+        let v0 = arr.get(0)
+        if v0 is string {
+            assert(v0 == "hello")
+        } else {
+            assert(false)
+        }
+
+        let v1 = arr.get(1)
+        if v1 is f64 {
+            assert(v1 == 42.0)
+        } else {
+            assert(false)
+        }
+
+        let v2 = arr.get(2)
+        if v2 is bool {
+            assert(v2 == true)
+        } else {
+            assert(false)
+        }
+
+        assert(arr.get(3) is nil)
+    }
+
+    test "multiple pushes grow length" {
+        let arr = JsonArray.new()
+        var i: f64 = 0.0
+        while i < 10.0 {
+            arr.push(i)
+            i = i + 1.0
+        }
+        assert(arr.length() == 10)
+    }
+}
+
+tests "JsonArray nested" {
+    test "nested JsonObject in array" {
+        let obj = JsonObject.new()
+        obj.set("key", "value")
+
+        let arr = JsonArray.new()
+        arr.push(obj)
+
+        let got = arr.get(0)
+        if got is JsonObject {
+            let v = got.get("key")
+            if v is string {
+                assert(v == "value")
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+
+    test "nested JsonArray in array" {
+        let inner = JsonArray.new()
+        inner.push(1.0)
+        inner.push(2.0)
+
+        let outer = JsonArray.new()
+        outer.push(inner)
+
+        let got = outer.get(0)
+        if got is JsonArray {
+            assert(got.length() == 2)
+            let v = got.get(1)
+            if v is f64 {
+                assert(v == 2.0)
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+}
+
+tests "deeply nested JSON structures" {
+    test "object with array of objects" {
+        // Build: { "users": [{ "name": "Alice", "age": 30.0 }, { "name": "Bob", "age": 25.0 }] }
+        let alice = JsonObject.new()
+        alice.set("name", "Alice")
+        alice.set("age", 30.0)
+
+        let bob = JsonObject.new()
+        bob.set("name", "Bob")
+        bob.set("age", 25.0)
+
+        let users = JsonArray.new()
+        users.push(alice)
+        users.push(bob)
+
+        let root = JsonObject.new()
+        root.set("users", users)
+
+        // Navigate
+        let arr = root.get("users")
+        if arr is JsonArray {
+            assert(arr.length() == 2)
+
+            let first = arr.get(0)
+            if first is JsonObject {
+                let name = first.get("name")
+                if name is string {
+                    assert(name == "Alice")
+                } else {
+                    assert(false)
+                }
+                let age = first.get("age")
+                if age is f64 {
+                    assert(age == 30.0)
+                } else {
+                    assert(false)
+                }
+            } else {
+                assert(false)
+            }
+
+            let second = arr.get(1)
+            if second is JsonObject {
+                let name = second.get("name")
+                if name is string {
+                    assert(name == "Bob")
+                } else {
+                    assert(false)
+                }
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+
+    test "three levels of nesting" {
+        // { "level1": { "level2": { "level3": "deep" } } }
+        let l3 = JsonObject.new()
+        l3.set("level3", "deep")
+
+        let l2 = JsonObject.new()
+        l2.set("level2", l3)
+
+        let l1 = JsonObject.new()
+        l1.set("level1", l2)
+
+        let got_l2 = l1.get("level1")
+        if got_l2 is JsonObject {
+            let got_l3 = got_l2.get("level2")
+            if got_l3 is JsonObject {
+                let v = got_l3.get("level3")
+                if v is string {
+                    assert(v == "deep")
+                } else {
+                    assert(false)
+                }
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+
+    test "array of arrays" {
+        // [[1.0, 2.0], [3.0, 4.0]]
+        let row1 = JsonArray.new()
+        row1.push(1.0)
+        row1.push(2.0)
+
+        let row2 = JsonArray.new()
+        row2.push(3.0)
+        row2.push(4.0)
+
+        let matrix = JsonArray.new()
+        matrix.push(row1)
+        matrix.push(row2)
+
+        assert(matrix.length() == 2)
+
+        let r0 = matrix.get(0)
+        if r0 is JsonArray {
+            assert(r0.length() == 2)
+            let v = r0.get(1)
+            if v is f64 {
+                assert(v == 2.0)
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+
+        let r1 = matrix.get(1)
+        if r1 is JsonArray {
+            let v = r1.get(0)
+            if v is f64 {
+                assert(v == 3.0)
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+
+    test "complex mixed structure" {
+        // { "config": { "enabled": true, "tags": ["a", "b"], "count": 5.0 } }
+        let tags = JsonArray.new()
+        tags.push("a")
+        tags.push("b")
+
+        let config = JsonObject.new()
+        config.set("enabled", true)
+        config.set("tags", tags)
+        config.set("count", 5.0)
+
+        let root = JsonObject.new()
+        root.set("config", config)
+
+        let cfg = root.get("config")
+        if cfg is JsonObject {
+            let enabled = cfg.get("enabled")
+            if enabled is bool {
+                assert(enabled == true)
+            } else {
+                assert(false)
+            }
+
+            let t = cfg.get("tags")
+            if t is JsonArray {
+                assert(t.length() == 2)
+                let first_tag = t.get(0)
+                if first_tag is string {
+                    assert(first_tag == "a")
+                } else {
+                    assert(false)
+                }
+            } else {
+                assert(false)
+            }
+
+            let cnt = cfg.get("count")
+            if cnt is f64 {
+                assert(cnt == 5.0)
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+}
+
+tests "JsonObject edge cases" {
+    test "empty string key" {
+        let obj = JsonObject.new()
+        obj.set("", "empty key")
+        let v = obj.get("")
+        if v is string {
+            assert(v == "empty key")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "empty string value" {
+        let obj = JsonObject.new()
+        obj.set("key", "")
+        let v = obj.get("key")
+        if v is string {
+            assert(v == "")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "zero f64 value" {
+        let obj = JsonObject.new()
+        obj.set("zero", 0.0)
+        let v = obj.get("zero")
+        if v is f64 {
+            assert(v == 0.0)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "negative f64 value" {
+        let obj = JsonObject.new()
+        obj.set("neg", -42.5)
+        let v = obj.get("neg")
+        if v is f64 {
+            assert(v == -42.5)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "many keys triggers rehash" {
+        let obj = JsonObject.new()
+        var i: f64 = 0.0
+        while i < 20.0 {
+            let key = i.to_string()
+            obj.set(key, i)
+            i = i + 1.0
+        }
+        assert(obj.len() == 20)
+
+        // Verify all keys still accessible after rehash
+        var j: f64 = 0.0
+        while j < 20.0 {
+            let key = j.to_string()
+            let v = obj.get(key)
+            if v is f64 {
+                assert(v == j)
+            } else {
+                assert(false)
+            }
+            j = j + 1.0
+        }
+    }
+}

@@ -1,0 +1,120 @@
+// stdlib/json.vole
+//
+// JSON types - pure Vole types for representing JSON data.
+//
+// Usage: let { JsonObject, JsonArray } = import "std:json"
+//
+// Json is a type alias (not exported) for the full union:
+//   string | f64 | bool | nil | JsonObject | JsonArray
+//
+// JsonObject wraps a Map<string, Json> and provides get/set/keys/remove.
+// JsonArray wraps a [Json] array and provides get/push/length.
+//
+// To define a Json type alias in your own module:
+//   let Json = string | f64 | bool | nil | JsonObject | JsonArray
+//
+// Example:
+//   let obj = JsonObject.new()
+//   obj.set("name", "Alice")
+//   obj.set("age", 30.0)
+//
+//   let arr = JsonArray.new()
+//   arr.push(obj)
+//
+//   let root = JsonObject.new()
+//   root.set("users", arr)
+
+let { Map } = import "std:collections/map"
+
+// Json union type - represents any valid JSON value.
+// Numbers are represented as f64 (matching the JSON spec's use of IEEE 754).
+// Null is represented as nil.
+let Json = string | f64 | bool | nil | JsonObject | JsonArray
+
+// JsonObject - a JSON object (key-value map with string keys).
+//
+// Backed by Map<string, Json>. Keys are insertion-ordered within hash buckets.
+class JsonObject {
+    data: Map<string, Json>,
+
+    statics {
+        // Create an empty JsonObject.
+        func new() -> JsonObject {
+            return JsonObject {
+                data: Map.new<string, Json>(),
+            }
+        }
+    }
+
+    // Set a key-value pair. Overwrites any existing value for the key.
+    func set(key: string, value: Json) {
+        self.data.set(key, value)
+    }
+
+    // Get the value for a key. Returns nil if the key is not present.
+    //
+    // Note: nil is also a valid JSON value, so to distinguish "key absent"
+    // from "key present with null value", use contains_key() first.
+    func get(key: string) -> Json {
+        let result = self.data.get(key)
+        if result is nil {
+            return nil
+        }
+        return result
+    }
+
+    // Return the number of key-value pairs.
+    func len() -> i64 {
+        return self.data.len()
+    }
+
+    // Check whether a key exists in the object.
+    func contains_key(key: string) -> bool {
+        return self.data.contains_key(key)
+    }
+
+    // Return an iterator over the keys.
+    func keys() -> Iterator<string> {
+        return self.data.keys()
+    }
+
+    // Remove a key-value pair, returning the removed value (or nil if absent).
+    func remove(key: string) -> Json {
+        let result = self.data.remove(key)
+        if result is nil {
+            return nil
+        }
+        return result
+    }
+}
+
+// JsonArray - a JSON array (ordered list of Json values).
+//
+// Backed by a [Json] array.
+class JsonArray {
+    items: [Json],
+
+    statics {
+        // Create an empty JsonArray.
+        func new() -> JsonArray {
+            return JsonArray {
+                items: [],
+            }
+        }
+    }
+
+    // Return the number of elements.
+    func length() -> i64 {
+        return self.items.length()
+    }
+
+    // Get the element at the given index.
+    func get(index: i64) -> Json {
+        return self.items[index]
+    }
+
+    // Append an element to the end.
+    func push(value: Json) {
+        self.items.push(value)
+    }
+}
