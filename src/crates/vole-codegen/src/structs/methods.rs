@@ -103,33 +103,40 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(&mc.object)?;
         let method_name_str = self.interner().resolve(mc.method);
 
-        // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
-        let module_id_opt = self.arena().unwrap_module(obj.type_id).map(|m| m.module_id);
-        if let Some(module_id) = module_id_opt {
-            return self.module_method_call(module_id, mc, expr_id, method_name_str);
+        // Route method dispatch based on sema's MethodDispatchKind annotation.
+        // In monomorphized contexts sema doesn't annotate (resolution is skipped),
+        // so we fall back to type-detection for those cases.
+        let dispatch_kind = self
+            .get_method_dispatch_kind(expr_id)
+            .unwrap_or_else(|| self.infer_method_dispatch_kind(&obj, method_name_str));
+        match dispatch_kind {
+            vole_sema::MethodDispatchKind::Module(module_id) => {
+                return self.module_method_call(module_id, mc, expr_id, method_name_str);
+            }
+            vole_sema::MethodDispatchKind::Builtin => {
+                if let Some(result) =
+                    self.builtin_method(&obj, method_name_str, concrete_return_hint)?
+                {
+                    let mut obj = obj;
+                    self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                    return Ok(result);
+                }
+            }
+            vole_sema::MethodDispatchKind::ArrayPush => {
+                let result = self.array_push_call(&obj, mc)?;
+                let mut obj = obj;
+                self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
+                return Ok(result);
+            }
+            vole_sema::MethodDispatchKind::Standard => {
+                // Fall through to RuntimeIterator check and standard dispatch below.
+            }
         }
 
-        // Handle built-in methods (passing concrete_return_hint for iter methods)
-        if let Some(result) = self.builtin_method(&obj, method_name_str, concrete_return_hint)? {
-            let mut obj = obj;
-            self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
-            return Ok(result);
-        }
-
-        // Handle array.push(value) - needs to compile argument and call runtime
-        if let Some(_elem_type_id) = self.arena().unwrap_array(obj.type_id)
-            && method_name_str == "push"
-        {
-            let result = self.array_push_call(&obj, mc)?;
-            let mut obj = obj;
-            self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;
-            return Ok(result);
-        }
-
-        // Handle RuntimeIterator methods - these call external functions directly
-        // without interface boxing or vtable dispatch
-        let runtime_iter_elem = self.arena().unwrap_runtime_iterator(obj.type_id);
-        if let Some(elem_type_id) = runtime_iter_elem {
+        // RuntimeIterator dispatch: detected from the codegen-side compiled type
+        // (not sema annotation) because the Iterator<T> → RuntimeIterator<T>
+        // conversion happens in codegen only.
+        if let Some(elem_type_id) = self.arena().unwrap_runtime_iterator(obj.type_id) {
             return self.runtime_iterator_method(&obj, mc, method_name_str, elem_type_id, expr_id);
         }
 
@@ -864,5 +871,33 @@ impl Cg<'_, '_, '_> {
         is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         self.compile_method_defaults(method_id, start_index, expected_types, is_generic_class)
+    }
+
+    /// Infer the method dispatch kind from the receiver type when sema didn't
+    /// annotate (e.g. in monomorphized generic contexts where sema resolution
+    /// is skipped). RuntimeIterator dispatch is handled separately in the
+    /// caller via `unwrap_runtime_iterator` on the compiled value's type.
+    fn infer_method_dispatch_kind(
+        &self,
+        obj: &CompiledValue,
+        method_name: &str,
+    ) -> vole_sema::MethodDispatchKind {
+        let arena = self.arena();
+        if let Some(m) = arena.unwrap_module(obj.type_id) {
+            return vole_sema::MethodDispatchKind::Module(m.module_id);
+        }
+        // Check array-specific methods: push needs its own path, other array
+        // builtins (length, iter) go through builtin_method.
+        if arena.unwrap_array(obj.type_id).is_some() {
+            if method_name == "push" {
+                return vole_sema::MethodDispatchKind::ArrayPush;
+            }
+            return vole_sema::MethodDispatchKind::Builtin;
+        }
+        // String and range builtins
+        if obj.type_id == TypeId::STRING || obj.type_id == TypeId::RANGE {
+            return vole_sema::MethodDispatchKind::Builtin;
+        }
+        vole_sema::MethodDispatchKind::Standard
     }
 }

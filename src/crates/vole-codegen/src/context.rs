@@ -449,6 +449,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.node_map.get_coercion_kind(expr_node_id)
     }
 
+    /// Get the method dispatch kind annotation for a method call expression.
+    #[inline]
+    pub fn get_method_dispatch_kind(
+        &self,
+        expr_node_id: vole_frontend::NodeId,
+    ) -> Option<vole_sema::MethodDispatchKind> {
+        self.env
+            .analyzed
+            .node_map
+            .get_method_dispatch_kind(expr_node_id)
+    }
+
     /// Get the union storage kind annotation for an expression involving
     /// union array elements (for-loops, indexing, compound assignments).
     #[inline]

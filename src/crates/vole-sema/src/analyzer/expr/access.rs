@@ -402,6 +402,22 @@ impl Analyzer {
                     crate::node_map::CoercionKind::IteratorWrap { elem_type },
                 );
             }
+
+            // Annotate method dispatch kind for codegen routing.
+            let dispatch_kind = {
+                let arena = self.type_arena();
+                if arena.unwrap_array(inner_type_id).is_some() && method_name == "push" {
+                    crate::node_map::MethodDispatchKind::ArrayPush
+                } else if resolved.is_builtin() {
+                    crate::node_map::MethodDispatchKind::Builtin
+                } else {
+                    crate::node_map::MethodDispatchKind::Standard
+                }
+            };
+            self.results
+                .node_map
+                .set_method_dispatch_kind(resolution_id, dispatch_kind);
+
             // Build a synthetic Expr wrapper for process_resolved_instance_method
             // (it reads expr.id to store resolution and expr.span for diagnostics).
             let synthetic_expr = Expr {
@@ -618,6 +634,25 @@ impl Analyzer {
                     crate::node_map::CoercionKind::IteratorWrap { elem_type },
                 );
             }
+
+            // Annotate method dispatch kind so codegen can route without
+            // re-detecting the receiver type via arena queries.
+            // Note: RuntimeIterator dispatch is NOT annotated here; the
+            // Iterator<T> → RuntimeIterator<T> conversion is a codegen concern.
+            let dispatch_kind = {
+                let arena = self.type_arena();
+                if arena.unwrap_array(object_type_id).is_some() && method_name == "push" {
+                    crate::node_map::MethodDispatchKind::ArrayPush
+                } else if resolved.is_builtin() {
+                    crate::node_map::MethodDispatchKind::Builtin
+                } else {
+                    crate::node_map::MethodDispatchKind::Standard
+                }
+            };
+            self.results
+                .node_map
+                .set_method_dispatch_kind(expr.id, dispatch_kind);
+
             return self.process_resolved_instance_method(
                 expr,
                 method_call,
@@ -1204,6 +1239,12 @@ impl Analyzer {
                 external_info,
                 concrete_return_hint: None,
             },
+        );
+
+        // Annotate dispatch kind so codegen can route without re-detecting module type.
+        self.results.node_map.set_method_dispatch_kind(
+            expr.id,
+            crate::node_map::MethodDispatchKind::Module(module_id),
         );
 
         Ok(Some(concrete_return_id))

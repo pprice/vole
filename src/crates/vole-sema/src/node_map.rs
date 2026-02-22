@@ -120,6 +120,36 @@ pub enum CoercionKind {
     IteratorWrap { elem_type: TypeId },
 }
 
+/// Method dispatch routing annotation, set by sema during method resolution.
+///
+/// Codegen reads this to route to the correct dispatch path without
+/// re-detecting the receiver type via arena queries. This replaces
+/// the module/builtin/array-push detection that previously used
+/// arena queries in codegen.
+///
+/// Note: `RuntimeIterator` dispatch is NOT annotated here because the
+/// Iterator<T> → RuntimeIterator<T> conversion happens in codegen only
+/// (sema always sees Iterator<T> for builtin iterator return types).
+/// Codegen detects RuntimeIterator dispatch from the compiled value's type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MethodDispatchKind {
+    /// Module-scoped function call (e.g., `math.sqrt(16.0)`).
+    /// The `ModuleId` identifies the module containing the function.
+    Module(ModuleId),
+    /// Built-in method on array/string/range (length, iter, to_upper, etc.)
+    /// handled by `builtin_method()` in codegen.
+    Builtin,
+    /// `array.push(value)` — needs special codegen to compile the argument
+    /// and call the array push runtime function.
+    ArrayPush,
+    /// Default: vtable dispatch, direct call, external call, or other
+    /// standard method dispatch. Codegen proceeds through the normal
+    /// resolution-driven paths. Codegen will still check for RuntimeIterator
+    /// dispatch at the codegen level (since the Iterator<T> → RuntimeIterator<T>
+    /// conversion is a codegen concern).
+    Standard,
+}
+
 /// What kind of optional chain this is (field access or method call).
 #[derive(Debug, Clone)]
 pub enum OptionalChainKind {
@@ -276,6 +306,9 @@ pub struct NodeData {
 
     /// Union storage kind for array elements (inline vs heap-boxed).
     pub union_storage_kind: Option<UnionStorageKind>,
+
+    /// Method dispatch routing for method call expressions.
+    pub method_dispatch_kind: Option<MethodDispatchKind>,
 }
 
 // ---------------------------------------------------------------------------
@@ -586,6 +619,18 @@ impl NodeMap {
         self.get_mut_or_insert(node).union_storage_kind = Some(kind);
     }
 
+    // -- method_dispatch_kind ----------------------------------------------
+
+    /// Get the method dispatch kind for a method call expression.
+    pub fn get_method_dispatch_kind(&self, node: NodeId) -> Option<MethodDispatchKind> {
+        self.get(node).and_then(|d| d.method_dispatch_kind)
+    }
+
+    /// Set the method dispatch kind for a method call expression.
+    pub fn set_method_dispatch_kind(&mut self, node: NodeId, kind: MethodDispatchKind) {
+        self.get_mut_or_insert(node).method_dispatch_kind = Some(kind);
+    }
+
     // ======================================================================
     // Bulk operations
     // ======================================================================
@@ -764,6 +809,9 @@ fn merge_node_data(dst: &mut NodeData, src: NodeData) {
     }
     if src.union_storage_kind.is_some() {
         dst.union_storage_kind = src.union_storage_kind;
+    }
+    if src.method_dispatch_kind.is_some() {
+        dst.method_dispatch_kind = src.method_dispatch_kind;
     }
 }
 
