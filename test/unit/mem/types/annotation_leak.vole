@@ -1,0 +1,414 @@
+// RC leak tests for annotation instances in FieldMeta.annotations.
+//
+// Annotations are struct instances stored in the FieldMeta.annotations array.
+// Each annotation instance is RC'd (boxed as `unknown`), and string-field
+// annotations carry additional RC strings. These tests verify that accessing
+// annotations via .@meta does not leak any of those allocations.
+
+// --- Annotation types ---
+@annotation
+struct label {
+    text: string,
+}
+
+@annotation
+struct ignore {}
+
+@annotation
+struct bounds {
+    min: i64,
+    max: i64,
+}
+
+@annotation
+struct description {
+    summary: string,
+    detail: string,
+}
+
+// ---------------------------------------------------------------------------
+// Types with annotated fields
+// ---------------------------------------------------------------------------
+
+class Config {
+    @label(text: "The hostname")
+    host: string,
+
+    @ignore
+    secret: string,
+
+    @bounds(min: 0, max: 65535)
+    port: i64,
+
+    debug: bool,
+}
+
+struct Point {
+    @label(text: "x-axis")
+    x: i64,
+
+    @label(text: "y-axis")
+    y: i64,
+}
+
+class Service {
+    @ignore
+    @label(text: "old endpoint")
+    url: string,
+
+    @description(summary: "short", detail: "a longer description of the version field")
+    version: string,
+}
+
+class TaggedItem {
+    @label("positional-tag")
+    value: i64,
+}
+
+struct RichAnnotated {
+    @label(text: "field_a")
+    @bounds(min: 1, max: 100)
+    @description(summary: "first", detail: "first field with three annotations")
+    a: i64,
+
+    @label(text: "field_b")
+    @ignore
+    b: string,
+
+    c: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Tests: FieldMeta.annotations array with annotation instances — no leak
+// ---------------------------------------------------------------------------
+
+tests "annotation instances in FieldMeta no leak" {
+    test "single annotation on field no leak" {
+        let meta = Config.@meta
+        let host_field = meta.fields[0]
+        assert(host_field.name == "host")
+        assert(host_field.annotations.length() == 1)
+        let ann = host_field.annotations[0]
+        assert(ann is label)
+    }
+
+    test "parameterless annotation on field no leak" {
+        let meta = Config.@meta
+        let secret_field = meta.fields[1]
+        assert(secret_field.name == "secret")
+        assert(secret_field.annotations.length() == 1)
+        assert(secret_field.annotations[0] is ignore)
+    }
+
+    test "multi-arg annotation on field no leak" {
+        let meta = Config.@meta
+        let port_field = meta.fields[2]
+        assert(port_field.name == "port")
+        assert(port_field.annotations.length() == 1)
+        let ann = port_field.annotations[0]
+        assert(ann is bounds)
+        if ann is bounds {
+            assert(ann.min == 0)
+            assert(ann.max == 65535)
+        }
+    }
+
+    test "unannotated field empty annotations no leak" {
+        let meta = Config.@meta
+        let debug_field = meta.fields[3]
+        assert(debug_field.name == "debug")
+        assert(debug_field.annotations.length() == 0)
+    }
+
+    test "struct field annotation instances no leak" {
+        let meta = Point.@meta
+        let x_field = meta.fields[0]
+        assert(x_field.annotations.length() == 1)
+        assert(x_field.annotations[0] is label)
+        let y_field = meta.fields[1]
+        assert(y_field.annotations.length() == 1)
+        assert(y_field.annotations[0] is label)
+    }
+
+    test "positional arg annotation no leak" {
+        let meta = TaggedItem.@meta
+        let val_field = meta.fields[0]
+        assert(val_field.annotations.length() == 1)
+        let ann = val_field.annotations[0]
+        assert(ann is label)
+        if ann is label {
+            assert(ann.text == "positional-tag")
+        }
+    }
+
+    test "all fields annotations accessed then dropped no leak" {
+        let meta = Config.@meta
+        var i = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            let anns = field.annotations
+            let count = anns.length()
+            assert(count >= 0)
+            i = i + 1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: repeated .@meta calls on annotated type — no leak
+// ---------------------------------------------------------------------------
+
+tests "repeated meta calls on annotated types no leak" {
+    test "repeated Config meta calls no leak" {
+        let m1 = Config.@meta
+        let m2 = Config.@meta
+        let m3 = Config.@meta
+        assert(m1.fields[0].annotations.length() == 1)
+        assert(m2.fields[0].annotations.length() == 1)
+        assert(m3.fields[0].annotations.length() == 1)
+    }
+
+    test "repeated meta in loop no leak" {
+        var i = 0
+        while i < 10 {
+            let meta = Config.@meta
+            assert(meta.fields[0].annotations.length() == 1)
+            let ann = meta.fields[0].annotations[0]
+            assert(ann is label)
+            i = i + 1
+        }
+    }
+
+    test "repeated annotation value access in loop no leak" {
+        var i = 0
+        while i < 10 {
+            let meta = Config.@meta
+            let ann = meta.fields[0].annotations[0]
+            if ann is label {
+                assert(ann.text == "The hostname")
+            }
+            i = i + 1
+        }
+    }
+
+    test "repeated Point meta calls no leak" {
+        let m1 = Point.@meta
+        let m2 = Point.@meta
+        assert(m1.fields[0].annotations.length() == 1)
+        assert(m2.fields[1].annotations.length() == 1)
+        let ann_x = m1.fields[0].annotations[0]
+        if ann_x is label {
+            assert(ann_x.text == "x-axis")
+        }
+        let ann_y = m2.fields[1].annotations[0]
+        if ann_y is label {
+            assert(ann_y.text == "y-axis")
+        }
+    }
+
+    test "repeated Service meta calls no leak" {
+        var i = 0
+        while i < 5 {
+            let meta = Service.@meta
+            let url_field = meta.fields[0]
+            assert(url_field.annotations.length() == 2)
+            assert(url_field.annotations[0] is ignore)
+            assert(url_field.annotations[1] is label)
+            i = i + 1
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: annotation struct with string fields (RC) — no leak after .@meta
+// ---------------------------------------------------------------------------
+
+tests "annotation structs with RC string fields no leak" {
+    test "label annotation text field no leak" {
+        let meta = Config.@meta
+        let ann = meta.fields[0].annotations[0]
+        if ann is label {
+            let text = ann.text
+            assert(text == "The hostname")
+        }
+    }
+
+    test "description annotation two string fields no leak" {
+        let meta = Service.@meta
+        let version_field = meta.fields[1]
+        assert(version_field.name == "version")
+        assert(version_field.annotations.length() == 1)
+        let ann = version_field.annotations[0]
+        assert(ann is description)
+        if ann is description {
+            assert(ann.summary == "short")
+            assert(ann.detail == "a longer description of the version field")
+        }
+    }
+
+    test "string annotation fields copied to local variables no leak" {
+        let meta = Service.@meta
+        let ann = meta.fields[1].annotations[0]
+        if ann is description {
+            let s = ann.summary
+            let d = ann.detail
+            assert(s == "short")
+            assert(d == "a longer description of the version field")
+        }
+    }
+
+    test "label annotation string in loop no leak" {
+        var i = 0
+        while i < 10 {
+            let meta = Point.@meta
+            let ann = meta.fields[0].annotations[0]
+            if ann is label {
+                let text = ann.text
+                assert(text == "x-axis")
+            }
+            i = i + 1
+        }
+    }
+
+    test "positional label string no leak" {
+        let meta = TaggedItem.@meta
+        let ann = meta.fields[0].annotations[0]
+        if ann is label {
+            let text = ann.text
+            assert(text == "positional-tag")
+        }
+    }
+
+    test "multiple string annotations accessed and dropped no leak" {
+        let meta = Service.@meta
+        // url field: @ignore, @label(text: "old endpoint")
+        let url_field = meta.fields[0]
+        let label_ann = url_field.annotations[1]
+        if label_ann is label {
+            let text = label_ann.text
+            assert(text == "old endpoint")
+        }
+        // version field: @description(summary: ..., detail: ...)
+        let version_field = meta.fields[1]
+        let desc_ann = version_field.annotations[0]
+        if desc_ann is description {
+            let summary = desc_ann.summary
+            let detail = desc_ann.detail
+            assert(summary == "short")
+            assert(detail == "a longer description of the version field")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests: multiple fields with multiple annotations — no leak
+// ---------------------------------------------------------------------------
+
+tests "multiple fields multiple annotations no leak" {
+    test "field with three annotations no leak" {
+        let meta = RichAnnotated.@meta
+        let a_field = meta.fields[0]
+        assert(a_field.name == "a")
+        assert(a_field.annotations.length() == 3)
+        assert(a_field.annotations[0] is label)
+        assert(a_field.annotations[1] is bounds)
+        assert(a_field.annotations[2] is description)
+    }
+
+    test "field with two annotations no leak" {
+        let meta = RichAnnotated.@meta
+        let b_field = meta.fields[1]
+        assert(b_field.name == "b")
+        assert(b_field.annotations.length() == 2)
+        assert(b_field.annotations[0] is label)
+        assert(b_field.annotations[1] is ignore)
+    }
+
+    test "unannotated field among heavily annotated fields no leak" {
+        let meta = RichAnnotated.@meta
+        let c_field = meta.fields[2]
+        assert(c_field.name == "c")
+        assert(c_field.annotations.length() == 0)
+    }
+
+    test "all annotation values from richly annotated type no leak" {
+        let meta = RichAnnotated.@meta
+        // field a: label, bounds, description
+        let a_ann0 = meta.fields[0].annotations[0]
+        if a_ann0 is label {
+            assert(a_ann0.text == "field_a")
+        }
+        let a_ann1 = meta.fields[0].annotations[1]
+        if a_ann1 is bounds {
+            assert(a_ann1.min == 1)
+            assert(a_ann1.max == 100)
+        }
+        let a_ann2 = meta.fields[0].annotations[2]
+        if a_ann2 is description {
+            assert(a_ann2.summary == "first")
+            assert(a_ann2.detail == "first field with three annotations")
+        }
+        // field b: label, ignore
+        let b_ann0 = meta.fields[1].annotations[0]
+        if b_ann0 is label {
+            assert(b_ann0.text == "field_b")
+        }
+        assert(meta.fields[1].annotations[1] is ignore)
+    }
+
+    test "repeated access to multi-annotated fields in loop no leak" {
+        var i = 0
+        while i < 5 {
+            let meta = RichAnnotated.@meta
+            let a_field = meta.fields[0]
+            assert(a_field.annotations.length() == 3)
+            let b_field = meta.fields[1]
+            assert(b_field.annotations.length() == 2)
+            let c_field = meta.fields[2]
+            assert(c_field.annotations.length() == 0)
+
+            // Access annotation values to exercise RC
+            let ann_a0 = a_field.annotations[0]
+            if ann_a0 is label {
+                let text = ann_a0.text
+                assert(text == "field_a")
+            }
+            let ann_a2 = a_field.annotations[2]
+            if ann_a2 is description {
+                let s = ann_a2.summary
+                let d = ann_a2.detail
+                assert(s == "first")
+                assert(d == "first field with three annotations")
+            }
+
+            i = i + 1
+        }
+    }
+
+    test "Service multiple annotations on url field no leak" {
+        let meta = Service.@meta
+        let url_field = meta.fields[0]
+        assert(url_field.annotations.length() == 2)
+        assert(url_field.annotations[0] is ignore)
+        assert(url_field.annotations[1] is label)
+        let url_label_ann = url_field.annotations[1]
+        if url_label_ann is label {
+            assert(url_label_ann.text == "old endpoint")
+        }
+    }
+
+    test "mixed annotated and unannotated across all Config fields no leak" {
+        let meta = Config.@meta
+        // host: 1 annotation (label)
+        assert(meta.fields[0].annotations.length() == 1)
+        assert(meta.fields[0].annotations[0] is label)
+        // secret: 1 annotation (ignore)
+        assert(meta.fields[1].annotations.length() == 1)
+        assert(meta.fields[1].annotations[0] is ignore)
+        // port: 1 annotation (bounds)
+        assert(meta.fields[2].annotations.length() == 1)
+        assert(meta.fields[2].annotations[0] is bounds)
+        // debug: 0 annotations
+        assert(meta.fields[3].annotations.length() == 0)
+    }
+}

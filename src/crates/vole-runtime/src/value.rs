@@ -156,6 +156,11 @@ pub enum RuntimeTypeId {
     Channel = 13,
     /// RC-managed boxed 128-bit payload used by dynamic arrays for i128/f128.
     Wide128 = 14,
+    /// Heap-allocated TaggedValue buffer: `[tag: u64, value: u64]` (16 bytes).
+    /// Not RC-managed itself (no RcHeader). Used for annotation instances in
+    /// FieldMeta.annotations arrays. When cleaned up: reads inner tag to
+    /// determine if value is RC, rc_dec's if needed, then frees the 16-byte buffer.
+    UnknownHeap = 15,
 }
 
 impl RuntimeTypeId {
@@ -176,6 +181,7 @@ impl RuntimeTypeId {
             12 => Some(Self::UnionHeap),
             13 => Some(Self::Channel),
             14 => Some(Self::Wide128),
+            15 => Some(Self::UnknownHeap),
             _ => None,
         }
     }
@@ -197,6 +203,7 @@ impl RuntimeTypeId {
             Self::UnionHeap => "UnionHeap",
             Self::Channel => "Channel",
             Self::Wide128 => "Wide128",
+            Self::UnknownHeap => "UnknownHeap",
         }
     }
 }
@@ -297,6 +304,8 @@ impl TaggedValue {
             rc_dec(self.value as *mut u8);
         } else if self.tag == RuntimeTypeId::UnionHeap as u64 {
             union_heap_cleanup(self.value as *mut u8);
+        } else if self.tag == RuntimeTypeId::UnknownHeap as u64 {
+            unknown_heap_cleanup(self.value as *mut u8);
         }
     }
 
@@ -361,15 +370,7 @@ pub fn unknown_heap_cleanup(ptr: *mut u8) {
     unsafe {
         let tag = *(ptr as *const u64);
         let value = *(ptr.add(8) as *const u64);
-        // RC-managed types: String=1, Array=5, Closure=6, Instance=7
-        let is_rc = matches!(
-            tag,
-            x if x == RuntimeTypeId::String as u64
-                || x == RuntimeTypeId::Array as u64
-                || x == RuntimeTypeId::Closure as u64
-                || x == RuntimeTypeId::Instance as u64
-        );
-        if is_rc && value != 0 {
+        if tag_needs_rc(tag) && value != 0 {
             rc_dec(value as *mut u8);
         }
         // Free the 16-byte heap buffer

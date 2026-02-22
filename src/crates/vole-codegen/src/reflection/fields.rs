@@ -228,11 +228,14 @@ fn build_annotations_array(
             union_layout::PAYLOAD_OFFSET,
         );
 
-        // Push as I64 (matching how box_to_unknown + prepare_dynamic_array_store
-        // works for regular [unknown] arrays). The actual type tag lives inside
-        // the heap TaggedValue at offset 0.
-        let array_tag =
-            cg.iconst_cached(types::I64, vole_runtime::value::RuntimeTypeId::I64 as i64);
+        // Push as UnknownHeap so that array_drop calls unknown_heap_cleanup
+        // on the heap TaggedValue, which rc_dec's the inner annotation instance
+        // and frees the 16-byte buffer. The actual type tag lives inside the
+        // heap TaggedValue at offset 0.
+        let array_tag = cg.iconst_cached(
+            types::I64,
+            vole_runtime::value::RuntimeTypeId::UnknownHeap as i64,
+        );
         cg.emit_call(array_push_ref, &[arr_ptr, array_tag, heap_tv_ptr]);
     }
 

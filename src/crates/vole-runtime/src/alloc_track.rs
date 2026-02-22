@@ -9,7 +9,7 @@
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
 /// Number of type slots. Must be greater than the highest RuntimeTypeId variant.
-const NUM_TYPE_SLOTS: usize = 15;
+const NUM_TYPE_SLOTS: usize = 16;
 
 /// Per-type allocation counters, indexed by RuntimeTypeId discriminant.
 static TYPE_COUNTERS: [AtomicI64; NUM_TYPE_SLOTS] = {
