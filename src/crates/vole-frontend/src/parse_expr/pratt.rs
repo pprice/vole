@@ -161,6 +161,39 @@ impl<'src> Parser<'src> {
                         span,
                     });
                 }
+                TokenType::KwAs => {
+                    // Cast operators: x as? Type (safe) or x as! Type (unsafe)
+                    self.advance();
+                    let cast_kind = if self.check(TokenType::Question) {
+                        self.advance();
+                        AsCastKind::Safe
+                    } else if self.check(TokenType::Bang) {
+                        self.advance();
+                        AsCastKind::Unsafe
+                    } else {
+                        return Err(ParseError::new(
+                            ParserError::UnexpectedToken {
+                                token: "expected '?' or '!' after 'as'".to_string(),
+                                span: self.current.span.into(),
+                            },
+                            self.current.span,
+                        ));
+                    };
+                    let type_span_start = self.current.span;
+                    let type_expr = self.parse_type()?;
+                    let type_span = type_span_start.merge(self.previous.span);
+                    let span = left.span.merge(type_span);
+                    return Ok(Expr {
+                        id: self.next_id(),
+                        kind: ExprKind::AsCast(Box::new(AsCastExpr {
+                            value: left,
+                            kind: cast_kind,
+                            type_expr,
+                            type_span,
+                        })),
+                        span,
+                    });
+                }
                 _ => break,
             };
 

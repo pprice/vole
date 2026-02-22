@@ -2,6 +2,7 @@
 
 mod access;
 mod array;
+mod as_cast;
 mod assign;
 mod binary;
 mod call;

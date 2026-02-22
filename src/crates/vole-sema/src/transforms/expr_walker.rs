@@ -36,6 +36,7 @@ pub fn any_child_expr(expr: &Expr, visit: &mut impl FnMut(&Expr) -> bool) -> boo
         ExprKind::Match(m) => visit(&m.scrutinee) || m.arms.iter().any(|arm| visit(&arm.body)),
         ExprKind::NullCoalesce(nc) => visit(&nc.value) || visit(&nc.default),
         ExprKind::Is(is_expr) => visit(&is_expr.value),
+        ExprKind::AsCast(as_cast) => visit(&as_cast.value),
         ExprKind::FieldAccess(fa) => visit(&fa.object),
         ExprKind::OptionalChain(oc) => visit(&oc.object),
         ExprKind::OptionalMethodCall(omc) => {

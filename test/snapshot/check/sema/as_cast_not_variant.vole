@@ -1,0 +1,3 @@
+// Error: as? with a type that is not a variant of the union
+let x: i64 | string = 42
+let y = x as? bool

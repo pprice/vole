@@ -3,6 +3,7 @@
 // Expression compilation - impl Cg methods.
 // The main expr() router lives here; specific expression categories are in sub-modules.
 
+mod as_cast;
 mod control_flow;
 mod error_patterns;
 mod indexing;
@@ -93,6 +94,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index, expr.id),
             ExprKind::Match(match_expr) => self.match_expr(match_expr, expr.id),
             ExprKind::Is(is_expr) => self.is_expr(is_expr, expr.id),
+            ExprKind::AsCast(as_cast) => self.as_cast_expr(as_cast, expr.id, expr.span.line),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc, expr.id),
             ExprKind::Lambda(lambda) => {
                 let result = self.lambda(lambda, expr.id)?;

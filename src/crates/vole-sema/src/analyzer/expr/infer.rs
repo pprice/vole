@@ -98,6 +98,7 @@ impl Analyzer {
             // Null coalesce and is expression
             ExprKind::NullCoalesce(nc) => self.check_null_coalesce_expr(nc, interner),
             ExprKind::Is(is_expr) => self.check_is_expr(expr, is_expr, interner),
+            ExprKind::AsCast(as_cast) => self.check_as_cast_expr(expr, as_cast, interner),
 
             // Lambda - delegate to existing analyze_lambda
             ExprKind::Lambda(lambda) => Ok(self.analyze_lambda(lambda, expr.id, None, interner)),

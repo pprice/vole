@@ -1,0 +1,10 @@
+[stdout]
+
+[stderr]
+  × [E2042]: type 'bool' is not a variant of 'string | i64'
+   ╭─[<path>/as_cast_not_variant.vole:3:15]
+ 2 │ let x: i64 | string = 42
+ 3 │ let y = x as? bool
+   ·               ──┬─
+   ·                 ╰── not a variant of the union
+   ╰────

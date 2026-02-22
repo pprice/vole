@@ -685,6 +685,9 @@ impl<'a> ConstantFolder<'a> {
             ExprKind::Is(is) => {
                 self.fold_expr(&mut is.value);
             }
+            ExprKind::AsCast(as_cast) => {
+                self.fold_expr(&mut as_cast.value);
+            }
             ExprKind::Lambda(lambda) => {
                 for param in &mut lambda.params {
                     if let Some(ref mut default) = param.default_value {

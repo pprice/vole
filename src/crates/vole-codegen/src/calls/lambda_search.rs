@@ -280,6 +280,7 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
         ExprKind::NullCoalesce(nc) => find_lambda_in_expr(&nc.value, node_id)
             .or_else(|| find_lambda_in_expr(&nc.default, node_id)),
         ExprKind::Is(is_expr) => find_lambda_in_expr(&is_expr.value, node_id),
+        ExprKind::AsCast(as_cast) => find_lambda_in_expr(&as_cast.value, node_id),
         ExprKind::StructLiteral(lit) => {
             for field in &lit.fields {
                 if let Some(lambda) = find_lambda_in_expr(&field.value, node_id) {

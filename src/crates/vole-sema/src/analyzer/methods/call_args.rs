@@ -534,6 +534,7 @@ fn expr_contains_it(expr: &Expr, it_sym: Symbol) -> bool {
             expr_contains_it(&nc.value, it_sym) || expr_contains_it(&nc.default, it_sym)
         }
         ExprKind::Is(is_expr) => expr_contains_it(&is_expr.value, it_sym),
+        ExprKind::AsCast(as_cast) => expr_contains_it(&as_cast.value, it_sym),
         ExprKind::StructLiteral(sl) => sl.fields.iter().any(|f| expr_contains_it(&f.value, it_sym)),
         ExprKind::InterpolatedString(parts) => parts.iter().any(|p| {
             if let StringPart::Expr(e) = p {

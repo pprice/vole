@@ -57,6 +57,7 @@ pub(super) fn print_expr<'a>(
         ExprKind::Match(match_expr) => print_match_expr(arena, match_expr, interner),
         ExprKind::NullCoalesce(nc) => print_null_coalesce_expr(arena, nc, interner),
         ExprKind::Is(is_expr) => print_is_expr(arena, is_expr, interner),
+        ExprKind::AsCast(as_cast) => print_as_cast_expr(arena, as_cast, interner),
         ExprKind::Lambda(lambda) => print_lambda_expr(arena, lambda, interner),
         ExprKind::TypeLiteral(ty) => print_type_expr(arena, ty, interner),
         ExprKind::StructLiteral(struct_lit) => print_struct_literal(arena, struct_lit, interner),
@@ -567,6 +568,21 @@ fn print_is_expr<'a>(
     print_expr(arena, &is_expr.value, interner)
         .append(arena.text(" is "))
         .append(print_type_expr(arena, &is_expr.type_expr, interner))
+}
+
+/// Print an as-cast expression.
+fn print_as_cast_expr<'a>(
+    arena: &'a Arena<'a>,
+    as_cast: &AsCastExpr,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let op = match as_cast.kind {
+        AsCastKind::Safe => " as? ",
+        AsCastKind::Unsafe => " as! ",
+    };
+    print_expr(arena, &as_cast.value, interner)
+        .append(arena.text(op))
+        .append(print_type_expr(arena, &as_cast.type_expr, interner))
 }
 
 /// Print a lambda expression.

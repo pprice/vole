@@ -345,7 +345,10 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Produce a nil value wrapped in the given optional result type.
-    fn compile_nil_for_optional(&mut self, result_type_id: TypeId) -> CodegenResult<CompiledValue> {
+    pub(super) fn compile_nil_for_optional(
+        &mut self,
+        result_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
         let nil_type_id = self.arena().nil();
         let nil_val = CompiledValue::new(self.iconst_cached(types::I8, 0), types::I8, nil_type_id);
         self.coerce_to_type(nil_val, result_type_id)

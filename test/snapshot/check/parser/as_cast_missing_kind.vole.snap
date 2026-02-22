@@ -1,0 +1,10 @@
+[stdout]
+
+[stderr]
+  × [E1003]: unexpected token 'expected '?' or '!' after 'as''
+   ╭─[<path>/as_cast_missing_kind.vole:3:14]
+ 2 │ let x: i64 | string = 42
+ 3 │ let y = x as i64
+   ·              ─┬─
+   ·               ╰── unexpected
+   ╰────

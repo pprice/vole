@@ -971,6 +971,23 @@ impl<'a> AstPrinter<'a> {
                 out.push('\n');
             }
 
+            ExprKind::AsCast(as_cast) => {
+                self.write_indent(out);
+                let op = match as_cast.kind {
+                    crate::ast::AsCastKind::Safe => "AsCastSafe",
+                    crate::ast::AsCastKind::Unsafe => "AsCastUnsafe",
+                };
+                wln!(out, "{}", op);
+                let inner = self.indented();
+                inner.write_indent(out);
+                out.push_str("value:\n");
+                inner.indented().write_expr(out, &as_cast.value);
+                inner.write_indent(out);
+                out.push_str("type: ");
+                self.write_type_inline(out, &as_cast.type_expr);
+                out.push('\n');
+            }
+
             ExprKind::Lambda(lambda) => {
                 self.write_indent(out);
                 wln!(out, "Lambda");

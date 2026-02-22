@@ -619,6 +619,7 @@ impl Expr {
             | ExprKind::OptionalChain(_)
             | ExprKind::OptionalMethodCall(_)
             | ExprKind::Is(_)
+            | ExprKind::AsCast(_)
             | ExprKind::InterpolatedString(_)
             | ExprKind::Range(_)
             | ExprKind::StructLiteral(_)
@@ -763,6 +764,9 @@ pub enum ExprKind {
 
     /// Type test: value is Type
     Is(Box<IsExpr>),
+
+    /// Type cast: value as? Type or value as! Type
+    AsCast(Box<AsCastExpr>),
 
     /// Lambda expression: (x) => x + 1
     Lambda(Box<LambdaExpr>),
@@ -1023,6 +1027,24 @@ pub struct NullCoalesceExpr {
 #[derive(Debug, Clone)]
 pub struct IsExpr {
     pub value: Expr,
+    pub type_expr: TypeExpr,
+    pub type_span: Span,
+}
+
+/// Cast kind for as? (safe) and as! (unsafe) operators
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsCastKind {
+    /// as? — safe cast, returns T | nil
+    Safe,
+    /// as! — unsafe cast, panics on failure
+    Unsafe,
+}
+
+/// Cast expression: value as? Type or value as! Type
+#[derive(Debug, Clone)]
+pub struct AsCastExpr {
+    pub value: Expr,
+    pub kind: AsCastKind,
     pub type_expr: TypeExpr,
     pub type_span: Span,
 }

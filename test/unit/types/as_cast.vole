@@ -1,0 +1,203 @@
+// Unit tests for as? (safe cast) and as! (unsafe cast) operators
+
+tests "as? safe cast on unions" {
+    test "as? returns value when type matches" {
+        let x: i64 | string = 42
+        let result = x as? i64
+        assert(result != nil)
+        assert(result == 42)
+    }
+
+    test "as? returns nil when type does not match" {
+        let x: i64 | string = "hello"
+        let result = x as? i64
+        assert(result == nil)
+    }
+
+    test "as? extracts string from union" {
+        let x: i64 | string = "hello"
+        let result = x as? string
+        assert(result != nil)
+        assert(result == "hello")
+    }
+
+    test "as? returns nil for wrong variant" {
+        let x: i64 | string = 42
+        let result = x as? string
+        assert(result == nil)
+    }
+
+    test "as? with three-type union matches" {
+        let x: i64 | string | bool = true
+        let r1 = x as? bool
+        assert(r1 != nil)
+    }
+
+    test "as? with three-type union rejects wrong types" {
+        let x: i64 | string | bool = true
+        let r2 = x as? i64
+        let r3 = x as? string
+        assert(r2 == nil)
+        assert(r3 == nil)
+    }
+
+    test "as? result is usable in expressions" {
+        let x: i64 | string = 10
+        let result = x as? i64
+        if result != nil {
+            assert(result == 10)
+        } else {
+            assert(false)
+        }
+    }
+}
+
+tests "as! unsafe cast on unions" {
+    test "as! extracts matching type" {
+        let x: i64 | string = 42
+        let result: i64 = x as! i64
+        assert(result == 42)
+    }
+
+    test "as! extracts string from union" {
+        let x: i64 | string = "world"
+        let result: string = x as! string
+        assert(result == "world")
+    }
+
+    test "as! with three-type union" {
+        let x: i64 | string | bool = true
+        let result: bool = x as! bool
+        assert(result)
+    }
+
+    test "as! result usable in arithmetic" {
+        let x: i64 | string = 20
+        let doubled = (x as! i64) * 2
+        assert(doubled == 40)
+    }
+}
+
+tests "as? safe cast on unknown" {
+    test "as? extracts i64 from unknown" {
+        let x: unknown = 42
+        let result = x as? i64
+        assert(result != nil)
+        assert(result == 42)
+    }
+
+    test "as? returns nil for wrong type on unknown" {
+        let x: unknown = 42
+        let result = x as? string
+        assert(result == nil)
+    }
+
+    test "as? extracts string from unknown" {
+        let x: unknown = "hello"
+        let result = x as? string
+        assert(result != nil)
+        assert(result == "hello")
+    }
+
+    test "as? extracts bool from unknown" {
+        let x: unknown = true
+        let result = x as? bool
+        assert(result != nil)
+        assert(result == true)
+    }
+
+    test "as? extracts f64 from unknown" {
+        let x: unknown = 3.14
+        let result = x as? f64
+        assert(result != nil)
+    }
+}
+
+tests "as! unsafe cast on unknown" {
+    test "as! extracts i64 from unknown" {
+        let x: unknown = 100
+        let result: i64 = x as! i64
+        assert(result == 100)
+    }
+
+    test "as! extracts string from unknown" {
+        let x: unknown = "test"
+        let result: string = x as! string
+        assert(result == "test")
+    }
+
+    test "as! extracts bool from unknown" {
+        let x: unknown = false
+        let result: bool = x as! bool
+        assert(!result)
+    }
+}
+
+tests "as? always-true (same type)" {
+    test "as? on same type returns value" {
+        let x: i64 = 5
+        let result = x as? i64
+        assert(result != nil)
+        assert(result == 5)
+    }
+
+    test "as? on same string type" {
+        let x: string = "hello"
+        let result = x as? string
+        assert(result != nil)
+        assert(result == "hello")
+    }
+}
+
+tests "as! always-true (same type)" {
+    test "as! on same type returns value" {
+        let x: i64 = 5
+        let result: i64 = x as! i64
+        assert(result == 5)
+    }
+}
+
+tests "as? with null coalesce" {
+    test "as? with ?? provides default" {
+        let x: i64 | string = "hello"
+        let result = (x as? i64) ?? 0
+        assert(result == 0)
+    }
+
+    test "as? with ?? uses cast result when match" {
+        let x: i64 | string = 42
+        let result = (x as? i64) ?? 0
+        assert(result == 42)
+    }
+}
+
+tests "as? in control flow" {
+    test "as? result in if condition" {
+        let x: i64 | string = 42
+        let casted = x as? i64
+        if casted != nil {
+            assert(casted == 42)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "as? in function with matching arg" {
+        func try_get_int(x: i64 | string) -> i64? {
+            return x as? i64
+        }
+        let result = try_get_int(42)
+        assert(result != nil)
+        assert(result == 42)
+    }
+
+    // NOTE: calling try_get_int("nope") and checking == nil hits
+    // a pre-existing codegen bug (vol-8ktv) where RC cleanup of
+    // the union arg clobbers the callee's return stack. Testing
+    // the nil path inline instead:
+    test "as? nil path via inline expression" {
+        let x: i64 | string = "nope"
+        let result = x as? i64
+        assert(result == nil)
+    }
+}

@@ -331,9 +331,9 @@ impl TokenType {
             Self::Caret => 5,                             // bitwise xor
             Self::Ampersand => 6,                         // bitwise and
             Self::EqEq | Self::BangEq => 7,               // equality
-            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq | Self::KwIs => 8, // comparison
-            Self::LessLess | Self::GreaterGreater => 9,   // shifts
-            Self::Plus | Self::Minus => 10,               // additive
+            Self::Lt | Self::Gt | Self::LtEq | Self::GtEq | Self::KwIs | Self::KwAs => 8, // comparison
+            Self::LessLess | Self::GreaterGreater => 9,                                   // shifts
+            Self::Plus | Self::Minus => 10, // additive
             Self::Star | Self::Slash | Self::Percent => 11, // multiplicative
             _ => 0,
         }
