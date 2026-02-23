@@ -183,10 +183,15 @@ pub enum VirExpr {
     },
 
     /// Type cast (`x as T`).
+    ///
+    /// `kind` is `Checked` (as?) or `Unchecked` (as!).
+    /// `result` carries the sema-computed `IsCheckResult` so codegen
+    /// knows whether to emit a tag check, unknown check, or static result.
     AsCast {
         value: VirRef,
         target_ty: TypeId,
         kind: AsCastKind,
+        result: IsCheckResult,
     },
 
     // -- Reflection ---------------------------------------------------------

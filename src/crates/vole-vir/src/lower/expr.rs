@@ -10,7 +10,7 @@ use vole_frontend::ast::{BinaryOp, ExprKind, UnaryOp};
 use vole_identity::TypeId;
 use vole_sema::node_map::NodeMap;
 
-use crate::expr::{VirBinOp, VirExpr, VirUnOp};
+use crate::expr::{AsCastKind, IsCheckResult, VirBinOp, VirExpr, VirUnOp};
 use crate::func::VirBody;
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
@@ -66,6 +66,8 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         ExprKind::Range(range_expr) => lower_range(range_expr, node_map, interner),
         ExprKind::Identifier(sym) => Box::new(VirExpr::LocalLoad { name: *sym, ty }),
         ExprKind::Assign(assign_expr) => lower_assign(assign_expr, expr, ty, node_map, interner),
+        ExprKind::Is(is_expr) => lower_is_check(is_expr, expr, ty, node_map, interner),
+        ExprKind::AsCast(as_cast) => lower_as_cast(as_cast, expr, ty, node_map, interner),
         // Ast escape hatches — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
@@ -76,8 +78,6 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         | ExprKind::Index(_)
         | ExprKind::Match(_)
         | ExprKind::NullCoalesce(_)
-        | ExprKind::Is(_)
-        | ExprKind::AsCast(_)
         | ExprKind::Lambda(_)
         | ExprKind::StructLiteral(_)
         | ExprKind::FieldAccess(_)
@@ -359,6 +359,92 @@ fn lower_assign(
             expr: Box::new(expr.clone()),
             ty,
         }),
+    }
+}
+
+/// Lower an `is` expression to `VirExpr::IsCheck`.
+///
+/// Looks up the pre-computed `IsCheckResult` from sema's NodeMap and embeds
+/// it directly in the VIR node so codegen never re-derives it.
+/// Falls back to `VirExpr::Ast` when sema didn't record a result (e.g.
+/// generic function bodies that sema skips).
+fn lower_is_check(
+    is_expr: &vole_frontend::ast::IsExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let result = node_map.get_is_check_result(expr.id);
+    match result {
+        Some(sema_result) => {
+            let value = lower_expr(&is_expr.value, node_map, interner);
+            let vir_result = convert_is_check_result(sema_result);
+            Box::new(VirExpr::IsCheck {
+                value,
+                result: vir_result,
+                ty,
+            })
+        }
+        None => {
+            // Generic function body — sema didn't analyze this; keep as Ast
+            // so codegen can recompute with substituted types.
+            Box::new(VirExpr::Ast {
+                expr: Box::new(expr.clone()),
+                ty,
+            })
+        }
+    }
+}
+
+/// Lower an `as?`/`as!` cast to `VirExpr::AsCast`.
+///
+/// Embeds the cast kind (checked/unchecked) and target type, plus the
+/// sema-computed `IsCheckResult` so codegen can branch without re-detection.
+/// Falls back to `VirExpr::Ast` when sema didn't record a result.
+fn lower_as_cast(
+    as_cast: &vole_frontend::ast::AsCastExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let result = node_map.get_is_check_result(expr.id);
+    match result {
+        Some(sema_result) => {
+            let value = lower_expr(&as_cast.value, node_map, interner);
+            let kind = match as_cast.kind {
+                vole_frontend::ast::AsCastKind::Safe => AsCastKind::Checked,
+                vole_frontend::ast::AsCastKind::Unsafe => AsCastKind::Unchecked,
+            };
+            let vir_result = convert_is_check_result(sema_result);
+            Box::new(VirExpr::AsCast {
+                value,
+                target_ty: ty,
+                kind,
+                result: vir_result,
+            })
+        }
+        None => {
+            // Generic function body — keep as Ast for codegen recomputation.
+            Box::new(VirExpr::Ast {
+                expr: Box::new(expr.clone()),
+                ty,
+            })
+        }
+    }
+}
+
+/// Convert sema's `IsCheckResult` to VIR's `IsCheckResult`.
+///
+/// VIR defines its own copy of this enum to avoid circular dependencies
+/// and keep the VIR crate dependency-light.
+fn convert_is_check_result(sema: vole_sema::IsCheckResult) -> IsCheckResult {
+    match sema {
+        vole_sema::IsCheckResult::AlwaysTrue => IsCheckResult::AlwaysTrue,
+        vole_sema::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
+        vole_sema::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(tag),
+        vole_sema::IsCheckResult::CheckUnknown(ty) => IsCheckResult::CheckUnknown(ty),
     }
 }
 

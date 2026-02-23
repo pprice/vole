@@ -222,6 +222,18 @@ impl Cg<'_, '_, '_> {
         extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
     ) -> CodegenResult<CompiledValue> {
         let nullable_type_id = self.safe_cast_nullable_type(&expr_id)?;
+        self.as_cast_safe_branch_with_type(is_match, nullable_type_id, extract)
+    }
+
+    /// Core safe-branch: if match -> extract and wrap nullable, else -> nil.
+    ///
+    /// Used by both the AST path (via `as_cast_safe_branch`) and the VIR path.
+    pub(super) fn as_cast_safe_branch_with_type(
+        &mut self,
+        is_match: Value,
+        nullable_type_id: TypeId,
+        extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
+    ) -> CodegenResult<CompiledValue> {
         let result_cranelift_type = self.cranelift_type(nullable_type_id);
         let result_needs_rc = self.rc_state(nullable_type_id).needs_cleanup();
 
@@ -255,10 +267,11 @@ impl Cg<'_, '_, '_> {
         Ok(self.mark_rc_owned(cv))
     }
 
-    /// Emit unsafe cast branching: if match -> extract, else -> panic.
-    fn as_cast_unsafe_branch(
+    /// Core unsafe-branch: if match -> extract, else -> panic.
+    ///
+    /// Used by both the AST path (via `as_cast_unsafe_branch`) and the VIR path.
+    pub(super) fn as_cast_unsafe_branch_with_type(
         &mut self,
-        _value: CompiledValue,
         is_match: Value,
         tested_type_id: TypeId,
         line: u32,
@@ -297,8 +310,20 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
+    /// Emit unsafe cast branching: if match -> extract, else -> panic.
+    fn as_cast_unsafe_branch(
+        &mut self,
+        _value: CompiledValue,
+        is_match: Value,
+        tested_type_id: TypeId,
+        line: u32,
+        extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
+    ) -> CodegenResult<CompiledValue> {
+        self.as_cast_unsafe_branch_with_type(is_match, tested_type_id, line, extract)
+    }
+
     /// Extract a union payload with a known target type.
-    fn extract_union_payload_typed(
+    pub(super) fn extract_union_payload_typed(
         &mut self,
         union_value: CompiledValue,
         target_type_id: TypeId,

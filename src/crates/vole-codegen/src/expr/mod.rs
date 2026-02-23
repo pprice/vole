@@ -24,7 +24,7 @@ use vole_frontend::ast::YieldExpr;
 use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
-use vole_vir::{CoerceKind, VirBinOp, VirExpr, VirUnOp};
+use vole_vir::{AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirUnOp};
 
 use super::context::Cg;
 use super::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
@@ -693,13 +693,18 @@ impl Cg<'_, '_, '_> {
                 self.compile_vir_expr(value)
             }
 
-            // -- Type operations (todo) -----------------------------------
-            VirExpr::IsCheck { .. } => {
-                todo!("VIR IsCheck: lowering still emits Ast escape hatch")
-            }
-            VirExpr::AsCast { .. } => {
-                todo!("VIR AsCast: lowering still emits Ast escape hatch")
-            }
+            // -- Type operations ------------------------------------------
+            VirExpr::IsCheck {
+                value,
+                result,
+                ty: _,
+            } => self.compile_vir_is_check(value, *result),
+            VirExpr::AsCast {
+                value,
+                target_ty,
+                kind,
+                result,
+            } => self.compile_vir_as_cast(value, *target_ty, *kind, *result),
 
             // -- Reflection (todo) ----------------------------------------
             VirExpr::MetaAccess { .. } => {
@@ -1080,6 +1085,187 @@ impl Cg<'_, '_, '_> {
         value.mark_consumed();
         value.debug_assert_rc_handled("assign to variable");
         Ok(value)
+    }
+
+    // =========================================================================
+    // VIR IsCheck / AsCast
+    // =========================================================================
+
+    /// Compile a VIR `IsCheck` expression.
+    ///
+    /// The `result` field carries the sema-computed decision so codegen is
+    /// purely mechanical: static true/false or a runtime tag/unknown check.
+    fn compile_vir_is_check(
+        &mut self,
+        value: &VirExpr,
+        result: IsCheckResult,
+    ) -> CodegenResult<CompiledValue> {
+        match result {
+            IsCheckResult::AlwaysTrue => {
+                // Compile value for side-effects, then return true.
+                let _value = self.compile_vir_expr(value)?;
+                Ok(self.bool_const(true))
+            }
+            IsCheckResult::AlwaysFalse => {
+                let _value = self.compile_vir_expr(value)?;
+                Ok(self.bool_const(false))
+            }
+            IsCheckResult::CheckTag(tag_index) => {
+                let compiled = self.compile_vir_expr(value)?;
+                let cmp = self.tag_eq(compiled.value, tag_index as i64);
+                Ok(self.bool_value(cmp))
+            }
+            IsCheckResult::CheckUnknown(tested_type_id) => {
+                let compiled = self.compile_vir_expr(value)?;
+                let cmp = self.compile_unknown_is_check(compiled.value, tested_type_id);
+                Ok(self.bool_value(cmp))
+            }
+        }
+    }
+
+    /// Compile a VIR `AsCast` expression (`as?` or `as!`).
+    ///
+    /// Dispatches on the sema-computed `IsCheckResult` embedded in the VIR
+    /// node.  `kind` distinguishes checked (as?) from unchecked (as!) casts.
+    ///
+    /// `target_ty` is the sema expression type:
+    ///   - For `as?`: `T | nil` (nullable result)
+    ///   - For `as!`: `T` (the tested type directly)
+    fn compile_vir_as_cast(
+        &mut self,
+        value_expr: &VirExpr,
+        target_ty: TypeId,
+        kind: AsCastKind,
+        result: IsCheckResult,
+    ) -> CodegenResult<CompiledValue> {
+        let value = self.compile_vir_expr(value_expr)?;
+        match result {
+            IsCheckResult::AlwaysTrue => self.vir_as_cast_always_true(kind, value, target_ty),
+            IsCheckResult::AlwaysFalse => self.vir_as_cast_always_false(kind, target_ty),
+            IsCheckResult::CheckTag(tag_index) => {
+                self.vir_as_cast_check_tag(kind, value, tag_index, target_ty)
+            }
+            IsCheckResult::CheckUnknown(tested_type_id) => {
+                self.vir_as_cast_check_unknown(kind, value, tested_type_id, target_ty)
+            }
+        }
+    }
+
+    /// Handle `as` cast when sema determined it always succeeds.
+    fn vir_as_cast_always_true(
+        &mut self,
+        kind: AsCastKind,
+        value: CompiledValue,
+        target_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        match kind {
+            AsCastKind::Checked => {
+                // target_ty is T | nil — wrap the value.
+                self.coerce_to_type(value, target_ty)
+            }
+            AsCastKind::Unchecked => {
+                // Value is already T — pass through.
+                Ok(value)
+            }
+        }
+    }
+
+    /// Handle `as` cast when sema determined it always fails.
+    fn vir_as_cast_always_false(
+        &mut self,
+        kind: AsCastKind,
+        target_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        match kind {
+            AsCastKind::Checked => {
+                // target_ty is T | nil — always returns nil.
+                self.compile_nil_for_optional(target_ty)
+            }
+            AsCastKind::Unchecked => {
+                // Always panics.
+                self.emit_panic_static("as! cast failed: value is not the expected type", 0)?;
+                Ok(CompiledValue::new(
+                    self.iconst_cached(types::I64, 0),
+                    types::I64,
+                    TypeId::NEVER,
+                ))
+            }
+        }
+    }
+
+    /// Handle union tag check for `as` cast: branch on tag, extract payload.
+    fn vir_as_cast_check_tag(
+        &mut self,
+        kind: AsCastKind,
+        value: CompiledValue,
+        tag_index: u32,
+        target_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        // Derive the tested type from the union variants.
+        let tested_type_id = self
+            .arena()
+            .unwrap_union(value.type_id)
+            .and_then(|variants| variants.get(tag_index as usize).copied())
+            .ok_or_else(|| {
+                CodegenError::internal("as cast CheckTag: cannot derive tested type from union")
+            })?;
+        let is_match = self.tag_eq(value.value, tag_index as i64);
+        match kind {
+            AsCastKind::Checked => {
+                // target_ty is T | nil
+                self.as_cast_safe_branch_with_type(is_match, target_ty, |cg| {
+                    cg.extract_union_payload_typed(value, tested_type_id)
+                })
+            }
+            AsCastKind::Unchecked => {
+                // target_ty is T
+                self.as_cast_unsafe_branch_with_type(is_match, tested_type_id, 0, |cg| {
+                    cg.extract_union_payload_typed(value, tested_type_id)
+                })
+            }
+        }
+    }
+
+    /// Handle unknown type check for `as` cast: branch on runtime tag.
+    fn vir_as_cast_check_unknown(
+        &mut self,
+        kind: AsCastKind,
+        value: CompiledValue,
+        tested_type_id: TypeId,
+        target_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), value.value, 0);
+        let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
+        let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
+        let is_match = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
+        match kind {
+            AsCastKind::Checked => {
+                // target_ty is T | nil
+                self.as_cast_safe_branch_with_type(is_match, target_ty, |cg| {
+                    let raw_value = cg.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        value.value,
+                        union_layout::PAYLOAD_OFFSET,
+                    );
+                    Ok(cg.extract_unknown_value(raw_value, tested_type_id))
+                })
+            }
+            AsCastKind::Unchecked => {
+                self.as_cast_unsafe_branch_with_type(is_match, tested_type_id, 0, |cg| {
+                    let raw_value = cg.builder.ins().load(
+                        types::I64,
+                        MemFlags::new(),
+                        value.value,
+                        union_layout::PAYLOAD_OFFSET,
+                    );
+                    Ok(cg.extract_unknown_value(raw_value, tested_type_id))
+                })
+            }
+        }
     }
 
     // VIR call dispatch is in the `vir_calls` submodule.

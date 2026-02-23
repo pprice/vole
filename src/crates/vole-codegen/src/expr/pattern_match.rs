@@ -264,7 +264,7 @@ impl Cg<'_, '_, '_> {
     /// check: (1) tag == Instance, (2) the instance's `type_id` field matches
     /// the annotation type's registered runtime type_id. This distinguishes
     /// different annotation types that all share the Instance tag.
-    fn compile_unknown_is_check(
+    pub(super) fn compile_unknown_is_check(
         &mut self,
         tagged_value_ptr: Value,
         tested_type_id: TypeId,
