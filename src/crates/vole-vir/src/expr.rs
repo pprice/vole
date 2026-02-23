@@ -19,9 +19,8 @@ use crate::stmt::VirStmt;
 /// A single VIR expression.
 ///
 /// Every variant carries enough information for codegen to emit instructions
-/// without consulting sema.  During the incremental migration, the `Ast`
-/// escape-hatch lets us lower one expression kind at a time while the rest
-/// pass through as raw AST nodes.
+/// without consulting sema.  All AST expression kinds are fully lowered to
+/// typed VIR nodes.
 #[derive(Debug, Clone)]
 pub enum VirExpr {
     // -- Literals -----------------------------------------------------------
@@ -357,13 +356,6 @@ pub enum VirExpr {
     /// Always produces a void/zero result (yield is used in statement
     /// position).
     Yield { value: VirRef },
-
-    // -- Escape hatch -------------------------------------------------------
-    /// An AST expression that has not yet been lowered to VIR.
-    ///
-    /// `ty` is the sema-computed type so codegen can still make layout
-    /// decisions without reaching back into the node map.
-    Ast { expr: Box<Expr>, ty: TypeId },
 }
 
 impl VirExpr {

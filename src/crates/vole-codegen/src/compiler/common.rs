@@ -459,7 +459,7 @@ pub(crate) fn compile_function_body_with_cg(
 /// # Body structure
 /// - `trailing: Some(expr)` — expression body (`=> expr`), treated as implicit return.
 /// - `trailing: None` — block body; the trailing-expression heuristic peeks into the
-///   last `VirStmt::Ast` to detect a trailing `Stmt::Expr` for implicit return.
+///   last `VirStmt::Expr` to detect a trailing expression for implicit return.
 pub(crate) fn compile_vir_body_with_cg(
     cg: &mut Cg,
     body: &VirBody,
@@ -530,8 +530,7 @@ fn compile_trailing_vir_expr(
 /// Compile a VIR block body (trailing=None), with trailing-expression detection.
 ///
 /// Peeks into the last statement to detect a trailing expression for the
-/// Rust-like implicit return heuristic. Handles both `VirStmt::Ast` (wrapping
-/// `Stmt::Expr`) and lowered `VirStmt::Expr` variants.
+/// Rust-like implicit return heuristic via `VirStmt::Expr` variants.
 #[allow(clippy::type_complexity)]
 fn compile_vir_block_body(
     cg: &mut Cg,
@@ -540,13 +539,8 @@ fn compile_vir_block_body(
     let has_trailing_expr = cg.return_type.is_some_and(|ret| !cg.arena().is_void(ret))
         && matches!(
             stmts.last(),
-            Some(VirStmt::Ast { stmt }) if matches!(stmt.as_ref(), Stmt::Expr(_))
-        )
-        || cg.return_type.is_some_and(|ret| !cg.arena().is_void(ret))
-            && matches!(
-                stmts.last(),
-                Some(VirStmt::Expr { value }) if !value.is_void_if()
-            );
+            Some(VirStmt::Expr { value }) if !value.is_void_if()
+        );
 
     if has_trailing_expr {
         // Compile all statements except the trailing expression
@@ -562,14 +556,6 @@ fn compile_vir_block_body(
         }
         // Compile the trailing expression
         let (value, skip_var) = match stmts.last() {
-            Some(VirStmt::Ast { stmt }) => match stmt.as_ref() {
-                Stmt::Expr(expr_stmt) => {
-                    let value = cg.expr(&expr_stmt.expr)?;
-                    let skip_var = extract_rc_skip_var(cg, &expr_stmt.expr);
-                    (value, skip_var)
-                }
-                _ => unreachable!(),
-            },
             Some(VirStmt::Expr { value: vir_expr }) => {
                 let compiled = cg.compile_vir_expr(vir_expr)?;
                 let skip_var = extract_vir_rc_skip_var(cg, vir_expr);
@@ -601,24 +587,12 @@ fn compile_vir_block_body(
     }
 }
 
-/// Extract the RC skip variable from an AST expression, if it's an identifier
-/// bound to an RC-tracked local.
-fn extract_rc_skip_var(cg: &Cg, expr: &vole_frontend::Expr) -> Option<Variable> {
-    if let ExprKind::Identifier(sym) = &expr.kind {
-        extract_rc_skip_var_for_sym(cg, *sym)
-    } else {
-        None
-    }
-}
-
 /// Extract the RC skip variable from a VIR expression.
 ///
-/// Handles `VirExpr::LocalLoad` (lowered identifiers) and `VirExpr::Ast`
-/// (escape hatch wrapping an AST identifier).
+/// Handles `VirExpr::LocalLoad` (lowered identifiers).
 fn extract_vir_rc_skip_var(cg: &Cg, vir_expr: &VirExpr) -> Option<Variable> {
     match vir_expr {
         VirExpr::LocalLoad { name, .. } => extract_rc_skip_var_for_sym(cg, *name),
-        VirExpr::Ast { expr, .. } => extract_rc_skip_var(cg, expr),
         _ => None,
     }
 }

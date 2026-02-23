@@ -232,6 +232,7 @@ impl Analyzer {
                 static_method_generics,
                 is_check_results,
                 declared_var_types,
+                struct_literal_infos,
             ) = prelude_node_map.extract_cached_maps();
             cache.borrow_mut().insert(
                 import_path.to_string(),
@@ -246,6 +247,7 @@ impl Analyzer {
                     functions_by_name: sub_analyzer.symbols.functions_by_name.clone(),
                     is_check_results,
                     declared_var_types,
+                    struct_literal_infos,
                     partial_error_count,
                 },
             );

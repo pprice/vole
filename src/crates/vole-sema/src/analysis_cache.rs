@@ -17,6 +17,7 @@
 
 use crate::compilation_db::CompilationDb;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
+use crate::node_map::StructLiteralInfo;
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
 use crate::types::FunctionType;
@@ -70,6 +71,8 @@ pub struct CachedModule {
     pub is_check_results: FxHashMap<NodeId, IsCheckResult>,
     /// Declared variable types for let statements with type annotations (NodeId → TypeId)
     pub declared_var_types: FxHashMap<NodeId, TypeId>,
+    /// Struct/class literal type resolution (NodeId → StructLiteralInfo)
+    pub struct_literal_infos: FxHashMap<NodeId, StructLiteralInfo>,
     /// Number of semantic errors seen while analyzing this module before it was cached.
     /// Non-zero means cached data is partial but still usable for best-effort compilation.
     pub partial_error_count: usize,

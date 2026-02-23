@@ -521,12 +521,12 @@ fn lower_is_check(
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
-    let Some(sema_result) = node_map.get_is_check_result(expr.id) else {
-        return Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        });
-    };
+    let sema_result = node_map.get_is_check_result(expr.id).unwrap_or_else(|| {
+        panic!(
+            "VIR lower: missing sema is_check_result for NodeId {:?} (line {})",
+            expr.id, expr.span.line
+        )
+    });
     let value = lower_expr(&is_expr.value, node_map, interner);
     let vir_result = convert_is_check_result(sema_result);
     Box::new(VirExpr::IsCheck {
@@ -548,12 +548,12 @@ fn lower_as_cast(
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
-    let Some(sema_result) = node_map.get_is_check_result(expr.id) else {
-        return Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        });
-    };
+    let sema_result = node_map.get_is_check_result(expr.id).unwrap_or_else(|| {
+        panic!(
+            "VIR lower: missing sema is_check_result for as_cast NodeId {:?} (line {})",
+            expr.id, expr.span.line
+        )
+    });
     let value = lower_expr(&as_cast.value, node_map, interner);
     let kind = match as_cast.kind {
         vole_frontend::ast::AsCastKind::Safe => AsCastKind::Checked,
@@ -650,10 +650,10 @@ fn lower_meta_access(
     use vole_sema::node_map::MetaAccessKind;
 
     let Some(meta_kind) = node_map.get_meta_access(expr.id) else {
-        return Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        });
+        panic!(
+            "VIR lower: missing sema meta_access for NodeId {:?} (line {})",
+            expr.id, expr.span.line
+        )
     };
 
     let kind = match meta_kind {
@@ -765,12 +765,12 @@ fn lower_optional_chain(
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
-    let Some(info) = node_map.get_optional_chain(expr.id) else {
-        return Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        });
-    };
+    let info = node_map.get_optional_chain(expr.id).unwrap_or_else(|| {
+        panic!(
+            "VIR lower: missing sema optional_chain for NodeId {:?} (line {})",
+            expr.id, expr.span.line
+        )
+    });
     let object = lower_expr(&oc.object, node_map, interner);
     Box::new(VirExpr::OptionalChain {
         object,
@@ -794,12 +794,12 @@ fn lower_optional_method_call(
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
-    let Some(info) = node_map.get_optional_chain(expr.id) else {
-        return Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        });
-    };
+    let info = node_map.get_optional_chain(expr.id).unwrap_or_else(|| {
+        panic!(
+            "VIR lower: missing sema optional_chain for optional_method_call NodeId {:?} (line {})",
+            expr.id, expr.span.line
+        )
+    });
     let object = lower_expr(&omc.object, node_map, interner);
     Box::new(VirExpr::OptionalMethodCall {
         object,
@@ -857,12 +857,14 @@ fn lower_struct_literal(
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
-    let Some(info) = node_map.get_struct_literal_info(expr.id) else {
-        return Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
+    let info = node_map
+        .get_struct_literal_info(expr.id)
+        .unwrap_or_else(|| {
+            panic!(
+                "VIR lower: missing sema struct_literal_info for NodeId {:?} (line {})",
+                expr.id, expr.span.line
+            )
         });
-    };
 
     let fields: Vec<(vole_identity::Symbol, VirRef)> = sl
         .fields

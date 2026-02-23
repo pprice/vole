@@ -753,6 +753,9 @@ impl NodeMap {
         for (&node, &ty) in &cached.declared_var_types {
             self.set_declared_var_type(node, ty);
         }
+        for (&node, &info) in &cached.struct_literal_infos {
+            self.set_struct_literal_info(node, info);
+        }
     }
 
     /// Extract the subset of per-node data needed by
@@ -760,7 +763,8 @@ impl NodeMap {
     /// `FxHashMap`s.
     ///
     /// Returns `(types, methods, generics, class_method_generics,
-    /// static_method_generics, is_check_results, declared_var_types)`.
+    /// static_method_generics, is_check_results, declared_var_types,
+    /// struct_literal_infos)`.
     #[allow(clippy::type_complexity)]
     pub fn extract_cached_maps(
         &self,
@@ -772,6 +776,7 @@ impl NodeMap {
         FxHashMap<NodeId, StaticMethodMonomorphKey>,
         FxHashMap<NodeId, IsCheckResult>,
         FxHashMap<NodeId, TypeId>,
+        FxHashMap<NodeId, StructLiteralInfo>,
     ) {
         let mut types = FxHashMap::default();
         let mut methods = FxHashMap::default();
@@ -780,6 +785,7 @@ impl NodeMap {
         let mut static_method_generics = FxHashMap::default();
         let mut is_check_results = FxHashMap::default();
         let mut declared_var_types = FxHashMap::default();
+        let mut struct_literal_infos = FxHashMap::default();
 
         for (&module, nodes) in &self.modules {
             for (local, data) in nodes.iter().enumerate() {
@@ -805,6 +811,9 @@ impl NodeMap {
                 if let Some(ty) = data.declared_var_type {
                     declared_var_types.insert(node, ty);
                 }
+                if let Some(info) = data.struct_literal_info {
+                    struct_literal_infos.insert(node, info);
+                }
             }
         }
 
@@ -816,6 +825,7 @@ impl NodeMap {
             static_method_generics,
             is_check_results,
             declared_var_types,
+            struct_literal_infos,
         )
     }
 }
@@ -881,6 +891,9 @@ fn merge_node_data(dst: &mut NodeData, src: NodeData) {
     }
     if src.meta_access.is_some() {
         dst.meta_access = src.meta_access;
+    }
+    if src.struct_literal_info.is_some() {
+        dst.struct_literal_info = src.struct_literal_info;
     }
 }
 

@@ -800,9 +800,6 @@ impl Cg<'_, '_, '_> {
 
             // -- Generator ------------------------------------------------
             VirExpr::Yield { value } => self.compile_vir_yield(value),
-
-            // -- Ast escape hatch -----------------------------------------
-            VirExpr::Ast { expr, ty: _ } => self.expr(expr),
         }
     }
 
@@ -1263,7 +1260,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// Handles simple variable assignment with RC bookkeeping, captured
     /// variable stores, and type coercion.  Field and index assignment
-    /// targets are not handled here (they remain as `VirExpr::Ast`).
+    /// targets are handled by `VirExpr::FieldStore` and `VirExpr::IndexStore`.
     pub(crate) fn compile_local_store(
         &mut self,
         sym: Symbol,

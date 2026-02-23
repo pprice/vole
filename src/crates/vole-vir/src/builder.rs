@@ -2,7 +2,6 @@
 //
 // VirBuilder: incremental construction of VIR trees.
 
-use vole_frontend::{Expr, Stmt};
 use vole_identity::{FunctionId, Symbol, TypeId};
 
 use crate::calls::CallTarget;
@@ -189,11 +188,6 @@ impl VirBuilder {
         })
     }
 
-    /// AST escape hatch for expressions not yet lowered to VIR.
-    pub fn build_ast_expr(&mut self, expr: Box<Expr>, ty: TypeId) -> VirRef {
-        Box::new(VirExpr::Ast { expr, ty })
-    }
-
     // -- Statement builders ---------------------------------------------------
 
     /// Local variable binding (`let x = ...`).
@@ -227,11 +221,6 @@ impl VirBuilder {
     /// Decrement reference count (statement form — fire-and-forget).
     pub fn build_rc_dec_stmt(&mut self, value: VirRef) -> VirStmt {
         VirStmt::RcDec { value }
-    }
-
-    /// AST escape hatch for statements not yet lowered to VIR.
-    pub fn build_ast_stmt(&mut self, stmt: Box<Stmt>) -> VirStmt {
-        VirStmt::Ast { stmt }
     }
 
     // -- Body / function construction -----------------------------------------
@@ -347,54 +336,6 @@ mod tests {
                 else_body: Some(_), ..
             }) => {}
             other => panic!("expected If with else, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn build_with_ast_expr_escape_hatch() {
-        use vole_frontend::{ExprKind, NodeId};
-        use vole_identity::{ModuleId, Span};
-
-        let mut b = VirBuilder::new();
-        let ty = dummy_type_id();
-
-        // Construct a minimal AST expression (BoolLiteral is the simplest).
-        let ast_expr = Box::new(Expr {
-            id: NodeId::new(ModuleId::new(0), 0),
-            kind: ExprKind::BoolLiteral(true),
-            span: Span::default(),
-        });
-        let vir_ref = b.build_ast_expr(ast_expr, ty);
-
-        // Wrap in an expression statement
-        let stmt = b.build_expr_stmt(vir_ref);
-        let body = b.build_body(vec![stmt], None);
-
-        assert_eq!(body.stmts.len(), 1);
-        match &body.stmts[0] {
-            VirStmt::Expr { value } => match value.as_ref() {
-                VirExpr::Ast { .. } => {}
-                other => panic!("expected Ast, got {other:?}"),
-            },
-            other => panic!("expected Expr stmt, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn build_ast_stmt_escape_hatch() {
-        use vole_identity::Span;
-
-        let mut b = VirBuilder::new();
-
-        // Stmt::Break(Span) is the simplest AST statement variant.
-        let ast_stmt = Box::new(Stmt::Break(Span::default()));
-        let stmt = b.build_ast_stmt(ast_stmt);
-        let body = b.build_body(vec![stmt], None);
-
-        assert_eq!(body.stmts.len(), 1);
-        match &body.stmts[0] {
-            VirStmt::Ast { .. } => {}
-            other => panic!("expected Ast stmt, got {other:?}"),
         }
     }
 

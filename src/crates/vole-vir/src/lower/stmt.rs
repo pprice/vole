@@ -103,11 +103,9 @@ fn lower_raise(
 fn lower_let(let_stmt: &LetStmt, node_map: &NodeMap, interner: &mut Interner) -> VirStmt {
     let init_expr = match &let_stmt.init {
         LetInit::Expr(e) => e,
-        // Type aliases produce no runtime code.
+        // Type aliases produce no runtime code — skip entirely.
         LetInit::TypeAlias(_) => {
-            return VirStmt::Ast {
-                stmt: Box::new(Stmt::Let(let_stmt.clone())),
-            };
+            return VirStmt::Noop;
         }
     };
 

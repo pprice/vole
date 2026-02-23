@@ -42,7 +42,7 @@ fn vir_stmt_contains_continue(stmt: &VirStmt) -> bool {
         | VirStmt::Raise { .. }
         | VirStmt::RcInc { .. }
         | VirStmt::RcDec { .. }
-        | VirStmt::Ast { .. } => false,
+        | VirStmt::Noop => false,
     }
 }
 

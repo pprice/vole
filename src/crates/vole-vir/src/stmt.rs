@@ -2,7 +2,6 @@
 //
 // VIR statement nodes.
 
-use vole_frontend::Stmt;
 use vole_identity::{Symbol, TypeId};
 use vole_sema::UnionStorageKind;
 
@@ -16,8 +15,7 @@ use crate::refs::VirRef;
 
 /// A single VIR statement.
 ///
-/// Like `VirExpr`, the `Ast` variant is a temporary escape hatch for
-/// statements that have not yet been lowered from the AST.
+/// All AST statement kinds are fully lowered to typed VIR nodes.
 ///
 /// Note: there is no `If` variant — Vole's `if/else` is an expression, so
 /// conditional logic lives in [`VirExpr::If`] wrapped in `VirStmt::Expr`.
@@ -88,9 +86,9 @@ pub enum VirStmt {
     /// Decrement the reference count of a value (fire-and-forget).
     RcDec { value: VirRef },
 
-    // -- Escape hatch -------------------------------------------------------
-    /// An AST statement not yet lowered to VIR.
-    Ast { stmt: Box<Stmt> },
+    // -- No-op ---------------------------------------------------------------
+    /// A no-op statement (e.g. type aliases that produce no runtime code).
+    Noop,
 }
 
 // ---------------------------------------------------------------------------

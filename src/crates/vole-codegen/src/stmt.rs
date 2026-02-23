@@ -1161,8 +1161,8 @@ impl Cg<'_, '_, '_> {
             VirStmt::For(vir_for) => self.compile_vir_for(vir_for),
             VirStmt::Raise { error_name, fields } => self.compile_vir_raise(*error_name, fields),
 
-            // -- Ast escape hatch ------------------------------------------------
-            VirStmt::Ast { stmt } => self.stmt(stmt),
+            // -- No-op -----------------------------------------------------------
+            VirStmt::Noop => Ok(false),
         }
     }
 
@@ -1612,10 +1612,6 @@ impl Cg<'_, '_, '_> {
             self.vars.insert(name, (var, *ty));
             return Some(var);
         }
-        // Ast-wrapped lambdas: delegate to the old helper which reads NodeMap.
-        if let vole_vir::VirExpr::Ast { expr, .. } = value_expr {
-            return self.preregister_recursive_lambda(name, expr);
-        }
         None
     }
 
@@ -1636,10 +1632,6 @@ impl Cg<'_, '_, '_> {
         value_expr: &vole_vir::VirExpr,
         binding_ty: TypeId,
     ) -> Option<TypeId> {
-        // For Ast-wrapped inits, check the NodeMap directly (the old path).
-        if let vole_vir::VirExpr::Ast { expr, .. } = value_expr {
-            return self.get_declared_var_type(&expr.id);
-        }
         // For MethodCall inits, check the NodeMap via the carried NodeId.
         // Method calls may have codegen-computed return types that differ from
         // the sema expression type (e.g. sum() on Iterator<[i64]> returns i64
@@ -1721,15 +1713,6 @@ impl Cg<'_, '_, '_> {
                 .vars
                 .get(name)
                 .is_some_and(|&(v, _)| self.rc_scopes.is_composite_rc_local(v)),
-            vole_vir::VirExpr::Ast { expr, .. } => {
-                if let ExprKind::Identifier(sym) = &expr.kind {
-                    self.vars
-                        .get(sym)
-                        .is_some_and(|&(v, _)| self.rc_scopes.is_composite_rc_local(v))
-                } else {
-                    false
-                }
-            }
             _ => false,
         };
 

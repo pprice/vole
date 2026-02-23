@@ -308,12 +308,12 @@ fn lower_stmt_let_becomes_vir_let() {
 }
 
 #[test]
-fn lower_stmt_let_type_alias_becomes_ast() {
+fn lower_stmt_let_type_alias_becomes_noop() {
     use vole_frontend::ast::{LetInit, LetStmt, TypeExpr, TypeExprKind};
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let sym = interner.intern("Foo");
-    // Let with TypeAlias init remains as Ast escape hatch
+    // Let with TypeAlias init is a compile-time construct: lowers to Noop
     let stmt = Stmt::Let(LetStmt {
         name: Symbol::UNKNOWN,
         ty: None,
@@ -327,7 +327,7 @@ fn lower_stmt_let_type_alias_becomes_ast() {
     let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
 
     match &vir_stmt {
-        VirStmt::Ast { .. } => {}
-        other => panic!("expected VirStmt::Ast for TypeAlias, got {other:?}"),
+        VirStmt::Noop => {}
+        other => panic!("expected VirStmt::Noop for TypeAlias, got {other:?}"),
     }
 }
