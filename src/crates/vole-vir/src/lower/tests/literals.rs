@@ -153,7 +153,7 @@ fn lower_expr_grouping_strips_parens() {
 }
 
 #[test]
-fn lower_expr_unknown_kind_becomes_ast() {
+fn lower_expr_identifier_becomes_local_load() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let expr = Expr {
@@ -164,8 +164,11 @@ fn lower_expr_unknown_kind_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch, got {other:?}"),
+        VirExpr::LocalLoad { name, ty } => {
+            assert_eq!(*name, Symbol::UNKNOWN);
+            assert_eq!(*ty, TypeId::UNKNOWN);
+        }
+        other => panic!("expected LocalLoad, got {other:?}"),
     }
 }
 

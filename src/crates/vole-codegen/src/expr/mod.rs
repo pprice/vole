@@ -702,13 +702,9 @@ impl Cg<'_, '_, '_> {
                 todo!("VIR MetaAccess: lowering still emits Ast escape hatch")
             }
 
-            // -- Variables (todo) -----------------------------------------
-            VirExpr::LocalLoad { .. } => {
-                todo!("VIR LocalLoad: lowering still emits Ast escape hatch")
-            }
-            VirExpr::LocalStore { .. } => {
-                todo!("VIR LocalStore: lowering still emits Ast escape hatch")
-            }
+            // -- Variables ------------------------------------------------
+            VirExpr::LocalLoad { name, ty } => self.compile_local_load(*name, *ty),
+            VirExpr::LocalStore { name, value } => self.compile_local_store(*name, value),
 
             // -- Lambda (todo) --------------------------------------------
             VirExpr::Lambda { .. } => {
@@ -867,6 +863,218 @@ impl Cg<'_, '_, '_> {
             }
         };
         Ok(CompiledValue::new(result, target_ty, to))
+    }
+
+    /// Compile a VIR `LocalLoad` — variable/identifier lookup.
+    ///
+    /// Handles four cases in priority order:
+    /// 1. **Sentinel types** — if `ty` is a sentinel, emit `i8(0)`.
+    /// 2. **Local variables** — look up in `self.vars`, with union narrowing
+    ///    and unknown extraction when `ty` differs from the declared type.
+    /// 3. **Non-local identifiers** — module bindings, globals, function refs,
+    ///    and sentinel fallback are delegated to the full `identifier()` path
+    ///    (these will migrate to dedicated VIR nodes later).
+    fn compile_local_load(&mut self, sym: Symbol, ty: TypeId) -> CodegenResult<CompiledValue> {
+        // 1. Sentinel types — always i8(0).
+        if self.arena().is_sentinel(ty) {
+            let value = self.iconst_cached(types::I8, 0);
+            return Ok(CompiledValue::new(value, types::I8, ty));
+        }
+
+        // 2. Captured variable — load from closure environment.
+        if self.has_captures()
+            && let Some(binding) = self.get_capture(&sym).copied() {
+                return self.load_capture(&binding);
+            }
+
+        // 3. Local variable — vars map lookup with narrowing.
+        if let Some((var, var_type_id)) = self.vars.get(&sym) {
+            return self.compile_local_var_load(*var, *var_type_id, ty);
+        }
+
+        // 4. Non-local fallback: module bindings, globals, function refs.
+        self.compile_non_local_load(sym, ty)
+    }
+
+    /// Load a local variable from the vars map, handling union narrowing,
+    /// unknown extraction, and RC lifecycle marking.
+    fn compile_local_var_load(
+        &mut self,
+        var: Variable,
+        var_type_id: TypeId,
+        narrowed_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let val = self.builder.use_var(var);
+        let cl_ty = self.builder.func.dfg.value_type(val);
+
+        // Union narrowing: if VIR type differs from declared type, extract
+        // the payload from the tagged union.
+        let resolved_union_type_id = self.try_substitute_type(var_type_id);
+        let narrowed_type_id = self.try_substitute_type(narrowed_ty);
+        if self.arena().is_union(resolved_union_type_id)
+            && !self.arena().is_union(narrowed_type_id)
+            && narrowed_type_id != resolved_union_type_id
+            && let Some(narrowed_variant) =
+                self.find_union_variant(resolved_union_type_id, narrowed_type_id)
+            {
+                let payload_ty =
+                    type_id_to_cranelift(narrowed_variant, self.arena(), self.ptr_type());
+                let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
+                let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
+                self.mark_borrowed_if_rc(&mut cv);
+                return Ok(cv);
+            }
+
+        // Unknown extraction: if declared type is unknown but VIR type is
+        // concrete, extract the value from the TaggedValue.
+        if self.arena().is_unknown(var_type_id) && !self.arena().is_unknown(narrowed_type_id) {
+            let raw_value = self.builder.ins().load(
+                types::I64,
+                MemFlags::new(),
+                val,
+                union_layout::PAYLOAD_OFFSET,
+            );
+            let extracted = self.extract_unknown_value(raw_value, narrowed_type_id);
+            return Ok(extracted);
+        }
+
+        // Simple local: no narrowing needed.
+        let mut cv = CompiledValue::new(val, cl_ty, var_type_id);
+        self.mark_borrowed_if_rc(&mut cv);
+        if cv.rc_lifecycle == RcLifecycle::Untracked
+            && self.rc_state(var_type_id).union_variants().is_some()
+        {
+            cv.mark_borrowed();
+        }
+        Ok(cv)
+    }
+
+    /// Find a union variant matching the narrowed type, with integer fallback.
+    fn find_union_variant(
+        &self,
+        union_type_id: TypeId,
+        narrowed_type_id: TypeId,
+    ) -> Option<TypeId> {
+        self.arena()
+            .unwrap_union(union_type_id)
+            .and_then(|variants| {
+                variants
+                    .iter()
+                    .copied()
+                    .find(|&v| v == narrowed_type_id)
+                    .or_else(|| {
+                        if self.arena().is_integer(narrowed_type_id) {
+                            variants
+                                .iter()
+                                .copied()
+                                .find(|&v| self.arena().is_integer(v))
+                        } else {
+                            None
+                        }
+                    })
+            })
+    }
+
+    /// Handle non-local identifier resolution: module bindings, globals,
+    /// function references, and sentinel fallback.
+    fn compile_non_local_load(&mut self, sym: Symbol, ty: TypeId) -> CodegenResult<CompiledValue> {
+        // Module binding
+        if let Some(&(module_id, export_name, export_type_id)) = self.lookup_module_binding(&sym) {
+            return self.module_binding_value(module_id, export_name, export_type_id);
+        }
+
+        // Global initializer
+        if let Some(global_init) = self.global_init(sym).cloned() {
+            let mut value = self.expr(&global_init)?;
+            let name_table = self.name_table();
+            let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
+            if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
+                && let Some(global_def) = self.query().global(name_id)
+            {
+                value = self.coerce_to_type(value, global_def.type_id)?;
+            }
+            return Ok(value);
+        }
+
+        // Function reference
+        if self.arena().is_function(ty) {
+            return self.function_reference(sym, ty);
+        }
+
+        // Sentinel fallback (name-based resolution)
+        let name = self.interner().resolve(sym);
+        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+        if let Some(type_def_id) = self.query().resolve_type_def_by_str(module_id, name)
+            && self.query().is_sentinel_type(type_def_id)
+            && let Some(sentinel_type_id) = self.query().sentinel_base_type(type_def_id) {
+                let value = self.iconst_cached(types::I8, 0);
+                return Ok(CompiledValue::new(value, types::I8, sentinel_type_id));
+            }
+
+        Err(CodegenError::not_found(
+            "variable",
+            self.interner().resolve(sym),
+        ))
+    }
+
+    /// Compile a VIR `LocalStore` — variable assignment.
+    ///
+    /// Handles simple variable assignment with RC bookkeeping, captured
+    /// variable stores, and type coercion.  Field and index assignment
+    /// targets are not handled here (they remain as `VirExpr::Ast`).
+    fn compile_local_store(
+        &mut self,
+        sym: Symbol,
+        value_expr: &VirExpr,
+    ) -> CodegenResult<CompiledValue> {
+        // Snapshot RC state before evaluating the new value.
+        let (rc_old, composite_rc_old, union_rc_old) = self.snapshot_rc_for_reassignment(&sym);
+
+        let mut value = self.compile_vir_expr(value_expr)?;
+
+        // Captured variable — store through closure environment.
+        if let Some(binding) = self.get_capture(&sym).copied() {
+            return self.store_capture(&binding, value);
+        }
+
+        let (var, var_type_id) = self
+            .vars
+            .get(&sym)
+            .ok_or_else(|| CodegenError::not_found("variable", self.interner().resolve(sym)))?;
+        let var = *var;
+        let var_type_id = *var_type_id;
+
+        value = self.coerce_to_type(value, var_type_id)?;
+
+        // RC bookkeeping: inc new if borrowed, store, dec old.
+        if rc_old.is_some() && value.is_borrowed() {
+            self.emit_rc_inc_for_type(value.value, var_type_id)?;
+        }
+        self.builder.def_var(var, value.value);
+        if let Some(old_val) = rc_old {
+            self.emit_rc_dec_for_type(old_val, var_type_id)?;
+        }
+
+        // Composite RC: dec each RC field of the old struct.
+        if let Some((old_ptr, offsets)) = composite_rc_old {
+            for off in &offsets {
+                let field_ptr = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), old_ptr, *off);
+                self.emit_rc_dec(field_ptr)?;
+            }
+            self.rc_scopes.update_composite_offsets(var, offsets);
+        }
+
+        // Union RC: dec the RC payload of the old union value.
+        if let Some((old_ptr, rc_tags)) = union_rc_old {
+            self.emit_union_rc_dec(old_ptr, &rc_tags)?;
+        }
+
+        value.mark_consumed();
+        value.debug_assert_rc_handled("assign to variable");
+        Ok(value)
     }
 
     // VIR call dispatch is in the `vir_calls` submodule.

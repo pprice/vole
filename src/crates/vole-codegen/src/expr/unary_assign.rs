@@ -155,7 +155,7 @@ impl Cg<'_, '_, '_> {
     /// Returns (rc_old, composite_rc_old, union_rc_old) — each `Some` if the
     /// variable's old value needs RC cleanup after the new value is stored.
     #[expect(clippy::type_complexity)]
-    fn snapshot_rc_for_reassignment(
+    pub(super) fn snapshot_rc_for_reassignment(
         &mut self,
         sym: &Symbol,
     ) -> (

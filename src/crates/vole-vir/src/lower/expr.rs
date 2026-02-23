@@ -64,15 +64,15 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         ExprKind::Import(_) => Box::new(VirExpr::Import { ty }),
         ExprKind::TypeLiteral(_) => Box::new(VirExpr::TypeLiteral),
         ExprKind::Range(range_expr) => lower_range(range_expr, node_map, interner),
+        ExprKind::Identifier(sym) => Box::new(VirExpr::LocalLoad { name: *sym, ty }),
+        ExprKind::Assign(assign_expr) => lower_assign(assign_expr, expr, ty, node_map, interner),
         // Ast escape hatches — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
-        ExprKind::Assign(_)
-        | ExprKind::CompoundAssign(_)
+        ExprKind::CompoundAssign(_)
         | ExprKind::ArrayLiteral(_)
         | ExprKind::RepeatLiteral { .. }
         | ExprKind::InterpolatedString(_)
-        | ExprKind::Identifier(_)
         | ExprKind::Index(_)
         | ExprKind::Match(_)
         | ExprKind::NullCoalesce(_)
@@ -321,6 +321,32 @@ fn lower_range(
         end,
         inclusive: range_expr.inclusive,
     })
+}
+
+/// Lower an assignment expression.
+///
+/// Variable targets (`x = expr`) are lowered to `VirExpr::LocalStore`.
+/// All other targets (field, index, discard) remain as `VirExpr::Ast`
+/// because they require codegen-level information (field offsets, array
+/// bounds, etc.) that is not available during lowering.
+fn lower_assign(
+    assign_expr: &vole_frontend::ast::AssignExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    match &assign_expr.target {
+        vole_frontend::AssignTarget::Variable(sym) => {
+            let value = lower_expr(&assign_expr.value, node_map, interner);
+            Box::new(VirExpr::LocalStore { name: *sym, value })
+        }
+        // Discard, field, and index targets stay as Ast.
+        _ => Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        }),
+    }
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.

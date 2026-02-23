@@ -189,7 +189,7 @@ fn lower_expr_range_inclusive() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn lower_expr_assign_becomes_ast() {
+fn lower_expr_assign_variable_becomes_local_store() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -204,8 +204,14 @@ fn lower_expr_assign_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for Assign, got {other:?}"),
+        VirExpr::LocalStore { name, value } => {
+            assert_eq!(*name, Symbol::UNKNOWN);
+            match value.as_ref() {
+                VirExpr::IntLiteral { value: 42, .. } => {}
+                other => panic!("expected IntLiteral(42) as store value, got {other:?}"),
+            }
+        }
+        other => panic!("expected LocalStore for variable Assign, got {other:?}"),
     }
 }
 

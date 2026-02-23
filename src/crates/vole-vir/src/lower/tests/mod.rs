@@ -7,6 +7,7 @@ mod control_flow;
 mod functions;
 mod literals;
 mod operators;
+mod variables;
 
 use vole_frontend::Interner;
 use vole_frontend::NodeId;
