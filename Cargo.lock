@@ -1677,7 +1677,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vole"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "clap",
  "comfy-table",
@@ -1704,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "vole-codegen"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "cranelift",
  "cranelift-codegen",
@@ -1725,7 +1725,7 @@ dependencies = [
 
 [[package]]
 name = "vole-doccheck"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "glob",
  "vole",
@@ -1733,7 +1733,7 @@ dependencies = [
 
 [[package]]
 name = "vole-fmt"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "pretty",
  "vole-frontend",
@@ -1741,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "vole-frontend"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "miette",
  "rustc-hash",
@@ -1753,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "vole-identity"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "hashbrown 0.16.1",
  "miette",
@@ -1762,7 +1762,7 @@ dependencies = [
 
 [[package]]
 name = "vole-leak"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "clap",
  "glob",
@@ -1774,7 +1774,7 @@ dependencies = [
 
 [[package]]
 name = "vole-reduce"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "clap",
  "libc",
@@ -1785,7 +1785,7 @@ dependencies = [
 
 [[package]]
 name = "vole-runtime"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "chrono",
  "corosensei",
@@ -1799,7 +1799,7 @@ dependencies = [
 
 [[package]]
 name = "vole-sema"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "miette",
  "rustc-hash",
@@ -1813,7 +1813,7 @@ dependencies = [
 
 [[package]]
 name = "vole-snap"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "clap",
  "glob",
@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "vole-stress"
-version = "2026.2.3"
+version = "2026.2.4"
 dependencies = [
  "clap",
  "rand",
