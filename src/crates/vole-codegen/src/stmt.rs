@@ -1120,10 +1120,92 @@ impl Cg<'_, '_, '_> {
                 Ok(false)
             }
             VirStmt::While { cond, body } => self.compile_vir_while(cond, body),
+
+            // -- Control flow (simple delegation) --------------------------------
+            VirStmt::Return { value } => self.compile_vir_return(value.as_deref()),
+            VirStmt::Break => self.compile_vir_break(),
+            VirStmt::Continue => self.compile_vir_continue(),
+
+            // -- RC operations ---------------------------------------------------
+            VirStmt::RcInc { value } => {
+                let compiled = self.compile_vir_expr(value)?;
+                self.emit_rc_inc(compiled.value)?;
+                Ok(false)
+            }
+            VirStmt::RcDec { value } => {
+                let compiled = self.compile_vir_expr(value)?;
+                self.emit_rc_dec(compiled.value)?;
+                Ok(false)
+            }
+
+            // -- Complex stmts (todo) -------------------------------------------
+            VirStmt::Let { .. } => {
+                todo!("VIR Let stmt: lowering still emits Ast escape hatch")
+            }
+            VirStmt::LetTuple { .. } => {
+                todo!("VIR LetTuple stmt: lowering still emits Ast escape hatch")
+            }
+            VirStmt::Assign { .. } => {
+                todo!("VIR Assign stmt: lowering still emits Ast escape hatch")
+            }
+            VirStmt::For(_) => {
+                todo!("VIR For stmt: lowering still emits Ast escape hatch")
+            }
+            VirStmt::Raise { .. } => {
+                todo!("VIR Raise stmt: lowering still emits Ast escape hatch")
+            }
+
+            // -- Ast escape hatch ------------------------------------------------
             VirStmt::Ast { stmt } => self.stmt(stmt),
-            // Future phases add arms here
-            _ => todo!("VIR stmt not yet implemented: {vir_stmt:?}"),
         }
+    }
+
+    /// Compile a VIR return statement.
+    ///
+    /// Compiles the optional return value, cleans up all RC scopes, and
+    /// emits the Cranelift return instruction.
+    fn compile_vir_return(&mut self, value: Option<&vole_vir::VirExpr>) -> CodegenResult<bool> {
+        if let Some(value_expr) = value {
+            let compiled = self.compile_vir_expr(value_expr)?;
+            self.emit_rc_cleanup_all_scopes(None)?;
+            self.builder.ins().return_(&[compiled.value]);
+        } else {
+            self.emit_rc_cleanup_all_scopes(None)?;
+            self.builder.ins().return_(&[]);
+        }
+        Ok(true)
+    }
+
+    /// Compile a VIR break statement.
+    ///
+    /// Cleans up RC locals from inner loop scopes, then jumps to the
+    /// loop exit block.
+    fn compile_vir_break(&mut self) -> CodegenResult<bool> {
+        if let Some(exit_block) = self.cf.loop_exit() {
+            if let Some(depth) = self.cf.loop_rc_depth() {
+                self.emit_rc_cleanup_from_depth(depth)?;
+            }
+            self.builder.ins().jump(exit_block, &[]);
+        }
+        Ok(true)
+    }
+
+    /// Compile a VIR continue statement.
+    ///
+    /// Cleans up RC locals from inner loop scopes, then jumps to the
+    /// loop continue block. Creates an unreachable continuation block
+    /// so Cranelift does not complain about subsequent dead code.
+    fn compile_vir_continue(&mut self) -> CodegenResult<bool> {
+        if let Some(continue_block) = self.cf.loop_continue() {
+            if let Some(depth) = self.cf.loop_rc_depth() {
+                self.emit_rc_cleanup_from_depth(depth)?;
+            }
+            self.builder.ins().jump(continue_block, &[]);
+            let unreachable = self.builder.create_block();
+            self.switch_to_block(unreachable);
+            self.builder.seal_block(unreachable);
+        }
+        Ok(true)
     }
 
     /// Compile a VIR while loop.

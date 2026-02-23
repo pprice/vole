@@ -600,11 +600,69 @@ impl Cg<'_, '_, '_> {
                 ty: _,
             } => self.compile_vir_block(stmts, trailing.as_deref()),
 
+            // -- Pattern match (complex, todo) ----------------------------
+            VirExpr::Match { .. } => {
+                todo!("VIR Match expr: lowering still emits Ast escape hatch")
+            }
+
+            // -- Construction (todo) --------------------------------------
+            VirExpr::ArrayLiteral { .. } => {
+                todo!("VIR ArrayLiteral: lowering still emits Ast escape hatch")
+            }
+            VirExpr::StructLiteral { .. } => {
+                todo!("VIR StructLiteral: lowering still emits Ast escape hatch")
+            }
+            VirExpr::ClassInstance { .. } => {
+                todo!("VIR ClassInstance: lowering still emits Ast escape hatch")
+            }
+
+            // -- Field access (todo) --------------------------------------
+            VirExpr::FieldLoad { .. } => {
+                todo!("VIR FieldLoad: lowering still emits Ast escape hatch")
+            }
+            VirExpr::FieldStore { .. } => {
+                todo!("VIR FieldStore: lowering still emits Ast escape hatch")
+            }
+
+            // -- RC operations (todo) -------------------------------------
+            VirExpr::RcInc { .. } => {
+                todo!("VIR RcInc expr: lowering still emits Ast escape hatch")
+            }
+            VirExpr::RcDec { .. } => {
+                todo!("VIR RcDec expr: lowering still emits Ast escape hatch")
+            }
+            VirExpr::RcMove { .. } => {
+                todo!("VIR RcMove expr: lowering still emits Ast escape hatch")
+            }
+
+            // -- Type operations (todo) -----------------------------------
+            VirExpr::IsCheck { .. } => {
+                todo!("VIR IsCheck: lowering still emits Ast escape hatch")
+            }
+            VirExpr::AsCast { .. } => {
+                todo!("VIR AsCast: lowering still emits Ast escape hatch")
+            }
+
+            // -- Reflection (todo) ----------------------------------------
+            VirExpr::MetaAccess { .. } => {
+                todo!("VIR MetaAccess: lowering still emits Ast escape hatch")
+            }
+
+            // -- Variables (todo) -----------------------------------------
+            VirExpr::LocalLoad { .. } => {
+                todo!("VIR LocalLoad: lowering still emits Ast escape hatch")
+            }
+            VirExpr::LocalStore { .. } => {
+                todo!("VIR LocalStore: lowering still emits Ast escape hatch")
+            }
+
+            // -- Lambda (todo) --------------------------------------------
+            VirExpr::Lambda { .. } => {
+                todo!("VIR Lambda: lowering still emits Ast escape hatch")
+            }
+
             // -- Ast escape hatch -----------------------------------------
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),
-
-            // Future phases add arms here
-            _ => todo!("VIR expr not yet implemented: {vir_expr:?}"),
         }
     }
 
