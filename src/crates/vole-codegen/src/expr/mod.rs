@@ -555,6 +555,14 @@ impl Cg<'_, '_, '_> {
                 Ok(self.float_const(*value, type_id))
             }
             VirExpr::BoolLiteral(b) => Ok(self.bool_const(*b)),
+            VirExpr::StringLiteral(sym) => {
+                let s = self.interner().resolve(*sym).to_string();
+                self.string_literal(&s)
+            }
+            VirExpr::NilLiteral => {
+                let value = self.iconst_cached(types::I8, 0);
+                Ok(CompiledValue::new(value, types::I8, TypeId::NIL))
+            }
 
             // -- Ast escape hatch -----------------------------------------
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),

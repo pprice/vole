@@ -9,6 +9,7 @@
 // be emitted as `VirExpr::IntLiteral`, `FloatLiteral`, `BoolLiteral`, etc.
 // All other statement kinds remain as `VirStmt::Ast`.
 
+use vole_frontend::Interner;
 use vole_frontend::ast::{ExprKind, FuncBody, FuncDecl, InterfaceMethod, Stmt};
 use vole_frontend::{self, Expr};
 use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeId};
@@ -35,8 +36,9 @@ pub fn lower_function(
     param_types: &[(Symbol, TypeId)],
     return_type: TypeId,
     node_map: &NodeMap,
+    interner: &mut Interner,
 ) -> VirFunction {
-    let body = lower_func_body(&func.body, node_map);
+    let body = lower_func_body(&func.body, node_map, interner);
     VirFunction {
         id: func_id,
         name,
@@ -70,9 +72,18 @@ pub fn lower_monomorphized_function(
     node_map: &NodeMap,
     type_arena: &TypeArena,
     mangled_name_id: NameId,
+    interner: &mut Interner,
 ) -> VirFunction {
     debug_assert_concrete_types(param_types, return_type, type_arena, &name);
-    let mut vir = lower_function(func, func_id, name, param_types, return_type, node_map);
+    let mut vir = lower_function(
+        func,
+        func_id,
+        name,
+        param_types,
+        return_type,
+        node_map,
+        interner,
+    );
     vir.mangled_name_id = Some(mangled_name_id);
     vir
 }
@@ -90,8 +101,9 @@ pub fn lower_method(
     param_types: &[(Symbol, TypeId)],
     return_type: TypeId,
     node_map: &NodeMap,
+    interner: &mut Interner,
 ) -> VirFunction {
-    let body = lower_func_body(&func.body, node_map);
+    let body = lower_func_body(&func.body, node_map, interner);
     VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
@@ -114,9 +126,10 @@ pub fn lower_interface_method(
     param_types: &[(Symbol, TypeId)],
     return_type: TypeId,
     node_map: &NodeMap,
+    interner: &mut Interner,
 ) -> Option<VirFunction> {
     let body_ast = method.body.as_ref()?;
-    let body = lower_func_body(body_ast, node_map);
+    let body = lower_func_body(body_ast, node_map, interner);
     Some(VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
@@ -158,19 +171,19 @@ fn debug_assert_concrete_types(
 /// Test bodies use the same `FuncBody` type as functions, so this delegates
 /// to `lower_func_body`.  Exposed as a public API so the lowering pipeline
 /// in `analyzed.rs` can lower test bodies alongside function bodies.
-pub fn lower_test_body(body: &FuncBody, node_map: &NodeMap) -> VirBody {
-    lower_func_body(body, node_map)
+pub fn lower_test_body(body: &FuncBody, node_map: &NodeMap, interner: &mut Interner) -> VirBody {
+    lower_func_body(body, node_map, interner)
 }
 
 /// Lower a `FuncBody` (block or expression) into a `VirBody`.
 ///
 /// Block bodies have their statements walked individually; expression bodies
 /// become a single trailing VIR expression.
-fn lower_func_body(body: &FuncBody, node_map: &NodeMap) -> VirBody {
+fn lower_func_body(body: &FuncBody, node_map: &NodeMap, interner: &mut Interner) -> VirBody {
     match body {
-        FuncBody::Block(block) => lower_stmts(&block.stmts, node_map),
+        FuncBody::Block(block) => lower_stmts(&block.stmts, node_map, interner),
         FuncBody::Expr(expr) => {
-            let trailing = lower_expr(expr, node_map);
+            let trailing = lower_expr(expr, node_map, interner);
             VirBody {
                 stmts: Vec::new(),
                 trailing: Some(trailing),
@@ -184,8 +197,11 @@ fn lower_func_body(body: &FuncBody, node_map: &NodeMap) -> VirBody {
 /// Expression statements have their inner expression lowered through
 /// `lower_expr` (which emits proper VIR for known kinds like literals).
 /// All other statement kinds are wrapped in `VirStmt::Ast`.
-fn lower_stmts(stmts: &[Stmt], node_map: &NodeMap) -> VirBody {
-    let vir_stmts: Vec<VirStmt> = stmts.iter().map(|s| lower_stmt(s, node_map)).collect();
+fn lower_stmts(stmts: &[Stmt], node_map: &NodeMap, interner: &mut Interner) -> VirBody {
+    let vir_stmts: Vec<VirStmt> = stmts
+        .iter()
+        .map(|s| lower_stmt(s, node_map, interner))
+        .collect();
     VirBody {
         stmts: vir_stmts,
         trailing: None,
@@ -197,10 +213,10 @@ fn lower_stmts(stmts: &[Stmt], node_map: &NodeMap) -> VirBody {
 /// Expression statements (`Stmt::Expr`) are lowered through `lower_expr`,
 /// which produces proper VIR for known expression kinds. All other
 /// statement kinds are wrapped in the `VirStmt::Ast` escape hatch.
-fn lower_stmt(stmt: &Stmt, node_map: &NodeMap) -> VirStmt {
+fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interner) -> VirStmt {
     match stmt {
         Stmt::Expr(expr_stmt) => VirStmt::Expr {
-            value: lower_expr(&expr_stmt.expr, node_map),
+            value: lower_expr(&expr_stmt.expr, node_map, interner),
         },
         _ => VirStmt::Ast {
             stmt: Box::new(stmt.clone()),
@@ -212,10 +228,10 @@ fn lower_stmt(stmt: &Stmt, node_map: &NodeMap) -> VirStmt {
 ///
 /// Known expression kinds (literals, grouping) are emitted as proper VIR
 /// nodes. Everything else is wrapped in `VirExpr::Ast`.
-fn lower_expr(expr: &Expr, node_map: &NodeMap) -> VirRef {
+fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRef {
     // Strip grouping parentheses — lower the inner expression directly.
     if let ExprKind::Grouping(inner) = &expr.kind {
-        return lower_expr(inner, node_map);
+        return lower_expr(inner, node_map, interner);
     }
 
     let ty = node_map.get_type(expr.id).unwrap_or(TypeId::UNKNOWN);
@@ -225,6 +241,10 @@ fn lower_expr(expr: &Expr, node_map: &NodeMap) -> VirRef {
             Box::new(VirExpr::FloatLiteral { value: *value, ty })
         }
         ExprKind::BoolLiteral(value) => Box::new(VirExpr::BoolLiteral(*value)),
+        ExprKind::StringLiteral(s) => {
+            let sym = interner.intern(s);
+            Box::new(VirExpr::StringLiteral(sym))
+        }
         // Everything else: Ast escape hatch
         _ => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
@@ -326,10 +346,15 @@ mod tests {
         NodeMap::default()
     }
 
+    fn test_interner() -> Interner {
+        Interner::new()
+    }
+
     #[test]
     fn lower_empty_block_function() {
         let func = make_block_func(vec![]);
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let ret_ty = dummy_type_id();
 
         let vir = lower_function(
@@ -339,6 +364,7 @@ mod tests {
             &[],
             ret_ty,
             &node_map,
+            &mut interner,
         );
 
         assert_eq!(vir.id, dummy_func_id());
@@ -352,6 +378,7 @@ mod tests {
     fn lower_block_function_wraps_stmts_as_ast() {
         let func = make_block_func(vec![make_break_stmt(), make_continue_stmt()]);
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let ret_ty = dummy_type_id();
 
         let vir = lower_function(
@@ -361,6 +388,7 @@ mod tests {
             &[],
             ret_ty,
             &node_map,
+            &mut interner,
         );
 
         assert_eq!(vir.body.stmts.len(), 2);
@@ -379,6 +407,7 @@ mod tests {
     fn lower_expr_body_function_sets_trailing() {
         let func = make_expr_func(make_bool_expr());
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let ret_ty = dummy_type_id();
 
         let vir = lower_function(
@@ -388,6 +417,7 @@ mod tests {
             &[],
             ret_ty,
             &node_map,
+            &mut interner,
         );
 
         assert!(vir.body.stmts.is_empty());
@@ -404,6 +434,7 @@ mod tests {
     fn lower_preserves_params_and_return_type() {
         let func = make_block_func(vec![]);
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let ret_ty = dummy_type_id();
         let param_a = TypeId::from_raw(10);
         let param_b = TypeId::from_raw(20);
@@ -416,6 +447,7 @@ mod tests {
             &params,
             ret_ty,
             &node_map,
+            &mut interner,
         );
 
         assert_eq!(vir.params.len(), 2);
@@ -427,8 +459,9 @@ mod tests {
     #[test]
     fn lower_stmts_preserves_order() {
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let stmts = vec![make_break_stmt(), make_continue_stmt(), make_break_stmt()];
-        let body = lower_stmts(&stmts, &node_map);
+        let body = lower_stmts(&stmts, &node_map, &mut interner);
 
         assert_eq!(body.stmts.len(), 3);
         assert!(body.trailing.is_none());
@@ -464,8 +497,9 @@ mod tests {
     #[test]
     fn lower_expr_bool_literal() {
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let expr = make_bool_expr();
-        let vir_ref = lower_expr(&expr, &node_map);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
         match vir_ref.as_ref() {
             VirExpr::BoolLiteral(true) => {}
@@ -476,12 +510,13 @@ mod tests {
     #[test]
     fn lower_expr_int_literal_no_type() {
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let expr = Expr {
             id: dummy_node_id(),
             kind: ExprKind::IntLiteral(42, None),
             span: dummy_span(),
         };
-        let vir_ref = lower_expr(&expr, &node_map);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
         // No type in NodeMap → TypeId::UNKNOWN
         match vir_ref.as_ref() {
@@ -495,6 +530,7 @@ mod tests {
     #[test]
     fn lower_expr_int_literal_with_type() {
         let mut node_map = empty_node_map();
+        let mut interner = test_interner();
         let node_id = dummy_node_id();
         node_map.set_type(node_id, TypeId::I32);
         let expr = Expr {
@@ -502,7 +538,7 @@ mod tests {
             kind: ExprKind::IntLiteral(99, None),
             span: dummy_span(),
         };
-        let vir_ref = lower_expr(&expr, &node_map);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
         match vir_ref.as_ref() {
             VirExpr::IntLiteral { value: 99, ty } => {
@@ -515,6 +551,7 @@ mod tests {
     #[test]
     fn lower_expr_int_literal_i128_becomes_wide() {
         let mut node_map = empty_node_map();
+        let mut interner = test_interner();
         let node_id = dummy_node_id();
         node_map.set_type(node_id, TypeId::I128);
         let expr = Expr {
@@ -522,7 +559,7 @@ mod tests {
             kind: ExprKind::IntLiteral(42, None),
             span: dummy_span(),
         };
-        let vir_ref = lower_expr(&expr, &node_map);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
         match vir_ref.as_ref() {
             VirExpr::WideLiteral { low, high, ty } => {
@@ -537,6 +574,7 @@ mod tests {
     #[test]
     fn lower_expr_negative_int_i128_sign_extends() {
         let mut node_map = empty_node_map();
+        let mut interner = test_interner();
         let node_id = dummy_node_id();
         node_map.set_type(node_id, TypeId::I128);
         let expr = Expr {
@@ -544,7 +582,7 @@ mod tests {
             kind: ExprKind::IntLiteral(-1, None),
             span: dummy_span(),
         };
-        let vir_ref = lower_expr(&expr, &node_map);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
         match vir_ref.as_ref() {
             VirExpr::WideLiteral { low, high, ty } => {
@@ -560,6 +598,7 @@ mod tests {
     #[test]
     fn lower_expr_float_literal() {
         let mut node_map = empty_node_map();
+        let mut interner = test_interner();
         let node_id = dummy_node_id();
         node_map.set_type(node_id, TypeId::F64);
         let expr = Expr {
@@ -567,7 +606,7 @@ mod tests {
             kind: ExprKind::FloatLiteral(3.14, None),
             span: dummy_span(),
         };
-        let vir_ref = lower_expr(&expr, &node_map);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
         match vir_ref.as_ref() {
             VirExpr::FloatLiteral { value, ty } => {
@@ -581,6 +620,7 @@ mod tests {
     #[test]
     fn lower_expr_grouping_strips_parens() {
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let inner = Expr {
             id: dummy_node_id(),
             kind: ExprKind::BoolLiteral(false),
@@ -591,7 +631,7 @@ mod tests {
             kind: ExprKind::Grouping(Box::new(inner)),
             span: dummy_span(),
         };
-        let vir_ref = lower_expr(&expr, &node_map);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
         match vir_ref.as_ref() {
             VirExpr::BoolLiteral(false) => {}
@@ -602,12 +642,13 @@ mod tests {
     #[test]
     fn lower_expr_unknown_kind_becomes_ast() {
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let expr = Expr {
             id: dummy_node_id(),
             kind: ExprKind::Identifier(Symbol::UNKNOWN),
             span: dummy_span(),
         };
-        let vir_ref = lower_expr(&expr, &node_map);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
         match vir_ref.as_ref() {
             VirExpr::Ast { .. } => {}
@@ -618,12 +659,13 @@ mod tests {
     #[test]
     fn lower_stmt_expr_produces_vir_expr() {
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         use vole_frontend::ast::ExprStmt;
         let stmt = Stmt::Expr(ExprStmt {
             expr: make_bool_expr(),
             span: dummy_span(),
         });
-        let vir_stmt = lower_stmt(&stmt, &node_map);
+        let vir_stmt = lower_stmt(&stmt, &node_map, &mut interner);
 
         match &vir_stmt {
             VirStmt::Expr { value } => match value.as_ref() {
@@ -637,8 +679,9 @@ mod tests {
     #[test]
     fn lower_stmt_non_expr_becomes_ast() {
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let stmt = make_break_stmt();
-        let vir_stmt = lower_stmt(&stmt, &node_map);
+        let vir_stmt = lower_stmt(&stmt, &node_map, &mut interner);
 
         match &vir_stmt {
             VirStmt::Ast { .. } => {}
@@ -655,6 +698,7 @@ mod tests {
         let arena = TypeArena::new();
         let func = make_block_func(vec![make_break_stmt()]);
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let i64_ty = arena.i64();
         let string_ty = arena.string();
         let params = vec![(Symbol::UNKNOWN, i64_ty)];
@@ -668,6 +712,7 @@ mod tests {
             &node_map,
             &arena,
             dummy_name_id(),
+            &mut interner,
         );
 
         assert_eq!(vir.name, "identity__mono_0");
@@ -682,6 +727,7 @@ mod tests {
         let arena = TypeArena::new();
         let func = make_expr_func(make_bool_expr());
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let bool_ty = arena.bool();
 
         let vir = lower_monomorphized_function(
@@ -693,6 +739,7 @@ mod tests {
             &node_map,
             &arena,
             dummy_name_id(),
+            &mut interner,
         );
 
         assert_eq!(vir.name, "to_bool__mono_0");
@@ -707,6 +754,7 @@ mod tests {
         let mut arena = TypeArena::new();
         let func = make_block_func(vec![]);
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         // Create a type parameter — this should trigger the assertion
         let mut names = vole_identity::NameTable::new();
         let t_name_id = names.intern_raw(names.main_module(), &["T"]);
@@ -722,6 +770,7 @@ mod tests {
             &node_map,
             &arena,
             dummy_name_id(),
+            &mut interner,
         );
     }
 
@@ -731,6 +780,7 @@ mod tests {
         let mut arena = TypeArena::new();
         let func = make_block_func(vec![]);
         let node_map = empty_node_map();
+        let mut interner = test_interner();
         let mut names = vole_identity::NameTable::new();
         let t_name_id = names.intern_raw(names.main_module(), &["T"]);
         let type_param = arena.type_param(t_name_id);
@@ -744,6 +794,78 @@ mod tests {
             &node_map,
             &arena,
             dummy_name_id(),
+            &mut interner,
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // StringLiteral lowering
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn lower_expr_string_literal() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::StringLiteral("hello world".to_string()),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::StringLiteral(sym) => {
+                assert_eq!(interner.resolve(*sym), "hello world");
+            }
+            other => panic!("expected StringLiteral, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_string_literal_empty() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::StringLiteral(String::new()),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::StringLiteral(sym) => {
+                assert_eq!(interner.resolve(*sym), "");
+            }
+            other => panic!("expected StringLiteral for empty string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_string_literal_deduplicates() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr1 = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::StringLiteral("same".to_string()),
+            span: dummy_span(),
+        };
+        let expr2 = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::StringLiteral("same".to_string()),
+            span: dummy_span(),
+        };
+        let vir1 = lower_expr(&expr1, &node_map, &mut interner);
+        let vir2 = lower_expr(&expr2, &node_map, &mut interner);
+
+        // Both should produce the same Symbol
+        let sym1 = match vir1.as_ref() {
+            VirExpr::StringLiteral(s) => *s,
+            _ => panic!("expected StringLiteral"),
+        };
+        let sym2 = match vir2.as_ref() {
+            VirExpr::StringLiteral(s) => *s,
+            _ => panic!("expected StringLiteral"),
+        };
+        assert_eq!(sym1, sym2);
     }
 }

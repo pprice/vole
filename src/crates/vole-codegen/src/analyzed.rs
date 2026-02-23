@@ -59,23 +59,24 @@ impl AnalyzedProgram {
     /// When the CompilationDb has a single owner (non-cached path), unwraps it
     /// directly. When shared (cached path, where module cache holds a reference),
     /// creates a CodegenDb that shares all data via Rc (O(1), zero cloning).
-    pub fn from_analysis(program: Program, interner: Interner, output: AnalysisOutput) -> Self {
+    pub fn from_analysis(program: Program, mut interner: Interner, output: AnalysisOutput) -> Self {
         let db = match Rc::try_unwrap(output.db) {
             // Non-cached path: sole owner, move data directly (zero-cost)
             Ok(compilation_db) => compilation_db.into_codegen(),
             // Cached path: share Rc-wrapped fields instead of cloning entire CompilationDb
             Err(rc) => rc.to_codegen_shared(),
         };
+        let mut module_programs = output.module_programs;
         let mut vir_functions = lower_top_level_functions(
             &program,
-            &interner,
+            &mut interner,
             &db.names,
             &db.entities,
             &output.node_map,
             output.module_id,
         );
         lower_module_functions(
-            &output.module_programs,
+            &mut module_programs,
             &db.names,
             &db.entities,
             &output.node_map,
@@ -90,11 +91,12 @@ impl AnalyzedProgram {
             &db.entities,
             &db.types,
             &output.node_map,
+            &mut interner,
             &mut vir_functions,
         );
         lower_top_level_type_methods(
             &program,
-            &interner,
+            &mut interner,
             &db.names,
             &db.entities,
             &output.node_map,
@@ -102,7 +104,7 @@ impl AnalyzedProgram {
             &mut vir_functions,
         );
         lower_module_type_methods(
-            &output.module_programs,
+            &mut module_programs,
             &db.names,
             &db.entities,
             &output.node_map,
@@ -112,13 +114,13 @@ impl AnalyzedProgram {
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
         let vir_function_map = build_vir_function_map(&vir_functions);
         let vir_method_map = build_vir_method_map(&vir_functions);
-        let vir_test_bodies = lower_test_bodies(&program, &output.node_map);
+        let vir_test_bodies = lower_test_bodies(&program, &output.node_map, &mut interner);
         Self {
             program,
             interner: Rc::new(interner),
             node_map: output.node_map,
             tests_virtual_modules: output.tests_virtual_modules,
-            module_programs: output.module_programs,
+            module_programs,
             db,
             module_id: output.module_id,
             modules_with_errors: output.modules_with_errors,
@@ -213,34 +215,39 @@ impl AnalyzedProgram {
 /// because they are monomorphized during codegen.
 fn lower_top_level_functions(
     program: &Program,
-    interner: &Interner,
+    interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
     node_map: &NodeMap,
     module_id: ModuleId,
 ) -> Vec<VirFunction> {
-    let namer = NamerLookup::new(names, interner);
-    let mut vir_functions = Vec::new();
+    // Collect (func_decl, func_id, func_def) tuples first while interner is
+    // borrowed immutably by NamerLookup, then lower with &mut interner.
+    let resolved: Vec<_> = {
+        let namer = NamerLookup::new(names, interner);
+        program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                let Decl::Function(func) = decl else {
+                    return None;
+                };
+                if !func.type_params.is_empty() {
+                    return None;
+                }
+                let name_id = namer.function(module_id, func.name)?;
+                let func_id = entities.function_by_name(name_id)?;
+                let func_def = entities.get_function(func_id);
+                if func_def.generic_info.is_some() {
+                    return None;
+                }
+                Some((func, func_id, func_def))
+            })
+            .collect()
+    };
 
-    for decl in &program.declarations {
-        let Decl::Function(func) = decl else { continue };
-        // Skip generic functions — they are templates, not concrete
-        if !func.type_params.is_empty() {
-            continue;
-        }
-        // Look up the semantic FunctionId via NameTable
-        let Some(name_id) = namer.function(module_id, func.name) else {
-            continue;
-        };
-        let Some(func_id) = entities.function_by_name(name_id) else {
-            continue;
-        };
-        let func_def = entities.get_function(func_id);
-        // Skip implicit generics (structural type params)
-        if func_def.generic_info.is_some() {
-            continue;
-        }
-        // Build (Symbol, TypeId) pairs from AST param names + sema types
+    let mut vir_functions = Vec::new();
+    for (func, func_id, func_def) in resolved {
         let param_types: Vec<_> = func
             .params
             .iter()
@@ -255,6 +262,7 @@ fn lower_top_level_functions(
             &param_types,
             func_def.signature.return_type_id,
             node_map,
+            interner,
         );
         vir_functions.push(vir);
     }
@@ -276,6 +284,7 @@ fn lower_monomorphized_instances(
     entities: &EntityRegistry,
     type_arena: &TypeArena,
     node_map: &NodeMap,
+    interner: &mut Interner,
     vir_functions: &mut Vec<VirFunction>,
 ) {
     // Iterate all monomorphized instances in the cache
@@ -310,6 +319,7 @@ fn lower_monomorphized_instances(
             node_map,
             type_arena,
             instance.mangled_name,
+            interner,
         );
         vir_functions.push(vir);
     }
@@ -351,23 +361,24 @@ fn build_generic_func_map<'a>(
 /// non-generic, non-implicitly-generic function.  Modules with sema errors are
 /// skipped to avoid INVALID type IDs.
 fn lower_module_functions(
-    module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
+    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
     entities: &EntityRegistry,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
 ) {
-    for (module_path, (program, module_interner)) in module_programs {
-        if modules_with_errors.contains(module_path) {
+    for (module_path, (program, module_interner)) in module_programs.iter_mut() {
+        if modules_with_errors.contains(module_path.as_str()) {
             continue;
         }
         let module_id = names
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
+        let interner = Rc::make_mut(module_interner);
         lower_module_program_functions(
             program,
-            module_interner,
+            interner,
             names,
             entities,
             node_map,
@@ -380,30 +391,37 @@ fn lower_module_functions(
 /// Lower non-generic functions from a single module program to VIR.
 fn lower_module_program_functions(
     program: &Program,
-    interner: &Interner,
+    interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
 ) {
-    let namer = NamerLookup::new(names, interner);
+    let resolved: Vec<_> = {
+        let namer = NamerLookup::new(names, interner);
+        program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                let Decl::Function(func) = decl else {
+                    return None;
+                };
+                if !func.type_params.is_empty() {
+                    return None;
+                }
+                let name_id = namer.function(module_id, func.name)?;
+                let func_id = entities.function_by_name(name_id)?;
+                let func_def = entities.get_function(func_id);
+                if func_def.generic_info.is_some() {
+                    return None;
+                }
+                Some((func, func_id, func_def))
+            })
+            .collect()
+    };
 
-    for decl in &program.declarations {
-        let Decl::Function(func) = decl else { continue };
-        if !func.type_params.is_empty() {
-            continue;
-        }
-        let Some(name_id) = namer.function(module_id, func.name) else {
-            continue;
-        };
-        let Some(func_id) = entities.function_by_name(name_id) else {
-            continue;
-        };
-        let func_def = entities.get_function(func_id);
-        if func_def.generic_info.is_some() {
-            continue;
-        }
+    for (func, func_id, func_def) in resolved {
         let param_types: Vec<_> = func
             .params
             .iter()
@@ -418,6 +436,7 @@ fn lower_module_program_functions(
             &param_types,
             func_def.signature.return_type_id,
             node_map,
+            interner,
         );
         vir_functions.push(vir);
     }
@@ -472,15 +491,13 @@ fn build_vir_method_map(vir_functions: &[VirFunction]) -> FxHashMap<MethodId, us
 /// methods in the entity registry, and lowers non-generic methods to VIR.
 fn lower_top_level_type_methods(
     program: &Program,
-    interner: &Interner,
+    interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
 ) {
-    let namer = NamerLookup::new(names, interner);
-
     for decl in &program.declarations {
         match decl {
             Decl::Class(class) => {
@@ -492,7 +509,6 @@ fn lower_top_level_type_methods(
                     class.statics.as_ref(),
                     class.name,
                     interner,
-                    &namer,
                     names,
                     entities,
                     node_map,
@@ -509,7 +525,6 @@ fn lower_top_level_type_methods(
                     s.statics.as_ref(),
                     s.name,
                     interner,
-                    &namer,
                     names,
                     entities,
                     node_map,
@@ -528,60 +543,98 @@ fn lower_type_methods(
     methods: &[vole_frontend::FuncDecl],
     statics: Option<&vole_frontend::ast::StaticsBlock>,
     type_name: vole_frontend::Symbol,
-    interner: &Interner,
-    namer: &NamerLookup<'_>,
+    interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
 ) {
-    // Look up TypeDefId for the type
-    let Some(type_name_id) = names.name_id(module_id, &[type_name], interner) else {
-        return;
-    };
-    let Some(type_def_id) = entities.type_by_name(type_name_id) else {
-        return;
-    };
-    let type_name_str = interner.resolve(type_name);
-
-    // Lower instance methods
-    for method in methods {
-        if !method.type_params.is_empty() {
-            continue;
-        }
-        let Some(method_name_id) = namer.method(method.name) else {
-            continue;
+    // Resolve all name lookups first while interner is borrowed immutably
+    let (type_def_id, resolved_methods, resolved_statics) = {
+        let namer = NamerLookup::new(names, interner);
+        let Some(type_name_id) = names.name_id(module_id, &[type_name], interner) else {
+            return;
         };
-        let Some(mid) = entities.find_method_on_type(type_def_id, method_name_id) else {
-            continue;
+        let Some(type_def_id) = entities.type_by_name(type_name_id) else {
+            return;
         };
-        let method_def = entities.get_method(mid);
-        if method_def.method_type_params.is_empty() {
-            lower_single_method(
-                method,
-                mid,
-                method_def,
-                type_name_str,
-                interner,
-                node_map,
-                vir_functions,
-            );
-        }
-    }
 
-    // Lower static methods
-    if let Some(statics) = statics {
-        lower_static_methods(
-            statics,
-            type_def_id,
-            type_name_str,
+        let resolved_methods: Vec<_> = methods
+            .iter()
+            .filter_map(|method| {
+                if !method.type_params.is_empty() {
+                    return None;
+                }
+                let method_name_id = namer.method(method.name)?;
+                let mid = entities.find_method_on_type(type_def_id, method_name_id)?;
+                let method_def = entities.get_method(mid);
+                if !method_def.method_type_params.is_empty() {
+                    return None;
+                }
+                Some((method, mid, method_def))
+            })
+            .collect();
+
+        let resolved_statics: Vec<_> = statics
+            .map(|s| {
+                s.methods
+                    .iter()
+                    .filter_map(|method| {
+                        if method.body.is_none() || !method.type_params.is_empty() {
+                            return None;
+                        }
+                        let method_name_id = namer.method(method.name)?;
+                        let mid =
+                            entities.find_static_method_on_type(type_def_id, method_name_id)?;
+                        let method_def = entities.get_method(mid);
+                        if !method_def.method_type_params.is_empty() {
+                            return None;
+                        }
+                        Some((method, mid, method_def))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        (type_def_id, resolved_methods, resolved_statics)
+    };
+
+    // Now lower with &mut interner (namer is dropped, no immutable borrow)
+    let _ = type_def_id;
+    let type_name_str = interner.resolve(type_name).to_string();
+
+    for (method, mid, method_def) in resolved_methods {
+        lower_single_method(
+            method,
+            mid,
+            method_def,
+            &type_name_str,
             interner,
-            namer,
-            entities,
             node_map,
             vir_functions,
         );
+    }
+
+    for (method, mid, method_def) in resolved_statics {
+        let method_name_str = interner.resolve(method.name);
+        let display_name = format!("{}::{}", type_name_str, method_name_str);
+        let param_types: Vec<_> = method
+            .params
+            .iter()
+            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+            .collect();
+        if let Some(vir) = vole_vir::lower_interface_method(
+            method,
+            mid,
+            display_name,
+            &param_types,
+            method_def.signature_id,
+            node_map,
+            interner,
+        ) {
+            vir_functions.push(vir);
+        }
     }
 }
 
@@ -591,7 +644,7 @@ fn lower_single_method(
     method_id: MethodId,
     method_def: &vole_sema::MethodDef,
     type_name_str: &str,
-    interner: &Interner,
+    interner: &mut Interner,
     node_map: &NodeMap,
     vir_functions: &mut Vec<VirFunction>,
 ) {
@@ -619,79 +672,28 @@ fn lower_single_method(
         &param_types,
         arena_sig, // return_type placeholder (Phase 0 doesn't use it)
         node_map,
+        interner,
     );
     vir_functions.push(vir);
 }
 
-/// Lower static methods from a StaticsBlock to VIR.
-#[allow(clippy::too_many_arguments)]
-fn lower_static_methods(
-    statics: &vole_frontend::ast::StaticsBlock,
-    type_def_id: vole_identity::TypeDefId,
-    type_name_str: &str,
-    interner: &Interner,
-    namer: &NamerLookup<'_>,
-    entities: &EntityRegistry,
-    node_map: &NodeMap,
-    vir_functions: &mut Vec<VirFunction>,
-) {
-    for method in &statics.methods {
-        // Static methods are InterfaceMethod nodes; skip those without bodies
-        if method.body.is_none() {
-            continue;
-        }
-        if !method.type_params.is_empty() {
-            continue;
-        }
-        let Some(method_name_id) = namer.method(method.name) else {
-            continue;
-        };
-        let Some(mid) = entities.find_static_method_on_type(type_def_id, method_name_id) else {
-            continue;
-        };
-        let method_def = entities.get_method(mid);
-        if !method_def.method_type_params.is_empty() {
-            continue;
-        }
-        let method_name_str = interner.resolve(method.name);
-        let display_name = format!("{}::{}", type_name_str, method_name_str);
-
-        let param_types: Vec<_> = method
-            .params
-            .iter()
-            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
-            .collect();
-
-        if let Some(vir) = vole_vir::lower_interface_method(
-            method,
-            mid,
-            display_name,
-            &param_types,
-            method_def.signature_id,
-            node_map,
-        ) {
-            vir_functions.push(vir);
-        }
-    }
-}
-
 /// Lower non-generic type methods from imported modules to VIR.
 fn lower_module_type_methods(
-    module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
+    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
     entities: &EntityRegistry,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
 ) {
-    for (module_path, (program, module_interner)) in module_programs {
-        if modules_with_errors.contains(module_path) {
+    for (module_path, (program, module_interner)) in module_programs.iter_mut() {
+        if modules_with_errors.contains(module_path.as_str()) {
             continue;
         }
         let module_id = names
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
-        let namer = NamerLookup::new(names, module_interner);
+        let interner = Rc::make_mut(module_interner);
 
         for decl in &program.declarations {
             match decl {
@@ -703,8 +705,7 @@ fn lower_module_type_methods(
                         &class.methods,
                         class.statics.as_ref(),
                         class.name,
-                        module_interner,
-                        &namer,
+                        interner,
                         names,
                         entities,
                         node_map,
@@ -720,8 +721,7 @@ fn lower_module_type_methods(
                         &s.methods,
                         s.statics.as_ref(),
                         s.name,
-                        module_interner,
-                        &namer,
+                        interner,
                         names,
                         entities,
                         node_map,
@@ -740,11 +740,15 @@ fn lower_module_type_methods(
 /// Walks the program's `Decl::Tests` blocks (including nested ones) and
 /// lowers each `TestCase.body` to a `VirBody`.  Returns a map keyed by
 /// the `TestCase`'s `Span` for O(1) lookup during test compilation.
-fn lower_test_bodies(program: &Program, node_map: &NodeMap) -> FxHashMap<Span, VirBody> {
+fn lower_test_bodies(
+    program: &Program,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> FxHashMap<Span, VirBody> {
     let mut map = FxHashMap::default();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
-            lower_tests_decl_bodies(tests_decl, node_map, &mut map);
+            lower_tests_decl_bodies(tests_decl, node_map, interner, &mut map);
         }
     }
     map
@@ -754,16 +758,17 @@ fn lower_test_bodies(program: &Program, node_map: &NodeMap) -> FxHashMap<Span, V
 fn lower_tests_decl_bodies(
     tests_decl: &vole_frontend::ast::TestsDecl,
     node_map: &NodeMap,
+    interner: &mut Interner,
     map: &mut FxHashMap<Span, VirBody>,
 ) {
     for test in &tests_decl.tests {
-        let vir_body = lower_test_body(&test.body, node_map);
+        let vir_body = lower_test_body(&test.body, node_map, interner);
         map.insert(test.span, vir_body);
     }
     // Recurse into nested tests blocks
     for decl in &tests_decl.decls {
         if let Decl::Tests(nested) = decl {
-            lower_tests_decl_bodies(nested, node_map, map);
+            lower_tests_decl_bodies(nested, node_map, interner, map);
         }
     }
 }
