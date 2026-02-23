@@ -524,22 +524,17 @@ func _to_json_object(meta: TypeMeta, instance: unknown) -> JsonObject {
 // Convert a struct/class instance to a JsonObject with field mapping.
 // The renames map maps field names to JSON keys.
 // The ignores map lists field names that should be excluded.
-// Iterates meta.fields directly to avoid RC issues with for-in over keys().
 func _to_json_object_mapped(meta: TypeMeta, instance: unknown, renames: Map<string, string>, ignores: Map<string, bool>) -> JsonObject {
     let result = JsonObject.new()
-    var i: i64 = 0
-    while i < meta.fields.length() {
-        let field = meta.fields[i]
+    for field in meta.fields {
         let fname = field.name
         if !ignores.contains_key(fname) {
             let getter = field.get
             let raw = getter(instance)
             let tname = field.type_name
-            // Resolve the output key name via helper to avoid cache issues in loop.
             let out_key = _mapped_resolve_key(fname, renames)
             _serde_set_field_value(result, out_key, tname, raw)
         }
-        i = i + 1
     }
     return result
 }
@@ -558,32 +553,32 @@ func _mapped_resolve_key(fname: string, renames: Map<string, string>) -> string 
 
 // Construct a struct/class instance from a JsonObject with field mapping.
 // The renames map maps field names to JSON keys (same direction as to_object_mapped).
-// This reverses the renames (json_key -> field_name) before passing to _from_json_object.
-//
-// Implementation: Stringify the source object, replace renamed keys in the
-// JSON string, then parse and pass to _from_json_object. This avoids copying
-// Json union values between JsonObjects, which triggers RC lifecycle bugs.
+// Builds a new JsonObject with keys reversed from json_key -> field_name,
+// then passes to _from_json_object_raw.
 func _from_json_object_mapped(meta: TypeMeta, obj: JsonObject, renames: Map<string, string>) -> unknown {
-    var json_str = _stringify_value(obj)
-    // For each field in meta, if it has a rename, replace the renamed key
-    // back to the original field name in the JSON string.
-    var ri: i64 = 0
-    while ri < meta.fields.length() {
-        let field = meta.fields[ri]
+    // Build reverse map: json_key -> field_name
+    let reverse = Map.new<string, string>()
+    for field in meta.fields {
         let fname = field.name
         let mapped_key = _mapped_resolve_key(fname, renames)
         if mapped_key != fname {
-            let old_key = "\"" + mapped_key + "\":"
-            let new_key = "\"" + fname + "\":"
-            json_str = json_str.replace(old_key, new_key)
+            reverse.set(mapped_key, fname)
         }
-        ri = ri + 1
     }
-    let parsed = _parse_top(json_str)
-    if !parsed.ok { return nil }
-    if !parsed.is_object() { return nil }
-    let parsed_obj = parsed.as_object()
-    return _from_json_object(meta, parsed_obj)
+    // Copy values with reversed key names
+    let remapped = JsonObject.new()
+    for key in obj.keys() {
+        let v = obj.get(key)
+        if reverse.contains_key(key) {
+            let original_name = reverse.get(key)
+            if original_name is string {
+                remapped.set(original_name, v)
+            }
+        } else {
+            remapped.set(key, v)
+        }
+    }
+    return _from_json_object_raw(meta, remapped)
 }
 
 // Set a single field on a JsonObject, converting from the native type to Json.
@@ -657,14 +652,21 @@ func _from_json_object(meta: TypeMeta, obj: JsonObject) -> unknown {
     if has_renames {
         return _from_json_object_mapped(meta, obj, mappings.renames)
     }
-    // Work around [unknown] array push bug: pushing different values in a loop
-    // causes all entries to point to the last value. Instead, we:
-    // 1. Construct an instance with placeholder values
-    // 2. Use field.set to set each field individually
-    //
-    // Strategy: stringify the whole object to JSON text, then for each field
-    // in meta.fields, search the JSON text for "fieldname": and extract
-    // the value text inline, then set the field via field.set.
+    return _from_json_object_raw(meta, obj)
+}
+
+// Raw deserialization: construct a struct/class instance from a JsonObject
+// without checking annotations. Called by both _from_json_object (after
+// annotation extraction) and _from_json_object_mapped (after key renaming).
+//
+// Work around [unknown] array push bug: pushing different typed values in a
+// loop causes all entries to alias the last value. Instead, we:
+// 1. Construct an instance with placeholder nil values (all same value = safe)
+// 2. Use field.set to set each field individually after construction
+//
+// Strategy: stringify the object to JSON text, extract each field's raw text,
+// then set the field via field.set.
+func _from_json_object_raw(meta: TypeMeta, obj: JsonObject) -> unknown {
     let json_text = _stringify_value(obj)
     let text_len: i32 = _str_len_i32(json_text)
     // Build placeholder defaults array (all nil, same value so push works)
@@ -684,99 +686,111 @@ func _from_json_object(meta: TypeMeta, obj: JsonObject) -> unknown {
         let fname = field.name
         let tname = field.type_name
         let setter = field.set
-        // --- Inline extraction of field text from json_text ---
-        let pattern = "\"" + fname + "\":"
-        let pattern_len: i32 = _str_len_i32(pattern)
-        var field_text = ""
-        var search_pos: i32 = 0
-        while search_pos + pattern_len <= text_len {
-            let candidate = json_text.substring(search_pos, search_pos + pattern_len)
-            if candidate == pattern {
-                let vs: i32 = search_pos + pattern_len
-                var vi: i32 = vs
-                while vi < text_len {
-                    let wc = json_text.char_at_raw(vi)
-                    if wc != 32 && wc != 9 && wc != 10 && wc != 13 {
-                        search_pos = text_len
-                        let vch = json_text.char_at_raw(vi)
-                        if vch == 34 {
-                            let one32: i32 = 1
-                            let two32: i32 = 2
-                            var sj: i32 = vi + one32
-                            var found_end = false
-                            while sj < text_len && !found_end {
-                                let sc = json_text.char_at_raw(sj)
-                                if sc == 92 {
-                                    sj = sj + two32
-                                } else if sc == 34 {
-                                    field_text = json_text.substring(vi, sj + one32)
-                                    found_end = true
-                                } else {
-                                    sj = sj + one32
-                                }
-                            }
-                            if !found_end {
-                                field_text = json_text.substring(vi, text_len)
-                            }
-                        } else {
-                            let one32: i32 = 1
-                            var nj: i32 = vi
-                            var found_delim = false
-                            while nj < text_len && !found_delim {
-                                let nc = json_text.char_at_raw(nj)
-                                if nc == 44 || nc == 125 || nc == 93 || nc == 32 || nc == 10 {
-                                    field_text = json_text.substring(vi, nj)
-                                    found_delim = true
-                                } else {
-                                    nj = nj + one32
-                                }
-                            }
-                            if !found_delim {
-                                field_text = json_text.substring(vi, text_len)
-                            }
-                        }
-                        vi = text_len
-                    } else {
-                        let one32: i32 = 1
-                        vi = vi + one32
-                    }
-                }
-            }
-            let one32: i32 = 1
-            search_pos = search_pos + one32
-        }
-        // --- Set the field value based on type ---
-        if tname == "string" {
-            let sv = _serde_unquote(field_text)
-            let boxed: unknown = sv
-            setter(instance, boxed)
-        } else if tname == "i64" {
-            let fv = _serde_parse_f64(field_text)
-            let nv: i64 = _serde_f64_to_i64(fv)
-            let boxed: unknown = nv
-            setter(instance, boxed)
-        } else if tname == "f64" {
-            let fv = _serde_parse_f64(field_text)
-            let boxed: unknown = fv
-            setter(instance, boxed)
-        } else if tname == "bool" {
-            if field_text == "true" {
-                let boxed: unknown = true
-                setter(instance, boxed)
-            } else {
-                let boxed: unknown = false
-                setter(instance, boxed)
-            }
-        } else if tname == "i32" {
-            let fv = _serde_parse_f64(field_text)
-            let n64: i64 = _serde_f64_to_i64(fv)
-            let nv: i32 = _serde_i64_to_i32(n64)
-            let boxed: unknown = nv
-            setter(instance, boxed)
-        }
+        let field_text = _extract_field_text(json_text, text_len, fname)
+        _serde_set_field_from_text(setter, instance, tname, field_text)
         i = i + 1
     }
     return instance
+}
+
+// Extract the raw JSON text for a named field from a stringified JSON object.
+// Searches for "fieldname": and returns the value text (string literal or token).
+func _extract_field_text(json_text: string, text_len: i32, fname: string) -> string {
+    let pattern = "\"" + fname + "\":"
+    let pattern_len: i32 = _str_len_i32(pattern)
+    var field_text = ""
+    var search_pos: i32 = 0
+    while search_pos + pattern_len <= text_len {
+        let candidate = json_text.substring(search_pos, search_pos + pattern_len)
+        if candidate == pattern {
+            let vs: i32 = search_pos + pattern_len
+            var vi: i32 = vs
+            while vi < text_len {
+                let wc = json_text.char_at_raw(vi)
+                if wc != 32 && wc != 9 && wc != 10 && wc != 13 {
+                    search_pos = text_len
+                    let vch = json_text.char_at_raw(vi)
+                    if vch == 34 {
+                        field_text = _extract_string_value(json_text, text_len, vi)
+                    } else {
+                        field_text = _extract_token_value(json_text, text_len, vi)
+                    }
+                    vi = text_len
+                } else {
+                    let one32: i32 = 1
+                    vi = vi + one32
+                }
+            }
+        }
+        let one32: i32 = 1
+        search_pos = search_pos + one32
+    }
+    return field_text
+}
+
+// Extract a JSON string value starting at the opening quote.
+func _extract_string_value(json_text: string, text_len: i32, start: i32) -> string {
+    let one32: i32 = 1
+    let two32: i32 = 2
+    var sj: i32 = start + one32
+    var found_end = false
+    while sj < text_len && !found_end {
+        let sc = json_text.char_at_raw(sj)
+        if sc == 92 {
+            sj = sj + two32
+        } else if sc == 34 {
+            return json_text.substring(start, sj + one32)
+        } else {
+            sj = sj + one32
+        }
+    }
+    return json_text.substring(start, text_len)
+}
+
+// Extract a JSON token value (number, bool, null) starting at the first char.
+func _extract_token_value(json_text: string, text_len: i32, start: i32) -> string {
+    let one32: i32 = 1
+    var nj: i32 = start
+    while nj < text_len {
+        let nc = json_text.char_at_raw(nj)
+        if nc == 44 || nc == 125 || nc == 93 || nc == 32 || nc == 10 {
+            return json_text.substring(start, nj)
+        }
+        nj = nj + one32
+    }
+    return json_text.substring(start, text_len)
+}
+
+// Set a field on an instance from a raw JSON text value, dispatching by type name.
+func _serde_set_field_from_text(setter: (unknown, unknown) -> void, instance: unknown, tname: string, field_text: string) {
+    if tname == "string" {
+        let sv = _serde_unquote(field_text)
+        let boxed: unknown = sv
+        setter(instance, boxed)
+    } else if tname == "i64" {
+        let fv = _serde_parse_f64(field_text)
+        let nv: i64 = _serde_f64_to_i64(fv)
+        let boxed: unknown = nv
+        setter(instance, boxed)
+    } else if tname == "f64" {
+        let fv = _serde_parse_f64(field_text)
+        let boxed: unknown = fv
+        setter(instance, boxed)
+    } else if tname == "bool" {
+        if field_text == "true" {
+            let boxed: unknown = true
+            setter(instance, boxed)
+        } else {
+            let boxed: unknown = false
+            setter(instance, boxed)
+        }
+    } else if tname == "i32" {
+        let fv = _serde_parse_f64(field_text)
+        let n64: i64 = _serde_f64_to_i64(fv)
+        let nv: i32 = _serde_i64_to_i32(n64)
+        let boxed: unknown = nv
+        setter(instance, boxed)
+    }
 }
 
 
