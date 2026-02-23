@@ -9,11 +9,11 @@ use vole_frontend::{ExprKind, MatchExpr, PatternKind, UnaryOp};
 use vole_sema::type_arena::TypeId;
 
 /// Minimum number of non-default arms required to use the Switch optimization.
-const MIN_SWITCH_ARMS: usize = 4;
+pub(crate) const MIN_SWITCH_ARMS: usize = 4;
 
 /// Maximum ratio of (range size / arm count) for the range to be considered dense enough.
 /// For example, arms [0, 1, 2, 5] have range 6, count 4, ratio 1.5 which is <= 2.0.
-const MAX_DENSITY_RATIO: f64 = 2.0;
+pub(crate) const MAX_DENSITY_RATIO: f64 = 2.0;
 
 /// Result of analyzing match arms for Switch applicability.
 pub(crate) struct SwitchAnalysis {
@@ -25,7 +25,7 @@ pub(crate) struct SwitchAnalysis {
 
 /// Try to extract a constant integer value from a pattern's literal expression.
 /// Returns `Some(value)` for `IntLiteral(n)` or `Unary(Neg, IntLiteral(n))`.
-fn extract_int_literal(expr: &vole_frontend::Expr) -> Option<i64> {
+pub(crate) fn extract_int_literal(expr: &vole_frontend::Expr) -> Option<i64> {
     match &expr.kind {
         ExprKind::IntLiteral(n, _) => Some(*n),
         ExprKind::Unary(unary) if unary.op == UnaryOp::Neg => {
@@ -102,6 +102,70 @@ pub(crate) fn analyze_switch(
     let range_size = (max_val as i128) - (min_val as i128) + 1;
     if range_size > i64::MAX as i128 {
         return None; // Range too large for switch table
+    }
+    let range_size = range_size as f64;
+    let arm_count = arm_values.len() as f64;
+
+    if range_size / arm_count > MAX_DENSITY_RATIO {
+        return None;
+    }
+
+    Some(SwitchAnalysis {
+        arm_values,
+        wildcard_idx,
+    })
+}
+
+/// Analyze VIR match arms to determine if Switch optimization is applicable.
+///
+/// Same criteria as [`analyze_switch`] but operates on VIR match arms
+/// with `VirPattern::Ast`-wrapped AST patterns.
+pub(crate) fn analyze_vir_switch(
+    arms: &[vole_vir::VirMatchArm],
+    scrutinee_type_id: TypeId,
+) -> Option<SwitchAnalysis> {
+    if !scrutinee_type_id.is_integer() {
+        return None;
+    }
+
+    let mut arm_values = Vec::new();
+    let mut seen_values = HashSet::new();
+    let mut wildcard_idx = None;
+
+    for (i, arm) in arms.iter().enumerate() {
+        // Guards prevent Switch optimization
+        if arm.guard.is_some() {
+            return None;
+        }
+
+        let vole_vir::VirPattern::Ast(pattern) = &arm.pattern;
+        match &pattern.kind {
+            PatternKind::Wildcard => {
+                if wildcard_idx.is_some() {
+                    return None;
+                }
+                wildcard_idx = Some(i);
+            }
+            PatternKind::Literal(lit_expr) => {
+                let value = extract_int_literal(lit_expr)?;
+                if seen_values.insert(value) {
+                    arm_values.push((i, value));
+                }
+            }
+            _ => return None,
+        }
+    }
+
+    if arm_values.len() < MIN_SWITCH_ARMS {
+        return None;
+    }
+
+    // Check density
+    let min_val = arm_values.iter().map(|(_, v)| *v).min()?;
+    let max_val = arm_values.iter().map(|(_, v)| *v).max()?;
+    let range_size = (max_val as i128) - (min_val as i128) + 1;
+    if range_size > i64::MAX as i128 {
+        return None;
     }
     let range_size = range_size as f64;
     let arm_count = arm_values.len() as f64;

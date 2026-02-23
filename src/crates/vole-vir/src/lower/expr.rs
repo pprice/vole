@@ -13,8 +13,8 @@ use vole_sema::node_map::NodeMap;
 
 use crate::calls::CallTarget;
 use crate::expr::{
-    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirExpr, VirMetaKind,
-    VirStringPart, VirUnOp,
+    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirExpr, VirMatchArm,
+    VirMetaKind, VirPattern, VirStringPart, VirUnOp,
 };
 use crate::func::VirBody;
 use crate::refs::VirRef;
@@ -83,10 +83,9 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         ExprKind::StructLiteral(struct_lit) => {
             lower_struct_literal(struct_lit, expr, ty, node_map, interner)
         }
-        ExprKind::RepeatLiteral { .. }
-        | ExprKind::Match(_)
-        | ExprKind::MethodCall(_)
-        | ExprKind::When(_) => Box::new(VirExpr::Ast {
+        ExprKind::When(when_expr) => lower_when_expr(when_expr, ty, node_map, interner),
+        ExprKind::Match(match_expr) => lower_match_expr(match_expr, expr, ty, node_map, interner),
+        ExprKind::RepeatLiteral { .. } | ExprKind::MethodCall(_) => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,
         }),
@@ -883,4 +882,122 @@ pub(crate) fn map_unary_op(op: UnaryOp) -> VirUnOp {
         UnaryOp::Not => VirUnOp::Not,
         UnaryOp::BitNot => VirUnOp::BitNot,
     }
+}
+
+/// Lower a `when` expression by desugaring to a chain of `VirExpr::If`.
+///
+/// `when { c1 => r1, c2 => r2, _ => def }` becomes:
+///   `if c1 { r1 } else { if c2 { r2 } else { def } }`
+///
+/// The wildcard arm (condition = None) becomes the innermost else body.
+/// Non-wildcard arms form nested if-else chains.
+fn lower_when_expr(
+    when_expr: &vole_frontend::ast::WhenExpr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    // Separate conditional arms from the wildcard arm.
+    let mut cond_arms: Vec<&vole_frontend::ast::WhenArm> = Vec::new();
+    let mut wildcard_arm: Option<&vole_frontend::ast::WhenArm> = None;
+
+    for arm in &when_expr.arms {
+        if arm.condition.is_none() {
+            wildcard_arm = Some(arm);
+        } else {
+            cond_arms.push(arm);
+        }
+    }
+
+    // Build the else body from the wildcard arm (or void if none).
+    let else_body = wildcard_arm.map(|arm| {
+        let body = lower_expr(&arm.body, node_map, interner);
+        VirBody {
+            stmts: Vec::new(),
+            trailing: Some(body),
+        }
+    });
+
+    // Build the if-else chain from back to front.
+    // Start with the last conditional arm and nest inward.
+    let mut result_else = else_body;
+
+    for arm in cond_arms.iter().rev() {
+        let cond = lower_expr(
+            arm.condition
+                .as_ref()
+                .expect("INTERNAL: when arm: non-wildcard arm has no condition"),
+            node_map,
+            interner,
+        );
+        let then_val = lower_expr(&arm.body, node_map, interner);
+        let then_body = VirBody {
+            stmts: Vec::new(),
+            trailing: Some(then_val),
+        };
+
+        result_else = Some(VirBody {
+            stmts: Vec::new(),
+            trailing: Some(Box::new(VirExpr::If {
+                cond,
+                then_body,
+                else_body: result_else,
+                ty,
+            })),
+        });
+    }
+
+    // The outermost result is in result_else's trailing expression.
+    match result_else {
+        Some(body) => body.trailing.expect("INTERNAL: when expr: empty chain"),
+        None => {
+            // No arms at all (shouldn't happen with well-formed when, but handle gracefully).
+            Box::new(VirExpr::NilLiteral)
+        }
+    }
+}
+
+/// Lower a `match` expression to `VirExpr::Match`.
+///
+/// The scrutinee is recursively lowered. Each arm's pattern is preserved as
+/// `VirPattern::Ast` (patterns are compiled by codegen which needs the full
+/// AST pattern node for type resolution, field extraction, etc.). Guards and
+/// bodies are recursively lowered.
+fn lower_match_expr(
+    match_expr: &vole_frontend::ast::MatchExpr,
+    _expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let scrutinee = lower_expr(&match_expr.scrutinee, node_map, interner);
+
+    let arms: Vec<VirMatchArm> = match_expr
+        .arms
+        .iter()
+        .map(|arm| {
+            let pattern = VirPattern::Ast(Box::new(arm.pattern.clone()));
+            let guard = arm
+                .guard
+                .as_ref()
+                .map(|g| lower_expr(g, node_map, interner));
+            let body_ref = lower_expr(&arm.body, node_map, interner);
+            let arm_ty = node_map.get_type(arm.body.id).unwrap_or(TypeId::UNKNOWN);
+            VirMatchArm {
+                pattern,
+                guard,
+                body: VirBody {
+                    stmts: Vec::new(),
+                    trailing: Some(body_ref),
+                },
+                ty: arm_ty,
+            }
+        })
+        .collect();
+
+    Box::new(VirExpr::Match {
+        scrutinee,
+        arms,
+        ty,
+    })
 }

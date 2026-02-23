@@ -870,4 +870,283 @@ impl Cg<'_, '_, '_> {
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }
+
+    // =========================================================================
+    // VIR Match expression compilation
+    // =========================================================================
+
+    /// Compile a VIR `Match` expression.
+    ///
+    /// Like [`match_expr`] but operates on VIR nodes: the scrutinee is a
+    /// `VirRef`, arms carry `VirPattern::Ast` patterns, VIR guards, and
+    /// `VirBody` bodies.  Pattern compilation still delegates to
+    /// [`compile_match_arm_pattern`] via the AST pattern inside
+    /// `VirPattern::Ast`.
+    pub(super) fn compile_vir_match(
+        &mut self,
+        scrutinee_expr: &vole_vir::VirExpr,
+        arms: &[vole_vir::VirMatchArm],
+        result_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let scrutinee = self.compile_vir_expr(scrutinee_expr)?;
+        let scrutinee_type_id = scrutinee.type_id;
+
+        let mut effective_result_type = self.try_substitute_type(result_type_id);
+
+        // Replicate the nil-arm union return type adjustment from match_expr.
+        if !self.arena().is_union(effective_result_type) {
+            let has_nil_arm = arms.iter().any(|arm| {
+                arm.ty != TypeId::UNKNOWN && self.arena().is_nil(self.try_substitute_type(arm.ty))
+            });
+            if has_nil_arm && let Some(ret_type_id) = self.return_type {
+                let ret_type_id = self.try_substitute_type(ret_type_id);
+                if self.arena().is_union(ret_type_id) {
+                    effective_result_type = ret_type_id;
+                }
+            }
+        }
+
+        let result_cranelift_type = self.cranelift_type(effective_result_type);
+        let is_void = self.arena().is_void(effective_result_type);
+
+        // Try switch optimization for dense integer literal arms.
+        if let Some(analysis) = match_switch::analyze_vir_switch(arms, scrutinee_type_id) {
+            return self.emit_vir_switch_match(
+                arms,
+                analysis,
+                scrutinee,
+                effective_result_type,
+                result_cranelift_type,
+                is_void,
+            );
+        }
+
+        self.compile_vir_match_chain(
+            arms,
+            scrutinee,
+            effective_result_type,
+            result_cranelift_type,
+            is_void,
+            scrutinee_type_id,
+        )
+    }
+
+    /// Compile a VIR match using the standard chain of if-else blocks.
+    fn compile_vir_match_chain(
+        &mut self,
+        arms: &[vole_vir::VirMatchArm],
+        scrutinee: CompiledValue,
+        result_type_id: TypeId,
+        result_cranelift_type: Type,
+        is_void: bool,
+        scrutinee_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let merge_block = self.builder.create_block();
+        if !is_void {
+            self.builder
+                .append_block_param(merge_block, result_cranelift_type);
+        }
+
+        let trap_block = self.builder.create_block();
+        let arm_blocks: Vec<Block> = arms.iter().map(|_| self.builder.create_block()).collect();
+
+        if !arm_blocks.is_empty() {
+            self.builder.ins().jump(arm_blocks[0], &[]);
+        } else if !is_void {
+            let default_val = self.typed_zero(result_cranelift_type);
+            let default_arg = BlockArg::from(default_val);
+            self.builder.ins().jump(merge_block, &[default_arg]);
+        } else {
+            self.builder.ins().jump(merge_block, &[]);
+        }
+
+        for (i, arm) in arms.iter().enumerate() {
+            let next_block = arm_blocks.get(i + 1).copied().unwrap_or(trap_block);
+            self.compile_vir_match_arm(
+                arm,
+                &scrutinee,
+                arm_blocks[i],
+                next_block,
+                merge_block,
+                result_type_id,
+                result_cranelift_type,
+                is_void,
+            )?;
+        }
+
+        self.switch_and_seal(trap_block);
+        self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+
+        self.switch_and_seal(merge_block);
+
+        self.cleanup_fallible_scrutinee(&scrutinee, scrutinee_type_id)?;
+
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
+    }
+
+    /// Compile a single VIR match arm: pattern check, guard, body, and jump to merge.
+    #[expect(clippy::too_many_arguments)]
+    fn compile_vir_match_arm(
+        &mut self,
+        arm: &vole_vir::VirMatchArm,
+        scrutinee: &CompiledValue,
+        arm_block: Block,
+        next_block: Block,
+        merge_block: Block,
+        result_type_id: TypeId,
+        result_cranelift_type: Type,
+        is_void: bool,
+    ) -> CodegenResult<()> {
+        self.switch_to_block(arm_block);
+
+        let mut arm_variables = self.vars.clone();
+        let mut effective_arm_block = arm_block;
+
+        let vole_vir::VirPattern::Ast(ast_pattern) = &arm.pattern;
+        let pattern_matches = self.compile_match_arm_pattern(
+            scrutinee,
+            ast_pattern,
+            &mut arm_variables,
+            arm_block,
+            next_block,
+            &mut effective_arm_block,
+        )?;
+
+        // Compile guard from VIR.
+        let guard_result = if let Some(guard_expr) = &arm.guard {
+            let saved_vars = std::mem::replace(&mut self.vars, arm_variables.clone());
+            let guard_val = self.compile_vir_expr(guard_expr)?;
+            arm_variables = std::mem::replace(&mut self.vars, saved_vars);
+            Some(guard_val.value)
+        } else {
+            None
+        };
+
+        let should_execute = match (pattern_matches, guard_result) {
+            (None, None) => None,
+            (Some(p), None) => Some(p),
+            (None, Some(g)) => Some(g),
+            (Some(p), Some(g)) => Some(self.builder.ins().band(p, g)),
+        };
+
+        let body_block = self.builder.create_block();
+        if let Some(cond) = should_execute {
+            self.emit_brif(cond, body_block, next_block);
+        } else {
+            self.builder.ins().jump(body_block, &[]);
+        }
+        self.builder.seal_block(effective_arm_block);
+
+        self.switch_to_block(body_block);
+        let saved_vars = std::mem::replace(&mut self.vars, arm_variables);
+        let body_result = self.compile_vir_arm_body(&arm.body, result_type_id)?;
+        let _ = std::mem::replace(&mut self.vars, saved_vars);
+
+        self.emit_match_arm_exit(
+            body_result,
+            result_type_id,
+            result_cranelift_type,
+            is_void,
+            merge_block,
+        )?;
+        self.builder.seal_block(body_block);
+        Ok(())
+    }
+
+    /// Compile a VIR match arm body, coercing the result to the match result type.
+    fn compile_vir_arm_body(
+        &mut self,
+        body: &vole_vir::VirBody,
+        result_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let (_, body_val) = self.compile_vir_body(body)?;
+        let body_result = body_val.unwrap_or_else(|| self.void_value());
+        if body_result.type_id == TypeId::NEVER {
+            return Ok(body_result);
+        }
+        self.coerce_to_type(body_result, result_type_id)
+    }
+
+    /// Emit the exit jump for a match arm body to the merge block.
+    fn emit_match_arm_exit(
+        &mut self,
+        body_result: CompiledValue,
+        result_type_id: TypeId,
+        result_cranelift_type: Type,
+        is_void: bool,
+        merge_block: Block,
+    ) -> CodegenResult<()> {
+        if body_result.type_id == TypeId::NEVER {
+            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+        } else if !is_void {
+            let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
+            self.jump_with_owned_result(
+                body_result,
+                result_type_id,
+                result_cranelift_type,
+                result_needs_rc,
+                merge_block,
+            )?;
+        } else {
+            self.builder.ins().jump(merge_block, &[]);
+        }
+        Ok(())
+    }
+
+    /// Emit a VIR match using Cranelift's Switch for O(1) dispatch.
+    fn emit_vir_switch_match(
+        &mut self,
+        arms: &[vole_vir::VirMatchArm],
+        analysis: match_switch::SwitchAnalysis,
+        scrutinee: CompiledValue,
+        result_type_id: TypeId,
+        result_cranelift_type: Type,
+        is_void: bool,
+    ) -> CodegenResult<CompiledValue> {
+        use cranelift::frontend::Switch;
+
+        let merge_block = self.builder.create_block();
+        if !is_void {
+            self.builder
+                .append_block_param(merge_block, result_cranelift_type);
+        }
+
+        let body_blocks: Vec<Block> = arms.iter().map(|_| self.builder.create_block()).collect();
+
+        let default_block = if let Some(wc_idx) = analysis.wildcard_idx {
+            body_blocks[wc_idx]
+        } else {
+            self.builder.create_block()
+        };
+
+        let mut switch = Switch::new();
+        for &(arm_idx, value) in &analysis.arm_values {
+            let entry = value as u64 as u128;
+            switch.set_entry(entry, body_blocks[arm_idx]);
+        }
+        switch.emit(self.builder, scrutinee.value, default_block);
+
+        if analysis.wildcard_idx.is_none() {
+            self.switch_and_seal(default_block);
+            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+        }
+
+        for (i, arm) in arms.iter().enumerate() {
+            self.switch_to_block(body_blocks[i]);
+            self.builder.seal_block(body_blocks[i]);
+
+            let body_result = self.compile_vir_arm_body(&arm.body, result_type_id)?;
+            self.emit_match_arm_exit(
+                body_result,
+                result_type_id,
+                result_cranelift_type,
+                is_void,
+                merge_block,
+            )?;
+        }
+
+        self.switch_and_seal(merge_block);
+
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
+    }
 }

@@ -2,7 +2,7 @@
 //
 // VIR expression nodes and their supporting types.
 
-use vole_frontend::Expr;
+use vole_frontend::{Expr, Pattern};
 use vole_identity::{NameId, Symbol, TypeDefId, TypeId};
 use vole_sema::{StringConversion, UnionStorageKind};
 
@@ -449,12 +449,15 @@ pub struct VirMatchArm {
 
 /// A pattern in a `Match` arm.
 ///
-/// Stub: only the `Ast` escape hatch is available for now. Concrete pattern
-/// variants will be added as match lowering is migrated to VIR.
+/// Currently only the `Ast` escape hatch is available. Concrete pattern
+/// variants will be added as pattern matching is further migrated to VIR.
 #[derive(Debug, Clone)]
 pub enum VirPattern {
-    /// Escape hatch: a pattern that has not yet been lowered.
-    Ast { expr: Box<Expr> },
+    /// Escape hatch: an AST pattern that has not yet been lowered.
+    ///
+    /// Carries the original `Pattern` (for codegen's pattern compilation)
+    /// which includes the `NodeId` for sema lookup (is-check results, etc.).
+    Ast(Box<Pattern>),
 }
 
 /// Whether an `as` cast is checked or unchecked.

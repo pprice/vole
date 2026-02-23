@@ -658,10 +658,12 @@ impl Cg<'_, '_, '_> {
                 ty: _,
             } => self.compile_vir_block(stmts, trailing.as_deref()),
 
-            // -- Pattern match (complex, todo) ----------------------------
-            VirExpr::Match { .. } => {
-                todo!("VIR Match expr: lowering still emits Ast escape hatch")
-            }
+            // -- Pattern match ------------------------------------------------
+            VirExpr::Match {
+                scrutinee,
+                arms,
+                ty,
+            } => self.compile_vir_match(scrutinee, arms, *ty),
 
             // -- Construction -------------------------------------------------
             VirExpr::ArrayLiteral { elements, ty } => {
