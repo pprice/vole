@@ -25,8 +25,8 @@ use super::stmt::lower_stmt;
 
 /// Lower an AST expression into a VIR expression.
 ///
-/// Known expression kinds (literals, grouping) are emitted as proper VIR
-/// nodes. Everything else is wrapped in `VirExpr::Ast`.
+/// All `ExprKind` variants are lowered to concrete `VirExpr` nodes.
+/// Grouping parentheses are stripped transparently.
 pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRef {
     // Strip grouping parentheses — lower the inner expression directly.
     if let ExprKind::Grouping(inner) = &expr.kind {
@@ -61,7 +61,7 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         ExprKind::FieldAccess(fa) => lower_field_access(fa, ty, node_map, interner),
         ExprKind::Is(is_expr) => lower_is_check(is_expr, expr, ty, node_map, interner),
         ExprKind::AsCast(as_cast) => lower_as_cast(as_cast, expr, ty, node_map, interner),
-        // Ast escape hatches — explicitly listed so new ExprKind variants
+        // Remaining variants — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
         ExprKind::InterpolatedString(parts) => lower_interpolated_string(parts, node_map, interner),
@@ -512,8 +512,7 @@ fn lower_field_access(
 ///
 /// Looks up the pre-computed `IsCheckResult` from sema's NodeMap and embeds
 /// it directly in the VIR node so codegen never re-derives it.
-/// Falls back to `VirExpr::Ast` when sema didn't record a result (e.g.
-/// when sema skips analysis for the containing body).
+/// Panics if sema didn't record a result.
 fn lower_is_check(
     is_expr: &vole_frontend::ast::IsExpr,
     expr: &Expr,
@@ -540,7 +539,7 @@ fn lower_is_check(
 ///
 /// Embeds the cast kind (checked/unchecked) and target type, plus the
 /// sema-computed `IsCheckResult` so codegen can branch without re-detection.
-/// Falls back to `VirExpr::Ast` when sema didn't record a result.
+/// Panics if sema didn't record a result.
 fn lower_as_cast(
     as_cast: &vole_frontend::ast::AsCastExpr,
     expr: &Expr,
@@ -639,7 +638,7 @@ fn lower_index(
 /// - `Dynamic`: lowers the object expression for vtable dispatch.
 /// - `TypeParam`: carries the NameId and lowered object for codegen resolution.
 ///
-/// Falls back to `VirExpr::Ast` when sema didn't record a classification.
+/// Panics if sema didn't record a classification.
 fn lower_meta_access(
     meta_access: &vole_frontend::ast::MetaAccessExpr,
     expr: &Expr,
@@ -756,8 +755,7 @@ fn lower_null_coalesce(
 /// Lower an optional chain field access (`obj?.field`) to `VirExpr::OptionalChain`.
 ///
 /// Extracts `OptionalChainInfo` from sema's NodeMap for the inner/result types.
-///
-/// Falls back to `VirExpr::Ast` when sema didn't record the info.
+/// Panics if sema didn't record the info.
 fn lower_optional_chain(
     oc: &vole_frontend::ast::OptionalChainExpr,
     expr: &Expr,
@@ -784,9 +782,8 @@ fn lower_optional_chain(
 ///
 /// Extracts `OptionalChainInfo` from sema's NodeMap for the inner/result types.
 /// The original AST expression is preserved because method dispatch resolution is
-/// still keyed on NodeId (method calls remain as Ast escape hatches).
-///
-/// Falls back to `VirExpr::Ast` when sema didn't record the info.
+/// still keyed on NodeId (method calls carry the AST `MethodCallExpr`).
+/// Panics if sema didn't record the info.
 fn lower_optional_method_call(
     omc: &vole_frontend::ast::OptionalMethodCallExpr,
     expr: &Expr,
@@ -848,8 +845,7 @@ fn lower_array_literal(
 /// Reads `StructLiteralInfo` from the NodeMap to determine whether to emit
 /// `VirExpr::StructLiteral` (stack value type) or `VirExpr::ClassInstance`
 /// (heap reference type).
-///
-/// Falls back to `VirExpr::Ast` when sema didn't record the info.
+/// Panics if sema didn't record the info.
 fn lower_struct_literal(
     sl: &vole_frontend::ast::StructLiteralExpr,
     expr: &Expr,

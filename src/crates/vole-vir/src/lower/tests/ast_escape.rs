@@ -184,8 +184,8 @@ fn lower_expr_range_inclusive() {
 }
 
 // -----------------------------------------------------------------------
-// Ast escape hatch lowering: Assign, CompoundAssign, RepeatLiteral
-// and proper VIR lowering: ArrayLiteral (vol-aq9j, vol-w4mg, vol-pc2m)
+// VIR lowering: Assign, CompoundAssign, RepeatLiteral, ArrayLiteral
+// (vol-aq9j, vol-w4mg, vol-pc2m)
 // -----------------------------------------------------------------------
 
 #[test]

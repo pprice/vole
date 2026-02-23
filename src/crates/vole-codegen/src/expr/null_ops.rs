@@ -731,7 +731,7 @@ impl Cg<'_, '_, '_> {
             merge_block,
         )?;
 
-        // Not-nil branch: extract inner, call method via AST escape hatch
+        // Not-nil branch: extract inner, call method via AST method_call path
         self.switch_and_seal(not_nil_block);
         let inner = self.extract_optional_inner(scrutinee, inner_type_id);
         let body_val = self.optional_chain_method_call(call_expr, inner, call_expr.id)?;

@@ -343,9 +343,9 @@ fn lower_unary_nested_in_binary() {
 
 #[test]
 fn map_binary_op_covers_all_variants() {
-    // Verify all BinaryOp variants map correctly (excludes And/Or which
-    // are handled as Ast escape hatches and never reach map_binary_op in
-    // practice, but the mapping function handles them anyway for completeness).
+    // Verify all BinaryOp variants map correctly (And/Or are desugared to
+    // VirExpr::If in lower_binary and never reach map_binary_op in practice,
+    // but the mapping function handles them anyway for completeness).
     assert_eq!(map_binary_op(BinaryOp::Add), VirBinOp::Add);
     assert_eq!(map_binary_op(BinaryOp::Sub), VirBinOp::Sub);
     assert_eq!(map_binary_op(BinaryOp::Mul), VirBinOp::Mul);

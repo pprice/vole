@@ -34,8 +34,8 @@ pub struct AnalyzedProgram {
     /// Module paths that had sema errors. Codegen should skip compiling
     /// function bodies for these modules to avoid INVALID type IDs.
     pub modules_with_errors: HashSet<String>,
-    /// VIR-lowered functions (Phase 0: top-level non-generic functions and
-    /// their monomorphized instances).
+    /// VIR-lowered functions: top-level non-generic functions, their
+    /// monomorphized instances, and type methods.
     pub vir_functions: Vec<VirFunction>,
     /// Lookup map from monomorphized mangled NameId to index in `vir_functions`.
     /// Enables O(1) VIR function lookup during monomorphized compilation.
@@ -275,7 +275,6 @@ fn lower_top_level_functions(
 /// For each concrete instance in the monomorph cache, finds the generic
 /// function's AST via `generic_func_asts` and lowers it with the substituted
 /// (concrete) param and return types from the instance's `func_type`.
-/// The body remains Ast-wrapped (Phase 2 migrates bodies).
 ///
 /// Debug-asserts that no `TypeId` in the output contains a type parameter.
 fn lower_monomorphized_instances(
@@ -653,12 +652,12 @@ fn lower_single_method(
     // Instead, use the AST param names + entity registry param types.
     // MethodDef doesn't store params_id directly, so we extract from signature.
     // Since we can't unwrap_function without the TypeArena, pass param names
-    // paired with AST params (Phase 0 VIR doesn't use param types for codegen).
+    // paired with placeholder types (UNKNOWN).  VIR lowering embeds types from
+    // sema's NodeMap, so the placeholder types are not used for codegen.
     let method_name_str = interner.resolve(method.name);
     let display_name = format!("{}::{}", type_name_str, method_name_str);
 
-    // For Phase 0, param types are not used (AST escape hatch delegates to codegen).
-    // We create placeholder entries matching the AST params.
+    // Create placeholder entries matching the AST params.
     let param_types: Vec<_> = method
         .params
         .iter()
@@ -670,7 +669,7 @@ fn lower_single_method(
         method_id,
         display_name,
         &param_types,
-        arena_sig, // return_type placeholder (Phase 0 doesn't use it)
+        arena_sig, // return_type from entity registry
         node_map,
         interner,
     );

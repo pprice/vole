@@ -1109,8 +1109,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR statement node.
     ///
-    /// Handles lowered VIR variants directly, and delegates `Ast` escape
-    /// hatches to the existing `self.stmt()` method.
+    /// All VIR statement variants are handled directly.
     pub fn compile_vir_stmt(&mut self, vir_stmt: &VirStmt) -> CodegenResult<bool> {
         match vir_stmt {
             VirStmt::Expr { value } => {

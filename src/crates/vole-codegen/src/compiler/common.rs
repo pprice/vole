@@ -451,10 +451,9 @@ pub(crate) fn compile_function_body_with_cg(
 
 /// Compile a VIR function body using the Cg context.
 ///
-/// Mirrors [`compile_function_body_with_cg`] but walks `VirBody` instead
-/// of `FuncBody`.  In Phase 0, every VIR node is the `Ast` escape hatch
-/// so the generated code is identical — the routing through VIR validates
-/// that the VIR pipeline is wired correctly end-to-end.
+/// Mirrors [`compile_function_body_with_cg`] but walks `VirBody` (typed VIR
+/// nodes) instead of `FuncBody` (raw AST).  All expression and statement
+/// kinds are fully lowered to VIR.
 ///
 /// # Body structure
 /// - `trailing: Some(expr)` — expression body (`=> expr`), treated as implicit return.
@@ -689,9 +688,9 @@ pub(crate) fn compile_function_inner_with_params<'ctx>(
 /// compiles the body via [`compile_vir_body_with_cg`] instead of
 /// [`compile_function_body_with_cg`].
 ///
-/// Substitutions are still passed through because Phase 0 VIR bodies use the
-/// `Ast` escape hatch, which delegates to `cg.stmt()`/`cg.expr()` that read
-/// the NodeMap with generic TypeIds requiring substitution.
+/// Substitutions are still passed through because some VIR variants (e.g.
+/// `MethodCall`) delegate to old codegen helpers that read the NodeMap with
+/// generic TypeIds requiring substitution.
 pub(crate) fn compile_function_inner_with_vir<'ctx>(
     mut builder: FunctionBuilder,
     codegen_ctx: &mut CodegenCtx<'ctx>,

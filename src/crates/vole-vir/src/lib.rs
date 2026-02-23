@@ -5,9 +5,9 @@
 //! its concrete type.  Codegen becomes a mechanical translation from VIR to
 //! Cranelift IR.
 //!
-//! During the incremental migration, `VirExpr::Ast` and `VirStmt::Ast`
-//! escape hatches allow individual expression/statement kinds to be lowered
-//! one at a time.
+//! All expression and statement kinds are fully lowered to typed VIR nodes.
+//! A few variants (`MethodCall`, `OptionalMethodCall`) still carry AST
+//! fragments for codegen dispatch, but there are no generic escape hatches.
 
 pub mod builder;
 pub mod calls;

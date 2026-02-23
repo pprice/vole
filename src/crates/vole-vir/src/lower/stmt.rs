@@ -16,15 +16,8 @@ use super::lower_stmts;
 
 /// Lower a single AST statement into a VIR statement.
 ///
-/// Expression statements (`Stmt::Expr`) are lowered through `lower_expr`,
-/// which produces proper VIR for known expression kinds.  Statement-level
-/// control flow (While, If, Break, Continue, Raise) is lowered to proper
-/// VIR nodes.  Remaining statement kinds — including Return — are wrapped
-/// in the `VirStmt::Ast` escape hatch.
-///
-/// Return is kept as Ast because `compile_vir_return` does not yet handle
-/// interface boxing, fallible returns, struct returns, or RC bookkeeping;
-/// the old `return_stmt()` path handles all of these correctly.
+/// All `Stmt` variants are lowered to typed `VirStmt` nodes.  Expression
+/// statements are recursively lowered through `lower_expr`.
 ///
 /// Each variant is listed explicitly so that adding a new `Stmt` variant
 /// causes a compile error rather than silently falling through a wildcard.
@@ -93,7 +86,7 @@ fn lower_raise(
 /// Lower a let statement to `VirStmt::Let`.
 ///
 /// Type aliases (`let T = i32 | i64`) produce no runtime code; they are
-/// kept as `VirStmt::Ast` so the old codegen can handle the no-op.
+/// lowered to `VirStmt::Noop`.
 ///
 /// The binding type (`ty`) comes from:
 /// 1. The declared type annotation (via `node_map.get_declared_var_type`),

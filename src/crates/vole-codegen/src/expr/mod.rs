@@ -563,8 +563,9 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR expression node.
     ///
-    /// Handles lowered VIR variants directly, and delegates `Ast` escape
-    /// hatches to the existing `self.expr()` method.
+    /// All VIR variants are handled directly.  A few (`MethodCall`,
+    /// `OptionalMethodCall`) delegate to existing AST-based methods for
+    /// dispatch logic that has not yet been fully migrated.
     pub fn compile_vir_expr(&mut self, vir_expr: &VirExpr) -> CodegenResult<CompiledValue> {
         match vir_expr {
             // -- Lowered literals -----------------------------------------
@@ -823,11 +824,8 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR unary operation.
     ///
-    /// Compiles the operand via `compile_vir_expr`, then delegates to the
-    /// existing `unary()` infrastructure by constructing a temporary
-    /// `UnaryExpr` AST node. Since `unary()` calls `self.expr()` on the
-    /// operand (which would re-compile from AST), we instead inline the
-    /// relevant Cranelift emission logic directly.
+    /// Compiles the operand via `compile_vir_expr`, then delegates to
+    /// `emit_unary_op` which handles the Cranelift emission directly.
     fn compile_vir_unary_op(
         &mut self,
         op: VirUnOp,

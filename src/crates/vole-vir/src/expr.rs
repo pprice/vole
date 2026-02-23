@@ -469,11 +469,12 @@ pub struct VirMatchArm {
 
 /// A pattern in a `Match` arm.
 ///
-/// Currently only the `Ast` escape hatch is available. Concrete pattern
-/// variants will be added as pattern matching is further migrated to VIR.
+/// Currently only the `Ast` variant is available; patterns have not yet
+/// been lowered to VIR.  Concrete pattern variants will be added as
+/// pattern matching is further migrated.
 #[derive(Debug, Clone)]
 pub enum VirPattern {
-    /// Escape hatch: an AST pattern that has not yet been lowered.
+    /// AST pattern that has not yet been lowered to VIR.
     ///
     /// Carries the original `Pattern` (for codegen's pattern compilation)
     /// which includes the `NodeId` for sema lookup (is-check results, etc.).

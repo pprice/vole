@@ -2,12 +2,10 @@
 //
 // AST-to-VIR lowering.
 //
-// Walks the AST, lowering known expression kinds (literals, grouping) to
-// proper VIR nodes and wrapping everything else in `VirStmt::Ast` /
-// `VirExpr::Ast` escape hatches.  Expression statements (`Stmt::Expr`)
-// are lowered through `lower_expr`, which enables literal expressions to
-// be emitted as `VirExpr::IntLiteral`, `FloatLiteral`, `BoolLiteral`, etc.
-// All other statement kinds remain as `VirStmt::Ast`.
+// Walks the AST and lowers all expression and statement kinds to typed VIR
+// nodes.  Every `ExprKind` variant maps to a concrete `VirExpr` variant
+// (no escape hatches).  A few VIR nodes still carry AST fragments for
+// codegen dispatch (`MethodCall`, `OptionalMethodCall`, `VirPattern::Ast`).
 
 mod expr;
 mod stmt;
@@ -32,8 +30,8 @@ use self::stmt::lower_stmt;
 /// entity registry — they are resolved during semantic analysis and passed
 /// in by the caller (the compilation pipeline).
 ///
-/// `node_map` is accepted for API compatibility with future phases that will
-/// look up per-expression types.  Phase 0 does not use it.
+/// `node_map` is used by expression lowering to look up sema-computed types,
+/// is-check results, optional chain info, and other annotations.
 pub fn lower_function(
     func: &FuncDecl,
     func_id: FunctionId,
@@ -203,9 +201,9 @@ pub(crate) fn lower_func_body(
 
 /// Lower a slice of AST statements into a `VirBody`.
 ///
-/// Expression statements have their inner expression lowered through
-/// `lower_expr` (which emits proper VIR for known kinds like literals).
-/// All other statement kinds are wrapped in `VirStmt::Ast`.
+/// Each statement is fully lowered to a typed `VirStmt` node via
+/// `lower_stmt`.  Expression statements have their inner expression
+/// lowered recursively through `lower_expr`.
 pub(crate) fn lower_stmts(
     stmts: &[vole_frontend::ast::Stmt],
     node_map: &NodeMap,
