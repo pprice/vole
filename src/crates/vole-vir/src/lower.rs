@@ -247,6 +247,21 @@ fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRe
         }
         ExprKind::Binary(bin_expr) => lower_binary(bin_expr, expr, ty, node_map, interner),
         ExprKind::Unary(un_expr) => lower_unary(un_expr, ty, node_map, interner),
+        // Call expressions: explicit match arm for future lowering.
+        //
+        // Call dispatch requires information that is not yet available in the
+        // NodeMap during lowering (function registry, module bindings, closure
+        // state, monomorphization keys, etc.).  The call() method in codegen
+        // uses ~15 dispatch paths that inspect runtime registries.
+        //
+        // Until sema annotates a "call dispatch kind" on Call nodes (similar
+        // to MethodDispatchKind for method calls), we cannot distinguish
+        // direct calls from closures/builtins/FFI during lowering.  All calls
+        // remain as Ast escape hatches for now.
+        ExprKind::Call(_) => Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        }),
         // Ast escape hatches — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
@@ -256,7 +271,6 @@ fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRe
         | ExprKind::RepeatLiteral { .. }
         | ExprKind::InterpolatedString(_)
         | ExprKind::Identifier(_)
-        | ExprKind::Call(_)
         | ExprKind::Range(_)
         | ExprKind::Index(_)
         | ExprKind::Match(_)
@@ -1480,6 +1494,95 @@ mod tests {
         match vir_ref.as_ref() {
             VirExpr::Ast { .. } => {}
             other => panic!("expected Ast escape hatch for RepeatLiteral, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Call expression lowering (vol-kzj3)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn lower_expr_call_becomes_ast() {
+        use vole_frontend::ast::{CallArg, CallExpr};
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let callee = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Identifier(Symbol::UNKNOWN),
+            span: dummy_span(),
+        };
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Call(Box::new(CallExpr {
+                callee,
+                args: vec![CallArg::Positional(make_int_expr(42))],
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        // Calls stay as Ast escape hatch until sema annotates call
+        // dispatch kind (similar to MethodDispatchKind for method calls).
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_call_no_args_becomes_ast() {
+        use vole_frontend::ast::CallExpr;
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let callee = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Identifier(Symbol::UNKNOWN),
+            span: dummy_span(),
+        };
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Call(Box::new(CallExpr {
+                callee,
+                args: vec![],
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for Call (no args), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_call_preserves_type() {
+        use vole_frontend::ast::CallExpr;
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let node_id = dummy_node_id();
+        node_map.set_type(node_id, TypeId::I64);
+        let callee = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Identifier(Symbol::UNKNOWN),
+            span: dummy_span(),
+        };
+        let expr = Expr {
+            id: node_id,
+            kind: ExprKind::Call(Box::new(CallExpr {
+                callee,
+                args: vec![],
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        // The Ast escape hatch should carry the sema-computed type
+        match vir_ref.as_ref() {
+            VirExpr::Ast { ty, .. } => {
+                assert_eq!(*ty, TypeId::I64);
+            }
+            other => panic!("expected Ast with type, got {other:?}"),
         }
     }
 }
