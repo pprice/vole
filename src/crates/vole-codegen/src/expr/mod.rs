@@ -23,7 +23,7 @@ use vole_frontend::ast::YieldExpr;
 use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
-use vole_vir::{VirBinOp, VirExpr, VirUnOp};
+use vole_vir::{CoerceKind, VirBinOp, VirExpr, VirUnOp};
 
 use super::context::Cg;
 use super::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
@@ -571,6 +571,17 @@ impl Cg<'_, '_, '_> {
             VirExpr::UnaryOp { op, operand, ty } => self.compile_vir_unary_op(*op, operand, *ty),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
 
+            // -- Coercion -------------------------------------------------
+            VirExpr::Coerce {
+                value,
+                from,
+                to,
+                kind,
+            } => {
+                let compiled = self.compile_vir_expr(value)?;
+                self.compile_vir_coerce(compiled, *from, *to, *kind)
+            }
+
             // -- Ast escape hatch -----------------------------------------
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),
 
@@ -670,6 +681,59 @@ impl Cg<'_, '_, '_> {
         let left = self.compile_vir_expr(&parts[0])?;
         let right = self.compile_vir_expr(&parts[1])?;
         self.string_concat(left, right)
+    }
+
+    /// Compile a VIR type coercion.
+    ///
+    /// Dispatches on `CoerceKind` to emit the appropriate Cranelift
+    /// instructions for numeric conversions.  Complex coercions (Box,
+    /// Unbox, IteratorWrap) are deferred to a later VIR phase.
+    fn compile_vir_coerce(
+        &mut self,
+        value: CompiledValue,
+        from: TypeId,
+        to: TypeId,
+        kind: CoerceKind,
+    ) -> CodegenResult<CompiledValue> {
+        use crate::ops::{sextend_const, uextend_const};
+
+        let target_ty = self.cranelift_type(to);
+        let result = match kind {
+            CoerceKind::IntExtend => {
+                if self.arena().is_unsigned(from) {
+                    uextend_const(self.builder, target_ty, value.value)
+                } else {
+                    sextend_const(self.builder, target_ty, value.value)
+                }
+            }
+            CoerceKind::IntTruncate => self.builder.ins().ireduce(target_ty, value.value),
+            CoerceKind::IntToFloat => {
+                if self.arena().is_unsigned(from) {
+                    self.builder.ins().fcvt_from_uint(target_ty, value.value)
+                } else {
+                    self.builder.ins().fcvt_from_sint(target_ty, value.value)
+                }
+            }
+            CoerceKind::FloatToInt => {
+                if self.arena().is_unsigned(to) {
+                    self.builder.ins().fcvt_to_uint(target_ty, value.value)
+                } else {
+                    self.builder.ins().fcvt_to_sint(target_ty, value.value)
+                }
+            }
+            CoerceKind::FloatExtend => self.builder.ins().fpromote(target_ty, value.value),
+            CoerceKind::FloatTruncate => self.builder.ins().fdemote(target_ty, value.value),
+            CoerceKind::Box => {
+                todo!("VIR CoerceKind::Box not yet emitted by lowering")
+            }
+            CoerceKind::Unbox => {
+                todo!("VIR CoerceKind::Unbox not yet emitted by lowering")
+            }
+            CoerceKind::IteratorWrap => {
+                todo!("VIR CoerceKind::IteratorWrap not yet emitted by lowering")
+            }
+        };
+        Ok(CompiledValue::new(result, target_ty, to))
     }
 }
 
