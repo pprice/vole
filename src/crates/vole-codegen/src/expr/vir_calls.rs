@@ -8,9 +8,12 @@ use cranelift_module::Module;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, is_wide_fallible, type_id_to_cranelift};
+use crate::types::{
+    CompiledValue, is_wide_fallible, native_type_to_cranelift, type_id_to_cranelift,
+};
 use crate::union_layout;
 
+use vole_runtime::native_registry::NativeType;
 use vole_sema::type_arena::TypeId;
 use vole_vir::{CallTarget, VirRef};
 
@@ -226,14 +229,66 @@ impl Cg<'_, '_, '_> {
     fn compile_vir_vtable_call(
         &mut self,
         slot: usize,
-        _args: &[VirRef],
-        _return_ty: TypeId,
+        args: &[VirRef],
+        return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        todo!(
-            "VIR CallTarget::VtableMethod(slot={}) — \
-             requires interface dispatch lowering (not yet emitted by VIR lowering)",
-            slot
-        )
+        assert!(
+            !args.is_empty(),
+            "VIR VtableMethod call must have receiver as first arg"
+        );
+
+        let receiver = self.compile_vir_expr(&args[0])?;
+        let word_type = self.ptr_type();
+        let word_bytes = word_type.bytes() as i32;
+
+        // Load vtable pointer from the boxed interface (second word)
+        let vtable_ptr =
+            self.builder
+                .ins()
+                .load(word_type, MemFlags::new(), receiver.value, word_bytes);
+        // Slot 0 is the meta getter; method slots start at VTABLE_METHOD_OFFSET.
+        let vtable_offset =
+            (slot as i32 + crate::interfaces::vtable::VTABLE_METHOD_OFFSET as i32) * word_bytes;
+        let func_ptr =
+            self.builder
+                .ins()
+                .load(word_type, MemFlags::new(), vtable_ptr, vtable_offset);
+
+        // Build signature: all params and return are word-typed (interface ABI)
+        let is_void = self.arena().is_void(return_ty);
+        let param_count = args.len(); // receiver + method params
+        let mut sig = self.jit_module().make_signature();
+        for _ in 0..param_count {
+            sig.params.push(AbiParam::new(word_type));
+        }
+        if !is_void {
+            sig.returns.push(AbiParam::new(word_type));
+        }
+
+        // Compile remaining args as word values (interface dispatch uses i64 ABI)
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeKey::HeapAlloc)?;
+        let mut call_args = Vec::with_capacity(args.len());
+        call_args.push(receiver.value);
+        for arg in &args[1..] {
+            let compiled = self.compile_vir_expr(arg)?;
+            let word = self.emit_word(&compiled, Some(heap_alloc_ref))?;
+            call_args.push(word);
+        }
+
+        let sig_ref = self.import_sig_and_coerce_args(sig, &mut call_args);
+        let call = self.emit_call_indirect(sig_ref, func_ptr, &call_args);
+        let results = self.builder.inst_results(call);
+
+        if is_void {
+            return Ok(self.void_value());
+        }
+        let word = results
+            .first()
+            .copied()
+            .ok_or_else(|| CodegenError::internal("vtable call missing return value"))?;
+        let value = self.convert_from_i64_storage(word, return_ty);
+        let return_ty = self.maybe_convert_iterator_return_type(return_ty);
+        Ok(self.compiled(value, return_ty))
     }
 
     /// Compile a built-in method call (`CallTarget::BuiltinMethod`).
@@ -249,24 +304,61 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         todo!(
             "VIR CallTarget::BuiltinMethod({:?}) — \
-             requires method call lowering (not yet emitted by VIR lowering)",
+             needs per-method dispatch to existing builtin_method()/runtime_iterator_method() \
+             infrastructure.  Each variant (ArrayLength, ArrayIter, StringIter, IterMap, …) \
+             uses different runtime keys, elem_tag setup, RC ownership, and return-type \
+             logic.  Delegate to builtin_methods.rs and iterator_methods.rs once VIR \
+             lowering emits BuiltinMethod call nodes.",
             method
         )
     }
 
     /// Compile a native (FFI) call (`CallTarget::Native`).
+    ///
+    /// Resolves the module/function symbols, looks up the `NativeFunction` in
+    /// the runtime registry, compiles VIR args, and emits the indirect call.
     fn compile_vir_native_call(
         &mut self,
-        _module_path: vole_identity::Symbol,
-        _native_name: vole_identity::Symbol,
+        module_path: vole_identity::Symbol,
+        native_name: vole_identity::Symbol,
         _abi: vole_vir::NativeAbi,
-        _args: &[VirRef],
-        _return_ty: TypeId,
+        args: &[VirRef],
+        return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        todo!(
-            "VIR CallTarget::Native — \
-             requires FFI call lowering (not yet emitted by VIR lowering)",
-        )
+        let module_str = self.interner().resolve(module_path).to_string();
+        let name_str = self.interner().resolve(native_name).to_string();
+        let native_func = self
+            .native_registry()
+            .lookup(&module_str, &name_str)
+            .ok_or_else(|| {
+                CodegenError::not_found("native function", format!("{module_str}::{name_str}"))
+            })?
+            .clone();
+
+        // Compile VIR args and coerce to the expected native parameter types
+        let (arg_values, mut rc_temps) = self.compile_vir_args(args)?;
+        let expected_types: Vec<Type> = native_func
+            .signature
+            .params
+            .iter()
+            .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
+            .collect();
+        let coerced: Vec<Value> = arg_values
+            .iter()
+            .zip(expected_types.iter())
+            .map(|(&arg, &expected_ty)| {
+                let actual_ty = self.builder.func.dfg.value_type(arg);
+                self.coerce_cranelift_value(arg, actual_ty, expected_ty)
+            })
+            .collect();
+
+        let call_inst = self.call_native_indirect(&native_func, &coerced);
+        self.consume_rc_args(&mut rc_temps)?;
+
+        if native_func.signature.return_type == NativeType::Nil {
+            return Ok(self.void_value());
+        }
+        self.native_call_result(call_inst, &native_func, return_ty)
     }
 
     // =====================================================================

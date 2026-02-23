@@ -209,7 +209,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// For struct-returning native functions, this reconstructs the struct from
     /// the multi-value return registers or sret pointer.
-    pub(super) fn native_call_result(
+    pub(crate) fn native_call_result(
         &mut self,
         call_inst: cranelift_codegen::ir::Inst,
         native_func: &NativeFunction,
