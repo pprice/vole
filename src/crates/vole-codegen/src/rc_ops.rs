@@ -409,8 +409,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn register_rc_local(&mut self, variable: Variable, type_id: TypeId) -> Variable {
         let drop_flag = super::rc_cleanup::alloc_drop_flag(self);
         let is_interface = self.arena().is_interface(type_id);
+        let is_unknown = self.arena().is_unknown(type_id);
         self.rc_scopes
-            .register_rc_local(variable, drop_flag, type_id, is_interface);
+            .register_rc_local(variable, drop_flag, type_id, is_interface, is_unknown);
         drop_flag
     }
 

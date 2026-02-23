@@ -260,6 +260,8 @@ runtime_keys! {
 
     // ── Unknown type cleanup ──────────────────────────────────────────
     UnknownHeapCleanup     => "vole_unknown_heap_cleanup"    : (Ptr) -> Void          = vole_runtime::value::vole_unknown_heap_cleanup,
+    TaggedValueNew         => "vole_tagged_value_new"        : (I64, I64) -> Ptr      = vole_runtime::value::vole_tagged_value_new,
+    TaggedValueClone       => "vole_tagged_value_clone"      : (Ptr) -> Ptr           = vole_runtime::value::vole_tagged_value_clone,
 
     // ── Task scheduler ─────────────────────────────────────────────────
     TaskSpawn              => "vole_task_spawn"              : (Ptr, Ptr) -> I64      = vole_runtime::scheduler::vole_task_spawn,

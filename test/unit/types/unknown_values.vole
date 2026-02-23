@@ -1,0 +1,216 @@
+// Unit tests for heap-allocated unknown (TaggedValue) values.
+//
+// Covers three scenarios that previously caused use-after-free or missing
+// coercion when unknown values were stored on the stack:
+//   1. Function returning unknown  (dangling stack pointer on return)
+//   2. Struct fields typed unknown  (missing box coercion in literals)
+//   3. Loop aliasing of unknown     (stack slot reuse across iterations)
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func get_val(i: i64) -> unknown {
+    if i == 0 { return "hello" }
+    if i == 1 { return 42 }
+    return true
+}
+
+func return_string_as_unknown() -> unknown {
+    return "abc"
+}
+
+func return_i64_as_unknown() -> unknown {
+    return 99
+}
+
+func return_bool_as_unknown() -> unknown {
+    return false
+}
+
+func return_f64_as_unknown() -> unknown {
+    return 3.14
+}
+
+struct Pair { name: string, value: unknown }
+
+struct Triple { a: unknown, b: unknown, c: unknown }
+
+class Box { item: unknown }
+
+// ---------------------------------------------------------------------------
+// Bug 1: Return unknown from function
+// ---------------------------------------------------------------------------
+
+tests "return unknown from function" {
+    test "return string as unknown preserves type" {
+        let v = return_string_as_unknown()
+        assert(v is string)
+        assert((v as! string) == "abc")
+    }
+
+    test "return i64 as unknown preserves type" {
+        let v = return_i64_as_unknown()
+        assert(v is i64)
+        assert((v as! i64) == 99)
+    }
+
+    test "return bool as unknown preserves type" {
+        let v = return_bool_as_unknown()
+        assert(v is bool)
+        assert((v as! bool) == false)
+    }
+
+    test "return f64 as unknown preserves type" {
+        let v = return_f64_as_unknown()
+        assert(v is f64)
+        assert((v as! f64) == 3.14)
+    }
+
+    test "return different types via branching" {
+        let a = get_val(0)
+        let b = get_val(1)
+        let c = get_val(2)
+        assert(a is string)
+        assert(b is i64)
+        assert(c is bool)
+    }
+
+    test "return unknown into array" {
+        let arr: [unknown] = []
+        var i = 0
+        while i < 3 {
+            arr.push(get_val(i))
+            i = i + 1
+        }
+        assert(arr[0] is string)
+        assert(arr[1] is i64)
+        assert(arr[2] is bool)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bug 2: Struct fields typed as unknown
+// ---------------------------------------------------------------------------
+
+tests "struct fields typed as unknown" {
+    test "struct unknown field stores i64" {
+        let p = Pair { name: "test", value: 42 }
+        assert(p.value is i64)
+        assert((p.value as! i64) == 42)
+    }
+
+    test "struct unknown field stores string" {
+        let p = Pair { name: "test", value: "hello" }
+        assert(p.value is string)
+        assert((p.value as! string) == "hello")
+    }
+
+    test "struct unknown field stores bool" {
+        let p = Pair { name: "test", value: true }
+        assert(p.value is bool)
+        assert((p.value as! bool) == true)
+    }
+
+    test "struct unknown field stores f64" {
+        let p = Pair { name: "pi", value: 3.14 }
+        assert(p.value is f64)
+    }
+
+    test "struct multiple unknown fields" {
+        let t = Triple { a: "x", b: 42, c: false }
+        assert(t.a is string)
+        assert(t.b is i64)
+        assert(t.c is bool)
+    }
+
+    test "class unknown field stores i64" {
+        let b = Box { item: 99 }
+        assert(b.item is i64)
+        assert((b.item as! i64) == 99)
+    }
+
+    test "class unknown field stores string" {
+        let b = Box { item: "world" }
+        assert(b.item is string)
+        assert((b.item as! string) == "world")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bug 3: Loop aliasing of unknown values
+// ---------------------------------------------------------------------------
+
+tests "loop aliasing of unknown values" {
+    test "push unknown in loop preserves distinct values" {
+        let arr: [unknown] = []
+        let strs = ["a", "b", "c"]
+        var i = 0
+        while i < 3 {
+            let v: unknown = strs[i]
+            arr.push(v)
+            i = i + 1
+        }
+        assert((arr[0] as! string) == "a")
+        assert((arr[1] as! string) == "b")
+        assert((arr[2] as! string) == "c")
+    }
+
+    test "push i64 as unknown in loop" {
+        let arr: [unknown] = []
+        var i = 0
+        while i < 5 {
+            let v: unknown = i
+            arr.push(v)
+            i = i + 1
+        }
+        assert((arr[0] as! i64) == 0)
+        assert((arr[1] as! i64) == 1)
+        assert((arr[4] as! i64) == 4)
+    }
+
+    test "push mixed types as unknown in loop" {
+        let arr: [unknown] = []
+        var i = 0
+        while i < 3 {
+            arr.push(get_val(i))
+            i = i + 1
+        }
+        assert((arr[0] as! string) == "hello")
+        assert((arr[1] as! i64) == 42)
+        assert((arr[2] as! bool) == true)
+    }
+
+    test "read unknown array elements in loop" {
+        let arr: [unknown] = ["x", "y", "z"]
+        var i = 0
+        while i < 3 {
+            let v = arr[i]
+            assert(v is string)
+            i = i + 1
+        }
+    }
+
+    test "unknown array index assign" {
+        var arr: [unknown] = [1, 2, 3]
+        arr[1] = "replaced"
+        assert(arr[0] is i64)
+        assert(arr[1] is string)
+        assert((arr[1] as! string) == "replaced")
+        assert(arr[2] is i64)
+    }
+
+    test "push already-unknown value to array" {
+        let arr: [unknown] = ["hello", 42, true]
+        let result: [unknown] = []
+        var i = 0
+        while i < arr.length() {
+            let elem = arr[i]
+            result.push(elem)
+            i = i + 1
+        }
+        assert(result[0] is string)
+        assert(result[1] is i64)
+        assert(result[2] is bool)
+    }
+}

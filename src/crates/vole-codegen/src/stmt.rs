@@ -322,7 +322,19 @@ impl Cg<'_, '_, '_> {
         // borrow. Ownership transfers (calls, literals) inside loops
         // still get normal RC tracking — they produce a fresh +1 that
         // the scope-exit dec balances against the last iteration's value.
-        if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup() {
+        // Detect whether coerce_let_init called box_to_unknown (creating a new
+        // heap TaggedValue that this binding owns). This happens when the declared
+        // type is unknown but the init expression was NOT already unknown.
+        // In that case we must register for unknown_heap_cleanup on scope exit.
+        // When the init is already unknown (e.g. reading from an [unknown] array),
+        // the TaggedValue is borrowed from the container and must NOT be freed here.
+        let created_tagged_value =
+            self.arena().is_unknown(final_type_id) && !self.arena().is_unknown(init.type_id);
+        if self.rc_scopes.has_active_scope() && created_tagged_value {
+            let drop_flag = self.register_rc_local(var, final_type_id);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        } else if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup()
+        {
             let is_borrow = init.is_borrowed();
             if self.cf.in_loop() && is_borrow {
                 // Borrow inside loop: skip inc and RC registration.
@@ -510,12 +522,14 @@ impl Cg<'_, '_, '_> {
                 return Ok(true);
             }
 
-            // Box concrete types to unknown (TaggedValue) if needed
+            // Box concrete types to unknown (TaggedValue) if needed.
+            // Use _no_inc because the RC bookkeeping above already rc_inc'd
+            // borrowed values for the caller.
             if let Some(ret_type_id) = return_type_id
                 && self.arena().is_unknown(ret_type_id)
                 && !self.arena().is_unknown(compiled.type_id)
             {
-                let boxed = self.box_to_unknown(compiled)?;
+                let boxed = self.box_to_unknown_no_inc(compiled)?;
                 self.builder.ins().return_(&[boxed.value]);
                 return Ok(true);
             }

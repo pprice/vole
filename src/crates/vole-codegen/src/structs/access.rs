@@ -250,9 +250,9 @@ impl Cg<'_, '_, '_> {
         let value = if self.arena().is_unknown(field_type_id)
             && !self.arena().is_unknown(value.type_id)
         {
-            // Box the value into a TaggedValue (stack), then copy to heap.
-            let boxed = self.box_to_unknown(value)?;
-            self.copy_tagged_value_to_heap(boxed)?
+            // Box the value into a heap-allocated TaggedValue.
+            // box_to_unknown() heap-allocates, so no further copy needed.
+            self.box_to_unknown(value)?
         } else if self.arena().is_unknown(field_type_id) && self.arena().is_unknown(value.type_id) {
             // Already a TaggedValue pointer; copy to heap for independent cleanup.
             self.copy_tagged_value_to_heap(value)?

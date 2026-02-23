@@ -395,6 +395,56 @@ pub extern "C" fn vole_unknown_heap_cleanup(ptr: *mut u8) {
     unknown_heap_cleanup(ptr);
 }
 
+/// Heap-allocate a 16-byte TaggedValue buffer: `[tag: u64, value: u64]`.
+///
+/// Used by codegen's `box_to_unknown()` to create heap-allocated unknown values.
+/// The returned pointer is freed by `unknown_heap_cleanup` which conditionally
+/// `rc_dec`'s the payload if it's an RC type, then deallocates the buffer.
+///
+/// # Safety
+/// Caller must ensure `value` is a valid bit pattern for the type indicated by `tag`.
+/// For RC types (String, Array, etc.), `value` must be a valid pointer with an
+/// existing ownership reference (the TaggedValue takes ownership).
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_tagged_value_new(tag: u64, value: u64) -> *mut u8 {
+    const LAYOUT: std::alloc::Layout = match std::alloc::Layout::from_size_align(16, 8) {
+        Ok(l) => l,
+        Err(_) => panic!("tagged value layout"),
+    };
+    let ptr = unsafe { std::alloc::alloc(LAYOUT) };
+    unsafe {
+        *(ptr as *mut u64) = tag;
+        *(ptr.add(8) as *mut u64) = value;
+    }
+    ptr
+}
+
+/// Clone a heap-allocated TaggedValue: allocates a new 16-byte buffer with
+/// the same tag and value, and `rc_inc`'s the inner payload if RC-managed.
+///
+/// Used when an already-unknown value is stored into a container (e.g.,
+/// `arr.push(v)` where `v: unknown`). Both the original and the clone own
+/// independent references to the inner payload; each will be freed
+/// separately by `unknown_heap_cleanup`.
+///
+/// # Safety
+/// `ptr` must point to a valid TaggedValue heap buffer.
+#[unsafe(no_mangle)]
+#[expect(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn vole_tagged_value_clone(ptr: *mut u8) -> *mut u8 {
+    debug_assert!(!ptr.is_null(), "tagged_value_clone: null pointer");
+    unsafe {
+        let tag = *(ptr as *const u64);
+        let value = *(ptr.add(8) as *const u64);
+        // RC-inc the inner payload so both the original and the clone
+        // can independently clean up via unknown_heap_cleanup.
+        if tag_needs_rc(tag) && value != 0 {
+            rc_inc(value as *mut u8);
+        }
+        vole_tagged_value_new(tag, value)
+    }
+}
+
 /// Decrement refcount of an i64 value if it represents an RC pointer.
 /// Used by collections that store raw i64 values and know their element types are RC.
 #[inline]

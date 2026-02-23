@@ -317,11 +317,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let value_is_unknown = arena.is_unknown(value.type_id);
 
         if field_is_unknown && !value_is_unknown {
-            // Box the value into a TaggedValue (stack), then copy to heap for
-            // storage in class fields. The heap copy is needed because the
-            // stack slot would be invalidated when the function returns.
-            let boxed = self.box_to_unknown(value)?;
-            self.copy_tagged_value_to_heap(boxed)
+            // Box the value into a heap-allocated TaggedValue.
+            // box_to_unknown() heap-allocates, so no further copy needed.
+            // Use _no_inc because the class literal init site already rc_inc'd
+            // borrowed values before calling coerce_field_value.
+            self.box_to_unknown_no_inc(value)
         } else if field_is_unknown && value_is_unknown {
             // Value is already a TaggedValue pointer. Copy to heap so
             // instance_drop can free it independently.
@@ -580,11 +580,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
     }
 
-    /// Copy an unknown-typed TaggedValue to a heap allocation.
+    /// Copy an unknown-typed TaggedValue to a new heap allocation.
     ///
-    /// TaggedValues are 16-byte buffers: `[tag: i64, value: i64]`.
-    /// The source may be a stack slot (from `box_to_unknown`). Class fields
-    /// need heap-allocated copies so `instance_drop` can free them.
+    /// TaggedValues are 16-byte heap buffers: `[tag: i64, value: i64]`.
+    /// Used when an existing unknown value needs an independent copy
+    /// (e.g., storing an already-unknown value into a class field).
     ///
     /// If the contained value is RC-managed (e.g. a string), the caller must
     /// have already incremented the refcount at the class literal init site.
@@ -677,6 +677,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             {
                 self.emit_rc_inc_for_type(value.value, value.type_id)?;
             }
+            // Coerce concrete values to unknown (heap-allocated TaggedValue)
+            // when the field type is unknown. Use _no_inc because the rc_inc
+            // for borrowed values was already done above.
+            if let Some(&field_type_id) = field_types.get(init_name)
+                && self.arena().is_unknown(field_type_id) && !self.arena().is_unknown(value.type_id)
+                {
+                    value = self.box_to_unknown_no_inc(value)?;
+                }
             self.store_struct_field(value, slot, offset)?;
             // The field value is consumed into the struct literal.
             value.mark_consumed();
@@ -703,11 +711,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             })?;
 
             let offset = self.struct_field_byte_offset(result_type_id, field_slot);
-            let value = if let Some(&field_type_id) = field_types.get(&field_name) {
+            let mut value = if let Some(&field_type_id) = field_types.get(&field_name) {
                 self.expr_with_expected_type(default_expr, field_type_id)?
             } else {
                 self.expr(default_expr)?
             };
+            // Coerce concrete defaults to unknown when the field type is unknown.
+            if let Some(&field_type_id) = field_types.get(&field_name)
+                && self.arena().is_unknown(field_type_id) && !self.arena().is_unknown(value.type_id)
+                {
+                    value = self.box_to_unknown(value)?;
+                }
             self.store_struct_field(value, slot, offset)?;
         }
 

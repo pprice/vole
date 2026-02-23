@@ -31,6 +31,10 @@ pub(crate) struct RcLocal {
     /// actual RC-managed data word is at offset 0 of the fat pointer, so cleanup
     /// must load it before calling rc_dec.
     pub is_interface: bool,
+    /// True if this is an unknown-typed (heap-allocated TaggedValue) local.
+    /// Cleanup calls `unknown_heap_cleanup` instead of `rc_dec` to free the
+    /// 16-byte buffer and conditionally rc_dec the inner payload.
+    pub is_unknown: bool,
 }
 
 /// A composite local (struct, fixed array, tuple) that contains RC fields.
@@ -100,6 +104,7 @@ impl RcScopeStack {
         drop_flag: Variable,
         type_id: TypeId,
         is_interface: bool,
+        is_unknown: bool,
     ) {
         let scope = self
             .scopes
@@ -110,6 +115,7 @@ impl RcScopeStack {
             drop_flag,
             type_id,
             is_interface,
+            is_unknown,
         });
     }
 
@@ -248,7 +254,7 @@ impl RcScopeStack {
 /// ```text
 /// flag_val = use_var(drop_flag)
 /// if flag_val != 0:
-///     rc_dec(use_var(variable))
+///     rc_dec(use_var(variable))       // or unknown_heap_cleanup for unknown locals
 /// ```
 ///
 /// Each conditional requires its own Cranelift block pair.
@@ -258,6 +264,9 @@ pub(crate) fn emit_rc_cleanup(
     rc_dec_ref: cranelift::codegen::ir::FuncRef,
     skip_var: Option<Variable>,
 ) {
+    // Lazily resolve unknown_heap_cleanup func ref only if needed.
+    let mut unknown_cleanup_ref: Option<cranelift::codegen::ir::FuncRef> = None;
+
     // Iterate in reverse (LIFO) so that closures are dec'd before their
     // captured variables. A closure destructor dec's its captures, so the
     // closure must be freed first to avoid double-freeing a capture that
@@ -266,6 +275,17 @@ pub(crate) fn emit_rc_cleanup(
         if skip_var == Some(local.variable) {
             continue;
         }
+
+        // Resolve the appropriate cleanup func ref for this local.
+        let cleanup_ref = if local.is_unknown {
+            *unknown_cleanup_ref.get_or_insert_with(|| {
+                cg.runtime_func_ref(crate::RuntimeKey::UnknownHeapCleanup)
+                    .expect("INTERNAL: UnknownHeapCleanup func ref")
+            })
+        } else {
+            rc_dec_ref
+        };
+
         let flag_val = cg.builder.use_var(local.drop_flag);
 
         // Constant-fold: skip the branch diamond when the drop flag is known.
@@ -275,7 +295,7 @@ pub(crate) fn emit_rc_cleanup(
                 continue;
             }
             // Flag is known-live: emit cleanup unconditionally (no branch).
-            emit_single_rc_dec(cg.builder, local, rc_dec_ref);
+            emit_single_cleanup(cg.builder, local, cleanup_ref);
             let zero = cg.iconst_cached(types::I8, 0);
             cg.builder.def_var(local.drop_flag, zero);
             continue;
@@ -293,7 +313,7 @@ pub(crate) fn emit_rc_cleanup(
 
         cg.switch_to_block(cleanup_block);
         cg.builder.seal_block(cleanup_block);
-        emit_single_rc_dec(cg.builder, local, rc_dec_ref);
+        emit_single_cleanup(cg.builder, local, cleanup_ref);
         // Reset drop flag to 0 after cleanup. This prevents double-free when
         // the variable is conditionally initialized inside a loop: without
         // this, the stale flag=1 propagates via SSA phi nodes to the next
@@ -307,20 +327,24 @@ pub(crate) fn emit_rc_cleanup(
     }
 }
 
-/// Emit a single rc_dec call for an RC local (handles interface fat pointers).
-fn emit_single_rc_dec(
+/// Emit a single cleanup call for an RC local.
+///
+/// For interface locals, loads the data word from the fat pointer.
+/// For unknown locals, calls `unknown_heap_cleanup` to free the TaggedValue buffer.
+/// For other RC locals, calls `rc_dec` directly.
+fn emit_single_cleanup(
     builder: &mut FunctionBuilder,
     local: &RcLocal,
-    rc_dec_ref: cranelift::codegen::ir::FuncRef,
+    cleanup_ref: cranelift::codegen::ir::FuncRef,
 ) {
     let val = builder.use_var(local.variable);
     if local.is_interface {
         // Interface locals are fat pointers: [data_word, vtable_ptr].
         // The RC-managed value is the data word at offset 0.
         let data_word = builder.ins().load(types::I64, MemFlags::new(), val, 0);
-        builder.ins().call(rc_dec_ref, &[data_word]);
+        builder.ins().call(cleanup_ref, &[data_word]);
     } else {
-        builder.ins().call(rc_dec_ref, &[val]);
+        builder.ins().call(cleanup_ref, &[val]);
     }
 }
 

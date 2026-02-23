@@ -17,7 +17,6 @@ use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::union_layout;
 
 use super::context::Cg;
 use super::types::CompiledValue;
@@ -357,12 +356,40 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Box a value into the unknown type (TaggedValue representation).
     ///
-    /// Creates a 16-byte stack slot containing:
+    /// Heap-allocates a 16-byte TaggedValue via `vole_tagged_value_new`:
     /// - Offset 0: tag (u64) - runtime type identifier
     /// - Offset 8: value (u64) - the actual value (or pointer for reference types)
     ///
-    /// Returns a pointer to the TaggedValue.
+    /// Returns a pointer to the heap-allocated TaggedValue. The buffer is freed
+    /// by `unknown_heap_cleanup` which conditionally `rc_dec`'s the payload.
+    ///
+    /// If the inner value is borrowed and RC-managed, this method rc_inc's it
+    /// so the TaggedValue owns its own reference. Callers that already handle
+    /// rc_inc for the inner value should pass `skip_inner_rc_inc = true` via
+    /// `box_to_unknown_no_inc`.
     pub fn box_to_unknown(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
+        // RC-inc borrowed RC values so the TaggedValue owns its own reference.
+        // unknown_heap_cleanup will rc_dec the inner value when the TaggedValue
+        // is freed, so we need the extra reference to avoid use-after-free.
+        if value.is_borrowed()
+            && self.rc_scopes.has_active_scope()
+            && self.rc_state(value.type_id).needs_cleanup()
+        {
+            self.emit_rc_inc_for_type(value.value, value.type_id)?;
+        }
+        self.box_to_unknown_raw(value)
+    }
+
+    /// Box a value into the unknown type without rc_inc'ing the inner value.
+    ///
+    /// Use when the caller has already ensured the inner value has an extra
+    /// reference (e.g., class literal field init which rc_inc's before coercion).
+    pub fn box_to_unknown_no_inc(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
+        self.box_to_unknown_raw(value)
+    }
+
+    /// Raw unknown boxing: heap-allocates a TaggedValue without RC adjustment.
+    fn box_to_unknown_raw(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
         use crate::types::unknown_type_tag;
 
         if value.ty == types::I128 || value.ty == types::F128 {
@@ -375,32 +402,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Get the runtime tag for this type
         let tag = unknown_type_tag(value.type_id, self.arena());
-
-        // Create a stack slot for TaggedValue
-        let slot = self.alloc_stack(union_layout::STANDARD_SIZE);
-
-        // Store the tag at offset 0
         let tag_val = self.iconst_cached(types::I64, tag as i64);
-        self.builder.ins().stack_store(tag_val, slot, 0);
 
-        // Store the value at offset 8
-        // Convert to i64 if needed (for smaller types)
+        // Convert value to i64 for storage
         let value_as_i64 = if value.ty == types::I64 || value.ty == self.ptr_type() {
             value.value
         } else if value.ty == types::F64 {
-            // F64 is stored as bits
             self.builder
                 .ins()
                 .bitcast(types::I64, MemFlags::new(), value.value)
         } else if value.ty == types::F32 {
-            // F32 needs to be extended
             let i32_val = self
                 .builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
             uextend_const(self.builder, types::I64, i32_val)
         } else if value.ty.is_int() && value.ty.bytes() < 8 {
-            // Extend smaller integers to i64
             if self.arena().is_unsigned(value.type_id) {
                 uextend_const(self.builder, types::I64, value.value)
             } else {
@@ -410,15 +427,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             value.value
         };
 
-        self.builder
-            .ins()
-            .stack_store(value_as_i64, slot, union_layout::PAYLOAD_OFFSET);
+        // Heap-allocate the TaggedValue via runtime call
+        let ptr = self.call_runtime(RuntimeKey::TaggedValueNew, &[tag_val, value_as_i64])?;
 
-        // Return pointer to the TaggedValue
-        let ptr_type = self.ptr_type();
-        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-        Ok(CompiledValue::new(ptr, ptr_type, TypeId::UNKNOWN))
+        Ok(CompiledValue::new(ptr, self.ptr_type(), TypeId::UNKNOWN))
     }
 
     /// Box a value as an interface type.

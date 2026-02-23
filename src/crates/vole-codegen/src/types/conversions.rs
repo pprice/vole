@@ -835,6 +835,9 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
         // calls union_heap_cleanup (which frees the buffer and conditionally
         // rc_dec's the RC payload inside).
         ArenaType::Union(_) => RuntimeTypeId::UnionHeap as i64,
+        // Unknown values are heap-allocated TaggedValues [tag: u64, value: u64].
+        // Tagged as UnknownHeap so array_drop calls unknown_heap_cleanup.
+        ArenaType::Unknown => RuntimeTypeId::UnknownHeap as i64,
         _ => RuntimeTypeId::I64 as i64,
     }
 }

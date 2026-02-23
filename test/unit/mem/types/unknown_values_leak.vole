@@ -1,0 +1,178 @@
+// RC leak tests for heap-allocated unknown (TaggedValue) values.
+//
+// Each TaggedValue is a 16-byte heap buffer [tag, value]. When the inner
+// value is RC-managed (string, array, class instance), unknown_heap_cleanup
+// rc_dec's the payload before freeing the buffer. These tests exercise
+// various ownership patterns to verify no leaks or double-frees.
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func get_val(i: i64) -> unknown {
+    if i == 0 { return "hello" }
+    if i == 1 { return 42 }
+    return true
+}
+
+func return_string_as_unknown() -> unknown {
+    return "dynamic"
+}
+
+struct Pair { name: string, value: unknown }
+
+struct Triple { a: unknown, b: unknown, c: unknown }
+
+class UnknownBox { item: unknown }
+
+// ---------------------------------------------------------------------------
+// Return unknown from function — no leak
+// ---------------------------------------------------------------------------
+
+tests "return unknown no leak" {
+    test "return string as unknown no leak" {
+        let v = return_string_as_unknown()
+        assert(v is string)
+    }
+
+    test "return unknown in loop no leak" {
+        var i = 0
+        while i < 10 {
+            let v = return_string_as_unknown()
+            assert(v is string)
+            i = i + 1
+        }
+    }
+
+    test "return multiple unknowns no leak" {
+        let a = get_val(0)
+        let b = get_val(1)
+        let c = get_val(2)
+        assert(a is string)
+        assert(b is i64)
+        assert(c is bool)
+    }
+
+    test "return unknowns into array no leak" {
+        let arr: [unknown] = []
+        var i = 0
+        while i < 10 {
+            arr.push(get_val(i % 3))
+            i = i + 1
+        }
+        assert(arr.length() == 10)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Struct fields typed as unknown — no leak
+// ---------------------------------------------------------------------------
+
+tests "struct unknown fields no leak" {
+    test "struct with string unknown field no leak" {
+        let p = Pair { name: "test", value: "hello" }
+        assert(p.value is string)
+    }
+
+    test "struct with i64 unknown field no leak" {
+        let p = Pair { name: "test", value: 42 }
+        assert(p.value is i64)
+    }
+
+    test "struct with multiple unknown fields no leak" {
+        let t = Triple { a: "x", b: 42, c: true }
+        assert(t.a is string)
+    }
+
+    test "struct unknown fields in loop no leak" {
+        var i = 0
+        while i < 10 {
+            let p = Pair { name: "iter", value: "str" }
+            assert(p.value is string)
+            i = i + 1
+        }
+    }
+
+    test "class with string unknown field no leak" {
+        let b = UnknownBox { item: "world" }
+        assert(b.item is string)
+    }
+
+    test "class unknown field reassignment no leak" {
+        var b = UnknownBox { item: "first" }
+        assert(b.item is string)
+        b.item = "second"
+        assert(b.item is string)
+        b.item = 42
+        assert(b.item is i64)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unknown array push / read — no leak
+// ---------------------------------------------------------------------------
+
+tests "unknown array lifecycle no leak" {
+    test "push string as unknown to array no leak" {
+        let arr: [unknown] = []
+        arr.push("a")
+        arr.push("b")
+        arr.push("c")
+        assert(arr.length() == 3)
+    }
+
+    test "unknown array literal no leak" {
+        let arr: [unknown] = ["x", "y", "z"]
+        assert(arr.length() == 3)
+    }
+
+    test "push boxed unknown in loop no leak" {
+        let arr: [unknown] = []
+        var i = 0
+        while i < 10 {
+            let v: unknown = "item"
+            arr.push(v)
+            i = i + 1
+        }
+        assert(arr.length() == 10)
+    }
+
+    test "read unknown array elements in loop no leak" {
+        let arr: [unknown] = ["a", "b", "c"]
+        var i = 0
+        while i < arr.length() {
+            let elem = arr[i]
+            assert(elem is string)
+            i = i + 1
+        }
+    }
+
+    test "copy unknown elements between arrays no leak" {
+        let src: [unknown] = ["hello", 42, true]
+        let dst: [unknown] = []
+        var i = 0
+        while i < src.length() {
+            let elem = src[i]
+            dst.push(elem)
+            i = i + 1
+        }
+        assert(dst.length() == 3)
+    }
+
+    test "unknown array index assign no leak" {
+        var arr: [unknown] = ["old", "value"]
+        arr[0] = "new"
+        arr[1] = 42
+        assert(arr[0] is string)
+        assert(arr[1] is i64)
+    }
+
+    test "repeated unknown array build and drop in loop no leak" {
+        var i = 0
+        while i < 5 {
+            let arr: [unknown] = ["a", "b", "c"]
+            assert(arr.length() == 3)
+            i = i + 1
+        }
+    }
+}

@@ -178,15 +178,11 @@ fn build_single_field_meta(
 ///
 /// ## Why heap TaggedValues?
 ///
-/// Regular `[unknown]` arrays use `box_to_unknown()` which creates STACK-allocated
-/// TaggedValues. The array stores a pointer to each stack TaggedValue as the element
-/// value. When `arr[i]` is accessed, `ArrayGetValue` returns this pointer, and the
-/// `is` check loads from it at offset 0 to read the type tag. This works because
-/// the stack slots are valid for the function's lifetime.
-///
-/// Annotation arrays persist beyond function return (stored in FieldMeta fields),
-/// so their TaggedValues must be HEAP-allocated. The inner tag is `Instance` since
-/// annotation structs are allocated as class instances via `InstanceNew`.
+/// `box_to_unknown()` creates heap-allocated TaggedValues. The array stores a
+/// pointer to each TaggedValue as the element value. When `arr[i]` is accessed,
+/// `ArrayGetValue` returns this pointer, and the `is` check loads from it at
+/// offset 0 to read the type tag. The inner tag for annotations is `Instance`
+/// since annotation structs are allocated as class instances via `InstanceNew`.
 fn build_annotations_array(
     cg: &mut Cg,
     annotations: &[ValidatedAnnotation],
