@@ -144,6 +144,17 @@ impl EntityRegistry {
         result
     }
 
+    /// Look up a struct by its short name (string-based, cross-module).
+    /// Uses a cached short name index for O(1) lookups after initial build.
+    /// Used for cross-module struct resolution (e.g., imported annotation types).
+    pub fn struct_by_short_name(
+        &self,
+        short_name: &str,
+        name_table: &vole_identity::NameTable,
+    ) -> Option<TypeDefId> {
+        self.lookup_short_name(short_name, name_table, Some(TypeDefKind::Struct))
+    }
+
     /// Look up a sentinel type by its short name (string-based, cross-module).
     /// Uses a cached short name index for O(1) lookups after initial build.
     /// Used to resolve well-known sentinel types (nil, Done) from any module.

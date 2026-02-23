@@ -419,6 +419,10 @@ impl Analyzer {
         }
 
         // Register a new type alias that points to the original type
+        let is_annotation = self
+            .entity_registry()
+            .get_type(original_type_def_id)
+            .is_annotation;
         let alias_type_def_id = self.entity_registry_mut().register_type(
             binding_name_id,
             TypeDefKind::Alias,
@@ -428,5 +432,12 @@ impl Analyzer {
         // Set the aliased type to the original class/interface type
         self.entity_registry_mut()
             .set_aliased_type(alias_type_def_id, type_id);
+
+        // Propagate the is_annotation flag from the original type
+        if is_annotation {
+            self.entity_registry_mut()
+                .get_type_mut(alias_type_def_id)
+                .is_annotation = true;
+        }
     }
 }

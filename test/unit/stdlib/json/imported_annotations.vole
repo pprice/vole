@@ -1,0 +1,223 @@
+// Tests that annotation types imported from std:json are recognized
+// as annotation types and can be used on fields.
+//
+// This specifically tests cross-module struct annotation resolution
+// (vol-zhjm). Previously, imported struct annotation types were not
+// found because the resolver had no struct_by_short_name fallback.
+
+let { JSON, json_name, json_ignore, json_field } = import "std:json"
+let { Map } = import "std:collections/map"
+
+class UserWithRename {
+    @json_name(name: "user_name")
+    name: string,
+
+    age: i64,
+}
+
+class SessionWithIgnore {
+    token: string,
+
+    @json_ignore
+    internal_secret: string,
+}
+
+class MixedAnnotations {
+    @json_field(name: "display_name", ignore: false)
+    name: string,
+
+    @json_field(name: "", ignore: true)
+    secret: string,
+
+    age: i64,
+}
+
+class MixedSeparateAnnotations {
+    @json_name(name: "display_name")
+    name: string,
+
+    @json_ignore
+    secret: string,
+
+    age: i64,
+}
+
+struct ApiConfig {
+    @json_name(name: "api_key")
+    key: string,
+
+    @json_ignore
+    internal: bool,
+
+    endpoint: string,
+}
+
+tests "imported annotation types resolve correctly" {
+    test "imported @json_name recognized on class field" {
+        let meta = UserWithRename.@meta
+        let field = meta.fields[0]
+        assert(field.name == "name")
+        assert(field.annotations.length() == 1)
+        assert(field.annotations[0] is json_name)
+    }
+
+    test "imported @json_name field value accessible" {
+        let meta = UserWithRename.@meta
+        let ann = meta.fields[0].annotations[0]
+        if ann is json_name {
+            assert(ann.name == "user_name")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "imported @json_ignore recognized on class field" {
+        let meta = SessionWithIgnore.@meta
+        let field = meta.fields[1]
+        assert(field.name == "internal_secret")
+        assert(field.annotations.length() == 1)
+        assert(field.annotations[0] is json_ignore)
+    }
+
+    test "imported @json_field recognized with multiple args" {
+        let meta = MixedAnnotations.@meta
+        let name_field = meta.fields[0]
+        assert(name_field.annotations.length() == 1)
+        let ann = name_field.annotations[0]
+        assert(ann is json_field)
+        if ann is json_field {
+            assert(ann.name == "display_name")
+            assert(ann.ignore == false)
+        }
+    }
+
+    test "imported @json_field ignore flag" {
+        let meta = MixedAnnotations.@meta
+        let secret_field = meta.fields[1]
+        let ann = secret_field.annotations[0]
+        if ann is json_field {
+            assert(ann.ignore == true)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "mixed separate imported annotations on same class" {
+        let meta = MixedSeparateAnnotations.@meta
+        assert(meta.fields[0].annotations.length() == 1)
+        assert(meta.fields[0].annotations[0] is json_name)
+        assert(meta.fields[1].annotations.length() == 1)
+        assert(meta.fields[1].annotations[0] is json_ignore)
+        assert(meta.fields[2].annotations.length() == 0)
+    }
+
+    test "imported annotations on struct fields" {
+        let meta = ApiConfig.@meta
+        assert(meta.fields[0].annotations.length() == 1)
+        assert(meta.fields[0].annotations[0] is json_name)
+        assert(meta.fields[1].annotations.length() == 1)
+        assert(meta.fields[1].annotations[0] is json_ignore)
+        assert(meta.fields[2].annotations.length() == 0)
+    }
+
+    test "imported annotation struct field value on struct" {
+        let meta = ApiConfig.@meta
+        let ann = meta.fields[0].annotations[0]
+        if ann is json_name {
+            assert(ann.name == "api_key")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "unannotated fields have empty annotations" {
+        let meta = UserWithRename.@meta
+        assert(meta.fields[1].name == "age")
+        assert(meta.fields[1].annotations.length() == 0)
+    }
+}
+
+tests "imported annotations work with to_object_mapped" {
+    test "to_object_mapped uses imported @json_name" {
+        let meta = UserWithRename.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            i = i + 1
+        }
+
+        let user = UserWithRename { name: "Alice", age: 30 }
+        let box: unknown = user
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("user_name"))
+        assert(!obj.contains_key("name"))
+        assert(obj.contains_key("age"))
+    }
+
+    test "to_object_mapped omits imported @json_ignore field" {
+        let meta = SessionWithIgnore.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_ignore {
+                    ignores.set(field.name, true)
+                }
+            }
+            i = i + 1
+        }
+
+        let session = SessionWithIgnore { token: "abc", internal_secret: "shh" }
+        let box: unknown = session
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("token"))
+        assert(!obj.contains_key("internal_secret"))
+        assert(obj.len() == 1)
+    }
+
+    test "stringify with imported annotations" {
+        let meta = MixedSeparateAnnotations.@meta
+        let renames = Map.new<string, string>()
+        let ignores = Map.new<string, bool>()
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is json_name {
+                    renames.set(field.name, ann.name)
+                }
+                if ann is json_ignore {
+                    ignores.set(field.name, true)
+                }
+            }
+            i = i + 1
+        }
+
+        let item = MixedSeparateAnnotations {
+            name: "Bob",
+            secret: "hidden",
+            age: 25,
+        }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(json_str.contains("display_name"))
+        assert(!json_str.contains("secret"))
+        assert(json_str.contains("age"))
+    }
+}

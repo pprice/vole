@@ -6,7 +6,7 @@
 //! the self-referential `@annotation struct annotation {}`.
 
 use super::Analyzer;
-use crate::entity_defs::ValidatedAnnotation;
+use crate::entity_defs::{TypeDefKind, ValidatedAnnotation};
 use crate::errors::SemanticError;
 use vole_frontend::Interner;
 use vole_frontend::ast::{
@@ -255,8 +255,17 @@ impl Analyzer {
             return None;
         };
 
+        // Resolve through aliases to the underlying type.
+        // When a type is imported via destructuring (e.g., `let { json_name } = import "std:json"`),
+        // the local binding is a type alias. We need the original TypeDefId for field lookups
+        // and annotation validation.
+        let resolved_type_def_id = self.resolve_annotation_alias(type_def_id);
+
         // Check that the type is an annotation type
-        let is_annotation = self.entity_registry().get_type(type_def_id).is_annotation;
+        let is_annotation = self
+            .entity_registry()
+            .get_type(resolved_type_def_id)
+            .is_annotation;
         if !is_annotation {
             self.add_error(
                 SemanticError::NotAnAnnotationType {
@@ -269,7 +278,7 @@ impl Analyzer {
         }
 
         // Validate args against the annotation struct's fields
-        self.validate_annotation_args(ann, type_def_id, interner)
+        self.validate_annotation_args(ann, resolved_type_def_id, interner)
     }
 
     /// Validate annotation arguments against the annotation struct's fields.
@@ -407,5 +416,27 @@ impl Analyzer {
             type_def_id,
             args: result_args,
         })
+    }
+
+    /// Resolve a TypeDefId through aliases to the underlying concrete type.
+    ///
+    /// When annotations are imported via destructuring (`let { json_name } = import "std:json"`),
+    /// the local binding is a type alias. This method follows the alias chain to find the
+    /// original struct TypeDefId so field lookups and annotation validation work correctly.
+    fn resolve_annotation_alias(&self, type_def_id: TypeDefId) -> TypeDefId {
+        let registry = self.entity_registry();
+        let type_def = registry.get_type(type_def_id);
+        if type_def.kind != TypeDefKind::Alias {
+            return type_def_id;
+        }
+        let Some(aliased_type_id) = type_def.aliased_type else {
+            return type_def_id;
+        };
+        let arena = self.type_arena();
+        if let Some((original_def_id, _, _)) = arena.unwrap_nominal(aliased_type_id) {
+            original_def_id
+        } else {
+            type_def_id
+        }
     }
 }

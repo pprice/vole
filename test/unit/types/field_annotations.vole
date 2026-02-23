@@ -1,21 +1,12 @@
 // Unit tests for field-level annotations accessed via FieldMeta.annotations.
 //
-// Tests annotation access patterns using json_name-like and json_ignore-like
-// annotation types (locally defined, mirroring the stdlib json annotation shapes).
+// Tests annotation access patterns using json_name and json_ignore
+// annotation types imported from stdlib json.
 //
 // Covers: single annotation, multiple annotations, annotation value access,
 // mixed annotated/unannotated fields, struct fields, parameterless shorthand.
 
-// --- Annotation types mirroring stdlib json annotations ---
-// json_name shape: single string field
-@annotation
-struct json_name {
-    name: string,
-}
-
-// json_ignore shape: parameterless marker
-@annotation
-struct json_ignore {}
+let { json_name, json_ignore } = import "std:json"
 
 // --- Class with @json_name on a field ---
 class UserProfile {

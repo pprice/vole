@@ -82,6 +82,7 @@ impl ResolverEntityExt for Resolver<'_> {
             .and_then(|name_id| registry.type_by_name(name_id))
             .or_else(|| registry.interface_by_short_name(name, self.table()))
             .or_else(|| registry.class_by_short_name(name, self.table()))
+            .or_else(|| registry.struct_by_short_name(name, self.table()))
             .or_else(|| registry.sentinel_by_short_name(name, self.table()));
         tracing::trace!(?result, "resolve_type_str_or_interface result");
         result
