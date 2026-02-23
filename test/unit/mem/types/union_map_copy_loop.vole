@@ -1,0 +1,138 @@
+// Regression test for vol-67py: RC lifecycle corruption when copying
+// union-typed values between Maps in a loop.
+//
+// The bug: copy_union_ptr_to_local only copied the tag (offset 0) and
+// payload (offset 8) but NOT the is_rc flag (offset 1). When the copied
+// union was later promoted to the heap via copy_union_to_heap, the
+// missing is_rc flag caused the rc_inc to be skipped, leading to a
+// premature free and heap corruption during cleanup.
+//
+// Specifically manifests with RC-tracked union variants (class instances)
+// being get/set between Maps inside a while loop.
+
+let { JsonObject, JsonArray, JSON } = import "std:json"
+
+tests "union map copy loop - RC objects (vol-67py)" {
+    test "copy JsonObject value between JsonObjects in while loop" {
+        let inner = JsonObject.new()
+        inner.set("x", 1.0)
+
+        let source = JsonObject.new()
+        source.set("o", inner)
+
+        let dest = JsonObject.new()
+        let keys = ["o"]
+        var i = 0
+        while i < keys.length() {
+            let key = keys[i]
+            let v = source.get(key)
+            dest.set(key, v)
+            i = i + 1
+        }
+
+        assert(dest.len() == 1)
+    }
+
+    test "copy nested JsonObjects between JsonObjects in while loop" {
+        let o1 = JsonObject.new()
+        o1.set("x", "first")
+        let o2 = JsonObject.new()
+        o2.set("y", "second")
+
+        let source = JsonObject.new()
+        source.set("a", o1)
+        source.set("b", o2)
+
+        let dest = JsonObject.new()
+        let keys = ["a", "b"]
+        var i = 0
+        while i < keys.length() {
+            let key = keys[i]
+            let v = source.get(key)
+            dest.set(key, v)
+            i = i + 1
+        }
+
+        let ra = dest.get("a")
+        if ra is JsonObject {
+            let rx = ra.get("x")
+            if rx is string {
+                assert(rx == "first")
+            } else {
+                assert(false)
+            }
+        } else {
+            assert(false)
+        }
+    }
+
+    test "copy mixed types including JsonObject in while loop" {
+        let inner = JsonObject.new()
+        inner.set("x", 1.0)
+
+        let source = JsonObject.new()
+        source.set("s", "hello")
+        source.set("n", 42.0)
+        source.set("b", true)
+        source.set("o", inner)
+
+        let dest = JsonObject.new()
+        let keys = ["s", "n", "b", "o"]
+        var i = 0
+        while i < keys.length() {
+            let key = keys[i]
+            let v = source.get(key)
+            dest.set(key, v)
+            i = i + 1
+        }
+
+        let rs = dest.get("s")
+        if rs is string {
+            assert(rs == "hello")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "multiple rounds of copying union values in nested loops" {
+        let source = JsonObject.new()
+        source.set("a", "hello")
+        source.set("b", "world")
+        source.set("c", "foo")
+
+        let keys = ["a", "b", "c"]
+        var round = 0
+        while round < 3 {
+            let dest = JsonObject.new()
+            var i = 0
+            while i < keys.length() {
+                let key = keys[i]
+                let v = source.get(key)
+                dest.set(key, v)
+                i = i + 1
+            }
+            round = round + 1
+        }
+    }
+
+    test "copy JsonArray values between JsonObjects in while loop" {
+        let arr = JsonArray.new()
+        arr.push(1.0)
+        arr.push(2.0)
+
+        let source = JsonObject.new()
+        source.set("arr", arr)
+
+        let dest = JsonObject.new()
+        let keys = ["arr"]
+        var i = 0
+        while i < keys.length() {
+            let key = keys[i]
+            let v = source.get(key)
+            dest.set(key, v)
+            i = i + 1
+        }
+
+        assert(dest.len() == 1)
+    }
+}

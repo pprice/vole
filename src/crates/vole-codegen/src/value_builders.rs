@@ -636,11 +636,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let union_size = self.type_size(union_type_id);
         let slot = self.alloc_stack(union_size);
 
-        let tag = self
+        // Copy both tag (offset 0) and is_rc flag (offset 1) as a single i16 load.
+        // The is_rc byte is required by copy_union_to_heap to decide whether to
+        // rc_inc the payload when promoting the union to the heap.
+        let tag_and_rc = self
             .builder
             .ins()
-            .load(types::I8, MemFlags::new(), src_ptr, 0);
-        self.builder.ins().stack_store(tag, slot, 0);
+            .load(types::I16, MemFlags::new(), src_ptr, 0);
+        self.builder.ins().stack_store(tag_and_rc, slot, 0);
 
         if union_size > union_layout::TAG_ONLY_SIZE {
             let payload = self.builder.ins().load(
