@@ -1,0 +1,13 @@
+[package]
+name = "vole-vir"
+version.workspace = true
+edition = "2024"
+description = "Vole Intermediate Representation — typed IR between sema and codegen"
+
+[dependencies]
+# Workspace crates
+vole-identity = { path = "../vole-identity" }
+vole-frontend = { path = "../vole-frontend" }
+
+[lints]
+workspace = true

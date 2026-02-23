@@ -1836,6 +1836,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vole-vir"
+version = "2026.2.4"
+dependencies = [
+ "vole-frontend",
+ "vole-identity",
+]
+
+[[package]]
 name = "wasi"
 version = "0.11.1+wasi-snapshot-preview1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
