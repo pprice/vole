@@ -738,9 +738,15 @@ impl Cg<'_, '_, '_> {
             VirExpr::LocalLoad { name, ty } => self.compile_local_load(*name, *ty),
             VirExpr::LocalStore { name, value } => self.compile_local_store(*name, value),
 
-            // -- Lambda (todo) --------------------------------------------
-            VirExpr::Lambda { .. } => {
-                todo!("VIR Lambda: lowering still emits Ast escape hatch")
+            // -- Lambda / closure ------------------------------------------
+            VirExpr::Lambda {
+                params,
+                body,
+                captures,
+                ty,
+            } => {
+                let result = self.compile_vir_lambda(params, body, captures, *ty)?;
+                Ok(self.mark_rc_owned(result))
             }
 
             // -- Generator ------------------------------------------------

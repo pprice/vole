@@ -3,7 +3,7 @@
 // VIR expression nodes and their supporting types.
 
 use vole_frontend::Expr;
-use vole_identity::{FunctionId, NameId, Symbol, TypeDefId, TypeId};
+use vole_identity::{NameId, Symbol, TypeDefId, TypeId};
 use vole_sema::{StringConversion, UnionStorageKind};
 
 use crate::calls::CallTarget;
@@ -241,8 +241,22 @@ pub enum VirExpr {
 
     // -- Lambda -------------------------------------------------------------
     /// Lambda / closure expression.
+    ///
+    /// `params` are the parameter names in declaration order; individual
+    /// parameter types are derived by codegen from the function type `ty`
+    /// via `TypeArena::unwrap_function`.
+    ///
+    /// `body` is the lowered VIR body (statements + optional trailing
+    /// expression).
+    ///
+    /// `captures` list the variables captured from the enclosing scope by
+    /// name; codegen resolves their runtime values and types from the
+    /// enclosing compilation context.
+    ///
+    /// `ty` is the sema-computed function type `(P1, P2, ...) -> R`.
     Lambda {
-        func_id: FunctionId,
+        params: Vec<Symbol>,
+        body: VirBody,
         captures: Vec<VirCapture>,
         ty: TypeId,
     },

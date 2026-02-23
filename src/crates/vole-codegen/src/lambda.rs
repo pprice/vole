@@ -9,6 +9,8 @@ use cranelift_module::Module;
 
 use vole_frontend::{Block, Capture, Expr, FuncBody, LambdaExpr, NodeId, Stmt, Symbol};
 use vole_sema::type_arena::{TypeArena, TypeId};
+use vole_vir::VirBody;
+use vole_vir::expr::VirCapture;
 
 use super::RuntimeKey;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
@@ -244,6 +246,185 @@ impl Cg<'_, '_, '_> {
             .collect();
 
         self.compile_closure(&lambda.body, params, node_id)
+    }
+
+    /// Compile a VIR lambda expression — the VIR-path counterpart to
+    /// `compile_closure`.
+    ///
+    /// Derives param types from the function type `ty` via
+    /// `TypeArena::unwrap_function`, compiles the body via the VIR path,
+    /// allocates a closure struct, and sets up captures.
+    pub fn compile_vir_lambda(
+        &mut self,
+        param_names: &[Symbol],
+        body: &VirBody,
+        vir_captures: &[VirCapture],
+        ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let func_type_id = ty;
+        let (param_type_ids, return_type_id) = self.unwrap_lambda_func_type(func_type_id)?;
+
+        let captures: Vec<Capture> = vir_captures
+            .iter()
+            .map(|c| Capture {
+                name: c.name,
+                is_mutable: false,
+                is_mutated: false,
+            })
+            .collect();
+
+        let func_id = self.declare_vir_lambda_func(
+            param_names,
+            &param_type_ids,
+            return_type_id,
+            &captures,
+            body,
+        )?;
+
+        self.alloc_closure(func_id, func_type_id, &captures)
+    }
+
+    /// Unwrap a function type into param types and return type, applying
+    /// monomorphization substitutions.
+    fn unwrap_lambda_func_type(
+        &self,
+        func_type_id: TypeId,
+    ) -> CodegenResult<(Vec<TypeId>, TypeId)> {
+        let arena = self.arena();
+        let (sema_params, ret_id, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("VIR lambda", "function type", format!("{func_type_id:?}"))
+        })?;
+        let param_ids: Vec<TypeId> = sema_params
+            .iter()
+            .map(|&p| self.substitute_type(p))
+            .collect();
+        let ret = self.substitute_type(ret_id);
+        Ok((param_ids, ret))
+    }
+
+    /// Declare and compile a VIR lambda as a Cranelift function.
+    ///
+    /// Builds the signature, declares the function, compiles the VIR body,
+    /// and defines the function in the JIT module.  Returns the Cranelift
+    /// FuncId for use in closure allocation.
+    fn declare_vir_lambda_func(
+        &mut self,
+        param_names: &[Symbol],
+        param_type_ids: &[TypeId],
+        return_type_id: TypeId,
+        captures: &[Capture],
+        body: &VirBody,
+    ) -> CodegenResult<cranelift_module::FuncId> {
+        let lambda_id = self.next_lambda_id();
+        let cr_param_types: Vec<Type> = param_type_ids
+            .iter()
+            .map(|&id| self.cranelift_type(id))
+            .collect();
+        let return_type = self.cranelift_type(return_type_id);
+        let ptr_type = self.ptr_type();
+
+        let sig = self.build_lambda_signature(&cr_param_types, return_type, return_type_id);
+
+        let func_key = self.funcs().intern_lambda(lambda_id);
+        let lambda_name = self.funcs().display(func_key);
+        let func_id = self
+            .jit_module()
+            .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
+            .map_err(CodegenError::cranelift)?;
+        self.funcs().set_func_id(func_key, func_id);
+        self.funcs().set_return_type(func_key, return_type_id);
+
+        // Build capture bindings
+        let capture_bindings = if !captures.is_empty() {
+            let parent_captures = self.captures.as_ref().map(|c| c.bindings);
+            Some(build_capture_bindings(
+                captures,
+                &self.vars,
+                parent_captures,
+                self.arena(),
+            ))
+        } else {
+            None
+        };
+
+        let params: Vec<(Symbol, TypeId, Type)> = param_names
+            .iter()
+            .enumerate()
+            .map(|(i, &name)| (name, param_type_ids[i], cr_param_types[i]))
+            .collect();
+
+        // Compile the body in a new Cranelift function context.
+        // A dummy AST body is needed for FunctionCompileConfig (never read
+        // on the VIR path).
+        let dummy_body = FuncBody::Block(Block {
+            stmts: Vec::new(),
+            span: vole_frontend::Span::default(),
+        });
+        let mut lambda_ctx = self.jit_module().make_context();
+        lambda_ctx.func.signature = sig;
+
+        {
+            use super::compiler::common::compile_function_inner_with_vir;
+
+            let mut builder_ctx = FunctionBuilderContext::new();
+            let builder = FunctionBuilder::new(&mut lambda_ctx.func, &mut builder_ctx);
+
+            let config = FunctionCompileConfig::lambda(
+                &dummy_body,
+                params,
+                return_type_id,
+                capture_bindings.as_ref(),
+                ptr_type,
+            );
+
+            compile_function_inner_with_vir(
+                builder,
+                self.codegen_ctx,
+                self.env,
+                config,
+                body,
+                self.current_module(),
+                self.substitutions,
+            )?;
+        }
+
+        self.jit_module()
+            .define_function(func_id, &mut lambda_ctx)
+            .map_err(CodegenError::cranelift)?;
+
+        Ok(func_id)
+    }
+
+    /// Allocate a closure struct and set up captures.
+    ///
+    /// Given the compiled function's FuncId, allocates a closure struct with
+    /// the function pointer and capture slots, then populates the captures.
+    fn alloc_closure(
+        &mut self,
+        func_id: cranelift_module::FuncId,
+        func_type_id: TypeId,
+        captures: &[Capture],
+    ) -> CodegenResult<CompiledValue> {
+        let ptr_type = self.ptr_type();
+        let func_ref = self
+            .codegen_ctx
+            .module
+            .declare_func_in_func(func_id, self.builder.func);
+        let func_addr = self.builder.ins().func_addr(ptr_type, func_ref);
+
+        let alloc_ref = self.runtime_func_ref(RuntimeKey::ClosureAlloc)?;
+        let num_captures_val = self.iconst_cached(types::I64, captures.len() as i64);
+        let alloc_call = self
+            .builder
+            .ins()
+            .call(alloc_ref, &[func_addr, num_captures_val]);
+        let closure_ptr = self.builder.inst_results(alloc_call)[0];
+
+        if !captures.is_empty() {
+            self.setup_closure_captures(captures, closure_ptr)?;
+        }
+
+        Ok(CompiledValue::new(closure_ptr, ptr_type, func_type_id))
     }
 
     /// Set up the capture values in an allocated closure.

@@ -12,12 +12,14 @@ use vole_sema::StringConversion;
 use vole_sema::node_map::NodeMap;
 
 use crate::expr::{
-    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
+    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirExpr, VirMetaKind,
+    VirStringPart, VirUnOp,
 };
 use crate::func::VirBody;
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
 
+use super::lower_func_body;
 use super::stmt::lower_stmt;
 
 /// Lower an AST expression into a VIR expression.
@@ -83,11 +85,11 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         ExprKind::MetaAccess(meta_access) => {
             lower_meta_access(meta_access, expr, ty, node_map, interner)
         }
+        ExprKind::Lambda(lambda) => lower_lambda(lambda, expr, ty, node_map, interner),
         ExprKind::ArrayLiteral(_)
         | ExprKind::RepeatLiteral { .. }
         | ExprKind::Match(_)
         | ExprKind::NullCoalesce(_)
-        | ExprKind::Lambda(_)
         | ExprKind::StructLiteral(_)
         | ExprKind::OptionalChain(_)
         | ExprKind::OptionalMethodCall(_)
@@ -646,6 +648,46 @@ fn lower_meta_access(
     };
 
     Box::new(VirExpr::MetaAccess { kind, ty })
+}
+
+/// Lower a lambda expression to `VirExpr::Lambda`.
+///
+/// Extracts parameter names from the AST, lowers the body to VIR, and
+/// collects captures from sema's `LambdaAnalysis`.  Individual parameter
+/// types are derived by codegen from the function type `ty` at compile
+/// time (the lowering context does not have access to `TypeArena`).
+fn lower_lambda(
+    lambda: &vole_frontend::ast::LambdaExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let params: Vec<_> = lambda.params.iter().map(|p| p.name).collect();
+    let body = lower_func_body(&lambda.body, node_map, interner);
+
+    // Extract captures from sema's lambda analysis.
+    let captures = node_map
+        .get_lambda_analysis(expr.id)
+        .map(|analysis| {
+            analysis
+                .captures
+                .iter()
+                .map(|c| VirCapture {
+                    name: c.name,
+                    ty: TypeId::UNKNOWN,
+                    by_ref: false,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Box::new(VirExpr::Lambda {
+        params,
+        body,
+        captures,
+        ty,
+    })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.
