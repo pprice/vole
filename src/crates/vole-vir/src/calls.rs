@@ -4,6 +4,8 @@
 
 use vole_identity::{FunctionId, Symbol};
 
+use crate::intrinsics::IntrinsicKey;
+
 /// The target of a function or method call in VIR.
 ///
 /// Codegen uses this to select the correct calling convention and linkage.
@@ -18,13 +20,12 @@ pub enum CallTarget {
     /// A built-in method on a primitive type (array, string, range).
     BuiltinMethod { method: BuiltinMethod },
 
-    /// A compiler intrinsic, identified by a string key that codegen resolves
-    /// to its internal `IntrinsicKey`.  Keeps vole-vir free of codegen details.
-    Intrinsic { key: String },
+    /// A compiler intrinsic, identified by a typed `IntrinsicKey`.
+    Intrinsic { key: IntrinsicKey },
 
-    /// A runtime intrinsic (calls into `vole-runtime`), identified by string
-    /// key.  Codegen resolves to the appropriate `RuntimeKey`.
-    IntrinsicRuntime { key: String },
+    /// A runtime intrinsic (calls into `vole-runtime`), identified by a typed
+    /// `IntrinsicKey`.  Codegen resolves to the appropriate `RuntimeKey`.
+    IntrinsicRuntime { key: IntrinsicKey },
 
     /// Lambda / closure invocation.  The closure value is the first element
     /// of the call's `args`.

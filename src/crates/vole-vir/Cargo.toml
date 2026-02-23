@@ -10,5 +10,8 @@ vole-identity = { path = "../vole-identity" }
 vole-frontend = { path = "../vole-frontend" }
 vole-sema = { path = "../vole-sema" }
 
+# Identifier concatenation for macros (used by define_int_op_enum)
+paste = "1.0"
+
 [lints]
 workspace = true
