@@ -4,7 +4,9 @@ use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
-use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
+use super::common::{
+    FunctionCompileConfig, compile_function_inner_with_params, compile_function_inner_with_vir,
+};
 use super::{Compiler, DeclareMode};
 
 use crate::FunctionKey;
@@ -820,6 +822,9 @@ impl Compiler<'_> {
             return Ok(());
         }
 
+        // Check if a VIR function was lowered for this function
+        let vir_func = self.analyzed.get_vir_function(semantic_func_id);
+
         let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
 
@@ -856,14 +861,26 @@ impl Compiler<'_> {
             );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                Some(module_id),
-                None,
-            )?;
+            if let Some(vir) = vir_func {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    Some(module_id),
+                    None,
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    Some(module_id),
+                    None,
+                )?;
+            }
         }
 
         // Define the function
@@ -913,6 +930,9 @@ impl Compiler<'_> {
             return Ok(());
         }
 
+        // Check if a VIR function was lowered for this function
+        let vir_func = self.analyzed.get_vir_function(semantic_func_id);
+
         // Create function signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
@@ -949,14 +969,26 @@ impl Compiler<'_> {
             // Use pre-resolved return type (None for void)
             let return_type_opt = Some(return_type_id).filter(|id| !id.is_void());
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_opt);
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                None,
-                None,
-            )?;
+            if let Some(vir) = vir_func {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    None,
+                    None,
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    None,
+                    None,
+                )?;
+            }
         }
 
         // Define the function

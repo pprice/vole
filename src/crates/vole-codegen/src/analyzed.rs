@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use vole_frontend::{Decl, Interner, Program, Span};
-use vole_identity::{ModuleId, NameId, NameTable, NamerLookup};
+use vole_identity::{FunctionId, ModuleId, NameId, NameTable, NamerLookup};
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
@@ -37,6 +37,10 @@ pub struct AnalyzedProgram {
     /// Lookup map from monomorphized mangled NameId to index in `vir_functions`.
     /// Enables O(1) VIR function lookup during monomorphized compilation.
     pub vir_monomorph_map: FxHashMap<NameId, usize>,
+    /// Lookup map from semantic FunctionId to index in `vir_functions`.
+    /// Enables O(1) VIR function lookup for non-generic top-level and module
+    /// functions during compilation.
+    pub vir_function_map: FxHashMap<FunctionId, usize>,
 }
 
 impl AnalyzedProgram {
@@ -60,6 +64,14 @@ impl AnalyzedProgram {
             &output.node_map,
             output.module_id,
         );
+        lower_module_functions(
+            &output.module_programs,
+            &db.names,
+            &db.entities,
+            &output.node_map,
+            &output.modules_with_errors,
+            &mut vir_functions,
+        );
         let generic_func_asts =
             build_generic_func_map(&program, &interner, &db.names, output.module_id);
         lower_monomorphized_instances(
@@ -71,6 +83,7 @@ impl AnalyzedProgram {
             &mut vir_functions,
         );
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
+        let vir_function_map = build_vir_function_map(&vir_functions);
         Self {
             program,
             interner: Rc::new(interner),
@@ -82,6 +95,7 @@ impl AnalyzedProgram {
             modules_with_errors: output.modules_with_errors,
             vir_functions,
             vir_monomorph_map,
+            vir_function_map,
         }
     }
 
@@ -134,6 +148,14 @@ impl AnalyzedProgram {
     pub fn get_vir_monomorph(&self, mangled_name_id: NameId) -> Option<&VirFunction> {
         self.vir_monomorph_map
             .get(&mangled_name_id)
+            .map(|&idx| &self.vir_functions[idx])
+    }
+
+    /// Look up a VIR function by its semantic FunctionId.
+    /// Returns `None` if no VIR function was lowered for this function.
+    pub fn get_vir_function(&self, func_id: FunctionId) -> Option<&VirFunction> {
+        self.vir_function_map
+            .get(&func_id)
             .map(|&idx| &self.vir_functions[idx])
     }
 }
@@ -277,6 +299,85 @@ fn build_generic_func_map<'a>(
     map
 }
 
+/// Lower non-generic functions from imported modules to VIR.
+///
+/// Iterates each module's parsed program, resolves function identities through
+/// the module's interner and module ID, and calls `lower_function()` for each
+/// non-generic, non-implicitly-generic function.  Modules with sema errors are
+/// skipped to avoid INVALID type IDs.
+fn lower_module_functions(
+    module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    node_map: &NodeMap,
+    modules_with_errors: &HashSet<String>,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    for (module_path, (program, module_interner)) in module_programs {
+        if modules_with_errors.contains(module_path) {
+            continue;
+        }
+        let module_id = names
+            .module_id_if_known(module_path)
+            .unwrap_or_else(|| names.main_module());
+        lower_module_program_functions(
+            program,
+            module_interner,
+            names,
+            entities,
+            node_map,
+            module_id,
+            vir_functions,
+        );
+    }
+}
+
+/// Lower non-generic functions from a single module program to VIR.
+fn lower_module_program_functions(
+    program: &Program,
+    interner: &Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    node_map: &NodeMap,
+    module_id: ModuleId,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let namer = NamerLookup::new(names, interner);
+
+    for decl in &program.declarations {
+        let Decl::Function(func) = decl else { continue };
+        if !func.type_params.is_empty() {
+            continue;
+        }
+        let Some(name_id) = namer.function(module_id, func.name) else {
+            continue;
+        };
+        let Some(func_id) = entities.function_by_name(name_id) else {
+            continue;
+        };
+        let func_def = entities.get_function(func_id);
+        if func_def.generic_info.is_some() {
+            continue;
+        }
+        let param_types: Vec<_> = func
+            .params
+            .iter()
+            .zip(func_def.signature.params_id.iter())
+            .map(|(p, &ty)| (p.name, ty))
+            .collect();
+        let display_name = interner.resolve(func.name).to_string();
+        let vir = lower_function(
+            func,
+            func_id,
+            display_name,
+            &param_types,
+            func_def.signature.return_type_id,
+            node_map,
+        );
+        vir_functions.push(vir);
+    }
+}
+
 /// Build a lookup map from monomorphized mangled NameId to VirFunction index.
 ///
 /// Only includes VIR functions that have a `mangled_name_id` set (i.e.,
@@ -287,6 +388,20 @@ fn build_vir_monomorph_map(vir_functions: &[VirFunction]) -> FxHashMap<NameId, u
     for (idx, vf) in vir_functions.iter().enumerate() {
         if let Some(name_id) = vf.mangled_name_id {
             map.insert(name_id, idx);
+        }
+    }
+    map
+}
+
+/// Build a lookup map from semantic FunctionId to VirFunction index.
+///
+/// Only includes non-monomorphized functions (those without a `mangled_name_id`).
+/// Monomorphized instances are looked up via `vir_monomorph_map` instead.
+fn build_vir_function_map(vir_functions: &[VirFunction]) -> FxHashMap<FunctionId, usize> {
+    let mut map = FxHashMap::default();
+    for (idx, vf) in vir_functions.iter().enumerate() {
+        if vf.mangled_name_id.is_none() {
+            map.insert(vf.id, idx);
         }
     }
     map
