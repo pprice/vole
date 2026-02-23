@@ -16,6 +16,7 @@ mod vir_calls;
 
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Module};
+use smallvec::smallvec;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
@@ -910,8 +911,8 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR type coercion.
     ///
     /// Dispatches on `CoerceKind` to emit the appropriate Cranelift
-    /// instructions for numeric conversions.  Complex coercions (Box,
-    /// Unbox, IteratorWrap) are deferred to a later VIR phase.
+    /// instructions for numeric conversions, interface boxing/unboxing,
+    /// and iterator wrapping.
     fn compile_vir_coerce(
         &mut self,
         value: CompiledValue,
@@ -922,42 +923,132 @@ impl Cg<'_, '_, '_> {
         use crate::ops::{sextend_const, uextend_const};
 
         let target_ty = self.cranelift_type(to);
-        let result = match kind {
+        match kind {
             CoerceKind::IntExtend => {
-                if self.arena().is_unsigned(from) {
+                let result = if self.arena().is_unsigned(from) {
                     uextend_const(self.builder, target_ty, value.value)
                 } else {
                     sextend_const(self.builder, target_ty, value.value)
-                }
+                };
+                Ok(CompiledValue::new(result, target_ty, to))
             }
-            CoerceKind::IntTruncate => self.builder.ins().ireduce(target_ty, value.value),
+            CoerceKind::IntTruncate => {
+                let result = self.builder.ins().ireduce(target_ty, value.value);
+                Ok(CompiledValue::new(result, target_ty, to))
+            }
             CoerceKind::IntToFloat => {
-                if self.arena().is_unsigned(from) {
+                let result = if self.arena().is_unsigned(from) {
                     self.builder.ins().fcvt_from_uint(target_ty, value.value)
                 } else {
                     self.builder.ins().fcvt_from_sint(target_ty, value.value)
-                }
+                };
+                Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::FloatToInt => {
-                if self.arena().is_unsigned(to) {
+                let result = if self.arena().is_unsigned(to) {
                     self.builder.ins().fcvt_to_uint(target_ty, value.value)
                 } else {
                     self.builder.ins().fcvt_to_sint(target_ty, value.value)
-                }
+                };
+                Ok(CompiledValue::new(result, target_ty, to))
             }
-            CoerceKind::FloatExtend => self.builder.ins().fpromote(target_ty, value.value),
-            CoerceKind::FloatTruncate => self.builder.ins().fdemote(target_ty, value.value),
-            CoerceKind::Box => {
-                todo!("VIR CoerceKind::Box not yet emitted by lowering")
+            CoerceKind::FloatExtend => {
+                let result = self.builder.ins().fpromote(target_ty, value.value);
+                Ok(CompiledValue::new(result, target_ty, to))
             }
-            CoerceKind::Unbox => {
-                todo!("VIR CoerceKind::Unbox not yet emitted by lowering")
+            CoerceKind::FloatTruncate => {
+                let result = self.builder.ins().fdemote(target_ty, value.value);
+                Ok(CompiledValue::new(result, target_ty, to))
             }
-            CoerceKind::IteratorWrap => {
-                todo!("VIR CoerceKind::IteratorWrap not yet emitted by lowering")
-            }
-        };
-        Ok(CompiledValue::new(result, target_ty, to))
+            CoerceKind::Box => self.compile_coerce_box(value, to),
+            CoerceKind::Unbox => self.compile_coerce_unbox(value, to),
+            CoerceKind::IteratorWrap => self.compile_coerce_iterator_wrap(value, to),
+        }
+    }
+
+    /// Box a concrete value as an interface type.
+    ///
+    /// Allocates `[data_ptr, vtable_ptr]` on the heap and generates the
+    /// vtable for the concrete type implementing the interface.  Delegates
+    /// to the existing `box_interface_value` infrastructure.
+    fn compile_coerce_box(
+        &mut self,
+        value: CompiledValue,
+        interface_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        self.box_interface_value(value, interface_type_id)
+    }
+
+    /// Unbox an interface pointer back to the concrete value.
+    ///
+    /// Loads the data word at offset 0 from the interface box `[data, vtable]`
+    /// and converts it back to the concrete Cranelift type.
+    fn compile_coerce_unbox(
+        &mut self,
+        value: CompiledValue,
+        concrete_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let ptr_ty = self.ptr_type();
+        let data_word = self
+            .builder
+            .ins()
+            .load(ptr_ty, MemFlags::new(), value.value, 0);
+        let concrete_val = self.convert_from_i64_storage(data_word, concrete_type_id);
+        let concrete_ty = self.cranelift_type(concrete_type_id);
+        Ok(CompiledValue::new(
+            concrete_val,
+            concrete_ty,
+            concrete_type_id,
+        ))
+    }
+
+    /// Wrap a concrete iterator as a `RuntimeIterator`.
+    ///
+    /// 1. Extracts the element type from the target `RuntimeIterator(elem)`.
+    /// 2. Looks up the `Iterator<elem>` interface type.
+    /// 3. Boxes the value as that interface.
+    /// 4. Wraps via `InterfaceIter` runtime call.
+    /// 5. Consumes the intermediate boxed interface.
+    fn compile_coerce_iterator_wrap(
+        &mut self,
+        value: CompiledValue,
+        runtime_iter_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        // Extract element type from RuntimeIterator(elem)
+        let elem_type_id = self
+            .arena()
+            .unwrap_runtime_iterator(runtime_iter_type_id)
+            .ok_or_else(|| {
+                CodegenError::internal("IteratorWrap target is not a RuntimeIterator type")
+            })?;
+
+        // Look up Iterator<elem> interface type
+        let iterator_type_def = self
+            .name_table()
+            .well_known
+            .iterator_type_def
+            .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
+        let interface_type_id = self
+            .arena()
+            .lookup_interface(iterator_type_def, smallvec![elem_type_id])
+            .ok_or_else(|| {
+                CodegenError::internal("Iterator<T> interface type not found in arena")
+            })?;
+
+        // Box as Iterator<elem> interface
+        let mut boxed = self.box_interface_value(value, interface_type_id)?;
+
+        // Wrap via InterfaceIter runtime call
+        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[boxed.value])?;
+
+        // Release the intermediate boxed interface (InterfaceIter took its own ref)
+        self.consume_rc_value(&mut boxed)?;
+
+        Ok(CompiledValue::owned(
+            wrapped,
+            types::I64,
+            runtime_iter_type_id,
+        ))
     }
 
     /// Compile a VIR `LocalLoad` — variable/identifier lookup.
