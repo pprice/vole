@@ -40,18 +40,20 @@ pub(crate) fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interne
         Stmt::Raise(raise_stmt) => lower_raise(raise_stmt, node_map, interner),
         Stmt::Let(let_stmt) => lower_let(let_stmt, node_map, interner),
         Stmt::For(for_stmt) => lower_for(for_stmt, node_map, interner),
-        // Ast escape hatches — explicitly listed so new Stmt variants
-        // cause a compile error rather than silently falling through.
-        //
-        // Return stays as Ast until compile_vir_return handles interface
-        // boxing, fallible returns, struct returns, and RC bookkeeping.
-        //
-        // LetTuple stays as Ast because element types require TypeArena
-        // (unwrap_tuple / unwrap_fixed_array) which is not available in
-        // the lowering context.
-        Stmt::Return(_) | Stmt::LetTuple(_) => VirStmt::Ast {
-            stmt: Box::new(stmt.clone()),
-        },
+        Stmt::Return(ret) => {
+            let value = ret
+                .value
+                .as_ref()
+                .map(|v| lower_expr(v, node_map, interner));
+            VirStmt::Return { value }
+        }
+        Stmt::LetTuple(let_tuple) => {
+            let value = lower_expr(&let_tuple.init, node_map, interner);
+            VirStmt::LetTuple {
+                pattern: Box::new(let_tuple.pattern.clone()),
+                value,
+            }
+        }
     }
 }
 

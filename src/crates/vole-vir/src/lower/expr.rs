@@ -90,10 +90,14 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
             node_id: expr.id,
             ty,
         }),
-        ExprKind::RepeatLiteral { .. } => Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        }),
+        ExprKind::RepeatLiteral { element, count } => {
+            let elem = lower_expr(element, node_map, interner);
+            Box::new(VirExpr::RepeatLiteral {
+                element: elem,
+                count: *count,
+                ty,
+            })
+        }
     }
 }
 
@@ -344,12 +348,12 @@ fn lower_range(
 ///
 /// Variable targets (`x = expr`) are lowered to `VirExpr::LocalStore`.
 /// Field targets (`obj.field = expr`) are lowered to `VirExpr::FieldStore`.
-/// Other targets (index, discard) remain as `VirExpr::Ast` because they
-/// require codegen-level information (array bounds, etc.).
+/// Index targets (`arr[i] = expr`) are lowered to `VirExpr::IndexStore`.
+/// Discard targets (`_ = expr`) evaluate the expression for side effects.
 fn lower_assign(
     assign_expr: &vole_frontend::ast::AssignExpr,
     expr: &Expr,
-    ty: TypeId,
+    _ty: TypeId,
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
@@ -380,11 +384,8 @@ fn lower_assign(
                 union_storage,
             })
         }
-        // Discard target stays as Ast.
-        vole_frontend::AssignTarget::Discard => Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        }),
+        // Discard target `_ = expr`: just evaluate the expression for side effects.
+        vole_frontend::AssignTarget::Discard => lower_expr(&assign_expr.value, node_map, interner),
     }
 }
 
@@ -393,10 +394,19 @@ fn lower_assign(
 /// Variable targets (`x += expr`) are desugared to:
 ///   `LocalStore { name, value: BinaryOp { op, lhs: LocalLoad { name, ty }, rhs: lower(expr) } }`
 ///
-/// Field and index targets remain as `VirExpr::Ast` because they require
-/// evaluating the object/index sub-expression exactly once (shared between
-/// the load and store), which tree-shaped VIR cannot represent without
-/// introducing temporaries.
+/// Field targets (`obj.field += expr`) are desugared to:
+///   `FieldStore { object, field, value: BinaryOp { op, lhs: FieldLoad { object, field }, rhs } }`
+///
+/// Index targets (`arr[i] += expr`) are desugared to:
+///   `IndexStore { object, index, value: BinaryOp { op, lhs: Index { object, index }, rhs } }`
+///
+/// Note: field and index targets lower the object/index sub-expressions
+/// twice (once for the load, once for the store). This is safe because
+/// Vole assignment targets are always lvalues (variables, field chains,
+/// index on a variable), which are side-effect-free to re-evaluate.
+///
+/// Discard targets (`_ += expr`) are rejected by sema; lowering them
+/// would be a compiler bug.
 fn lower_compound_assign(
     compound: &vole_frontend::ast::CompoundAssignExpr,
     expr: &Expr,
@@ -404,10 +414,11 @@ fn lower_compound_assign(
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
+    let rhs = lower_expr(&compound.value, node_map, interner);
+    let binary_op = map_binary_op(compound.op.to_binary_op());
+
     match &compound.target {
         vole_frontend::AssignTarget::Variable(sym) => {
-            let rhs = lower_expr(&compound.value, node_map, interner);
-            let binary_op = map_binary_op(compound.op.to_binary_op());
             let load = Box::new(VirExpr::LocalLoad { name: *sym, ty });
             let binop_result = Box::new(VirExpr::BinaryOp {
                 op: binary_op,
@@ -421,11 +432,59 @@ fn lower_compound_assign(
                 value: binop_result,
             })
         }
-        // Field, index, and discard targets stay as Ast.
-        _ => Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        }),
+        vole_frontend::AssignTarget::Field { object, field, .. } => {
+            let obj_for_load = lower_expr(object, node_map, interner);
+            let obj_for_store = lower_expr(object, node_map, interner);
+            let load = Box::new(VirExpr::FieldLoad {
+                object: obj_for_load,
+                field: *field,
+                storage: FieldStorage::ByName,
+                ty,
+            });
+            let binop_result = Box::new(VirExpr::BinaryOp {
+                op: binary_op,
+                lhs: load,
+                rhs,
+                ty,
+                line: expr.span.line,
+            });
+            Box::new(VirExpr::FieldStore {
+                object: obj_for_store,
+                field: *field,
+                storage: FieldStorage::ByName,
+                value: binop_result,
+            })
+        }
+        vole_frontend::AssignTarget::Index { object, index } => {
+            let obj_for_load = lower_expr(object, node_map, interner);
+            let idx_for_load = lower_expr(index, node_map, interner);
+            let obj_for_store = lower_expr(object, node_map, interner);
+            let idx_for_store = lower_expr(index, node_map, interner);
+            let union_storage = node_map.get_union_storage_kind(expr.id);
+            let load = Box::new(VirExpr::Index {
+                object: obj_for_load,
+                index: idx_for_load,
+                ty,
+                union_storage,
+            });
+            let binop_result = Box::new(VirExpr::BinaryOp {
+                op: binary_op,
+                lhs: load,
+                rhs,
+                ty,
+                line: expr.span.line,
+            });
+            Box::new(VirExpr::IndexStore {
+                object: obj_for_store,
+                index: idx_for_store,
+                value: binop_result,
+                union_storage,
+            })
+        }
+        vole_frontend::AssignTarget::Discard => {
+            // Sema rejects `_ += expr`; this should never be reached.
+            unreachable!("INTERNAL: compound assignment to discard should be rejected by sema")
+        }
     }
 }
 
@@ -454,7 +513,7 @@ fn lower_field_access(
 /// Looks up the pre-computed `IsCheckResult` from sema's NodeMap and embeds
 /// it directly in the VIR node so codegen never re-derives it.
 /// Falls back to `VirExpr::Ast` when sema didn't record a result (e.g.
-/// generic function bodies that sema skips).
+/// when sema skips analysis for the containing body).
 fn lower_is_check(
     is_expr: &vole_frontend::ast::IsExpr,
     expr: &Expr,
@@ -462,26 +521,19 @@ fn lower_is_check(
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
-    let result = node_map.get_is_check_result(expr.id);
-    match result {
-        Some(sema_result) => {
-            let value = lower_expr(&is_expr.value, node_map, interner);
-            let vir_result = convert_is_check_result(sema_result);
-            Box::new(VirExpr::IsCheck {
-                value,
-                result: vir_result,
-                ty,
-            })
-        }
-        None => {
-            // Generic function body — sema didn't analyze this; keep as Ast
-            // so codegen can recompute with substituted types.
-            Box::new(VirExpr::Ast {
-                expr: Box::new(expr.clone()),
-                ty,
-            })
-        }
-    }
+    let Some(sema_result) = node_map.get_is_check_result(expr.id) else {
+        return Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        });
+    };
+    let value = lower_expr(&is_expr.value, node_map, interner);
+    let vir_result = convert_is_check_result(sema_result);
+    Box::new(VirExpr::IsCheck {
+        value,
+        result: vir_result,
+        ty,
+    })
 }
 
 /// Lower an `as?`/`as!` cast to `VirExpr::AsCast`.
@@ -496,30 +548,24 @@ fn lower_as_cast(
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
-    let result = node_map.get_is_check_result(expr.id);
-    match result {
-        Some(sema_result) => {
-            let value = lower_expr(&as_cast.value, node_map, interner);
-            let kind = match as_cast.kind {
-                vole_frontend::ast::AsCastKind::Safe => AsCastKind::Checked,
-                vole_frontend::ast::AsCastKind::Unsafe => AsCastKind::Unchecked,
-            };
-            let vir_result = convert_is_check_result(sema_result);
-            Box::new(VirExpr::AsCast {
-                value,
-                target_ty: ty,
-                kind,
-                result: vir_result,
-            })
-        }
-        None => {
-            // Generic function body — keep as Ast for codegen recomputation.
-            Box::new(VirExpr::Ast {
-                expr: Box::new(expr.clone()),
-                ty,
-            })
-        }
-    }
+    let Some(sema_result) = node_map.get_is_check_result(expr.id) else {
+        return Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        });
+    };
+    let value = lower_expr(&as_cast.value, node_map, interner);
+    let kind = match as_cast.kind {
+        vole_frontend::ast::AsCastKind::Safe => AsCastKind::Checked,
+        vole_frontend::ast::AsCastKind::Unsafe => AsCastKind::Unchecked,
+    };
+    let vir_result = convert_is_check_result(sema_result);
+    Box::new(VirExpr::AsCast {
+        value,
+        target_ty: ty,
+        kind,
+        result: vir_result,
+    })
 }
 
 /// Convert sema's `IsCheckResult` to VIR's `IsCheckResult`.
@@ -593,8 +639,7 @@ fn lower_index(
 /// - `Dynamic`: lowers the object expression for vtable dispatch.
 /// - `TypeParam`: carries the NameId and lowered object for codegen resolution.
 ///
-/// Falls back to `VirExpr::Ast` when sema didn't record a classification
-/// (e.g. generic function bodies that sema skips).
+/// Falls back to `VirExpr::Ast` when sema didn't record a classification.
 fn lower_meta_access(
     meta_access: &vole_frontend::ast::MetaAccessExpr,
     expr: &Expr,
@@ -605,7 +650,6 @@ fn lower_meta_access(
     use vole_sema::node_map::MetaAccessKind;
 
     let Some(meta_kind) = node_map.get_meta_access(expr.id) else {
-        // No sema annotation — keep as Ast escape hatch.
         return Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,
@@ -712,7 +756,8 @@ fn lower_null_coalesce(
 /// Lower an optional chain field access (`obj?.field`) to `VirExpr::OptionalChain`.
 ///
 /// Extracts `OptionalChainInfo` from sema's NodeMap for the inner/result types.
-/// Falls back to `VirExpr::Ast` when sema didn't record the info (generic bodies).
+///
+/// Falls back to `VirExpr::Ast` when sema didn't record the info.
 fn lower_optional_chain(
     oc: &vole_frontend::ast::OptionalChainExpr,
     expr: &Expr,
@@ -740,6 +785,7 @@ fn lower_optional_chain(
 /// Extracts `OptionalChainInfo` from sema's NodeMap for the inner/result types.
 /// The original AST expression is preserved because method dispatch resolution is
 /// still keyed on NodeId (method calls remain as Ast escape hatches).
+///
 /// Falls back to `VirExpr::Ast` when sema didn't record the info.
 fn lower_optional_method_call(
     omc: &vole_frontend::ast::OptionalMethodCallExpr,
@@ -801,8 +847,9 @@ fn lower_array_literal(
 ///
 /// Reads `StructLiteralInfo` from the NodeMap to determine whether to emit
 /// `VirExpr::StructLiteral` (stack value type) or `VirExpr::ClassInstance`
-/// (heap reference type).  Falls back to `VirExpr::Ast` when sema didn't
-/// record the info (generic function bodies that sema skips).
+/// (heap reference type).
+///
+/// Falls back to `VirExpr::Ast` when sema didn't record the info.
 fn lower_struct_literal(
     sl: &vole_frontend::ast::StructLiteralExpr,
     expr: &Expr,
@@ -811,7 +858,6 @@ fn lower_struct_literal(
     interner: &mut Interner,
 ) -> VirRef {
     let Some(info) = node_map.get_struct_literal_info(expr.id) else {
-        // No sema annotation — keep as Ast escape hatch.
         return Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,

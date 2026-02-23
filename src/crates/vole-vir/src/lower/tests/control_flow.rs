@@ -321,11 +321,11 @@ fn lower_continue_stmt() {
 }
 
 // -----------------------------------------------------------------------
-// Statement lowering: Return (Ast escape hatch)
+// Statement lowering: Return
 // -----------------------------------------------------------------------
 
 #[test]
-fn lower_return_stays_as_ast() {
+fn lower_return_with_value() {
     use vole_frontend::ast::ReturnStmt;
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -335,11 +335,29 @@ fn lower_return_stays_as_ast() {
     });
     let vir = lower_stmt(&stmt, &node_map, &mut interner);
 
-    // Return stays as Ast until compile_vir_return handles interface
-    // boxing, fallible returns, struct returns, and RC bookkeeping.
     match &vir {
-        VirStmt::Ast { .. } => {}
-        other => panic!("expected VirStmt::Ast for Return, got {other:?}"),
+        VirStmt::Return { value: Some(v) } => match v.as_ref() {
+            VirExpr::IntLiteral { value: 42, .. } => {}
+            other => panic!("expected IntLiteral(42) as return value, got {other:?}"),
+        },
+        other => panic!("expected VirStmt::Return with value, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_return_void() {
+    use vole_frontend::ast::ReturnStmt;
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = Stmt::Return(ReturnStmt {
+        value: None,
+        span: dummy_span(),
+    });
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Return { value: None } => {}
+        other => panic!("expected VirStmt::Return with no value, got {other:?}"),
     }
 }
 

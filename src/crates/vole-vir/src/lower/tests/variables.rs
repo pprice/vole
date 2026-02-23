@@ -142,11 +142,11 @@ fn lower_assign_variable_lowers_value_recursively() {
 }
 
 // -----------------------------------------------------------------------
-// Assign with non-Variable targets → Ast escape hatch
+// Assign with Discard target → evaluates inner expression only
 // -----------------------------------------------------------------------
 
 #[test]
-fn lower_assign_discard_becomes_ast() {
+fn lower_assign_discard_evaluates_inner_expr() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -154,15 +154,16 @@ fn lower_assign_discard_becomes_ast() {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
             target: AssignTarget::Discard,
-            value: make_int_expr(0),
+            value: make_int_expr(42),
         })),
         span: dummy_span(),
     };
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
+    // Discard assign `_ = 42` lowers to just the inner expression `42`.
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for discard assign, got {other:?}"),
+        VirExpr::IntLiteral { value: 42, .. } => {}
+        other => panic!("expected IntLiteral(42) for discard assign, got {other:?}"),
     }
 }
 

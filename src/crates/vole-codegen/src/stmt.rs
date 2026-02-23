@@ -1115,12 +1115,20 @@ impl Cg<'_, '_, '_> {
         match vir_stmt {
             VirStmt::Expr { value } => {
                 let mut compiled = self.compile_vir_expr(value)?;
-                // If the expression produced NEVER (e.g. a void-typed if
-                // where all branches terminated), propagate termination.
-                let terminated = compiled.type_id == TypeId::NEVER;
-                // Discard the value — expression used as statement.
-                compiled.mark_consumed();
-                Ok(terminated)
+                if compiled.type_id == TypeId::NEVER {
+                    // The expression diverges (e.g. exhaustive if/else with
+                    // returns in all branches, `unreachable`, `panic`).
+                    // The current block is already terminated by the expression
+                    // compiler, so we must NOT emit another trap here.
+                    compiled.mark_consumed();
+                    Ok(true)
+                } else {
+                    // Consume RC value if the expression result is unused
+                    // (e.g. standalone function call returning a string).
+                    self.consume_rc_value(&mut compiled)?;
+                    compiled.debug_assert_rc_handled("VirStmt::Expr");
+                    Ok(false)
+                }
             }
             VirStmt::While { cond, body } => self.compile_vir_while(cond, body),
 
@@ -1148,9 +1156,7 @@ impl Cg<'_, '_, '_> {
                 mutable: _,
                 ty,
             } => self.compile_vir_let(*name, value, *ty),
-            VirStmt::LetTuple { .. } => {
-                todo!("VIR LetTuple stmt: lowering still emits Ast escape hatch")
-            }
+            VirStmt::LetTuple { pattern, value } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
             VirStmt::For(vir_for) => self.compile_vir_for(vir_for),
             VirStmt::Raise { error_name, fields } => self.compile_vir_raise(*error_name, fields),
@@ -1162,18 +1168,135 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR return statement.
     ///
-    /// Compiles the optional return value, cleans up all RC scopes, and
-    /// emits the Cranelift return instruction.
+    /// Handles all return conventions: simple value return, interface boxing,
+    /// unknown boxing, fallible returns, struct returns, union wrapping, and
+    /// RC bookkeeping (skip-var for owned locals, inc for borrows).
     fn compile_vir_return(&mut self, value: Option<&vole_vir::VirExpr>) -> CodegenResult<bool> {
+        let return_type_id = self.return_type;
         if let Some(value_expr) = value {
-            let compiled = self.compile_vir_expr(value_expr)?;
-            self.emit_rc_cleanup_all_scopes(None)?;
-            self.builder.ins().return_(&[compiled.value]);
+            let mut compiled = self.compile_vir_expr(value_expr)?;
+            compiled.type_id = self.try_substitute_type(compiled.type_id);
+
+            // RC bookkeeping: detect RC skip-var from VIR LocalLoad.
+            let skip_var = self.extract_vir_return_skip_var(value_expr);
+            if skip_var.is_none() && compiled.is_borrowed() {
+                if self.rc_state(compiled.type_id).needs_cleanup() {
+                    self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
+                } else if let Some(rc_tags) = self.rc_state(compiled.type_id).union_variants() {
+                    self.emit_union_rc_inc(compiled.value, rc_tags)?;
+                }
+            }
+            self.emit_rc_cleanup_all_scopes(skip_var)?;
+
+            compiled.mark_consumed();
+            compiled.debug_assert_rc_handled("VirStmt::Return");
+
+            self.emit_return_value(compiled, return_type_id)?;
         } else {
             self.emit_rc_cleanup_all_scopes(None)?;
             self.builder.ins().return_(&[]);
         }
         Ok(true)
+    }
+
+    /// Extract RC skip-var from a VIR return value expression.
+    ///
+    /// If the return value is a `LocalLoad` (lowered identifier) bound to
+    /// an RC-tracked local, returns that variable so RC cleanup can skip it
+    /// (ownership transfers to the caller).
+    fn extract_vir_return_skip_var(&self, value_expr: &vole_vir::VirExpr) -> Option<Variable> {
+        if let vole_vir::VirExpr::LocalLoad { name, .. } = value_expr
+            && let Some((var, _)) = self.vars.get(name)
+            && (self.rc_scopes.is_rc_local(*var)
+                || self.rc_scopes.is_composite_rc_local(*var)
+                || self.rc_scopes.is_union_rc_local(*var))
+        {
+            return Some(*var);
+        }
+        None
+    }
+
+    /// Emit the actual return instruction, handling all return conventions.
+    ///
+    /// Dispatches based on the function's return type: interface boxing,
+    /// unknown boxing, fallible (tag+payload), struct, union, or plain value.
+    fn emit_return_value(
+        &mut self,
+        compiled: CompiledValue,
+        return_type_id: Option<TypeId>,
+    ) -> CodegenResult<()> {
+        // Interface boxing
+        if let Some(ret_type_id) = return_type_id
+            && self.arena().is_interface(ret_type_id)
+            && !self.arena().is_interface(compiled.type_id)
+            && !self.arena().is_runtime_iterator(compiled.type_id)
+        {
+            let boxed = self.box_interface_value(compiled, ret_type_id)?;
+            self.builder.ins().return_(&[boxed.value]);
+            return Ok(());
+        }
+
+        // Unknown boxing
+        if let Some(ret_type_id) = return_type_id
+            && self.arena().is_unknown(ret_type_id)
+            && !self.arena().is_unknown(compiled.type_id)
+        {
+            let boxed = self.box_to_unknown_no_inc(compiled)?;
+            self.builder.ins().return_(&[boxed.value]);
+            return Ok(());
+        }
+
+        // Fallible return
+        if let Some(ret_type_id) = return_type_id
+            && self.arena().unwrap_fallible(ret_type_id).is_some()
+        {
+            let tag_val = self.iconst_cached(types::I64, FALLIBLE_SUCCESS_TAG);
+            if is_wide_fallible(ret_type_id, self.arena()) {
+                let (low, high) = split_i128_for_storage(self.builder, compiled.value);
+                self.builder.ins().return_(&[tag_val, low, high]);
+            } else {
+                let payload_val = convert_to_i64_for_storage(self.builder, &compiled);
+                self.builder.ins().return_(&[tag_val, payload_val]);
+            }
+            return Ok(());
+        }
+
+        // Small struct return
+        if let Some(ret_type_id) = return_type_id
+            && self.is_small_struct_return(ret_type_id)
+        {
+            self.emit_small_struct_return(compiled.value, ret_type_id)?;
+            return Ok(());
+        }
+
+        // Sret struct return
+        if let Some(ret_type_id) = return_type_id
+            && self.is_sret_struct_return(ret_type_id)
+        {
+            self.emit_sret_struct_return(compiled.value, ret_type_id)?;
+            return Ok(());
+        }
+
+        // Union return
+        if let Some(ret_type_id) = return_type_id
+            && self.arena().is_union(ret_type_id)
+        {
+            let wrapped = self.construct_union_id(compiled, ret_type_id)?;
+            self.builder.ins().return_(&[wrapped.value]);
+            return Ok(());
+        }
+
+        // Plain value return (with type conversion if needed)
+        let return_value = if let Some(ret_type_id) = return_type_id {
+            let arena = self.env.analyzed.type_arena();
+            let ptr_type = self.ptr_type();
+            let target_ty = type_id_to_cranelift(ret_type_id, arena, ptr_type);
+            convert_to_type(self.builder, compiled, target_ty, arena)
+        } else {
+            compiled.value
+        };
+        self.builder.ins().return_(&[return_value]);
+        Ok(())
     }
 
     /// Compile a VIR break statement.
@@ -1429,6 +1552,42 @@ impl Cg<'_, '_, '_> {
 
         init.mark_consumed();
         init.debug_assert_rc_handled("VirStmt::Let");
+        Ok(false)
+    }
+
+    /// Compile a VIR let-tuple destructuring statement.
+    ///
+    /// Compiles the init expression, registers composite RC cleanup for
+    /// owned temporaries, then delegates to `compile_destructure_pattern`
+    /// which handles tuple, fixed-array, record, and nested patterns.
+    fn compile_vir_let_tuple(
+        &mut self,
+        pattern: &Pattern,
+        value_expr: &vole_vir::VirExpr,
+    ) -> CodegenResult<bool> {
+        let mut init = self.compile_vir_expr(value_expr)?;
+        let is_borrow = init.is_borrowed();
+
+        // Register composite RC cleanup for owned temporaries.
+        if self.rc_scopes.has_active_scope()
+            && !is_borrow
+            && let Some(offsets) = self.rc_state(init.type_id).shallow_offsets()
+        {
+            let cr_type = self.cranelift_type(init.type_id);
+            let temp_var = self.builder.declare_var(cr_type);
+            self.builder.def_var(temp_var, init.value);
+            let union_fields = self
+                .rc_state(init.type_id)
+                .composite_union_fields()
+                .to_vec();
+            let drop_flag =
+                self.register_composite_rc_local(temp_var, offsets.to_vec(), union_fields);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        }
+
+        self.compile_destructure_pattern(pattern, init.value, init.type_id)?;
+        init.mark_consumed();
+        init.debug_assert_rc_handled("VirStmt::LetTuple");
         Ok(false)
     }
 

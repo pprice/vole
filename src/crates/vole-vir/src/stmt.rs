@@ -33,10 +33,15 @@ pub enum VirStmt {
     },
 
     /// Tuple destructuring (`let (a, b) = ...`).
+    ///
+    /// Carries the original AST `Pattern` because destructuring supports
+    /// nested tuples, records, wildcards, and module bindings — all of
+    /// which require TypeArena resolution at codegen time.
+    ///
+    /// `value` is the lowered init expression.
     LetTuple {
-        names: Vec<Symbol>,
+        pattern: Box<vole_frontend::Pattern>,
         value: VirRef,
-        types: Vec<TypeId>,
     },
 
     // -- Assignment ---------------------------------------------------------

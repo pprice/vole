@@ -512,11 +512,7 @@ fn compile_trailing_vir_expr(
     let mut value = cg.compile_vir_expr(vir_expr)?;
 
     // RC bookkeeping: detect identifier borrows that need rc_inc.
-    // Peek into the Ast escape hatch to access the inner expression kind.
-    let skip_var = match vir_expr {
-        VirExpr::Ast { expr, .. } => extract_rc_skip_var(cg, expr),
-        _ => None,
-    };
+    let skip_var = extract_vir_rc_skip_var(cg, vir_expr);
 
     if skip_var.is_none() && value.is_borrowed() {
         if cg.rc_state(value.type_id).needs_cleanup() {
@@ -576,9 +572,8 @@ fn compile_vir_block_body(
             },
             Some(VirStmt::Expr { value: vir_expr }) => {
                 let compiled = cg.compile_vir_expr(vir_expr)?;
-                // Lowered VIR expressions (literals, etc.) are never identifiers,
-                // so there is no RC skip variable to extract.
-                (compiled, None)
+                let skip_var = extract_vir_rc_skip_var(cg, vir_expr);
+                (compiled, skip_var)
             }
             _ => unreachable!(),
         };
@@ -609,8 +604,28 @@ fn compile_vir_block_body(
 /// Extract the RC skip variable from an AST expression, if it's an identifier
 /// bound to an RC-tracked local.
 fn extract_rc_skip_var(cg: &Cg, expr: &vole_frontend::Expr) -> Option<Variable> {
-    if let ExprKind::Identifier(sym) = &expr.kind
-        && let Some((var, _)) = cg.vars.get(sym)
+    if let ExprKind::Identifier(sym) = &expr.kind {
+        extract_rc_skip_var_for_sym(cg, *sym)
+    } else {
+        None
+    }
+}
+
+/// Extract the RC skip variable from a VIR expression.
+///
+/// Handles `VirExpr::LocalLoad` (lowered identifiers) and `VirExpr::Ast`
+/// (escape hatch wrapping an AST identifier).
+fn extract_vir_rc_skip_var(cg: &Cg, vir_expr: &VirExpr) -> Option<Variable> {
+    match vir_expr {
+        VirExpr::LocalLoad { name, .. } => extract_rc_skip_var_for_sym(cg, *name),
+        VirExpr::Ast { expr, .. } => extract_rc_skip_var(cg, expr),
+        _ => None,
+    }
+}
+
+/// Check if a symbol name is bound to an RC-tracked local variable.
+fn extract_rc_skip_var_for_sym(cg: &Cg, sym: Symbol) -> Option<Variable> {
+    if let Some((var, _)) = cg.vars.get(&sym)
         && (cg.rc_scopes.is_rc_local(*var)
             || cg.rc_scopes.is_composite_rc_local(*var)
             || cg.rc_scopes.is_union_rc_local(*var))

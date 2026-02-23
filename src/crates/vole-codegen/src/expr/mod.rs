@@ -678,6 +678,10 @@ impl Cg<'_, '_, '_> {
                 let result = self.compile_vir_array_literal(elements, *ty)?;
                 Ok(self.mark_rc_owned(result))
             }
+            VirExpr::RepeatLiteral { element, count, ty } => {
+                let result = self.compile_vir_repeat_literal(element, *count, *ty)?;
+                Ok(self.mark_rc_owned(result))
+            }
             VirExpr::StructLiteral {
                 type_def,
                 fields,

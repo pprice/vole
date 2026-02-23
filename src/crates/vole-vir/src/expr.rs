@@ -74,6 +74,16 @@ pub enum VirExpr {
     /// between dynamic array (heap) and tuple (stack) construction paths.
     ArrayLiteral { elements: Vec<VirRef>, ty: TypeId },
 
+    /// Repeat literal `[value; count]` — fixed-size array with repeated value.
+    ///
+    /// `ty` is the sema-inferred fixed-array type (e.g. `[i64; 4]`).
+    /// Codegen allocates a stack slot and stores the element at each position.
+    RepeatLiteral {
+        element: VirRef,
+        count: usize,
+        ty: TypeId,
+    },
+
     // -- Construction -------------------------------------------------------
     /// Value-type struct construction (stack-allocated).
     ///

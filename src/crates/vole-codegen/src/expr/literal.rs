@@ -349,6 +349,56 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(arr_ptr, self.ptr_type(), array_type_id))
     }
 
+    /// Compile a VIR repeat literal `[value; count]` to a fixed-size array.
+    ///
+    /// Mirrors [`repeat_literal()`] but compiles the element from a VIR
+    /// expression instead of an AST node.
+    pub(super) fn compile_vir_repeat_literal(
+        &mut self,
+        element: &vole_vir::VirExpr,
+        count: usize,
+        type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let (elem_type_id, _) = self.arena().unwrap_fixed_array(type_id).unwrap_or_else(|| {
+            unreachable!("VIR repeat literal is missing fixed array type info (TypeId={type_id:?})")
+        });
+
+        let mut elem_value = self.compile_vir_expr(element)?;
+
+        let elem_size = field_byte_size(elem_type_id, self.arena());
+        let total_size = elem_size * (count as u32);
+
+        let slot = self.alloc_stack(total_size);
+
+        let needs_rc =
+            self.rc_scopes.has_active_scope() && self.rc_state(elem_value.type_id).needs_cleanup();
+        let is_borrowed = elem_value.is_borrowed();
+        let wide_bits = crate::types::wide_ops::WideType::from_cranelift_type(elem_value.ty)
+            .map(|wide| wide.to_i128_bits(self.builder, elem_value.value));
+        for i in 0..count {
+            if needs_rc && (i > 0 || is_borrowed) {
+                self.emit_rc_inc_for_type(elem_value.value, elem_value.type_id)?;
+            }
+            let offset = (i as i32) * (elem_size as i32);
+            if let Some(wide_bits) = wide_bits {
+                let (low, high) = split_i128_for_storage(self.builder, wide_bits);
+                self.builder.ins().stack_store(low, slot, offset);
+                self.builder.ins().stack_store(high, slot, offset + 8);
+            } else {
+                self.builder
+                    .ins()
+                    .stack_store(elem_value.value, slot, offset);
+            }
+        }
+        elem_value.mark_consumed();
+        elem_value.debug_assert_rc_handled("repeat array element");
+
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+        Ok(CompiledValue::new(ptr, ptr_type, type_id))
+    }
+
     /// Compile a VIR tuple literal to stack-allocated memory.
     ///
     /// Mirrors `tuple_literal()` but compiles elements from VIR expressions.

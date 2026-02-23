@@ -1,9 +1,8 @@
 // lower/tests/ast_escape.rs
 //
-// Tests for lowered simple expressions (Unreachable, Import, TypeLiteral, Range)
-// and remaining AST escape hatches (Assign, RepeatLiteral, Call).
-// Also tests compound assignment desugaring (variable targets lowered,
-// index/field targets remain as Ast) and ArrayLiteral VIR lowering.
+// Tests for lowered simple expressions (Unreachable, Import, TypeLiteral, Range),
+// compound assignment desugaring (variable/field/index targets all lowered to VIR),
+// ArrayLiteral, RepeatLiteral, and Call VIR lowering.
 
 use super::*;
 use crate::expr::VirExpr;
@@ -252,7 +251,8 @@ fn lower_expr_compound_assign_variable_desugars_to_store() {
 }
 
 #[test]
-fn lower_expr_compound_assign_index_becomes_ast() {
+fn lower_expr_compound_assign_index_desugars_to_index_store() {
+    use crate::expr::VirBinOp;
     use vole_frontend::ast::{AssignTarget, CompoundAssignExpr, CompoundOp};
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -270,9 +270,17 @@ fn lower_expr_compound_assign_index_becomes_ast() {
     };
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
+    // Desugars to: IndexStore { object, index, value: BinaryOp { Add, Index { .. }, 1 } }
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for index CompoundAssign, got {other:?}"),
+        VirExpr::IndexStore { value, .. } => match value.as_ref() {
+            VirExpr::BinaryOp { op, lhs, rhs, .. } => {
+                assert_eq!(*op, VirBinOp::Add);
+                assert!(matches!(lhs.as_ref(), VirExpr::Index { .. }));
+                assert!(matches!(rhs.as_ref(), VirExpr::IntLiteral { value: 1, .. }));
+            }
+            other => panic!("expected BinaryOp as IndexStore value, got {other:?}"),
+        },
+        other => panic!("expected IndexStore for index CompoundAssign, got {other:?}"),
     }
 }
 
@@ -297,7 +305,7 @@ fn lower_expr_array_literal_becomes_vir() {
 }
 
 #[test]
-fn lower_expr_repeat_literal_becomes_ast() {
+fn lower_expr_repeat_literal_becomes_vir() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let expr = Expr {
@@ -311,8 +319,15 @@ fn lower_expr_repeat_literal_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for RepeatLiteral, got {other:?}"),
+        VirExpr::RepeatLiteral { element, count, ty } => {
+            assert_eq!(*count, 10);
+            assert_eq!(*ty, TypeId::UNKNOWN);
+            match element.as_ref() {
+                VirExpr::IntLiteral { value: 0, .. } => {}
+                other => panic!("expected IntLiteral(0) as element, got {other:?}"),
+            }
+        }
+        other => panic!("expected RepeatLiteral, got {other:?}"),
     }
 }
 
