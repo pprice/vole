@@ -245,24 +245,73 @@ impl Cg<'_, '_, '_> {
                 Ok(self.bool_value(result))
             }
             IsCheckResult::CheckUnknown(tested_type_id) => {
-                // Check if the unknown value's tag matches the tested type
-                // TaggedValue layout: [tag: u64 at offset 0][value: u64 at offset 8]
-                let tag = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), value.value, 0);
-                // Annotation struct types are heap-allocated as class instances
-                // (via InstanceNew) in FieldMeta.annotations, so they use the
-                // Instance tag rather than the default I64 tag for structs.
-                let expected_tag = if self.is_heap_allocated_annotation(tested_type_id) {
-                    vole_runtime::value::RuntimeTypeId::Instance as u64
-                } else {
-                    crate::types::unknown_type_tag(tested_type_id, self.arena())
-                };
-                let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
-                let result = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
+                let result = self.compile_unknown_is_check(value.value, tested_type_id);
                 Ok(self.bool_value(result))
             }
+        }
+    }
+
+    // =========================================================================
+    // Unknown is-check helper
+    // =========================================================================
+
+    /// Compile an `is` check against an unknown-typed value.
+    ///
+    /// For non-annotation types, compares the TaggedValue's tag against the
+    /// expected RuntimeTypeId.
+    ///
+    /// For annotation types (structs with `@annotation`), performs a two-level
+    /// check: (1) tag == Instance, (2) the instance's `type_id` field matches
+    /// the annotation type's registered runtime type_id. This distinguishes
+    /// different annotation types that all share the Instance tag.
+    fn compile_unknown_is_check(
+        &mut self,
+        tagged_value_ptr: Value,
+        tested_type_id: TypeId,
+    ) -> Value {
+        // TaggedValue layout: [tag: u64 at offset 0][value: u64 at offset 8]
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), tagged_value_ptr, 0);
+
+        if let Some(ann_runtime_type_id) = self.get_annotation_runtime_type_id(tested_type_id) {
+            // Two-level annotation check:
+            // 1. Tag must be Instance (7)
+            let instance_tag = self.iconst_cached(
+                types::I64,
+                vole_runtime::value::RuntimeTypeId::Instance as i64,
+            );
+            let tag_match = self.builder.ins().icmp(IntCC::Equal, tag, instance_tag);
+
+            // 2. Load the instance pointer from TaggedValue.value (offset 8)
+            let instance_ptr =
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), tagged_value_ptr, 8);
+
+            // 3. Load RcInstance.type_id (u32 at offset 16 = sizeof(RcHeader))
+            //    RcHeader: [ref_count: u32, header_type_id: u32, drop_fn: ptr] = 16 bytes
+            //    RcInstance: [header: RcHeader, type_id: u32 @ offset 16, ...]
+            let inst_type_id =
+                self.builder
+                    .ins()
+                    .load(types::I32, MemFlags::new(), instance_ptr, 16);
+
+            // 4. Compare against the expected annotation runtime type_id
+            let expected_id = self.iconst_cached(types::I32, ann_runtime_type_id as i64);
+            let id_match = self
+                .builder
+                .ins()
+                .icmp(IntCC::Equal, inst_type_id, expected_id);
+
+            // Both checks must pass
+            self.builder.ins().band(tag_match, id_match)
+        } else {
+            // Standard single-level tag check
+            let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
+            let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
+            self.builder.ins().icmp(IntCC::Equal, tag, expected_val)
         }
     }
 
@@ -294,19 +343,7 @@ impl Cg<'_, '_, '_> {
                 Ok(Some(result))
             }
             IsCheckResult::CheckUnknown(tested_type_id) => {
-                // Check if the unknown value's tag matches the tested type
-                // TaggedValue layout: [tag: u64 at offset 0][value: u64 at offset 8]
-                let tag = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), scrutinee.value, 0);
-                let expected_tag = if self.is_heap_allocated_annotation(tested_type_id) {
-                    vole_runtime::value::RuntimeTypeId::Instance as u64
-                } else {
-                    crate::types::unknown_type_tag(tested_type_id, self.arena())
-                };
-                let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
-                let result = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
+                let result = self.compile_unknown_is_check(scrutinee.value, tested_type_id);
                 Ok(Some(result))
             }
         }

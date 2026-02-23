@@ -389,6 +389,65 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Get the runtime type_id for an annotation struct type, eagerly registering
+    /// it if needed.
+    ///
+    /// Returns `Some(runtime_type_id)` if the type is a struct with `@annotation`,
+    /// `None` otherwise. This is used by `is` checks on `unknown` values to
+    /// distinguish different annotation types that all share the `Instance` tag.
+    ///
+    /// Unlike `is_heap_allocated_annotation()`, this checks sema's `is_annotation`
+    /// flag directly, so it works even when the annotation type hasn't been through
+    /// the FieldMeta.annotations codepath yet (cross-function case).
+    pub fn get_annotation_runtime_type_id(&self, type_id: TypeId) -> Option<u32> {
+        let (type_def_id, _) = self.arena().unwrap_struct(type_id)?;
+
+        // Check sema's is_annotation flag (authoritative source)
+        if !self.registry().get_type(type_def_id).is_annotation {
+            return None;
+        }
+
+        // Check the annotation_type_ids cache first
+        if let Some(&cached_id) = self
+            .env
+            .state
+            .annotation_type_ids
+            .borrow()
+            .get(&type_def_id)
+        {
+            return Some(cached_id);
+        }
+
+        // Check if this type already has a non-zero type_id in type_metadata
+        // (it's a class rather than a struct)
+        if let Some(meta) = self.type_metadata().get(&type_def_id)
+            && meta.type_id != 0 {
+                return Some(meta.type_id);
+            }
+
+        // Eagerly register: allocate a new runtime type_id with field type tags
+        let new_type_id = vole_runtime::type_registry::alloc_type_id();
+        let field_type_tags: Vec<_> = {
+            let query = self.query();
+            query
+                .fields_on_type(type_def_id)
+                .map(|field_id| {
+                    let field = query.get_field(field_id);
+                    self.field_type_tag(field.ty)
+                })
+                .collect()
+        };
+        vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
+
+        self.env
+            .state
+            .annotation_type_ids
+            .borrow_mut()
+            .insert(type_def_id, new_type_id);
+
+        Some(new_type_id)
+    }
+
     /// Get IsCheckResult for an is-expression or type pattern.
     #[inline]
     pub fn get_is_check_result(

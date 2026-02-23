@@ -1,0 +1,184 @@
+// Tests for annotation type `is` checks against unknown values.
+//
+// Covers: cross-function annotation checks, mixed annotation type
+// discrimination in loops, negative checks, and match expressions.
+
+@annotation
+struct marker_a {}
+
+@annotation
+struct marker_b {}
+
+@annotation
+struct labeled {
+    name: string,
+}
+
+class Holder {
+    @marker_a
+    x: i64,
+
+    @marker_b
+    y: i64,
+
+    @labeled(name: "z_label")
+    z: string,
+}
+
+// --- Cross-function annotation is-check ---
+
+func is_marker_a(ann: unknown) -> bool {
+    return ann is marker_a
+}
+
+func is_marker_b(ann: unknown) -> bool {
+    return ann is marker_b
+}
+
+func is_labeled(ann: unknown) -> bool {
+    return ann is labeled
+}
+
+tests "cross-function annotation is-check" {
+    test "cross-function: marker_a recognized" {
+        let meta = Holder.@meta
+        let ann = meta.fields[0].annotations[0]
+        assert(is_marker_a(ann))
+    }
+
+    test "cross-function: marker_a not confused with marker_b" {
+        let meta = Holder.@meta
+        let ann = meta.fields[0].annotations[0]
+        assert(!is_marker_b(ann))
+    }
+
+    test "cross-function: marker_b recognized" {
+        let meta = Holder.@meta
+        let ann = meta.fields[1].annotations[0]
+        assert(is_marker_b(ann))
+    }
+
+    test "cross-function: marker_b not confused with marker_a" {
+        let meta = Holder.@meta
+        let ann = meta.fields[1].annotations[0]
+        assert(!is_marker_a(ann))
+    }
+
+    test "cross-function: labeled recognized" {
+        let meta = Holder.@meta
+        let ann = meta.fields[2].annotations[0]
+        assert(is_labeled(ann))
+    }
+
+    test "cross-function: labeled not confused with marker_a" {
+        let meta = Holder.@meta
+        let ann = meta.fields[2].annotations[0]
+        assert(!is_marker_a(ann))
+    }
+}
+
+// --- Mixed annotation types in a loop ---
+
+tests "mixed annotation type discrimination" {
+    test "loop distinguishes marker_a from marker_b and labeled" {
+        let meta = Holder.@meta
+        var a_count: i64 = 0
+        var b_count: i64 = 0
+        var labeled_count: i64 = 0
+        var i: i64 = 0
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            var j: i64 = 0
+            while j < field.annotations.length() {
+                let ann = field.annotations[j]
+                if ann is marker_a {
+                    a_count = a_count + 1
+                }
+                if ann is marker_b {
+                    b_count = b_count + 1
+                }
+                if ann is labeled {
+                    labeled_count = labeled_count + 1
+                }
+                j = j + 1
+            }
+            i = i + 1
+        }
+        assert(a_count == 1)
+        assert(b_count == 1)
+        assert(labeled_count == 1)
+    }
+
+    test "inline is checks distinguish annotation types" {
+        let meta = Holder.@meta
+        let ann_a = meta.fields[0].annotations[0]
+        let ann_b = meta.fields[1].annotations[0]
+        let ann_l = meta.fields[2].annotations[0]
+
+        // Each annotation matches only its own type
+        assert(ann_a is marker_a)
+        assert(!(ann_a is marker_b))
+        assert(!(ann_a is labeled))
+
+        assert(ann_b is marker_b)
+        assert(!(ann_b is marker_a))
+        assert(!(ann_b is labeled))
+
+        assert(ann_l is labeled)
+        assert(!(ann_l is marker_a))
+        assert(!(ann_l is marker_b))
+    }
+}
+
+// --- Accessing fields after narrowing ---
+
+tests "annotation field access after narrowing" {
+    test "narrowed labeled annotation field access" {
+        let meta = Holder.@meta
+        let ann = meta.fields[2].annotations[0]
+        if ann is labeled {
+            assert(ann.name == "z_label")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "cross-function narrowing and field access" {
+        let meta = Holder.@meta
+        let ann = meta.fields[2].annotations[0]
+        assert(is_labeled(ann))
+        if ann is labeled {
+            assert(ann.name == "z_label")
+        }
+    }
+}
+
+// --- Match expression with annotation types ---
+
+tests "annotation is-check in match-like patterns" {
+    test "if-else chain dispatches on annotation type" {
+        let meta = Holder.@meta
+        var i: i64 = 0
+        var results: [string] = []
+        while i < meta.fields.length() {
+            let field = meta.fields[i]
+            if field.annotations.length() > 0 {
+                let ann = field.annotations[0]
+                if ann is marker_a {
+                    results.push("a")
+                } else if ann is marker_b {
+                    results.push("b")
+                } else if ann is labeled {
+                    results.push("labeled")
+                } else {
+                    results.push("unknown")
+                }
+            }
+            i = i + 1
+        }
+        assert(results.length() == 3)
+        assert(results[0] == "a")
+        assert(results[1] == "b")
+        assert(results[2] == "labeled")
+    }
+}
