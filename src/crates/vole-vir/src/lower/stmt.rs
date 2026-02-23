@@ -4,17 +4,26 @@
 
 use vole_frontend::Interner;
 use vole_frontend::ast::Stmt;
+use vole_identity::TypeId;
 use vole_sema::node_map::NodeMap;
 
+use crate::expr::VirExpr;
 use crate::stmt::VirStmt;
 
 use super::expr::lower_expr;
+use super::lower_stmts;
 
 /// Lower a single AST statement into a VIR statement.
 ///
 /// Expression statements (`Stmt::Expr`) are lowered through `lower_expr`,
-/// which produces proper VIR for known expression kinds.  All other
-/// statement kinds are wrapped in the `VirStmt::Ast` escape hatch.
+/// which produces proper VIR for known expression kinds.  Statement-level
+/// control flow (While, If, Break, Continue) is lowered to proper VIR
+/// nodes.  Remaining statement kinds — including Return — are wrapped
+/// in the `VirStmt::Ast` escape hatch.
+///
+/// Return is kept as Ast because `compile_vir_return` does not yet handle
+/// interface boxing, fallible returns, struct returns, or RC bookkeeping;
+/// the old `return_stmt()` path handles all of these correctly.
 ///
 /// Each variant is listed explicitly so that adding a new `Stmt` variant
 /// causes a compile error rather than silently falling through a wildcard.
@@ -23,18 +32,57 @@ pub(crate) fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interne
         Stmt::Expr(expr_stmt) => VirStmt::Expr {
             value: lower_expr(&expr_stmt.expr, node_map, interner),
         },
+        Stmt::While(while_stmt) => lower_while(while_stmt, node_map, interner),
+        Stmt::If(if_stmt) => lower_if_stmt(if_stmt, node_map, interner),
+        Stmt::Break(_) => VirStmt::Break,
+        Stmt::Continue(_) => VirStmt::Continue,
         // Ast escape hatches — explicitly listed so new Stmt variants
         // cause a compile error rather than silently falling through.
-        Stmt::Let(_)
-        | Stmt::LetTuple(_)
-        | Stmt::While(_)
-        | Stmt::For(_)
-        | Stmt::If(_)
-        | Stmt::Break(_)
-        | Stmt::Continue(_)
-        | Stmt::Return(_)
-        | Stmt::Raise(_) => VirStmt::Ast {
-            stmt: Box::new(stmt.clone()),
-        },
+        //
+        // Return stays as Ast until compile_vir_return handles interface
+        // boxing, fallible returns, struct returns, and RC bookkeeping.
+        Stmt::Return(_) | Stmt::Let(_) | Stmt::LetTuple(_) | Stmt::For(_) | Stmt::Raise(_) => {
+            VirStmt::Ast {
+                stmt: Box::new(stmt.clone()),
+            }
+        }
+    }
+}
+
+/// Lower a while statement to `VirStmt::While`.
+///
+/// The condition expression and body statements are recursively lowered.
+fn lower_while(
+    while_stmt: &vole_frontend::ast::WhileStmt,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirStmt {
+    let cond = lower_expr(&while_stmt.condition, node_map, interner);
+    let body = lower_stmts(&while_stmt.body.stmts, node_map, interner);
+    VirStmt::While { cond, body }
+}
+
+/// Lower an if statement to `VirStmt::Expr { VirExpr::If { ... } }`.
+///
+/// Vole's VIR has no separate `VirStmt::If` — statement-level `if` is
+/// wrapped as a void-typed `VirExpr::If` inside `VirStmt::Expr`.
+fn lower_if_stmt(
+    if_stmt: &vole_frontend::ast::IfStmt,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirStmt {
+    let cond = lower_expr(&if_stmt.condition, node_map, interner);
+    let then_body = lower_stmts(&if_stmt.then_branch.stmts, node_map, interner);
+    let else_body = if_stmt
+        .else_branch
+        .as_ref()
+        .map(|block| lower_stmts(&block.stmts, node_map, interner));
+    VirStmt::Expr {
+        value: Box::new(VirExpr::If {
+            cond,
+            then_body,
+            else_body,
+            ty: TypeId::VOID,
+        }),
     }
 }

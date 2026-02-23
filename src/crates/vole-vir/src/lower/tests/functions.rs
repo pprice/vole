@@ -34,7 +34,7 @@ fn lower_empty_block_function() {
 }
 
 #[test]
-fn lower_block_function_wraps_stmts_as_ast() {
+fn lower_block_function_lowers_control_flow() {
     let func = make_block_func(vec![make_break_stmt(), make_continue_stmt()]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -53,12 +53,13 @@ fn lower_block_function_wraps_stmts_as_ast() {
     assert_eq!(vir.body.stmts.len(), 2);
     assert!(vir.body.trailing.is_none());
 
-    // Every statement should be VirStmt::Ast
-    for stmt in &vir.body.stmts {
-        match stmt {
-            VirStmt::Ast { .. } => {}
-            other => panic!("expected VirStmt::Ast, got {other:?}"),
-        }
+    match &vir.body.stmts[0] {
+        VirStmt::Break => {}
+        other => panic!("expected VirStmt::Break, got {other:?}"),
+    }
+    match &vir.body.stmts[1] {
+        VirStmt::Continue => {}
+        other => panic!("expected VirStmt::Continue, got {other:?}"),
     }
 }
 
@@ -125,27 +126,18 @@ fn lower_stmts_preserves_order() {
     assert_eq!(body.stmts.len(), 3);
     assert!(body.trailing.is_none());
 
-    // Verify the inner AST statements match
+    // Break and Continue are now properly lowered to VIR
     match &body.stmts[0] {
-        VirStmt::Ast { stmt } => match stmt.as_ref() {
-            Stmt::Break(_) => {}
-            other => panic!("expected Break, got {other:?}"),
-        },
-        other => panic!("expected Ast, got {other:?}"),
+        VirStmt::Break => {}
+        other => panic!("expected Break, got {other:?}"),
     }
     match &body.stmts[1] {
-        VirStmt::Ast { stmt } => match stmt.as_ref() {
-            Stmt::Continue(_) => {}
-            other => panic!("expected Continue, got {other:?}"),
-        },
-        other => panic!("expected Ast, got {other:?}"),
+        VirStmt::Continue => {}
+        other => panic!("expected Continue, got {other:?}"),
     }
     match &body.stmts[2] {
-        VirStmt::Ast { stmt } => match stmt.as_ref() {
-            Stmt::Break(_) => {}
-            other => panic!("expected Break, got {other:?}"),
-        },
-        other => panic!("expected Ast, got {other:?}"),
+        VirStmt::Break => {}
+        other => panic!("expected Break, got {other:?}"),
     }
 }
 
@@ -284,9 +276,17 @@ fn lower_stmt_expr_produces_vir_expr() {
 
 #[test]
 fn lower_stmt_non_expr_becomes_ast() {
+    use vole_frontend::ast::{LetInit, LetStmt};
     let node_map = empty_node_map();
     let mut interner = test_interner();
-    let stmt = make_break_stmt();
+    // Let statements are still Ast escape hatches
+    let stmt = Stmt::Let(LetStmt {
+        name: Symbol::UNKNOWN,
+        ty: None,
+        mutable: false,
+        init: LetInit::Expr(make_int_expr(42)),
+        span: dummy_span(),
+    });
     let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
 
     match &vir_stmt {

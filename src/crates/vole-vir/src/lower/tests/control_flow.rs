@@ -1,10 +1,12 @@
 // lower/tests/control_flow.rs
 //
-// Tests for control flow expression lowering: If, Block, Yield.
+// Tests for control flow lowering: If, Block, Yield expressions,
+// and While, If, Break, Continue, Return statements.
 
 use super::*;
 use crate::expr::VirExpr;
 use crate::lower::expr::lower_expr;
+use crate::lower::stmt::lower_stmt;
 use crate::stmt::VirStmt;
 
 // -----------------------------------------------------------------------
@@ -200,8 +202,8 @@ fn lower_block_expr_with_stmts_and_trailing() {
         } => {
             assert_eq!(stmts.len(), 1);
             match &stmts[0] {
-                VirStmt::Ast { .. } => {}
-                other => panic!("expected VirStmt::Ast for break, got {other:?}"),
+                VirStmt::Break => {}
+                other => panic!("expected VirStmt::Break, got {other:?}"),
             }
             match trailing.as_deref() {
                 Some(VirExpr::BoolLiteral(true)) => {}
@@ -285,5 +287,238 @@ fn lower_expr_yield_lowers_inner_recursively() {
             other => panic!("expected BoolLiteral(true) inside Yield, got {other:?}"),
         },
         other => panic!("expected VirExpr::Yield, got {other:?}"),
+    }
+}
+
+// -----------------------------------------------------------------------
+// Statement lowering: Break, Continue
+// -----------------------------------------------------------------------
+
+#[test]
+fn lower_break_stmt() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_break_stmt();
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Break => {}
+        other => panic!("expected VirStmt::Break, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_continue_stmt() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_continue_stmt();
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Continue => {}
+        other => panic!("expected VirStmt::Continue, got {other:?}"),
+    }
+}
+
+// -----------------------------------------------------------------------
+// Statement lowering: Return (Ast escape hatch)
+// -----------------------------------------------------------------------
+
+#[test]
+fn lower_return_stays_as_ast() {
+    use vole_frontend::ast::ReturnStmt;
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = Stmt::Return(ReturnStmt {
+        value: Some(make_int_expr(42)),
+        span: dummy_span(),
+    });
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    // Return stays as Ast until compile_vir_return handles interface
+    // boxing, fallible returns, struct returns, and RC bookkeeping.
+    match &vir {
+        VirStmt::Ast { .. } => {}
+        other => panic!("expected VirStmt::Ast for Return, got {other:?}"),
+    }
+}
+
+// -----------------------------------------------------------------------
+// Statement lowering: While
+// -----------------------------------------------------------------------
+
+fn make_while_stmt(condition: Expr, body_stmts: Vec<Stmt>) -> Stmt {
+    use vole_frontend::ast::WhileStmt;
+    Stmt::While(WhileStmt {
+        condition,
+        body: Block {
+            stmts: body_stmts,
+            span: dummy_span(),
+        },
+        span: dummy_span(),
+    })
+}
+
+#[test]
+fn lower_while_empty_body() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_while_stmt(make_bool_expr(), vec![]);
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::While { cond, body } => {
+            match cond.as_ref() {
+                VirExpr::BoolLiteral(true) => {}
+                other => panic!("expected BoolLiteral(true) condition, got {other:?}"),
+            }
+            assert!(body.stmts.is_empty());
+            assert!(body.trailing.is_none());
+        }
+        other => panic!("expected VirStmt::While, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_while_with_body() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_while_stmt(make_bool_expr(), vec![make_break_stmt()]);
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::While { body, .. } => {
+            assert_eq!(body.stmts.len(), 1);
+            match &body.stmts[0] {
+                VirStmt::Break => {}
+                other => panic!("expected VirStmt::Break in body, got {other:?}"),
+            }
+        }
+        other => panic!("expected VirStmt::While, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_while_lowers_condition_recursively() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_while_stmt(make_int_expr(1), vec![]);
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::While { cond, .. } => match cond.as_ref() {
+            VirExpr::IntLiteral { value: 1, .. } => {}
+            other => panic!("expected IntLiteral(1) condition, got {other:?}"),
+        },
+        other => panic!("expected VirStmt::While, got {other:?}"),
+    }
+}
+
+// -----------------------------------------------------------------------
+// Statement lowering: If (as statement)
+// -----------------------------------------------------------------------
+
+fn make_if_stmt(condition: Expr, then_stmts: Vec<Stmt>, else_stmts: Option<Vec<Stmt>>) -> Stmt {
+    use vole_frontend::ast::IfStmt;
+    Stmt::If(IfStmt {
+        condition,
+        then_branch: Block {
+            stmts: then_stmts,
+            span: dummy_span(),
+        },
+        else_branch: else_stmts.map(|stmts| Block {
+            stmts,
+            span: dummy_span(),
+        }),
+        span: dummy_span(),
+    })
+}
+
+#[test]
+fn lower_if_stmt_no_else() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_if_stmt(make_bool_expr(), vec![make_break_stmt()], None);
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Expr { value } => match value.as_ref() {
+            VirExpr::If {
+                cond,
+                then_body,
+                else_body,
+                ty,
+            } => {
+                match cond.as_ref() {
+                    VirExpr::BoolLiteral(true) => {}
+                    other => panic!("expected BoolLiteral(true) cond, got {other:?}"),
+                }
+                assert_eq!(then_body.stmts.len(), 1);
+                match &then_body.stmts[0] {
+                    VirStmt::Break => {}
+                    other => panic!("expected VirStmt::Break, got {other:?}"),
+                }
+                assert!(then_body.trailing.is_none());
+                assert!(else_body.is_none());
+                assert_eq!(*ty, TypeId::VOID);
+            }
+            other => panic!("expected VirExpr::If, got {other:?}"),
+        },
+        other => panic!("expected VirStmt::Expr, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_if_stmt_with_else() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_if_stmt(
+        make_bool_expr(),
+        vec![make_break_stmt()],
+        Some(vec![make_continue_stmt()]),
+    );
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Expr { value } => match value.as_ref() {
+            VirExpr::If {
+                then_body,
+                else_body,
+                ty,
+                ..
+            } => {
+                assert_eq!(then_body.stmts.len(), 1);
+                match &then_body.stmts[0] {
+                    VirStmt::Break => {}
+                    other => panic!("expected VirStmt::Break in then, got {other:?}"),
+                }
+                let else_body = else_body.as_ref().expect("should have else body");
+                assert_eq!(else_body.stmts.len(), 1);
+                match &else_body.stmts[0] {
+                    VirStmt::Continue => {}
+                    other => panic!("expected VirStmt::Continue in else, got {other:?}"),
+                }
+                assert!(else_body.trailing.is_none());
+                assert_eq!(*ty, TypeId::VOID);
+            }
+            other => panic!("expected VirExpr::If, got {other:?}"),
+        },
+        other => panic!("expected VirStmt::Expr, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_if_stmt_is_void_typed() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_if_stmt(make_bool_expr(), vec![], None);
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Expr { value } => match value.as_ref() {
+            VirExpr::If { ty, .. } => assert_eq!(*ty, TypeId::VOID),
+            other => panic!("expected VirExpr::If, got {other:?}"),
+        },
+        other => panic!("expected VirStmt::Expr, got {other:?}"),
     }
 }

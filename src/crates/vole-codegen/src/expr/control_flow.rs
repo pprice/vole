@@ -598,47 +598,73 @@ impl Cg<'_, '_, '_> {
         let result_needs_rc = !is_void && self.rc_state(result_type_id).needs_cleanup();
 
         // Compile then branch
+        //
+        // `compile_vir_body` returns `(flag, Option<value>)`:
+        //   - Expression bodies (trailing != None): always `(true, Some(value))`
+        //   - Block bodies (trailing == None): `(terminated, None)`
+        //
+        // A branch is "terminated" (has a control-flow exit like break/return)
+        // when the body returns `(true, None)` — the block body compiled stmts
+        // that ended with a terminator, and there's no trailing expression.
         self.switch_and_seal(then_block);
-        let (_, then_val) = self.compile_vir_body(then_body)?;
-        let then_result = then_val.unwrap_or_else(|| self.void_value());
-        if then_result.type_id == TypeId::NEVER {
-            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
-        } else if !is_void {
-            self.jump_with_owned_result(
-                then_result,
-                result_type_id,
-                result_cranelift_type,
-                result_needs_rc,
-                merge_block,
-            )?;
-        } else {
-            self.builder.ins().jump(merge_block, &[]);
+        let (then_flag, then_val) = self.compile_vir_body(then_body)?;
+        let then_terminated = then_flag && then_val.is_none();
+        if !then_terminated {
+            let then_result = then_val.unwrap_or_else(|| self.void_value());
+            if then_result.type_id == TypeId::NEVER {
+                self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+            } else if !is_void {
+                self.jump_with_owned_result(
+                    then_result,
+                    result_type_id,
+                    result_cranelift_type,
+                    result_needs_rc,
+                    merge_block,
+                )?;
+            } else {
+                self.builder.ins().jump(merge_block, &[]);
+            }
         }
 
         // Compile else branch
         self.switch_and_seal(else_block);
-        let else_result = if let Some(else_body) = else_body {
-            let (_, val) = self.compile_vir_body(else_body)?;
-            val.unwrap_or_else(|| self.void_value())
-        } else {
-            self.void_value()
-        };
-        if else_result.type_id == TypeId::NEVER {
-            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
-        } else if !is_void {
-            self.jump_with_owned_result(
-                else_result,
-                result_type_id,
-                result_cranelift_type,
-                result_needs_rc,
-                merge_block,
-            )?;
+        let else_terminated = if let Some(else_body) = else_body {
+            let (flag, val) = self.compile_vir_body(else_body)?;
+            let terminated = flag && val.is_none();
+            if !terminated {
+                let else_result = val.unwrap_or_else(|| self.void_value());
+                if else_result.type_id == TypeId::NEVER {
+                    self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+                } else if !is_void {
+                    self.jump_with_owned_result(
+                        else_result,
+                        result_type_id,
+                        result_cranelift_type,
+                        result_needs_rc,
+                        merge_block,
+                    )?;
+                } else {
+                    self.builder.ins().jump(merge_block, &[]);
+                }
+            }
+            terminated
         } else {
             self.builder.ins().jump(merge_block, &[]);
-        }
+            false
+        };
 
         // Continue in merge block
         self.switch_and_seal(merge_block);
+
+        // If both branches terminated, the merge block is unreachable.
+        // Cranelift still requires it to be filled, so emit a trap.
+        // Return a NEVER-typed value so callers know this code path
+        // is dead (e.g., VirStmt::Expr propagates termination).
+        if then_terminated && else_terminated {
+            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+            let dummy = self.cached_void_val;
+            return Ok(CompiledValue::new(dummy, types::I64, TypeId::NEVER));
+        }
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }

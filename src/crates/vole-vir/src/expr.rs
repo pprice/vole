@@ -222,6 +222,17 @@ pub enum VirExpr {
     Ast { expr: Box<Expr>, ty: TypeId },
 }
 
+impl VirExpr {
+    /// Returns `true` if this is a void-typed `If` expression.
+    ///
+    /// Void-typed if expressions originate from lowered `IfStmt`s (statement-
+    /// level if/else) and should NOT be treated as trailing value-producing
+    /// expressions in function bodies.
+    pub fn is_void_if(&self) -> bool {
+        matches!(self, VirExpr::If { ty, .. } if ty.is_void())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Supporting types
 // ---------------------------------------------------------------------------

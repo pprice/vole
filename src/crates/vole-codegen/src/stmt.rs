@@ -1115,9 +1115,12 @@ impl Cg<'_, '_, '_> {
         match vir_stmt {
             VirStmt::Expr { value } => {
                 let mut compiled = self.compile_vir_expr(value)?;
+                // If the expression produced NEVER (e.g. a void-typed if
+                // where all branches terminated), propagate termination.
+                let terminated = compiled.type_id == TypeId::NEVER;
                 // Discard the value — expression used as statement.
                 compiled.mark_consumed();
-                Ok(false)
+                Ok(terminated)
             }
             VirStmt::While { cond, body } => self.compile_vir_while(cond, body),
 

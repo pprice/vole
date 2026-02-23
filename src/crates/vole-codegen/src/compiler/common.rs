@@ -547,7 +547,10 @@ fn compile_vir_block_body(
             Some(VirStmt::Ast { stmt }) if matches!(stmt.as_ref(), Stmt::Expr(_))
         )
         || cg.return_type.is_some_and(|ret| !cg.arena().is_void(ret))
-            && matches!(stmts.last(), Some(VirStmt::Expr { .. }));
+            && matches!(
+                stmts.last(),
+                Some(VirStmt::Expr { value }) if !value.is_void_if()
+            );
 
     if has_trailing_expr {
         // Compile all statements except the trailing expression
