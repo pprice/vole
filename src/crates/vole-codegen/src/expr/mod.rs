@@ -615,9 +615,13 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_range(start, end, *inclusive),
 
             // -- Operators ------------------------------------------------
-            VirExpr::BinaryOp { op, lhs, rhs, ty } => {
-                self.compile_vir_binary_op(*op, lhs, rhs, *ty)
-            }
+            VirExpr::BinaryOp {
+                op,
+                lhs,
+                rhs,
+                ty,
+                line,
+            } => self.compile_vir_binary_op(*op, lhs, rhs, *ty, *line),
             VirExpr::UnaryOp { op, operand, ty } => self.compile_vir_unary_op(*op, operand, *ty),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
 
@@ -729,12 +733,12 @@ impl Cg<'_, '_, '_> {
         lhs: &VirExpr,
         rhs: &VirExpr,
         _ty: TypeId,
+        line: u32,
     ) -> CodegenResult<CompiledValue> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
         let ast_op = vir_binop_to_ast(op);
-        // Line 0: VIR nodes don't carry span info yet (will be added later).
-        self.binary_op(left, right, ast_op, 0)
+        self.binary_op(left, right, ast_op, line)
     }
 
     /// Compile a VIR unary operation.
@@ -883,9 +887,10 @@ impl Cg<'_, '_, '_> {
 
         // 2. Captured variable — load from closure environment.
         if self.has_captures()
-            && let Some(binding) = self.get_capture(&sym).copied() {
-                return self.load_capture(&binding);
-            }
+            && let Some(binding) = self.get_capture(&sym).copied()
+        {
+            return self.load_capture(&binding);
+        }
 
         // 3. Local variable — vars map lookup with narrowing.
         if let Some((var, var_type_id)) = self.vars.get(&sym) {
@@ -916,14 +921,13 @@ impl Cg<'_, '_, '_> {
             && narrowed_type_id != resolved_union_type_id
             && let Some(narrowed_variant) =
                 self.find_union_variant(resolved_union_type_id, narrowed_type_id)
-            {
-                let payload_ty =
-                    type_id_to_cranelift(narrowed_variant, self.arena(), self.ptr_type());
-                let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
-                let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
-                self.mark_borrowed_if_rc(&mut cv);
-                return Ok(cv);
-            }
+        {
+            let payload_ty = type_id_to_cranelift(narrowed_variant, self.arena(), self.ptr_type());
+            let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
+            let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
+            self.mark_borrowed_if_rc(&mut cv);
+            return Ok(cv);
+        }
 
         // Unknown extraction: if declared type is unknown but VIR type is
         // concrete, extract the value from the TaggedValue.
@@ -1006,10 +1010,11 @@ impl Cg<'_, '_, '_> {
         let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
         if let Some(type_def_id) = self.query().resolve_type_def_by_str(module_id, name)
             && self.query().is_sentinel_type(type_def_id)
-            && let Some(sentinel_type_id) = self.query().sentinel_base_type(type_def_id) {
-                let value = self.iconst_cached(types::I8, 0);
-                return Ok(CompiledValue::new(value, types::I8, sentinel_type_id));
-            }
+            && let Some(sentinel_type_id) = self.query().sentinel_base_type(type_def_id)
+        {
+            let value = self.iconst_cached(types::I8, 0);
+            return Ok(CompiledValue::new(value, types::I8, sentinel_type_id));
+        }
 
         Err(CodegenError::not_found(
             "variable",
@@ -1022,7 +1027,7 @@ impl Cg<'_, '_, '_> {
     /// Handles simple variable assignment with RC bookkeeping, captured
     /// variable stores, and type coercion.  Field and index assignment
     /// targets are not handled here (they remain as `VirExpr::Ast`).
-    fn compile_local_store(
+    pub(crate) fn compile_local_store(
         &mut self,
         sym: Symbol,
         value_expr: &VirExpr,

@@ -95,7 +95,19 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
 
 /// Lower an integer literal, splitting into `WideLiteral` for i128/f128.
 fn lower_int_literal(value: i64, ty: TypeId) -> VirRef {
-    if ty == TypeId::I128 || ty == TypeId::F128 {
+    if ty == TypeId::F128 {
+        // Integer promoted to f128: convert to f64 first to get a float
+        // bit-pattern, then store as the low 64 bits of a wide literal.
+        // The high 64 bits are zero so the i128→f128 bitcast in codegen
+        // reproduces the same representation as the old int_const(n, f128)
+        // path (f64 bits in the low half, zero-extended).
+        let f64_bits = (value as f64).to_bits();
+        Box::new(VirExpr::WideLiteral {
+            low: f64_bits,
+            high: 0,
+            ty,
+        })
+    } else if ty == TypeId::I128 {
         // Sign-extend i64 to i128 then split into low/high u64.
         let wide = value as i128;
         Box::new(VirExpr::WideLiteral {
@@ -119,7 +131,7 @@ fn lower_int_literal(value: i64, ty: TypeId) -> VirRef {
 /// All other binary operators become `BinaryOp`.
 fn lower_binary(
     bin_expr: &vole_frontend::ast::BinaryExpr,
-    _expr: &Expr,
+    expr: &Expr,
     ty: TypeId,
     node_map: &NodeMap,
     interner: &mut Interner,
@@ -148,6 +160,7 @@ fn lower_binary(
         lhs,
         rhs,
         ty,
+        line: expr.span.line,
     })
 }
 

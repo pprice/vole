@@ -1141,16 +1141,17 @@ impl Cg<'_, '_, '_> {
                 Ok(false)
             }
 
-            // -- Complex stmts (todo) -------------------------------------------
-            VirStmt::Let { .. } => {
-                todo!("VIR Let stmt: lowering still emits Ast escape hatch")
-            }
+            // -- Bindings -----------------------------------------------------------
+            VirStmt::Let {
+                name,
+                value,
+                mutable: _,
+                ty,
+            } => self.compile_vir_let(*name, value, *ty),
             VirStmt::LetTuple { .. } => {
                 todo!("VIR LetTuple stmt: lowering still emits Ast escape hatch")
             }
-            VirStmt::Assign { .. } => {
-                todo!("VIR Assign stmt: lowering still emits Ast escape hatch")
-            }
+            VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
             VirStmt::For(_) => {
                 todo!("VIR For stmt: lowering still emits Ast escape hatch")
             }
@@ -1371,5 +1372,268 @@ impl Cg<'_, '_, '_> {
 
         let ptr_type = self.ptr_type();
         Ok(self.builder.ins().stack_addr(ptr_type, slot, 0))
+    }
+
+    /// Compile a VIR let binding: `let x = <init>`.
+    ///
+    /// Mirrors [`let_stmt`] but reads from VIR nodes instead of AST+NodeMap.
+    /// The initializer is compiled through `compile_vir_expr`, then coerced
+    /// to the declared type, and the variable is registered with RC tracking.
+    fn compile_vir_let(
+        &mut self,
+        name: Symbol,
+        value_expr: &vole_vir::VirExpr,
+        binding_ty: TypeId,
+    ) -> CodegenResult<bool> {
+        // Pre-register recursive lambdas so they can capture themselves.
+        let preregistered_var = self.preregister_recursive_vir_lambda(name, value_expr);
+        if preregistered_var.is_some() {
+            self.self_capture = Some(name);
+        }
+
+        let declared_type_id_opt = self.vir_let_declared_type(value_expr, binding_ty);
+
+        let init = self.compile_vir_expr(value_expr)?;
+        self.self_capture = None;
+
+        // Struct copy: when binding a struct value, copy to a new stack slot
+        // to maintain value semantics (structs are stack-allocated value types).
+        let mut init = if self.arena().is_struct(init.type_id) {
+            self.copy_struct_value(init)?
+        } else {
+            init
+        };
+
+        let (final_value, final_type_id, is_stack_union) =
+            self.coerce_let_init(&init, declared_type_id_opt)?;
+
+        // Use preregistered var for recursive lambdas, otherwise declare new.
+        let var = if let Some(var) = preregistered_var {
+            self.builder.def_var(var, final_value);
+            var
+        } else {
+            let cranelift_ty = self.cranelift_type(final_type_id);
+            let var = self.builder.declare_var(cranelift_ty);
+            self.builder.def_var(var, final_value);
+            self.vars.insert(name, (var, final_type_id));
+            var
+        };
+
+        // RC bookkeeping — identical to old let_stmt path.
+        self.register_vir_let_rc(
+            var,
+            &init,
+            value_expr,
+            final_value,
+            final_type_id,
+            is_stack_union,
+        )?;
+
+        init.mark_consumed();
+        init.debug_assert_rc_handled("VirStmt::Let");
+        Ok(false)
+    }
+
+    /// Pre-register a recursive lambda binding from a VIR init expression.
+    ///
+    /// For recursive lambdas (lambdas that capture themselves), we need
+    /// the binding in `vars` before compiling so capture bindings get the
+    /// correct type.  Returns `Some(var)` if pre-registered, `None` otherwise.
+    fn preregister_recursive_vir_lambda(
+        &mut self,
+        name: Symbol,
+        value_expr: &vole_vir::VirExpr,
+    ) -> Option<Variable> {
+        // VIR lambdas already carry captures — check directly.
+        if let vole_vir::VirExpr::Lambda { captures, ty, .. } = value_expr {
+            let has_self_capture = captures.iter().any(|c| c.name == name);
+            if !has_self_capture {
+                return None;
+            }
+            let cranelift_ty = self.cranelift_type(*ty);
+            let var = self.builder.declare_var(cranelift_ty);
+            self.vars.insert(name, (var, *ty));
+            return Some(var);
+        }
+        // Ast-wrapped lambdas: delegate to the old helper which reads NodeMap.
+        if let vole_vir::VirExpr::Ast { expr, .. } = value_expr {
+            return self.preregister_recursive_lambda(name, expr);
+        }
+        None
+    }
+
+    /// Determine the declared type for a VIR let binding.
+    ///
+    /// For Ast-wrapped inits, the NodeMap's `declared_var_type` is
+    /// authoritative.  For pure VIR inits, the lowering phase encodes
+    /// the declared type (or inferred type) as `binding_ty`.
+    ///
+    /// We conservatively always pass `binding_ty` as the declared type.
+    /// This is safe because `coerce_let_init` is a no-op when the
+    /// declared type matches the init value type at the Cranelift level.
+    /// We must include `TypeId::UNKNOWN` (the Vole `unknown` type) since
+    /// it triggers `box_to_unknown` in `coerce_let_init` when the init
+    /// value is a concrete type.
+    fn vir_let_declared_type(
+        &self,
+        value_expr: &vole_vir::VirExpr,
+        binding_ty: TypeId,
+    ) -> Option<TypeId> {
+        // For Ast-wrapped inits, check the NodeMap directly (the old path).
+        if let vole_vir::VirExpr::Ast { expr, .. } = value_expr {
+            return self.get_declared_var_type(&expr.id);
+        }
+        // For pure VIR inits: always pass binding_ty as declared type.
+        Some(binding_ty)
+    }
+
+    /// Register RC tracking for a newly compiled VIR let binding.
+    ///
+    /// Handles: unknown boxing detection, direct RC inc for borrows,
+    /// composite RC tracking for structs/tuples with RC fields, and
+    /// union RC tracking.
+    ///
+    /// Mirrors the RC bookkeeping section of [`let_stmt`].
+    fn register_vir_let_rc(
+        &mut self,
+        var: Variable,
+        init: &CompiledValue,
+        value_expr: &vole_vir::VirExpr,
+        final_value: Value,
+        final_type_id: TypeId,
+        is_stack_union: bool,
+    ) -> CodegenResult<()> {
+        // Detect whether coerce_let_init called box_to_unknown (new TaggedValue).
+        let created_tagged_value =
+            self.arena().is_unknown(final_type_id) && !self.arena().is_unknown(init.type_id);
+
+        if self.rc_scopes.has_active_scope() && created_tagged_value {
+            let drop_flag = self.register_rc_local(var, final_type_id);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        } else if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup()
+        {
+            let is_borrow = init.is_borrowed();
+            if self.cf.in_loop() && is_borrow {
+                // Borrow inside loop: skip inc and RC registration.
+            } else {
+                if is_borrow {
+                    self.emit_rc_inc_for_type(final_value, final_type_id)?;
+                }
+                let drop_flag = self.register_rc_local(var, final_type_id);
+                crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+            }
+        } else if self.rc_scopes.has_active_scope() {
+            self.register_vir_let_composite_rc(var, init, value_expr, final_value, final_type_id)?;
+            self.register_vir_let_union_rc(var, init, final_value, final_type_id, is_stack_union)?;
+        }
+        Ok(())
+    }
+
+    /// Register composite RC tracking for struct/tuple fields with RC content.
+    ///
+    /// Detects struct copies (let b = a) and increments each RC field so
+    /// both the original and the copy own their references.
+    fn register_vir_let_composite_rc(
+        &mut self,
+        var: Variable,
+        _init: &CompiledValue,
+        value_expr: &vole_vir::VirExpr,
+        final_value: Value,
+        final_type_id: TypeId,
+    ) -> CodegenResult<()> {
+        let rc_state = self.rc_state(final_type_id);
+        let Some(offsets) = rc_state.shallow_offsets() else {
+            return Ok(());
+        };
+        let offsets = offsets.to_vec();
+        let union_fields = rc_state.composite_union_fields().to_vec();
+
+        // Detect struct copy: init is a variable that is already tracked as a
+        // composite RC local.
+        let is_struct_copy = match value_expr {
+            vole_vir::VirExpr::LocalLoad { name, .. } => self
+                .vars
+                .get(name)
+                .is_some_and(|&(v, _)| self.rc_scopes.is_composite_rc_local(v)),
+            vole_vir::VirExpr::Ast { expr, .. } => {
+                if let ExprKind::Identifier(sym) = &expr.kind {
+                    self.vars
+                        .get(sym)
+                        .is_some_and(|&(v, _)| self.rc_scopes.is_composite_rc_local(v))
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+
+        if is_struct_copy {
+            for &off in &offsets {
+                let field_ptr =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), final_value, off);
+                self.emit_rc_inc(field_ptr)?;
+            }
+        }
+
+        let drop_flag = self.register_composite_rc_local(var, offsets, union_fields);
+        crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        Ok(())
+    }
+
+    /// Register union RC tracking for union-typed let bindings.
+    fn register_vir_let_union_rc(
+        &mut self,
+        var: Variable,
+        init: &CompiledValue,
+        final_value: Value,
+        final_type_id: TypeId,
+        is_stack_union: bool,
+    ) -> CodegenResult<()> {
+        if !(is_stack_union || self.arena().is_union(final_type_id)) {
+            return Ok(());
+        }
+        // Already handled by composite RC path.
+        if self.rc_state(final_type_id).shallow_offsets().is_some() {
+            return Ok(());
+        }
+        let rc_state = self.rc_state(final_type_id);
+        let Some(rc_tags) = rc_state.union_variants() else {
+            return Ok(());
+        };
+        let rc_tags = rc_tags.to_vec();
+        if init.is_borrowed() {
+            // Use final_value (the union stack slot pointer), NOT init.value.
+            // emit_union_rc_inc reads the tag from the union layout to decide
+            // whether the payload needs rc_inc.
+            self.emit_union_rc_inc(final_value, &rc_tags)?;
+        }
+        let drop_flag = self.register_union_rc_local(var, rc_tags);
+        crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        Ok(())
+    }
+
+    /// Compile a VIR assignment statement.
+    ///
+    /// Routes to the appropriate handler based on the assignment target:
+    /// - Local: delegates to `compile_local_store` (existing VIR expression handler)
+    /// - Field/Index: currently unsupported (lowering does not yet emit these)
+    fn compile_vir_assign(
+        &mut self,
+        target: &vole_vir::AssignTarget,
+        value: &vole_vir::VirExpr,
+    ) -> CodegenResult<bool> {
+        match target {
+            vole_vir::AssignTarget::Local(sym) => {
+                let mut result = self.compile_local_store(*sym, value)?;
+                result.mark_consumed();
+                result.debug_assert_rc_handled("VirStmt::Assign(Local)");
+                Ok(false)
+            }
+            vole_vir::AssignTarget::Field { .. } | vole_vir::AssignTarget::Index { .. } => Err(
+                CodegenError::internal("VirStmt::Assign with Field/Index target not yet lowered"),
+            ),
+        }
     }
 }

@@ -3,7 +3,7 @@
 // Statement lowering: AST `Stmt` → VIR `VirStmt`.
 
 use vole_frontend::Interner;
-use vole_frontend::ast::Stmt;
+use vole_frontend::ast::{LetInit, LetStmt, Stmt};
 use vole_identity::TypeId;
 use vole_sema::node_map::NodeMap;
 
@@ -37,12 +37,17 @@ pub(crate) fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interne
         Stmt::Break(_) => VirStmt::Break,
         Stmt::Continue(_) => VirStmt::Continue,
         Stmt::Raise(raise_stmt) => lower_raise(raise_stmt, node_map, interner),
+        Stmt::Let(let_stmt) => lower_let(let_stmt, node_map, interner),
         // Ast escape hatches — explicitly listed so new Stmt variants
         // cause a compile error rather than silently falling through.
         //
         // Return stays as Ast until compile_vir_return handles interface
         // boxing, fallible returns, struct returns, and RC bookkeeping.
-        Stmt::Return(_) | Stmt::Let(_) | Stmt::LetTuple(_) | Stmt::For(_) => VirStmt::Ast {
+        //
+        // LetTuple stays as Ast because element types require TypeArena
+        // (unwrap_tuple / unwrap_fixed_array) which is not available in
+        // the lowering context.
+        Stmt::Return(_) | Stmt::LetTuple(_) | Stmt::For(_) => VirStmt::Ast {
             stmt: Box::new(stmt.clone()),
         },
     }
@@ -78,6 +83,43 @@ fn lower_raise(
     VirStmt::Raise {
         error_name: raise_stmt.error_name,
         fields,
+    }
+}
+
+/// Lower a let statement to `VirStmt::Let`.
+///
+/// Type aliases (`let T = i32 | i64`) produce no runtime code; they are
+/// kept as `VirStmt::Ast` so the old codegen can handle the no-op.
+///
+/// The binding type (`ty`) comes from:
+/// 1. The declared type annotation (via `node_map.get_declared_var_type`),
+///    if one was provided in the source — this is the type the codegen
+///    should coerce to.
+/// 2. Otherwise, the sema-computed expression type.
+fn lower_let(let_stmt: &LetStmt, node_map: &NodeMap, interner: &mut Interner) -> VirStmt {
+    let init_expr = match &let_stmt.init {
+        LetInit::Expr(e) => e,
+        // Type aliases produce no runtime code.
+        LetInit::TypeAlias(_) => {
+            return VirStmt::Ast {
+                stmt: Box::new(Stmt::Let(let_stmt.clone())),
+            };
+        }
+    };
+
+    let value = lower_expr(init_expr, node_map, interner);
+
+    // Determine the binding type: use declared type if annotated, else the
+    // init expression's inferred type.
+    let declared_ty = node_map.get_declared_var_type(init_expr.id);
+    let expr_ty = node_map.get_type(init_expr.id).unwrap_or(TypeId::UNKNOWN);
+    let ty = declared_ty.unwrap_or(expr_ty);
+
+    VirStmt::Let {
+        name: let_stmt.name,
+        value,
+        mutable: let_stmt.mutable,
+        ty,
     }
 }
 

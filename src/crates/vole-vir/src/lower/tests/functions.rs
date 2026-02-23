@@ -275,11 +275,11 @@ fn lower_stmt_expr_produces_vir_expr() {
 }
 
 #[test]
-fn lower_stmt_non_expr_becomes_ast() {
+fn lower_stmt_let_becomes_vir_let() {
     use vole_frontend::ast::{LetInit, LetStmt};
     let node_map = empty_node_map();
     let mut interner = test_interner();
-    // Let statements are still Ast escape hatches
+    // Let with Expr init is now lowered to VirStmt::Let
     let stmt = Stmt::Let(LetStmt {
         name: Symbol::UNKNOWN,
         ty: None,
@@ -290,7 +290,44 @@ fn lower_stmt_non_expr_becomes_ast() {
     let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
 
     match &vir_stmt {
+        VirStmt::Let {
+            name,
+            mutable,
+            value,
+            ..
+        } => {
+            assert_eq!(*name, Symbol::UNKNOWN);
+            assert!(!mutable);
+            match value.as_ref() {
+                VirExpr::IntLiteral { value, .. } => assert_eq!(*value, 42),
+                other => panic!("expected IntLiteral in Let init, got {other:?}"),
+            }
+        }
+        other => panic!("expected VirStmt::Let, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_stmt_let_type_alias_becomes_ast() {
+    use vole_frontend::ast::{LetInit, LetStmt, TypeExpr, TypeExprKind};
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let sym = interner.intern("Foo");
+    // Let with TypeAlias init remains as Ast escape hatch
+    let stmt = Stmt::Let(LetStmt {
+        name: Symbol::UNKNOWN,
+        ty: None,
+        mutable: false,
+        init: LetInit::TypeAlias(TypeExpr {
+            kind: TypeExprKind::Named(sym),
+            span: dummy_span(),
+        }),
+        span: dummy_span(),
+    });
+    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir_stmt {
         VirStmt::Ast { .. } => {}
-        other => panic!("expected VirStmt::Ast, got {other:?}"),
+        other => panic!("expected VirStmt::Ast for TypeAlias, got {other:?}"),
     }
 }

@@ -97,8 +97,15 @@ impl VirBuilder {
         lhs: VirRef,
         rhs: VirRef,
         ty: TypeId,
+        line: u32,
     ) -> VirRef {
-        Box::new(VirExpr::BinaryOp { op, lhs, rhs, ty })
+        Box::new(VirExpr::BinaryOp {
+            op,
+            lhs,
+            rhs,
+            ty,
+            line,
+        })
     }
 
     /// Unary operation (negation, logical/bitwise not).
@@ -416,7 +423,7 @@ mod tests {
 
         let lhs = b.build_int_literal(1, ty);
         let rhs = b.build_int_literal(2, ty);
-        let sum = b.build_binary_op(VirBinOp::Add, lhs, rhs, ty);
+        let sum = b.build_binary_op(VirBinOp::Add, lhs, rhs, ty, 0);
 
         match sum.as_ref() {
             VirExpr::BinaryOp { op, .. } => assert_eq!(*op, VirBinOp::Add),

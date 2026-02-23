@@ -37,7 +37,9 @@ fn lower_binary_add_produces_binary_op() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::BinaryOp { op, lhs, rhs, ty } => {
+        VirExpr::BinaryOp {
+            op, lhs, rhs, ty, ..
+        } => {
             assert_eq!(*op, VirBinOp::Add);
             assert_eq!(*ty, TypeId::I64);
             match lhs.as_ref() {

@@ -91,6 +91,8 @@ pub enum VirExpr {
         lhs: VirRef,
         rhs: VirRef,
         ty: TypeId,
+        /// Source line for panic messages (division by zero, overflow).
+        line: u32,
     },
 
     /// Unary operation (negation, logical/bitwise not).
