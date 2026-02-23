@@ -10,6 +10,7 @@ mod literals;
 mod method_dispatch;
 mod methods;
 mod static_methods;
+mod vir_literals;
 
 pub(crate) use helpers::{
     convert_field_value_id, convert_to_i64_for_storage, field_flat_slots,

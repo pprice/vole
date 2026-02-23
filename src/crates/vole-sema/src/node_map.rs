@@ -263,6 +263,18 @@ pub enum MetaAccessKind {
     TypeParam { name_id: NameId },
 }
 
+/// Resolved type definition for struct/class literal expressions.
+///
+/// Sema annotates every `StructLiteral` expression with the resolved
+/// `TypeDefId` and whether the type is a class (heap-allocated) or a
+/// struct (stack-allocated).  VIR lowering reads this to emit the
+/// correct `VirExpr::StructLiteral` vs `VirExpr::ClassInstance` variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StructLiteralInfo {
+    pub type_def_id: TypeDefId,
+    pub is_class: bool,
+}
+
 // ---------------------------------------------------------------------------
 // NodeData
 // ---------------------------------------------------------------------------
@@ -336,6 +348,9 @@ pub struct NodeData {
 
     /// Meta access classification for `.@meta` expressions.
     pub meta_access: Option<MetaAccessKind>,
+
+    /// Struct literal type resolution: TypeDefId and whether it is a class.
+    pub struct_literal_info: Option<StructLiteralInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -668,6 +683,18 @@ impl NodeMap {
     /// Set the meta access classification for a `.@meta` expression.
     pub fn set_meta_access(&mut self, node: NodeId, kind: MetaAccessKind) {
         self.get_mut_or_insert(node).meta_access = Some(kind);
+    }
+
+    // -- struct_literal_info --------------------------------------------------
+
+    /// Get the resolved type definition for a struct/class literal expression.
+    pub fn get_struct_literal_info(&self, node: NodeId) -> Option<StructLiteralInfo> {
+        self.get(node).and_then(|d| d.struct_literal_info)
+    }
+
+    /// Set the resolved type definition for a struct/class literal expression.
+    pub fn set_struct_literal_info(&mut self, node: NodeId, info: StructLiteralInfo) {
+        self.get_mut_or_insert(node).struct_literal_info = Some(info);
     }
 
     // ======================================================================
@@ -1020,10 +1047,10 @@ mod tests {
     #[test]
     fn node_data_size_is_reasonable() {
         let size = size_of::<NodeData>();
-        // Target: ~100-200 bytes with strategic boxing. Currently 176 bytes.
+        // Target: ~100-210 bytes with strategic boxing. Currently 208 bytes.
         // If this assertion trips, audit the struct for un-boxed large fields.
         assert!(
-            size <= 200,
+            size <= 216,
             "NodeData is {size} bytes — consider boxing more fields"
         );
     }

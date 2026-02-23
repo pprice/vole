@@ -296,4 +296,85 @@ impl Cg<'_, '_, '_> {
 
         Ok(CompiledValue::new(ptr, ptr_type, range_type_id))
     }
+
+    /// Compile a VIR array literal.
+    ///
+    /// Dispatches between tuple (stack) and dynamic array (heap) construction
+    /// based on the sema-inferred type.  Mirrors the AST `array_literal_with_union_hint`
+    /// but reads element VIR expressions instead of AST nodes.
+    pub(super) fn compile_vir_array_literal(
+        &mut self,
+        elements: &[vole_vir::VirRef],
+        array_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        // If sema inferred a tuple type, use stack allocation.
+        let elem_type_ids = self.arena().unwrap_tuple(array_type_id).cloned();
+        if let Some(elem_type_ids) = elem_type_ids {
+            return self.compile_vir_tuple_literal(elements, &elem_type_ids, array_type_id);
+        }
+
+        // Dynamic array path.
+        let arr_ptr = self.call_runtime(RuntimeKey::ArrayNew, &[])?;
+        let array_push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
+        let elem_type = self.arena().unwrap_array(array_type_id);
+
+        for elem_expr in elements {
+            let compiled = self.compile_vir_expr(elem_expr)?;
+            let (tag_val, value_bits, mut compiled) = if let Some(elem_type_id) = elem_type {
+                self.prepare_dynamic_array_store_with_hint(compiled, elem_type_id, None)?
+            } else {
+                let compiled = if self.arena().is_struct(compiled.type_id) {
+                    self.copy_struct_to_heap(compiled)?
+                } else {
+                    compiled
+                };
+                let tag = {
+                    let arena = self.arena();
+                    array_element_tag_id(compiled.type_id, arena)
+                };
+                let tag_val = self.iconst_cached(types::I64, tag);
+                let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
+                (tag_val, value_bits, compiled)
+            };
+
+            // RC: inc borrowed RC elements so the array gets its own reference.
+            self.rc_inc_borrowed_for_container(&compiled)?;
+
+            self.emit_call(array_push_ref, &[arr_ptr, tag_val, value_bits]);
+
+            // The element value is consumed into the array container.
+            compiled.mark_consumed();
+        }
+
+        Ok(CompiledValue::new(arr_ptr, self.ptr_type(), array_type_id))
+    }
+
+    /// Compile a VIR tuple literal to stack-allocated memory.
+    ///
+    /// Mirrors `tuple_literal()` but compiles elements from VIR expressions.
+    fn compile_vir_tuple_literal(
+        &mut self,
+        elements: &[vole_vir::VirRef],
+        elem_type_ids: &[TypeId],
+        tuple_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let (total_size, offsets) = self.tuple_layout(elem_type_ids);
+        let slot = self.alloc_stack(total_size);
+
+        for (i, elem_expr) in elements.iter().enumerate() {
+            let mut compiled = self.compile_vir_expr(elem_expr)?;
+            let offset = offsets[i];
+
+            // RC: inc borrowed RC elements so the tuple gets its own reference.
+            self.rc_inc_borrowed_for_container(&compiled)?;
+
+            self.builder.ins().stack_store(compiled.value, slot, offset);
+            compiled.mark_consumed();
+            compiled.debug_assert_rc_handled("tuple element");
+        }
+
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        Ok(CompiledValue::new(ptr, ptr_type, tuple_type_id))
+    }
 }

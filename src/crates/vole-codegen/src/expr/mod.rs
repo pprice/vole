@@ -663,15 +663,26 @@ impl Cg<'_, '_, '_> {
                 todo!("VIR Match expr: lowering still emits Ast escape hatch")
             }
 
-            // -- Construction (todo) --------------------------------------
-            VirExpr::ArrayLiteral { .. } => {
-                todo!("VIR ArrayLiteral: lowering still emits Ast escape hatch")
+            // -- Construction -------------------------------------------------
+            VirExpr::ArrayLiteral { elements, ty } => {
+                let result = self.compile_vir_array_literal(elements, *ty)?;
+                Ok(self.mark_rc_owned(result))
             }
-            VirExpr::StructLiteral { .. } => {
-                todo!("VIR StructLiteral: lowering still emits Ast escape hatch")
+            VirExpr::StructLiteral {
+                type_def,
+                fields,
+                ty,
+            } => {
+                let result = self.compile_vir_struct_literal(*type_def, fields, *ty)?;
+                Ok(self.mark_rc_owned(result))
             }
-            VirExpr::ClassInstance { .. } => {
-                todo!("VIR ClassInstance: lowering still emits Ast escape hatch")
+            VirExpr::ClassInstance {
+                type_def,
+                fields,
+                ty,
+            } => {
+                let result = self.compile_vir_class_instance(*type_def, fields, *ty)?;
+                Ok(self.mark_rc_owned(result))
             }
 
             // -- Field access -------------------------------------------------

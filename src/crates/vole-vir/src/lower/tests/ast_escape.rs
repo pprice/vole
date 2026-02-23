@@ -1,9 +1,9 @@
 // lower/tests/ast_escape.rs
 //
 // Tests for lowered simple expressions (Unreachable, Import, TypeLiteral, Range)
-// and remaining AST escape hatches (Assign, ArrayLiteral, RepeatLiteral, Call).
+// and remaining AST escape hatches (Assign, RepeatLiteral, Call).
 // Also tests compound assignment desugaring (variable targets lowered,
-// index/field targets remain as Ast).
+// index/field targets remain as Ast) and ArrayLiteral VIR lowering.
 
 use super::*;
 use crate::expr::VirExpr;
@@ -185,8 +185,8 @@ fn lower_expr_range_inclusive() {
 }
 
 // -----------------------------------------------------------------------
-// Ast escape hatch lowering: Assign, CompoundAssign, ArrayLiteral,
-// RepeatLiteral (vol-aq9j, vol-w4mg)
+// Ast escape hatch lowering: Assign, CompoundAssign, RepeatLiteral
+// and proper VIR lowering: ArrayLiteral (vol-aq9j, vol-w4mg, vol-pc2m)
 // -----------------------------------------------------------------------
 
 #[test]
@@ -277,7 +277,7 @@ fn lower_expr_compound_assign_index_becomes_ast() {
 }
 
 #[test]
-fn lower_expr_array_literal_becomes_ast() {
+fn lower_expr_array_literal_becomes_vir() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let expr = Expr {
@@ -288,8 +288,11 @@ fn lower_expr_array_literal_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for ArrayLiteral, got {other:?}"),
+        VirExpr::ArrayLiteral { elements, ty } => {
+            assert_eq!(elements.len(), 3);
+            assert_eq!(*ty, TypeId::UNKNOWN);
+        }
+        other => panic!("expected ArrayLiteral, got {other:?}"),
     }
 }
 

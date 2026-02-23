@@ -66,23 +66,36 @@ pub enum VirExpr {
         inclusive: bool,
     },
 
-    /// Array literal with a homogeneous element type.
-    ArrayLiteral {
-        elements: Vec<VirRef>,
-        elem_ty: TypeId,
-    },
+    /// Array literal `[a, b, c]`.
+    ///
+    /// `ty` is the overall inferred type (array or tuple) from sema.
+    /// Codegen uses `unwrap_array(ty)` / `unwrap_tuple(ty)` to dispatch
+    /// between dynamic array (heap) and tuple (stack) construction paths.
+    ArrayLiteral { elements: Vec<VirRef>, ty: TypeId },
 
     // -- Construction -------------------------------------------------------
-    /// Value-type struct construction.
+    /// Value-type struct construction (stack-allocated).
+    ///
+    /// `type_def` is the resolved `TypeDefId` from the entity registry.
+    /// `ty` is the sema-inferred result type (may include generic args).
+    /// `fields` are the explicitly provided field initializers; default
+    /// fields are still compiled from AST by codegen.
     StructLiteral {
         type_def: TypeDefId,
         fields: Vec<(Symbol, VirRef)>,
+        ty: TypeId,
     },
 
-    /// Reference-counted class instance creation.
+    /// Reference-counted class instance creation (heap-allocated).
+    ///
+    /// `type_def` is the resolved `TypeDefId` from the entity registry.
+    /// `ty` is the sema-inferred result type (may include generic args).
+    /// `fields` are the explicitly provided field initializers; default
+    /// fields are still compiled from AST by codegen.
     ClassInstance {
         type_def: TypeDefId,
         fields: Vec<(Symbol, VirRef)>,
+        ty: TypeId,
     },
 
     // -- Operators ----------------------------------------------------------

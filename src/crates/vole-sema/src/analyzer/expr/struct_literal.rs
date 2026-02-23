@@ -1,6 +1,7 @@
 use super::super::*;
 use crate::entity_defs::GenericTypeInfo;
 use crate::generic::TypeParamInfo;
+use crate::node_map::StructLiteralInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use crate::type_arena::TypeIdVec;
 use crate::types::StructFieldId;
@@ -196,6 +197,13 @@ impl Analyzer {
             match kind {
                 TypeDefKind::Class => {
                     let result_id = self.type_arena_mut().class(resolved_type_id, vec![]);
+                    self.results.node_map.set_struct_literal_info(
+                        expr.id,
+                        StructLiteralInfo {
+                            type_def_id: resolved_type_id,
+                            is_class: true,
+                        },
+                    );
                     (
                         Self::format_struct_literal_path(&struct_lit.path, interner),
                         fields,
@@ -205,6 +213,13 @@ impl Analyzer {
                 }
                 TypeDefKind::Struct | TypeDefKind::Sentinel => {
                     let result_id = self.type_arena_mut().struct_type(resolved_type_id, vec![]);
+                    self.results.node_map.set_struct_literal_info(
+                        expr.id,
+                        StructLiteralInfo {
+                            type_def_id: resolved_type_id,
+                            is_class: false,
+                        },
+                    );
                     (
                         Self::format_struct_literal_path(&struct_lit.path, interner),
                         fields,
@@ -469,6 +484,14 @@ impl Analyzer {
         // Pre-compute substituted field types so codegen can use lookup_substitute
         self.precompute_field_substitutions(type_def_id, &type_args_id);
 
+        self.results.node_map.set_struct_literal_info(
+            expr.id,
+            StructLiteralInfo {
+                type_def_id,
+                is_class: true,
+            },
+        );
+
         Ok(self
             .type_arena_mut()
             .class(type_def_id, type_args_id.to_vec()))
@@ -530,6 +553,14 @@ impl Analyzer {
 
         // Pre-compute substituted field types so codegen can use lookup_substitute
         self.precompute_field_substitutions(type_def_id, &type_args_id);
+
+        self.results.node_map.set_struct_literal_info(
+            expr.id,
+            StructLiteralInfo {
+                type_def_id,
+                is_class: false,
+            },
+        );
 
         Ok(self
             .type_arena_mut()

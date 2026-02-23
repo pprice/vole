@@ -304,7 +304,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Handles union wrapping (non-union → union, union → heap copy),
     /// interface boxing, unknown boxing, and interface fat pointer copying
     /// for class fields.
-    fn coerce_field_value(
+    pub(crate) fn coerce_field_value(
         &mut self,
         value: CompiledValue,
         field_type_id: TypeId,
@@ -350,7 +350,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// provided in the struct literal. The references borrow from `AnalyzedProgram` via the
     /// `'ctx` lifetime, so they are independent of `&mut self` and safe to use while calling
     /// expression-compilation methods.
-    fn collect_field_default_refs(
+    pub(crate) fn collect_field_default_refs(
         &self,
         type_name: Symbol,
         provided_fields: &HashSet<String>,
@@ -754,7 +754,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Store a value into a struct field's stack slot, handling nested structs,
     /// inline unions, and i128.
-    fn store_struct_field(
+    pub(crate) fn store_struct_field(
         &mut self,
         value: CompiledValue,
         slot: StackSlot,

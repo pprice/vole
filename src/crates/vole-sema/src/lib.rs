@@ -44,7 +44,8 @@ pub use module::{LoadError, ModuleInfo, ModuleLoader};
 pub use node_map::NodeMap;
 pub use node_map::{
     CoercionKind, ItLambdaInfo, IterableKind, LambdaAnalysis, LambdaDefaults, MethodDispatchKind,
-    NodeData, OptionalChainInfo, OptionalChainKind, StringConversion, UnionStorageKind,
+    NodeData, OptionalChainInfo, OptionalChainKind, StringConversion, StructLiteralInfo,
+    UnionStorageKind,
 };
 pub use numeric_model::{
     NumericCoercion, integer_result_type, numeric_coercion, numeric_result_type,

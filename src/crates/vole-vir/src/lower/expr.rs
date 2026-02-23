@@ -92,10 +92,12 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
             lower_optional_method_call(omc, expr, ty, node_map, interner)
         }
         ExprKind::Try(inner) => lower_try(inner, ty, node_map, interner),
-        ExprKind::ArrayLiteral(_)
-        | ExprKind::RepeatLiteral { .. }
+        ExprKind::ArrayLiteral(elements) => lower_array_literal(elements, ty, node_map, interner),
+        ExprKind::StructLiteral(struct_lit) => {
+            lower_struct_literal(struct_lit, expr, ty, node_map, interner)
+        }
+        ExprKind::RepeatLiteral { .. }
         | ExprKind::Match(_)
-        | ExprKind::StructLiteral(_)
         | ExprKind::MethodCall(_)
         | ExprKind::When(_) => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
@@ -781,6 +783,69 @@ fn lower_try(inner: &Expr, ty: TypeId, node_map: &NodeMap, interner: &mut Intern
         value,
         success_type: ty,
     })
+}
+
+/// Lower an array literal to `VirExpr::ArrayLiteral`.
+///
+/// Each element is recursively lowered. `ty` is the sema-inferred overall
+/// type (array or tuple); codegen uses `unwrap_array` / `unwrap_tuple` to
+/// dispatch between dynamic-array (heap) and tuple (stack) construction.
+fn lower_array_literal(
+    elements: &[Expr],
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let lowered: Vec<VirRef> = elements
+        .iter()
+        .map(|e| lower_expr(e, node_map, interner))
+        .collect();
+    Box::new(VirExpr::ArrayLiteral {
+        elements: lowered,
+        ty,
+    })
+}
+
+/// Lower a struct/class literal to VIR.
+///
+/// Reads `StructLiteralInfo` from the NodeMap to determine whether to emit
+/// `VirExpr::StructLiteral` (stack value type) or `VirExpr::ClassInstance`
+/// (heap reference type).  Falls back to `VirExpr::Ast` when sema didn't
+/// record the info (generic function bodies that sema skips).
+fn lower_struct_literal(
+    sl: &vole_frontend::ast::StructLiteralExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let Some(info) = node_map.get_struct_literal_info(expr.id) else {
+        // No sema annotation — keep as Ast escape hatch.
+        return Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        });
+    };
+
+    let fields: Vec<(vole_identity::Symbol, VirRef)> = sl
+        .fields
+        .iter()
+        .map(|f| (f.name, lower_expr(&f.value, node_map, interner)))
+        .collect();
+
+    if info.is_class {
+        Box::new(VirExpr::ClassInstance {
+            type_def: info.type_def_id,
+            fields,
+            ty,
+        })
+    } else {
+        Box::new(VirExpr::StructLiteral {
+            type_def: info.type_def_id,
+            fields,
+            ty,
+        })
+    }
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.
