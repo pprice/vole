@@ -681,10 +681,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // when the field type is unknown. Use _no_inc because the rc_inc
             // for borrowed values was already done above.
             if let Some(&field_type_id) = field_types.get(init_name)
-                && self.arena().is_unknown(field_type_id) && !self.arena().is_unknown(value.type_id)
-                {
-                    value = self.box_to_unknown_no_inc(value)?;
-                }
+                && self.arena().is_unknown(field_type_id)
+                && !self.arena().is_unknown(value.type_id)
+            {
+                value = self.box_to_unknown_no_inc(value)?;
+            }
+            // Coerce non-union values to union when the field type is a
+            // payload-carrying union. construct_union_id creates a stack-
+            // allocated 16-byte buffer (tag + payload) that gets copied
+            // inline into the struct by store_struct_field.
+            if let Some(&field_type_id) = field_types.get(init_name)
+                && super::helpers::is_payload_union(field_type_id, self.arena())
+                && !self.arena().is_union(value.type_id)
+            {
+                value = self.construct_union_id(value, field_type_id)?;
+            }
             self.store_struct_field(value, slot, offset)?;
             // The field value is consumed into the struct literal.
             value.mark_consumed();
@@ -718,10 +729,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             };
             // Coerce concrete defaults to unknown when the field type is unknown.
             if let Some(&field_type_id) = field_types.get(&field_name)
-                && self.arena().is_unknown(field_type_id) && !self.arena().is_unknown(value.type_id)
-                {
-                    value = self.box_to_unknown(value)?;
-                }
+                && self.arena().is_unknown(field_type_id)
+                && !self.arena().is_unknown(value.type_id)
+            {
+                value = self.box_to_unknown(value)?;
+            }
+            // Coerce non-union default values to union for payload-carrying
+            // union fields (same as explicit field values above).
+            if let Some(&field_type_id) = field_types.get(&field_name)
+                && super::helpers::is_payload_union(field_type_id, self.arena())
+                && !self.arena().is_union(value.type_id)
+            {
+                value = self.construct_union_id(value, field_type_id)?;
+            }
             self.store_struct_field(value, slot, offset)?;
         }
 
@@ -732,7 +752,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(CompiledValue::new(ptr, ptr_type, result_type_id))
     }
 
-    /// Store a value into a struct field's stack slot, handling nested structs and i128.
+    /// Store a value into a struct field's stack slot, handling nested structs,
+    /// inline unions, and i128.
     fn store_struct_field(
         &mut self,
         value: CompiledValue,
@@ -750,6 +771,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         .load(types::I64, MemFlags::new(), value.value, src_off);
                 self.builder.ins().stack_store(val, slot, dst_off);
             }
+        } else if super::helpers::is_payload_union(value.type_id, self.arena()) {
+            // Union values are pointers to 16-byte buffers (tag + payload).
+            // Copy both words inline into the struct's slot.
+            let word0 = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), value.value, 0);
+            self.builder.ins().stack_store(word0, slot, offset);
+            let word1 = self.builder.ins().load(
+                types::I64,
+                MemFlags::new(),
+                value.value,
+                union_layout::PAYLOAD_OFFSET,
+            );
+            self.builder
+                .ins()
+                .stack_store(word1, slot, offset + union_layout::PAYLOAD_OFFSET);
         } else if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
             // Wide types need 2 x 8-byte slots: low bits at offset, high bits at offset+8.
             let i128_bits = wide.to_i128_bits(self.builder, value.value);

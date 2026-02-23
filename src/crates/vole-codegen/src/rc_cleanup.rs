@@ -47,6 +47,15 @@ pub(crate) struct CompositeRcLocal {
     pub drop_flag: Variable,
     /// Byte offsets of RC fields within the composite, relative to base pointer.
     pub rc_field_offsets: Vec<i32>,
+    /// Inline union fields that need tag-based conditional RC cleanup.
+    /// Each entry is (byte_offset, rc_variant_tags) where the union buffer
+    /// is stored at `byte_offset` from the base pointer.
+    ///
+    /// NOTE: Cleanup emission is currently disabled because existing structs
+    /// (e.g. ParseResult in json.vole) share RC values between the union field
+    /// and typed fields, causing double-dec. Proper fix requires rc_inc at
+    /// construction time for the union copy. Tracked as follow-up.
+    pub union_field_offsets: Vec<(i32, Vec<(u8, bool)>)>,
 }
 
 /// A union local that may contain RC variants. At scope exit, we check the tag
@@ -174,6 +183,7 @@ impl RcScopeStack {
         variable: Variable,
         drop_flag: Variable,
         rc_field_offsets: Vec<i32>,
+        union_field_offsets: Vec<(i32, Vec<(u8, bool)>)>,
     ) {
         let scope = self
             .scopes
@@ -183,6 +193,7 @@ impl RcScopeStack {
             variable,
             drop_flag,
             rc_field_offsets,
+            union_field_offsets,
         });
     }
 
@@ -490,6 +501,8 @@ pub(crate) fn emit_composite_rc_cleanup(
             }
             // Flag is known-live: emit field cleanup unconditionally (no branch).
             emit_composite_field_cleanup(cg.builder, composite, rc_dec_ref);
+            // TODO: emit_composite_union_cleanup disabled pending fix for
+            // ParseResult double-dec issue (value: Json overlaps str_val/obj_val/arr_val)
             let zero = cg.iconst_cached(types::I8, 0);
             cg.builder.def_var(composite.drop_flag, zero);
             continue;
@@ -508,6 +521,7 @@ pub(crate) fn emit_composite_rc_cleanup(
         cg.builder.seal_block(cleanup_block);
 
         emit_composite_field_cleanup(cg.builder, composite, rc_dec_ref);
+        // TODO: emit_composite_union_cleanup disabled pending fix
         // Reset drop flag after cleanup (same reason as emit_rc_cleanup).
         let zero = cg.iconst_cached(types::I8, 0);
         cg.builder.def_var(composite.drop_flag, zero);
@@ -530,5 +544,71 @@ fn emit_composite_field_cleanup(
             .ins()
             .load(types::I64, MemFlags::new(), base_ptr, offset);
         builder.ins().call(rc_dec_ref, &[field_val]);
+    }
+}
+
+/// Emit tag-based conditional rc_dec for inline union fields within a composite.
+/// For each union field, loads the tag from `base_ptr + field_offset`, checks each
+/// RC variant, and conditionally rc_dec's the payload.
+///
+/// NOTE: Currently unused because existing structs (e.g. ParseResult) share RC
+/// values between the union field and typed fields. Will be enabled once union
+/// field construction properly rc_inc's the payload.
+#[expect(
+    dead_code,
+    reason = "pending proper rc_inc at union field construction"
+)]
+fn emit_composite_union_cleanup(
+    cg: &mut Cg,
+    composite: &CompositeRcLocal,
+    rc_dec_ref: cranelift::codegen::ir::FuncRef,
+) {
+    for (field_offset, rc_tags) in &composite.union_field_offsets {
+        let base_ptr = cg.builder.use_var(composite.variable);
+        let union_ptr = if *field_offset == 0 {
+            base_ptr
+        } else {
+            cg.builder.ins().iadd_imm(base_ptr, *field_offset as i64)
+        };
+        // Load tag byte from offset 0 within the inline union buffer
+        let tag = cg
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), union_ptr, 0);
+
+        for &(variant_tag, is_interface) in rc_tags {
+            let is_match = cg
+                .builder
+                .ins()
+                .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
+            let dec_block = cg.builder.create_block();
+            let next_block = cg.builder.create_block();
+
+            cg.builder
+                .ins()
+                .brif(is_match, dec_block, &[], next_block, &[]);
+
+            cg.switch_to_block(dec_block);
+            cg.builder.seal_block(dec_block);
+            let payload = cg.builder.ins().load(
+                types::I64,
+                MemFlags::new(),
+                union_ptr,
+                crate::union_layout::PAYLOAD_OFFSET,
+            );
+            if is_interface {
+                let data_word = cg
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), payload, 0);
+                cg.builder.ins().call(rc_dec_ref, &[data_word]);
+            } else {
+                cg.builder.ins().call(rc_dec_ref, &[payload]);
+            }
+            cg.builder.ins().jump(next_block, &[]);
+
+            cg.switch_to_block(next_block);
+            cg.builder.seal_block(next_block);
+        }
     }
 }

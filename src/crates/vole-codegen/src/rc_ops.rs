@@ -421,10 +421,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         variable: Variable,
         rc_field_offsets: Vec<i32>,
+        union_field_offsets: Vec<(i32, Vec<(u8, bool)>)>,
     ) -> Variable {
         let drop_flag = super::rc_cleanup::alloc_drop_flag(self);
-        self.rc_scopes
-            .register_composite(variable, drop_flag, rc_field_offsets);
+        self.rc_scopes.register_composite(
+            variable,
+            drop_flag,
+            rc_field_offsets,
+            union_field_offsets,
+        );
         drop_flag
     }
 

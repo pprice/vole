@@ -1,0 +1,238 @@
+// Tests for structs with union-typed fields (inline union storage).
+//
+// Union fields are stored inline in structs as 16-byte buffers (2 flat slots):
+//   [tag:i8, is_rc:i8, pad(6), payload:i64]
+// This tests correct storage, loading, assignment, and field access.
+
+let Val = string | i64
+
+struct Simple {
+    value: Val,
+    flag: bool,
+}
+
+struct MultiUnion {
+    a: string | i64,
+    b: bool | f64,
+    name: string,
+}
+
+struct UnionFirst {
+    value: string | nil,
+    count: i64,
+}
+
+struct UnionLast {
+    count: i64,
+    value: string | nil,
+}
+
+struct UnionMiddle {
+    prefix: string,
+    value: i64 | bool,
+    suffix: string,
+}
+
+struct TwoUnions {
+    first: string | i64,
+    second: bool | nil,
+}
+
+struct UnionWithDefault {
+    value: i64 | nil,
+    tag: string,
+}
+
+tests "struct union field basics" {
+    test "string variant stored and loaded" {
+        let s = Simple { value: "hello", flag: true }
+        assert(s.value is string)
+    }
+
+    test "i64 variant stored and loaded" {
+        let s = Simple { value: 42, flag: true }
+        assert(s.value is i64)
+    }
+
+    test "string variant is not i64" {
+        let s = Simple { value: "world", flag: false }
+        assert(!(s.value is i64))
+    }
+
+    test "i64 variant is not string" {
+        let s = Simple { value: 99, flag: false }
+        assert(!(s.value is string))
+    }
+
+    test "flag field after union field" {
+        let s = Simple { value: "hello", flag: true }
+        assert(s.flag == true)
+    }
+
+    test "flag field after i64 union field" {
+        let s = Simple { value: 42, flag: false }
+        assert(s.flag == false)
+    }
+}
+
+tests "struct union field positions" {
+    test "union as first field" {
+        let s = UnionFirst { value: "test", count: 10 }
+        assert(s.value is string)
+        assert(s.count == 10)
+    }
+
+    test "union as first field nil variant" {
+        let s = UnionFirst { value: nil, count: 5 }
+        assert(s.value is nil)
+        assert(s.count == 5)
+    }
+
+    test "union as last field" {
+        let s = UnionLast { count: 7, value: "end" }
+        assert(s.count == 7)
+        assert(s.value is string)
+    }
+
+    test "union as last field nil variant" {
+        let s = UnionLast { count: 3, value: nil }
+        assert(s.count == 3)
+        assert(s.value is nil)
+    }
+
+    test "union in middle of struct" {
+        let s = UnionMiddle { prefix: "pre", value: 42, suffix: "suf" }
+        assert(s.prefix == "pre")
+        assert(s.value is i64)
+        assert(s.suffix == "suf")
+    }
+
+    test "union in middle bool variant" {
+        let s = UnionMiddle { prefix: "a", value: true, suffix: "b" }
+        assert(s.prefix == "a")
+        assert(s.value is bool)
+        assert(s.suffix == "b")
+    }
+}
+
+tests "struct multiple union fields" {
+    test "two union fields" {
+        let s = TwoUnions { first: "hello", second: true }
+        assert(s.first is string)
+        assert(s.second is bool)
+    }
+
+    test "two union fields alternate variants" {
+        let s = TwoUnions { first: 42, second: nil }
+        assert(s.first is i64)
+        assert(s.second is nil)
+    }
+
+    test "multi union struct" {
+        let s = MultiUnion { a: "x", b: 3.14, name: "test" }
+        assert(s.a is string)
+        assert(s.b is f64)
+        assert(s.name == "test")
+    }
+
+    test "multi union struct alternate" {
+        let s = MultiUnion { a: 7, b: false, name: "alt" }
+        assert(s.a is i64)
+        assert(s.b is bool)
+        assert(s.name == "alt")
+    }
+}
+
+tests "struct union field assignment" {
+    test "reassign string to i64" {
+        var s = Simple { value: "hello", flag: true }
+        s.value = 99
+        assert(s.value is i64)
+        assert(s.flag == true)
+    }
+
+    test "reassign i64 to string" {
+        var s = Simple { value: 42, flag: false }
+        s.value = "world"
+        assert(s.value is string)
+        assert(s.flag == false)
+    }
+
+    test "reassign nil to string" {
+        var s = UnionFirst { value: nil, count: 1 }
+        s.value = "now set"
+        assert(s.value is string)
+        assert(s.count == 1)
+    }
+
+    test "reassign string to nil" {
+        var s = UnionFirst { value: "was set", count: 2 }
+        s.value = nil
+        assert(s.value is nil)
+        assert(s.count == 2)
+    }
+
+    test "multiple reassignments" {
+        var s = Simple { value: "first", flag: true }
+        s.value = 1
+        assert(s.value is i64)
+        s.value = "second"
+        assert(s.value is string)
+        s.value = 2
+        assert(s.value is i64)
+    }
+}
+
+tests "struct union field with multiple instances" {
+    test "different instances different variants" {
+        let a = Simple { value: "a", flag: true }
+        let b = Simple { value: 1, flag: false }
+        assert(a.value is string)
+        assert(b.value is i64)
+        assert(a.flag == true)
+        assert(b.flag == false)
+    }
+
+    test "array of structs with union fields" {
+        let arr = [
+            Simple { value: "x", flag: true },
+            Simple { value: 42, flag: false },
+        ]
+        assert(arr[0].value is string)
+        assert(arr[1].value is i64)
+        assert(arr[0].flag == true)
+        assert(arr[1].flag == false)
+    }
+}
+
+func _make_string_simple() -> Simple {
+    return Simple { value: "from func", flag: true }
+}
+
+func _make_i64_simple() -> Simple {
+    return Simple { value: 123, flag: false }
+}
+
+func _make_nil_union_first() -> UnionFirst {
+    return UnionFirst { value: nil, count: 0 }
+}
+
+tests "struct union field function return" {
+    test "return struct with string union" {
+        let s = _make_string_simple()
+        assert(s.value is string)
+        assert(s.flag == true)
+    }
+
+    test "return struct with i64 union" {
+        let s = _make_i64_simple()
+        assert(s.value is i64)
+        assert(s.flag == false)
+    }
+
+    test "return struct with nil union" {
+        let s = _make_nil_union_first()
+        assert(s.value is nil)
+        assert(s.count == 0)
+    }
+}

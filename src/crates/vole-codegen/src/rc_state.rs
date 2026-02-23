@@ -40,12 +40,16 @@ pub(crate) enum RcState {
     ///
     /// - `shallow_offsets`: Byte offsets of direct RC fields (one level deep)
     /// - `deep_offsets`: Byte offsets of all RC fields, including nested struct fields
+    /// - `union_fields`: Inline union fields that need tag-based conditional RC cleanup.
+    ///   Each entry is (byte_offset, rc_variant_tags) where rc_variant_tags has the same
+    ///   format as `RcState::Union::rc_variants`.
     ///
     /// For non-struct composites (tuple, fixed array), shallow and deep are identical.
     /// For structs with nested struct fields, deep includes offsets within those nested structs.
     Composite {
         shallow_offsets: Vec<i32>,
         deep_offsets: Vec<i32>,
+        union_fields: Vec<(i32, Vec<(u8, bool)>)>,
     },
 
     /// Type is a union with some RC variants.
@@ -109,6 +113,19 @@ impl RcState {
         }
     }
 
+    /// Returns inline union fields in composite types that need tag-based RC cleanup.
+    ///
+    /// Each entry is (byte_offset, rc_variant_tags) where the union is stored
+    /// inline at `byte_offset` within the struct.
+    /// Returns an empty slice for non-composite types or composites without union fields.
+    #[inline]
+    pub fn composite_union_fields(&self) -> &[(i32, Vec<(u8, bool)>)] {
+        match self {
+            RcState::Composite { union_fields, .. } => union_fields,
+            _ => &[],
+        }
+    }
+
     /// Returns the RC variant information for union types.
     ///
     /// Each entry is (tag_index, is_interface) where:
@@ -155,12 +172,13 @@ pub(crate) fn compute_rc_state(
     }
 
     // Check for composite types (struct, tuple, fixed array) with RC fields
-    if let Some((shallow_offsets, deep_offsets)) =
+    if let Some((shallow_offsets, deep_offsets, union_fields)) =
         compute_composite_rc_offsets(arena, registry, type_id)
     {
         return RcState::Composite {
             shallow_offsets,
             deep_offsets,
+            union_fields,
         };
     }
 
@@ -221,16 +239,20 @@ fn compute_union_rc_variants(arena: &TypeArena, variants: &[TypeId]) -> Vec<(u8,
 
 /// Compute the byte offsets of RC fields within a composite type.
 ///
-/// Returns `Some((shallow_offsets, deep_offsets))` if the type has RC fields,
-/// or `None` if the type has no RC fields needing cleanup.
+/// Composite RC offsets: (shallow_offsets, deep_offsets, union_fields).
+type CompositeRcOffsets = (Vec<i32>, Vec<i32>, Vec<(i32, Vec<(u8, bool)>)>);
+
+/// Returns `Some((shallow_offsets, deep_offsets, union_fields))` if the type
+/// has RC fields, or `None` if the type has no RC fields needing cleanup.
 ///
 /// - `shallow_offsets`: Direct RC fields only (one level deep)
 /// - `deep_offsets`: All RC fields, including those in nested structs
+/// - `union_fields`: Inline union fields with RC variants, as (offset, rc_tags) pairs
 fn compute_composite_rc_offsets(
     arena: &TypeArena,
     registry: &EntityRegistry,
     type_id: TypeId,
-) -> Option<(Vec<i32>, Vec<i32>)> {
+) -> Option<CompositeRcOffsets> {
     // Struct: iterate fields, collect offsets of RC-typed fields
     if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id) {
         let type_def = registry.get_type(type_def_id);
@@ -255,6 +277,7 @@ fn compute_composite_rc_offsets(
 
         let mut shallow_offsets = Vec::new();
         let mut deep_offsets = Vec::new();
+        let mut union_fields = Vec::new();
         let mut byte_offset = 0i32;
 
         for field_type in &field_types {
@@ -264,13 +287,22 @@ fn compute_composite_rc_offsets(
             if is_simple_rc_type(arena, *field_type) {
                 shallow_offsets.push(byte_offset);
                 deep_offsets.push(byte_offset);
+            } else if let Some(variants) = arena.unwrap_union(*field_type) {
+                // Inline union field: collect RC variant tags for tag-based cleanup
+                let rc_tags = compute_union_rc_variants(arena, variants);
+                if !rc_tags.is_empty() {
+                    union_fields.push((byte_offset, rc_tags));
+                }
             } else {
                 // Deep: recursively collect from nested structs
-                if let Some((_, nested_deep)) =
+                if let Some((_, nested_deep, nested_unions)) =
                     compute_composite_rc_offsets(arena, registry, *field_type)
                 {
                     for off in nested_deep {
                         deep_offsets.push(byte_offset + off);
+                    }
+                    for (off, tags) in nested_unions {
+                        union_fields.push((byte_offset + off, tags));
                     }
                 }
             }
@@ -278,17 +310,17 @@ fn compute_composite_rc_offsets(
             byte_offset += (slots as i32) * 8;
         }
 
-        if shallow_offsets.is_empty() && deep_offsets.is_empty() {
+        if shallow_offsets.is_empty() && deep_offsets.is_empty() && union_fields.is_empty() {
             return None;
         }
-        return Some((shallow_offsets, deep_offsets));
+        return Some((shallow_offsets, deep_offsets, union_fields));
     }
 
     // Fixed array: if element type is RC, all elements need cleanup
     if let Some((elem_type_id, size)) = arena.unwrap_fixed_array(type_id) {
         if is_simple_rc_type(arena, elem_type_id) {
             let offsets: Vec<i32> = (0..size).map(|i| (i as i32) * 8).collect();
-            return Some((offsets.clone(), offsets));
+            return Some((offsets.clone(), offsets, Vec::new()));
         }
         return None;
     }
@@ -306,7 +338,7 @@ fn compute_composite_rc_offsets(
         if rc_offsets.is_empty() {
             return None;
         }
-        return Some((rc_offsets.clone(), rc_offsets));
+        return Some((rc_offsets.clone(), rc_offsets, Vec::new()));
     }
 
     None
@@ -505,6 +537,7 @@ mod tests {
         let composite = RcState::Composite {
             shallow_offsets: vec![0, 8],
             deep_offsets: vec![0, 8, 16],
+            union_fields: Vec::new(),
         };
         let union = RcState::Union {
             rc_variants: vec![(0, false), (2, true)],
@@ -568,6 +601,7 @@ mod tests {
             RcState::Composite {
                 shallow_offsets,
                 deep_offsets,
+                ..
             } => {
                 assert_eq!(shallow_offsets, vec![0, 8, 16]);
                 assert_eq!(deep_offsets, vec![0, 8, 16]);
@@ -599,6 +633,7 @@ mod tests {
             RcState::Composite {
                 shallow_offsets,
                 deep_offsets,
+                ..
             } => {
                 assert_eq!(shallow_offsets, vec![8]); // String is at offset 8
                 assert_eq!(deep_offsets, vec![8]);

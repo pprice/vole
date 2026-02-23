@@ -351,6 +351,7 @@ pub(crate) fn struct_flat_slot_count(
 
 /// Compute the number of flat 8-byte slots a single field occupies.
 /// Nested struct fields are recursively expanded; i128 uses 2 slots (16 bytes);
+/// payload-carrying unions use 2 slots (16 bytes: tag + payload);
 /// all other non-struct types use 1 slot.
 pub(crate) fn field_flat_slots(
     type_id: TypeId,
@@ -360,8 +361,26 @@ pub(crate) fn field_flat_slots(
     if let Some(count) = struct_flat_slot_count(type_id, arena, entities) {
         return count;
     }
+    // Payload-carrying unions need 2 x 8-byte slots (tag + payload) when stored
+    // inline in structs. Tag-only unions (all sentinel variants) fit in 1 slot.
+    if is_payload_union(type_id, arena) {
+        return 2;
+    }
     // i128 needs 2 x 8-byte slots
     crate::types::field_slot_count(type_id, arena)
+}
+
+/// Check whether a union type carries a payload (non-sentinel, non-void variant).
+/// Payload unions need 16 bytes (2 flat slots) when stored inline in structs.
+/// Tag-only unions (all variants are sentinels or void) need only 8 bytes (1 slot).
+pub(crate) fn is_payload_union(type_id: TypeId, arena: &TypeArena) -> bool {
+    if let Some(variants) = arena.unwrap_union(type_id) {
+        variants
+            .iter()
+            .any(|&v| !arena.is_sentinel(v) && !arena.is_void(v))
+    } else {
+        false
+    }
 }
 
 /// Map a leaf TypeId to its Cranelift type for equality comparison.
@@ -441,6 +460,15 @@ fn collect_leaf_slots(
             }
             return;
         }
+    }
+    // Payload-carrying unions occupy 2 x 8-byte slots (tag + payload) inline,
+    // comparable as two i64 words (like i128 but without reconstruction).
+    if is_payload_union(type_id, arena) {
+        out.push((*offset, types::I64));
+        *offset += 8;
+        out.push((*offset, types::I64));
+        *offset += 8;
+        return;
     }
     // Leaf field: emit one entry and advance offset by the field's byte size
     let cl_type = leaf_cranelift_type(type_id, arena);

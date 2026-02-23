@@ -108,7 +108,12 @@ impl Cg<'_, '_, '_> {
                     let cr_type = self.cranelift_type(init.type_id);
                     let temp_var = self.builder.declare_var(cr_type);
                     self.builder.def_var(temp_var, init.value);
-                    let drop_flag = self.register_composite_rc_local(temp_var, offsets.to_vec());
+                    let union_fields = self
+                        .rc_state(init.type_id)
+                        .composite_union_fields()
+                        .to_vec();
+                    let drop_flag =
+                        self.register_composite_rc_local(temp_var, offsets.to_vec(), union_fields);
                     crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
                 }
 
@@ -374,8 +379,17 @@ impl Cg<'_, '_, '_> {
                                 .load(types::I64, MemFlags::new(), final_value, off);
                         self.emit_rc_inc(field_ptr)?;
                     }
+                    // NOTE: union field payloads are NOT rc_inc'd here because
+                    // composite union cleanup is currently disabled (see rc_cleanup.rs).
+                    // Both the original and copy skip union payload cleanup, so the
+                    // refcounts stay balanced.
                 }
-                let drop_flag = self.register_composite_rc_local(var, offsets.to_vec());
+                let union_fields = self
+                    .rc_state(final_type_id)
+                    .composite_union_fields()
+                    .to_vec();
+                let drop_flag =
+                    self.register_composite_rc_local(var, offsets.to_vec(), union_fields);
                 crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
             } else if is_stack_union || self.arena().is_union(final_type_id) {
                 // Register union RC cleanup for any union-typed value. This

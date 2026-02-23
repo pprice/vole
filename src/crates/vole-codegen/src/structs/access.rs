@@ -5,6 +5,7 @@ use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle, module_name_id};
+use crate::union_layout;
 use cranelift::prelude::*;
 use vole_frontend::{Expr, FieldAccessExpr, Symbol};
 use vole_sema::type_arena::TypeId;
@@ -197,6 +198,8 @@ impl Cg<'_, '_, '_> {
                         .ins()
                         .store(MemFlags::new(), val, obj.value, dst_off);
                 }
+            } else if super::helpers::is_payload_union(field_type_id, self.arena()) {
+                self.assign_struct_union_field(obj.value, offset, value, field_type_id)?;
             } else {
                 // RC bookkeeping for struct field overwrite:
                 // 1. Load old value (before store)
@@ -335,6 +338,19 @@ impl Cg<'_, '_, '_> {
             return Ok(CompiledValue::new(field_ptr, ptr_type, field_type_id));
         }
 
+        // Payload-carrying union fields are stored inline (16 bytes: tag + payload).
+        // Return a pointer into the parent struct, like nested struct fields —
+        // union operations expect a pointer to the 16-byte buffer.
+        if super::helpers::is_payload_union(field_type_id, self.arena()) {
+            let ptr_type = self.ptr_type();
+            let field_ptr = if offset == 0 {
+                struct_ptr
+            } else {
+                self.builder.ins().iadd_imm(struct_ptr, offset as i64)
+            };
+            return Ok(CompiledValue::new(field_ptr, ptr_type, field_type_id));
+        }
+
         // i128 fields occupy 2 x 8-byte slots: load low and high halves, reconstruct
         if let Some(wide) =
             crate::types::wide_ops::WideType::from_type_id(field_type_id, self.arena())
@@ -359,5 +375,60 @@ impl Cg<'_, '_, '_> {
         let mut cv = self.convert_field_value(raw_value, field_type_id);
         self.mark_borrowed_if_rc(&mut cv);
         Ok(cv)
+    }
+
+    /// Assign to a struct's inline union field with proper coercion and RC cleanup.
+    ///
+    /// 1. RC-dec the old union payload (if any RC variant is active)
+    /// 2. Coerce the new value to a union buffer via construct_union_id
+    /// 3. Copy the 16-byte buffer inline into the struct
+    fn assign_struct_union_field(
+        &mut self,
+        struct_ptr: Value,
+        offset: i32,
+        value: CompiledValue,
+        field_type_id: TypeId,
+    ) -> CodegenResult<()> {
+        // RC cleanup of old payload: compute pointer to old inline union,
+        // then conditionally rc_dec its payload before overwriting.
+        if self.rc_scopes.has_active_scope()
+            && let Some(rc_tags) = self.rc_state(field_type_id).union_variants()
+        {
+            let old_ptr = if offset == 0 {
+                struct_ptr
+            } else {
+                self.builder.ins().iadd_imm(struct_ptr, offset as i64)
+            };
+            self.emit_union_rc_dec(old_ptr, rc_tags)?;
+        }
+
+        // Coerce to union if needed
+        let union_val = if !self.arena().is_union(value.type_id) {
+            self.construct_union_id(value, field_type_id)?
+        } else {
+            value
+        };
+
+        // Copy 16-byte union buffer (tag word + payload word) inline
+        let word0 = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), union_val.value, 0);
+        self.builder
+            .ins()
+            .store(MemFlags::new(), word0, struct_ptr, offset);
+        let word1 = self.builder.ins().load(
+            types::I64,
+            MemFlags::new(),
+            union_val.value,
+            union_layout::PAYLOAD_OFFSET,
+        );
+        self.builder.ins().store(
+            MemFlags::new(),
+            word1,
+            struct_ptr,
+            offset + union_layout::PAYLOAD_OFFSET,
+        );
+        Ok(())
     }
 }

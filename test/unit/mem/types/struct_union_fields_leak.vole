@@ -1,0 +1,133 @@
+// RC leak tests for structs with inline union-typed fields.
+//
+// Union fields in structs are stored as 16-byte inline buffers (tag + payload).
+// These tests verify that RC values within union fields don't leak when the
+// struct goes out of scope.
+
+struct TaggedStr {
+    value: string | i64,
+    label: string,
+}
+
+struct OptionalStr {
+    value: string | nil,
+    count: i64,
+}
+
+struct TwoUnions {
+    first: string | i64,
+    second: string | nil,
+}
+
+tests "struct union field string variant leak" {
+    test "create and drop struct with string union" {
+        let s = TaggedStr { value: "hello", label: "tag" }
+        assert(s.value is string)
+    }
+
+    test "create and drop struct with i64 union" {
+        let s = TaggedStr { value: 42, label: "num" }
+        assert(s.value is i64)
+    }
+
+    test "reassign union field from string to i64" {
+        var s = TaggedStr { value: "hello", label: "test" }
+        s.value = 99
+        assert(s.value is i64)
+    }
+
+    test "reassign union field from i64 to string" {
+        var s = TaggedStr { value: 42, label: "test" }
+        s.value = "world"
+        assert(s.value is string)
+    }
+
+    test "multiple reassignments of union field" {
+        var s = TaggedStr { value: "first", label: "multi" }
+        s.value = 1
+        s.value = "second"
+        s.value = 2
+        s.value = "third"
+        assert(s.value is string)
+    }
+}
+
+tests "struct optional union field leak" {
+    test "optional string some" {
+        let s = OptionalStr { value: "hello", count: 1 }
+        assert(s.value is string)
+    }
+
+    test "optional string nil" {
+        let s = OptionalStr { value: nil, count: 0 }
+        assert(s.value is nil)
+    }
+
+    test "reassign optional nil to string" {
+        var s = OptionalStr { value: nil, count: 1 }
+        s.value = "now set"
+        assert(s.value is string)
+    }
+
+    test "reassign optional string to nil" {
+        var s = OptionalStr { value: "was set", count: 2 }
+        s.value = nil
+        assert(s.value is nil)
+    }
+}
+
+tests "struct two union fields leak" {
+    test "both string variants" {
+        let s = TwoUnions { first: "a", second: "b" }
+        assert(s.first is string)
+        assert(s.second is string)
+    }
+
+    test "mixed variants" {
+        let s = TwoUnions { first: 42, second: nil }
+        assert(s.first is i64)
+        assert(s.second is nil)
+    }
+}
+
+func make_tagged_str() -> TaggedStr {
+    return TaggedStr { value: "from func", label: "ret" }
+}
+
+func check_tagged_str(s: TaggedStr) -> bool {
+    return s.value is string
+}
+
+tests "struct union field in function" {
+    test "return struct with string union" {
+        let s = make_tagged_str()
+        assert(s.value is string)
+        assert(s.label == "ret")
+    }
+
+    test "pass struct with union to function" {
+        let s = TaggedStr { value: "passed", label: "arg" }
+        assert(check_tagged_str(s))
+    }
+}
+
+tests "struct union field in loop" {
+    test "create structs with union in loop" {
+        var i: i64 = 0
+        while i < 5 {
+            let s = TaggedStr { value: "iter", label: "loop" }
+            assert(s.value is string)
+            i = i + 1
+        }
+    }
+
+    test "reassign union field in loop" {
+        var s = TaggedStr { value: "start", label: "loop" }
+        var i: i64 = 0
+        while i < 5 {
+            s.value = i
+            i = i + 1
+        }
+        assert(s.value is i64)
+    }
+}
