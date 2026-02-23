@@ -312,6 +312,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(terminated)
     }
 
+    /// Compile the body of a VIR while loop, managing loop state and RC scopes.
+    ///
+    /// Mirrors [`compile_loop_body`] but operates on a `VirBody` instead of an
+    /// AST `Block`.
+    pub fn compile_vir_loop_body(
+        &mut self,
+        body: &vole_vir::VirBody,
+        exit_block: cranelift::prelude::Block,
+        continue_block: cranelift::prelude::Block,
+    ) -> CodegenResult<bool> {
+        let rc_depth = self.rc_scope_depth();
+        self.cf.push_loop(exit_block, continue_block, rc_depth);
+        self.push_rc_scope();
+        let (terminated, _) = self.compile_vir_body(body)?;
+        self.cf.pop_loop();
+        if !terminated {
+            self.pop_rc_scope_with_cleanup(None)?;
+            self.builder.ins().jump(continue_block, &[]);
+        } else {
+            self.rc_scopes.pop_scope();
+        }
+        Ok(terminated)
+    }
+
     /// Finalize a for-loop by switching to exit_block and sealing internal blocks.
     ///
     /// Standard for-loop structure has 4 blocks: header, body, continue, exit.

@@ -594,6 +594,12 @@ impl Cg<'_, '_, '_> {
                 ty,
             } => self.compile_vir_if(cond, then_body, else_body.as_ref(), *ty),
 
+            VirExpr::Block {
+                stmts,
+                trailing,
+                ty: _,
+            } => self.compile_vir_block(stmts, trailing.as_deref()),
+
             // -- Ast escape hatch -----------------------------------------
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),
 

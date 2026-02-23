@@ -642,4 +642,34 @@ impl Cg<'_, '_, '_> {
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }
+
+    // =========================================================================
+    // VIR Block expression
+    // =========================================================================
+
+    /// Compile a VIR `Block` expression.
+    ///
+    /// Pushes an RC scope, compiles statements sequentially, then compiles
+    /// the trailing expression (if any).  Mirrors [`block_expr`] but operates
+    /// on VIR nodes instead of AST nodes.
+    pub(super) fn compile_vir_block(
+        &mut self,
+        stmts: &[vole_vir::VirStmt],
+        trailing: Option<&vole_vir::VirExpr>,
+    ) -> CodegenResult<CompiledValue> {
+        self.push_rc_scope();
+
+        for vir_stmt in stmts {
+            self.compile_vir_stmt(vir_stmt)?;
+        }
+
+        let result = if let Some(trailing_expr) = trailing {
+            self.compile_vir_expr(trailing_expr)?
+        } else {
+            self.void_value()
+        };
+
+        self.pop_rc_scope_with_cleanup(None)?;
+        Ok(result)
+    }
 }

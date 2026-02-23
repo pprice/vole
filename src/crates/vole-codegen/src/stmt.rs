@@ -1119,9 +1119,41 @@ impl Cg<'_, '_, '_> {
                 compiled.mark_consumed();
                 Ok(false)
             }
+            VirStmt::While { cond, body } => self.compile_vir_while(cond, body),
             VirStmt::Ast { stmt } => self.stmt(stmt),
             // Future phases add arms here
             _ => todo!("VIR stmt not yet implemented: {vir_stmt:?}"),
         }
+    }
+
+    /// Compile a VIR while loop.
+    ///
+    /// Creates header/body/exit blocks, compiles the condition and body using
+    /// VIR compilation methods.  Mirrors the existing `Stmt::While` handling
+    /// in `stmt()`.
+    fn compile_vir_while(
+        &mut self,
+        cond: &vole_vir::VirExpr,
+        body: &vole_vir::VirBody,
+    ) -> CodegenResult<bool> {
+        let header_block = self.builder.create_block();
+        let body_block = self.builder.create_block();
+        let exit_block = self.builder.create_block();
+
+        self.builder.ins().jump(header_block, &[]);
+
+        self.switch_to_block(header_block);
+        let condition = self.compile_vir_expr(cond)?;
+        self.emit_brif(condition.value, body_block, exit_block);
+
+        self.switch_to_block(body_block);
+        self.compile_vir_loop_body(body, exit_block, header_block)?;
+
+        self.switch_to_block(exit_block);
+
+        self.builder.seal_block(header_block);
+        self.builder.seal_block(body_block);
+
+        Ok(false)
     }
 }
