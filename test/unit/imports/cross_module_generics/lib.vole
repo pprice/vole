@@ -1,0 +1,154 @@
+// Module providing generic classes for cross-module instantiation tests (vol-tmiz).
+//
+// Tests that generic definitions in one module can be instantiated with
+// concrete types from another module, with fully resolved types through
+// the full pipeline: sema -> lower -> codegen -> execute.
+
+// --- Generic classes ---
+
+// Simple generic wrapper with static constructor and instance methods
+class Box<T> {
+    value: T,
+
+    statics {
+        func of(v: T) -> Box<T> {
+            return Box { value: v }
+        }
+    }
+
+    func unwrap() -> T {
+        return self.value
+    }
+
+    func replace(v: T) -> Box<T> {
+        return Box { value: v }
+    }
+}
+
+// Generic pair with multiple type parameters
+class Pair<A, B> {
+    first: A,
+    second: B,
+
+    func get_first() -> A {
+        return self.first
+    }
+
+    func get_second() -> B {
+        return self.second
+    }
+
+    // Returns same monomorphization Pair<A, B>
+    func with_first(a: A) -> Pair<A, B> {
+        return Pair { first: a, second: self.second }
+    }
+
+    // Returns same monomorphization Pair<A, B>
+    func with_second(b: B) -> Pair<A, B> {
+        return Pair { first: self.first, second: b }
+    }
+}
+
+// Generic class with union-typed field (T | nil pattern)
+// Tests that union tag indices are correctly recomputed after monomorphization
+class Maybe<T> {
+    _value: T | nil,
+
+    statics {
+        func some(v: T) -> Maybe<T> {
+            return Maybe { _value: v }
+        }
+
+        func none() -> Maybe<T> {
+            return Maybe { _value: nil }
+        }
+    }
+
+    func is_some() -> bool {
+        if self._value is nil {
+            return false
+        }
+        return true
+    }
+
+    func is_none() -> bool {
+        return !self.is_some()
+    }
+}
+
+// Nested generics: a class wrapping another generic class (Box<T>)
+// Tests that generic class composition works across module boundaries.
+// Labeled.create() internally calls Box.of() and Labeled.get_value()
+// internally calls Box.unwrap(), exercising cross-class generic dispatch
+// within the module.
+class Labeled<T> {
+    label: string,
+    content: Box<T>,
+
+    statics {
+        func create(label: string, content_value: T) -> Labeled<T> {
+            return Labeled { label: label, content: Box.of(content_value) }
+        }
+    }
+
+    func get_label() -> string {
+        return self.label
+    }
+
+    func get_value() -> T {
+        return self.content.unwrap()
+    }
+}
+
+// Generic class with array-typed field
+class Accumulator<T> {
+    items: [T],
+
+    statics {
+        func from_array(arr: [T]) -> Accumulator<T> {
+            return Accumulator { items: arr }
+        }
+    }
+
+    func count() -> i64 {
+        return self.items.length()
+    }
+
+    func first() -> T {
+        return self.items[0]
+    }
+
+    func last() -> T {
+        return self.items[self.items.length() - 1]
+    }
+}
+
+sentinel Empty
+
+// Generic class with sentinel union field (T | Empty pattern)
+// Different from T | nil: sentinel has a different sort key than nil,
+// testing that union tag recomputation works for non-nil sentinels too
+class Slot<T> {
+    _value: T | Empty,
+
+    statics {
+        func filled(v: T) -> Slot<T> {
+            return Slot { _value: v }
+        }
+
+        func vacant() -> Slot<T> {
+            return Slot { _value: Empty }
+        }
+    }
+
+    func is_filled() -> bool {
+        if self._value is Empty {
+            return false
+        }
+        return true
+    }
+
+    func is_vacant() -> bool {
+        return !self.is_filled()
+    }
+}

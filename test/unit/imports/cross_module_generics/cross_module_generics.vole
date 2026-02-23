@@ -1,0 +1,464 @@
+// Cross-module generic instantiation validation (vol-tmiz)
+//
+// Validates that generic classes defined in one module and instantiated in
+// another produce correct VIR with fully resolved types through the full
+// pipeline: sema -> lower -> codegen -> execute.
+//
+// Exercises:
+// - Generic classes with static constructors (Box.of, Maybe.some, etc.)
+// - Instance methods on monomorphized generic classes
+// - Multiple type parameters (Pair<A, B>)
+// - Union-typed fields (T | nil, T | sentinel)
+// - Nested generic classes (Labeled<T> wrapping Box<T>)
+// - Array-typed generic fields (Accumulator<T>)
+// - Multiple instantiations of the same generic with different types
+// - Method chaining on cross-module generic instances
+// - Interaction with stdlib types
+let lib = import "./lib"
+
+// ── Generic class: Box<T> ───────────────────────────────────────────
+
+tests "cross-module Box<T> static constructor and instance methods" {
+    test "Box.of with i64" {
+        let b = lib.Box.of(100)
+        assert(b.unwrap() == 100)
+    }
+
+    test "Box.of with string" {
+        let b = lib.Box.of("boxed")
+        assert(b.unwrap() == "boxed")
+    }
+
+    test "Box.of with f64" {
+        let b = lib.Box.of(1.5)
+        assert(b.unwrap() == 1.5)
+    }
+
+    test "Box.of with bool" {
+        let b = lib.Box.of(true)
+        assert(b.unwrap() == true)
+    }
+
+    test "Box.replace creates new Box preserving type" {
+        let b = lib.Box.of(10)
+        let b2 = b.replace(20)
+        assert(b2.unwrap() == 20)
+    }
+
+    test "Box.replace with string value" {
+        let b = lib.Box.of("first")
+        let b2 = b.replace("second")
+        assert(b2.unwrap() == "second")
+    }
+
+    test "Box.replace chained multiple times" {
+        let result = lib.Box.of(1).replace(2).replace(3)
+        assert(result.unwrap() == 3)
+    }
+
+    test "Box direct field access" {
+        let b = lib.Box.of(42)
+        assert(b.value == 42)
+    }
+
+    test "Box literal construction via module type" {
+        let b = lib.Box { value: 77 }
+        assert(b.unwrap() == 77)
+    }
+}
+
+// ── Generic class: Pair<A, B> ────────────────────────────────────────
+
+tests "cross-module Pair<A, B> with multiple type parameters" {
+    test "Pair with i64 and string" {
+        let p = lib.Pair { first: 1, second: "one" }
+        assert(p.get_first() == 1)
+        assert(p.get_second() == "one")
+    }
+
+    test "Pair with string and bool" {
+        let p = lib.Pair { first: "flag", second: false }
+        assert(p.get_first() == "flag")
+        assert(p.get_second() == false)
+    }
+
+    test "Pair with f64 and i64" {
+        let p = lib.Pair { first: 9.81, second: 10 }
+        assert(p.get_first() == 9.81)
+        assert(p.get_second() == 10)
+    }
+
+    test "Pair with same type (i64, i64)" {
+        let p = lib.Pair { first: 10, second: 20 }
+        assert(p.get_first() == 10)
+        assert(p.get_second() == 20)
+    }
+
+    test "Pair with same type (string, string)" {
+        let p = lib.Pair { first: "hello", second: "world" }
+        assert(p.get_first() == "hello")
+        assert(p.get_second() == "world")
+    }
+
+    test "Pair.with_first replaces first element" {
+        let p = lib.Pair { first: 1, second: "one" }
+        let q = p.with_first(99)
+        assert(q.get_first() == 99)
+        assert(q.get_second() == "one")
+    }
+
+    test "Pair.with_second replaces second element" {
+        let p = lib.Pair { first: 1, second: "one" }
+        let q = p.with_second("ninety-nine")
+        assert(q.get_first() == 1)
+        assert(q.get_second() == "ninety-nine")
+    }
+
+    test "Pair.with_first then with_second chained" {
+        let p = lib.Pair { first: 0, second: "zero" }
+        let q = p.with_first(1).with_second("one")
+        assert(q.get_first() == 1)
+        assert(q.get_second() == "one")
+    }
+
+    test "Pair direct field access" {
+        let p = lib.Pair { first: 42, second: true }
+        assert(p.first == 42)
+        assert(p.second == true)
+    }
+}
+
+// ── Generic class: Maybe<T> with union field ────────────────────────
+
+tests "cross-module Maybe<T> with T | nil union field" {
+    test "Maybe.some with i64" {
+        let m = lib.Maybe.some(42)
+        assert(m.is_some())
+        assert(!m.is_none())
+    }
+
+    test "Maybe.none with i64" {
+        let m = lib.Maybe.none<i64>()
+        assert(m.is_none())
+        assert(!m.is_some())
+    }
+
+    test "Maybe.some with string" {
+        let m = lib.Maybe.some("present")
+        assert(m.is_some())
+        assert(!m.is_none())
+    }
+
+    test "Maybe.none with string" {
+        let m = lib.Maybe.none<string>()
+        assert(m.is_none())
+        assert(!m.is_some())
+    }
+
+    test "Maybe.some with bool" {
+        let m = lib.Maybe.some(true)
+        assert(m.is_some())
+    }
+
+    test "Maybe.none with bool" {
+        let m = lib.Maybe.none<bool>()
+        assert(m.is_none())
+    }
+
+    test "Maybe.some with f64" {
+        let m = lib.Maybe.some(9.81)
+        assert(m.is_some())
+    }
+
+    test "Maybe.none with f64" {
+        let m = lib.Maybe.none<f64>()
+        assert(m.is_none())
+    }
+}
+
+// ── Generic class: Slot<T> with sentinel union field ────────────────
+
+tests "cross-module Slot<T> with T | Empty sentinel union" {
+    test "Slot.filled with i64" {
+        let s = lib.Slot.filled(42)
+        assert(s.is_filled())
+        assert(!s.is_vacant())
+    }
+
+    test "Slot.vacant with i64" {
+        let s = lib.Slot.vacant<i64>()
+        assert(s.is_vacant())
+        assert(!s.is_filled())
+    }
+
+    test "Slot.filled with string" {
+        let s = lib.Slot.filled("occupied")
+        assert(s.is_filled())
+        assert(!s.is_vacant())
+    }
+
+    test "Slot.vacant with string" {
+        let s = lib.Slot.vacant<string>()
+        assert(s.is_vacant())
+        assert(!s.is_filled())
+    }
+
+    test "Slot.filled with bool" {
+        let s = lib.Slot.filled(false)
+        assert(s.is_filled())
+    }
+
+    test "Slot.vacant with bool" {
+        let s = lib.Slot.vacant<bool>()
+        assert(s.is_vacant())
+    }
+
+    test "Slot.filled with f64" {
+        let s = lib.Slot.filled(2.718)
+        assert(s.is_filled())
+    }
+
+    test "Slot.vacant with f64" {
+        let s = lib.Slot.vacant<f64>()
+        assert(s.is_vacant())
+    }
+}
+
+// ── Nested generic classes ──────────────────────────────────────────
+
+tests "cross-module Labeled<T> wrapping Box<T> (nested generics)" {
+    // Labeled.create() internally calls Box.of() and Labeled.get_value()
+    // internally calls Box.unwrap(), exercising cross-class generic dispatch
+    // within the module.
+
+    test "Labeled.create with i64" {
+        let item = lib.Labeled.create("count", 42)
+        assert(item.get_label() == "count")
+        assert(item.get_value() == 42)
+    }
+
+    test "Labeled.create with string" {
+        let item = lib.Labeled.create("greeting", "hello")
+        assert(item.get_label() == "greeting")
+        assert(item.get_value() == "hello")
+    }
+
+    test "Labeled.create with f64" {
+        let item = lib.Labeled.create("pi", 3.14159)
+        assert(item.get_label() == "pi")
+        assert(item.get_value() == 3.14159)
+    }
+
+    test "Labeled.create with bool" {
+        let item = lib.Labeled.create("flag", true)
+        assert(item.get_label() == "flag")
+        assert(item.get_value() == true)
+    }
+
+    test "Labeled content field exposes inner Box" {
+        let item = lib.Labeled.create("inner", 99)
+        assert(item.content.unwrap() == 99)
+    }
+
+    test "Labeled nested field access through Box" {
+        let item = lib.Labeled.create("deep", 7)
+        assert(item.label == "deep")
+        assert(item.content.value == 7)
+    }
+}
+
+// ── Generic class with array field ──────────────────────────────────
+
+tests "cross-module Accumulator<T> with array field" {
+    test "Accumulator.from_array with i64" {
+        let acc = lib.Accumulator.from_array([10, 20, 30])
+        assert(acc.count() == 3)
+        assert(acc.first() == 10)
+        assert(acc.last() == 30)
+    }
+
+    test "Accumulator.from_array with string" {
+        let acc = lib.Accumulator.from_array(["a", "b", "c", "d"])
+        assert(acc.count() == 4)
+        assert(acc.first() == "a")
+        assert(acc.last() == "d")
+    }
+
+    test "Accumulator.from_array with bool" {
+        let acc = lib.Accumulator.from_array([true, false, true])
+        assert(acc.count() == 3)
+        assert(acc.first() == true)
+        assert(acc.last() == true)
+    }
+
+    test "Accumulator.from_array with f64" {
+        let acc = lib.Accumulator.from_array([1.1, 2.2])
+        assert(acc.count() == 2)
+        assert(acc.first() == 1.1)
+        assert(acc.last() == 2.2)
+    }
+
+    test "Accumulator single element: first equals last" {
+        let acc = lib.Accumulator.from_array([42])
+        assert(acc.count() == 1)
+        assert(acc.first() == 42)
+        assert(acc.last() == 42)
+    }
+
+    test "Accumulator items field accessible via stdlib array methods" {
+        let acc = lib.Accumulator.from_array([5, 10, 15])
+        assert(acc.items.length() == 3)
+        assert(acc.items[1] == 10)
+    }
+}
+
+// ── Multiple instantiations of same generic in one test ─────────────
+
+tests "cross-module multiple instantiations of same generic" {
+    test "Box.of instantiated with four different types in one test" {
+        let b1 = lib.Box.of(10)
+        let b2 = lib.Box.of("ten")
+        let b3 = lib.Box.of(true)
+        let b4 = lib.Box.of(1.1)
+        assert(b1.unwrap() == 10)
+        assert(b2.unwrap() == "ten")
+        assert(b3.unwrap() == true)
+        assert(b4.unwrap() == 1.1)
+    }
+
+    test "Pair with various type combinations in one test" {
+        let p1 = lib.Pair { first: 1, second: 2 }
+        let p2 = lib.Pair { first: "a", second: "b" }
+        let p3 = lib.Pair { first: 1, second: "one" }
+        let p4 = lib.Pair { first: true, second: 3.14 }
+        assert(p1.first == 1)
+        assert(p1.second == 2)
+        assert(p2.first == "a")
+        assert(p2.second == "b")
+        assert(p3.first == 1)
+        assert(p3.second == "one")
+        assert(p4.first == true)
+        assert(p4.second == 3.14)
+    }
+
+    test "Maybe.some with all four primitive types in one test" {
+        let m1 = lib.Maybe.some(42)
+        let m2 = lib.Maybe.some("hello")
+        let m3 = lib.Maybe.some(true)
+        let m4 = lib.Maybe.some(3.14)
+        assert(m1.is_some())
+        assert(m2.is_some())
+        assert(m3.is_some())
+        assert(m4.is_some())
+    }
+
+    test "Maybe.none with all four primitive types in one test" {
+        let m1 = lib.Maybe.none<i64>()
+        let m2 = lib.Maybe.none<string>()
+        let m3 = lib.Maybe.none<bool>()
+        let m4 = lib.Maybe.none<f64>()
+        assert(m1.is_none())
+        assert(m2.is_none())
+        assert(m3.is_none())
+        assert(m4.is_none())
+    }
+
+    test "Slot filled and vacant with multiple types in one test" {
+        let s1 = lib.Slot.filled(1)
+        let s2 = lib.Slot.filled("one")
+        let v1 = lib.Slot.vacant<i64>()
+        let v2 = lib.Slot.vacant<string>()
+        assert(s1.is_filled())
+        assert(s2.is_filled())
+        assert(v1.is_vacant())
+        assert(v2.is_vacant())
+    }
+
+    test "Accumulator with different element types in one test" {
+        let a1 = lib.Accumulator.from_array([1, 2, 3])
+        let a2 = lib.Accumulator.from_array(["x", "y"])
+        assert(a1.count() == 3)
+        assert(a1.first() == 1)
+        assert(a2.count() == 2)
+        assert(a2.first() == "x")
+    }
+
+    test "Labeled with different value types in one test" {
+        let l1 = lib.Labeled.create("int", 42)
+        let l2 = lib.Labeled.create("str", "hello")
+        let l3 = lib.Labeled.create("flt", 3.14)
+        assert(l1.get_value() == 42)
+        assert(l2.get_value() == "hello")
+        assert(l3.get_value() == 3.14)
+    }
+}
+
+// ── Cross-module generics interacting with stdlib types ─────────────
+
+tests "cross-module generics interacting with stdlib types" {
+    test "Box containing an array" {
+        let b = lib.Box.of([1, 2, 3])
+        let arr = b.unwrap()
+        assert(arr.length() == 3)
+        assert(arr[0] == 1)
+        assert(arr[2] == 3)
+    }
+
+    test "Pair of two arrays" {
+        let p = lib.Pair { first: [1, 2], second: ["a", "b"] }
+        assert(p.get_first().length() == 2)
+        assert(p.get_second().length() == 2)
+        assert(p.get_first()[0] == 1)
+        assert(p.get_second()[1] == "b")
+    }
+
+    test "Accumulator items accessed via stdlib array indexing" {
+        let acc = lib.Accumulator.from_array([10, 20, 30, 40, 50])
+        assert(acc.items.length() == 5)
+        assert(acc.items[2] == 30)
+    }
+
+    test "Labeled with string value, lengths via stdlib string method" {
+        let item = lib.Labeled.create("long-label", "value")
+        assert(item.get_label().length() == 10)
+        assert(item.get_value().length() == 5)
+    }
+
+    test "Box containing a string, string methods on unwrapped value" {
+        let b = lib.Box.of("hello world")
+        assert(b.unwrap().length() == 11)
+    }
+}
+
+// ── Cross-module generic method chaining ─────────────────────────────
+
+tests "cross-module generic method chaining" {
+    test "Box.replace chained from static constructor" {
+        let result = lib.Box.of(1).replace(2).replace(3).unwrap()
+        assert(result == 3)
+    }
+
+    test "Pair.with_first and with_second chained" {
+        let result = lib.Pair { first: 0, second: "zero" }
+            .with_first(1)
+            .with_second("one")
+            .with_first(2)
+        assert(result.get_first() == 2)
+        assert(result.get_second() == "one")
+    }
+
+    test "Accumulator methods chained on result" {
+        let acc = lib.Accumulator.from_array([5, 10, 15, 20])
+        assert(acc.count() == 4)
+        assert(acc.first() == 5)
+        assert(acc.last() == 20)
+    }
+
+    test "Labeled get_label and get_value called in sequence" {
+        let item = lib.Labeled.create("tag", 999)
+        let label = item.get_label()
+        let content = item.get_value()
+        assert(label == "tag")
+        assert(content == 999)
+    }
+}
