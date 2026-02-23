@@ -650,15 +650,20 @@ impl Cg<'_, '_, '_> {
                 todo!("VIR FieldStore: lowering still emits Ast escape hatch")
             }
 
-            // -- RC operations (todo) -------------------------------------
-            VirExpr::RcInc { .. } => {
-                todo!("VIR RcInc expr: lowering still emits Ast escape hatch")
+            // -- RC operations ------------------------------------------------
+            VirExpr::RcInc { value } => {
+                let compiled = self.compile_vir_expr(value)?;
+                self.emit_rc_inc(compiled.value)?;
+                Ok(compiled)
             }
-            VirExpr::RcDec { .. } => {
-                todo!("VIR RcDec expr: lowering still emits Ast escape hatch")
+            VirExpr::RcDec { value } => {
+                let compiled = self.compile_vir_expr(value)?;
+                self.emit_rc_dec(compiled.value)?;
+                Ok(compiled)
             }
-            VirExpr::RcMove { .. } => {
-                todo!("VIR RcMove expr: lowering still emits Ast escape hatch")
+            VirExpr::RcMove { value } => {
+                // Ownership transfer marker — no runtime effect, just pass through.
+                self.compile_vir_expr(value)
             }
 
             // -- Type operations (todo) -----------------------------------
