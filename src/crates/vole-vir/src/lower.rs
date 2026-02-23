@@ -247,6 +247,15 @@ fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRe
         }
         ExprKind::Binary(bin_expr) => lower_binary(bin_expr, expr, ty, node_map, interner),
         ExprKind::Unary(un_expr) => lower_unary(un_expr, ty, node_map, interner),
+        // Ast escape hatches — explicitly listed so new ExprKind variants
+        // cause a compile error rather than silently falling through.
+        ExprKind::Range(_)
+        | ExprKind::Unreachable
+        | ExprKind::Import(_)
+        | ExprKind::TypeLiteral(_) => Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        }),
         // Everything else: Ast escape hatch
         _ => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
@@ -1283,5 +1292,85 @@ mod tests {
         assert_eq!(map_unary_op(UnaryOp::Neg), VirUnOp::Neg);
         assert_eq!(map_unary_op(UnaryOp::Not), VirUnOp::Not);
         assert_eq!(map_unary_op(UnaryOp::BitNot), VirUnOp::BitNot);
+    }
+
+    // -----------------------------------------------------------------------
+    // Ast escape hatch lowering: Range, Unreachable, Import, TypeLiteral
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn lower_expr_range_becomes_ast() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Range(Box::new(vole_frontend::ast::RangeExpr {
+                start: make_int_expr(0),
+                end: make_int_expr(10),
+                inclusive: false,
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for Range, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_unreachable_becomes_ast() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Unreachable,
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for Unreachable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_import_becomes_ast() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Import("std:math".to_string()),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for Import, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_type_literal_becomes_ast() {
+        use vole_frontend::ast::{PrimitiveType, TypeExpr, TypeExprKind};
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::TypeLiteral(Box::new(TypeExpr {
+                kind: TypeExprKind::Primitive(PrimitiveType::I64),
+                span: dummy_span(),
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for TypeLiteral, got {other:?}"),
+        }
     }
 }
