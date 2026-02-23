@@ -1109,11 +1109,16 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR statement node.
     ///
-    /// In Phase 0, every VIR statement is the `Ast` escape hatch, which
-    /// delegates to the existing `self.stmt()` method. Future phases will add
-    /// arms for lowered VIR statement variants.
+    /// Handles lowered VIR variants directly, and delegates `Ast` escape
+    /// hatches to the existing `self.stmt()` method.
     pub fn compile_vir_stmt(&mut self, vir_stmt: &VirStmt) -> CodegenResult<bool> {
         match vir_stmt {
+            VirStmt::Expr { value } => {
+                let mut compiled = self.compile_vir_expr(value)?;
+                // Discard the value — expression used as statement.
+                compiled.mark_consumed();
+                Ok(false)
+            }
             VirStmt::Ast { stmt } => self.stmt(stmt),
             // Future phases add arms here
             _ => todo!("VIR stmt not yet implemented: {vir_stmt:?}"),

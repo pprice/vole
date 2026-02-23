@@ -533,8 +533,9 @@ fn compile_trailing_vir_expr(
 
 /// Compile a VIR block body (trailing=None), with trailing-expression detection.
 ///
-/// Peeks into the last `VirStmt::Ast` to detect a trailing `Stmt::Expr` for
-/// the Rust-like implicit return heuristic.
+/// Peeks into the last statement to detect a trailing expression for the
+/// Rust-like implicit return heuristic. Handles both `VirStmt::Ast` (wrapping
+/// `Stmt::Expr`) and lowered `VirStmt::Expr` variants.
 #[allow(clippy::type_complexity)]
 fn compile_vir_block_body(
     cg: &mut Cg,
@@ -544,7 +545,9 @@ fn compile_vir_block_body(
         && matches!(
             stmts.last(),
             Some(VirStmt::Ast { stmt }) if matches!(stmt.as_ref(), Stmt::Expr(_))
-        );
+        )
+        || cg.return_type.is_some_and(|ret| !cg.arena().is_void(ret))
+            && matches!(stmts.last(), Some(VirStmt::Expr { .. }));
 
     if has_trailing_expr {
         // Compile all statements except the trailing expression
@@ -558,16 +561,25 @@ fn compile_vir_block_body(
         if terminated {
             return Ok((true, None));
         }
-        // Extract the trailing expression from the last VirStmt::Ast
-        let trailing = match stmts.last() {
+        // Compile the trailing expression
+        let (value, skip_var) = match stmts.last() {
             Some(VirStmt::Ast { stmt }) => match stmt.as_ref() {
-                Stmt::Expr(expr_stmt) => &expr_stmt.expr,
+                Stmt::Expr(expr_stmt) => {
+                    let value = cg.expr(&expr_stmt.expr)?;
+                    let skip_var = extract_rc_skip_var(cg, &expr_stmt.expr);
+                    (value, skip_var)
+                }
                 _ => unreachable!(),
             },
+            Some(VirStmt::Expr { value: vir_expr }) => {
+                let compiled = cg.compile_vir_expr(vir_expr)?;
+                // Lowered VIR expressions (literals, etc.) are never identifiers,
+                // so there is no RC skip variable to extract.
+                (compiled, None)
+            }
             _ => unreachable!(),
         };
-        let mut value = cg.expr(trailing)?;
-        let skip_var = extract_rc_skip_var(cg, trailing);
+        let mut value = value;
         if skip_var.is_none() && value.is_borrowed() {
             if cg.rc_state(value.type_id).needs_cleanup() {
                 cg.emit_rc_inc_for_type(value.value, value.type_id)?;

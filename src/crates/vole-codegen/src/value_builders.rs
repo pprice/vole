@@ -115,6 +115,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(value, ty, type_id)
     }
 
+    /// Create a wide (i128/f128) literal from pre-split low/high u64 halves.
+    ///
+    /// Used by `compile_vir_expr` for `VirExpr::WideLiteral`. The low/high
+    /// values are produced during VIR lowering when the type is i128 or f128.
+    pub fn wide_literal_const(&mut self, low: u64, high: u64, type_id: TypeId) -> CompiledValue {
+        let low_val = self.iconst_cached(types::I64, low as i64);
+        let high_val = self.iconst_cached(types::I64, high as i64);
+        let i128_val = crate::structs::reconstruct_i128(self.builder, low_val, high_val);
+        if type_id == TypeId::F128 {
+            let value = self
+                .builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), i128_val);
+            CompiledValue::new(value, types::F128, type_id)
+        } else {
+            CompiledValue::new(i128_val, types::I128, type_id)
+        }
+    }
+
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
         let arena = self.arena();

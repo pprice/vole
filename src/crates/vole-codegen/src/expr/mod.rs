@@ -532,12 +532,33 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR expression node.
     ///
-    /// In Phase 0, every VIR expression is the `Ast` escape hatch, which
-    /// delegates to the existing `self.expr()` method. Future phases will add
-    /// arms for lowered VIR expression variants.
+    /// Handles lowered VIR variants directly, and delegates `Ast` escape
+    /// hatches to the existing `self.expr()` method.
     pub fn compile_vir_expr(&mut self, vir_expr: &VirExpr) -> CodegenResult<CompiledValue> {
         match vir_expr {
+            // -- Lowered literals -----------------------------------------
+            VirExpr::IntLiteral { value, ty } => {
+                let type_id = if *ty == TypeId::UNKNOWN {
+                    TypeId::I64
+                } else {
+                    *ty
+                };
+                Ok(self.int_const(*value, type_id))
+            }
+            VirExpr::WideLiteral { low, high, ty } => Ok(self.wide_literal_const(*low, *high, *ty)),
+            VirExpr::FloatLiteral { value, ty } => {
+                let type_id = if *ty == TypeId::UNKNOWN {
+                    TypeId::F64
+                } else {
+                    *ty
+                };
+                Ok(self.float_const(*value, type_id))
+            }
+            VirExpr::BoolLiteral(b) => Ok(self.bool_const(*b)),
+
+            // -- Ast escape hatch -----------------------------------------
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),
+
             // Future phases add arms here
             _ => todo!("VIR expr not yet implemented: {vir_expr:?}"),
         }

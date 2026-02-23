@@ -112,7 +112,7 @@ impl AnalyzedProgram {
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
         let vir_function_map = build_vir_function_map(&vir_functions);
         let vir_method_map = build_vir_method_map(&vir_functions);
-        let vir_test_bodies = lower_test_bodies(&program);
+        let vir_test_bodies = lower_test_bodies(&program, &output.node_map);
         Self {
             program,
             interner: Rc::new(interner),
@@ -740,11 +740,11 @@ fn lower_module_type_methods(
 /// Walks the program's `Decl::Tests` blocks (including nested ones) and
 /// lowers each `TestCase.body` to a `VirBody`.  Returns a map keyed by
 /// the `TestCase`'s `Span` for O(1) lookup during test compilation.
-fn lower_test_bodies(program: &Program) -> FxHashMap<Span, VirBody> {
+fn lower_test_bodies(program: &Program, node_map: &NodeMap) -> FxHashMap<Span, VirBody> {
     let mut map = FxHashMap::default();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
-            lower_tests_decl_bodies(tests_decl, &mut map);
+            lower_tests_decl_bodies(tests_decl, node_map, &mut map);
         }
     }
     map
@@ -753,16 +753,17 @@ fn lower_test_bodies(program: &Program) -> FxHashMap<Span, VirBody> {
 /// Recursively lower test bodies from a single `TestsDecl`.
 fn lower_tests_decl_bodies(
     tests_decl: &vole_frontend::ast::TestsDecl,
+    node_map: &NodeMap,
     map: &mut FxHashMap<Span, VirBody>,
 ) {
     for test in &tests_decl.tests {
-        let vir_body = lower_test_body(&test.body);
+        let vir_body = lower_test_body(&test.body, node_map);
         map.insert(test.span, vir_body);
     }
     // Recurse into nested tests blocks
     for decl in &tests_decl.decls {
         if let Decl::Tests(nested) = decl {
-            lower_tests_decl_bodies(nested, map);
+            lower_tests_decl_bodies(nested, node_map, map);
         }
     }
 }
