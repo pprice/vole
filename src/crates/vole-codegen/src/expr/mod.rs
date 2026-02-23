@@ -586,6 +586,14 @@ impl Cg<'_, '_, '_> {
             // -- Calls ----------------------------------------------------
             VirExpr::Call { target, args, ty } => self.compile_vir_call(target, args, *ty),
 
+            // -- Control flow ---------------------------------------------
+            VirExpr::If {
+                cond,
+                then_body,
+                else_body,
+                ty,
+            } => self.compile_vir_if(cond, then_body, else_body.as_ref(), *ty),
+
             // -- Ast escape hatch -----------------------------------------
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),
 

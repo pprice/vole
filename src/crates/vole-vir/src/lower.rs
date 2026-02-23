@@ -211,14 +211,27 @@ fn lower_stmts(stmts: &[Stmt], node_map: &NodeMap, interner: &mut Interner) -> V
 /// Lower a single AST statement into a VIR statement.
 ///
 /// Expression statements (`Stmt::Expr`) are lowered through `lower_expr`,
-/// which produces proper VIR for known expression kinds. All other
+/// which produces proper VIR for known expression kinds.  All other
 /// statement kinds are wrapped in the `VirStmt::Ast` escape hatch.
+///
+/// Each variant is listed explicitly so that adding a new `Stmt` variant
+/// causes a compile error rather than silently falling through a wildcard.
 fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interner) -> VirStmt {
     match stmt {
         Stmt::Expr(expr_stmt) => VirStmt::Expr {
             value: lower_expr(&expr_stmt.expr, node_map, interner),
         },
-        _ => VirStmt::Ast {
+        // Ast escape hatches — explicitly listed so new Stmt variants
+        // cause a compile error rather than silently falling through.
+        Stmt::Let(_)
+        | Stmt::LetTuple(_)
+        | Stmt::While(_)
+        | Stmt::For(_)
+        | Stmt::If(_)
+        | Stmt::Break(_)
+        | Stmt::Continue(_)
+        | Stmt::Return(_)
+        | Stmt::Raise(_) => VirStmt::Ast {
             stmt: Box::new(stmt.clone()),
         },
     }
@@ -315,22 +328,26 @@ fn lower_int_literal(value: i64, ty: TypeId) -> VirRef {
 
 /// Lower a binary expression.
 ///
-/// And/Or operators stay as `Ast` escape hatches (they require short-circuit
-/// control flow, handled in Phase 4).  String concatenation (string + string)
-/// is emitted as `StringConcat`.  All other binary operators become `BinaryOp`.
+/// And/Or operators are desugared into `VirExpr::If` for short-circuit
+/// evaluation:
+///   `a && b` → `if a { b } else { false }`
+///   `a || b` → `if a { true } else { b }`
+///
+/// String concatenation (string + string) is emitted as `StringConcat`.
+/// All other binary operators become `BinaryOp`.
 fn lower_binary(
     bin_expr: &vole_frontend::ast::BinaryExpr,
-    expr: &Expr,
+    _expr: &Expr,
     ty: TypeId,
     node_map: &NodeMap,
     interner: &mut Interner,
 ) -> VirRef {
-    // And/Or require short-circuit control flow — keep as Ast.
-    if matches!(bin_expr.op, BinaryOp::And | BinaryOp::Or) {
-        return Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        });
+    // And/Or: desugar to VirExpr::If for short-circuit evaluation.
+    if bin_expr.op == BinaryOp::And {
+        return lower_and(bin_expr, ty, node_map, interner);
+    }
+    if bin_expr.op == BinaryOp::Or {
+        return lower_or(bin_expr, ty, node_map, interner);
     }
 
     let lhs = lower_expr(&bin_expr.left, node_map, interner);
@@ -348,6 +365,52 @@ fn lower_binary(
         op: vir_op,
         lhs,
         rhs,
+        ty,
+    })
+}
+
+/// Desugar `a && b` → `if a { b } else { false }`.
+fn lower_and(
+    bin_expr: &vole_frontend::ast::BinaryExpr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let cond = lower_expr(&bin_expr.left, node_map, interner);
+    let then_val = lower_expr(&bin_expr.right, node_map, interner);
+    Box::new(VirExpr::If {
+        cond,
+        then_body: VirBody {
+            stmts: Vec::new(),
+            trailing: Some(then_val),
+        },
+        else_body: Some(VirBody {
+            stmts: Vec::new(),
+            trailing: Some(Box::new(VirExpr::BoolLiteral(false))),
+        }),
+        ty,
+    })
+}
+
+/// Desugar `a || b` → `if a { true } else { b }`.
+fn lower_or(
+    bin_expr: &vole_frontend::ast::BinaryExpr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let cond = lower_expr(&bin_expr.left, node_map, interner);
+    let else_val = lower_expr(&bin_expr.right, node_map, interner);
+    Box::new(VirExpr::If {
+        cond,
+        then_body: VirBody {
+            stmts: Vec::new(),
+            trailing: Some(Box::new(VirExpr::BoolLiteral(true))),
+        },
+        else_body: Some(VirBody {
+            stmts: Vec::new(),
+            trailing: Some(else_val),
+        }),
         ty,
     })
 }
@@ -1102,28 +1165,74 @@ mod tests {
     }
 
     #[test]
-    fn lower_binary_and_stays_as_ast() {
+    fn lower_binary_and_desugars_to_if() {
         let node_map = empty_node_map();
         let mut interner = test_interner();
         let expr = make_binary_expr(make_bool_expr(), BinaryOp::And, make_bool_expr());
         let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
+        // a && b → if a { b } else { false }
         match vir_ref.as_ref() {
-            VirExpr::Ast { .. } => {}
-            other => panic!("expected Ast escape hatch for And, got {other:?}"),
+            VirExpr::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                // Condition is the left operand (bool literal true)
+                match cond.as_ref() {
+                    VirExpr::BoolLiteral(true) => {}
+                    other => panic!("expected BoolLiteral(true) cond, got {other:?}"),
+                }
+                // Then branch is the right operand (bool literal true)
+                match then_body.trailing.as_deref() {
+                    Some(VirExpr::BoolLiteral(true)) => {}
+                    other => panic!("expected BoolLiteral(true) then, got {other:?}"),
+                }
+                // Else branch is BoolLiteral(false)
+                let else_body = else_body.as_ref().expect("And should have else body");
+                match else_body.trailing.as_deref() {
+                    Some(VirExpr::BoolLiteral(false)) => {}
+                    other => panic!("expected BoolLiteral(false) else, got {other:?}"),
+                }
+            }
+            other => panic!("expected If for And desugar, got {other:?}"),
         }
     }
 
     #[test]
-    fn lower_binary_or_stays_as_ast() {
+    fn lower_binary_or_desugars_to_if() {
         let node_map = empty_node_map();
         let mut interner = test_interner();
         let expr = make_binary_expr(make_bool_expr(), BinaryOp::Or, make_bool_expr());
         let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
+        // a || b → if a { true } else { b }
         match vir_ref.as_ref() {
-            VirExpr::Ast { .. } => {}
-            other => panic!("expected Ast escape hatch for Or, got {other:?}"),
+            VirExpr::If {
+                cond,
+                then_body,
+                else_body,
+                ..
+            } => {
+                // Condition is the left operand (bool literal true)
+                match cond.as_ref() {
+                    VirExpr::BoolLiteral(true) => {}
+                    other => panic!("expected BoolLiteral(true) cond, got {other:?}"),
+                }
+                // Then branch is BoolLiteral(true)
+                match then_body.trailing.as_deref() {
+                    Some(VirExpr::BoolLiteral(true)) => {}
+                    other => panic!("expected BoolLiteral(true) then, got {other:?}"),
+                }
+                // Else branch is the right operand (bool literal true)
+                let else_body = else_body.as_ref().expect("Or should have else body");
+                match else_body.trailing.as_deref() {
+                    Some(VirExpr::BoolLiteral(true)) => {}
+                    other => panic!("expected BoolLiteral(true) else, got {other:?}"),
+                }
+            }
+            other => panic!("expected If for Or desugar, got {other:?}"),
         }
     }
 

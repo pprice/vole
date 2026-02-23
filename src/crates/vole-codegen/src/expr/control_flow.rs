@@ -561,4 +561,85 @@ impl Cg<'_, '_, '_> {
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
     }
+
+    // =========================================================================
+    // VIR If expression
+    // =========================================================================
+
+    /// Compile a VIR `If` expression using block-based control flow.
+    ///
+    /// Similar to [`if_expr_blocks`] but operates on `VirBody` branches
+    /// instead of AST expression nodes.  Used by desugared And/Or operators
+    /// and will be used by future VIR-lowered `if` expressions.
+    pub(super) fn compile_vir_if(
+        &mut self,
+        cond: &vole_vir::VirExpr,
+        then_body: &vole_vir::VirBody,
+        else_body: Option<&vole_vir::VirBody>,
+        result_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let condition = self.compile_vir_expr(cond)?;
+        let is_void = self.arena().is_void(result_type_id);
+        let result_cranelift_type =
+            type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
+
+        // Create basic blocks
+        let then_block = self.builder.create_block();
+        let else_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+
+        if !is_void {
+            self.builder
+                .append_block_param(merge_block, result_cranelift_type);
+        }
+
+        self.emit_brif(condition.value, then_block, else_block);
+
+        let result_needs_rc = !is_void && self.rc_state(result_type_id).needs_cleanup();
+
+        // Compile then branch
+        self.switch_and_seal(then_block);
+        let (_, then_val) = self.compile_vir_body(then_body)?;
+        let then_result = then_val.unwrap_or_else(|| self.void_value());
+        if then_result.type_id == TypeId::NEVER {
+            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+        } else if !is_void {
+            self.jump_with_owned_result(
+                then_result,
+                result_type_id,
+                result_cranelift_type,
+                result_needs_rc,
+                merge_block,
+            )?;
+        } else {
+            self.builder.ins().jump(merge_block, &[]);
+        }
+
+        // Compile else branch
+        self.switch_and_seal(else_block);
+        let else_result = if let Some(else_body) = else_body {
+            let (_, val) = self.compile_vir_body(else_body)?;
+            val.unwrap_or_else(|| self.void_value())
+        } else {
+            self.void_value()
+        };
+        if else_result.type_id == TypeId::NEVER {
+            self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
+        } else if !is_void {
+            self.jump_with_owned_result(
+                else_result,
+                result_type_id,
+                result_cranelift_type,
+                result_needs_rc,
+                merge_block,
+            )?;
+        } else {
+            self.builder.ins().jump(merge_block, &[]);
+        }
+
+        // Continue in merge block
+        self.switch_and_seal(merge_block);
+
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
+    }
 }
