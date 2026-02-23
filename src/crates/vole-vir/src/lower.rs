@@ -150,6 +150,15 @@ fn debug_assert_concrete_types(
     );
 }
 
+/// Lower a test case body into a `VirBody`.
+///
+/// Test bodies use the same `FuncBody` type as functions, so this delegates
+/// to `lower_func_body`.  Exposed as a public API so the lowering pipeline
+/// in `analyzed.rs` can lower test bodies alongside function bodies.
+pub fn lower_test_body(body: &FuncBody) -> VirBody {
+    lower_func_body(body)
+}
+
 /// Lower a `FuncBody` (block or expression) into a `VirBody`.
 ///
 /// Block bodies have their statements wrapped individually; expression bodies

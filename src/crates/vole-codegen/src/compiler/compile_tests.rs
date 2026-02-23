@@ -97,11 +97,16 @@ impl Compiler<'_> {
                 cg.block(&let_block)?;
             }
 
-            // Compile test body
+            // Compile test body, using VIR path if available (AST fallback otherwise).
             // Note: For FuncBody::Expr, terminated=true but the block isn't actually
             // terminated (no return instruction). For FuncBody::Block, terminated=true
             // only if there's an explicit return/break. So we check both.
-            let (block_terminated, expr_value) = cg.compile_body(&test.body)?;
+            let vir_body = self.analyzed.get_vir_test(test.span);
+            let (block_terminated, expr_value) = if let Some(vir) = vir_body {
+                cg.compile_vir_body(vir)?
+            } else {
+                cg.compile_body(&test.body)?
+            };
 
             // Tests always return 0. Add return if block didn't explicitly terminate
             // or if it's an expression body.
@@ -442,9 +447,14 @@ impl Compiler<'_> {
                 &mut self.func_registry,
                 &mut self.pending_monomorphs,
             );
-            let (terminated, _) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
-                .compile_body(&test.body)?;
+            let vir_body = self.analyzed.get_vir_test(test.span);
+            let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env)
+                .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline);
+            let (terminated, _) = if let Some(vir) = vir_body {
+                cg.compile_vir_body(vir)?
+            } else {
+                cg.compile_body(&test.body)?
+            };
 
             finalize_function_body(builder, None, terminated, DefaultReturn::Zero);
         }

@@ -10,7 +10,10 @@ use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLook
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
-use vole_vir::{VirFunction, lower_function, lower_method, lower_monomorphized_function};
+use vole_vir::{
+    VirBody, VirFunction, lower_function, lower_method, lower_monomorphized_function,
+    lower_test_body,
+};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
@@ -45,6 +48,9 @@ pub struct AnalyzedProgram {
     /// Enables O(1) VIR function lookup for non-generic class/struct methods
     /// and static methods during compilation.
     pub vir_method_map: FxHashMap<MethodId, usize>,
+    /// VIR-lowered test function bodies, keyed by the TestCase's Span.
+    /// Tests don't have FunctionId or MethodId, so Span is the unique key.
+    pub vir_test_bodies: FxHashMap<Span, VirBody>,
 }
 
 impl AnalyzedProgram {
@@ -106,6 +112,7 @@ impl AnalyzedProgram {
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
         let vir_function_map = build_vir_function_map(&vir_functions);
         let vir_method_map = build_vir_method_map(&vir_functions);
+        let vir_test_bodies = lower_test_bodies(&program);
         Self {
             program,
             interner: Rc::new(interner),
@@ -119,6 +126,7 @@ impl AnalyzedProgram {
             vir_monomorph_map,
             vir_function_map,
             vir_method_map,
+            vir_test_bodies,
         }
     }
 
@@ -188,6 +196,12 @@ impl AnalyzedProgram {
         self.vir_method_map
             .get(&method_id)
             .map(|&idx| &self.vir_functions[idx])
+    }
+
+    /// Look up a VIR test body by the test case's span.
+    /// Returns `None` if no VIR body was lowered for this test.
+    pub fn get_vir_test(&self, span: Span) -> Option<&VirBody> {
+        self.vir_test_bodies.get(&span)
     }
 }
 
@@ -717,6 +731,38 @@ fn lower_module_type_methods(
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// Lower all test function bodies in the program to VIR.
+///
+/// Walks the program's `Decl::Tests` blocks (including nested ones) and
+/// lowers each `TestCase.body` to a `VirBody`.  Returns a map keyed by
+/// the `TestCase`'s `Span` for O(1) lookup during test compilation.
+fn lower_test_bodies(program: &Program) -> FxHashMap<Span, VirBody> {
+    let mut map = FxHashMap::default();
+    for decl in &program.declarations {
+        if let Decl::Tests(tests_decl) = decl {
+            lower_tests_decl_bodies(tests_decl, &mut map);
+        }
+    }
+    map
+}
+
+/// Recursively lower test bodies from a single `TestsDecl`.
+fn lower_tests_decl_bodies(
+    tests_decl: &vole_frontend::ast::TestsDecl,
+    map: &mut FxHashMap<Span, VirBody>,
+) {
+    for test in &tests_decl.tests {
+        let vir_body = lower_test_body(&test.body);
+        map.insert(test.span, vir_body);
+    }
+    // Recurse into nested tests blocks
+    for decl in &tests_decl.decls {
+        if let Decl::Tests(nested) = decl {
+            lower_tests_decl_bodies(nested, map);
         }
     }
 }

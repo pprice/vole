@@ -1062,8 +1062,50 @@ impl Cg<'_, '_, '_> {
     }
 
     // =========================================================================
-    // VIR statement compilation
+    // VIR body and statement compilation
     // =========================================================================
+
+    /// Compile a VIR body (stmts + optional trailing expression).
+    ///
+    /// Mirrors [`compile_body`] but operates on a `VirBody` instead of a
+    /// `FuncBody`.  Used for test function compilation where the caller
+    /// manages RC scopes and finalization externally.
+    ///
+    /// Returns `(terminated, Option<CompiledValue>)`:
+    /// - If trailing is `Some`: compiles stmts then the trailing expr,
+    ///   returns `(true, Some(value))`.
+    /// - If trailing is `None`: compiles all stmts, returns `(terminated, None)`.
+    pub fn compile_vir_body(
+        &mut self,
+        body: &vole_vir::VirBody,
+    ) -> CodegenResult<(bool, Option<CompiledValue>)> {
+        if let Some(trailing) = &body.trailing {
+            // Expression body: compile preceding stmts then the trailing expr
+            let mut terminated = false;
+            for vir_stmt in &body.stmts {
+                if terminated {
+                    break;
+                }
+                terminated = self.compile_vir_stmt(vir_stmt)?;
+            }
+            if terminated {
+                Ok((true, None))
+            } else {
+                let value = self.compile_vir_expr(trailing)?;
+                Ok((true, Some(value)))
+            }
+        } else {
+            // Block body: compile all stmts
+            let mut terminated = false;
+            for vir_stmt in &body.stmts {
+                if terminated {
+                    break;
+                }
+                terminated = self.compile_vir_stmt(vir_stmt)?;
+            }
+            Ok((terminated, None))
+        }
+    }
 
     /// Compile a VIR statement node.
     ///
