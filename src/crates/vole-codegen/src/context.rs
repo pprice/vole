@@ -421,9 +421,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Check if this type already has a non-zero type_id in type_metadata
         // (it's a class rather than a struct)
         if let Some(meta) = self.type_metadata().get(&type_def_id)
-            && meta.type_id != 0 {
-                return Some(meta.type_id);
-            }
+            && meta.type_id != 0
+        {
+            return Some(meta.type_id);
+        }
 
         // Eagerly register: allocate a new runtime type_id with field type tags
         let new_type_id = vole_runtime::type_registry::alloc_type_id();

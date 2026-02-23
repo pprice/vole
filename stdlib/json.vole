@@ -52,10 +52,9 @@ struct json_ignore {}
 
 // json_field - combined annotation for JSON field control.
 //
-// Use this annotation to rename or ignore fields during JSON serialization.
-// This single annotation replaces json_name/json_ignore for cases where
-// runtime annotation type dispatch is needed (see annotation narrowing
-// limitation with [unknown] arrays).
+// Use this annotation to rename and ignore fields in a single annotation.
+// Equivalent to using separate @json_name and @json_ignore annotations,
+// but convenient when both rename and ignore are needed on the same type.
 //
 // Example:
 //   class User {
@@ -348,6 +347,9 @@ class JSON {
 
         // Convert a typed struct/class instance to a JsonObject using reflection.
         //
+        // Automatically reads @json_name, @json_ignore, and @json_field annotations
+        // from field metadata. Annotated fields are renamed or excluded accordingly.
+        //
         // Usage:
         //   let obj = JSON.to_object(User.@meta, user)
         //   let json_str = JSON.stringify(obj)
@@ -360,6 +362,9 @@ class JSON {
         }
 
         // Construct a typed struct/class instance from a JsonObject using reflection.
+        //
+        // Automatically reads @json_name annotations from field metadata for key
+        // mapping, reversing renames during deserialization.
         //
         // Usage:
         //   let result = JSON.parse(json_str)
@@ -407,13 +412,16 @@ class JSON {
 // Uses a generic wrapper class because free generic functions with T.@meta have
 // a known limitation (vol-kjf1) when instantiated with multiple types.
 //
+// serialize() and deserialize() automatically read @json_name, @json_ignore,
+// and @json_field annotations from field metadata. No manual map-building needed.
+//
 // Usage:
 //   let serde = JsonSerde { item: my_user }
 //   let json_str = serde.serialize()
 //   let result = serde.deserialize(json_str)
 //   if result is User { ... }
 //
-// With field mapping:
+// With explicit field mapping (overrides annotations):
 //   let renames = Map.new<string, string>()
 //   renames.set("name", "user_name")
 //   let ignores = Map.new<string, bool>()
@@ -424,6 +432,7 @@ class JsonSerde<T> {
     item: T,
 
     // Serialize the stored item to a compact JSON string.
+    // Automatically reads @json_name, @json_ignore, and @json_field annotations.
     func serialize() -> string {
         let meta = self.item.@meta
         let box: unknown = self.item
@@ -431,7 +440,7 @@ class JsonSerde<T> {
         return _stringify_value(obj)
     }
 
-    // Serialize with field renaming and ignoring.
+    // Serialize with explicit field renaming and ignoring (overrides annotations).
     func serialize_mapped(renames: Map<string, string>, ignores: Map<string, bool>) -> string {
         let meta = self.item.@meta
         let box: unknown = self.item
@@ -440,6 +449,7 @@ class JsonSerde<T> {
     }
 
     // Deserialize a JSON string to a typed instance (returned as unknown).
+    // Automatically reads @json_name annotations for key mapping.
     // Returns nil if parsing fails or the JSON is not an object.
     func deserialize(json_str: string) -> unknown {
         let r = _parse_top(json_str)
@@ -450,7 +460,7 @@ class JsonSerde<T> {
         return _from_json_object(meta, parsed_obj)
     }
 
-    // Deserialize with field renaming (reverse of serialize_mapped renames).
+    // Deserialize with explicit field renaming (reverse of serialize_mapped renames).
     func deserialize_mapped(json_str: string, renames: Map<string, string>) -> unknown {
         let r = _parse_top(json_str)
         if !r.ok { return nil }
@@ -465,19 +475,50 @@ class JsonSerde<T> {
 // Typed serialization — struct/class ↔ JsonObject via TypeMeta reflection
 // =============================================================================
 
-// Convert a struct/class instance to a JsonObject.
-// Iterates meta.fields, reads each value via the getter, and converts to Json.
-func _to_json_object(meta: TypeMeta, instance: unknown) -> JsonObject {
-    let obj = JsonObject.new()
+// Holds renames and ignores maps extracted from field annotations.
+struct JsonFieldMappings {
+    renames: Map<string, string>,
+    ignores: Map<string, bool>,
+}
+
+// Extract @json_name / @json_ignore / @json_field annotations from TypeMeta
+// fields and build renames/ignores maps for use with the mapped serde functions.
+func _extract_json_mappings(meta: TypeMeta) -> JsonFieldMappings {
+    let renames = Map.new<string, string>()
+    let ignores = Map.new<string, bool>()
     var i: i64 = 0
     while i < meta.fields.length() {
         let field = meta.fields[i]
-        let getter = field.get
-        let raw = getter(instance)
-        _serde_set_field_value(obj, field.name, field.type_name, raw)
+        var ai: i64 = 0
+        while ai < field.annotations.length() {
+            let ann = field.annotations[ai]
+            if ann is json_name {
+                renames.set(field.name, ann.name)
+            }
+            if ann is json_ignore {
+                ignores.set(field.name, true)
+            }
+            if ann is json_field {
+                if ann.ignore {
+                    ignores.set(field.name, true)
+                }
+                if ann.name != "" {
+                    renames.set(field.name, ann.name)
+                }
+            }
+            ai = ai + 1
+        }
         i = i + 1
     }
-    return obj
+    return JsonFieldMappings { renames: renames, ignores: ignores }
+}
+
+// Convert a struct/class instance to a JsonObject.
+// Automatically reads @json_name and @json_ignore annotations from fields.
+// Iterates meta.fields, reads each value via the getter, and converts to Json.
+func _to_json_object(meta: TypeMeta, instance: unknown) -> JsonObject {
+    let mappings = _extract_json_mappings(meta)
+    return _to_json_object_mapped(meta, instance, mappings.renames, mappings.ignores)
 }
 
 // Convert a struct/class instance to a JsonObject with field mapping.
@@ -604,12 +645,18 @@ func _serde_set_field_value(obj: JsonObject, name: string, type_name: string, ra
 }
 
 // Construct a struct/class instance from a JsonObject.
+// Automatically reads @json_name annotations from fields for key mapping.
 // Reads each field from the object, converts from Json to the expected type,
 // and calls meta.construct with the argument array.
 //
 // Note: uses explicit type checking on each Json value rather than passing
 // union-typed values to helper functions, to avoid cross-module union issues.
 func _from_json_object(meta: TypeMeta, obj: JsonObject) -> unknown {
+    let mappings = _extract_json_mappings(meta)
+    let has_renames = mappings.renames.len() > 0
+    if has_renames {
+        return _from_json_object_mapped(meta, obj, mappings.renames)
+    }
     // Work around [unknown] array push bug: pushing different values in a loop
     // causes all entries to point to the last value. Instead, we:
     // 1. Construct an instance with placeholder values

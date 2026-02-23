@@ -1,20 +1,14 @@
 // Tests for the end-to-end annotation-driven JSON serde workflow.
 //
-// Demonstrates reading field annotations from .@meta.fields, building
-// renames/ignores maps, then passing them to JSON.to_object_mapped()
-// and JSON.from_object_mapped() for annotation-aware serialization.
+// Demonstrates:
+// - Reading field annotations from .@meta.fields with manual map building
+// - Using JSON.to_object() / JSON.from_object() which auto-read annotations
+// - Using separate @json_name and @json_ignore on the same class
+// - Using the combined @json_field annotation
+// - Cross-function annotation narrowing
 //
 // Annotation types are defined locally because cross-module annotation resolution
 // has a known bug with imported types.
-//
-// Note: annotation type narrowing (`ann is T`) only works within the same
-// lexical scope -- not across function boundaries. Therefore the map-building
-// logic is inlined in each test block.
-//
-// Note: mixing different annotation types (e.g. @json_name and @json_ignore)
-// in a loop over fields triggers an RC lifecycle bug. For types that use both
-// rename and ignore, the combined @json_field annotation is used instead.
-// Types that use only one kind of annotation work fine with the separate types.
 
 let { JSON, JsonObject } = import "std:json"
 let { Map } = import "std:collections/map"
@@ -29,9 +23,8 @@ struct json_name {
 @annotation
 struct json_ignore {}
 
-// Combined annotation for types that need both rename and ignore on different
-// fields. Avoids the RC lifecycle bug that occurs when narrowing mixed annotation
-// types in a loop (see stdlib/json.vole for the canonical definition).
+// Combined annotation for types that need both rename and ignore in a single
+// annotation (see stdlib/json.vole for the canonical definition).
 @annotation
 struct json_field {
     name: string,
@@ -82,7 +75,7 @@ class AllIgnored {
     visible: string,
 }
 
-// --- Test types using combined @json_field for mixed rename/ignore ---
+// --- Test types using combined @json_field ---
 
 class MixedAnnotations {
     @json_field(name: "display_name", ignore: false)
@@ -95,6 +88,59 @@ class MixedAnnotations {
 
     @json_field(name: "is_active", ignore: false)
     active: bool,
+}
+
+// --- Test type using separate @json_name and @json_ignore on the same class ---
+
+class MixedSeparateAnnotations {
+    @json_name(name: "display_name")
+    name: string,
+
+    @json_ignore
+    secret: string,
+
+    age: i64,
+
+    @json_name(name: "is_active")
+    active: bool,
+}
+
+// --- Helper function for cross-function annotation narrowing ---
+
+func _build_renames_from_meta(meta: TypeMeta) -> Map<string, string> {
+    let renames = Map.new<string, string>()
+    var i: i64 = 0
+    while i < meta.fields.length() {
+        let field = meta.fields[i]
+        var ai: i64 = 0
+        while ai < field.annotations.length() {
+            let ann = field.annotations[ai]
+            if ann is json_name {
+                renames.set(field.name, ann.name)
+            }
+            ai = ai + 1
+        }
+        i = i + 1
+    }
+    return renames
+}
+
+func _build_ignores_from_meta(meta: TypeMeta) -> Map<string, bool> {
+    let ignores = Map.new<string, bool>()
+    var i: i64 = 0
+    while i < meta.fields.length() {
+        let field = meta.fields[i]
+        var ai: i64 = 0
+        while ai < field.annotations.length() {
+            let ann = field.annotations[ai]
+            if ann is json_ignore {
+                ignores.set(field.name, true)
+            }
+            ai = ai + 1
+        }
+        i = i + 1
+    }
+    return ignores
 }
 
 // --- Tests: @json_name -> to_object_mapped uses annotated name ---
@@ -829,6 +875,212 @@ tests "annotation-driven multiple @json_ignore fields" {
             assert(result.visible == "ok")
             assert(result.secret1 == "")
             assert(result.secret2 == "")
+        }
+    }
+}
+
+// --- Tests: separate @json_name and @json_ignore on the same class ---
+// These tests demonstrate that mixed annotation types (checking both
+// is json_name and is json_ignore in the same loop) now work correctly.
+
+// --- Tests: separate @json_name and @json_ignore on the same class ---
+
+tests "mixed separate annotations: @json_name and @json_ignore on same class" {
+    test "mixed separate annotations via helper functions" {
+        let meta = MixedSeparateAnnotations.@meta
+        let renames = _build_renames_from_meta(meta)
+        let ignores = _build_ignores_from_meta(meta)
+
+        let item = MixedSeparateAnnotations {
+            name: "Alice",
+            secret: "hidden",
+            age: 28,
+            active: true,
+        }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("display_name"))
+        assert(!obj.contains_key("name"))
+        assert(!obj.contains_key("secret"))
+        assert(obj.contains_key("age"))
+        assert(obj.contains_key("is_active"))
+        assert(!obj.contains_key("active"))
+        assert(obj.len() == 3)
+    }
+
+    test "mixed separate annotations: field values correct" {
+        let meta = MixedSeparateAnnotations.@meta
+        let renames = _build_renames_from_meta(meta)
+        let ignores = _build_ignores_from_meta(meta)
+
+        let item = MixedSeparateAnnotations {
+            name: "Eve",
+            secret: "password",
+            age: 35,
+            active: false,
+        }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        let dn = obj.get("display_name")
+        if dn is string {
+            assert(dn == "Eve")
+        } else {
+            assert(false)
+        }
+
+        let a = obj.get("age")
+        if a is f64 {
+            assert(a == 35.0)
+        } else {
+            assert(false)
+        }
+
+        let ia = obj.get("is_active")
+        if ia is bool {
+            assert(ia == false)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "mixed separate annotations: stringify" {
+        let meta = MixedSeparateAnnotations.@meta
+        let renames = _build_renames_from_meta(meta)
+        let ignores = _build_ignores_from_meta(meta)
+
+        let item = MixedSeparateAnnotations {
+            name: "Frank",
+            secret: "top-secret",
+            age: 40,
+            active: true,
+        }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(json_str.contains("\"display_name\":\"Frank\""))
+        assert(json_str.contains("\"is_active\":true"))
+        assert(json_str.contains("\"age\":40"))
+        assert(!json_str.contains("secret"))
+        assert(!json_str.contains("top-secret"))
+    }
+
+    test "mixed separate annotations: round-trip" {
+        let meta = MixedSeparateAnnotations.@meta
+        let renames = _build_renames_from_meta(meta)
+        let ignores = _build_ignores_from_meta(meta)
+
+        let original = MixedSeparateAnnotations {
+            name: "Gina",
+            secret: "my-secret",
+            age: 29,
+            active: true,
+        }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(!json_str.contains("secret"))
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(meta, parsed_obj, renames)
+        assert(result is MixedSeparateAnnotations)
+        if result is MixedSeparateAnnotations {
+            assert(result.name == "Gina")
+            assert(result.age == 29)
+            assert(result.active == true)
+            assert(result.secret == "")
+        }
+    }
+}
+
+// --- Tests: cross-function annotation narrowing via helper functions ---
+
+tests "cross-function annotation narrowing" {
+    test "helper function builds renames from @json_name" {
+        let renames = _build_renames_from_meta(UserWithRename.@meta)
+        let has_rename = renames.contains_key("name")
+        assert(has_rename)
+        let mapped = renames.get("name")
+        if mapped is string {
+            assert(mapped == "user_name")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "helper function builds ignores from @json_ignore" {
+        let ignores = _build_ignores_from_meta(SessionWithIgnore.@meta)
+        let has_ignore = ignores.contains_key("internal_secret")
+        assert(has_ignore)
+        assert(!ignores.contains_key("token"))
+    }
+
+    test "helper functions work with mixed separate annotations" {
+        let meta = MixedSeparateAnnotations.@meta
+        let renames = _build_renames_from_meta(meta)
+        let ignores = _build_ignores_from_meta(meta)
+
+        assert(renames.contains_key("name"))
+        assert(renames.contains_key("active"))
+        assert(ignores.contains_key("secret"))
+        assert(!ignores.contains_key("name"))
+        assert(!ignores.contains_key("age"))
+    }
+
+    test "helper-built maps produce correct serialization" {
+        let meta = MixedSeparateAnnotations.@meta
+        let renames = _build_renames_from_meta(meta)
+        let ignores = _build_ignores_from_meta(meta)
+
+        let item = MixedSeparateAnnotations {
+            name: "Helper",
+            secret: "shh",
+            age: 50,
+            active: true,
+        }
+        let box: unknown = item
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+
+        assert(obj.contains_key("display_name"))
+        assert(!obj.contains_key("name"))
+        assert(!obj.contains_key("secret"))
+        assert(obj.contains_key("age"))
+        assert(obj.contains_key("is_active"))
+        assert(obj.len() == 3)
+
+        let dn = obj.get("display_name")
+        if dn is string {
+            assert(dn == "Helper")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "helper-built maps round-trip with from_object_mapped" {
+        let meta = UserWithRename.@meta
+        let renames = _build_renames_from_meta(meta)
+        let ignores = _build_ignores_from_meta(meta)
+
+        let original = UserWithRename { name: "Zara", age: 88 }
+        let box: unknown = original
+        let obj = JSON.to_object_mapped(meta, box, renames, ignores)
+        let json_str = JSON.stringify(obj)
+
+        assert(json_str.contains("user_name"))
+
+        let parsed = JSON.parse(json_str)
+        assert(parsed.ok)
+        let parsed_obj = parsed.as_object()
+        let result = JSON.from_object_mapped(meta, parsed_obj, renames)
+        assert(result is UserWithRename)
+        if result is UserWithRename {
+            assert(result.name == "Zara")
+            assert(result.age == 88)
         }
     }
 }
