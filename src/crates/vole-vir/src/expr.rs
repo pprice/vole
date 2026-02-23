@@ -182,6 +182,14 @@ pub enum VirExpr {
         ty: TypeId,
     },
 
+    // -- Generator ----------------------------------------------------------
+    /// Yield expression inside a generator body.
+    ///
+    /// Suspends the coroutine and passes `value` to the iterator consumer.
+    /// Always produces a void/zero result (yield is used in statement
+    /// position).
+    Yield { value: VirRef },
+
     // -- Escape hatch -------------------------------------------------------
     /// An AST expression that has not yet been lowered to VIR.
     ///

@@ -527,6 +527,32 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
+    /// Compile a VIR yield expression inside a generator body.
+    ///
+    /// Like [`compile_yield`] but operates on a VIR `VirRef` value instead of
+    /// an AST `YieldExpr`.
+    fn compile_vir_yield(&mut self, value: &VirExpr) -> CodegenResult<CompiledValue> {
+        let yielder_var = self.yielder_var.ok_or_else(|| {
+            CodegenError::unsupported("yield expression outside generator context")
+        })?;
+
+        // Compile the yielded value
+        let compiled = self.compile_vir_expr(value)?;
+
+        // Load the yielder pointer
+        let yielder_ptr = self.builder.use_var(yielder_var);
+
+        // Call vole_generator_yield(yielder_ptr, value)
+        self.call_runtime_void(RuntimeKey::GeneratorYield, &[yielder_ptr, compiled.value])?;
+
+        // Yield is a statement-like expression; return a void/zero value.
+        Ok(CompiledValue::new(
+            self.iconst_cached(types::I64, 0),
+            types::I64,
+            self.arena().primitives.i64,
+        ))
+    }
+
     // =========================================================================
     // VIR expression compilation
     // =========================================================================
@@ -660,6 +686,9 @@ impl Cg<'_, '_, '_> {
             VirExpr::Lambda { .. } => {
                 todo!("VIR Lambda: lowering still emits Ast escape hatch")
             }
+
+            // -- Generator ------------------------------------------------
+            VirExpr::Yield { value } => self.compile_vir_yield(value),
 
             // -- Ast escape hatch -----------------------------------------
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),

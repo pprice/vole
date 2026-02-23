@@ -277,6 +277,7 @@ fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRe
         }),
         ExprKind::If(if_expr) => lower_if_expr(if_expr, ty, node_map, interner),
         ExprKind::Block(block_expr) => lower_block_expr(block_expr, ty, node_map, interner),
+        ExprKind::Yield(yield_expr) => lower_yield(yield_expr, node_map, interner),
         // Ast escape hatches — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
@@ -302,7 +303,6 @@ fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRe
         | ExprKind::OptionalMethodCall(_)
         | ExprKind::MethodCall(_)
         | ExprKind::Try(_)
-        | ExprKind::Yield(_)
         | ExprKind::When(_)
         | ExprKind::MetaAccess(_) => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
@@ -486,6 +486,18 @@ fn lower_block_expr(
         trailing,
         ty,
     })
+}
+
+/// Lower a yield expression to `VirExpr::Yield`.
+///
+/// The yielded value is recursively lowered via `lower_expr`.
+fn lower_yield(
+    yield_expr: &vole_frontend::ast::YieldExpr,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let value = lower_expr(&yield_expr.value, node_map, interner);
+    Box::new(VirExpr::Yield { value })
 }
 
 /// Map an AST `BinaryOp` to the VIR `VirBinOp`.
@@ -1977,6 +1989,59 @@ mod tests {
         match vir_ref.as_ref() {
             VirExpr::Block { ty, .. } => assert_eq!(*ty, TypeId::I64),
             other => panic!("expected VirExpr::Block, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Yield expression lowering
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn lower_expr_yield_produces_vir_yield() {
+        use vole_frontend::ast::YieldExpr;
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Yield(Box::new(YieldExpr {
+                value: make_int_expr(42),
+                span: dummy_span(),
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Yield { value } => match value.as_ref() {
+                VirExpr::IntLiteral { value: 42, .. } => {}
+                other => panic!("expected IntLiteral(42) inside Yield, got {other:?}"),
+            },
+            other => panic!("expected VirExpr::Yield, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_yield_lowers_inner_recursively() {
+        use vole_frontend::ast::YieldExpr;
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        // yield true — the inner bool should be lowered to VirExpr::BoolLiteral
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Yield(Box::new(YieldExpr {
+                value: make_bool_expr(),
+                span: dummy_span(),
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Yield { value } => match value.as_ref() {
+                VirExpr::BoolLiteral(true) => {}
+                other => panic!("expected BoolLiteral(true) inside Yield, got {other:?}"),
+            },
+            other => panic!("expected VirExpr::Yield, got {other:?}"),
         }
     }
 }
