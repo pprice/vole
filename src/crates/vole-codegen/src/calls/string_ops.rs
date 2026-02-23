@@ -172,7 +172,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// Reads the `StringConversion` annotation (set by sema) and applies the
     /// corresponding runtime call or branching logic. No type inspection needed.
-    fn apply_string_conversion(
+    pub(crate) fn apply_string_conversion(
         &mut self,
         val: CompiledValue,
         conversion: &StringConversion,

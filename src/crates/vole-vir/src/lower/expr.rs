@@ -6,11 +6,14 @@
 
 use vole_frontend::Expr;
 use vole_frontend::Interner;
-use vole_frontend::ast::{BinaryOp, ExprKind, UnaryOp};
+use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
 use vole_identity::TypeId;
+use vole_sema::StringConversion;
 use vole_sema::node_map::NodeMap;
 
-use crate::expr::{AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirExpr, VirUnOp};
+use crate::expr::{
+    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirExpr, VirStringPart, VirUnOp,
+};
 use crate::func::VirBody;
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
@@ -72,10 +75,10 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         // Ast escape hatches — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
+        ExprKind::InterpolatedString(parts) => lower_interpolated_string(parts, node_map, interner),
         ExprKind::CompoundAssign(_)
         | ExprKind::ArrayLiteral(_)
         | ExprKind::RepeatLiteral { .. }
-        | ExprKind::InterpolatedString(_)
         | ExprKind::Index(_)
         | ExprKind::Match(_)
         | ExprKind::NullCoalesce(_)
@@ -476,6 +479,33 @@ fn convert_is_check_result(sema: vole_sema::IsCheckResult) -> IsCheckResult {
         vole_sema::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(tag),
         vole_sema::IsCheckResult::CheckUnknown(ty) => IsCheckResult::CheckUnknown(ty),
     }
+}
+
+/// Lower an interpolated string to `VirExpr::InterpolatedString`.
+///
+/// Each part is lowered to a `VirStringPart`: literal fragments become
+/// `VirStringPart::Literal`, and expression fragments carry the
+/// sema-annotated `StringConversion` so codegen never re-detects types.
+fn lower_interpolated_string(
+    parts: &[StringPart],
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let vir_parts: Vec<VirStringPart> = parts
+        .iter()
+        .map(|part| match part {
+            StringPart::Literal(s) => VirStringPart::Literal(interner.intern(s)),
+            StringPart::Expr(expr) => {
+                let value = lower_expr(expr, node_map, interner);
+                let conversion = node_map
+                    .get_string_conversion(expr.id)
+                    .cloned()
+                    .unwrap_or(StringConversion::Identity);
+                VirStringPart::Expr { value, conversion }
+            }
+        })
+        .collect();
+    Box::new(VirExpr::InterpolatedString { parts: vir_parts })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.

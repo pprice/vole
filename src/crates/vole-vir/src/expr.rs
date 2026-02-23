@@ -4,6 +4,7 @@
 
 use vole_frontend::Expr;
 use vole_identity::{FunctionId, Symbol, TypeDefId, TypeId};
+use vole_sema::StringConversion;
 
 use crate::calls::CallTarget;
 use crate::func::VirBody;
@@ -104,6 +105,14 @@ pub enum VirExpr {
 
     /// String concatenation of two or more parts.
     StringConcat { parts: Vec<VirRef> },
+
+    /// Interpolated string with conversion annotations per part.
+    ///
+    /// Each part is either a literal string or an expression with an
+    /// associated `StringConversion` that tells codegen how to turn the
+    /// value into a string.  Single-part interpolations preserve the
+    /// borrowed/owned lifecycle of the original expression.
+    InterpolatedString { parts: Vec<VirStringPart> },
 
     // -- Calls --------------------------------------------------------------
     /// Function or method call.
@@ -377,6 +386,22 @@ pub struct VirCapture {
     /// Whether the variable is captured by reference (true) or by value
     /// (false).
     pub by_ref: bool,
+}
+
+/// A single part of an interpolated string.
+///
+/// Literal parts become static strings at compile time.  Expression parts
+/// carry the sema-annotated `StringConversion` so codegen knows how to
+/// convert the value to a string without re-detecting types.
+#[derive(Debug, Clone)]
+pub enum VirStringPart {
+    /// A literal string fragment (e.g. the `"hello "` in `"hello {x}"`).
+    Literal(Symbol),
+    /// An expression with its string-conversion strategy.
+    Expr {
+        value: VirRef,
+        conversion: StringConversion,
+    },
 }
 
 /// Result of an `is` type-check, pre-computed by sema.

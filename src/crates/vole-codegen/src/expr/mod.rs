@@ -25,7 +25,7 @@ use vole_frontend::ast::YieldExpr;
 use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
-use vole_vir::{AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirUnOp};
+use vole_vir::{AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirStringPart, VirUnOp};
 
 use super::context::Cg;
 use super::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
@@ -625,6 +625,7 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_binary_op(*op, lhs, rhs, *ty, *line),
             VirExpr::UnaryOp { op, operand, ty } => self.compile_vir_unary_op(*op, operand, *ty),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
+            VirExpr::InterpolatedString { parts } => self.compile_vir_interpolated_string(parts),
 
             // -- Coercion -------------------------------------------------
             VirExpr::Coerce {
@@ -826,6 +827,70 @@ impl Cg<'_, '_, '_> {
         let left = self.compile_vir_expr(&parts[0])?;
         let right = self.compile_vir_expr(&parts[1])?;
         self.string_concat(left, right)
+    }
+
+    /// Compile a VIR `InterpolatedString`.
+    ///
+    /// Each part is either a literal (compiled as a static string) or an
+    /// expression with a `StringConversion` annotation.  Single-part
+    /// interpolations preserve the borrowed/owned lifecycle of the original
+    /// expression.  Multi-part interpolations use StringBuilder for a
+    /// single allocation.
+    fn compile_vir_interpolated_string(
+        &mut self,
+        parts: &[VirStringPart],
+    ) -> CodegenResult<CompiledValue> {
+        if parts.is_empty() {
+            return self.string_literal("");
+        }
+
+        // Collect all string values and track which are owned for cleanup.
+        let mut string_values: Vec<Value> = Vec::new();
+        let mut owned_flags: Vec<bool> = Vec::new();
+        for part in parts {
+            let (str_val, is_owned) = match part {
+                VirStringPart::Literal(sym) => {
+                    let s = self.interner().resolve(*sym).to_string();
+                    (self.string_literal(&s)?.value, true)
+                }
+                VirStringPart::Expr { value, conversion } => {
+                    let compiled = self.compile_vir_expr(value)?;
+                    match conversion {
+                        vole_sema::StringConversion::Identity => {
+                            (compiled.value, compiled.is_owned())
+                        }
+                        _ => (self.apply_string_conversion(compiled, conversion)?, true),
+                    }
+                }
+            };
+            string_values.push(str_val);
+            owned_flags.push(is_owned);
+        }
+
+        // Single part: return directly, preserving borrowed/owned lifecycle.
+        if string_values.len() == 1 {
+            let mut cv = self.string_temp(string_values[0]);
+            if !owned_flags[0] {
+                cv.mark_borrowed();
+            }
+            return Ok(cv);
+        }
+
+        // Multi-part: use StringBuilder for a single allocation.
+        let sb = self.call_runtime(RuntimeKey::SbNew, &[])?;
+        for &sv in &string_values {
+            self.call_runtime_void(RuntimeKey::SbPushString, &[sb, sv])?;
+        }
+        let result = self.call_runtime(RuntimeKey::SbFinish, &[sb])?;
+
+        // Free owned input parts — builder has copied the bytes.
+        for (val, is_owned) in string_values.iter().zip(owned_flags.iter()) {
+            if *is_owned {
+                self.emit_rc_dec(*val)?;
+            }
+        }
+
+        Ok(self.string_temp(result))
     }
 
     /// Compile a VIR type coercion.
