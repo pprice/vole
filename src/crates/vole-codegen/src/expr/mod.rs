@@ -738,6 +738,30 @@ impl Cg<'_, '_, '_> {
             VirExpr::LocalLoad { name, ty } => self.compile_local_load(*name, *ty),
             VirExpr::LocalStore { name, value } => self.compile_local_store(*name, value),
 
+            // -- Null / optional operations --------------------------------
+            VirExpr::NullCoalesce {
+                value,
+                default,
+                inner_type,
+                ty,
+            } => self.compile_vir_null_coalesce(value, default, *inner_type, *ty),
+            VirExpr::OptionalChain {
+                object,
+                field,
+                inner_type,
+                ty,
+            } => self.compile_vir_optional_chain(object, *field, *inner_type, *ty),
+            VirExpr::OptionalMethodCall {
+                object,
+                call_expr,
+                inner_type,
+                ty,
+            } => self.compile_vir_optional_method_call(object, call_expr, *inner_type, *ty),
+            VirExpr::Try {
+                value,
+                success_type,
+            } => self.compile_vir_try(value, *success_type),
+
             // -- Lambda / closure ------------------------------------------
             VirExpr::Lambda {
                 params,

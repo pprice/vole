@@ -261,6 +261,54 @@ pub enum VirExpr {
         ty: TypeId,
     },
 
+    // -- Null / optional operations -----------------------------------------
+    /// Null coalesce expression (`value ?? default`).
+    ///
+    /// Checks whether `value` is nil; if so, evaluates and returns `default`,
+    /// otherwise returns the unwrapped non-nil payload.  `inner_type` is the
+    /// non-nil result type (e.g. `T` from `T | nil`); codegen uses it to
+    /// determine whether the result path is scalar or union.
+    NullCoalesce {
+        value: VirRef,
+        default: VirRef,
+        inner_type: TypeId,
+        ty: TypeId,
+    },
+
+    /// Optional chain field access (`obj?.field`).
+    ///
+    /// Checks whether `object` is nil; if so, produces nil wrapped in the
+    /// result type.  Otherwise extracts the inner value and loads the field.
+    /// `ty` is the overall expression type (e.g. `string | nil`), used for
+    /// constructing the merge block and nil branch.
+    OptionalChain {
+        object: VirRef,
+        field: Symbol,
+        inner_type: TypeId,
+        ty: TypeId,
+    },
+
+    /// Optional chain method call (`obj?.method(args)`).
+    ///
+    /// Like `OptionalChain` but the body is a method call instead of a
+    /// field load.  `call_expr` carries the original AST expression so
+    /// codegen can build a synthetic `MethodCallExpr` using the NodeId
+    /// that sema annotated with method dispatch info.
+    /// `ty` is the overall expression type (e.g. `string | nil`).
+    OptionalMethodCall {
+        object: VirRef,
+        call_expr: Box<Expr>,
+        inner_type: TypeId,
+        ty: TypeId,
+    },
+
+    /// Try / error propagation (`expr?`).
+    ///
+    /// Evaluates the fallible expression; on success, unwraps and returns
+    /// the success payload.  On error, propagates via early return using
+    /// the fallible return convention (tag + payload registers).
+    Try { value: VirRef, success_type: TypeId },
+
     // -- Generator ----------------------------------------------------------
     /// Yield expression inside a generator body.
     ///

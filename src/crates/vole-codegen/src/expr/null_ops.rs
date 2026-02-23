@@ -15,6 +15,7 @@ use crate::union_layout;
 
 use vole_frontend::{Expr, ExprKind, NodeId};
 use vole_sema::type_arena::TypeId;
+use vole_vir::VirExpr;
 
 use super::super::context::Cg;
 
@@ -502,5 +503,334 @@ impl Cg<'_, '_, '_> {
             cranelift_ty,
             binding.vole_type,
         ))
+    }
+
+    // =====================================================================
+    // VIR null / optional codegen
+    // =====================================================================
+
+    /// Compile a VIR `NullCoalesce` expression (`value ?? default`).
+    ///
+    /// Checks the value for nil; if nil evaluates and returns default,
+    /// otherwise unwraps and returns the non-nil payload.  Dispatches to
+    /// scalar or union result path based on whether `inner_type` is a union.
+    pub(super) fn compile_vir_null_coalesce(
+        &mut self,
+        value_expr: &VirExpr,
+        default_expr: &VirExpr,
+        inner_type_id: TypeId,
+        _ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let value = self.compile_vir_expr(value_expr)?;
+        let nil_tag = self.find_nil_variant(value.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
+        })?;
+
+        let is_multi_variant_inner = self.arena().is_union(inner_type_id);
+        if is_multi_variant_inner {
+            self.vir_null_coalesce_union(default_expr, value, inner_type_id, nil_tag)
+        } else {
+            self.vir_null_coalesce_scalar(default_expr, value, inner_type_id, nil_tag)
+        }
+    }
+
+    /// Scalar result path for VIR null coalesce (`T | nil ?? default` -> `T`).
+    fn vir_null_coalesce_scalar(
+        &mut self,
+        default_expr: &VirExpr,
+        value: CompiledValue,
+        inner_type_id: TypeId,
+        nil_tag: usize,
+    ) -> CodegenResult<CompiledValue> {
+        let cranelift_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
+
+        let is_nil = self.tag_eq(value.value, nil_tag as i64);
+        let nil_block = self.builder.create_block();
+        let not_nil_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder.append_block_param(merge_block, cranelift_type);
+
+        let result_needs_rc =
+            self.rc_scopes.has_active_scope() && self.rc_state(inner_type_id).needs_cleanup();
+
+        self.emit_brif(is_nil, nil_block, not_nil_block);
+
+        // Nil branch: evaluate default
+        self.switch_and_seal(nil_block);
+        let default_val = self.compile_vir_expr(default_expr)?;
+        if result_needs_rc && default_val.is_borrowed() {
+            self.emit_rc_inc_for_type(default_val.value, inner_type_id)?;
+        }
+        let default_coerced =
+            self.coerce_int_type(default_val.value, default_val.ty, cranelift_type);
+        let default_arg = BlockArg::from(default_coerced);
+        self.builder.ins().jump(merge_block, &[default_arg]);
+
+        // Not-nil branch: extract payload
+        self.switch_and_seal(not_nil_block);
+        let union_size = self.type_size(value.type_id);
+        let payload = if union_size > union_layout::TAG_ONLY_SIZE {
+            let loaded = self.builder.ins().load(
+                cranelift_type,
+                MemFlags::new(),
+                value.value,
+                union_layout::PAYLOAD_OFFSET,
+            );
+            if result_needs_rc && value.is_borrowed() {
+                self.emit_rc_inc_for_type(loaded, inner_type_id)?;
+            }
+            loaded
+        } else {
+            self.iconst_cached(cranelift_type, 0)
+        };
+        let payload_arg = BlockArg::from(payload);
+        self.builder.ins().jump(merge_block, &[payload_arg]);
+
+        self.switch_and_seal(merge_block);
+        let result = self.builder.block_params(merge_block)[0];
+        let cv = CompiledValue::new(result, cranelift_type, inner_type_id);
+        Ok(self.mark_rc_owned(cv))
+    }
+
+    /// Union result path for VIR null coalesce (`A | B | nil ?? default` -> `A | B`).
+    fn vir_null_coalesce_union(
+        &mut self,
+        default_expr: &VirExpr,
+        value: CompiledValue,
+        inner_type_id: TypeId,
+        nil_tag: usize,
+    ) -> CodegenResult<CompiledValue> {
+        let ptr_type = self.ptr_type();
+
+        let is_nil = self.tag_eq(value.value, nil_tag as i64);
+        let nil_block = self.builder.create_block();
+        let not_nil_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder.append_block_param(merge_block, ptr_type);
+
+        self.emit_brif(is_nil, nil_block, not_nil_block);
+
+        // Nil branch: evaluate default, box into union if needed
+        self.switch_and_seal(nil_block);
+        let default_val = self.compile_vir_expr(default_expr)?;
+        let default_ptr = if self.arena().is_union(default_val.type_id) {
+            default_val.value
+        } else {
+            let boxed = self.construct_union_id(default_val, inner_type_id)?;
+            boxed.value
+        };
+        let default_arg = BlockArg::from(default_ptr);
+        self.builder.ins().jump(merge_block, &[default_arg]);
+
+        // Not-nil branch: reuse source pointer (tags are compatible)
+        self.switch_and_seal(not_nil_block);
+        let value_ptr_arg = BlockArg::from(value.value);
+        self.builder.ins().jump(merge_block, &[value_ptr_arg]);
+
+        self.switch_and_seal(merge_block);
+        let result_ptr = self.builder.block_params(merge_block)[0];
+        let cv = CompiledValue::new(result_ptr, ptr_type, inner_type_id);
+        Ok(cv)
+    }
+
+    /// Compile a VIR `OptionalChain` expression (`obj?.field`).
+    ///
+    /// Checks the object for nil; if nil produces a nil result, otherwise
+    /// extracts the inner value and loads the field.
+    pub(super) fn compile_vir_optional_chain(
+        &mut self,
+        object_expr: &VirExpr,
+        field: vole_frontend::Symbol,
+        inner_type_id: TypeId,
+        result_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let scrutinee = self.compile_vir_expr(object_expr)?;
+        let nil_tag = self.find_nil_variant(scrutinee.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("optional chain operator", "optional type", "non-optional")
+        })?;
+
+        let result_type_id = self.try_substitute_type(result_type_id);
+        let result_cranelift_type = self.cranelift_type(result_type_id);
+        let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
+
+        let nil_block = self.builder.create_block();
+        let not_nil_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder
+            .append_block_param(merge_block, result_cranelift_type);
+
+        let is_nil = self.tag_eq(scrutinee.value, nil_tag as i64);
+        self.emit_brif(is_nil, nil_block, not_nil_block);
+
+        // Nil branch: produce nil wrapped as result type
+        self.switch_and_seal(nil_block);
+        let nil_val = self.compile_nil_for_optional(result_type_id)?;
+        self.jump_with_owned_result(
+            nil_val,
+            result_type_id,
+            result_cranelift_type,
+            result_needs_rc,
+            merge_block,
+        )?;
+
+        // Not-nil branch: extract inner, do field access
+        self.switch_and_seal(not_nil_block);
+        let inner = self.extract_optional_inner(scrutinee, inner_type_id);
+        let body_val = self.optional_chain_field_access(inner, field)?;
+        let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
+        self.jump_with_owned_result(
+            body_coerced,
+            result_type_id,
+            result_cranelift_type,
+            result_needs_rc,
+            merge_block,
+        )?;
+
+        self.switch_and_seal(merge_block);
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, false)
+    }
+
+    /// Compile a VIR `OptionalMethodCall` expression (`obj?.method(args)`).
+    ///
+    /// Checks the object for nil; if nil produces a nil result, otherwise
+    /// extracts the inner value and dispatches the method call using the
+    /// original AST expression's NodeId for sema resolution.
+    pub(super) fn compile_vir_optional_method_call(
+        &mut self,
+        object_expr: &VirExpr,
+        call_expr: &Expr,
+        inner_type_id: TypeId,
+        result_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let scrutinee = self.compile_vir_expr(object_expr)?;
+        let nil_tag = self.find_nil_variant(scrutinee.type_id).ok_or_else(|| {
+            CodegenError::type_mismatch("optional chain operator", "optional type", "non-optional")
+        })?;
+
+        let result_type_id = self.try_substitute_type(result_type_id);
+        let result_cranelift_type = self.cranelift_type(result_type_id);
+        let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
+
+        let nil_block = self.builder.create_block();
+        let not_nil_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder
+            .append_block_param(merge_block, result_cranelift_type);
+
+        let is_nil = self.tag_eq(scrutinee.value, nil_tag as i64);
+        self.emit_brif(is_nil, nil_block, not_nil_block);
+
+        // Nil branch
+        self.switch_and_seal(nil_block);
+        let nil_val = self.compile_nil_for_optional(result_type_id)?;
+        self.jump_with_owned_result(
+            nil_val,
+            result_type_id,
+            result_cranelift_type,
+            result_needs_rc,
+            merge_block,
+        )?;
+
+        // Not-nil branch: extract inner, call method via AST escape hatch
+        self.switch_and_seal(not_nil_block);
+        let inner = self.extract_optional_inner(scrutinee, inner_type_id);
+        let body_val = self.optional_chain_method_call(call_expr, inner, call_expr.id)?;
+        let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
+        self.jump_with_owned_result(
+            body_coerced,
+            result_type_id,
+            result_cranelift_type,
+            result_needs_rc,
+            merge_block,
+        )?;
+
+        self.switch_and_seal(merge_block);
+        self.merge_block_result(merge_block, result_cranelift_type, result_type_id, false)
+    }
+
+    /// Compile a VIR `Try` expression (`expr?`).
+    ///
+    /// On success: unwraps and returns the success payload.
+    /// On error: propagates by returning from function with (tag, payload).
+    pub(super) fn compile_vir_try(
+        &mut self,
+        value_expr: &VirExpr,
+        success_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let fallible = self.compile_vir_expr(value_expr)?;
+
+        // Load tag from fallible (offset 0)
+        let tag = load_fallible_tag(self.builder, fallible.value);
+
+        let is_success = self
+            .builder
+            .ins()
+            .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
+
+        let success_block = self.builder.create_block();
+        let error_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+
+        let payload_ty = self.cranelift_type(success_type_id);
+        self.builder.append_block_param(merge_block, payload_ty);
+
+        self.emit_brif(is_success, success_block, error_block);
+
+        // Error block: propagate by returning (tag, payload)
+        self.switch_and_seal(error_block);
+        let error_payload_i64 = load_fallible_payload(self.builder, fallible.value, types::I64);
+        self.builder.ins().return_(&[tag, error_payload_i64]);
+
+        // Success block: extract payload
+        self.switch_and_seal(success_block);
+        let payload_i64 = load_fallible_payload(self.builder, fallible.value, types::I64);
+        let payload = self.convert_from_i64_storage(payload_i64, success_type_id);
+        let payload_arg = BlockArg::from(payload);
+        self.builder.ins().jump(merge_block, &[payload_arg]);
+
+        self.switch_and_seal(merge_block);
+        let result = self.builder.block_params(merge_block)[0];
+        Ok(CompiledValue::new(result, payload_ty, success_type_id))
+    }
+
+    /// Extract the inner (non-nil) value from an optional union.
+    ///
+    /// Reads the payload from the union's data area.  Used by both optional
+    /// chain field access and optional chain method call.
+    fn extract_optional_inner(
+        &mut self,
+        scrutinee: CompiledValue,
+        inner_type_id: TypeId,
+    ) -> CompiledValue {
+        let inner_type_id = self.try_substitute_type(inner_type_id);
+        let inner_cranelift_type = self.cranelift_type(inner_type_id);
+        let union_size = self.type_size(scrutinee.type_id);
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            let loaded = self.builder.ins().load(
+                inner_cranelift_type,
+                MemFlags::new(),
+                scrutinee.value,
+                union_layout::PAYLOAD_OFFSET,
+            );
+            CompiledValue::new(loaded, inner_cranelift_type, inner_type_id)
+        } else {
+            let zero = self.iconst_cached(inner_cranelift_type, 0);
+            CompiledValue::new(zero, inner_cranelift_type, inner_type_id)
+        }
+    }
+
+    /// Coerce an integer value to match the target Cranelift type (sextend/ireduce).
+    fn coerce_int_type(&mut self, val: Value, from: Type, to: Type) -> Value {
+        if from == to {
+            val
+        } else if from.is_int() && to.is_int() {
+            if to.bytes() < from.bytes() {
+                self.builder.ins().ireduce(to, val)
+            } else {
+                self.builder.ins().sextend(to, val)
+            }
+        } else {
+            val
+        }
     }
 }

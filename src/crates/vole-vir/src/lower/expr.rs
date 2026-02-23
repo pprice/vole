@@ -86,15 +86,17 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
             lower_meta_access(meta_access, expr, ty, node_map, interner)
         }
         ExprKind::Lambda(lambda) => lower_lambda(lambda, expr, ty, node_map, interner),
+        ExprKind::NullCoalesce(nc) => lower_null_coalesce(nc, expr, ty, node_map, interner),
+        ExprKind::OptionalChain(oc) => lower_optional_chain(oc, expr, ty, node_map, interner),
+        ExprKind::OptionalMethodCall(omc) => {
+            lower_optional_method_call(omc, expr, ty, node_map, interner)
+        }
+        ExprKind::Try(inner) => lower_try(inner, ty, node_map, interner),
         ExprKind::ArrayLiteral(_)
         | ExprKind::RepeatLiteral { .. }
         | ExprKind::Match(_)
-        | ExprKind::NullCoalesce(_)
         | ExprKind::StructLiteral(_)
-        | ExprKind::OptionalChain(_)
-        | ExprKind::OptionalMethodCall(_)
         | ExprKind::MethodCall(_)
-        | ExprKind::Try(_)
         | ExprKind::When(_) => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,
@@ -687,6 +689,97 @@ fn lower_lambda(
         body,
         captures,
         ty,
+    })
+}
+
+/// Lower a null coalesce expression (`value ?? default`) to `VirExpr::NullCoalesce`.
+///
+/// Extracts the sema-computed result type (the non-nil inner type) from the
+/// expression's NodeMap entry.  Both `value` and `default` sub-expressions
+/// are recursively lowered.
+fn lower_null_coalesce(
+    nc: &vole_frontend::ast::NullCoalesceExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let value = lower_expr(&nc.value, node_map, interner);
+    let default = lower_expr(&nc.default, node_map, interner);
+    // The expression type from sema is the non-nil result type (T from T | nil).
+    let inner_type = node_map.get_type(expr.id).unwrap_or(ty);
+    Box::new(VirExpr::NullCoalesce {
+        value,
+        default,
+        inner_type,
+        ty: inner_type,
+    })
+}
+
+/// Lower an optional chain field access (`obj?.field`) to `VirExpr::OptionalChain`.
+///
+/// Extracts `OptionalChainInfo` from sema's NodeMap for the inner/result types.
+/// Falls back to `VirExpr::Ast` when sema didn't record the info (generic bodies).
+fn lower_optional_chain(
+    oc: &vole_frontend::ast::OptionalChainExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let Some(info) = node_map.get_optional_chain(expr.id) else {
+        return Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        });
+    };
+    let object = lower_expr(&oc.object, node_map, interner);
+    Box::new(VirExpr::OptionalChain {
+        object,
+        field: oc.field,
+        inner_type: info.inner_type,
+        ty,
+    })
+}
+
+/// Lower an optional method call (`obj?.method(args)`) to `VirExpr::OptionalMethodCall`.
+///
+/// Extracts `OptionalChainInfo` from sema's NodeMap for the inner/result types.
+/// The original AST expression is preserved because method dispatch resolution is
+/// still keyed on NodeId (method calls remain as Ast escape hatches).
+/// Falls back to `VirExpr::Ast` when sema didn't record the info.
+fn lower_optional_method_call(
+    omc: &vole_frontend::ast::OptionalMethodCallExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let Some(info) = node_map.get_optional_chain(expr.id) else {
+        return Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        });
+    };
+    let object = lower_expr(&omc.object, node_map, interner);
+    Box::new(VirExpr::OptionalMethodCall {
+        object,
+        call_expr: Box::new(expr.clone()),
+        inner_type: info.inner_type,
+        ty,
+    })
+}
+
+/// Lower a try expression (`expr?`) to `VirExpr::Try`.
+///
+/// The inner fallible expression is recursively lowered.  `success_type` is
+/// the sema-computed type of the overall try expression (the unwrapped success
+/// type from the fallible).
+fn lower_try(inner: &Expr, ty: TypeId, node_map: &NodeMap, interner: &mut Interner) -> VirRef {
+    let value = lower_expr(inner, node_map, interner);
+    Box::new(VirExpr::Try {
+        value,
+        success_type: ty,
     })
 }
 
