@@ -3,7 +3,7 @@
 // VIR expression nodes and their supporting types.
 
 use vole_frontend::Expr;
-use vole_identity::{FunctionId, Symbol, TypeDefId, TypeId};
+use vole_identity::{FunctionId, NameId, Symbol, TypeDefId, TypeId};
 use vole_sema::{StringConversion, UnionStorageKind};
 
 use crate::calls::CallTarget;
@@ -395,10 +395,24 @@ pub enum AsCastKind {
 #[derive(Debug, Clone)]
 pub enum VirMetaKind {
     /// Static meta: the type is known at compile time.
-    Static { type_def: TypeDefId },
+    ///
+    /// `object` is present when the access was on a value expression
+    /// (e.g. `val.@meta` where `val: Point`) so codegen can re-derive the
+    /// TypeDefId in monomorphized contexts.  `None` when the access was on
+    /// a type name (e.g. `Point.@meta`).
+    Static {
+        type_def: TypeDefId,
+        object: Option<VirRef>,
+    },
     /// Dynamic meta: the value's type is only known at runtime (interface
     /// dispatch through vtable slot 0).
     Dynamic { value: VirRef },
+    /// Type parameter meta: the reflected type is a generic type parameter.
+    ///
+    /// Codegen resolves this at monomorphization time by looking up the
+    /// concrete type from substitutions and dispatching to the static or
+    /// dynamic path.
+    TypeParam { name_id: NameId, value: VirRef },
 }
 
 /// A captured variable in a lambda / closure.

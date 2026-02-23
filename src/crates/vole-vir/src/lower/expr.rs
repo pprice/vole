@@ -12,7 +12,7 @@ use vole_sema::StringConversion;
 use vole_sema::node_map::NodeMap;
 
 use crate::expr::{
-    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirExpr, VirStringPart, VirUnOp,
+    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
 };
 use crate::func::VirBody;
 use crate::refs::VirRef;
@@ -80,6 +80,9 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
             lower_compound_assign(compound, expr, ty, node_map, interner)
         }
         ExprKind::Index(idx) => lower_index(idx, expr, ty, node_map, interner),
+        ExprKind::MetaAccess(meta_access) => {
+            lower_meta_access(meta_access, expr, ty, node_map, interner)
+        }
         ExprKind::ArrayLiteral(_)
         | ExprKind::RepeatLiteral { .. }
         | ExprKind::Match(_)
@@ -90,8 +93,7 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         | ExprKind::OptionalMethodCall(_)
         | ExprKind::MethodCall(_)
         | ExprKind::Try(_)
-        | ExprKind::When(_)
-        | ExprKind::MetaAccess(_) => Box::new(VirExpr::Ast {
+        | ExprKind::When(_) => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,
         }),
@@ -584,6 +586,66 @@ fn lower_index(
         ty,
         union_storage,
     })
+}
+
+/// Lower a `.@meta` access expression to `VirExpr::MetaAccess`.
+///
+/// Looks up the `MetaAccessKind` from sema's NodeMap and dispatches:
+/// - `Static`: embeds the TypeDefId; carries the lowered object for
+///   re-derivation in monomorphized contexts (type-name targets carry `None`).
+/// - `Dynamic`: lowers the object expression for vtable dispatch.
+/// - `TypeParam`: carries the NameId and lowered object for codegen resolution.
+///
+/// Falls back to `VirExpr::Ast` when sema didn't record a classification
+/// (e.g. generic function bodies that sema skips).
+fn lower_meta_access(
+    meta_access: &vole_frontend::ast::MetaAccessExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    use vole_sema::node_map::MetaAccessKind;
+
+    let Some(meta_kind) = node_map.get_meta_access(expr.id) else {
+        // No sema annotation — keep as Ast escape hatch.
+        return Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        });
+    };
+
+    let kind = match meta_kind {
+        MetaAccessKind::Static { type_def_id } => {
+            // Determine whether this is a type-name access (no object needed)
+            // or a value-expression access (object needed for re-derivation).
+            let object = match &meta_access.object.kind {
+                ExprKind::TypeLiteral(_) => None,
+                ExprKind::Identifier(_) => {
+                    // Could be either a type name or a variable. Always lower
+                    // the object so codegen can inspect it for monomorphized
+                    // re-derivation. The object won't be compiled in the
+                    // non-monomorphized Static path.
+                    Some(lower_expr(&meta_access.object, node_map, interner))
+                }
+                _ => Some(lower_expr(&meta_access.object, node_map, interner)),
+            };
+            VirMetaKind::Static {
+                type_def: type_def_id,
+                object,
+            }
+        }
+        MetaAccessKind::Dynamic => {
+            let value = lower_expr(&meta_access.object, node_map, interner);
+            VirMetaKind::Dynamic { value }
+        }
+        MetaAccessKind::TypeParam { name_id } => {
+            let value = lower_expr(&meta_access.object, node_map, interner);
+            VirMetaKind::TypeParam { name_id, value }
+        }
+    };
+
+    Box::new(VirExpr::MetaAccess { kind, ty })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.

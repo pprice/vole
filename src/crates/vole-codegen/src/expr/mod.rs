@@ -23,9 +23,11 @@ use crate::union_layout;
 
 use vole_frontend::ast::YieldExpr;
 use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
-use vole_identity::ModuleId;
+use vole_identity::{ModuleId, TypeDefId};
 use vole_sema::type_arena::TypeId;
-use vole_vir::{AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirStringPart, VirUnOp};
+use vole_vir::{
+    AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
+};
 
 use super::context::Cg;
 use super::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
@@ -728,10 +730,8 @@ impl Cg<'_, '_, '_> {
                 result,
             } => self.compile_vir_as_cast(value, *target_ty, *kind, *result),
 
-            // -- Reflection (todo) ----------------------------------------
-            VirExpr::MetaAccess { .. } => {
-                todo!("VIR MetaAccess: lowering still emits Ast escape hatch")
-            }
+            // -- Reflection ---------------------------------------------------
+            VirExpr::MetaAccess { kind, ty } => self.compile_vir_meta_access(kind, *ty),
 
             // -- Variables ------------------------------------------------
             VirExpr::LocalLoad { name, ty } => self.compile_local_load(*name, *ty),
@@ -1171,6 +1171,121 @@ impl Cg<'_, '_, '_> {
         value.mark_consumed();
         value.debug_assert_rc_handled("assign to variable");
         Ok(value)
+    }
+
+    // =========================================================================
+    // VIR MetaAccess
+    // =========================================================================
+
+    /// Compile a VIR `MetaAccess` expression (`.@meta`).
+    ///
+    /// Dispatches on `VirMetaKind`:
+    /// - `Static`: builds a cached TypeMeta for the compile-time-known type.
+    ///   In monomorphized contexts, re-derives the TypeDefId from the object's
+    ///   concrete type to handle stale sema annotations.
+    /// - `Dynamic`: loads the meta getter from the interface vtable and calls it.
+    /// - `TypeParam`: resolves the type parameter via substitutions, then
+    ///   dispatches to the static or dynamic path.
+    fn compile_vir_meta_access(
+        &mut self,
+        kind: &VirMetaKind,
+        ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        use crate::reflection::{
+            compile_dynamic_meta_from_value, compile_static_meta_with_type,
+            resolve_reflection_types,
+        };
+
+        let result_ty = if ty == TypeId::UNKNOWN {
+            resolve_reflection_types(self)
+                .ok()
+                .map(|i| i.type_meta_type_id)
+                .unwrap_or(TypeId::UNKNOWN)
+        } else {
+            ty
+        };
+
+        match kind {
+            VirMetaKind::Static { type_def, object } => {
+                let effective_type_def = if self.substitutions.is_some() {
+                    self.resolve_vir_static_meta_type_def(object.as_deref())
+                        .unwrap_or(*type_def)
+                } else {
+                    *type_def
+                };
+                compile_static_meta_with_type(self, effective_type_def, result_ty)
+            }
+            VirMetaKind::Dynamic { value } => {
+                let obj = self.compile_vir_expr(value)?;
+                compile_dynamic_meta_from_value(self, obj, result_ty)
+            }
+            VirMetaKind::TypeParam { name_id, value } => {
+                self.compile_vir_type_param_meta(*name_id, value, result_ty)
+            }
+        }
+    }
+
+    /// Re-derive the TypeDefId for a static meta access in a monomorphized context.
+    ///
+    /// When codegen compiles multiple monomorphizations of a generic function,
+    /// sema's `MetaAccessKind::Static` annotation may refer to the wrong TypeDefId
+    /// because all monomorphizations share the same NodeId and the last re-analysis
+    /// overwrites earlier ones.  This function re-derives the correct TypeDefId
+    /// from the object's concrete type in the current codegen scope.
+    fn resolve_vir_static_meta_type_def(&self, object: Option<&VirExpr>) -> Option<TypeDefId> {
+        let object = object?;
+        let object_type_id = match object {
+            VirExpr::LocalLoad { name, .. } => self.vars.get(name).map(|(_, ty)| *ty)?,
+            _ => return None,
+        };
+        let (type_def_id, _, _) = self.arena().unwrap_nominal(object_type_id)?;
+        Some(type_def_id)
+    }
+
+    /// Resolve a `TypeParam` meta access by looking up the concrete type from
+    /// the current monomorphization substitutions.
+    fn compile_vir_type_param_meta(
+        &mut self,
+        name_id: vole_identity::NameId,
+        value: &VirExpr,
+        result_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        use crate::reflection::{compile_dynamic_meta_from_value, compile_static_meta_with_type};
+
+        let substitutions = self.substitutions.ok_or_else(|| {
+            CodegenError::unsupported(
+                "T.@meta requires concrete type (not in a monomorphized context)",
+            )
+        })?;
+
+        let concrete_type_id = substitutions.get(&name_id).copied().ok_or_else(|| {
+            let param_name = self
+                .query()
+                .last_segment(name_id)
+                .unwrap_or_else(|| "?".to_string());
+            CodegenError::unsupported_with_context(
+                "T.@meta: no substitution for type parameter",
+                param_name,
+            )
+        })?;
+
+        // Interface types require dynamic dispatch via vtable.
+        if self.arena().is_interface(concrete_type_id) {
+            let obj = self.compile_vir_expr(value)?;
+            return compile_dynamic_meta_from_value(self, obj, result_ty);
+        }
+
+        // Concrete nominal types (class/struct) are resolved statically.
+        if let Some((type_def_id, _, _)) = self.arena().unwrap_nominal(concrete_type_id) {
+            return compile_static_meta_with_type(self, type_def_id, result_ty);
+        }
+
+        // Unsupported concrete type (primitive, array, function, etc.)
+        let display = self.arena().display_basic(concrete_type_id);
+        Err(CodegenError::unsupported_with_context(
+            "T.@meta: concrete type does not support reflection",
+            display,
+        ))
     }
 
     // =========================================================================

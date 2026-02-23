@@ -169,6 +169,25 @@ fn compile_static_meta(
     type_def_id: TypeDefId,
     expr_node_id: vole_frontend::NodeId,
 ) -> CodegenResult<CompiledValue> {
+    let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
+        resolve_reflection_types(cg)
+            .ok()
+            .map(|i| i.type_meta_type_id)
+            .unwrap_or(TypeId::UNKNOWN)
+    });
+    compile_static_meta_with_type(cg, type_def_id, result_type_id)
+}
+
+/// Build a TypeMeta instance for a statically-known type, with singleton caching.
+///
+/// Like [`compile_static_meta`] but takes the result TypeId directly instead
+/// of looking it up from the NodeMap.  Used by both the AST codegen path
+/// (via `compile_static_meta`) and the VIR codegen path.
+pub(crate) fn compile_static_meta_with_type(
+    cg: &mut Cg,
+    type_def_id: TypeDefId,
+    result_type_id: TypeId,
+) -> CodegenResult<CompiledValue> {
     let ptr_type = cg.ptr_type();
 
     // Get or allocate a unique cache key for this type.
@@ -211,13 +230,6 @@ fn compile_static_meta(
     cg.switch_to_block(merge_block);
     cg.builder.seal_block(merge_block);
     let result_ptr = cg.builder.block_params(merge_block)[0];
-
-    let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
-        resolve_reflection_types(cg)
-            .ok()
-            .map(|i| i.type_meta_type_id)
-            .unwrap_or(TypeId::UNKNOWN)
-    });
 
     let cv = CompiledValue::new(result_ptr, ptr_type, result_type_id);
     Ok(cg.mark_rc_owned(cv))
@@ -304,9 +316,26 @@ fn compile_dynamic_meta(
     meta_access: &MetaAccessExpr,
     expr_node_id: vole_frontend::NodeId,
 ) -> CodegenResult<CompiledValue> {
-    // Compile the object expression to get the interface-boxed value
     let obj = cg.expr(&meta_access.object)?;
+    let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
+        resolve_reflection_types(cg)
+            .ok()
+            .map(|i| i.type_meta_type_id)
+            .unwrap_or(TypeId::UNKNOWN)
+    });
+    compile_dynamic_meta_from_value(cg, obj, result_type_id)
+}
 
+/// Build a TypeMeta instance for a dynamically-typed value (interface type).
+///
+/// Like [`compile_dynamic_meta`] but takes an already-compiled object value
+/// and result TypeId.  Used by both the AST codegen path (via
+/// `compile_dynamic_meta`) and the VIR codegen path.
+pub(crate) fn compile_dynamic_meta_from_value(
+    cg: &mut Cg,
+    obj: CompiledValue,
+    result_type_id: TypeId,
+) -> CodegenResult<CompiledValue> {
     let ptr_type = cg.ptr_type();
     let word_bytes = ptr_type.bytes() as i32;
 
@@ -332,13 +361,6 @@ fn compile_dynamic_meta(
     // Call the meta getter
     let call = cg.builder.ins().call_indirect(sig_ref, meta_fn_ptr, &[]);
     let type_meta_ptr = cg.builder.inst_results(call)[0];
-
-    // Determine the result type (TypeMeta)
-    let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
-        // Fallback: resolve TypeMeta type from entity registry
-        let info = resolve_reflection_types(cg).ok();
-        info.map(|i| i.type_meta_type_id).unwrap_or(TypeId::UNKNOWN)
-    });
 
     let cv = CompiledValue::new(type_meta_ptr, ptr_type, result_type_id);
     Ok(cg.mark_rc_owned(cv))
