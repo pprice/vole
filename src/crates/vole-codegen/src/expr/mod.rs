@@ -6,6 +6,7 @@
 mod as_cast;
 mod control_flow;
 mod error_patterns;
+mod field_ops;
 mod indexing;
 mod literal;
 mod null_ops;
@@ -669,13 +670,19 @@ impl Cg<'_, '_, '_> {
                 todo!("VIR ClassInstance: lowering still emits Ast escape hatch")
             }
 
-            // -- Field access (todo) --------------------------------------
-            VirExpr::FieldLoad { .. } => {
-                todo!("VIR FieldLoad: lowering still emits Ast escape hatch")
-            }
-            VirExpr::FieldStore { .. } => {
-                todo!("VIR FieldStore: lowering still emits Ast escape hatch")
-            }
+            // -- Field access -------------------------------------------------
+            VirExpr::FieldLoad {
+                object,
+                field,
+                storage: _,
+                ty,
+            } => self.compile_vir_field_load(object, *field, *ty),
+            VirExpr::FieldStore {
+                object,
+                field,
+                storage: _,
+                value,
+            } => self.compile_vir_field_store(object, *field, value),
 
             // -- RC operations ------------------------------------------------
             VirExpr::RcInc { value } => {

@@ -291,11 +291,15 @@ pub enum VirUnOp {
 /// Describes the physical storage location of a struct/class field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FieldStorage {
-    /// Field stored inline at the given byte offset.
+    /// Field stored inline at the given byte offset (value-type struct).
     Direct { offset: u32 },
-    /// Field stored on the heap, accessed through a pointer at the given
-    /// byte offset.
+    /// Field stored on the heap, accessed through a runtime call at the
+    /// given slot index (reference-counted class instance).
     Heap { offset: u32 },
+    /// Unresolved storage — the lowering pass emits this when `TypeArena`
+    /// is not available.  Codegen resolves it to `Direct` or `Heap` using
+    /// the object's type at instruction-selection time.
+    ByName,
 }
 
 /// The kind of type coercion to perform.

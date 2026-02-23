@@ -167,7 +167,8 @@ fn lower_assign_discard_becomes_ast() {
 }
 
 #[test]
-fn lower_assign_field_becomes_ast() {
+fn lower_assign_field_becomes_field_store() {
+    use crate::expr::FieldStorage;
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -187,8 +188,24 @@ fn lower_assign_field_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for field assign, got {other:?}"),
+        VirExpr::FieldStore {
+            object,
+            field,
+            storage,
+            value,
+        } => {
+            assert!(matches!(
+                object.as_ref(),
+                VirExpr::IntLiteral { value: 0, .. }
+            ));
+            assert_eq!(*field, sym);
+            assert_eq!(*storage, FieldStorage::ByName);
+            assert!(matches!(
+                value.as_ref(),
+                VirExpr::IntLiteral { value: 42, .. }
+            ));
+        }
+        other => panic!("expected FieldStore for field assign, got {other:?}"),
     }
 }
 

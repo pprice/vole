@@ -13,7 +13,7 @@ use vole_sema::types::ConstantValue;
 
 impl Cg<'_, '_, '_> {
     /// Convenience wrapper: compute struct field byte offset, panicking on invalid types.
-    pub(super) fn struct_field_byte_offset(&self, type_id: TypeId, slot: usize) -> i32 {
+    pub(crate) fn struct_field_byte_offset(&self, type_id: TypeId, slot: usize) -> i32 {
         super::helpers::struct_field_byte_offset(type_id, slot, self.arena(), self.registry())
             .expect("INTERNAL: struct field offset must be computable for valid struct type")
     }
@@ -382,7 +382,7 @@ impl Cg<'_, '_, '_> {
     /// 1. RC-dec the old union payload (if any RC variant is active)
     /// 2. Coerce the new value to a union buffer via construct_union_id
     /// 3. Copy the 16-byte buffer inline into the struct
-    fn assign_struct_union_field(
+    pub(crate) fn assign_struct_union_field(
         &mut self,
         struct_ptr: Value,
         offset: i32,

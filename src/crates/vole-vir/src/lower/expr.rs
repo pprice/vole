@@ -10,7 +10,7 @@ use vole_frontend::ast::{BinaryOp, ExprKind, UnaryOp};
 use vole_identity::TypeId;
 use vole_sema::node_map::NodeMap;
 
-use crate::expr::{AsCastKind, IsCheckResult, VirBinOp, VirExpr, VirUnOp};
+use crate::expr::{AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirExpr, VirUnOp};
 use crate::func::VirBody;
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
@@ -66,6 +66,7 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         ExprKind::Range(range_expr) => lower_range(range_expr, node_map, interner),
         ExprKind::Identifier(sym) => Box::new(VirExpr::LocalLoad { name: *sym, ty }),
         ExprKind::Assign(assign_expr) => lower_assign(assign_expr, expr, ty, node_map, interner),
+        ExprKind::FieldAccess(fa) => lower_field_access(fa, ty, node_map, interner),
         ExprKind::Is(is_expr) => lower_is_check(is_expr, expr, ty, node_map, interner),
         ExprKind::AsCast(as_cast) => lower_as_cast(as_cast, expr, ty, node_map, interner),
         // Ast escape hatches — explicitly listed so new ExprKind variants
@@ -80,7 +81,6 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         | ExprKind::NullCoalesce(_)
         | ExprKind::Lambda(_)
         | ExprKind::StructLiteral(_)
-        | ExprKind::FieldAccess(_)
         | ExprKind::OptionalChain(_)
         | ExprKind::OptionalMethodCall(_)
         | ExprKind::MethodCall(_)
@@ -339,9 +339,9 @@ fn lower_range(
 /// Lower an assignment expression.
 ///
 /// Variable targets (`x = expr`) are lowered to `VirExpr::LocalStore`.
-/// All other targets (field, index, discard) remain as `VirExpr::Ast`
-/// because they require codegen-level information (field offsets, array
-/// bounds, etc.) that is not available during lowering.
+/// Field targets (`obj.field = expr`) are lowered to `VirExpr::FieldStore`.
+/// Other targets (index, discard) remain as `VirExpr::Ast` because they
+/// require codegen-level information (array bounds, etc.).
 fn lower_assign(
     assign_expr: &vole_frontend::ast::AssignExpr,
     expr: &Expr,
@@ -354,12 +354,42 @@ fn lower_assign(
             let value = lower_expr(&assign_expr.value, node_map, interner);
             Box::new(VirExpr::LocalStore { name: *sym, value })
         }
-        // Discard, field, and index targets stay as Ast.
+        vole_frontend::AssignTarget::Field { object, field, .. } => {
+            let obj = lower_expr(object, node_map, interner);
+            let value = lower_expr(&assign_expr.value, node_map, interner);
+            Box::new(VirExpr::FieldStore {
+                object: obj,
+                field: *field,
+                storage: FieldStorage::ByName,
+                value,
+            })
+        }
+        // Discard and index targets stay as Ast.
         _ => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,
         }),
     }
+}
+
+/// Lower a field access expression to `VirExpr::FieldLoad`.
+///
+/// The object sub-expression is recursively lowered.  Storage resolution
+/// (`Direct` vs `Heap`) is deferred to codegen via `FieldStorage::ByName`
+/// because `TypeArena` is not available in the lowering context.
+fn lower_field_access(
+    fa: &vole_frontend::ast::FieldAccessExpr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let object = lower_expr(&fa.object, node_map, interner);
+    Box::new(VirExpr::FieldLoad {
+        object,
+        field: fa.field,
+        storage: FieldStorage::ByName,
+        ty,
+    })
 }
 
 /// Lower an `is` expression to `VirExpr::IsCheck`.
