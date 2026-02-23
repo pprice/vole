@@ -1,0 +1,222 @@
+// lower/mod.rs
+//
+// AST-to-VIR lowering.
+//
+// Walks the AST, lowering known expression kinds (literals, grouping) to
+// proper VIR nodes and wrapping everything else in `VirStmt::Ast` /
+// `VirExpr::Ast` escape hatches.  Expression statements (`Stmt::Expr`)
+// are lowered through `lower_expr`, which enables literal expressions to
+// be emitted as `VirExpr::IntLiteral`, `FloatLiteral`, `BoolLiteral`, etc.
+// All other statement kinds remain as `VirStmt::Ast`.
+
+mod expr;
+mod stmt;
+
+#[cfg(test)]
+mod tests;
+
+use vole_frontend::Interner;
+use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
+use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeId};
+use vole_sema::TypeArena;
+use vole_sema::node_map::NodeMap;
+
+use crate::func::{VirBody, VirFunction};
+
+use self::expr::lower_expr;
+use self::stmt::lower_stmt;
+
+/// Lower a single function declaration into a `VirFunction`.
+///
+/// `func_id`, `name`, `param_types`, and `return_type` come from the sema
+/// entity registry — they are resolved during semantic analysis and passed
+/// in by the caller (the compilation pipeline).
+///
+/// `node_map` is accepted for API compatibility with future phases that will
+/// look up per-expression types.  Phase 0 does not use it.
+pub fn lower_function(
+    func: &FuncDecl,
+    func_id: FunctionId,
+    name: String,
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirFunction {
+    let body = lower_func_body(&func.body, node_map, interner);
+    VirFunction {
+        id: func_id,
+        name,
+        params: param_types.to_vec(),
+        return_type,
+        body,
+        mangled_name_id: None,
+        method_id: None,
+    }
+}
+
+/// Lower a monomorphized function instance into a `VirFunction`.
+///
+/// Like [`lower_function`], but for a generic function that has been
+/// instantiated with concrete type arguments.  The caller provides
+/// already-substituted `param_types` and `return_type` from the
+/// `MonomorphInstance`'s `func_type`.
+///
+/// In debug builds, asserts that no `TypeId` in the output still
+/// contains a type parameter — all types must be concrete after
+/// monomorphization.
+///
+/// The body remains Ast-wrapped (Phase 2 migrates bodies).
+#[allow(clippy::too_many_arguments)]
+pub fn lower_monomorphized_function(
+    func: &FuncDecl,
+    func_id: FunctionId,
+    name: String,
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    node_map: &NodeMap,
+    type_arena: &TypeArena,
+    mangled_name_id: NameId,
+    interner: &mut Interner,
+) -> VirFunction {
+    debug_assert_concrete_types(param_types, return_type, type_arena, &name);
+    let mut vir = lower_function(
+        func,
+        func_id,
+        name,
+        param_types,
+        return_type,
+        node_map,
+        interner,
+    );
+    vir.mangled_name_id = Some(mangled_name_id);
+    vir
+}
+
+/// Lower a class/struct method (instance or static) into a `VirFunction`.
+///
+/// Similar to [`lower_function`] but associates a `MethodId` instead of
+/// using the `FunctionId` for lookup.  The `func_id` is a dummy value
+/// (methods don't have a `FunctionId` in the entity registry); the real
+/// identity is carried by `method_id`.
+pub fn lower_method(
+    func: &FuncDecl,
+    method_id: MethodId,
+    name: String,
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirFunction {
+    let body = lower_func_body(&func.body, node_map, interner);
+    VirFunction {
+        id: FunctionId::new(0), // dummy — methods use method_id for lookup
+        name,
+        params: param_types.to_vec(),
+        return_type,
+        body,
+        mangled_name_id: None,
+        method_id: Some(method_id),
+    }
+}
+
+/// Lower an interface method (default method with a body) into a `VirFunction`.
+///
+/// Interface methods use `InterfaceMethod` AST nodes (which have an optional
+/// body) rather than `FuncDecl`.  Only methods with a body should be lowered.
+pub fn lower_interface_method(
+    method: &InterfaceMethod,
+    method_id: MethodId,
+    name: String,
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> Option<VirFunction> {
+    let body_ast = method.body.as_ref()?;
+    let body = lower_func_body(body_ast, node_map, interner);
+    Some(VirFunction {
+        id: FunctionId::new(0), // dummy — methods use method_id for lookup
+        name,
+        params: param_types.to_vec(),
+        return_type,
+        body,
+        mangled_name_id: None,
+        method_id: Some(method_id),
+    })
+}
+
+/// Assert (debug-only) that all types in a monomorphized function signature
+/// are concrete — no `TypeParam` or `TypeParamRef` remains.
+fn debug_assert_concrete_types(
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    arena: &TypeArena,
+    func_name: &str,
+) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    for (i, (_sym, ty)) in param_types.iter().enumerate() {
+        debug_assert!(
+            !arena.contains_type_param(*ty),
+            "VIR monomorph `{func_name}`: param {i} still contains a type parameter \
+             (TypeId={ty:?})"
+        );
+    }
+    debug_assert!(
+        !arena.contains_type_param(return_type),
+        "VIR monomorph `{func_name}`: return type still contains a type parameter \
+         (TypeId={return_type:?})"
+    );
+}
+
+/// Lower a test case body into a `VirBody`.
+///
+/// Test bodies use the same `FuncBody` type as functions, so this delegates
+/// to `lower_func_body`.  Exposed as a public API so the lowering pipeline
+/// in `analyzed.rs` can lower test bodies alongside function bodies.
+pub fn lower_test_body(body: &FuncBody, node_map: &NodeMap, interner: &mut Interner) -> VirBody {
+    lower_func_body(body, node_map, interner)
+}
+
+/// Lower a `FuncBody` (block or expression) into a `VirBody`.
+///
+/// Block bodies have their statements walked individually; expression bodies
+/// become a single trailing VIR expression.
+pub(crate) fn lower_func_body(
+    body: &FuncBody,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirBody {
+    match body {
+        FuncBody::Block(block) => lower_stmts(&block.stmts, node_map, interner),
+        FuncBody::Expr(expr) => {
+            let trailing = lower_expr(expr, node_map, interner);
+            VirBody {
+                stmts: Vec::new(),
+                trailing: Some(trailing),
+            }
+        }
+    }
+}
+
+/// Lower a slice of AST statements into a `VirBody`.
+///
+/// Expression statements have their inner expression lowered through
+/// `lower_expr` (which emits proper VIR for known kinds like literals).
+/// All other statement kinds are wrapped in `VirStmt::Ast`.
+pub(crate) fn lower_stmts(
+    stmts: &[vole_frontend::ast::Stmt],
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirBody {
+    let vir_stmts = stmts
+        .iter()
+        .map(|s| lower_stmt(s, node_map, interner))
+        .collect();
+    VirBody {
+        stmts: vir_stmts,
+        trailing: None,
+    }
+}

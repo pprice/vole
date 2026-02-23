@@ -1,0 +1,296 @@
+// lower/tests/functions.rs
+//
+// Tests for function-level lowering: lower_function, lower_monomorphized_function,
+// lower_method, lower_stmts.
+
+use super::*;
+use crate::expr::VirExpr;
+use crate::lower::{lower_function, lower_monomorphized_function, lower_stmts};
+use crate::stmt::VirStmt;
+use vole_sema::TypeArena;
+
+#[test]
+fn lower_empty_block_function() {
+    let func = make_block_func(vec![]);
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let ret_ty = dummy_type_id();
+
+    let vir = lower_function(
+        &func,
+        dummy_func_id(),
+        "test_fn".into(),
+        &[],
+        ret_ty,
+        &node_map,
+        &mut interner,
+    );
+
+    assert_eq!(vir.id, dummy_func_id());
+    assert_eq!(vir.return_type, ret_ty);
+    assert!(vir.params.is_empty());
+    assert!(vir.body.stmts.is_empty());
+    assert!(vir.body.trailing.is_none());
+}
+
+#[test]
+fn lower_block_function_wraps_stmts_as_ast() {
+    let func = make_block_func(vec![make_break_stmt(), make_continue_stmt()]);
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let ret_ty = dummy_type_id();
+
+    let vir = lower_function(
+        &func,
+        dummy_func_id(),
+        "test_fn".into(),
+        &[],
+        ret_ty,
+        &node_map,
+        &mut interner,
+    );
+
+    assert_eq!(vir.body.stmts.len(), 2);
+    assert!(vir.body.trailing.is_none());
+
+    // Every statement should be VirStmt::Ast
+    for stmt in &vir.body.stmts {
+        match stmt {
+            VirStmt::Ast { .. } => {}
+            other => panic!("expected VirStmt::Ast, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn lower_expr_body_function_sets_trailing() {
+    let func = make_expr_func(make_bool_expr());
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let ret_ty = dummy_type_id();
+
+    let vir = lower_function(
+        &func,
+        dummy_func_id(),
+        "test_fn".into(),
+        &[],
+        ret_ty,
+        &node_map,
+        &mut interner,
+    );
+
+    assert!(vir.body.stmts.is_empty());
+    assert!(vir.body.trailing.is_some());
+
+    // BoolLiteral is now lowered to VirExpr::BoolLiteral
+    match vir.body.trailing.as_deref() {
+        Some(VirExpr::BoolLiteral(true)) => {}
+        other => panic!("expected VirExpr::BoolLiteral(true) trailing, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_preserves_params_and_return_type() {
+    let func = make_block_func(vec![]);
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let ret_ty = dummy_type_id();
+    let param_a = TypeId::from_raw(10);
+    let param_b = TypeId::from_raw(20);
+    let params = vec![(Symbol::UNKNOWN, param_a), (Symbol::UNKNOWN, param_b)];
+
+    let vir = lower_function(
+        &func,
+        dummy_func_id(),
+        "test_fn".into(),
+        &params,
+        ret_ty,
+        &node_map,
+        &mut interner,
+    );
+
+    assert_eq!(vir.params.len(), 2);
+    assert_eq!(vir.params[0].1, param_a);
+    assert_eq!(vir.params[1].1, param_b);
+    assert_eq!(vir.return_type, ret_ty);
+}
+
+#[test]
+fn lower_stmts_preserves_order() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmts = vec![make_break_stmt(), make_continue_stmt(), make_break_stmt()];
+    let body = lower_stmts(&stmts, &node_map, &mut interner);
+
+    assert_eq!(body.stmts.len(), 3);
+    assert!(body.trailing.is_none());
+
+    // Verify the inner AST statements match
+    match &body.stmts[0] {
+        VirStmt::Ast { stmt } => match stmt.as_ref() {
+            Stmt::Break(_) => {}
+            other => panic!("expected Break, got {other:?}"),
+        },
+        other => panic!("expected Ast, got {other:?}"),
+    }
+    match &body.stmts[1] {
+        VirStmt::Ast { stmt } => match stmt.as_ref() {
+            Stmt::Continue(_) => {}
+            other => panic!("expected Continue, got {other:?}"),
+        },
+        other => panic!("expected Ast, got {other:?}"),
+    }
+    match &body.stmts[2] {
+        VirStmt::Ast { stmt } => match stmt.as_ref() {
+            Stmt::Break(_) => {}
+            other => panic!("expected Break, got {other:?}"),
+        },
+        other => panic!("expected Ast, got {other:?}"),
+    }
+}
+
+// -----------------------------------------------------------------------
+// Monomorphized function lowering
+// -----------------------------------------------------------------------
+
+#[test]
+fn lower_monomorphized_with_concrete_types() {
+    let arena = TypeArena::new();
+    let func = make_block_func(vec![make_break_stmt()]);
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let i64_ty = arena.i64();
+    let string_ty = arena.string();
+    let params = vec![(Symbol::UNKNOWN, i64_ty)];
+
+    let vir = lower_monomorphized_function(
+        &func,
+        dummy_func_id(),
+        "identity__mono_0".into(),
+        &params,
+        string_ty,
+        &node_map,
+        &arena,
+        dummy_name_id(),
+        &mut interner,
+    );
+
+    assert_eq!(vir.name, "identity__mono_0");
+    assert_eq!(vir.params.len(), 1);
+    assert_eq!(vir.params[0].1, i64_ty);
+    assert_eq!(vir.return_type, string_ty);
+    assert_eq!(vir.body.stmts.len(), 1);
+}
+
+#[test]
+fn lower_monomorphized_expr_body() {
+    let arena = TypeArena::new();
+    let func = make_expr_func(make_bool_expr());
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let bool_ty = arena.bool();
+
+    let vir = lower_monomorphized_function(
+        &func,
+        dummy_func_id(),
+        "to_bool__mono_0".into(),
+        &[],
+        bool_ty,
+        &node_map,
+        &arena,
+        dummy_name_id(),
+        &mut interner,
+    );
+
+    assert_eq!(vir.name, "to_bool__mono_0");
+    assert!(vir.body.stmts.is_empty());
+    assert!(vir.body.trailing.is_some());
+    assert_eq!(vir.return_type, bool_ty);
+}
+
+#[test]
+#[should_panic(expected = "param 0 still contains a type parameter")]
+fn lower_monomorphized_rejects_type_param_in_params() {
+    let mut arena = TypeArena::new();
+    let func = make_block_func(vec![]);
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    // Create a type parameter — this should trigger the assertion
+    let mut names = vole_identity::NameTable::new();
+    let t_name_id = names.intern_raw(names.main_module(), &["T"]);
+    let type_param = arena.type_param(t_name_id);
+    let params = vec![(Symbol::UNKNOWN, type_param)];
+
+    let _ = lower_monomorphized_function(
+        &func,
+        dummy_func_id(),
+        "bad__mono_0".into(),
+        &params,
+        arena.i64(),
+        &node_map,
+        &arena,
+        dummy_name_id(),
+        &mut interner,
+    );
+}
+
+#[test]
+#[should_panic(expected = "return type still contains a type parameter")]
+fn lower_monomorphized_rejects_type_param_in_return() {
+    let mut arena = TypeArena::new();
+    let func = make_block_func(vec![]);
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let mut names = vole_identity::NameTable::new();
+    let t_name_id = names.intern_raw(names.main_module(), &["T"]);
+    let type_param = arena.type_param(t_name_id);
+
+    let _ = lower_monomorphized_function(
+        &func,
+        dummy_func_id(),
+        "bad__mono_0".into(),
+        &[],
+        type_param,
+        &node_map,
+        &arena,
+        dummy_name_id(),
+        &mut interner,
+    );
+}
+
+// -----------------------------------------------------------------------
+// Statement lowering
+// -----------------------------------------------------------------------
+
+#[test]
+fn lower_stmt_expr_produces_vir_expr() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    use vole_frontend::ast::ExprStmt;
+    let stmt = Stmt::Expr(ExprStmt {
+        expr: make_bool_expr(),
+        span: dummy_span(),
+    });
+    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir_stmt {
+        VirStmt::Expr { value } => match value.as_ref() {
+            VirExpr::BoolLiteral(true) => {}
+            other => panic!("expected BoolLiteral in Expr stmt, got {other:?}"),
+        },
+        other => panic!("expected VirStmt::Expr, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_stmt_non_expr_becomes_ast() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let stmt = make_break_stmt();
+    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir_stmt {
+        VirStmt::Ast { .. } => {}
+        other => panic!("expected VirStmt::Ast, got {other:?}"),
+    }
+}
