@@ -1,56 +1,59 @@
 // lower/tests/ast_escape.rs
 //
-// Tests for AST escape hatch lowering: Range, Unreachable, Import, TypeLiteral,
-// Assign, CompoundAssign, ArrayLiteral, RepeatLiteral, Call.
+// Tests for lowered simple expressions (Unreachable, Import, TypeLiteral, Range)
+// and remaining AST escape hatches (Assign, CompoundAssign, ArrayLiteral,
+// RepeatLiteral, Call).
 
 use super::*;
 use crate::expr::VirExpr;
 use crate::lower::expr::lower_expr;
 
 // -----------------------------------------------------------------------
-// Ast escape hatch lowering: Range, Unreachable, Import, TypeLiteral
+// Proper VIR lowering: Unreachable, Import, TypeLiteral, Range
 // -----------------------------------------------------------------------
 
 #[test]
-fn lower_expr_range_becomes_ast() {
-    let node_map = empty_node_map();
-    let mut interner = test_interner();
-    let expr = Expr {
-        id: dummy_node_id(),
-        kind: ExprKind::Range(Box::new(vole_frontend::ast::RangeExpr {
-            start: make_int_expr(0),
-            end: make_int_expr(10),
-            inclusive: false,
-        })),
-        span: dummy_span(),
-    };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
-
-    match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for Range, got {other:?}"),
-    }
-}
-
-#[test]
-fn lower_expr_unreachable_becomes_ast() {
+fn lower_expr_unreachable() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Unreachable,
-        span: dummy_span(),
+        span: Span {
+            line: 42,
+            ..dummy_span()
+        },
     };
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for Unreachable, got {other:?}"),
+        VirExpr::Unreachable { line: 42 } => {}
+        other => panic!("expected Unreachable with line 42, got {other:?}"),
     }
 }
 
 #[test]
-fn lower_expr_import_becomes_ast() {
+fn lower_expr_unreachable_preserves_line() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let expr = Expr {
+        id: dummy_node_id(),
+        kind: ExprKind::Unreachable,
+        span: Span {
+            line: 0,
+            ..dummy_span()
+        },
+    };
+    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+    match vir_ref.as_ref() {
+        VirExpr::Unreachable { line: 0 } => {}
+        other => panic!("expected Unreachable with line 0, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_expr_import() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let expr = Expr {
@@ -61,13 +64,36 @@ fn lower_expr_import_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for Import, got {other:?}"),
+        VirExpr::Import { ty } => {
+            assert_eq!(*ty, TypeId::UNKNOWN);
+        }
+        other => panic!("expected Import, got {other:?}"),
     }
 }
 
 #[test]
-fn lower_expr_type_literal_becomes_ast() {
+fn lower_expr_import_with_type() {
+    let mut node_map = empty_node_map();
+    let mut interner = test_interner();
+    let node_id = dummy_node_id();
+    node_map.set_type(node_id, dummy_type_id());
+    let expr = Expr {
+        id: node_id,
+        kind: ExprKind::Import("std:io".to_string()),
+        span: dummy_span(),
+    };
+    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+    match vir_ref.as_ref() {
+        VirExpr::Import { ty } => {
+            assert_eq!(*ty, dummy_type_id());
+        }
+        other => panic!("expected Import with type, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_expr_type_literal() {
     use vole_frontend::ast::{PrimitiveType, TypeExpr, TypeExprKind};
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -82,8 +108,78 @@ fn lower_expr_type_literal_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for TypeLiteral, got {other:?}"),
+        VirExpr::TypeLiteral => {}
+        other => panic!("expected TypeLiteral, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_expr_range_exclusive() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let expr = Expr {
+        id: dummy_node_id(),
+        kind: ExprKind::Range(Box::new(vole_frontend::ast::RangeExpr {
+            start: make_int_expr(0),
+            end: make_int_expr(10),
+            inclusive: false,
+        })),
+        span: dummy_span(),
+    };
+    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+    match vir_ref.as_ref() {
+        VirExpr::Range {
+            start,
+            end,
+            inclusive: false,
+        } => {
+            // Start should be IntLiteral(0)
+            match start.as_ref() {
+                VirExpr::IntLiteral { value: 0, .. } => {}
+                other => panic!("expected start IntLiteral(0), got {other:?}"),
+            }
+            // End should be IntLiteral(10)
+            match end.as_ref() {
+                VirExpr::IntLiteral { value: 10, .. } => {}
+                other => panic!("expected end IntLiteral(10), got {other:?}"),
+            }
+        }
+        other => panic!("expected Range (exclusive), got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_expr_range_inclusive() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let expr = Expr {
+        id: dummy_node_id(),
+        kind: ExprKind::Range(Box::new(vole_frontend::ast::RangeExpr {
+            start: make_int_expr(1),
+            end: make_int_expr(5),
+            inclusive: true,
+        })),
+        span: dummy_span(),
+    };
+    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+    match vir_ref.as_ref() {
+        VirExpr::Range {
+            start,
+            end,
+            inclusive: true,
+        } => {
+            match start.as_ref() {
+                VirExpr::IntLiteral { value: 1, .. } => {}
+                other => panic!("expected start IntLiteral(1), got {other:?}"),
+            }
+            match end.as_ref() {
+                VirExpr::IntLiteral { value: 5, .. } => {}
+                other => panic!("expected end IntLiteral(5), got {other:?}"),
+            }
+        }
+        other => panic!("expected Range (inclusive), got {other:?}"),
     }
 }
 

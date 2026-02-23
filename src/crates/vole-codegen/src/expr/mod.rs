@@ -591,6 +591,29 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue::new(value, types::I8, TypeId::NIL))
             }
 
+            // -- Simple expressions -----------------------------------------
+            VirExpr::Unreachable { line } => self.unreachable_expr(*line),
+            VirExpr::Import { ty } => {
+                let type_id = if *ty == TypeId::UNKNOWN {
+                    self.arena().primitives.i64
+                } else {
+                    *ty
+                };
+                Ok(CompiledValue::new(
+                    self.iconst_cached(types::I64, 0),
+                    types::I64,
+                    type_id,
+                ))
+            }
+            VirExpr::TypeLiteral => Err(CodegenError::unsupported(
+                "type expressions as runtime values",
+            )),
+            VirExpr::Range {
+                start,
+                end,
+                inclusive,
+            } => self.compile_vir_range(start, end, *inclusive),
+
             // -- Operators ------------------------------------------------
             VirExpr::BinaryOp { op, lhs, rhs, ty } => {
                 self.compile_vir_binary_op(*op, lhs, rhs, *ty)

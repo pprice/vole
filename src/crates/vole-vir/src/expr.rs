@@ -41,6 +41,30 @@ pub enum VirExpr {
     /// The `nil` literal.
     NilLiteral,
 
+    /// Unreachable expression (never type / bottom type).
+    ///
+    /// Emits a trap instruction with file:line info if reached at runtime.
+    Unreachable { line: u32 },
+
+    /// Import expression — compile-time module value placeholder.
+    ///
+    /// At runtime this is just a zero value; actual function calls go through
+    /// the method resolution mechanism.
+    Import { ty: TypeId },
+
+    /// Type literal used as a runtime value — always an error if reached.
+    TypeLiteral,
+
+    /// Range expression (`start..end` or `start..=end`).
+    ///
+    /// For inclusive ranges, codegen adds 1 to `end` so the runtime iterator
+    /// uses exclusive-end semantics internally.
+    Range {
+        start: VirRef,
+        end: VirRef,
+        inclusive: bool,
+    },
+
     /// Array literal with a homogeneous element type.
     ArrayLiteral {
         elements: Vec<VirRef>,

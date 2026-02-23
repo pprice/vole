@@ -263,4 +263,37 @@ impl Cg<'_, '_, '_> {
 
         Ok(CompiledValue::new(ptr, ptr_type, range_type_id))
     }
+
+    /// Compile a VIR range expression.
+    ///
+    /// Mirrors [`range()`] but compiles start/end from VIR expressions instead
+    /// of AST nodes.
+    pub(super) fn compile_vir_range(
+        &mut self,
+        start: &vole_vir::VirExpr,
+        end: &vole_vir::VirExpr,
+        inclusive: bool,
+    ) -> CodegenResult<CompiledValue> {
+        let start_val = self.compile_vir_expr(start)?;
+        let end_val = self.compile_vir_expr(end)?;
+
+        // For inclusive ranges (start..=end), add 1 to end
+        let end = if inclusive {
+            self.builder.ins().iadd_imm(end_val.value, 1)
+        } else {
+            end_val.value
+        };
+
+        // Create a stack slot to hold (start, end) - 16 bytes
+        let slot = self.alloc_stack(16);
+
+        self.builder.ins().stack_store(start_val.value, slot, 0);
+        self.builder.ins().stack_store(end, slot, 8);
+
+        let ptr_type = self.ptr_type();
+        let range_type_id = self.arena().range();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+        Ok(CompiledValue::new(ptr, ptr_type, range_type_id))
+    }
 }

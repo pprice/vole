@@ -58,6 +58,12 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         ExprKind::If(if_expr) => lower_if_expr(if_expr, ty, node_map, interner),
         ExprKind::Block(block_expr) => lower_block_expr(block_expr, ty, node_map, interner),
         ExprKind::Yield(yield_expr) => lower_yield(yield_expr, node_map, interner),
+        ExprKind::Unreachable => Box::new(VirExpr::Unreachable {
+            line: expr.span.line,
+        }),
+        ExprKind::Import(_) => Box::new(VirExpr::Import { ty }),
+        ExprKind::TypeLiteral(_) => Box::new(VirExpr::TypeLiteral),
+        ExprKind::Range(range_expr) => lower_range(range_expr, node_map, interner),
         // Ast escape hatches — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
@@ -67,16 +73,12 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         | ExprKind::RepeatLiteral { .. }
         | ExprKind::InterpolatedString(_)
         | ExprKind::Identifier(_)
-        | ExprKind::Range(_)
         | ExprKind::Index(_)
         | ExprKind::Match(_)
-        | ExprKind::Unreachable
         | ExprKind::NullCoalesce(_)
         | ExprKind::Is(_)
         | ExprKind::AsCast(_)
         | ExprKind::Lambda(_)
-        | ExprKind::TypeLiteral(_)
-        | ExprKind::Import(_)
         | ExprKind::StructLiteral(_)
         | ExprKind::FieldAccess(_)
         | ExprKind::OptionalChain(_)
@@ -302,6 +304,23 @@ pub(crate) fn map_binary_op(op: BinaryOp) -> VirBinOp {
         BinaryOp::Shl => VirBinOp::Shl,
         BinaryOp::Shr => VirBinOp::Shr,
     }
+}
+
+/// Lower a range expression to `VirExpr::Range`.
+///
+/// Both `start` and `end` sub-expressions are recursively lowered.
+fn lower_range(
+    range_expr: &vole_frontend::ast::RangeExpr,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let start = lower_expr(&range_expr.start, node_map, interner);
+    let end = lower_expr(&range_expr.end, node_map, interner);
+    Box::new(VirExpr::Range {
+        start,
+        end,
+        inclusive: range_expr.inclusive,
+    })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.
