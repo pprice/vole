@@ -76,8 +76,10 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
         ExprKind::InterpolatedString(parts) => lower_interpolated_string(parts, node_map, interner),
-        ExprKind::CompoundAssign(_)
-        | ExprKind::ArrayLiteral(_)
+        ExprKind::CompoundAssign(compound) => {
+            lower_compound_assign(compound, expr, ty, node_map, interner)
+        }
+        ExprKind::ArrayLiteral(_)
         | ExprKind::RepeatLiteral { .. }
         | ExprKind::Index(_)
         | ExprKind::Match(_)
@@ -368,6 +370,47 @@ fn lower_assign(
             })
         }
         // Discard and index targets stay as Ast.
+        _ => Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        }),
+    }
+}
+
+/// Lower a compound assignment expression.
+///
+/// Variable targets (`x += expr`) are desugared to:
+///   `LocalStore { name, value: BinaryOp { op, lhs: LocalLoad { name, ty }, rhs: lower(expr) } }`
+///
+/// Field and index targets remain as `VirExpr::Ast` because they require
+/// evaluating the object/index sub-expression exactly once (shared between
+/// the load and store), which tree-shaped VIR cannot represent without
+/// introducing temporaries.
+fn lower_compound_assign(
+    compound: &vole_frontend::ast::CompoundAssignExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    match &compound.target {
+        vole_frontend::AssignTarget::Variable(sym) => {
+            let rhs = lower_expr(&compound.value, node_map, interner);
+            let binary_op = map_binary_op(compound.op.to_binary_op());
+            let load = Box::new(VirExpr::LocalLoad { name: *sym, ty });
+            let binop_result = Box::new(VirExpr::BinaryOp {
+                op: binary_op,
+                lhs: load,
+                rhs,
+                ty,
+                line: expr.span.line,
+            });
+            Box::new(VirExpr::LocalStore {
+                name: *sym,
+                value: binop_result,
+            })
+        }
+        // Field, index, and discard targets stay as Ast.
         _ => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,

@@ -1,8 +1,9 @@
 // lower/tests/ast_escape.rs
 //
 // Tests for lowered simple expressions (Unreachable, Import, TypeLiteral, Range)
-// and remaining AST escape hatches (Assign, CompoundAssign, ArrayLiteral,
-// RepeatLiteral, Call).
+// and remaining AST escape hatches (Assign, ArrayLiteral, RepeatLiteral, Call).
+// Also tests compound assignment desugaring (variable targets lowered,
+// index/field targets remain as Ast).
 
 use super::*;
 use crate::expr::VirExpr;
@@ -216,7 +217,8 @@ fn lower_expr_assign_variable_becomes_local_store() {
 }
 
 #[test]
-fn lower_expr_compound_assign_becomes_ast() {
+fn lower_expr_compound_assign_variable_desugars_to_store() {
+    use crate::expr::VirBinOp;
     use vole_frontend::ast::{AssignTarget, CompoundAssignExpr, CompoundOp};
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -232,8 +234,45 @@ fn lower_expr_compound_assign_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
+        VirExpr::LocalStore { name, value } => {
+            assert_eq!(*name, Symbol::UNKNOWN);
+            match value.as_ref() {
+                VirExpr::BinaryOp { op, lhs, rhs, .. } => {
+                    assert_eq!(*op, VirBinOp::Add);
+                    assert!(
+                        matches!(lhs.as_ref(), VirExpr::LocalLoad { name, .. } if *name == Symbol::UNKNOWN)
+                    );
+                    assert!(matches!(rhs.as_ref(), VirExpr::IntLiteral { value: 1, .. }));
+                }
+                other => panic!("expected BinaryOp, got {other:?}"),
+            }
+        }
+        other => panic!("expected LocalStore for variable CompoundAssign, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_expr_compound_assign_index_becomes_ast() {
+    use vole_frontend::ast::{AssignTarget, CompoundAssignExpr, CompoundOp};
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let expr = Expr {
+        id: dummy_node_id(),
+        kind: ExprKind::CompoundAssign(Box::new(CompoundAssignExpr {
+            target: AssignTarget::Index {
+                object: Box::new(make_int_expr(0)),
+                index: Box::new(make_int_expr(0)),
+            },
+            op: CompoundOp::Add,
+            value: make_int_expr(1),
+        })),
+        span: dummy_span(),
+    };
+    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+    match vir_ref.as_ref() {
         VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for CompoundAssign, got {other:?}"),
+        other => panic!("expected Ast escape hatch for index CompoundAssign, got {other:?}"),
     }
 }
 
