@@ -79,9 +79,9 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         ExprKind::CompoundAssign(compound) => {
             lower_compound_assign(compound, expr, ty, node_map, interner)
         }
+        ExprKind::Index(idx) => lower_index(idx, expr, ty, node_map, interner),
         ExprKind::ArrayLiteral(_)
         | ExprKind::RepeatLiteral { .. }
-        | ExprKind::Index(_)
         | ExprKind::Match(_)
         | ExprKind::NullCoalesce(_)
         | ExprKind::Lambda(_)
@@ -369,8 +369,20 @@ fn lower_assign(
                 value,
             })
         }
-        // Discard and index targets stay as Ast.
-        _ => Box::new(VirExpr::Ast {
+        vole_frontend::AssignTarget::Index { object, index } => {
+            let obj = lower_expr(object, node_map, interner);
+            let idx = lower_expr(index, node_map, interner);
+            let value = lower_expr(&assign_expr.value, node_map, interner);
+            let union_storage = node_map.get_union_storage_kind(expr.id);
+            Box::new(VirExpr::IndexStore {
+                object: obj,
+                index: idx,
+                value,
+                union_storage,
+            })
+        }
+        // Discard target stays as Ast.
+        vole_frontend::AssignTarget::Discard => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,
         }),
@@ -549,6 +561,29 @@ fn lower_interpolated_string(
         })
         .collect();
     Box::new(VirExpr::InterpolatedString { parts: vir_parts })
+}
+
+/// Lower an index expression to `VirExpr::Index`.
+///
+/// The object and index sub-expressions are recursively lowered.
+/// `union_storage` is extracted from the NodeMap for dynamic array
+/// indexing where the element type is a union.
+fn lower_index(
+    idx: &vole_frontend::ast::IndexExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let object = lower_expr(&idx.object, node_map, interner);
+    let index = lower_expr(&idx.index, node_map, interner);
+    let union_storage = node_map.get_union_storage_kind(expr.id);
+    Box::new(VirExpr::Index {
+        object,
+        index,
+        ty,
+        union_storage,
+    })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.

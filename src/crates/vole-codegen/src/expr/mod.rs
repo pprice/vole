@@ -685,6 +685,20 @@ impl Cg<'_, '_, '_> {
                 value,
             } => self.compile_vir_field_store(object, *field, value),
 
+            // -- Indexing ------------------------------------------------------
+            VirExpr::Index {
+                object,
+                index,
+                ty,
+                union_storage,
+            } => self.compile_vir_index(object, index, *ty, *union_storage),
+            VirExpr::IndexStore {
+                object,
+                index,
+                value,
+                union_storage,
+            } => self.compile_vir_index_store(object, index, value, *union_storage),
+
             // -- RC operations ------------------------------------------------
             VirExpr::RcInc { value } => {
                 let compiled = self.compile_vir_expr(value)?;

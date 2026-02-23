@@ -4,7 +4,7 @@
 
 use vole_frontend::Expr;
 use vole_identity::{FunctionId, Symbol, TypeDefId, TypeId};
-use vole_sema::StringConversion;
+use vole_sema::{StringConversion, UnionStorageKind};
 
 use crate::calls::CallTarget;
 use crate::func::VirBody;
@@ -137,6 +137,31 @@ pub enum VirExpr {
         field: Symbol,
         storage: FieldStorage,
         value: VirRef,
+    },
+
+    // -- Indexing -----------------------------------------------------------
+    /// Index read: `obj[idx]` for tuple, fixed array, or dynamic array.
+    ///
+    /// Codegen dispatches on the object type (tuple, fixed array, dynamic
+    /// array) to select the right read strategy.  `union_storage` carries
+    /// the sema-annotated `UnionStorageKind` for dynamic arrays whose
+    /// element type is a union.
+    Index {
+        object: VirRef,
+        index: VirRef,
+        ty: TypeId,
+        union_storage: Option<UnionStorageKind>,
+    },
+
+    /// Index write: `obj[idx] = val` for fixed or dynamic array.
+    ///
+    /// Codegen dispatches on the object type to select fixed-array (bounds
+    /// check + direct store) or dynamic-array (runtime `ArraySet` call).
+    IndexStore {
+        object: VirRef,
+        index: VirRef,
+        value: VirRef,
+        union_storage: Option<UnionStorageKind>,
     },
 
     // -- Reference counting -------------------------------------------------

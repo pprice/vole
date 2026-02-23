@@ -210,7 +210,7 @@ fn lower_assign_field_becomes_field_store() {
 }
 
 #[test]
-fn lower_assign_index_becomes_ast() {
+fn lower_assign_index_becomes_index_store() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -228,7 +228,26 @@ fn lower_assign_index_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for index assign, got {other:?}"),
+        VirExpr::IndexStore {
+            object,
+            index,
+            value,
+            union_storage,
+        } => {
+            assert!(matches!(
+                object.as_ref(),
+                VirExpr::IntLiteral { value: 0, .. }
+            ));
+            assert!(matches!(
+                index.as_ref(),
+                VirExpr::IntLiteral { value: 1, .. }
+            ));
+            assert!(matches!(
+                value.as_ref(),
+                VirExpr::IntLiteral { value: 42, .. }
+            ));
+            assert!(union_storage.is_none());
+        }
+        other => panic!("expected IndexStore for index assign, got {other:?}"),
     }
 }
