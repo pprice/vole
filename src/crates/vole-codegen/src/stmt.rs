@@ -10,6 +10,7 @@ use vole_frontend::ast::{RaiseStmt, ReturnStmt};
 use vole_frontend::{self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, Stmt, Symbol};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
+use vole_vir::VirStmt;
 
 use super::context::Cg;
 use super::structs::{
@@ -1058,5 +1059,23 @@ impl Cg<'_, '_, '_> {
 
         let ptr_type = self.ptr_type();
         Ok(self.builder.ins().stack_addr(ptr_type, slot, 0))
+    }
+
+    // =========================================================================
+    // VIR statement compilation
+    // =========================================================================
+
+    /// Compile a VIR statement node.
+    ///
+    /// In Phase 0, every VIR statement is the `Ast` escape hatch, which
+    /// delegates to the existing `self.stmt()` method. Future phases will add
+    /// arms for lowered VIR statement variants.
+    #[allow(dead_code)] // Phase 0: not yet wired into main compilation flow
+    pub fn compile_vir_stmt(&mut self, vir_stmt: &VirStmt) -> CodegenResult<bool> {
+        match vir_stmt {
+            VirStmt::Ast { stmt } => self.stmt(stmt),
+            // Future phases add arms here
+            _ => todo!("VIR stmt not yet implemented: {vir_stmt:?}"),
+        }
     }
 }

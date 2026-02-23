@@ -1721,6 +1721,7 @@ dependencies = [
  "vole-identity",
  "vole-runtime",
  "vole-sema",
+ "vole-vir",
 ]
 
 [[package]]
@@ -1841,6 +1842,7 @@ version = "2026.2.4"
 dependencies = [
  "vole-frontend",
  "vole-identity",
+ "vole-sema",
 ]
 
 [[package]]

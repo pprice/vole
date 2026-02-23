@@ -13,14 +13,22 @@ pub mod builder;
 pub mod calls;
 pub mod expr;
 pub mod func;
+pub mod lower;
 pub mod refs;
 pub mod stmt;
 pub mod types;
 
 pub use builder::VirBuilder;
-pub use calls::CallTarget;
-pub use expr::VirExpr;
+pub use calls::{BuiltinMethod, CallTarget, NativeAbi};
+pub use expr::{
+    AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirExpr,
+    VirMatchArm, VirMetaKind, VirPattern, VirUnOp,
+};
 pub use func::{VirBody, VirFunction};
+pub use lower::lower_function;
 pub use refs::VirRef;
-pub use stmt::VirStmt;
-pub use types::{VirLayout, VirType};
+pub use stmt::{AssignTarget, VirFor, VirIterKind, VirStmt};
+pub use types::{
+    BitWidth, VirAnnotation, VirAnnotationValue, VirConstant, VirFieldInfo, VirFieldMeta,
+    VirLayout, VirStructLayout, VirType, VirTypeMeta, VirUnionLayout,
+};

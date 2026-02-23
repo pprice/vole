@@ -8,6 +8,7 @@ description = "Vole Intermediate Representation — typed IR between sema and co
 # Workspace crates
 vole-identity = { path = "../vole-identity" }
 vole-frontend = { path = "../vole-frontend" }
+vole-sema = { path = "../vole-sema" }
 
 [lints]
 workspace = true

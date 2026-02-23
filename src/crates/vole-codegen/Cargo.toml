@@ -10,6 +10,7 @@ vole-frontend = { path = "../vole-frontend" }
 vole-identity = { path = "../vole-identity" }
 vole-runtime = { path = "../vole-runtime" }
 vole-sema = { path = "../vole-sema" }
+vole-vir = { path = "../vole-vir" }
 
 # Cranelift for JIT compilation
 cranelift = "0.127"

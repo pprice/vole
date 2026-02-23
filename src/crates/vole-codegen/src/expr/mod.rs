@@ -23,6 +23,7 @@ use vole_frontend::ast::YieldExpr;
 use vole_frontend::{Expr, ExprKind, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
+use vole_vir::VirExpr;
 
 use super::context::Cg;
 use super::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
@@ -523,5 +524,23 @@ impl Cg<'_, '_, '_> {
             types::I64,
             self.arena().primitives.i64,
         ))
+    }
+
+    // =========================================================================
+    // VIR expression compilation
+    // =========================================================================
+
+    /// Compile a VIR expression node.
+    ///
+    /// In Phase 0, every VIR expression is the `Ast` escape hatch, which
+    /// delegates to the existing `self.expr()` method. Future phases will add
+    /// arms for lowered VIR expression variants.
+    #[allow(dead_code)] // Phase 0: not yet wired into main compilation flow
+    pub fn compile_vir_expr(&mut self, vir_expr: &VirExpr) -> CodegenResult<CompiledValue> {
+        match vir_expr {
+            VirExpr::Ast { expr, ty: _ } => self.expr(expr),
+            // Future phases add arms here
+            _ => todo!("VIR expr not yet implemented: {vir_expr:?}"),
+        }
     }
 }
