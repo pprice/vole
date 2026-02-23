@@ -2,6 +2,8 @@
 //
 // Call target descriptors for VIR function calls.
 
+use vole_frontend::NodeId;
+use vole_frontend::ast::CallExpr;
 use vole_identity::{FunctionId, Symbol};
 
 use crate::intrinsics::IntrinsicKey;
@@ -36,6 +38,26 @@ pub enum CallTarget {
         module_path: Symbol,
         native_name: Symbol,
         abi: NativeAbi,
+    },
+
+    /// A call that could not be fully classified during VIR lowering.
+    ///
+    /// Lowering can see the callee symbol and NodeMap annotations but lacks
+    /// access to the function registry, variable table, and module context
+    /// needed for full dispatch.  Codegen resolves these into concrete call
+    /// paths using the same dispatch logic as the legacy `call()` method.
+    ///
+    /// The `call_expr` carries the original AST so codegen can access
+    /// named-arg reordering, default-arg compilation, and type-coerced
+    /// argument compilation (via `expr_with_expected_type`).
+    Unresolved {
+        /// The original AST call expression, preserved for codegen dispatch.
+        call_expr: Box<CallExpr>,
+        /// NodeId of the call expression (for NodeMap lookups: monomorph key,
+        /// named-arg mapping, lambda defaults, intrinsic key, etc.).
+        call_node_id: NodeId,
+        /// Source line for error messages (assert, panic).
+        line: u32,
     },
 }
 

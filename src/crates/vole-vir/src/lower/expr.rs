@@ -11,6 +11,7 @@ use vole_identity::TypeId;
 use vole_sema::StringConversion;
 use vole_sema::node_map::NodeMap;
 
+use crate::calls::CallTarget;
 use crate::expr::{
     AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirExpr, VirMetaKind,
     VirStringPart, VirUnOp,
@@ -45,21 +46,7 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         }
         ExprKind::Binary(bin_expr) => lower_binary(bin_expr, expr, ty, node_map, interner),
         ExprKind::Unary(un_expr) => lower_unary(un_expr, ty, node_map, interner),
-        // Call expressions: explicit match arm for future lowering.
-        //
-        // Call dispatch requires information that is not yet available in the
-        // NodeMap during lowering (function registry, module bindings, closure
-        // state, monomorphization keys, etc.).  The call() method in codegen
-        // uses ~15 dispatch paths that inspect runtime registries.
-        //
-        // Until sema annotates a "call dispatch kind" on Call nodes (similar
-        // to MethodDispatchKind for method calls), we cannot distinguish
-        // direct calls from closures/builtins/FFI during lowering.  All calls
-        // remain as Ast escape hatches for now.
-        ExprKind::Call(_) => Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        }),
+        ExprKind::Call(call_expr) => lower_call(call_expr, expr, ty, node_map, interner),
         ExprKind::If(if_expr) => lower_if_expr(if_expr, ty, node_map, interner),
         ExprKind::Block(block_expr) => lower_block_expr(block_expr, ty, node_map, interner),
         ExprKind::Yield(yield_expr) => lower_yield(yield_expr, node_map, interner),
@@ -846,6 +833,47 @@ fn lower_struct_literal(
             ty,
         })
     }
+}
+
+/// Lower a call expression to `VirExpr::Call`.
+///
+/// Call dispatch is complex because sema does not annotate a "call dispatch
+/// kind" on Call nodes.  The full 15+ path dispatch requires the function
+/// registry, variable table, and module context — none of which are available
+/// during lowering.
+///
+/// The lowering emits `CallTarget::Unresolved` which carries the original AST
+/// `CallExpr` so codegen can perform the full dispatch.  VIR arguments are
+/// lowered recursively but are NOT used by codegen for Unresolved calls
+/// (the AST `CallExpr` provides the args for type-coerced compilation).
+///
+/// Over time, specific call patterns will be promoted from Unresolved to
+/// concrete `CallTarget` variants (Direct, Lambda, Intrinsic, etc.) as sema
+/// gains call classification annotations.
+fn lower_call(
+    call_expr: &vole_frontend::ast::CallExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    // Lower argument expressions to VIR.
+    // For Unresolved calls, codegen re-compiles from the AST CallExpr, but
+    // lowered args are still recorded for future migration to concrete
+    // CallTarget variants.
+    let args: Vec<VirRef> = call_expr
+        .args
+        .iter()
+        .map(|arg| lower_expr(arg.expr(), node_map, interner))
+        .collect();
+
+    let target = CallTarget::Unresolved {
+        call_expr: Box::new(call_expr.clone()),
+        call_node_id: expr.id,
+        line: expr.span.line,
+    };
+
+    Box::new(VirExpr::Call { target, args, ty })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.

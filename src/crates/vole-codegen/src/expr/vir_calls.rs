@@ -47,6 +47,11 @@ impl Cg<'_, '_, '_> {
                 native_name,
                 abi,
             } => self.compile_vir_native_call(*module_path, *native_name, *abi, args, ty),
+            CallTarget::Unresolved {
+                call_expr,
+                call_node_id,
+                line,
+            } => self.compile_vir_unresolved_call(call_expr, *call_node_id, *line),
         }
     }
 
@@ -359,6 +364,27 @@ impl Cg<'_, '_, '_> {
             return Ok(self.void_value());
         }
         self.native_call_result(call_inst, &native_func, return_ty)
+    }
+
+    /// Compile an unresolved call by delegating to the legacy `call()` dispatcher.
+    ///
+    /// The lowering pass emits `CallTarget::Unresolved` for call expressions
+    /// that couldn't be classified without the function registry, variable
+    /// table, and module context.  This method bridges VIR back to the
+    /// existing AST-based dispatch in `calls/mod.rs`.
+    ///
+    /// The legacy `call()` method compiles arguments from the AST `CallExpr`
+    /// directly (with type hints, coercion, named-arg reordering, etc.),
+    /// so we do NOT use the lowered VIR `args` here — they were lowered for
+    /// forward compatibility but are unused in this code path.
+    fn compile_vir_unresolved_call(
+        &mut self,
+        call_expr: &vole_frontend::ast::CallExpr,
+        call_node_id: vole_frontend::NodeId,
+        line: u32,
+    ) -> CodegenResult<CompiledValue> {
+        let result = self.call(call_expr, line, call_node_id)?;
+        Ok(self.mark_rc_owned(result))
     }
 
     // =====================================================================

@@ -321,7 +321,8 @@ fn lower_expr_repeat_literal_becomes_ast() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn lower_expr_call_becomes_ast() {
+fn lower_expr_call_becomes_vir_call() {
+    use crate::CallTarget;
     use vole_frontend::ast::{CallArg, CallExpr};
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -340,16 +341,21 @@ fn lower_expr_call_becomes_ast() {
     };
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
-    // Calls stay as Ast escape hatch until sema annotates call
-    // dispatch kind (similar to MethodDispatchKind for method calls).
+    // Calls are lowered to VirExpr::Call with CallTarget::Unresolved.
+    // The unresolved variant carries the original AST CallExpr so codegen
+    // can perform full dispatch.
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for Call, got {other:?}"),
+        VirExpr::Call { target, args, .. } => {
+            assert!(matches!(target, CallTarget::Unresolved { .. }));
+            assert_eq!(args.len(), 1, "call should have 1 lowered arg");
+        }
+        other => panic!("expected VirExpr::Call for Call, got {other:?}"),
     }
 }
 
 #[test]
-fn lower_expr_call_no_args_becomes_ast() {
+fn lower_expr_call_no_args_becomes_vir_call() {
+    use crate::CallTarget;
     use vole_frontend::ast::CallExpr;
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -369,8 +375,11 @@ fn lower_expr_call_no_args_becomes_ast() {
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
     match vir_ref.as_ref() {
-        VirExpr::Ast { .. } => {}
-        other => panic!("expected Ast escape hatch for Call (no args), got {other:?}"),
+        VirExpr::Call { target, args, .. } => {
+            assert!(matches!(target, CallTarget::Unresolved { .. }));
+            assert!(args.is_empty(), "call should have 0 lowered args");
+        }
+        other => panic!("expected VirExpr::Call for Call (no args), got {other:?}"),
     }
 }
 
@@ -396,11 +405,11 @@ fn lower_expr_call_preserves_type() {
     };
     let vir_ref = lower_expr(&expr, &node_map, &mut interner);
 
-    // The Ast escape hatch should carry the sema-computed type
+    // The VirExpr::Call should carry the sema-computed type
     match vir_ref.as_ref() {
-        VirExpr::Ast { ty, .. } => {
+        VirExpr::Call { ty, .. } => {
             assert_eq!(*ty, TypeId::I64);
         }
-        other => panic!("expected Ast with type, got {other:?}"),
+        other => panic!("expected Call with type, got {other:?}"),
     }
 }
