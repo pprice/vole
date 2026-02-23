@@ -9,6 +9,7 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
 use vole_frontend::{ExprKind, FuncBody, Stmt, Symbol};
 use vole_sema::type_arena::TypeId;
+use vole_vir::{VirBody, VirExpr, VirStmt};
 
 use crate::context::{Captures, Cg};
 use crate::errors::CodegenResult;
@@ -448,6 +449,163 @@ pub(crate) fn compile_function_body_with_cg(
     Ok(())
 }
 
+/// Compile a VIR function body using the Cg context.
+///
+/// Mirrors [`compile_function_body_with_cg`] but walks `VirBody` instead
+/// of `FuncBody`.  In Phase 0, every VIR node is the `Ast` escape hatch
+/// so the generated code is identical — the routing through VIR validates
+/// that the VIR pipeline is wired correctly end-to-end.
+///
+/// # Body structure
+/// - `trailing: Some(expr)` — expression body (`=> expr`), treated as implicit return.
+/// - `trailing: None` — block body; the trailing-expression heuristic peeks into the
+///   last `VirStmt::Ast` to detect a trailing `Stmt::Expr` for implicit return.
+pub(crate) fn compile_vir_body_with_cg(
+    cg: &mut Cg,
+    body: &VirBody,
+    default_return: DefaultReturn,
+) -> CodegenResult<()> {
+    cg.push_rc_scope();
+
+    let (terminated, expr_value) = if let Some(trailing) = &body.trailing {
+        // Expression body — compile all preceding stmts, then the trailing expr.
+        let mut terminated = false;
+        for vir_stmt in &body.stmts {
+            if terminated {
+                break;
+            }
+            terminated = cg.compile_vir_stmt(vir_stmt)?;
+        }
+        if terminated {
+            (true, None)
+        } else {
+            let value = compile_trailing_vir_expr(cg, trailing)?;
+            (true, Some(value))
+        }
+    } else {
+        // Block body — check for trailing expression heuristic.
+        compile_vir_block_body(cg, &body.stmts)?
+    };
+
+    // RC scope cleanup (same as compile_function_body_with_cg)
+    if !terminated || expr_value.is_some() {
+        let skip_var = expr_value.as_ref().and_then(|(_, sv)| *sv);
+        cg.pop_rc_scope_with_cleanup(skip_var)?;
+    } else {
+        cg.rc_scopes.pop_scope();
+    }
+
+    let return_value = expr_value.map(|(value, _)| value);
+    emit_implicit_return(cg, return_value, terminated, default_return)?;
+
+    Ok(())
+}
+
+/// Compile the trailing VIR expression of an expression-bodied function.
+///
+/// Handles RC bookkeeping for implicit returns, matching the `FuncBody::Expr`
+/// path in `compile_function_body_with_cg`.
+fn compile_trailing_vir_expr(
+    cg: &mut Cg,
+    vir_expr: &VirExpr,
+) -> CodegenResult<(CompiledValue, Option<Variable>)> {
+    let mut value = cg.compile_vir_expr(vir_expr)?;
+
+    // RC bookkeeping: detect identifier borrows that need rc_inc.
+    // Peek into the Ast escape hatch to access the inner expression kind.
+    let skip_var = match vir_expr {
+        VirExpr::Ast { expr, .. } => extract_rc_skip_var(cg, expr),
+        _ => None,
+    };
+
+    if skip_var.is_none() && value.is_borrowed() {
+        if cg.rc_state(value.type_id).needs_cleanup() {
+            cg.emit_rc_inc_for_type(value.value, value.type_id)?;
+        } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
+            cg.emit_union_rc_inc(value.value, rc_tags)?;
+        }
+    }
+
+    value.mark_consumed();
+    value.debug_assert_rc_handled("VIR implicit return");
+    Ok((value, skip_var))
+}
+
+/// Compile a VIR block body (trailing=None), with trailing-expression detection.
+///
+/// Peeks into the last `VirStmt::Ast` to detect a trailing `Stmt::Expr` for
+/// the Rust-like implicit return heuristic.
+#[allow(clippy::type_complexity)]
+fn compile_vir_block_body(
+    cg: &mut Cg,
+    stmts: &[VirStmt],
+) -> CodegenResult<(bool, Option<(CompiledValue, Option<Variable>)>)> {
+    let has_trailing_expr = cg.return_type.is_some_and(|ret| !cg.arena().is_void(ret))
+        && matches!(
+            stmts.last(),
+            Some(VirStmt::Ast { stmt }) if matches!(stmt.as_ref(), Stmt::Expr(_))
+        );
+
+    if has_trailing_expr {
+        // Compile all statements except the trailing expression
+        let mut terminated = false;
+        for vir_stmt in &stmts[..stmts.len() - 1] {
+            if terminated {
+                break;
+            }
+            terminated = cg.compile_vir_stmt(vir_stmt)?;
+        }
+        if terminated {
+            return Ok((true, None));
+        }
+        // Extract the trailing expression from the last VirStmt::Ast
+        let trailing = match stmts.last() {
+            Some(VirStmt::Ast { stmt }) => match stmt.as_ref() {
+                Stmt::Expr(expr_stmt) => &expr_stmt.expr,
+                _ => unreachable!(),
+            },
+            _ => unreachable!(),
+        };
+        let mut value = cg.expr(trailing)?;
+        let skip_var = extract_rc_skip_var(cg, trailing);
+        if skip_var.is_none() && value.is_borrowed() {
+            if cg.rc_state(value.type_id).needs_cleanup() {
+                cg.emit_rc_inc_for_type(value.value, value.type_id)?;
+            } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
+                cg.emit_union_rc_inc(value.value, rc_tags)?;
+            }
+        }
+        value.mark_consumed();
+        value.debug_assert_rc_handled("VIR implicit block return");
+        Ok((false, Some((value, skip_var))))
+    } else {
+        // No trailing expression — compile all statements
+        let mut terminated = false;
+        for vir_stmt in stmts {
+            if terminated {
+                break;
+            }
+            terminated = cg.compile_vir_stmt(vir_stmt)?;
+        }
+        Ok((terminated, None))
+    }
+}
+
+/// Extract the RC skip variable from an AST expression, if it's an identifier
+/// bound to an RC-tracked local.
+fn extract_rc_skip_var(cg: &Cg, expr: &vole_frontend::Expr) -> Option<Variable> {
+    if let ExprKind::Identifier(sym) = &expr.kind
+        && let Some((var, _)) = cg.vars.get(sym)
+        && (cg.rc_scopes.is_rc_local(*var)
+            || cg.rc_scopes.is_composite_rc_local(*var)
+            || cg.rc_scopes.is_union_rc_local(*var))
+    {
+        Some(*var)
+    } else {
+        None
+    }
+}
+
 /// Compile the inner logic of a function using split contexts.
 ///
 /// This uses the new split context architecture:
@@ -512,6 +670,68 @@ pub(crate) fn compile_function_inner_with_params<'ctx>(
     compile_function_body_with_cg(&mut cg, config.body, config.default_return)?;
 
     // Cg borrow ends here, builder is accessible again
+    drop(cg);
+
+    builder.seal_all_blocks();
+    builder.finalize();
+
+    Ok(())
+}
+
+/// Compile a monomorphized function using its VIR representation.
+///
+/// This is the VIR-path counterpart to [`compile_function_inner_with_params`].
+/// It uses the same setup (entry block, parameter binding, Cg creation) but
+/// compiles the body via [`compile_vir_body_with_cg`] instead of
+/// [`compile_function_body_with_cg`].
+///
+/// Substitutions are still passed through because Phase 0 VIR bodies use the
+/// `Ast` escape hatch, which delegates to `cg.stmt()`/`cg.expr()` that read
+/// the NodeMap with generic TypeIds requiring substitution.
+pub(crate) fn compile_function_inner_with_vir<'ctx>(
+    mut builder: FunctionBuilder,
+    codegen_ctx: &mut CodegenCtx<'ctx>,
+    env: &CompileEnv<'ctx>,
+    config: FunctionCompileConfig,
+    vir_body: &VirBody,
+    module_id: Option<vole_identity::ModuleId>,
+    substitutions: Option<&FxHashMap<vole_identity::NameId, TypeId>>,
+) -> CodegenResult<()> {
+    // Auto-detect sret convention (same as compile_function_inner_with_params)
+    let config = if let Some(ret_type_id) = config.return_type_id {
+        let arena = env.analyzed.type_arena();
+        let entities = env.analyzed.entity_registry();
+        if let Some(flat_count) =
+            crate::structs::struct_flat_slot_count(ret_type_id, arena, entities)
+        {
+            if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
+                config.with_sret()
+            } else {
+                config
+            }
+        } else {
+            config
+        }
+    } else {
+        config
+    };
+
+    let (variables, captures) = setup_function_entry(&mut builder, &config);
+
+    let mut cg = Cg::new(&mut builder, codegen_ctx, env)
+        .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
+        .with_vars(variables)
+        .with_return_type(config.return_type_id)
+        .with_captures(captures)
+        .with_module(module_id)
+        .with_substitutions(substitutions);
+
+    if config.in_iterable_default_body {
+        cg = cg.with_iterable_default_body();
+    }
+
+    compile_vir_body_with_cg(&mut cg, vir_body, config.default_return)?;
+
     drop(cg);
 
     builder.seal_all_blocks();

@@ -3,7 +3,9 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext};
 
 use super::Compiler;
-use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
+use super::common::{
+    FunctionCompileConfig, compile_function_inner_with_params, compile_function_inner_with_vir,
+};
 use super::generic_collection::GenericTypeMethodsAst;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -266,7 +268,10 @@ impl Compiler<'_> {
         compile_result
     }
 
-    /// Compile a single monomorphized function instance
+    /// Compile a single monomorphized function instance.
+    ///
+    /// If a VIR function was lowered for this instance, compiles via the VIR
+    /// path (walking VirBody). Otherwise falls back to the AST path.
     fn compile_monomorphized_function(
         &mut self,
         func: &FuncDecl,
@@ -302,7 +307,12 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Create function builder and compile
+        // Check if a VIR function was lowered for this instance
+        let vir_body = self.analyzed.get_vir_monomorph(instance.mangled_name);
+        if vir_body.is_some() {
+            tracing::debug!(name = %mangled_name, "compiling monomorph via VIR path");
+        }
+
         let source_file_ptr = self.source_file_ptr();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -315,17 +325,28 @@ impl Compiler<'_> {
             );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                None,
-                Some(&instance.substitutions),
-            )?;
+            if let Some(vir_func) = vir_body {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir_func.body,
+                    None,
+                    Some(&instance.substitutions),
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    None,
+                    Some(&instance.substitutions),
+                )?;
+            }
         }
 
-        // Define the function
         self.finalize_function(func_id)?;
 
         Ok(())

@@ -8,7 +8,8 @@
 // and expression kinds can be lowered one at a time.
 
 use vole_frontend::ast::{FuncBody, FuncDecl, Stmt};
-use vole_identity::{FunctionId, Symbol, TypeId};
+use vole_identity::{FunctionId, NameId, Symbol, TypeId};
+use vole_sema::TypeArena;
 use vole_sema::node_map::NodeMap;
 
 use crate::expr::VirExpr;
@@ -39,7 +40,62 @@ pub fn lower_function(
         params: param_types.to_vec(),
         return_type,
         body,
+        mangled_name_id: None,
     }
+}
+
+/// Lower a monomorphized function instance into a `VirFunction`.
+///
+/// Like [`lower_function`], but for a generic function that has been
+/// instantiated with concrete type arguments.  The caller provides
+/// already-substituted `param_types` and `return_type` from the
+/// `MonomorphInstance`'s `func_type`.
+///
+/// In debug builds, asserts that no `TypeId` in the output still
+/// contains a type parameter — all types must be concrete after
+/// monomorphization.
+///
+/// The body remains Ast-wrapped (Phase 2 migrates bodies).
+#[allow(clippy::too_many_arguments)]
+pub fn lower_monomorphized_function(
+    func: &FuncDecl,
+    func_id: FunctionId,
+    name: String,
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    node_map: &NodeMap,
+    type_arena: &TypeArena,
+    mangled_name_id: NameId,
+) -> VirFunction {
+    debug_assert_concrete_types(param_types, return_type, type_arena, &name);
+    let mut vir = lower_function(func, func_id, name, param_types, return_type, node_map);
+    vir.mangled_name_id = Some(mangled_name_id);
+    vir
+}
+
+/// Assert (debug-only) that all types in a monomorphized function signature
+/// are concrete — no `TypeParam` or `TypeParamRef` remains.
+fn debug_assert_concrete_types(
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    arena: &TypeArena,
+    func_name: &str,
+) {
+    if !cfg!(debug_assertions) {
+        return;
+    }
+    for (i, (_sym, ty)) in param_types.iter().enumerate() {
+        debug_assert!(
+            !arena.contains_type_param(*ty),
+            "VIR monomorph `{func_name}`: param {i} still contains a type parameter \
+             (TypeId={ty:?})"
+        );
+    }
+    debug_assert!(
+        !arena.contains_type_param(return_type),
+        "VIR monomorph `{func_name}`: return type still contains a type parameter \
+         (TypeId={return_type:?})"
+    );
 }
 
 /// Lower a `FuncBody` (block or expression) into a `VirBody`.
@@ -113,6 +169,10 @@ mod tests {
 
     fn dummy_type_id() -> TypeId {
         TypeId::from_raw(999)
+    }
+
+    fn dummy_name_id() -> NameId {
+        NameId::new_for_test(42)
     }
 
     fn make_break_stmt() -> Stmt {
@@ -308,5 +368,106 @@ mod tests {
             }
             other => panic!("expected Ast, got {other:?}"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Monomorphized function lowering
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn lower_monomorphized_with_concrete_types() {
+        let arena = TypeArena::new();
+        let func = make_block_func(vec![make_break_stmt()]);
+        let node_map = empty_node_map();
+        let i64_ty = arena.i64();
+        let string_ty = arena.string();
+        let params = vec![(Symbol::UNKNOWN, i64_ty)];
+
+        let vir = lower_monomorphized_function(
+            &func,
+            dummy_func_id(),
+            "identity__mono_0".into(),
+            &params,
+            string_ty,
+            &node_map,
+            &arena,
+            dummy_name_id(),
+        );
+
+        assert_eq!(vir.name, "identity__mono_0");
+        assert_eq!(vir.params.len(), 1);
+        assert_eq!(vir.params[0].1, i64_ty);
+        assert_eq!(vir.return_type, string_ty);
+        assert_eq!(vir.body.stmts.len(), 1);
+    }
+
+    #[test]
+    fn lower_monomorphized_expr_body() {
+        let arena = TypeArena::new();
+        let func = make_expr_func(make_bool_expr());
+        let node_map = empty_node_map();
+        let bool_ty = arena.bool();
+
+        let vir = lower_monomorphized_function(
+            &func,
+            dummy_func_id(),
+            "to_bool__mono_0".into(),
+            &[],
+            bool_ty,
+            &node_map,
+            &arena,
+            dummy_name_id(),
+        );
+
+        assert_eq!(vir.name, "to_bool__mono_0");
+        assert!(vir.body.stmts.is_empty());
+        assert!(vir.body.trailing.is_some());
+        assert_eq!(vir.return_type, bool_ty);
+    }
+
+    #[test]
+    #[should_panic(expected = "param 0 still contains a type parameter")]
+    fn lower_monomorphized_rejects_type_param_in_params() {
+        let mut arena = TypeArena::new();
+        let func = make_block_func(vec![]);
+        let node_map = empty_node_map();
+        // Create a type parameter — this should trigger the assertion
+        let mut names = vole_identity::NameTable::new();
+        let t_name_id = names.intern_raw(names.main_module(), &["T"]);
+        let type_param = arena.type_param(t_name_id);
+        let params = vec![(Symbol::UNKNOWN, type_param)];
+
+        let _ = lower_monomorphized_function(
+            &func,
+            dummy_func_id(),
+            "bad__mono_0".into(),
+            &params,
+            arena.i64(),
+            &node_map,
+            &arena,
+            dummy_name_id(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "return type still contains a type parameter")]
+    fn lower_monomorphized_rejects_type_param_in_return() {
+        let mut arena = TypeArena::new();
+        let func = make_block_func(vec![]);
+        let node_map = empty_node_map();
+        let mut names = vole_identity::NameTable::new();
+        let t_name_id = names.intern_raw(names.main_module(), &["T"]);
+        let type_param = arena.type_param(t_name_id);
+
+        let _ = lower_monomorphized_function(
+            &func,
+            dummy_func_id(),
+            "bad__mono_0".into(),
+            &[],
+            type_param,
+            &node_map,
+            &arena,
+            dummy_name_id(),
+        );
     }
 }

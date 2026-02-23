@@ -535,7 +535,6 @@ impl Cg<'_, '_, '_> {
     /// In Phase 0, every VIR expression is the `Ast` escape hatch, which
     /// delegates to the existing `self.expr()` method. Future phases will add
     /// arms for lowered VIR expression variants.
-    #[allow(dead_code)] // Phase 0: not yet wired into main compilation flow
     pub fn compile_vir_expr(&mut self, vir_expr: &VirExpr) -> CodegenResult<CompiledValue> {
         match vir_expr {
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),

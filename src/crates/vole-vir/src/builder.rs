@@ -250,6 +250,7 @@ impl VirBuilder {
             params,
             return_type: return_ty,
             body,
+            mangled_name_id: None,
         }
     }
 }

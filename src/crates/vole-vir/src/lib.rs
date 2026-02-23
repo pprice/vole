@@ -25,7 +25,7 @@ pub use expr::{
     VirMatchArm, VirMetaKind, VirPattern, VirUnOp,
 };
 pub use func::{VirBody, VirFunction};
-pub use lower::lower_function;
+pub use lower::{lower_function, lower_monomorphized_function};
 pub use refs::VirRef;
 pub use stmt::{AssignTarget, VirFor, VirIterKind, VirStmt};
 pub use types::{

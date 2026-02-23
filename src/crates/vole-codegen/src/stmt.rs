@@ -1070,7 +1070,6 @@ impl Cg<'_, '_, '_> {
     /// In Phase 0, every VIR statement is the `Ast` escape hatch, which
     /// delegates to the existing `self.stmt()` method. Future phases will add
     /// arms for lowered VIR statement variants.
-    #[allow(dead_code)] // Phase 0: not yet wired into main compilation flow
     pub fn compile_vir_stmt(&mut self, vir_stmt: &VirStmt) -> CodegenResult<bool> {
         match vir_stmt {
             VirStmt::Ast { stmt } => self.stmt(stmt),
