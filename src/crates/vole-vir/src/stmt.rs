@@ -63,8 +63,17 @@ pub enum VirStmt {
     /// Continue to the next iteration of the enclosing loop.
     Continue,
 
-    /// Raise an error value.
-    Raise { value: VirRef },
+    /// Raise an error value (early return with error propagation).
+    ///
+    /// `error_name` identifies the error variant (for tag lookup and type
+    /// resolution).  `fields` are the named field initializers, already
+    /// lowered to VIR expressions.  The function's return type (available
+    /// in codegen via `self.return_type`) provides the fallible type
+    /// context needed to compute the error tag and payload layout.
+    Raise {
+        error_name: Symbol,
+        fields: Vec<(Symbol, VirRef)>,
+    },
 
     // -- Reference counting (statement form) --------------------------------
     /// Increment the reference count of a value (fire-and-forget).

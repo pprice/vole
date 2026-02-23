@@ -522,3 +522,128 @@ fn lower_if_stmt_is_void_typed() {
         other => panic!("expected VirStmt::Expr, got {other:?}"),
     }
 }
+
+// -----------------------------------------------------------------------
+// Statement lowering: Raise
+// -----------------------------------------------------------------------
+
+fn make_raise_stmt(error_name: Symbol, fields: Vec<(Symbol, Expr)>) -> Stmt {
+    use vole_frontend::ast::{RaiseStmt, StructFieldInit};
+    Stmt::Raise(RaiseStmt {
+        error_name,
+        fields: fields
+            .into_iter()
+            .map(|(name, value)| StructFieldInit {
+                name,
+                value,
+                span: dummy_span(),
+                shorthand: false,
+            })
+            .collect(),
+        span: dummy_span(),
+    })
+}
+
+#[test]
+fn lower_raise_no_fields() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let error_sym = interner.intern("NotFound");
+    let stmt = make_raise_stmt(error_sym, vec![]);
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Raise {
+            error_name, fields, ..
+        } => {
+            assert_eq!(*error_name, error_sym);
+            assert!(fields.is_empty());
+        }
+        other => panic!("expected VirStmt::Raise, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_raise_single_field() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let error_sym = interner.intern("ParseError");
+    let msg_sym = interner.intern("message");
+    let stmt = make_raise_stmt(error_sym, vec![(msg_sym, make_int_expr(42))]);
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Raise {
+            error_name, fields, ..
+        } => {
+            assert_eq!(*error_name, error_sym);
+            assert_eq!(fields.len(), 1);
+            assert_eq!(fields[0].0, msg_sym);
+            match fields[0].1.as_ref() {
+                VirExpr::IntLiteral { value: 42, .. } => {}
+                other => panic!("expected IntLiteral(42) field value, got {other:?}"),
+            }
+        }
+        other => panic!("expected VirStmt::Raise, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_raise_multiple_fields() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let error_sym = interner.intern("IoError");
+    let code_sym = interner.intern("code");
+    let retry_sym = interner.intern("retry");
+    let stmt = make_raise_stmt(
+        error_sym,
+        vec![
+            (code_sym, make_int_expr(404)),
+            (retry_sym, make_bool_expr()),
+        ],
+    );
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Raise {
+            error_name, fields, ..
+        } => {
+            assert_eq!(*error_name, error_sym);
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].0, code_sym);
+            match fields[0].1.as_ref() {
+                VirExpr::IntLiteral { value: 404, .. } => {}
+                other => panic!("expected IntLiteral(404), got {other:?}"),
+            }
+            assert_eq!(fields[1].0, retry_sym);
+            match fields[1].1.as_ref() {
+                VirExpr::BoolLiteral(true) => {}
+                other => panic!("expected BoolLiteral(true), got {other:?}"),
+            }
+        }
+        other => panic!("expected VirStmt::Raise, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_raise_field_values_lowered_recursively() {
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let error_sym = interner.intern("Err");
+    let val_sym = interner.intern("val");
+    // Field value is a bool literal — should be lowered to VirExpr::BoolLiteral
+    let stmt = make_raise_stmt(error_sym, vec![(val_sym, make_bool_expr())]);
+    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+
+    match &vir {
+        VirStmt::Raise { fields, .. } => {
+            assert_eq!(fields.len(), 1);
+            // Bool literal should be lowered to VirExpr::BoolLiteral, not Ast
+            match fields[0].1.as_ref() {
+                VirExpr::BoolLiteral(true) => {}
+                other => panic!("expected BoolLiteral(true), got {other:?}"),
+            }
+        }
+        other => panic!("expected VirStmt::Raise, got {other:?}"),
+    }
+}

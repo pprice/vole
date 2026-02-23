@@ -17,8 +17,8 @@ use super::lower_stmts;
 ///
 /// Expression statements (`Stmt::Expr`) are lowered through `lower_expr`,
 /// which produces proper VIR for known expression kinds.  Statement-level
-/// control flow (While, If, Break, Continue) is lowered to proper VIR
-/// nodes.  Remaining statement kinds — including Return — are wrapped
+/// control flow (While, If, Break, Continue, Raise) is lowered to proper
+/// VIR nodes.  Remaining statement kinds — including Return — are wrapped
 /// in the `VirStmt::Ast` escape hatch.
 ///
 /// Return is kept as Ast because `compile_vir_return` does not yet handle
@@ -36,16 +36,15 @@ pub(crate) fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interne
         Stmt::If(if_stmt) => lower_if_stmt(if_stmt, node_map, interner),
         Stmt::Break(_) => VirStmt::Break,
         Stmt::Continue(_) => VirStmt::Continue,
+        Stmt::Raise(raise_stmt) => lower_raise(raise_stmt, node_map, interner),
         // Ast escape hatches — explicitly listed so new Stmt variants
         // cause a compile error rather than silently falling through.
         //
         // Return stays as Ast until compile_vir_return handles interface
         // boxing, fallible returns, struct returns, and RC bookkeeping.
-        Stmt::Return(_) | Stmt::Let(_) | Stmt::LetTuple(_) | Stmt::For(_) | Stmt::Raise(_) => {
-            VirStmt::Ast {
-                stmt: Box::new(stmt.clone()),
-            }
-        }
+        Stmt::Return(_) | Stmt::Let(_) | Stmt::LetTuple(_) | Stmt::For(_) => VirStmt::Ast {
+            stmt: Box::new(stmt.clone()),
+        },
     }
 }
 
@@ -60,6 +59,26 @@ fn lower_while(
     let cond = lower_expr(&while_stmt.condition, node_map, interner);
     let body = lower_stmts(&while_stmt.body.stmts, node_map, interner);
     VirStmt::While { cond, body }
+}
+
+/// Lower a raise statement to `VirStmt::Raise`.
+///
+/// The error name and field value expressions are extracted from the AST.
+/// Field values are recursively lowered through `lower_expr`.
+fn lower_raise(
+    raise_stmt: &vole_frontend::ast::RaiseStmt,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirStmt {
+    let fields = raise_stmt
+        .fields
+        .iter()
+        .map(|f| (f.name, lower_expr(&f.value, node_map, interner)))
+        .collect();
+    VirStmt::Raise {
+        error_name: raise_stmt.error_name,
+        fields,
+    }
 }
 
 /// Lower an if statement to `VirStmt::Expr { VirExpr::If { ... } }`.

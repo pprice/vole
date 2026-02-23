@@ -1154,9 +1154,7 @@ impl Cg<'_, '_, '_> {
             VirStmt::For(_) => {
                 todo!("VIR For stmt: lowering still emits Ast escape hatch")
             }
-            VirStmt::Raise { .. } => {
-                todo!("VIR Raise stmt: lowering still emits Ast escape hatch")
-            }
+            VirStmt::Raise { error_name, fields } => self.compile_vir_raise(*error_name, fields),
 
             // -- Ast escape hatch ------------------------------------------------
             VirStmt::Ast { stmt } => self.stmt(stmt),
@@ -1240,5 +1238,138 @@ impl Cg<'_, '_, '_> {
         self.builder.seal_block(body_block);
 
         Ok(false)
+    }
+
+    /// Compile a VIR raise statement: `raise ErrorName { field: value, ... }`.
+    ///
+    /// Uses multi-value return `(tag, payload)`:
+    /// - Tag: error tag (1+) from `fallible_error_tag_by_id`
+    /// - Payload: 0 for no fields, inline for a single non-wide field,
+    ///   or a stack pointer for multiple / wide fields.
+    ///
+    /// Mirrors [`raise_stmt`] + [`build_raise_payload`] but reads from
+    /// VIR nodes instead of AST.
+    fn compile_vir_raise(
+        &mut self,
+        error_name: Symbol,
+        fields: &[(Symbol, vole_vir::refs::VirRef)],
+    ) -> CodegenResult<bool> {
+        let return_type_id = self.return_type.ok_or_else(|| {
+            CodegenError::internal(
+                "raise statement used outside of a function with declared return type",
+            )
+        })?;
+
+        let (_success_type_id, error_type_id) = self
+            .arena()
+            .unwrap_fallible(return_type_id)
+            .ok_or_else(|| {
+                CodegenError::type_mismatch(
+                    "raise statement",
+                    "fallible return type",
+                    "non-fallible type",
+                )
+            })?;
+
+        let error_tag = self
+            .error_tag_for(error_type_id, error_name)
+            .ok_or_else(|| {
+                CodegenError::not_found("error type", self.interner().resolve(error_name))
+            })?;
+
+        let error_type_def_id = self.resolve_raise_error_type_def(error_type_id, error_name)?;
+
+        let error_fields: Vec<_> = self
+            .query()
+            .fields_on_type(error_type_def_id)
+            .map(|field_id| self.query().get_field(field_id).clone())
+            .collect();
+
+        let tag_val = self.iconst_cached(types::I64, error_tag);
+
+        let payload_val = self.build_vir_raise_payload(&error_fields, fields)?;
+
+        self.emit_rc_cleanup_all_scopes(None)?;
+
+        if is_wide_fallible(return_type_id, self.arena()) {
+            let zero = self.iconst_cached(types::I64, 0);
+            self.builder.ins().return_(&[tag_val, payload_val, zero]);
+        } else {
+            self.builder.ins().return_(&[tag_val, payload_val]);
+        }
+
+        Ok(true)
+    }
+
+    /// Build the error payload value for a VIR raise statement.
+    ///
+    /// Layout matches the runtime convention:
+    /// - 0 fields: payload is 0
+    /// - 1 field (non-wide): payload is the field value directly (inline)
+    /// - 1 field (i128): payload is a pointer to stack-allocated i128 data
+    /// - 2+ fields: payload is a pointer to field data
+    ///
+    /// Mirrors [`build_raise_payload`] but compiles field values from VIR
+    /// expressions instead of AST expressions.
+    fn build_vir_raise_payload(
+        &mut self,
+        error_fields: &[vole_sema::entity_defs::FieldDef],
+        raise_fields: &[(Symbol, vole_vir::refs::VirRef)],
+    ) -> CodegenResult<Value> {
+        if error_fields.is_empty() {
+            return Ok(self.iconst_cached(types::I64, 0));
+        }
+
+        if error_fields.len() == 1 && !crate::types::is_wide_type(error_fields[0].ty, self.arena())
+        {
+            let field_def = &error_fields[0];
+            let field_name = self
+                .name_table()
+                .last_segment_str(field_def.name_id)
+                .unwrap_or_default();
+            let field_init = raise_fields
+                .iter()
+                .find(|(name, _)| self.interner().resolve(*name) == field_name)
+                .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
+
+            let mut field_value = self.compile_vir_expr(&field_init.1)?;
+            if self.rc_state(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
+                self.emit_rc_inc_for_type(field_value.value, field_value.type_id)?;
+            }
+            field_value.mark_consumed();
+            field_value.debug_assert_rc_handled("VirStmt::Raise (single field)");
+            return Ok(convert_to_i64_for_storage(self.builder, &field_value));
+        }
+
+        // Multiple fields (or single i128 field) — heap-allocate payload.
+        let error_payload_size: u32 = error_fields
+            .iter()
+            .map(|f| crate::types::field_byte_size(f.ty, self.arena()))
+            .sum();
+        let slot = self.alloc_stack(error_payload_size);
+
+        let mut field_offset: i32 = 0;
+        for field_def in error_fields {
+            let field_name = self
+                .name_table()
+                .last_segment_str(field_def.name_id)
+                .unwrap_or_default();
+            let field_init = raise_fields
+                .iter()
+                .find(|(name, _)| self.interner().resolve(*name) == field_name)
+                .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
+
+            let mut field_value = self.compile_vir_expr(&field_init.1)?;
+            if self.rc_state(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
+                self.emit_rc_inc_for_type(field_value.value, field_value.type_id)?;
+            }
+            field_value.mark_consumed();
+            field_value.debug_assert_rc_handled("VirStmt::Raise (multi field)");
+            let bytes_stored = store_value_to_stack(self.builder, &field_value, slot, field_offset);
+            field_offset += bytes_stored;
+        }
+
+        let ptr_type = self.ptr_type();
+        Ok(self.builder.ins().stack_addr(ptr_type, slot, 0))
     }
 }
