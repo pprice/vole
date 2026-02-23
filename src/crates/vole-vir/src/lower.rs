@@ -10,13 +10,13 @@
 // All other statement kinds remain as `VirStmt::Ast`.
 
 use vole_frontend::Interner;
-use vole_frontend::ast::{ExprKind, FuncBody, FuncDecl, InterfaceMethod, Stmt};
+use vole_frontend::ast::{BinaryOp, ExprKind, FuncBody, FuncDecl, InterfaceMethod, Stmt, UnaryOp};
 use vole_frontend::{self, Expr};
 use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeId};
 use vole_sema::TypeArena;
 use vole_sema::node_map::NodeMap;
 
-use crate::expr::VirExpr;
+use crate::expr::{VirBinOp, VirExpr, VirUnOp};
 use crate::func::{VirBody, VirFunction};
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
@@ -245,6 +245,8 @@ fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRe
             let sym = interner.intern(s);
             Box::new(VirExpr::StringLiteral(sym))
         }
+        ExprKind::Binary(bin_expr) => lower_binary(bin_expr, expr, ty, node_map, interner),
+        ExprKind::Unary(un_expr) => lower_unary(un_expr, ty, node_map, interner),
         // Everything else: Ast escape hatch
         _ => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
@@ -268,6 +270,94 @@ fn lower_int_literal(value: i64, ty: TypeId) -> VirRef {
     }
 }
 
+/// Lower a binary expression.
+///
+/// And/Or operators stay as `Ast` escape hatches (they require short-circuit
+/// control flow, handled in Phase 4).  String concatenation (string + string)
+/// is emitted as `StringConcat`.  All other binary operators become `BinaryOp`.
+fn lower_binary(
+    bin_expr: &vole_frontend::ast::BinaryExpr,
+    expr: &Expr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    // And/Or require short-circuit control flow — keep as Ast.
+    if matches!(bin_expr.op, BinaryOp::And | BinaryOp::Or) {
+        return Box::new(VirExpr::Ast {
+            expr: Box::new(expr.clone()),
+            ty,
+        });
+    }
+
+    let lhs = lower_expr(&bin_expr.left, node_map, interner);
+    let rhs = lower_expr(&bin_expr.right, node_map, interner);
+
+    // String concatenation: result type is STRING and op is Add.
+    if ty == TypeId::STRING && bin_expr.op == BinaryOp::Add {
+        return Box::new(VirExpr::StringConcat {
+            parts: vec![lhs, rhs],
+        });
+    }
+
+    let vir_op = map_binary_op(bin_expr.op);
+    Box::new(VirExpr::BinaryOp {
+        op: vir_op,
+        lhs,
+        rhs,
+        ty,
+    })
+}
+
+/// Lower a unary expression to `VirExpr::UnaryOp`.
+fn lower_unary(
+    un_expr: &vole_frontend::ast::UnaryExpr,
+    ty: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirRef {
+    let operand = lower_expr(&un_expr.operand, node_map, interner);
+    let vir_op = map_unary_op(un_expr.op);
+    Box::new(VirExpr::UnaryOp {
+        op: vir_op,
+        operand,
+        ty,
+    })
+}
+
+/// Map an AST `BinaryOp` to the VIR `VirBinOp`.
+fn map_binary_op(op: BinaryOp) -> VirBinOp {
+    match op {
+        BinaryOp::Add => VirBinOp::Add,
+        BinaryOp::Sub => VirBinOp::Sub,
+        BinaryOp::Mul => VirBinOp::Mul,
+        BinaryOp::Div => VirBinOp::Div,
+        BinaryOp::Mod => VirBinOp::Mod,
+        BinaryOp::Eq => VirBinOp::Eq,
+        BinaryOp::Ne => VirBinOp::Ne,
+        BinaryOp::Lt => VirBinOp::Lt,
+        BinaryOp::Le => VirBinOp::Le,
+        BinaryOp::Gt => VirBinOp::Gt,
+        BinaryOp::Ge => VirBinOp::Ge,
+        BinaryOp::And => VirBinOp::And,
+        BinaryOp::Or => VirBinOp::Or,
+        BinaryOp::BitAnd => VirBinOp::BitAnd,
+        BinaryOp::BitOr => VirBinOp::BitOr,
+        BinaryOp::BitXor => VirBinOp::BitXor,
+        BinaryOp::Shl => VirBinOp::Shl,
+        BinaryOp::Shr => VirBinOp::Shr,
+    }
+}
+
+/// Map an AST `UnaryOp` to the VIR `VirUnOp`.
+fn map_unary_op(op: UnaryOp) -> VirUnOp {
+    match op {
+        UnaryOp::Neg => VirUnOp::Neg,
+        UnaryOp::Not => VirUnOp::Not,
+        UnaryOp::BitNot => VirUnOp::BitNot,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -275,8 +365,9 @@ fn lower_int_literal(value: i64, ty: TypeId) -> VirRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expr::{VirBinOp, VirUnOp};
     use vole_frontend::NodeId;
-    use vole_frontend::ast::{Block, Expr, ExprKind};
+    use vole_frontend::ast::{BinaryExpr, Block, Expr, ExprKind, UnaryExpr};
     use vole_identity::{ModuleId, Span};
 
     fn dummy_span() -> Span {
@@ -867,5 +958,330 @@ mod tests {
             _ => panic!("expected StringLiteral"),
         };
         assert_eq!(sym1, sym2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Binary expression lowering
+    // -----------------------------------------------------------------------
+
+    fn make_int_expr(value: i64) -> Expr {
+        Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::IntLiteral(value, None),
+            span: dummy_span(),
+        }
+    }
+
+    fn make_binary_expr(left: Expr, op: BinaryOp, right: Expr) -> Expr {
+        Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Binary(Box::new(BinaryExpr { left, op, right })),
+            span: dummy_span(),
+        }
+    }
+
+    fn make_unary_expr(op: UnaryOp, operand: Expr) -> Expr {
+        Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Unary(Box::new(UnaryExpr { op, operand })),
+            span: dummy_span(),
+        }
+    }
+
+    #[test]
+    fn lower_binary_add_produces_binary_op() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_binary_expr(make_int_expr(1), BinaryOp::Add, make_int_expr(2));
+        node_map.set_type(expr.id, TypeId::I64);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::BinaryOp { op, lhs, rhs, ty } => {
+                assert_eq!(*op, VirBinOp::Add);
+                assert_eq!(*ty, TypeId::I64);
+                match lhs.as_ref() {
+                    VirExpr::IntLiteral { value: 1, .. } => {}
+                    other => panic!("expected IntLiteral(1) lhs, got {other:?}"),
+                }
+                match rhs.as_ref() {
+                    VirExpr::IntLiteral { value: 2, .. } => {}
+                    other => panic!("expected IntLiteral(2) rhs, got {other:?}"),
+                }
+            }
+            other => panic!("expected BinaryOp, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_binary_sub_produces_binary_op() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_binary_expr(make_int_expr(10), BinaryOp::Sub, make_int_expr(5));
+        node_map.set_type(expr.id, TypeId::I64);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::BinaryOp { op, .. } => assert_eq!(*op, VirBinOp::Sub),
+            other => panic!("expected BinaryOp(Sub), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_binary_comparison_produces_binary_op() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_binary_expr(make_int_expr(1), BinaryOp::Lt, make_int_expr(2));
+        node_map.set_type(expr.id, TypeId::BOOL);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::BinaryOp { op, ty, .. } => {
+                assert_eq!(*op, VirBinOp::Lt);
+                assert_eq!(*ty, TypeId::BOOL);
+            }
+            other => panic!("expected BinaryOp(Lt), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_binary_bitwise_produces_binary_op() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_binary_expr(make_int_expr(0xFF), BinaryOp::BitAnd, make_int_expr(0x0F));
+        node_map.set_type(expr.id, TypeId::I64);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::BinaryOp { op, .. } => assert_eq!(*op, VirBinOp::BitAnd),
+            other => panic!("expected BinaryOp(BitAnd), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_binary_and_stays_as_ast() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_binary_expr(make_bool_expr(), BinaryOp::And, make_bool_expr());
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for And, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_binary_or_stays_as_ast() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_binary_expr(make_bool_expr(), BinaryOp::Or, make_bool_expr());
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for Or, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_string_add_produces_string_concat() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let left = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::StringLiteral("hello".to_string()),
+            span: dummy_span(),
+        };
+        let right = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::StringLiteral(" world".to_string()),
+            span: dummy_span(),
+        };
+        let expr = make_binary_expr(left, BinaryOp::Add, right);
+        // Mark the outer expression as STRING to trigger string concat detection
+        node_map.set_type(expr.id, TypeId::STRING);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::StringConcat { parts } => {
+                assert_eq!(parts.len(), 2);
+                match parts[0].as_ref() {
+                    VirExpr::StringLiteral(sym) => {
+                        assert_eq!(interner.resolve(*sym), "hello");
+                    }
+                    other => panic!("expected StringLiteral part[0], got {other:?}"),
+                }
+                match parts[1].as_ref() {
+                    VirExpr::StringLiteral(sym) => {
+                        assert_eq!(interner.resolve(*sym), " world");
+                    }
+                    other => panic!("expected StringLiteral part[1], got {other:?}"),
+                }
+            }
+            other => panic!("expected StringConcat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_non_string_add_is_not_string_concat() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_binary_expr(make_int_expr(1), BinaryOp::Add, make_int_expr(2));
+        node_map.set_type(expr.id, TypeId::I64);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        // Should be BinaryOp, not StringConcat
+        match vir_ref.as_ref() {
+            VirExpr::BinaryOp { op, .. } => assert_eq!(*op, VirBinOp::Add),
+            other => panic!("expected BinaryOp(Add), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_binary_lowers_operands_recursively() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        // (1 + 2) * 3 — the inner `1 + 2` should be lowered to BinaryOp too
+        let inner = make_binary_expr(make_int_expr(1), BinaryOp::Add, make_int_expr(2));
+        node_map.set_type(inner.id, TypeId::I64);
+        let outer = make_binary_expr(inner, BinaryOp::Mul, make_int_expr(3));
+        node_map.set_type(outer.id, TypeId::I64);
+        let vir_ref = lower_expr(&outer, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::BinaryOp { op, lhs, .. } => {
+                assert_eq!(*op, VirBinOp::Mul);
+                // Inner lhs should also be a BinaryOp
+                match lhs.as_ref() {
+                    VirExpr::BinaryOp { op: inner_op, .. } => {
+                        assert_eq!(*inner_op, VirBinOp::Add);
+                    }
+                    other => panic!("expected nested BinaryOp(Add), got {other:?}"),
+                }
+            }
+            other => panic!("expected BinaryOp(Mul), got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Unary expression lowering
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn lower_unary_neg_produces_unary_op() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_unary_expr(UnaryOp::Neg, make_int_expr(42));
+        node_map.set_type(expr.id, TypeId::I64);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::UnaryOp { op, operand, ty } => {
+                assert_eq!(*op, VirUnOp::Neg);
+                assert_eq!(*ty, TypeId::I64);
+                match operand.as_ref() {
+                    VirExpr::IntLiteral { value: 42, .. } => {}
+                    other => panic!("expected IntLiteral(42) operand, got {other:?}"),
+                }
+            }
+            other => panic!("expected UnaryOp(Neg), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_unary_not_produces_unary_op() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_unary_expr(UnaryOp::Not, make_bool_expr());
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::UnaryOp { op, .. } => assert_eq!(*op, VirUnOp::Not),
+            other => panic!("expected UnaryOp(Not), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_unary_bitnot_produces_unary_op() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = make_unary_expr(UnaryOp::BitNot, make_int_expr(0xFF));
+        node_map.set_type(expr.id, TypeId::I64);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::UnaryOp { op, .. } => assert_eq!(*op, VirUnOp::BitNot),
+            other => panic!("expected UnaryOp(BitNot), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_unary_nested_in_binary() {
+        let mut node_map = empty_node_map();
+        let mut interner = test_interner();
+        // -1 + 2: unary neg on 1, then binary add with 2
+        let neg = make_unary_expr(UnaryOp::Neg, make_int_expr(1));
+        node_map.set_type(neg.id, TypeId::I64);
+        let expr = make_binary_expr(neg, BinaryOp::Add, make_int_expr(2));
+        node_map.set_type(expr.id, TypeId::I64);
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::BinaryOp { op, lhs, .. } => {
+                assert_eq!(*op, VirBinOp::Add);
+                match lhs.as_ref() {
+                    VirExpr::UnaryOp {
+                        op: inner_op,
+                        operand,
+                        ..
+                    } => {
+                        assert_eq!(*inner_op, VirUnOp::Neg);
+                        match operand.as_ref() {
+                            VirExpr::IntLiteral { value: 1, .. } => {}
+                            other => panic!("expected IntLiteral(1), got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected UnaryOp(Neg) as lhs, got {other:?}"),
+                }
+            }
+            other => panic!("expected BinaryOp(Add), got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Operator mapping coverage
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn map_binary_op_covers_all_variants() {
+        // Verify all BinaryOp variants map correctly (excludes And/Or which
+        // are handled as Ast escape hatches and never reach map_binary_op in
+        // practice, but the mapping function handles them anyway for completeness).
+        assert_eq!(map_binary_op(BinaryOp::Add), VirBinOp::Add);
+        assert_eq!(map_binary_op(BinaryOp::Sub), VirBinOp::Sub);
+        assert_eq!(map_binary_op(BinaryOp::Mul), VirBinOp::Mul);
+        assert_eq!(map_binary_op(BinaryOp::Div), VirBinOp::Div);
+        assert_eq!(map_binary_op(BinaryOp::Mod), VirBinOp::Mod);
+        assert_eq!(map_binary_op(BinaryOp::Eq), VirBinOp::Eq);
+        assert_eq!(map_binary_op(BinaryOp::Ne), VirBinOp::Ne);
+        assert_eq!(map_binary_op(BinaryOp::Lt), VirBinOp::Lt);
+        assert_eq!(map_binary_op(BinaryOp::Le), VirBinOp::Le);
+        assert_eq!(map_binary_op(BinaryOp::Gt), VirBinOp::Gt);
+        assert_eq!(map_binary_op(BinaryOp::Ge), VirBinOp::Ge);
+        assert_eq!(map_binary_op(BinaryOp::And), VirBinOp::And);
+        assert_eq!(map_binary_op(BinaryOp::Or), VirBinOp::Or);
+        assert_eq!(map_binary_op(BinaryOp::BitAnd), VirBinOp::BitAnd);
+        assert_eq!(map_binary_op(BinaryOp::BitOr), VirBinOp::BitOr);
+        assert_eq!(map_binary_op(BinaryOp::BitXor), VirBinOp::BitXor);
+        assert_eq!(map_binary_op(BinaryOp::Shl), VirBinOp::Shl);
+        assert_eq!(map_binary_op(BinaryOp::Shr), VirBinOp::Shr);
+    }
+
+    #[test]
+    fn map_unary_op_covers_all_variants() {
+        assert_eq!(map_unary_op(UnaryOp::Neg), VirUnOp::Neg);
+        assert_eq!(map_unary_op(UnaryOp::Not), VirUnOp::Not);
+        assert_eq!(map_unary_op(UnaryOp::BitNot), VirUnOp::BitNot);
     }
 }

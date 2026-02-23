@@ -363,7 +363,7 @@ impl Cg<'_, '_, '_> {
 
     /// Concatenate two values as strings.
     /// Left must be a string, right will be converted via to_string() if not already string.
-    fn string_concat(
+    pub(crate) fn string_concat(
         &mut self,
         mut left: CompiledValue,
         mut right: CompiledValue,

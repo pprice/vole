@@ -20,10 +20,10 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
 use vole_frontend::ast::YieldExpr;
-use vole_frontend::{Expr, ExprKind, Symbol};
+use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
-use vole_vir::VirExpr;
+use vole_vir::{VirBinOp, VirExpr, VirUnOp};
 
 use super::context::Cg;
 use super::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
@@ -564,11 +564,144 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue::new(value, types::I8, TypeId::NIL))
             }
 
+            // -- Operators ------------------------------------------------
+            VirExpr::BinaryOp { op, lhs, rhs, ty } => {
+                self.compile_vir_binary_op(*op, lhs, rhs, *ty)
+            }
+            VirExpr::UnaryOp { op, operand, ty } => self.compile_vir_unary_op(*op, operand, *ty),
+            VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
+
             // -- Ast escape hatch -----------------------------------------
             VirExpr::Ast { expr, ty: _ } => self.expr(expr),
 
             // Future phases add arms here
             _ => todo!("VIR expr not yet implemented: {vir_expr:?}"),
         }
+    }
+
+    /// Compile a VIR binary operation by delegating to `binary_op()`.
+    ///
+    /// Converts `VirBinOp` back to the AST `BinaryOp` and calls the existing
+    /// `binary_op()` method which handles type promotion and Cranelift emission.
+    fn compile_vir_binary_op(
+        &mut self,
+        op: VirBinOp,
+        lhs: &VirExpr,
+        rhs: &VirExpr,
+        _ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let left = self.compile_vir_expr(lhs)?;
+        let right = self.compile_vir_expr(rhs)?;
+        let ast_op = vir_binop_to_ast(op);
+        // Line 0: VIR nodes don't carry span info yet (will be added later).
+        self.binary_op(left, right, ast_op, 0)
+    }
+
+    /// Compile a VIR unary operation.
+    ///
+    /// Compiles the operand via `compile_vir_expr`, then delegates to the
+    /// existing `unary()` infrastructure by constructing a temporary
+    /// `UnaryExpr` AST node. Since `unary()` calls `self.expr()` on the
+    /// operand (which would re-compile from AST), we instead inline the
+    /// relevant Cranelift emission logic directly.
+    fn compile_vir_unary_op(
+        &mut self,
+        op: VirUnOp,
+        operand: &VirExpr,
+        _ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let compiled = self.compile_vir_expr(operand)?;
+        let ast_op = vir_unop_to_ast(op);
+        self.emit_unary_op(ast_op, compiled)
+    }
+
+    /// Emit a unary operation on an already-compiled value.
+    fn emit_unary_op(
+        &mut self,
+        op: vole_frontend::UnaryOp,
+        operand: CompiledValue,
+    ) -> CodegenResult<CompiledValue> {
+        use crate::ops::try_constant_value;
+        use vole_frontend::UnaryOp;
+
+        let result = match op {
+            UnaryOp::Neg => {
+                if operand.ty == types::F128 {
+                    let bits = self.call_runtime(RuntimeKey::F128Neg, &[operand.value])?;
+                    self.builder
+                        .ins()
+                        .bitcast(types::F128, MemFlags::new(), bits)
+                } else if operand.ty.is_float() {
+                    self.builder.ins().fneg(operand.value)
+                } else if let Some(c) = try_constant_value(self.builder.func, operand.value) {
+                    self.iconst_cached(operand.ty, -c)
+                } else {
+                    self.builder.ins().ineg(operand.value)
+                }
+            }
+            UnaryOp::Not => {
+                let op_val = if operand.ty != types::I8 {
+                    self.builder.ins().ireduce(types::I8, operand.value)
+                } else {
+                    operand.value
+                };
+                if let Some(c) = try_constant_value(self.builder.func, op_val) {
+                    self.iconst_cached(types::I8, if c == 0 { 1 } else { 0 })
+                } else {
+                    let one = self.iconst_cached(types::I8, 1);
+                    self.builder.ins().isub(one, op_val)
+                }
+            }
+            UnaryOp::BitNot => self.builder.ins().bnot(operand.value),
+        };
+        Ok(operand.with_value(result))
+    }
+
+    /// Compile a VIR `StringConcat` by delegating to the existing
+    /// `string_concat()` method.
+    fn compile_vir_string_concat(
+        &mut self,
+        parts: &[vole_vir::VirRef],
+    ) -> CodegenResult<CompiledValue> {
+        debug_assert!(
+            parts.len() >= 2,
+            "StringConcat should have at least 2 parts"
+        );
+        let left = self.compile_vir_expr(&parts[0])?;
+        let right = self.compile_vir_expr(&parts[1])?;
+        self.string_concat(left, right)
+    }
+}
+
+/// Convert a VIR binary operator to its AST equivalent.
+fn vir_binop_to_ast(op: VirBinOp) -> BinaryOp {
+    match op {
+        VirBinOp::Add => BinaryOp::Add,
+        VirBinOp::Sub => BinaryOp::Sub,
+        VirBinOp::Mul => BinaryOp::Mul,
+        VirBinOp::Div => BinaryOp::Div,
+        VirBinOp::Mod => BinaryOp::Mod,
+        VirBinOp::Eq => BinaryOp::Eq,
+        VirBinOp::Ne => BinaryOp::Ne,
+        VirBinOp::Lt => BinaryOp::Lt,
+        VirBinOp::Le => BinaryOp::Le,
+        VirBinOp::Gt => BinaryOp::Gt,
+        VirBinOp::Ge => BinaryOp::Ge,
+        VirBinOp::And => BinaryOp::And,
+        VirBinOp::Or => BinaryOp::Or,
+        VirBinOp::BitAnd => BinaryOp::BitAnd,
+        VirBinOp::BitOr => BinaryOp::BitOr,
+        VirBinOp::BitXor => BinaryOp::BitXor,
+        VirBinOp::Shl => BinaryOp::Shl,
+        VirBinOp::Shr => BinaryOp::Shr,
+    }
+}
+
+/// Convert a VIR unary operator to its AST equivalent.
+fn vir_unop_to_ast(op: VirUnOp) -> vole_frontend::UnaryOp {
+    match op {
+        VirUnOp::Neg => vole_frontend::UnaryOp::Neg,
+        VirUnOp::Not => vole_frontend::UnaryOp::Not,
+        VirUnOp::BitNot => vole_frontend::UnaryOp::BitNot,
     }
 }
