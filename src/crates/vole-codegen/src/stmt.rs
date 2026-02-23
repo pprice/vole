@@ -1481,6 +1481,15 @@ impl Cg<'_, '_, '_> {
         if let vole_vir::VirExpr::Ast { expr, .. } = value_expr {
             return self.get_declared_var_type(&expr.id);
         }
+        // For MethodCall inits, check the NodeMap via the carried NodeId.
+        // Method calls may have codegen-computed return types that differ from
+        // the sema expression type (e.g. sum() on Iterator<[i64]> returns i64
+        // at runtime but sema records [i64]). Using the NodeMap lookup returns
+        // the *declared* annotation type (None for untyped lets), which lets
+        // coerce_let_init use init.type_id (the codegen-computed type) instead.
+        if let vole_vir::VirExpr::MethodCall { node_id, .. } = value_expr {
+            return self.get_declared_var_type(node_id);
+        }
         // For pure VIR inits: always pass binding_ty as declared type.
         Some(binding_ty)
     }

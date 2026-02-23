@@ -85,7 +85,12 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         }
         ExprKind::When(when_expr) => lower_when_expr(when_expr, ty, node_map, interner),
         ExprKind::Match(match_expr) => lower_match_expr(match_expr, expr, ty, node_map, interner),
-        ExprKind::RepeatLiteral { .. } | ExprKind::MethodCall(_) => Box::new(VirExpr::Ast {
+        ExprKind::MethodCall(mc) => Box::new(VirExpr::MethodCall {
+            method_call: mc.clone(),
+            node_id: expr.id,
+            ty,
+        }),
+        ExprKind::RepeatLiteral { .. } => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,
         }),

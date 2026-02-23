@@ -2,7 +2,8 @@
 //
 // VIR expression nodes and their supporting types.
 
-use vole_frontend::{Expr, Pattern};
+use vole_frontend::ast::MethodCallExpr;
+use vole_frontend::{Expr, NodeId, Pattern};
 use vole_identity::{NameId, Symbol, TypeDefId, TypeId};
 use vole_sema::{StringConversion, UnionStorageKind};
 
@@ -132,6 +133,23 @@ pub enum VirExpr {
     Call {
         target: CallTarget,
         args: Vec<VirRef>,
+        ty: TypeId,
+    },
+
+    /// Method call on a receiver object.
+    ///
+    /// Method dispatch has 6+ paths (direct, implemented, interface,
+    /// default, functional-interface, static) plus builtin and iterator
+    /// specialisations.  Classification requires the function registry,
+    /// variable table, and module context that lowering does not have.
+    ///
+    /// The `method_call` field carries the original AST expression so
+    /// codegen can delegate to the existing `method_call()` dispatcher.
+    /// `node_id` is the expression's NodeId for NodeMap lookups
+    /// (method resolution, monomorphization keys, etc.).
+    MethodCall {
+        method_call: Box<MethodCallExpr>,
+        node_id: NodeId,
         ty: TypeId,
     },
 

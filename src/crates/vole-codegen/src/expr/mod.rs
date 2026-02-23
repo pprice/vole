@@ -643,6 +643,14 @@ impl Cg<'_, '_, '_> {
 
             // -- Calls ----------------------------------------------------
             VirExpr::Call { target, args, ty } => self.compile_vir_call(target, args, *ty),
+            VirExpr::MethodCall {
+                method_call,
+                node_id,
+                ty: _,
+            } => {
+                let result = self.method_call(method_call, *node_id)?;
+                Ok(self.mark_rc_owned(result))
+            }
 
             // -- Control flow ---------------------------------------------
             VirExpr::If {
