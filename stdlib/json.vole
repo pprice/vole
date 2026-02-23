@@ -246,9 +246,9 @@ class JsonArray {
 //       println(r.err.to_string())
 //   }
 //
-// Note: Due to a cross-module union type limitation, this class stores each
-// possible value type in a separate field and uses an explicit type tag string.
-// Use the is_*() / as_*() methods rather than accessing fields directly.
+// Implementation note: stores each value type in a separate field because
+// returning RC types from a union field in a class across module boundaries
+// causes RC lifecycle corruption. Use the is_*() / as_*() methods to access.
 class JsonParseResult {
     _tag: string,
     _str_val: string,
@@ -409,8 +409,7 @@ class JSON {
 // =============================================================================
 //
 // JsonSerde<T> provides type-safe JSON serialization with optional field mapping.
-// Uses a generic wrapper class because free generic functions with T.@meta have
-// a known limitation (vol-kjf1) when instantiated with multiple types.
+// Uses a generic wrapper class so T.@meta is available via self.item.@meta.
 //
 // serialize() and deserialize() automatically read @json_name, @json_ignore,
 // and @json_field annotations from field metadata. No manual map-building needed.
@@ -641,11 +640,8 @@ func _serde_set_field_value(obj: JsonObject, name: string, type_name: string, ra
 
 // Construct a struct/class instance from a JsonObject.
 // Automatically reads @json_name annotations from fields for key mapping.
-// Reads each field from the object, converts from Json to the expected type,
-// and calls meta.construct with the argument array.
-//
-// Note: uses explicit type checking on each Json value rather than passing
-// union-typed values to helper functions, to avoid cross-module union issues.
+// Delegates to _from_json_object_mapped if renames are found, otherwise
+// passes directly to _from_json_object_raw.
 func _from_json_object(meta: TypeMeta, obj: JsonObject) -> unknown {
     let mappings = _extract_json_mappings(meta)
     let has_renames = mappings.renames.len() > 0
@@ -659,21 +655,18 @@ func _from_json_object(meta: TypeMeta, obj: JsonObject) -> unknown {
 // without checking annotations. Called by both _from_json_object (after
 // annotation extraction) and _from_json_object_mapped (after key renaming).
 //
-// Work around [unknown] array push bug: pushing different typed values in a
-// loop causes all entries to alias the last value. Instead, we:
-// 1. Construct an instance with placeholder nil values (all same value = safe)
-// 2. Use field.set to set each field individually after construction
-//
-// Strategy: stringify the object to JSON text, extract each field's raw text,
-// then set the field via field.set.
+// Strategy: construct a default instance with nil placeholders, then set each
+// field individually via field.set using values extracted from JSON text.
+// The construct-then-set pattern is required because meta.construct() return
+// values don't carry the right type tag for `is` narrowing.
 func _from_json_object_raw(meta: TypeMeta, obj: JsonObject) -> unknown {
     let json_text = _stringify_value(obj)
     let text_len: i32 = _str_len_i32(json_text)
-    // Build placeholder defaults array (all nil, same value so push works)
-    let placeholder: unknown = nil
+    // Build defaults array with nil placeholders for construction
     var defaults: [unknown] = []
     var k: i64 = 0
     while k < meta.fields.length() {
+        let placeholder: unknown = nil
         defaults.push(placeholder)
         k = k + 1
     }
@@ -1071,8 +1064,9 @@ func _pretty_array(arr: JsonArray, indent: i64) -> string {
 // =============================================================================
 
 // Internal result struct for the recursive descent parser.
-// Stores each value type in separate fields with an explicit tag string
-// to avoid union field type-tag issues when reading values back.
+// The typed fields (str_val, f64_val, etc.) duplicate the value field for use
+// in contexts where extracting from the union has RC lifecycle issues.
+// The value field is used directly where safe (e.g. obj.set / arr.push).
 struct ParseResult {
     value: Json,
     str_val: string,
@@ -1083,54 +1077,54 @@ struct ParseResult {
     pos: i32,
     has_error: bool,
     err_msg: string,
-    tag: string,
 }
 
 // Default empty values for ParseResult fields.
 func _empty_obj() -> JsonObject { return JsonObject.new() }
 func _empty_arr() -> JsonArray { return JsonArray.new() }
 
-// Convenience: wrap a successful parse result with a type tag.
+// Convenience constructors for successful parse results.
 func _parse_ok_str(v: string, pos: i32) -> ParseResult {
     return ParseResult { value: v, str_val: v, f64_val: 0.0, bool_val: false,
         obj_val: _empty_obj(), arr_val: _empty_arr(),
-        pos: pos, has_error: false, err_msg: "", tag: "string" }
+        pos: pos, has_error: false, err_msg: "" }
 }
 func _parse_ok_f64(v: f64, pos: i32) -> ParseResult {
     return ParseResult { value: v, str_val: "", f64_val: v, bool_val: false,
         obj_val: _empty_obj(), arr_val: _empty_arr(),
-        pos: pos, has_error: false, err_msg: "", tag: "f64" }
+        pos: pos, has_error: false, err_msg: "" }
 }
 func _parse_ok_bool(v: bool, pos: i32) -> ParseResult {
     return ParseResult { value: v, str_val: "", f64_val: 0.0, bool_val: v,
         obj_val: _empty_obj(), arr_val: _empty_arr(),
-        pos: pos, has_error: false, err_msg: "", tag: "bool" }
+        pos: pos, has_error: false, err_msg: "" }
 }
 func _parse_ok_nil(pos: i32) -> ParseResult {
     return ParseResult { value: nil, str_val: "", f64_val: 0.0, bool_val: false,
         obj_val: _empty_obj(), arr_val: _empty_arr(),
-        pos: pos, has_error: false, err_msg: "", tag: "nil" }
+        pos: pos, has_error: false, err_msg: "" }
 }
 func _parse_ok_obj(v: JsonObject, pos: i32) -> ParseResult {
     return ParseResult { value: v, str_val: "", f64_val: 0.0, bool_val: false,
         obj_val: v, arr_val: _empty_arr(),
-        pos: pos, has_error: false, err_msg: "", tag: "object" }
+        pos: pos, has_error: false, err_msg: "" }
 }
 func _parse_ok_arr(v: JsonArray, pos: i32) -> ParseResult {
     return ParseResult { value: v, str_val: "", f64_val: 0.0, bool_val: false,
         obj_val: _empty_obj(), arr_val: v,
-        pos: pos, has_error: false, err_msg: "", tag: "array" }
+        pos: pos, has_error: false, err_msg: "" }
 }
 
 // Convenience: wrap a parse error.
 func _parse_err(message: string, pos: i32) -> ParseResult {
     return ParseResult { value: nil, str_val: "", f64_val: 0.0, bool_val: false,
         obj_val: _empty_obj(), arr_val: _empty_arr(),
-        pos: pos, has_error: true, err_msg: message, tag: "error" }
+        pos: pos, has_error: true, err_msg: message }
 }
 
 // Internal parse entry point (called from JSON class statics).
-// Dispatches to typed constructors using explicit tag to avoid cross-module union issues.
+// Dispatches to typed JsonParseResult constructors because cross-module access
+// to union fields in a class causes RC lifecycle corruption.
 func _parse_top(text: string) -> JsonParseResult {
     let r = _parse_json_value(text, 0)
     if r.has_error {
@@ -1141,16 +1135,12 @@ func _parse_top(text: string) -> JsonParseResult {
     if end < text.length() {
         return JsonParseResult._failure(JsonError.new("unexpected trailing content", end))
     }
-    return _wrap_tagged_result(r)
-}
-
-// Convert a tagged ParseResult to a typed JsonParseResult using the explicit tag.
-func _wrap_tagged_result(r: ParseResult) -> JsonParseResult {
-    if r.tag == "string" { return JsonParseResult._success_str(r.str_val) }
-    if r.tag == "f64" { return JsonParseResult._success_f64(r.f64_val) }
-    if r.tag == "bool" { return JsonParseResult._success_bool(r.bool_val) }
-    if r.tag == "object" { return JsonParseResult._success_obj(r.obj_val) }
-    if r.tag == "array" { return JsonParseResult._success_arr(r.arr_val) }
+    let v = r.value
+    if v is string { return JsonParseResult._success_str(v) }
+    if v is f64 { return JsonParseResult._success_f64(v) }
+    if v is bool { return JsonParseResult._success_bool(v) }
+    if v is JsonObject { return JsonParseResult._success_obj(v) }
+    if v is JsonArray { return JsonParseResult._success_arr(v) }
     return JsonParseResult._success_nil()
 }
 
@@ -1460,8 +1450,7 @@ func _parse_json_object(text: string, pos: i32) -> ParseResult {
         i = i + 1
         let val_r = _parse_json_value(text, i)
         if val_r.has_error { return val_r }
-        // key_r is always a string on success from _parse_json_string
-        _obj_set_tagged(obj, key_r.str_val, val_r)
+        obj.set(key_r.str_val, val_r.value)
         i = _skip_whitespace(text, val_r.pos)
         if i < len && text.char_at_raw(i) == 125 {
             return _parse_ok_obj(obj, i + 1)
@@ -1487,7 +1476,7 @@ func _parse_json_array(text: string, pos: i32) -> ParseResult {
     while i < len {
         let elem_r = _parse_json_value(text, i)
         if elem_r.has_error { return elem_r }
-        _push_tagged(arr, elem_r)
+        arr.push(elem_r.value)
         i = _skip_whitespace(text, elem_r.pos)
         if i < len && text.char_at_raw(i) == 93 {
             return _parse_ok_arr(arr, i + 1)
@@ -1500,22 +1489,3 @@ func _parse_json_array(text: string, pos: i32) -> ParseResult {
     return _parse_err("unterminated array", pos)
 }
 
-// Set a parsed value on a JsonObject using the tagged fields.
-func _obj_set_tagged(obj: JsonObject, key: string, r: ParseResult) {
-    if r.tag == "string" { obj.set(key, r.str_val)
-    } else if r.tag == "f64" { obj.set(key, r.f64_val)
-    } else if r.tag == "bool" { obj.set(key, r.bool_val)
-    } else if r.tag == "object" { obj.set(key, r.obj_val)
-    } else if r.tag == "array" { obj.set(key, r.arr_val)
-    } else { obj.set(key, nil) }
-}
-
-// Push a parsed value into a JsonArray using the tagged fields.
-func _push_tagged(arr: JsonArray, r: ParseResult) {
-    if r.tag == "string" { arr.push(r.str_val)
-    } else if r.tag == "f64" { arr.push(r.f64_val)
-    } else if r.tag == "bool" { arr.push(r.bool_val)
-    } else if r.tag == "object" { arr.push(r.obj_val)
-    } else if r.tag == "array" { arr.push(r.arr_val)
-    } else { arr.push(nil) }
-}
