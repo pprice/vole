@@ -11,6 +11,7 @@ mod literal;
 mod null_ops;
 mod pattern_match;
 mod unary_assign;
+mod vir_calls;
 
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Module};
@@ -23,7 +24,7 @@ use vole_frontend::ast::YieldExpr;
 use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
-use vole_vir::{CallTarget, CoerceKind, VirBinOp, VirExpr, VirUnOp};
+use vole_vir::{CoerceKind, VirBinOp, VirExpr, VirUnOp};
 
 use super::context::Cg;
 use super::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
@@ -739,68 +740,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(result, target_ty, to))
     }
 
-    /// Compile a VIR call expression.
-    ///
-    /// Dispatches on `CallTarget` to select the correct calling convention.
-    /// Currently only `CallTarget::Direct` is implemented; other targets
-    /// are deferred to later VIR phases.
-    fn compile_vir_call(
-        &mut self,
-        target: &CallTarget,
-        args: &[vole_vir::VirRef],
-        ty: TypeId,
-    ) -> CodegenResult<CompiledValue> {
-        match target {
-            CallTarget::Direct { function_id } => {
-                self.compile_vir_direct_call(*function_id, args, ty)
-            }
-            _ => todo!("VIR CallTarget not yet implemented: {target:?}"),
-        }
-    }
-
-    /// Compile a direct call to a known function via its `FunctionId`.
-    ///
-    /// Resolves the sema `FunctionId` to a Cranelift `FuncId` through the
-    /// entity registry and function registry, compiles VIR arguments, and
-    /// emits the call instruction.
-    fn compile_vir_direct_call(
-        &mut self,
-        function_id: vole_identity::FunctionId,
-        args: &[vole_vir::VirRef],
-        return_ty: TypeId,
-    ) -> CodegenResult<CompiledValue> {
-        // Resolve FunctionId → NameId → FunctionKey → FuncId
-        let func_def = self.query().get_function(function_id);
-        let full_name_id = func_def.full_name_id;
-        let func_key = self.funcs().intern_name_id(full_name_id);
-        let func_id = self
-            .funcs_ref()
-            .func_id(func_key)
-            .ok_or_else(|| CodegenError::not_found("compiled function for VIR direct call", ""))?;
-
-        let func_ref = self
-            .codegen_ctx
-            .jit_module()
-            .declare_func_in_func(func_id, self.builder.func);
-
-        // Compile VIR arguments
-        let mut arg_values = Vec::with_capacity(args.len());
-        let mut rc_temps = Vec::new();
-        for arg in args {
-            let compiled = self.compile_vir_expr(arg)?;
-            if compiled.is_owned() {
-                rc_temps.push(compiled);
-            }
-            arg_values.push(compiled.value);
-        }
-
-        let call_inst = self.emit_call(func_ref, &arg_values);
-
-        // Dec RC temp args after the call has consumed them
-        self.consume_rc_args(&mut rc_temps)?;
-
-        self.call_result(call_inst, return_ty)
-    }
+    // VIR call dispatch is in the `vir_calls` submodule.
 }
 
 /// Convert a VIR binary operator to its AST equivalent.
