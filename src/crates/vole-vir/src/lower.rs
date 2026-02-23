@@ -7,8 +7,8 @@
 // incremental migration: once wired into the pipeline, individual statement
 // and expression kinds can be lowered one at a time.
 
-use vole_frontend::ast::{FuncBody, FuncDecl, Stmt};
-use vole_identity::{FunctionId, NameId, Symbol, TypeId};
+use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod, Stmt};
+use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeId};
 use vole_sema::TypeArena;
 use vole_sema::node_map::NodeMap;
 
@@ -41,6 +41,7 @@ pub fn lower_function(
         return_type,
         body,
         mangled_name_id: None,
+        method_id: None,
     }
 }
 
@@ -71,6 +72,57 @@ pub fn lower_monomorphized_function(
     let mut vir = lower_function(func, func_id, name, param_types, return_type, node_map);
     vir.mangled_name_id = Some(mangled_name_id);
     vir
+}
+
+/// Lower a class/struct method (instance or static) into a `VirFunction`.
+///
+/// Similar to [`lower_function`] but associates a `MethodId` instead of
+/// using the `FunctionId` for lookup.  The `func_id` is a dummy value
+/// (methods don't have a `FunctionId` in the entity registry); the real
+/// identity is carried by `method_id`.
+pub fn lower_method(
+    func: &FuncDecl,
+    method_id: MethodId,
+    name: String,
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    _node_map: &NodeMap,
+) -> VirFunction {
+    let body = lower_func_body(&func.body);
+    VirFunction {
+        id: FunctionId::new(0), // dummy — methods use method_id for lookup
+        name,
+        params: param_types.to_vec(),
+        return_type,
+        body,
+        mangled_name_id: None,
+        method_id: Some(method_id),
+    }
+}
+
+/// Lower an interface method (default method with a body) into a `VirFunction`.
+///
+/// Interface methods use `InterfaceMethod` AST nodes (which have an optional
+/// body) rather than `FuncDecl`.  Only methods with a body should be lowered.
+pub fn lower_interface_method(
+    method: &InterfaceMethod,
+    method_id: MethodId,
+    name: String,
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    _node_map: &NodeMap,
+) -> Option<VirFunction> {
+    let body_ast = method.body.as_ref()?;
+    let body = lower_func_body(body_ast);
+    Some(VirFunction {
+        id: FunctionId::new(0), // dummy — methods use method_id for lookup
+        name,
+        params: param_types.to_vec(),
+        return_type,
+        body,
+        mangled_name_id: None,
+        method_id: Some(method_id),
+    })
 }
 
 /// Assert (debug-only) that all types in a monomorphized function signature

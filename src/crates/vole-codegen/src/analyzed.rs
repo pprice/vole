@@ -6,11 +6,11 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use vole_frontend::{Decl, Interner, Program, Span};
-use vole_identity::{FunctionId, ModuleId, NameId, NameTable, NamerLookup};
+use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup};
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
-use vole_vir::{VirFunction, lower_function, lower_monomorphized_function};
+use vole_vir::{VirFunction, lower_function, lower_method, lower_monomorphized_function};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
@@ -41,6 +41,10 @@ pub struct AnalyzedProgram {
     /// Enables O(1) VIR function lookup for non-generic top-level and module
     /// functions during compilation.
     pub vir_function_map: FxHashMap<FunctionId, usize>,
+    /// Lookup map from semantic MethodId to index in `vir_functions`.
+    /// Enables O(1) VIR function lookup for non-generic class/struct methods
+    /// and static methods during compilation.
+    pub vir_method_map: FxHashMap<MethodId, usize>,
 }
 
 impl AnalyzedProgram {
@@ -82,8 +86,26 @@ impl AnalyzedProgram {
             &output.node_map,
             &mut vir_functions,
         );
+        lower_top_level_type_methods(
+            &program,
+            &interner,
+            &db.names,
+            &db.entities,
+            &output.node_map,
+            output.module_id,
+            &mut vir_functions,
+        );
+        lower_module_type_methods(
+            &output.module_programs,
+            &db.names,
+            &db.entities,
+            &output.node_map,
+            &output.modules_with_errors,
+            &mut vir_functions,
+        );
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
         let vir_function_map = build_vir_function_map(&vir_functions);
+        let vir_method_map = build_vir_method_map(&vir_functions);
         Self {
             program,
             interner: Rc::new(interner),
@@ -96,6 +118,7 @@ impl AnalyzedProgram {
             vir_functions,
             vir_monomorph_map,
             vir_function_map,
+            vir_method_map,
         }
     }
 
@@ -156,6 +179,14 @@ impl AnalyzedProgram {
     pub fn get_vir_function(&self, func_id: FunctionId) -> Option<&VirFunction> {
         self.vir_function_map
             .get(&func_id)
+            .map(|&idx| &self.vir_functions[idx])
+    }
+
+    /// Look up a VIR function by its semantic MethodId.
+    /// Returns `None` if no VIR function was lowered for this method.
+    pub fn get_vir_method(&self, method_id: MethodId) -> Option<&VirFunction> {
+        self.vir_method_map
+            .get(&method_id)
             .map(|&idx| &self.vir_functions[idx])
     }
 }
@@ -400,9 +431,292 @@ fn build_vir_monomorph_map(vir_functions: &[VirFunction]) -> FxHashMap<NameId, u
 fn build_vir_function_map(vir_functions: &[VirFunction]) -> FxHashMap<FunctionId, usize> {
     let mut map = FxHashMap::default();
     for (idx, vf) in vir_functions.iter().enumerate() {
-        if vf.mangled_name_id.is_none() {
+        if vf.mangled_name_id.is_none() && vf.method_id.is_none() {
             map.insert(vf.id, idx);
         }
     }
     map
+}
+
+/// Build a lookup map from semantic MethodId to VirFunction index.
+///
+/// Only includes VIR functions that have a `method_id` set (class/struct
+/// methods and static methods).
+fn build_vir_method_map(vir_functions: &[VirFunction]) -> FxHashMap<MethodId, usize> {
+    let mut map = FxHashMap::default();
+    for (idx, vf) in vir_functions.iter().enumerate() {
+        if let Some(method_id) = vf.method_id {
+            map.insert(method_id, idx);
+        }
+    }
+    map
+}
+
+/// Lower non-generic class/struct instance methods and static methods to VIR.
+///
+/// Iterates the program's class and struct declarations, looks up each type's
+/// methods in the entity registry, and lowers non-generic methods to VIR.
+fn lower_top_level_type_methods(
+    program: &Program,
+    interner: &Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    node_map: &NodeMap,
+    module_id: ModuleId,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let namer = NamerLookup::new(names, interner);
+
+    for decl in &program.declarations {
+        match decl {
+            Decl::Class(class) => {
+                if !class.type_params.is_empty() {
+                    continue;
+                }
+                lower_type_methods(
+                    &class.methods,
+                    class.statics.as_ref(),
+                    class.name,
+                    interner,
+                    &namer,
+                    names,
+                    entities,
+                    node_map,
+                    module_id,
+                    vir_functions,
+                );
+            }
+            Decl::Struct(s) => {
+                if !s.type_params.is_empty() {
+                    continue;
+                }
+                lower_type_methods(
+                    &s.methods,
+                    s.statics.as_ref(),
+                    s.name,
+                    interner,
+                    &namer,
+                    names,
+                    entities,
+                    node_map,
+                    module_id,
+                    vir_functions,
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Lower instance methods and static methods for a single type declaration.
+#[allow(clippy::too_many_arguments)]
+fn lower_type_methods(
+    methods: &[vole_frontend::FuncDecl],
+    statics: Option<&vole_frontend::ast::StaticsBlock>,
+    type_name: vole_frontend::Symbol,
+    interner: &Interner,
+    namer: &NamerLookup<'_>,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    node_map: &NodeMap,
+    module_id: ModuleId,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    // Look up TypeDefId for the type
+    let Some(type_name_id) = names.name_id(module_id, &[type_name], interner) else {
+        return;
+    };
+    let Some(type_def_id) = entities.type_by_name(type_name_id) else {
+        return;
+    };
+    let type_name_str = interner.resolve(type_name);
+
+    // Lower instance methods
+    for method in methods {
+        if !method.type_params.is_empty() {
+            continue;
+        }
+        let Some(method_name_id) = namer.method(method.name) else {
+            continue;
+        };
+        let Some(mid) = entities.find_method_on_type(type_def_id, method_name_id) else {
+            continue;
+        };
+        let method_def = entities.get_method(mid);
+        if method_def.method_type_params.is_empty() {
+            lower_single_method(
+                method,
+                mid,
+                method_def,
+                type_name_str,
+                interner,
+                node_map,
+                vir_functions,
+            );
+        }
+    }
+
+    // Lower static methods
+    if let Some(statics) = statics {
+        lower_static_methods(
+            statics,
+            type_def_id,
+            type_name_str,
+            interner,
+            namer,
+            entities,
+            node_map,
+            vir_functions,
+        );
+    }
+}
+
+/// Lower a single instance method to VIR and push it onto the functions vec.
+fn lower_single_method(
+    method: &vole_frontend::FuncDecl,
+    method_id: MethodId,
+    method_def: &vole_sema::MethodDef,
+    type_name_str: &str,
+    interner: &Interner,
+    node_map: &NodeMap,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let arena_sig = method_def.signature_id;
+    // We need the type arena to unwrap the signature, but we don't have it here.
+    // Instead, use the AST param names + entity registry param types.
+    // MethodDef doesn't store params_id directly, so we extract from signature.
+    // Since we can't unwrap_function without the TypeArena, pass param names
+    // paired with AST params (Phase 0 VIR doesn't use param types for codegen).
+    let method_name_str = interner.resolve(method.name);
+    let display_name = format!("{}::{}", type_name_str, method_name_str);
+
+    // For Phase 0, param types are not used (AST escape hatch delegates to codegen).
+    // We create placeholder entries matching the AST params.
+    let param_types: Vec<_> = method
+        .params
+        .iter()
+        .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+        .collect();
+
+    let vir = lower_method(
+        method,
+        method_id,
+        display_name,
+        &param_types,
+        arena_sig, // return_type placeholder (Phase 0 doesn't use it)
+        node_map,
+    );
+    vir_functions.push(vir);
+}
+
+/// Lower static methods from a StaticsBlock to VIR.
+#[allow(clippy::too_many_arguments)]
+fn lower_static_methods(
+    statics: &vole_frontend::ast::StaticsBlock,
+    type_def_id: vole_identity::TypeDefId,
+    type_name_str: &str,
+    interner: &Interner,
+    namer: &NamerLookup<'_>,
+    entities: &EntityRegistry,
+    node_map: &NodeMap,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    for method in &statics.methods {
+        // Static methods are InterfaceMethod nodes; skip those without bodies
+        if method.body.is_none() {
+            continue;
+        }
+        if !method.type_params.is_empty() {
+            continue;
+        }
+        let Some(method_name_id) = namer.method(method.name) else {
+            continue;
+        };
+        let Some(mid) = entities.find_static_method_on_type(type_def_id, method_name_id) else {
+            continue;
+        };
+        let method_def = entities.get_method(mid);
+        if !method_def.method_type_params.is_empty() {
+            continue;
+        }
+        let method_name_str = interner.resolve(method.name);
+        let display_name = format!("{}::{}", type_name_str, method_name_str);
+
+        let param_types: Vec<_> = method
+            .params
+            .iter()
+            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+            .collect();
+
+        if let Some(vir) = vole_vir::lower_interface_method(
+            method,
+            mid,
+            display_name,
+            &param_types,
+            method_def.signature_id,
+            node_map,
+        ) {
+            vir_functions.push(vir);
+        }
+    }
+}
+
+/// Lower non-generic type methods from imported modules to VIR.
+fn lower_module_type_methods(
+    module_programs: &FxHashMap<String, (Program, Rc<Interner>)>,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    node_map: &NodeMap,
+    modules_with_errors: &HashSet<String>,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    for (module_path, (program, module_interner)) in module_programs {
+        if modules_with_errors.contains(module_path) {
+            continue;
+        }
+        let module_id = names
+            .module_id_if_known(module_path)
+            .unwrap_or_else(|| names.main_module());
+        let namer = NamerLookup::new(names, module_interner);
+
+        for decl in &program.declarations {
+            match decl {
+                Decl::Class(class) => {
+                    if !class.type_params.is_empty() {
+                        continue;
+                    }
+                    lower_type_methods(
+                        &class.methods,
+                        class.statics.as_ref(),
+                        class.name,
+                        module_interner,
+                        &namer,
+                        names,
+                        entities,
+                        node_map,
+                        module_id,
+                        vir_functions,
+                    );
+                }
+                Decl::Struct(s) => {
+                    if !s.type_params.is_empty() {
+                        continue;
+                    }
+                    lower_type_methods(
+                        &s.methods,
+                        s.statics.as_ref(),
+                        s.name,
+                        module_interner,
+                        &namer,
+                        names,
+                        entities,
+                        node_map,
+                        module_id,
+                        vir_functions,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
 }

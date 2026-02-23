@@ -2,7 +2,7 @@
 //
 // VIR function and body representations.
 
-use vole_identity::{FunctionId, NameId, Symbol, TypeId};
+use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeId};
 
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
@@ -28,6 +28,10 @@ pub struct VirFunction {
     /// For monomorphized instances, the mangled NameId used by codegen for
     /// function lookup.  `None` for non-generic (non-monomorphized) functions.
     pub mangled_name_id: Option<NameId>,
+    /// For class/struct methods and static methods, the semantic MethodId.
+    /// `None` for free functions.  Used by `vir_method_map` for O(1) lookup
+    /// when routing method compilation through VIR.
+    pub method_id: Option<MethodId>,
 }
 
 /// The body of a VIR function: a linear sequence of statements with an

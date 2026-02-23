@@ -11,7 +11,9 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
+use super::common::{
+    FunctionCompileConfig, compile_function_inner_with_params, compile_function_inner_with_vir,
+};
 use super::impls::{ModuleCompileInfo, TypeDeclInfo, TypeMethodsData};
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
@@ -363,6 +365,9 @@ impl Compiler<'_> {
                 .collect()
         };
 
+        // Check if a VIR function was lowered for this method
+        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -382,14 +387,26 @@ impl Compiler<'_> {
                 self_binding,
                 method_return_type_id,
             );
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                None,
-                None,
-            )?;
+            if let Some(vir) = vir_func {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    None,
+                    None,
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    None,
+                    None,
+                )?;
+            }
         }
 
         // Define the function
@@ -471,6 +488,9 @@ impl Compiler<'_> {
         let self_sym = self.self_symbol();
         let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
+        // Check if a VIR function was lowered for this method
+        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -484,14 +504,26 @@ impl Compiler<'_> {
 
             let config =
                 FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                None,
-                None,
-            )?;
+            if let Some(vir) = vir_func {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    None,
+                    None,
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    None,
+                    None,
+                )?;
+            }
         }
 
         // Define the function
@@ -583,6 +615,9 @@ impl Compiler<'_> {
             .ok_or_else(|| CodegenError::internal("'self' not interned in module interner"))?;
         let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
+        // Check if a VIR function was lowered for this method
+        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+
         // Create function builder and compile using the module interner
         let no_global_inits = FxHashMap::default();
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -597,14 +632,26 @@ impl Compiler<'_> {
 
             let config =
                 FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                module_id,
-                None,
-            )?;
+            if let Some(vir) = vir_func {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    module_id,
+                    None,
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    module_id,
+                    None,
+                )?;
+            }
         }
 
         // Define the function
@@ -695,6 +742,9 @@ impl Compiler<'_> {
                 .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
                 .collect();
 
+            // Check if a VIR function was lowered for this method
+            let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -708,14 +758,26 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    None,
-                    None,
-                )?;
+                if let Some(vir) = vir_func {
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir.body,
+                        None,
+                        None,
+                    )?;
+                } else {
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        None,
+                        None,
+                    )?;
+                }
             }
 
             // Define the function
@@ -887,6 +949,9 @@ impl Compiler<'_> {
                 .collect();
             let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
+            // Check if a VIR function was lowered for this method
+            let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -910,14 +975,26 @@ impl Compiler<'_> {
                     self_binding,
                     return_type_id,
                 );
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    Some(module_info.module_id),
-                    None,
-                )?;
+                if let Some(vir) = vir_func {
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir.body,
+                        Some(module_info.module_id),
+                        None,
+                    )?;
+                } else {
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        Some(module_info.module_id),
+                        None,
+                    )?;
+                }
             }
 
             // Define the function
@@ -1009,6 +1086,9 @@ impl Compiler<'_> {
                 .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
                 .collect();
 
+            // Check if a VIR function was lowered for this method
+            let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -1027,14 +1107,26 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, return_type_id);
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    Some(module_info.module_id),
-                    None,
-                )?;
+                if let Some(vir) = vir_func {
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir.body,
+                        Some(module_info.module_id),
+                        None,
+                    )?;
+                } else {
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        Some(module_info.module_id),
+                        None,
+                    )?;
+                }
             }
 
             // Define the function

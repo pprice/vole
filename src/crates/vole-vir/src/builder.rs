@@ -251,6 +251,7 @@ impl VirBuilder {
             return_type: return_ty,
             body,
             mangled_name_id: None,
+            method_id: None,
         }
     }
 }
