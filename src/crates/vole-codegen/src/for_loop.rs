@@ -254,7 +254,6 @@ impl Cg<'_, '_, '_> {
             .arena()
             .unwrap_array(arr.type_id)
             .unwrap_or_else(|| self.arena().i64());
-        let elem_wide = crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena());
 
         let len_val = self
             .call_compiler_intrinsic_key_with_line(
@@ -304,41 +303,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .load(types::I64, MemFlags::new(), elem_ptr, value_offset);
         let union_storage = self.get_union_storage_kind(for_stmt.iterable.id);
-        let elem_val = if let Some(storage) = union_storage {
-            use vole_sema::UnionStorageKind;
-            match storage {
-                UnionStorageKind::Inline => {
-                    let tag_offset =
-                        std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
-                    let elem_tag =
-                        self.builder
-                            .ins()
-                            .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
-                    self.decode_dynamic_array_union_element(elem_tag, elem_val, elem_type_id)
-                        .value
-                }
-                UnionStorageKind::Heap => {
-                    self.copy_union_heap_to_stack(elem_val, elem_type_id).value
-                }
-            }
-        } else if let Some(wide) = elem_wide {
-            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[elem_val])?;
-            wide.reinterpret_i128(self.builder, wide_bits)
-        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
-            // Narrow the i64 runtime value to the element's actual Cranelift type.
-            self.builder.ins().ireduce(elem_cr_type, elem_val)
-        } else if elem_cr_type == types::F64 {
-            self.builder
-                .ins()
-                .bitcast(types::F64, MemFlags::new(), elem_val)
-        } else if elem_cr_type == types::F32 {
-            let i32_val = self.builder.ins().ireduce(types::I32, elem_val);
-            self.builder
-                .ins()
-                .bitcast(types::F32, MemFlags::new(), i32_val)
-        } else {
-            elem_val
-        };
+        let elem_val = self.decode_array_elem(elem_val, elem_ptr, elem_type_id, union_storage)?;
         self.builder.def_var(elem_var, elem_val);
 
         self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
@@ -563,7 +528,11 @@ impl Cg<'_, '_, '_> {
     // ===== Helpers =====
 
     /// Create a CompiledValue for a RuntimeIterator wrapping the given raw pointer.
-    fn make_runtime_iter_value(&self, raw: Value, elem_type_id: TypeId) -> CompiledValue {
+    pub(crate) fn make_runtime_iter_value(
+        &self,
+        raw: Value,
+        elem_type_id: TypeId,
+    ) -> CompiledValue {
         let runtime_iter_type_id = self
             .arena()
             .lookup_runtime_iterator(elem_type_id)
@@ -572,7 +541,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Track an owned iterator in the current RC scope for cleanup.
-    fn track_iter_in_rc_scope(&mut self, iter: &CompiledValue) {
+    pub(crate) fn track_iter_in_rc_scope(&mut self, iter: &CompiledValue) {
         if iter.is_owned() && self.rc_state(iter.type_id).needs_cleanup() {
             let tracked_var = self.builder.declare_var(self.cranelift_type(iter.type_id));
             self.builder.def_var(tracked_var, iter.value);
@@ -588,7 +557,11 @@ impl Cg<'_, '_, '_> {
     /// 1. push_rc_scope()
     /// 2. optionally track the source iterable (e.g. the string in string iteration)
     /// 3. track the iterator itself
-    fn enter_iter_rc_scope(&mut self, iter: &CompiledValue, source: Option<&CompiledValue>) {
+    pub(crate) fn enter_iter_rc_scope(
+        &mut self,
+        iter: &CompiledValue,
+        source: Option<&CompiledValue>,
+    ) {
         self.push_rc_scope();
         if let Some(src) = source {
             self.track_iter_in_rc_scope(src);
@@ -602,7 +575,7 @@ impl Cg<'_, '_, '_> {
     /// Shared by `setup_interface_iter`, `setup_custom_iterator`, and
     /// `setup_custom_iterable` -- all three produce an interface value that must
     /// be wrapped into a RuntimeIterator for the iter_next loop.
-    fn wrap_interface_iter(
+    pub(crate) fn wrap_interface_iter(
         &mut self,
         mut iface: CompiledValue,
         elem_type_id: TypeId,
@@ -613,7 +586,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Convert a raw i64 value from iter_next to the element's Cranelift type.
-    fn convert_iter_elem(
+    pub(crate) fn convert_iter_elem(
         &mut self,
         raw_val: Value,
         elem_type_id: TypeId,
@@ -643,7 +616,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Call the `.iter()` method on an Iterable value, returning the Iterator<T> interface.
-    fn call_iterable_iter_method(
+    pub(crate) fn call_iterable_iter_method(
         &mut self,
         iterable: &CompiledValue,
         _elem_type_id: TypeId,
@@ -686,5 +659,58 @@ impl Cg<'_, '_, '_> {
         let call_inst = self.emit_call(func_ref, &[iterable.value]);
 
         self.call_result(call_inst, return_type_id)
+    }
+
+    /// Decode a raw array element value to the correct Cranelift type.
+    ///
+    /// Handles union storage (inline/heap), wide types (i128), narrow
+    /// integers, and float reinterpretation.  Shared by both old AST and
+    /// new VIR array-loop paths.
+    pub(crate) fn decode_array_elem(
+        &mut self,
+        elem_val: Value,
+        elem_ptr: Value,
+        elem_type_id: TypeId,
+        union_storage: Option<vole_sema::UnionStorageKind>,
+    ) -> CodegenResult<Value> {
+        let elem_cr_type = self.cranelift_type(elem_type_id);
+        let elem_wide = crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena());
+        if let Some(storage) = union_storage {
+            use vole_sema::UnionStorageKind;
+            match storage {
+                UnionStorageKind::Inline => {
+                    let tag_offset =
+                        std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
+                    let elem_tag =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
+                    Ok(self
+                        .decode_dynamic_array_union_element(elem_tag, elem_val, elem_type_id)
+                        .value)
+                }
+                UnionStorageKind::Heap => {
+                    Ok(self.copy_union_heap_to_stack(elem_val, elem_type_id).value)
+                }
+            }
+        } else if let Some(wide) = elem_wide {
+            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[elem_val])?;
+            Ok(wide.reinterpret_i128(self.builder, wide_bits))
+        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            Ok(self.builder.ins().ireduce(elem_cr_type, elem_val))
+        } else if elem_cr_type == types::F64 {
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F64, MemFlags::new(), elem_val))
+        } else if elem_cr_type == types::F32 {
+            let i32_val = self.builder.ins().ireduce(types::I32, elem_val);
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F32, MemFlags::new(), i32_val))
+        } else {
+            Ok(elem_val)
+        }
     }
 }

@@ -4,6 +4,7 @@
 
 use vole_frontend::Stmt;
 use vole_identity::{Symbol, TypeId};
+use vole_sema::UnionStorageKind;
 
 use crate::expr::FieldStorage;
 use crate::func::VirBody;
@@ -110,9 +111,10 @@ pub enum AssignTarget {
 
 /// A for-loop in VIR.
 ///
-/// VIR collapses sema's six `IterableKind` variants down to four
-/// [`VirIterKind`] variants — `CustomIterator`, `CustomIterable`, and
-/// `IteratorInterface` all become [`VirIterKind::RuntimeIterator`].
+/// VIR collapses sema's six `IterableKind` variants down to five
+/// [`VirIterKind`] variants.  The loop body for all RuntimeIterator-based
+/// kinds shares the same `iter_next` protocol; they differ only in how
+/// the RuntimeIterator value is obtained (setup phase).
 #[derive(Debug, Clone)]
 pub struct VirFor {
     /// The loop variable name.
@@ -129,25 +131,42 @@ pub struct VirFor {
 
 /// The iteration strategy for a `VirFor` loop.
 ///
-/// Sema distinguishes six `IterableKind` variants; VIR collapses them to four.
-/// `CustomIterator`, `CustomIterable`, and `IteratorInterface` all map to
-/// `RuntimeIterator` because they share the same codegen path (call `.next()`
-/// on a `RuntimeIterator` value).
+/// Sema distinguishes six `IterableKind` variants; VIR maps them to five
+/// `VirIterKind` variants.  `IteratorInterface` and `CustomIterator` are
+/// kept separate because their setup differs (interface wrapping vs
+/// boxing + wrapping), while `CustomIterable` has its own variant because
+/// codegen must call `.iter()` before wrapping.
 #[derive(Debug, Clone)]
 pub enum VirIterKind {
     /// Iterate over a numeric range.
     Range,
 
     /// Iterate over an array with the given element type.
-    Array { elem_type: TypeId },
+    Array {
+        elem_type: TypeId,
+        /// Union storage annotation for arrays of union-typed elements.
+        /// Codegen needs this to decode element values correctly.
+        union_storage: Option<UnionStorageKind>,
+    },
 
     /// Iterate over the characters of a string.
     String,
 
-    /// Iterate via a `RuntimeIterator` with the given element type.
+    /// Iterate via an `Iterator<T>` interface or `RuntimeIterator` value.
     ///
-    /// This covers sema's `CustomIterator`, `CustomIterable`, and
-    /// `IteratorInterface` variants — all use the same `.next()` protocol
-    /// at runtime.
-    RuntimeIterator { elem_type: TypeId },
+    /// The compiled iterable may be a direct `RuntimeIterator` (pass through)
+    /// or an `Iterator<T>` interface (needs `InterfaceIter` wrapping).
+    /// Codegen inspects the compiled value's type to choose the path.
+    IteratorInterface { elem_type: TypeId },
+
+    /// Iterate via a concrete class implementing `Iterator<T>`.
+    ///
+    /// Codegen boxes to `Iterator<T>` interface, then wraps via `InterfaceIter`.
+    CustomIterator { elem_type: TypeId },
+
+    /// Iterate via a concrete class implementing `Iterable<T>`.
+    ///
+    /// Codegen calls `.iter()` to get `Iterator<T>`, then wraps via
+    /// `InterfaceIter`.
+    CustomIterable { elem_type: TypeId },
 }

@@ -5,10 +5,11 @@
 use vole_frontend::Interner;
 use vole_frontend::ast::{LetInit, LetStmt, Stmt};
 use vole_identity::TypeId;
+use vole_sema::IterableKind;
 use vole_sema::node_map::NodeMap;
 
 use crate::expr::VirExpr;
-use crate::stmt::VirStmt;
+use crate::stmt::{VirFor, VirIterKind, VirStmt};
 
 use super::expr::lower_expr;
 use super::lower_stmts;
@@ -38,6 +39,7 @@ pub(crate) fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interne
         Stmt::Continue(_) => VirStmt::Continue,
         Stmt::Raise(raise_stmt) => lower_raise(raise_stmt, node_map, interner),
         Stmt::Let(let_stmt) => lower_let(let_stmt, node_map, interner),
+        Stmt::For(for_stmt) => lower_for(for_stmt, node_map, interner),
         // Ast escape hatches — explicitly listed so new Stmt variants
         // cause a compile error rather than silently falling through.
         //
@@ -47,7 +49,7 @@ pub(crate) fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interne
         // LetTuple stays as Ast because element types require TypeArena
         // (unwrap_tuple / unwrap_fixed_array) which is not available in
         // the lowering context.
-        Stmt::Return(_) | Stmt::LetTuple(_) | Stmt::For(_) => VirStmt::Ast {
+        Stmt::Return(_) | Stmt::LetTuple(_) => VirStmt::Ast {
             stmt: Box::new(stmt.clone()),
         },
     }
@@ -121,6 +123,68 @@ fn lower_let(let_stmt: &LetStmt, node_map: &NodeMap, interner: &mut Interner) ->
         mutable: let_stmt.mutable,
         ty,
     }
+}
+
+/// Lower a for statement to `VirStmt::For`.
+///
+/// Looks up the `IterableKind` from the NodeMap (annotated by sema) and
+/// maps it to a `VirIterKind`.  The iterable expression, loop body, and
+/// iteration variable are recursively lowered.
+fn lower_for(
+    for_stmt: &vole_frontend::ast::ForStmt,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+) -> VirStmt {
+    let iterable = lower_expr(&for_stmt.iterable, node_map, interner);
+    let body = lower_stmts(&for_stmt.body.stmts, node_map, interner);
+
+    let sema_kind = node_map.get_iterable_kind(for_stmt.iterable.id);
+
+    let kind = match sema_kind {
+        Some(IterableKind::Range) => VirIterKind::Range,
+        Some(IterableKind::Array { elem_type }) => {
+            let union_storage = node_map.get_union_storage_kind(for_stmt.iterable.id);
+            VirIterKind::Array {
+                elem_type,
+                union_storage,
+            }
+        }
+        Some(IterableKind::String) => VirIterKind::String,
+        Some(IterableKind::IteratorInterface { elem_type }) => {
+            VirIterKind::IteratorInterface { elem_type }
+        }
+        Some(IterableKind::CustomIterator { elem_type }) => {
+            VirIterKind::CustomIterator { elem_type }
+        }
+        Some(IterableKind::CustomIterable { elem_type }) => {
+            VirIterKind::CustomIterable { elem_type }
+        }
+        None => {
+            // Fallback for error types — treat as array of i64.
+            VirIterKind::Array {
+                elem_type: TypeId::I64,
+                union_storage: None,
+            }
+        }
+    };
+
+    // Determine the element type for the loop variable.
+    let var_type = match kind {
+        VirIterKind::Range => TypeId::I64,
+        VirIterKind::Array { elem_type, .. } => elem_type,
+        VirIterKind::String => TypeId::STRING,
+        VirIterKind::IteratorInterface { elem_type }
+        | VirIterKind::CustomIterator { elem_type }
+        | VirIterKind::CustomIterable { elem_type } => elem_type,
+    };
+
+    VirStmt::For(VirFor {
+        var_name: for_stmt.var_name,
+        var_type,
+        iterable,
+        body,
+        kind,
+    })
 }
 
 /// Lower an if statement to `VirStmt::Expr { VirExpr::If { ... } }`.

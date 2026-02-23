@@ -1152,9 +1152,7 @@ impl Cg<'_, '_, '_> {
                 todo!("VIR LetTuple stmt: lowering still emits Ast escape hatch")
             }
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
-            VirStmt::For(_) => {
-                todo!("VIR For stmt: lowering still emits Ast escape hatch")
-            }
+            VirStmt::For(vir_for) => self.compile_vir_for(vir_for),
             VirStmt::Raise { error_name, fields } => self.compile_vir_raise(*error_name, fields),
 
             // -- Ast escape hatch ------------------------------------------------
