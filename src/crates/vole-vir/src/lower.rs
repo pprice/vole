@@ -249,15 +249,35 @@ fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRe
         ExprKind::Unary(un_expr) => lower_unary(un_expr, ty, node_map, interner),
         // Ast escape hatches — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
-        ExprKind::Range(_)
+        ExprKind::Grouping(_) => unreachable!("handled above"),
+        ExprKind::Assign(_)
+        | ExprKind::CompoundAssign(_)
+        | ExprKind::ArrayLiteral(_)
+        | ExprKind::RepeatLiteral { .. }
+        | ExprKind::InterpolatedString(_)
+        | ExprKind::Identifier(_)
+        | ExprKind::Call(_)
+        | ExprKind::Range(_)
+        | ExprKind::Index(_)
+        | ExprKind::Match(_)
         | ExprKind::Unreachable
+        | ExprKind::NullCoalesce(_)
+        | ExprKind::Is(_)
+        | ExprKind::AsCast(_)
+        | ExprKind::Lambda(_)
+        | ExprKind::TypeLiteral(_)
         | ExprKind::Import(_)
-        | ExprKind::TypeLiteral(_) => Box::new(VirExpr::Ast {
-            expr: Box::new(expr.clone()),
-            ty,
-        }),
-        // Everything else: Ast escape hatch
-        _ => Box::new(VirExpr::Ast {
+        | ExprKind::StructLiteral(_)
+        | ExprKind::FieldAccess(_)
+        | ExprKind::OptionalChain(_)
+        | ExprKind::OptionalMethodCall(_)
+        | ExprKind::MethodCall(_)
+        | ExprKind::Try(_)
+        | ExprKind::Yield(_)
+        | ExprKind::Block(_)
+        | ExprKind::If(_)
+        | ExprKind::When(_)
+        | ExprKind::MetaAccess(_) => Box::new(VirExpr::Ast {
             expr: Box::new(expr.clone()),
             ty,
         }),
@@ -1371,6 +1391,95 @@ mod tests {
         match vir_ref.as_ref() {
             VirExpr::Ast { .. } => {}
             other => panic!("expected Ast escape hatch for TypeLiteral, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Ast escape hatch lowering: Assign, CompoundAssign, ArrayLiteral,
+    // RepeatLiteral (vol-aq9j, vol-w4mg)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn lower_expr_assign_becomes_ast() {
+        use vole_frontend::ast::{AssignExpr, AssignTarget};
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::Assign(Box::new(AssignExpr {
+                target: AssignTarget::Variable(Symbol::UNKNOWN),
+                value: make_int_expr(42),
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for Assign, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_compound_assign_becomes_ast() {
+        use vole_frontend::ast::{AssignTarget, CompoundAssignExpr, CompoundOp};
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::CompoundAssign(Box::new(CompoundAssignExpr {
+                target: AssignTarget::Variable(Symbol::UNKNOWN),
+                op: CompoundOp::Add,
+                value: make_int_expr(1),
+            })),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for CompoundAssign, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_array_literal_becomes_ast() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::ArrayLiteral(vec![
+                make_int_expr(1),
+                make_int_expr(2),
+                make_int_expr(3),
+            ]),
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for ArrayLiteral, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_expr_repeat_literal_becomes_ast() {
+        let node_map = empty_node_map();
+        let mut interner = test_interner();
+        let expr = Expr {
+            id: dummy_node_id(),
+            kind: ExprKind::RepeatLiteral {
+                element: Box::new(make_int_expr(0)),
+                count: 10,
+            },
+            span: dummy_span(),
+        };
+        let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+
+        match vir_ref.as_ref() {
+            VirExpr::Ast { .. } => {}
+            other => panic!("expected Ast escape hatch for RepeatLiteral, got {other:?}"),
         }
     }
 }
