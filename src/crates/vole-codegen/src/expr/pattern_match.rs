@@ -1002,10 +1002,9 @@ impl Cg<'_, '_, '_> {
         let mut arm_variables = self.vars.clone();
         let mut effective_arm_block = arm_block;
 
-        let vole_vir::VirPattern::Ast(ast_pattern) = &arm.pattern;
-        let pattern_matches = self.compile_match_arm_pattern(
+        let pattern_matches = self.compile_vir_pattern(
+            &arm.pattern,
             scrutinee,
-            ast_pattern,
             &mut arm_variables,
             arm_block,
             next_block,
@@ -1051,6 +1050,121 @@ impl Cg<'_, '_, '_> {
         )?;
         self.builder.seal_block(body_block);
         Ok(())
+    }
+
+    /// Compile a VIR pattern, returning the condition value (if any).
+    ///
+    /// Dispatches concrete VIR pattern variants to specialised helpers.
+    /// `VirPattern::Ast` delegates to the existing AST pattern compiler.
+    fn compile_vir_pattern(
+        &mut self,
+        pattern: &vole_vir::VirPattern,
+        scrutinee: &CompiledValue,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_block: Block,
+        next_block: Block,
+        effective_arm_block: &mut Block,
+    ) -> CodegenResult<Option<Value>> {
+        match pattern {
+            vole_vir::VirPattern::Ast(ast_pattern) => self.compile_match_arm_pattern(
+                scrutinee,
+                ast_pattern,
+                arm_variables,
+                arm_block,
+                next_block,
+                effective_arm_block,
+            ),
+
+            vole_vir::VirPattern::Wildcard => Ok(None),
+
+            vole_vir::VirPattern::Binding { name, ty: _ } => {
+                let var = self.builder.declare_var(scrutinee.ty);
+                self.builder.def_var(var, scrutinee.value);
+                arm_variables.insert(*name, (var, scrutinee.type_id));
+                Ok(None)
+            }
+
+            vole_vir::VirPattern::TypeCheck {
+                result,
+                tested_type,
+                binding,
+            } => {
+                // For monomorphized generics, recompute the IsCheckResult
+                // using substituted types.
+                let effective_result = if self.substitutions.is_some() {
+                    let sub_tested = self.try_substitute_type(*tested_type);
+                    let sub_scrutinee = self.try_substitute_type(scrutinee.type_id);
+                    self.compute_is_check_result(sub_scrutinee, sub_tested)
+                } else {
+                    convert_vir_is_check(result)
+                };
+
+                let cond = self.compile_is_check_result(&effective_result, scrutinee)?;
+
+                // If there's a binding, introduce the variable after the check.
+                if let Some((name, bind_ty)) = binding {
+                    let var = self.builder.declare_var(scrutinee.ty);
+                    self.builder.def_var(var, scrutinee.value);
+                    arm_variables.insert(*name, (var, *bind_ty));
+                }
+
+                Ok(cond)
+            }
+
+            vole_vir::VirPattern::Literal {
+                value: lit_expr,
+                scrutinee_ty,
+            } => {
+                // Save and restore vars for pattern matching (literal may
+                // reference arm-scoped variables in degenerate cases).
+                let saved_vars = std::mem::replace(&mut self.vars, arm_variables.clone());
+                let lit_val = self.compile_vir_expr(lit_expr)?;
+                *arm_variables = std::mem::replace(&mut self.vars, saved_vars);
+
+                let coerced_lit = self.convert_for_select(lit_val.value, scrutinee.ty);
+                let cmp =
+                    self.compile_equality_check(*scrutinee_ty, scrutinee.value, coerced_lit)?;
+                Ok(Some(cmp))
+            }
+
+            vole_vir::VirPattern::Val { name } => {
+                let (var_val, var_type_id) =
+                    if let Some(&(var, var_type_id)) = arm_variables.get(name) {
+                        (self.builder.use_var(var), var_type_id)
+                    } else if let Some(binding) = self.get_capture(name).copied() {
+                        let captured = self.load_capture(&binding)?;
+                        (captured.value, captured.type_id)
+                    } else {
+                        return Err(CodegenError::internal("undefined variable in val pattern"));
+                    };
+
+                let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
+                Ok(Some(cmp))
+            }
+        }
+    }
+
+    /// Compile an IsCheckResult into a condition value (if runtime check needed).
+    fn compile_is_check_result(
+        &mut self,
+        result: &IsCheckResult,
+        scrutinee: &CompiledValue,
+    ) -> CodegenResult<Option<Value>> {
+        match result {
+            IsCheckResult::AlwaysTrue => Ok(None),
+            IsCheckResult::AlwaysFalse => {
+                let never_match = self.iconst_cached(types::I8, 0);
+                Ok(Some(never_match))
+            }
+            IsCheckResult::CheckTag(tag_index) => {
+                let cmp = self.tag_eq(scrutinee.value, *tag_index as i64);
+                Ok(Some(cmp))
+            }
+            IsCheckResult::CheckUnknown(tested_type_id) => {
+                let cmp = self.compile_unknown_is_check(scrutinee.value, *tested_type_id);
+                Ok(Some(cmp))
+            }
+        }
     }
 
     /// Compile a VIR match arm body, coercing the result to the match result type.
@@ -1148,5 +1262,18 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
+    }
+}
+
+/// Convert VIR's `IsCheckResult` to sema's `IsCheckResult`.
+///
+/// VIR defines its own copy to avoid circular crate dependencies.
+/// The variants are isomorphic so this is a mechanical mapping.
+fn convert_vir_is_check(vir: &vole_vir::expr::IsCheckResult) -> IsCheckResult {
+    match vir {
+        vole_vir::expr::IsCheckResult::AlwaysTrue => IsCheckResult::AlwaysTrue,
+        vole_vir::expr::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
+        vole_vir::expr::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(*tag),
+        vole_vir::expr::IsCheckResult::CheckUnknown(ty) => IsCheckResult::CheckUnknown(*ty),
     }
 }

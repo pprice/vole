@@ -469,9 +469,9 @@ pub struct VirMatchArm {
 
 /// A pattern in a `Match` arm.
 ///
-/// Currently only the `Ast` variant is available; patterns have not yet
-/// been lowered to VIR.  Concrete pattern variants will be added as
-/// pattern matching is further migrated.
+/// Simple patterns (Wildcard, Binding, TypeCheck, Literal, Val) are fully
+/// lowered to VIR.  Complex patterns (Tuple, Record, Success, Error)
+/// remain wrapped in `Ast` until further migration.
 #[derive(Debug, Clone)]
 pub enum VirPattern {
     /// AST pattern that has not yet been lowered to VIR.
@@ -479,6 +479,43 @@ pub enum VirPattern {
     /// Carries the original `Pattern` (for codegen's pattern compilation)
     /// which includes the `NodeId` for sema lookup (is-check results, etc.).
     Ast(Box<Pattern>),
+
+    /// Wildcard pattern (`_`): always matches, binds nothing.
+    Wildcard,
+
+    /// Binding pattern: binds the scrutinee to a local variable.
+    ///
+    /// `ty` is the scrutinee's type at the point of binding (used by codegen
+    /// to declare the variable with the right Cranelift type).
+    Binding { name: Symbol, ty: TypeId },
+
+    /// Type-check pattern: tests the scrutinee against a type.
+    ///
+    /// `result` is the sema-computed `IsCheckResult` (may be stale after
+    /// monomorphization).  `tested_type` is the target type so codegen can
+    /// recompute the result via `compute_is_check_result` when substitutions
+    /// are active.
+    ///
+    /// `binding` is present for identifier-as-type patterns (e.g. `n` in a
+    /// union match where sema recognizes `n` as a type name) that should
+    /// also bind the narrowed value after the check succeeds.
+    TypeCheck {
+        result: IsCheckResult,
+        tested_type: TypeId,
+        binding: Option<(Symbol, TypeId)>,
+    },
+
+    /// Literal pattern: compares the scrutinee against a pre-lowered literal.
+    ///
+    /// `value` is the lowered VIR expression for the literal (e.g.
+    /// `VirExpr::IntLiteral`, `VirExpr::StringLiteral`).
+    /// `scrutinee_ty` is the scrutinee's type, needed for selecting the
+    /// correct equality comparison (integer, float, string).
+    Literal { value: VirRef, scrutinee_ty: TypeId },
+
+    /// Val pattern (`val x`): compares the scrutinee against an existing
+    /// variable's value.
+    Val { name: Symbol },
 }
 
 /// Whether an `as` cast is checked or unchecked.

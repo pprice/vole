@@ -7,7 +7,7 @@
 use vole_frontend::Expr;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
 use vole_identity::TypeId;
-use vole_sema::StringConversion;
+use vole_sema::{StringConversion, TypeArena};
 
 use crate::calls::CallTarget;
 use crate::expr::{
@@ -967,10 +967,10 @@ fn lower_when_expr(
 
 /// Lower a `match` expression to `VirExpr::Match`.
 ///
-/// The scrutinee is recursively lowered. Each arm's pattern is preserved as
-/// `VirPattern::Ast` (patterns are compiled by codegen which needs the full
-/// AST pattern node for type resolution, field extraction, etc.). Guards and
-/// bodies are recursively lowered.
+/// The scrutinee is recursively lowered. Simple patterns (Wildcard, Binding,
+/// TypeCheck, Literal, Val) are lowered to concrete `VirPattern` variants.
+/// Complex patterns (Tuple, Record, Success, Error) remain wrapped in
+/// `VirPattern::Ast`. Guards and bodies are recursively lowered.
 fn lower_match_expr(
     match_expr: &vole_frontend::ast::MatchExpr,
     _expr: &Expr,
@@ -978,12 +978,16 @@ fn lower_match_expr(
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     let scrutinee = lower_expr(&match_expr.scrutinee, ctx);
+    let scrutinee_ty = ctx
+        .node_map
+        .get_type(match_expr.scrutinee.id)
+        .unwrap_or(TypeId::UNKNOWN);
 
     let arms: Vec<VirMatchArm> = match_expr
         .arms
         .iter()
         .map(|arm| {
-            let pattern = VirPattern::Ast(Box::new(arm.pattern.clone()));
+            let pattern = lower_pattern(&arm.pattern, scrutinee_ty, ctx);
             let guard = arm.guard.as_ref().map(|g| lower_expr(g, ctx));
             let body_ref = lower_expr(&arm.body, ctx);
             let arm_ty = ctx
@@ -1007,4 +1011,108 @@ fn lower_match_expr(
         arms,
         ty,
     })
+}
+
+/// Lower an AST `Pattern` to a `VirPattern`.
+///
+/// Simple patterns are lowered to concrete VIR variants:
+/// - `Wildcard` -> `VirPattern::Wildcard`
+/// - `Identifier` with sema `IsCheckResult` -> `VirPattern::TypeCheck`
+/// - `Identifier` without `IsCheckResult` -> `VirPattern::Binding`
+/// - `Type { .. }` -> `VirPattern::TypeCheck`
+/// - `Literal(..)` -> `VirPattern::Literal`
+/// - `Val { .. }` -> `VirPattern::Val`
+///
+/// Complex patterns (Tuple, Record, Success, Error) are wrapped in
+/// `VirPattern::Ast` for later migration.
+fn lower_pattern(
+    pattern: &vole_frontend::Pattern,
+    scrutinee_ty: TypeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> VirPattern {
+    use vole_frontend::PatternKind;
+
+    match &pattern.kind {
+        PatternKind::Wildcard => VirPattern::Wildcard,
+
+        PatternKind::Identifier { name } => {
+            // Sema records IsCheckResult on the pattern's NodeId when the
+            // identifier resolves to a type name. Its absence means a
+            // plain variable binding.
+            if let Some(sema_result) = ctx.node_map.get_is_check_result(pattern.id) {
+                let result = convert_is_check_result(sema_result);
+                let tested_type = recover_tested_type(&result, scrutinee_ty, ctx.type_arena);
+                VirPattern::TypeCheck {
+                    result,
+                    tested_type,
+                    binding: None,
+                }
+            } else {
+                VirPattern::Binding {
+                    name: *name,
+                    ty: scrutinee_ty,
+                }
+            }
+        }
+
+        PatternKind::Type { .. } => {
+            let sema_result = ctx
+                .node_map
+                .get_is_check_result(pattern.id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "VIR lower: missing sema is_check_result for Type pattern NodeId {:?}",
+                        pattern.id
+                    )
+                });
+            let result = convert_is_check_result(sema_result);
+            let tested_type = recover_tested_type(&result, scrutinee_ty, ctx.type_arena);
+            VirPattern::TypeCheck {
+                result,
+                tested_type,
+                binding: None,
+            }
+        }
+
+        PatternKind::Literal(lit_expr) => {
+            let value = lower_expr(lit_expr, ctx);
+            VirPattern::Literal {
+                value,
+                scrutinee_ty,
+            }
+        }
+
+        PatternKind::Val { name } => VirPattern::Val { name: *name },
+
+        // Complex patterns — keep as AST for now.
+        PatternKind::Tuple { .. }
+        | PatternKind::Record { .. }
+        | PatternKind::Success { .. }
+        | PatternKind::Error { .. } => VirPattern::Ast(Box::new(pattern.clone())),
+    }
+}
+
+/// Recover the tested type from an `IsCheckResult` and the scrutinee type.
+///
+/// For monomorphized generic recomputation, codegen needs the tested type to
+/// call `compute_is_check_result(value_type, tested_type)` with substituted
+/// types. This function recovers the tested type from the IsCheckResult:
+/// - `CheckTag(tag)`: the type at union variant index `tag`
+/// - `CheckUnknown(ty)`: the type is directly embedded
+/// - `AlwaysTrue`: the tested type equals the scrutinee type
+/// - `AlwaysFalse`: unrecoverable; uses `TypeId::UNKNOWN` as placeholder
+fn recover_tested_type(
+    result: &IsCheckResult,
+    scrutinee_ty: TypeId,
+    type_arena: &TypeArena,
+) -> TypeId {
+    match result {
+        IsCheckResult::CheckTag(tag) => type_arena
+            .unwrap_union(scrutinee_ty)
+            .and_then(|variants| variants.get(*tag as usize).copied())
+            .unwrap_or(TypeId::UNKNOWN),
+        IsCheckResult::CheckUnknown(ty) => *ty,
+        IsCheckResult::AlwaysTrue => scrutinee_ty,
+        IsCheckResult::AlwaysFalse => TypeId::UNKNOWN,
+    }
 }
