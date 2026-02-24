@@ -9,10 +9,10 @@ use cranelift_module::Module;
 use smallvec::{SmallVec, smallvec};
 
 use vole_frontend::NodeId;
-use vole_frontend::ast::CallExpr;
 use vole_sema::type_arena::TypeId;
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::structs::methods::ArgSource;
 use crate::types::{CompiledValue, is_wide_fallible, type_id_to_cranelift};
 use crate::union_layout;
 
@@ -29,11 +29,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         func_var: Variable,
         func_type_id: TypeId,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let func_ptr_or_closure = self.builder.use_var(func_var);
-        self.call_closure_value(func_ptr_or_closure, func_type_id, call, call_expr_id)
+        self.call_closure_value(func_ptr_or_closure, func_type_id, arg_source, call_expr_id)
     }
 
     /// Call a function via value (always uses closure calling convention now that
@@ -42,12 +42,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         func_ptr_or_closure: Value,
         func_type_id: TypeId,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         // Always use closure calling convention since all lambdas are now
         // wrapped in Closure structs for consistency with interface dispatch
-        self.call_actual_closure(func_ptr_or_closure, func_type_id, call, call_expr_id)
+        self.call_actual_closure(func_ptr_or_closure, func_type_id, arg_source, call_expr_id)
     }
 
     /// Build a Cranelift call signature for a closure call, returning the signature
@@ -100,12 +100,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok((sig, params.to_vec(), ret))
     }
 
-    /// Call an actual closure (with closure pointer)
+    /// Call an actual closure (with closure pointer).
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call sites can share this path.
+    /// Lambda defaults and named-arg reordering are driven by NodeMap annotations
+    /// on `call_expr_id`.
     fn call_actual_closure(
         &mut self,
         closure_ptr: Value,
         func_type_id: TypeId,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let func_ptr = self.call_runtime(RuntimeKey::ClosureGetFunc, &[closure_ptr])?;
@@ -123,7 +127,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Compile provided arguments, tracking RC temps for cleanup.
         // When named args were used, sema stored a resolved_call_args mapping that tells
-        // us which call.args[j] fills each parameter slot i (and None means use the default).
+        // us which arg_source[j] fills each parameter slot i (and None means use the default).
         let mut rc_temp_args = Vec::new();
         let named_mapping = self
             .analyzed()
@@ -131,92 +135,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get_resolved_call_args(call_expr_id)
             .map(|s| s.to_vec());
         if let Some(ref mapping) = named_mapping {
-            // Named arg reordering: compile each slot in parameter order using the mapping.
-            // For None slots, look up the lambda's default expression for that parameter.
-            let lambda_node_id = lambda_defaults.as_ref().map(|d| d.lambda_node_id);
-            let analyzed = self.analyzed();
-            // Collect all default refs up front (indexed by param slot) to avoid borrow issues
-            let all_default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = if let Some(node_id) =
-                lambda_node_id
-                && let Some(lambda) =
-                    super::lambda_search::find_lambda_in_analyzed(analyzed, node_id)
-            {
-                lambda
-                    .params
-                    .iter()
-                    .map(|p| p.default_value.as_deref())
-                    .collect()
-            } else {
-                vec![None; params.len()]
-            };
-
-            for (slot, opt_call_idx) in mapping.iter().enumerate() {
-                let param_type_id = params[slot];
-                let compiled_val = if let Some(&Some(call_arg_idx)) = Some(opt_call_idx) {
-                    let arg = &call.args[call_arg_idx];
-                    let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
-                    if compiled.is_owned() {
-                        rc_temp_args.push(compiled);
-                    }
-                    let compiled = self.coerce_to_type(compiled, param_type_id)?;
-                    compiled.value
-                } else if let Some(Some(default_expr)) = all_default_refs.get(slot) {
-                    let (default_vals, rc_owned) =
-                        self.compile_lambda_defaults(&[Some(default_expr)], &[param_type_id])?;
-                    rc_temp_args.extend(rc_owned);
-                    if let Some(&val) = default_vals.first() {
-                        val
-                    } else {
-                        continue;
-                    }
-                } else {
-                    continue;
-                };
-                args.push(compiled_val);
-            }
+            self.compile_closure_named_args(
+                arg_source,
+                mapping,
+                &params,
+                &lambda_defaults,
+                &mut args,
+                &mut rc_temp_args,
+            )?;
         } else {
-            for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
-                let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
-                if compiled.is_owned() {
-                    rc_temp_args.push(compiled);
-                }
-                let compiled = self.coerce_to_type(compiled, param_type_id)?;
-                args.push(compiled.value);
-            }
-
-            // Compile default expressions for missing arguments
-            if let Some(defaults_info) = lambda_defaults
-                && call.args.len() < params.len()
-            {
-                // Find the lambda expression by NodeId to get its default expressions.
-                // analyzed() returns &'ctx AnalyzedProgram, so the returned &'ctx LambdaExpr
-                // and its &'ctx Expr defaults are independent of &mut self.
-                let lambda_node_id = defaults_info.lambda_node_id;
-                let analyzed = self.analyzed();
-                let Some(lambda) =
-                    super::lambda_search::find_lambda_in_analyzed(analyzed, lambda_node_id)
-                else {
-                    return Err(CodegenError::internal_with_context(
-                        "lambda expression not found",
-                        format!("NodeId {:?}", lambda_node_id),
-                    ));
-                };
-
-                // Collect &'ctx Expr references for the omitted params before &mut self borrows.
-                let skip = call.args.len();
-                let omitted_type_ids: Vec<TypeId> = params[skip..].to_vec();
-                let default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = lambda
-                    .params
-                    .iter()
-                    .skip(skip)
-                    .map(|p| p.default_value.as_deref())
-                    .collect();
-
-                let (default_vals, rc_owned) =
-                    self.compile_lambda_defaults(&default_refs, &omitted_type_ids)?;
-                rc_temp_args.extend(rc_owned);
-                args.extend(default_vals);
-            }
+            self.compile_closure_positional_args(
+                arg_source,
+                &params,
+                &lambda_defaults,
+                &mut args,
+                &mut rc_temp_args,
+            )?;
         }
 
         let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
@@ -257,6 +191,120 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 Ok(self.compiled(results[0], ret))
             }
         }
+    }
+
+    /// Compile closure arguments in named-arg order using the sema-provided mapping.
+    ///
+    /// `mapping[slot] = Some(j)` means arg_source[j] fills parameter slot `slot`.
+    /// `mapping[slot] = None` means the slot uses its lambda default expression.
+    fn compile_closure_named_args(
+        &mut self,
+        arg_source: &ArgSource<'_>,
+        mapping: &[Option<usize>],
+        params: &[TypeId],
+        lambda_defaults: &Option<vole_sema::LambdaDefaults>,
+        args: &mut ArgVec,
+        rc_temp_args: &mut Vec<CompiledValue>,
+    ) -> CodegenResult<()> {
+        // Named arg reordering: compile each slot in parameter order using the mapping.
+        // For None slots, look up the lambda's default expression for that parameter.
+        let lambda_node_id = lambda_defaults.as_ref().map(|d| d.lambda_node_id);
+        let analyzed = self.analyzed();
+        // Collect all default refs up front (indexed by param slot) to avoid borrow issues
+        let all_default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = if let Some(node_id) =
+            lambda_node_id
+            && let Some(lambda) = super::lambda_search::find_lambda_in_analyzed(analyzed, node_id)
+        {
+            lambda
+                .params
+                .iter()
+                .map(|p| p.default_value.as_deref())
+                .collect()
+        } else {
+            vec![None; params.len()]
+        };
+
+        for (slot, opt_call_idx) in mapping.iter().enumerate() {
+            let param_type_id = params[slot];
+            let compiled_val = if let Some(&Some(call_arg_idx)) = Some(opt_call_idx) {
+                let compiled =
+                    self.compile_arg_with_expected_type(arg_source, call_arg_idx, param_type_id)?;
+                if compiled.is_owned() {
+                    rc_temp_args.push(compiled);
+                }
+                let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                compiled.value
+            } else if let Some(Some(default_expr)) = all_default_refs.get(slot) {
+                let (default_vals, rc_owned) =
+                    self.compile_lambda_defaults(&[Some(default_expr)], &[param_type_id])?;
+                rc_temp_args.extend(rc_owned);
+                if let Some(&val) = default_vals.first() {
+                    val
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            };
+            args.push(compiled_val);
+        }
+        Ok(())
+    }
+
+    /// Compile closure arguments in positional order, appending defaults for
+    /// omitted parameters.
+    fn compile_closure_positional_args(
+        &mut self,
+        arg_source: &ArgSource<'_>,
+        params: &[TypeId],
+        lambda_defaults: &Option<vole_sema::LambdaDefaults>,
+        args: &mut ArgVec,
+        rc_temp_args: &mut Vec<CompiledValue>,
+    ) -> CodegenResult<()> {
+        let arg_count = arg_source.len();
+        for (i, &param_type_id) in params.iter().enumerate().take(arg_count) {
+            let compiled = self.compile_arg_with_expected_type(arg_source, i, param_type_id)?;
+            if compiled.is_owned() {
+                rc_temp_args.push(compiled);
+            }
+            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            args.push(compiled.value);
+        }
+
+        // Compile default expressions for missing arguments
+        if let Some(defaults_info) = lambda_defaults
+            && arg_count < params.len()
+        {
+            // Find the lambda expression by NodeId to get its default expressions.
+            // analyzed() returns &'ctx AnalyzedProgram, so the returned &'ctx LambdaExpr
+            // and its &'ctx Expr defaults are independent of &mut self.
+            let lambda_node_id = defaults_info.lambda_node_id;
+            let analyzed = self.analyzed();
+            let Some(lambda) =
+                super::lambda_search::find_lambda_in_analyzed(analyzed, lambda_node_id)
+            else {
+                return Err(CodegenError::internal_with_context(
+                    "lambda expression not found",
+                    format!("NodeId {:?}", lambda_node_id),
+                ));
+            };
+
+            // Collect &'ctx Expr references for the omitted params before &mut self borrows.
+            let skip = arg_count;
+            let omitted_type_ids: Vec<TypeId> = params[skip..].to_vec();
+            let default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = lambda
+                .params
+                .iter()
+                .skip(skip)
+                .map(|p| p.default_value.as_deref())
+                .collect();
+
+            let (default_vals, rc_owned) =
+                self.compile_lambda_defaults(&default_refs, &omitted_type_ids)?;
+            rc_temp_args.extend(rc_owned);
+            args.extend(default_vals);
+        }
+        Ok(())
     }
 
     /// Import a signature and coerce argument values to match the expected parameter types.

@@ -72,7 +72,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
             && self.arena().is_function(*type_id)
         {
-            return self.call_closure(*var, *type_id, call, call_expr_id);
+            return self.call_closure(*var, *type_id, &ArgSource::Ast(&call.args), call_expr_id);
         }
 
         // Check if it's a captured closure (e.g., recursive lambda or captured function)
@@ -81,7 +81,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             && self.arena().is_function(binding.vole_type)
         {
             let captured = self.load_capture(&binding)?;
-            return self.call_closure_value(captured.value, binding.vole_type, call, call_expr_id);
+            return self.call_closure_value(
+                captured.value,
+                binding.vole_type,
+                &ArgSource::Ast(&call.args),
+                call_expr_id,
+            );
         }
 
         // Check if it's a functional interface variable
@@ -284,7 +289,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let result = self.call_closure_value(
                 lambda_val.value,
                 lambda_val.type_id,
-                call,
+                &ArgSource::Ast(&call.args),
                 call.callee.id,
             )?;
             // The global init re-compiles the lambda each call, creating a
@@ -731,8 +736,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         if self.arena().is_function(callee.type_id) {
             // Note: Indirect calls don't support default params lookup (use callee.id as placeholder)
-            let result =
-                self.call_closure_value(callee.value, callee.type_id, call, call.callee.id)?;
+            let result = self.call_closure_value(
+                callee.value,
+                callee.type_id,
+                &ArgSource::Ast(&call.args),
+                call.callee.id,
+            )?;
             self.consume_rc_value(&mut callee)?;
             return Ok(result);
         }
