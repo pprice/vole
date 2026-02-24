@@ -43,3 +43,14 @@ pub struct VirBody {
     /// An optional trailing expression whose value becomes the body's result.
     pub trailing: Option<VirRef>,
 }
+
+/// A VIR test case: a named test body with its source span.
+#[derive(Debug, Clone)]
+pub struct VirTest {
+    /// The test name from `test "name" { ... }`.
+    pub name: String,
+    /// The test body.
+    pub body: VirBody,
+    /// Source span for span-based lookup in codegen.
+    pub span: vole_frontend::Span,
+}

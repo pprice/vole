@@ -11,7 +11,7 @@ use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
 use vole_vir::{
-    VirBody, VirFunction, lower_function, lower_method, lower_monomorphized_function,
+    VirBody, VirFunction, VirTest, lower_function, lower_method, lower_monomorphized_function,
     lower_test_body,
 };
 
@@ -48,9 +48,8 @@ pub struct AnalyzedProgram {
     /// Enables O(1) VIR function lookup for non-generic class/struct methods
     /// and static methods during compilation.
     pub vir_method_map: FxHashMap<MethodId, usize>,
-    /// VIR-lowered test function bodies, keyed by the TestCase's Span.
-    /// Tests don't have FunctionId or MethodId, so Span is the unique key.
-    pub vir_test_bodies: FxHashMap<Span, VirBody>,
+    /// VIR-lowered test cases with names and bodies.
+    pub vir_tests: Vec<VirTest>,
 }
 
 impl AnalyzedProgram {
@@ -118,7 +117,7 @@ impl AnalyzedProgram {
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
         let vir_function_map = build_vir_function_map(&vir_functions);
         let vir_method_map = build_vir_method_map(&vir_functions);
-        let vir_test_bodies = lower_test_bodies(
+        let vir_tests = lower_test_bodies(
             &program,
             &output.node_map,
             &mut interner,
@@ -139,7 +138,7 @@ impl AnalyzedProgram {
             vir_monomorph_map,
             vir_function_map,
             vir_method_map,
-            vir_test_bodies,
+            vir_tests,
         }
     }
 
@@ -214,7 +213,10 @@ impl AnalyzedProgram {
     /// Look up a VIR test body by the test case's span.
     /// Returns `None` if no VIR body was lowered for this test.
     pub fn get_vir_test(&self, span: Span) -> Option<&VirBody> {
-        self.vir_test_bodies.get(&span)
+        self.vir_tests
+            .iter()
+            .find(|t| t.span == span)
+            .map(|t| &t.body)
     }
 }
 
@@ -794,16 +796,16 @@ fn lower_test_bodies(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     names: &NameTable,
-) -> FxHashMap<Span, VirBody> {
-    let mut map = FxHashMap::default();
+) -> Vec<VirTest> {
+    let mut tests = Vec::new();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
             lower_tests_decl_bodies(
-                tests_decl, node_map, interner, type_arena, entities, names, &mut map,
+                tests_decl, node_map, interner, type_arena, entities, names, &mut tests,
             );
         }
     }
-    map
+    tests
 }
 
 /// Recursively lower test bodies from a single `TestsDecl`.
@@ -815,16 +817,22 @@ fn lower_tests_decl_bodies(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     names: &NameTable,
-    map: &mut FxHashMap<Span, VirBody>,
+    tests: &mut Vec<VirTest>,
 ) {
     for test in &tests_decl.tests {
         let vir_body = lower_test_body(&test.body, node_map, interner, type_arena, entities, names);
-        map.insert(test.span, vir_body);
+        tests.push(VirTest {
+            name: test.name.clone(),
+            body: vir_body,
+            span: test.span,
+        });
     }
     // Recurse into nested tests blocks
     for decl in &tests_decl.decls {
         if let Decl::Tests(nested) = decl {
-            lower_tests_decl_bodies(nested, node_map, interner, type_arena, entities, names, map);
+            lower_tests_decl_bodies(
+                nested, node_map, interner, type_arena, entities, names, tests,
+            );
         }
     }
 }

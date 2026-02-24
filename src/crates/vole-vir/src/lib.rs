@@ -31,7 +31,7 @@ pub use expr::{
     VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern,
     VirStringPart, VirUnOp,
 };
-pub use func::{VirBody, VirFunction};
+pub use func::{VirBody, VirFunction, VirTest};
 pub use intrinsics::IntrinsicKey;
 pub use lower::{
     lower_function, lower_interface_method, lower_method, lower_monomorphized_function,

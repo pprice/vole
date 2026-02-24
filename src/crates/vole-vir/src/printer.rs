@@ -11,7 +11,7 @@ use std::fmt::Write;
 use vole_identity::{Interner, NameTable, Symbol, TypeId};
 use vole_sema::entity_registry::EntityRegistry;
 use vole_sema::type_arena::TypeArena;
-use vole_sema::type_display::display_type_id;
+use vole_sema::type_display::display_type_id_short;
 
 use crate::calls::{CallTarget, NativeAbi};
 use crate::expr::{
@@ -814,7 +814,7 @@ impl<'a> VirPrinter<'a> {
     }
 
     fn ty(&self, id: TypeId) -> String {
-        display_type_id(id, self.type_arena, self.names, self.entities)
+        display_type_id_short(id, self.type_arena, self.names, self.entities)
     }
 }
 

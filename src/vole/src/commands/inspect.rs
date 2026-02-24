@@ -297,9 +297,9 @@ fn inspect_vir(
 
     // Print VIR test bodies
     if include_tests {
-        for (span, body) in &analyzed.vir_test_bodies {
-            println!("// test @{}:{}", span.start, span.end);
-            print!("{}", printer.print_body(body));
+        for test in &analyzed.vir_tests {
+            println!("// test \"{}\"", test.name);
+            print!("{}", printer.print_body(&test.body));
         }
     }
 }
