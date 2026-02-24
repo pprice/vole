@@ -12,8 +12,8 @@ use vole_sema::{StringConversion, TypeArena};
 use crate::calls::CallTarget;
 use crate::expr::{
     AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirErrorFieldBinding,
-    VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern, VirStringPart,
-    VirTupleBinding, VirUnOp,
+    VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern, VirRecordFieldBinding,
+    VirStringPart, VirTupleBinding, VirUnOp,
 };
 use crate::func::VirBody;
 use crate::refs::VirRef;
@@ -970,10 +970,10 @@ fn lower_when_expr(
 
 /// Lower a `match` expression to `VirExpr::Match`.
 ///
-/// The scrutinee is recursively lowered. Most patterns are lowered to
+/// The scrutinee is recursively lowered. All patterns are lowered to
 /// concrete `VirPattern` variants (Wildcard, Binding, TypeCheck, Literal,
-/// Val, Success, Error, Tuple). Record patterns remain wrapped in
-/// `VirPattern::Ast`. Guards and bodies are recursively lowered.
+/// Val, Success, Error, Tuple, Record). Guards and bodies are recursively
+/// lowered.
 fn lower_match_expr(
     match_expr: &vole_frontend::ast::MatchExpr,
     _expr: &Expr,
@@ -1018,7 +1018,7 @@ fn lower_match_expr(
 
 /// Lower an AST `Pattern` to a `VirPattern`.
 ///
-/// Most patterns are lowered to concrete VIR variants:
+/// All pattern kinds are lowered to concrete VIR variants:
 /// - `Wildcard` -> `VirPattern::Wildcard`
 /// - `Identifier` with sema `IsCheckResult` -> `VirPattern::TypeCheck`
 /// - `Identifier` without `IsCheckResult` -> `VirPattern::Binding`
@@ -1028,8 +1028,7 @@ fn lower_match_expr(
 /// - `Success { .. }` -> `VirPattern::Success`
 /// - `Error { .. }` -> `VirPattern::Error`
 /// - `Tuple { .. }` -> `VirPattern::Tuple`
-///
-/// Record patterns are wrapped in `VirPattern::Ast` for later migration.
+/// - `Record { .. }` -> `VirPattern::Record`
 fn lower_pattern(
     pattern: &vole_frontend::Pattern,
     scrutinee_ty: TypeId,
@@ -1095,8 +1094,9 @@ fn lower_pattern(
 
         PatternKind::Tuple { elements } => lower_tuple_pattern(elements, scrutinee_ty, ctx),
 
-        // Complex patterns — keep as AST for now.
-        PatternKind::Record { .. } => VirPattern::Ast(Box::new(pattern.clone())),
+        PatternKind::Record { type_name, fields } => {
+            lower_record_pattern(pattern, type_name.as_ref(), fields, scrutinee_ty, ctx)
+        }
     }
 }
 
@@ -1349,6 +1349,142 @@ fn find_error_type_def(
         }
     }
 
+    None
+}
+
+/// Lower a record destructuring pattern to `VirPattern::Record`.
+///
+/// Pre-resolves:
+/// - `IsCheckResult` from the NodeMap (for typed patterns like `Point { x, y }`)
+/// - `source_ty`: the narrowed record type after union payload extraction
+/// - `is_union_payload`: whether the scrutinee is a union
+/// - `is_struct`: whether the source type is a value-type struct
+/// - Field slots and types from `EntityRegistry`
+fn lower_record_pattern(
+    pattern: &vole_frontend::Pattern,
+    type_name: Option<&vole_frontend::TypeExpr>,
+    fields: &[vole_frontend::ast::RecordFieldPattern],
+    scrutinee_ty: TypeId,
+    ctx: &LoweringCtx<'_>,
+) -> VirPattern {
+    // Typed record pattern: look up IsCheckResult and derive source_ty
+    let (type_check, tested_type, source_ty) = if type_name.is_some() {
+        let sema_result = ctx.node_map.get_is_check_result(pattern.id);
+        let (check, tested) = match sema_result {
+            Some(sr) => {
+                let check = convert_is_check_result(sr);
+                let tested = recover_tested_type(&check, scrutinee_ty, ctx.type_arena);
+                (Some(check), Some(tested))
+            }
+            None => (None, None),
+        };
+        // source_ty is the narrowed variant type (if typed union record) or scrutinee
+        let src = record_source_type(&check, scrutinee_ty, ctx);
+        (check, tested, src)
+    } else {
+        // Anonymous record: no type check, use scrutinee type directly
+        (None, None, scrutinee_ty)
+    };
+
+    let is_union = ctx.type_arena.is_union(scrutinee_ty);
+    let is_union_payload = is_union && type_check.is_some();
+    let is_struct = ctx.type_arena.is_struct(source_ty);
+
+    // Resolve field bindings from EntityRegistry
+    let vir_fields = resolve_record_field_bindings(fields, source_ty, ctx);
+
+    VirPattern::Record {
+        type_check,
+        tested_type,
+        fields: vir_fields,
+        source_ty,
+        is_union_payload,
+        is_struct,
+    }
+}
+
+/// Determine the source type for a record pattern's field extraction.
+///
+/// For typed patterns in a union scrutinee, the source is the narrowed variant type.
+/// Falls back to the scrutinee type if no narrowing is available.
+fn record_source_type(
+    check: &Option<IsCheckResult>,
+    scrutinee_ty: TypeId,
+    ctx: &LoweringCtx<'_>,
+) -> TypeId {
+    if let Some(result) = check {
+        match result {
+            IsCheckResult::CheckTag(tag) => {
+                if let Some(variants) = ctx.type_arena.unwrap_union(scrutinee_ty)
+                    && let Some(&variant) = variants.get(*tag as usize)
+                    && is_record_type(variant, ctx.type_arena)
+                {
+                    return variant;
+                }
+            }
+            IsCheckResult::AlwaysTrue => {
+                if is_record_type(scrutinee_ty, ctx.type_arena) {
+                    return scrutinee_ty;
+                }
+            }
+            IsCheckResult::AlwaysFalse | IsCheckResult::CheckUnknown(_) => {}
+        }
+    }
+    scrutinee_ty
+}
+
+/// Check whether a type is a class, struct, or error type (i.e. a record type).
+fn is_record_type(ty: TypeId, arena: &TypeArena) -> bool {
+    arena.unwrap_nominal(ty).is_some_and(|(_, _, kind)| {
+        kind.is_class_or_struct() || matches!(kind, vole_sema::type_arena::NominalKind::Error)
+    })
+}
+
+/// Resolve record field bindings from the EntityRegistry.
+///
+/// For each field in the pattern, looks up the field's slot index and type
+/// from the type definition.  Falls back to slot=0 and ty=UNKNOWN if the
+/// source type is not a nominal type or the field is not found.
+fn resolve_record_field_bindings(
+    fields: &[vole_frontend::ast::RecordFieldPattern],
+    source_ty: TypeId,
+    ctx: &LoweringCtx<'_>,
+) -> Vec<VirRecordFieldBinding> {
+    let type_def_id = ctx
+        .type_arena
+        .unwrap_nominal(source_ty)
+        .map(|(def_id, _, _)| def_id);
+
+    fields
+        .iter()
+        .map(|f| {
+            let (slot, ty) = type_def_id
+                .and_then(|def_id| find_field_slot(def_id, f.field_name, ctx))
+                .unwrap_or((0, TypeId::UNKNOWN));
+            VirRecordFieldBinding {
+                field_name: f.field_name,
+                binding_name: f.binding,
+                field_slot: slot as u32,
+                ty,
+            }
+        })
+        .collect()
+}
+
+/// Find a field's slot index and type in a type definition.
+fn find_field_slot(
+    type_def_id: vole_identity::TypeDefId,
+    field_name: vole_identity::Symbol,
+    ctx: &LoweringCtx<'_>,
+) -> Option<(usize, TypeId)> {
+    let field_name_str = ctx.interner.resolve(field_name);
+    for field_id in ctx.entities.fields_on_type(type_def_id) {
+        let field = ctx.entities.get_field(field_id);
+        let name = ctx.name_table.last_segment_str(field.name_id);
+        if name.as_deref() == Some(field_name_str) {
+            return Some((field.slot, field.ty));
+        }
+    }
     None
 }
 

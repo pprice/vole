@@ -472,8 +472,9 @@ pub struct VirMatchArm {
 /// Simple patterns (Wildcard, Binding, TypeCheck, Literal, Val) are fully
 /// lowered to VIR.  Fallible patterns (Success, Error) are lowered to VIR
 /// with pre-resolved type information.  Tuple patterns are fully lowered
-/// with pre-resolved element types.  Record patterns remain wrapped in
-/// `Ast` until further migration.
+/// with pre-resolved element types.  Record patterns are fully lowered
+/// with pre-resolved type check results, field slots, and struct/class
+/// discrimination.
 #[derive(Debug, Clone)]
 pub enum VirPattern {
     /// AST pattern that has not yet been lowered to VIR.
@@ -544,6 +545,35 @@ pub enum VirPattern {
     /// because they depend on Cranelift type sizes — codegen calls
     /// `tuple_layout()` and `cranelift_types()` at instruction selection time.
     Tuple { bindings: Vec<VirTupleBinding> },
+
+    /// Record (struct/class) destructuring pattern: `Point { x, y }` or `{ name, age }`.
+    ///
+    /// `type_check` is present for typed patterns (e.g. `Point { x, y }` in a union
+    /// match), where a type check must pass before fields can be extracted.
+    /// `None` for anonymous record patterns (`{ x, y }`).
+    ///
+    /// `tested_type` is the target type for monomorphized recomputation of the
+    /// type check result (parallel to `VirPattern::TypeCheck::tested_type`).
+    ///
+    /// `source_ty` is the narrowed type of the record after union payload extraction
+    /// (e.g. `Point` rather than `Point | Circle`).  Codegen uses this for field lookups.
+    ///
+    /// `is_union_payload` indicates whether the scrutinee is a union and the pattern
+    /// variant type must be extracted from offset 8 before field access.
+    ///
+    /// `is_struct` distinguishes struct (flat field load via `struct_field_load`)
+    /// from class (instance field load via `get_instance_field`).
+    ///
+    /// `fields` lists the field bindings to extract, each with a pre-resolved
+    /// field slot and type from `EntityRegistry`.
+    Record {
+        type_check: Option<IsCheckResult>,
+        tested_type: Option<TypeId>,
+        fields: Vec<VirRecordFieldBinding>,
+        source_ty: TypeId,
+        is_union_payload: bool,
+        is_struct: bool,
+    },
 }
 
 /// The sub-kind of an error pattern, pre-resolved during lowering.
@@ -606,6 +636,22 @@ pub struct VirTupleBinding {
     /// Zero-based position of this element in the tuple.
     pub element_index: usize,
     /// The element type, pre-resolved from `TypeArena::unwrap_tuple`.
+    pub ty: TypeId,
+}
+
+/// A single field binding in a record destructure pattern.
+///
+/// Maps a field name (from the type definition) to a binding name (the variable
+/// name in the match arm body), with pre-resolved field slot index and type.
+#[derive(Debug, Clone)]
+pub struct VirRecordFieldBinding {
+    /// The field name in the type definition.
+    pub field_name: Symbol,
+    /// The variable name to bind the field value to (may differ via rename syntax).
+    pub binding_name: Symbol,
+    /// Pre-resolved field slot index from `EntityRegistry`.
+    pub field_slot: u32,
+    /// Pre-resolved field type from `EntityRegistry`.
     pub ty: TypeId,
 }
 

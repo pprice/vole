@@ -755,6 +755,47 @@ impl<'a> VirPrinter<'a> {
                 }
                 w!(out, "]");
             }
+            VirPattern::Record {
+                type_check,
+                tested_type,
+                fields,
+                source_ty,
+                is_union_payload,
+                is_struct,
+            } => {
+                if let Some(ty) = tested_type {
+                    w!(out, "{}", self.ty(*ty));
+                }
+                w!(out, " {{ ");
+                for (i, f) in fields.iter().enumerate() {
+                    if i > 0 {
+                        w!(out, ", ");
+                    }
+                    if f.field_name == f.binding_name {
+                        w!(out, "{}: {}", self.sym(f.field_name), self.ty(f.ty));
+                    } else {
+                        w!(
+                            out,
+                            "{}: {} as {}",
+                            self.sym(f.field_name),
+                            self.ty(f.ty),
+                            self.sym(f.binding_name)
+                        );
+                    }
+                }
+                w!(out, " }}");
+                if let Some(check) = type_check {
+                    w!(out, " [{}]", fmt_is_check(check, self));
+                }
+                w!(out, " [src: {}", self.ty(*source_ty));
+                if *is_union_payload {
+                    w!(out, ", union");
+                }
+                if *is_struct {
+                    w!(out, ", struct");
+                }
+                w!(out, "]");
+            }
         }
     }
 

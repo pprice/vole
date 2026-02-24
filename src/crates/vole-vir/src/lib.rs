@@ -29,7 +29,7 @@ pub use calls::{BuiltinMethod, CallTarget, NativeAbi};
 pub use expr::{
     AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture,
     VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern,
-    VirStringPart, VirTupleBinding, VirUnOp,
+    VirRecordFieldBinding, VirStringPart, VirTupleBinding, VirUnOp,
 };
 pub use func::{VirBody, VirFunction, VirTest};
 pub use intrinsics::IntrinsicKey;

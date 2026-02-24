@@ -19,6 +19,7 @@ use vole_sema::type_arena::TypeId;
 
 use super::super::context::Cg;
 use super::super::control_flow::match_switch;
+use super::super::structs::get_field_slot_and_type_id_cg;
 
 impl Cg<'_, '_, '_> {
     // =========================================================================
@@ -1155,6 +1156,27 @@ impl Cg<'_, '_, '_> {
             vole_vir::VirPattern::Tuple { bindings } => {
                 self.compile_vir_tuple_pattern(bindings, scrutinee, arm_variables)
             }
+
+            vole_vir::VirPattern::Record {
+                type_check,
+                tested_type,
+                fields,
+                source_ty,
+                is_union_payload,
+                is_struct,
+            } => self.compile_vir_record_pattern(
+                type_check,
+                tested_type,
+                fields,
+                *source_ty,
+                *is_union_payload,
+                *is_struct,
+                scrutinee,
+                arm_variables,
+                arm_block,
+                next_block,
+                effective_arm_block,
+            ),
         }
     }
 
@@ -1297,6 +1319,118 @@ impl Cg<'_, '_, '_> {
             }
         }
         Ok(None)
+    }
+
+    /// Compile a VIR record destructuring pattern.
+    ///
+    /// Handles both typed patterns (`Point { x, y }` in a union match) and
+    /// anonymous patterns (`{ name, age }`).  For typed patterns in a union
+    /// scrutinee, creates a conditional extraction block: branch on the type
+    /// check, then extract fields in a separate block.
+    ///
+    /// Field extraction delegates to `extract_record_fields` which handles
+    /// struct (flat layout) vs class (instance) field loading.
+    #[expect(clippy::too_many_arguments)]
+    fn compile_vir_record_pattern(
+        &mut self,
+        type_check: &Option<vole_vir::expr::IsCheckResult>,
+        tested_type: &Option<TypeId>,
+        fields: &[vole_vir::VirRecordFieldBinding],
+        source_ty: TypeId,
+        is_union_payload: bool,
+        _is_struct: bool,
+        scrutinee: &CompiledValue,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_block: Block,
+        next_block: Block,
+        effective_arm_block: &mut Block,
+    ) -> CodegenResult<Option<Value>> {
+        // Compute pattern check condition (if type check present)
+        let pattern_check = if let Some(vir_result) = type_check {
+            let effective_result = if self.substitutions.is_some() {
+                if let Some(tested) = tested_type {
+                    let sub_tested = self.try_substitute_type(*tested);
+                    let sub_scrutinee = self.try_substitute_type(scrutinee.type_id);
+                    self.compute_is_check_result(sub_scrutinee, sub_tested)
+                } else {
+                    convert_vir_is_check(vir_result)
+                }
+            } else {
+                convert_vir_is_check(vir_result)
+            };
+            self.compile_is_check_result(&effective_result, scrutinee)?
+        } else {
+            None
+        };
+
+        // Resolve source type with substitutions for monomorphized generics
+        let resolved_source_ty = self.try_substitute_type(source_ty);
+
+        // Conditional extraction: when scrutinee is a union, branch on the type
+        // check before extracting fields in a new block.
+        let is_conditional = pattern_check.is_some() && is_union_payload;
+
+        if is_conditional {
+            let extract_block = self.builder.create_block();
+            let cond =
+                pattern_check.expect("INTERNAL: record pattern: missing pattern_check condition");
+            self.emit_brif(cond, extract_block, next_block);
+            self.builder.seal_block(arm_block);
+            *effective_arm_block = extract_block;
+            self.switch_to_block(extract_block);
+
+            // Extract union payload at offset 8
+            let payload = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), scrutinee.value, 8);
+            self.extract_vir_record_fields(fields, payload, resolved_source_ty, arm_variables)?;
+            Ok(None)
+        } else {
+            // Non-conditional: extract fields directly from scrutinee
+            let (field_source, field_type) = if is_union_payload {
+                // Union but no type check (anonymous record in union context)
+                let payload =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), scrutinee.value, 8);
+                (payload, resolved_source_ty)
+            } else {
+                (scrutinee.value, resolved_source_ty)
+            };
+            self.extract_vir_record_fields(fields, field_source, field_type, arm_variables)?;
+            Ok(pattern_check)
+        }
+    }
+
+    /// Extract and bind fields from a VIR record pattern.
+    ///
+    /// For class/instance types, uses `get_instance_field` runtime call.
+    /// For struct types (auto-boxed in unions), uses `struct_field_load` since the
+    /// source pointer is a raw heap pointer with flat offsets.
+    fn extract_vir_record_fields(
+        &mut self,
+        fields: &[vole_vir::VirRecordFieldBinding],
+        field_source: Value,
+        field_source_type_id: TypeId,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+    ) -> CodegenResult<()> {
+        let is_struct = self.arena().is_struct(field_source_type_id);
+        for field in fields {
+            let field_name = self.interner().resolve(field.field_name);
+            let (slot, field_type_id) =
+                get_field_slot_and_type_id_cg(field_source_type_id, field_name, self)?;
+
+            let converted = if is_struct {
+                self.struct_field_load(field_source, slot, field_type_id, field_source_type_id)?
+            } else {
+                self.get_instance_field(field_source, slot, field_type_id)?
+            };
+            let var = self.builder.declare_var(converted.ty);
+            self.builder.def_var(var, converted.value);
+            arm_variables.insert(field.binding_name, (var, field_type_id));
+        }
+        Ok(())
     }
 
     /// Compile an IsCheckResult into a condition value (if runtime check needed).
