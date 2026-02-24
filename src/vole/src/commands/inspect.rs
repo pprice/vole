@@ -284,7 +284,7 @@ fn inspect_vir(
     let main_module = analyzed.module_id;
     let entities = analyzed.entity_registry();
 
-    for func in &analyzed.vir_functions {
+    for func in &analyzed.vir_program.functions {
         // Skip non-main-module functions unless --all
         if !show_all && !is_main_module_vir_func(func, entities, main_module) {
             continue;
@@ -296,16 +296,16 @@ fn inspect_vir(
     }
 
     // Print generic VIR function templates (pre-monomorphization)
-    if !analyzed.generic_vir_functions.is_empty() {
+    if !analyzed.vir_program.generic_functions.is_empty() {
         println!("// --- generic VIR templates ---");
-        for func in &analyzed.generic_vir_functions {
+        for func in &analyzed.vir_program.generic_functions {
             print!("{}", printer.print_function(func));
         }
     }
 
     // Print VIR test bodies
     if include_tests {
-        for test in &analyzed.vir_tests {
+        for test in &analyzed.vir_program.tests {
             println!("// test \"{}\"", test.name);
             print!("{}", printer.print_body(&test.body));
         }

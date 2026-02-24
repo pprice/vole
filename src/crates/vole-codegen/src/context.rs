@@ -351,7 +351,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     pub fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
-        &self.env.analyzed.vir_type_table
+        &self.env.analyzed.vir_program.type_table
     }
 
     /// Translate a sema `TypeId` to a `VirTypeId` via the VIR type table's
@@ -770,11 +770,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let analyzed = self.analyzed();
         if let Some(module_id) = self.current_module() {
             let module_path = self.name_table().module_path(module_id);
-            if let Some(module_map) = analyzed.module_vir_global_inits.get(module_path) {
+            if let Some(module_map) = analyzed.vir_program.module_global_inits.get(module_path) {
                 return module_map.get(&name).map(|r| r.as_ref());
             }
         }
-        analyzed.vir_global_inits.get(&name).map(|r| r.as_ref())
+        analyzed
+            .vir_program
+            .global_inits
+            .get(&name)
+            .map(|r| r.as_ref())
     }
 
     /// Get source file pointer for error reporting

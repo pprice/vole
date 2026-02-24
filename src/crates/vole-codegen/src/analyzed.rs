@@ -11,7 +11,7 @@ use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
 use vole_vir::type_table::VirTypeTable;
-use vole_vir::{VirBody, VirFunction, VirRef, VirTest};
+use vole_vir::{VirBody, VirFunction, VirProgram, VirRef, VirTest};
 
 use vole_sema::vir_lower::{
     lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
@@ -37,48 +37,11 @@ pub struct AnalyzedProgram {
     /// Module paths that had sema errors. Codegen should skip compiling
     /// function bodies for these modules to avoid INVALID type IDs.
     pub modules_with_errors: HashSet<String>,
-    /// VIR-lowered functions: top-level non-generic functions, their
-    /// monomorphized instances, and type methods.
-    pub vir_functions: Vec<VirFunction>,
-    /// Lookup map from monomorphized mangled NameId to index in `vir_functions`.
-    /// Enables O(1) VIR function lookup during monomorphized compilation.
-    pub vir_monomorph_map: FxHashMap<NameId, usize>,
-    /// Lookup map from semantic FunctionId to index in `vir_functions`.
-    /// Enables O(1) VIR function lookup for non-generic top-level and module
-    /// functions during compilation.
-    pub vir_function_map: FxHashMap<FunctionId, usize>,
-    /// Lookup map from semantic MethodId to index in `vir_functions`.
-    /// Enables O(1) VIR function lookup for non-generic class/struct methods
-    /// and static methods during compilation.
-    pub vir_method_map: FxHashMap<MethodId, usize>,
-    /// VIR-lowered test cases with names and bodies.
-    pub vir_tests: Vec<VirTest>,
-    /// VIR-lowered global variable initializer expressions for the main program.
+    /// All VIR data: functions, tests, global inits, type table, and lookup maps.
     ///
-    /// Keyed by the `let` binding's `Symbol`.  Used by `try_call_global()` to
-    /// compile global lambda/functional-interface initializers through the VIR
-    /// path instead of falling back to `self.expr()` (AST path).
-    pub vir_global_inits: FxHashMap<Symbol, VirRef>,
-    /// VIR-lowered global variable initializer expressions for imported modules.
-    ///
-    /// Keyed by module path, then by the `let` binding's `Symbol`.
-    pub module_vir_global_inits: FxHashMap<String, FxHashMap<Symbol, VirRef>>,
-    /// Generic VIR function templates (pre-monomorphization).
-    ///
-    /// Each entry is a VIR function lowered with `generic: true` mode, where
-    /// type parameter types are preserved as `VirType::Param`.  These templates
-    /// are consumed by a future VIR-to-VIR monomorphization pass; they must NOT
-    /// reach codegen directly.
-    pub generic_vir_functions: Vec<VirFunction>,
-    /// Lookup map from the generic function's original `NameId` to its index
-    /// in `generic_vir_functions`.
-    pub generic_vir_map: FxHashMap<NameId, usize>,
-    /// VIR type table populated during lowering.
-    ///
-    /// Maps `TypeId` → `VirTypeId` with interned VIR type descriptors and
-    /// layout information.  Shared across all lowered functions and used by
-    /// codegen for type queries.
-    pub vir_type_table: VirTypeTable,
+    /// This is the single entry point for all VIR data produced during lowering.
+    /// Codegen accesses VIR through this struct rather than individual fields.
+    pub vir_program: VirProgram,
 }
 
 impl AnalyzedProgram {
@@ -226,6 +189,18 @@ impl AnalyzedProgram {
         );
         let (generic_vir_functions, generic_vir_map) =
             build_generic_vir_storage(output.generic_vir_functions);
+        let vir_program = VirProgram {
+            type_table,
+            functions: vir_functions,
+            monomorph_map: vir_monomorph_map,
+            function_map: vir_function_map,
+            method_map: vir_method_map,
+            generic_functions: generic_vir_functions,
+            generic_map: generic_vir_map,
+            tests: vir_tests,
+            global_inits: vir_global_inits,
+            module_global_inits: module_vir_global_inits,
+        };
         Self {
             program,
             interner: Rc::new(interner),
@@ -235,16 +210,7 @@ impl AnalyzedProgram {
             db,
             module_id: output.module_id,
             modules_with_errors: output.modules_with_errors,
-            vir_functions,
-            vir_monomorph_map,
-            vir_function_map,
-            vir_method_map,
-            vir_tests,
-            vir_global_inits,
-            module_vir_global_inits,
-            generic_vir_functions,
-            generic_vir_map,
-            vir_type_table: type_table,
+            vir_program,
         }
     }
 
@@ -295,42 +261,31 @@ impl AnalyzedProgram {
     /// Look up a VIR function by its monomorphized mangled NameId.
     /// Returns `None` if no VIR function was lowered for this instance.
     pub fn get_vir_monomorph(&self, mangled_name_id: NameId) -> Option<&VirFunction> {
-        self.vir_monomorph_map
-            .get(&mangled_name_id)
-            .map(|&idx| &self.vir_functions[idx])
+        self.vir_program.get_monomorph(mangled_name_id)
     }
 
     /// Look up a VIR function by its semantic FunctionId.
     /// Returns `None` if no VIR function was lowered for this function.
     pub fn get_vir_function(&self, func_id: FunctionId) -> Option<&VirFunction> {
-        self.vir_function_map
-            .get(&func_id)
-            .map(|&idx| &self.vir_functions[idx])
+        self.vir_program.get_function(func_id)
     }
 
     /// Look up a VIR function by its semantic MethodId.
     /// Returns `None` if no VIR function was lowered for this method.
     pub fn get_vir_method(&self, method_id: MethodId) -> Option<&VirFunction> {
-        self.vir_method_map
-            .get(&method_id)
-            .map(|&idx| &self.vir_functions[idx])
+        self.vir_program.get_method(method_id)
     }
 
     /// Look up a generic VIR function template by its original `NameId`.
     /// Returns `None` if no generic VIR function was lowered for this name.
     pub fn get_generic_vir_function(&self, original_name: NameId) -> Option<&VirFunction> {
-        self.generic_vir_map
-            .get(&original_name)
-            .map(|&idx| &self.generic_vir_functions[idx])
+        self.vir_program.get_generic_function(original_name)
     }
 
     /// Look up a VIR test body by the test case's span.
     /// Returns `None` if no VIR body was lowered for this test.
     pub fn get_vir_test(&self, span: Span) -> Option<&VirBody> {
-        self.vir_tests
-            .iter()
-            .find(|t| t.span == span)
-            .map(|t| &t.body)
+        self.vir_program.get_test(span)
     }
 }
 

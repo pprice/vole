@@ -161,7 +161,7 @@ impl<'a> Compiler<'a> {
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
-        &self.analyzed.vir_type_table
+        &self.analyzed.vir_program.type_table
     }
 
     /// Get the module ID for the program being compiled.

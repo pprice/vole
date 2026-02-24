@@ -17,6 +17,7 @@ pub mod calls;
 pub mod expr;
 pub mod func;
 pub mod intrinsics;
+pub mod program;
 pub mod refs;
 pub mod stmt;
 pub mod type_table;
@@ -35,6 +36,7 @@ pub use expr::{
 };
 pub use func::{VirBody, VirFunction, VirTest};
 pub use intrinsics::IntrinsicKey;
+pub use program::VirProgram;
 pub use refs::VirRef;
 pub use stmt::{
     AssignTarget, DestructureTupleKind, VirDestructureElement, VirDestructureField,
