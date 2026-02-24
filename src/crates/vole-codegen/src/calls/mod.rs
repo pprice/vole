@@ -17,6 +17,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::structs::methods::ArgSource;
 
 use vole_frontend::ast::CallExpr;
 use vole_frontend::{ExprKind, NodeId, Symbol};
@@ -265,7 +266,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let boxed = self.box_interface_value(lambda_val, declared_type_id)?;
                 let result = self.interface_dispatch_call_args_by_type_def_id(
                     &boxed,
-                    &crate::structs::methods::ArgSource::Ast(&call.args),
+                    &ArgSource::Ast(&call.args),
                     type_def_id,
                     method_name_id,
                     func_type_id,
@@ -325,7 +326,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.call_func_id_impl(
             func_key,
             func_id,
-            call,
+            &ArgSource::Ast(&call.args),
             name_id,
             None,
             return_type_override,
@@ -347,7 +348,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.call_func_id_impl(
             func_key,
             func_id,
-            call,
+            &ArgSource::Ast(&call.args),
             Some(name_id),
             None,
             return_type_override,
@@ -358,12 +359,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Core implementation for calling a function by FuncId.
     /// Takes an optional NameId for looking up parameter types and default arguments.
     /// `call_expr_id` is the NodeId of the call expression (used to look up named arg mapping).
+    ///
+    /// Accepts `ArgSource` so that both AST and VIR call sites can share this
+    /// function.  AST callers pass `ArgSource::Ast(&call.args)`, VIR callers
+    /// pass `ArgSource::Vir(&vir_args)`.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn call_func_id_impl(
         &mut self,
         func_key: FunctionKey,
         func_id: FuncId,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         name_id: Option<NameId>,
         param_type_ids_override: Option<Vec<TypeId>>,
         return_type_id_override: Option<TypeId>,
@@ -418,8 +423,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         });
 
         // Check for a resolved named-arg mapping from sema. When present, the mapping
-        // tells us which call.args[j] fills each parameter slot i.
-        // `mapping[i] = Some(j)` means call.args[j] fills slot i.
+        // tells us which arg_source[j] fills each parameter slot i.
+        // `mapping[i] = Some(j)` means arg_source[j] fills slot i.
         // `mapping[i] = None` means slot i uses its default value.
         let named_arg_mapping = self
             .analyzed()
@@ -429,122 +434,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
         if let Some(ref mapping) = named_arg_mapping {
-            // Named arg reordering: compile each slot in parameter order using the mapping.
-            let expected_user_params = expected_types.len() - user_param_offset;
-            let func_id = name_id.and_then(|id| self.query().function_id_by_name_id(id));
-            for slot in 0..expected_user_params {
-                let compiled = if let Some(&Some(call_arg_idx)) = mapping.get(slot) {
-                    // This slot maps to call.args[call_arg_idx]
-                    let arg = &call.args[call_arg_idx];
-                    let compiled = if let Some(&param_type_id) = param_type_ids.get(slot) {
-                        self.expr_with_expected_type(arg.expr(), param_type_id)?
-                    } else {
-                        self.expr(arg.expr())?
-                    };
-                    if compiled.is_owned() {
-                        rc_temp_args.push(compiled);
-                    }
-                    if let Some(&param_type_id) = param_type_ids.get(slot) {
-                        self.coerce_to_type(compiled, param_type_id)?
-                    } else {
-                        compiled
-                    }
-                } else {
-                    // mapping[slot] = None: compile the default expression for this slot
-                    // Fall back to the default compilation path
-                    if let Some(func_id) = func_id
-                        && let Some(default_expr) =
-                            self.query().function_default_expr_by_id(func_id, slot)
-                    {
-                        self.expr(default_expr)?
-                    } else {
-                        // No default — this shouldn't happen if sema validated correctly
-                        continue;
-                    }
-                };
-
-                let expected_ty = expected_types.get(slot + user_param_offset).copied();
-                let arg_value = if let Some(expected) = expected_ty {
-                    if compiled.ty.is_int()
-                        && expected.is_int()
-                        && expected.bits() < compiled.ty.bits()
-                    {
-                        self.builder.ins().ireduce(expected, compiled.value)
-                    } else if compiled.ty.is_int()
-                        && expected.is_int()
-                        && expected.bits() > compiled.ty.bits()
-                    {
-                        sextend_const(self.builder, expected, compiled.value)
-                    } else if compiled.ty == types::F32 && expected == types::F64 {
-                        self.builder.ins().fpromote(types::F64, compiled.value)
-                    } else if compiled.ty == types::F64 && expected == types::F32 {
-                        self.builder.ins().fdemote(types::F32, compiled.value)
-                    } else {
-                        compiled.value
-                    }
-                } else {
-                    compiled.value
-                };
-                args.push(arg_value);
-            }
+            self.compile_named_args(
+                arg_source,
+                mapping,
+                &expected_types,
+                &param_type_ids,
+                user_param_offset,
+                name_id,
+                &mut args,
+                &mut rc_temp_args,
+            )?;
         } else {
-            // Normal positional arg compilation
-            for (i, arg) in call.args.iter().enumerate() {
-                let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
-                    self.expr_with_expected_type(arg.expr(), param_type_id)?
-                } else {
-                    self.expr(arg.expr())?
-                };
-                if compiled.is_owned() {
-                    rc_temp_args.push(compiled);
-                }
-
-                // Coerce argument to parameter type if needed (e.g., string -> string?)
-                let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
-                    self.coerce_to_type(compiled, param_type_id)?
-                } else {
-                    compiled
-                };
-
-                let expected_ty = expected_types.get(i + user_param_offset).copied();
-
-                // Narrow/extend integer types or promote/demote floats if needed
-                let arg_value = if let Some(expected) = expected_ty {
-                    if compiled.ty.is_int()
-                        && expected.is_int()
-                        && expected.bits() < compiled.ty.bits()
-                    {
-                        self.builder.ins().ireduce(expected, compiled.value)
-                    } else if compiled.ty.is_int()
-                        && expected.is_int()
-                        && expected.bits() > compiled.ty.bits()
-                    {
-                        sextend_const(self.builder, expected, compiled.value)
-                    } else if compiled.ty == types::F32 && expected == types::F64 {
-                        self.builder.ins().fpromote(types::F64, compiled.value)
-                    } else if compiled.ty == types::F64 && expected == types::F32 {
-                        self.builder.ins().fdemote(types::F32, compiled.value)
-                    } else {
-                        compiled.value
-                    }
-                } else {
-                    compiled.value
-                };
-                args.push(arg_value);
-            }
-
-            // If there are fewer provided args than expected, compile default expressions
-            let total_user_args = args.len() - user_param_offset;
-            let expected_user_params = expected_types.len() - user_param_offset;
-            if total_user_args < expected_user_params
-                && let Some(name_id) = name_id
-            {
-                let provided_args = total_user_args;
-                let (default_args, rc_owned) =
-                    self.compile_default_args_with_types(name_id, provided_args, &param_type_ids)?;
-                args.extend(default_args);
-                rc_temp_args.extend(rc_owned);
-            }
+            self.compile_positional_args(
+                arg_source,
+                &expected_types,
+                &param_type_ids,
+                user_param_offset,
+                name_id,
+                &mut args,
+                &mut rc_temp_args,
+            )?;
         }
 
         let call_inst = self.emit_call(func_ref, &args);
@@ -585,6 +494,138 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             result = self.coerce_to_type(result, return_type_id)?;
         }
         Ok(result)
+    }
+
+    /// Compile arguments in named-arg order using the sema-provided mapping.
+    ///
+    /// `mapping[slot] = Some(j)` means arg_source[j] fills parameter slot `slot`.
+    /// `mapping[slot] = None` means the slot uses its default expression.
+    #[allow(clippy::too_many_arguments)]
+    fn compile_named_args(
+        &mut self,
+        arg_source: &ArgSource<'_>,
+        mapping: &[Option<usize>],
+        expected_types: &[Type],
+        param_type_ids: &[TypeId],
+        user_param_offset: usize,
+        name_id: Option<NameId>,
+        args: &mut Vec<Value>,
+        rc_temp_args: &mut Vec<CompiledValue>,
+    ) -> CodegenResult<()> {
+        let expected_user_params = expected_types.len() - user_param_offset;
+        let func_id = name_id.and_then(|id| self.query().function_id_by_name_id(id));
+        for slot in 0..expected_user_params {
+            let compiled = if let Some(&Some(call_arg_idx)) = mapping.get(slot) {
+                // This slot maps to arg_source[call_arg_idx]
+                let compiled = if let Some(&param_type_id) = param_type_ids.get(slot) {
+                    self.compile_arg_with_expected_type(arg_source, call_arg_idx, param_type_id)?
+                } else {
+                    self.compile_arg_from_source(arg_source, call_arg_idx)?
+                };
+                if compiled.is_owned() {
+                    rc_temp_args.push(compiled);
+                }
+                if let Some(&param_type_id) = param_type_ids.get(slot) {
+                    self.coerce_to_type(compiled, param_type_id)?
+                } else {
+                    compiled
+                }
+            } else {
+                // mapping[slot] = None: compile the default expression for this slot
+                if let Some(func_id) = func_id
+                    && let Some(default_expr) =
+                        self.query().function_default_expr_by_id(func_id, slot)
+                {
+                    self.expr(default_expr)?
+                } else {
+                    // No default -- this shouldn't happen if sema validated correctly
+                    continue;
+                }
+            };
+
+            let arg_value = self.coerce_arg_to_sig_type(
+                compiled,
+                expected_types.get(slot + user_param_offset).copied(),
+            );
+            args.push(arg_value);
+        }
+        Ok(())
+    }
+
+    /// Compile arguments in positional order, appending defaults for omitted params.
+    #[allow(clippy::too_many_arguments)]
+    fn compile_positional_args(
+        &mut self,
+        arg_source: &ArgSource<'_>,
+        expected_types: &[Type],
+        param_type_ids: &[TypeId],
+        user_param_offset: usize,
+        name_id: Option<NameId>,
+        args: &mut Vec<Value>,
+        rc_temp_args: &mut Vec<CompiledValue>,
+    ) -> CodegenResult<()> {
+        let arg_count = arg_source.len();
+        for i in 0..arg_count {
+            let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
+                self.compile_arg_with_expected_type(arg_source, i, param_type_id)?
+            } else {
+                self.compile_arg_from_source(arg_source, i)?
+            };
+            if compiled.is_owned() {
+                rc_temp_args.push(compiled);
+            }
+
+            // Coerce argument to parameter type if needed (e.g., string -> string?)
+            let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
+                self.coerce_to_type(compiled, param_type_id)?
+            } else {
+                compiled
+            };
+
+            let arg_value = self.coerce_arg_to_sig_type(
+                compiled,
+                expected_types.get(i + user_param_offset).copied(),
+            );
+            args.push(arg_value);
+        }
+
+        // If there are fewer provided args than expected, compile default expressions
+        let total_user_args = args.len() - user_param_offset;
+        let expected_user_params = expected_types.len() - user_param_offset;
+        if total_user_args < expected_user_params
+            && let Some(name_id) = name_id
+        {
+            let provided_args = total_user_args;
+            let (default_args, rc_owned) =
+                self.compile_default_args_with_types(name_id, provided_args, param_type_ids)?;
+            args.extend(default_args);
+            rc_temp_args.extend(rc_owned);
+        }
+        Ok(())
+    }
+
+    /// Narrow/extend integer types or promote/demote floats to match the
+    /// Cranelift signature parameter type.
+    fn coerce_arg_to_sig_type(
+        &mut self,
+        compiled: CompiledValue,
+        expected_ty: Option<Type>,
+    ) -> Value {
+        let Some(expected) = expected_ty else {
+            return compiled.value;
+        };
+        if compiled.ty.is_int() && expected.is_int() && expected.bits() < compiled.ty.bits() {
+            self.builder.ins().ireduce(expected, compiled.value)
+        } else if compiled.ty.is_int() && expected.is_int() && expected.bits() > compiled.ty.bits()
+        {
+            sextend_const(self.builder, expected, compiled.value)
+        } else if compiled.ty == types::F32 && expected == types::F64 {
+            self.builder.ins().fpromote(types::F64, compiled.value)
+        } else if compiled.ty == types::F64 && expected == types::F32 {
+            self.builder.ins().fdemote(types::F32, compiled.value)
+        } else {
+            compiled.value
+        }
     }
 
     fn compile_default_args_with_types(

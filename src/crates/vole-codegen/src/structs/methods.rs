@@ -34,6 +34,16 @@ pub enum ArgSource<'a> {
     Vir(&'a [VirRef]),
 }
 
+impl ArgSource<'_> {
+    /// Number of arguments in this source.
+    pub fn len(&self) -> usize {
+        match self {
+            ArgSource::Ast(args) => args.len(),
+            ArgSource::Vir(refs) => refs.len(),
+        }
+    }
+}
+
 /// Source of a method call: either an AST `MethodCallExpr` or VIR-native fields.
 ///
 /// VIR method calls carry the pre-lowered receiver and args as `VirExpr` nodes

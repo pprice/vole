@@ -14,6 +14,7 @@ use vole_sema::implement_registry::{TypeMappingEntry, TypeMappingKind};
 use vole_sema::type_arena::TypeId;
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::structs::methods::ArgSource;
 use crate::types::{CompiledValue, native_type_to_cranelift};
 
 use super::super::context::Cg;
@@ -414,7 +415,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         module_path: &str,
         intrinsic_key: &str,
-        arg_source: &crate::structs::methods::ArgSource<'_>,
+        arg_source: &ArgSource<'_>,
         return_type_id: TypeId,
         expected_param_type_ids: Option<&[TypeId]>,
     ) -> CodegenResult<CompiledValue> {
@@ -425,10 +426,7 @@ impl Cg<'_, '_, '_> {
                     format!("\"{intrinsic_key}\" (add handler in codegen/intrinsics.rs)"),
                 )
             })?;
-            let arg_count = match arg_source {
-                crate::structs::methods::ArgSource::Ast(a) => a.len(),
-                crate::structs::methods::ArgSource::Vir(r) => r.len(),
-            };
+            let arg_count = arg_source.len();
             let mut typed_args = Vec::with_capacity(arg_count);
             for index in 0..arg_count {
                 let compiled = if let Some(param_type_ids) = expected_param_type_ids
@@ -550,7 +548,7 @@ impl Cg<'_, '_, '_> {
 
         self.interface_dispatch_call_args_by_type_def_id(
             obj,
-            &crate::structs::methods::ArgSource::Ast(args),
+            &ArgSource::Ast(args),
             iface_type_def_id,
             method_name_id,
             func_type_id,
@@ -626,7 +624,7 @@ impl Cg<'_, '_, '_> {
                 .call_func_id_impl(
                     func_key,
                     func_id,
-                    call,
+                    &ArgSource::Ast(&call.args),
                     Some(original_name),
                     Some(param_type_ids),
                     self.get_expr_type_substituted(&call_expr_id),
