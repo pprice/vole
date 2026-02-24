@@ -327,8 +327,8 @@ impl Compiler<'_> {
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
 
-            // VIR path preferred; AST fallback for test-scoped generic monomorphs
-            // not yet lowered (build_generic_func_map doesn't recurse into Decl::Tests)
+            // VIR path preferred; AST fallback if VIR lowering was skipped
+            // (e.g. body_has_sema_data returned false for a module monomorph)
             if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
                 compile_function_inner_with_vir(
                     builder,

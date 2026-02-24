@@ -83,40 +83,26 @@ impl Analyzer {
         program: &Program,
         interner: &Interner,
     ) {
-        // Build map of generic function names to their ASTs
+        // Build map of generic function names to their ASTs.
         // Include both explicit generics (type_params in AST) and implicit generics
-        // (structural type params that create generic_info in entity registry)
-        let generic_func_asts: FxHashMap<NameId, &FuncDecl> = program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Function(func) = decl {
-                    let name_id = self.name_table_mut().intern(
-                        self.module.current_module,
-                        &[func.name],
-                        interner,
-                    );
+        // (structural type params that create generic_info in entity registry).
+        // Recurses into Decl::Tests blocks so that test-scoped generic functions
+        // are available for monomorphized body analysis.
+        let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
+        self.collect_generic_func_asts(&program.declarations, interner, &mut generic_func_asts);
 
-                    // Check for explicit type params OR implicit generic_info
-                    let has_explicit_type_params = !func.type_params.is_empty();
-                    let has_implicit_generic_info = self
-                        .entity_registry()
-                        .function_by_name(name_id)
-                        .map(|func_id| {
-                            self.entity_registry()
-                                .get_function(func_id)
-                                .generic_info
-                                .is_some()
-                        })
-                        .unwrap_or(false);
-
-                    if has_explicit_type_params || has_implicit_generic_info {
-                        return Some((name_id, func));
-                    }
-                }
-                None
-            })
+        // Make test-scoped types visible to the resolver during monomorph body
+        // analysis.  Virtual modules hold types defined inside tests blocks
+        // (e.g., `TbgHolder`); pushing them to `parent_modules` lets the
+        // resolver find them when analyzing test-scoped generic function bodies.
+        let virtual_module_ids: Vec<ModuleId> = self
+            .results
+            .tests_virtual_modules
+            .values()
+            .copied()
             .collect();
+        let num_virtual = virtual_module_ids.len();
+        self.env.parent_modules.extend(virtual_module_ids);
 
         // Track which instances we've already analyzed
         let mut analyzed_keys: HashSet<MonomorphKey> = HashSet::new();
@@ -159,6 +145,55 @@ impl Analyzer {
 
                 // Not in the main program — try module programs
                 self.analyze_module_monomorph_body(&instance);
+            }
+        }
+
+        // Remove the virtual modules we added for test-scoped type resolution.
+        let new_len = self.env.parent_modules.len() - num_virtual;
+        self.env.parent_modules.truncate(new_len);
+    }
+
+    /// Recursively collect generic function ASTs from declarations.
+    ///
+    /// Walks `Decl::Function` entries and recurses into `Decl::Tests` blocks
+    /// so that test-scoped generic functions are included in the map.
+    /// Test-scoped functions are registered under the program's module_id,
+    /// so the same `current_module` is used for name resolution.
+    fn collect_generic_func_asts<'a>(
+        &mut self,
+        decls: &'a [Decl],
+        interner: &Interner,
+        map: &mut FxHashMap<NameId, &'a FuncDecl>,
+    ) {
+        for decl in decls {
+            match decl {
+                Decl::Function(func) => {
+                    let name_id = self.name_table_mut().intern(
+                        self.module.current_module,
+                        &[func.name],
+                        interner,
+                    );
+
+                    let has_explicit_type_params = !func.type_params.is_empty();
+                    let has_implicit_generic_info = self
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+
+                    if has_explicit_type_params || has_implicit_generic_info {
+                        map.insert(name_id, func);
+                    }
+                }
+                Decl::Tests(tests_decl) => {
+                    self.collect_generic_func_asts(&tests_decl.decls, interner, map);
+                }
+                _ => {}
             }
         }
     }

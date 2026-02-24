@@ -540,7 +540,9 @@ fn first_expr_node_id(stmt: &vole_frontend::ast::Stmt) -> Option<vole_identity::
 ///
 /// Includes both explicitly generic functions (those with type_params in AST)
 /// and implicitly generic functions (those with generic_info in entity
-/// registry, e.g. structural type params).
+/// registry, e.g. structural type params).  Recurses into `Decl::Tests`
+/// blocks so that test-scoped generic functions are also available for
+/// monomorphized VIR lowering.
 fn build_generic_func_map<'a>(
     program: &'a Program,
     interner: &Interner,
@@ -550,19 +552,39 @@ fn build_generic_func_map<'a>(
     let namer = NamerLookup::new(names, interner);
     let mut map = FxHashMap::default();
 
-    for decl in &program.declarations {
-        let Decl::Function(func) = decl else { continue };
-        // Only include generic functions (explicit type params)
-        if func.type_params.is_empty() {
-            continue;
-        }
-        let Some(name_id) = namer.function(module_id, func.name) else {
-            continue;
-        };
-        map.insert(name_id, func);
-    }
+    collect_generic_funcs(&program.declarations, &namer, module_id, &mut map);
 
     map
+}
+
+/// Recursively collect generic function ASTs from a slice of declarations.
+///
+/// Test-scoped functions are registered under the program's module_id (not the
+/// virtual test module), so we use the same `module_id` for name resolution
+/// regardless of nesting depth.
+fn collect_generic_funcs<'a>(
+    decls: &'a [Decl],
+    namer: &NamerLookup<'_>,
+    module_id: ModuleId,
+    map: &mut FxHashMap<NameId, &'a vole_frontend::FuncDecl>,
+) {
+    for decl in decls {
+        match decl {
+            Decl::Function(func) => {
+                if func.type_params.is_empty() {
+                    continue;
+                }
+                let Some(name_id) = namer.function(module_id, func.name) else {
+                    continue;
+                };
+                map.insert(name_id, func);
+            }
+            Decl::Tests(tests_decl) => {
+                collect_generic_funcs(&tests_decl.decls, namer, module_id, map);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Lower non-generic functions from imported modules to VIR.
