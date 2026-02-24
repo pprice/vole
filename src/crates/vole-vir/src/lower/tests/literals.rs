@@ -11,8 +11,11 @@ use crate::lower::expr::lower_expr;
 fn lower_expr_bool_literal() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = make_bool_expr();
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::BoolLiteral(true) => {}
@@ -24,12 +27,15 @@ fn lower_expr_bool_literal() {
 fn lower_expr_int_literal_no_type() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::IntLiteral(42, None),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     // No type in NodeMap -> TypeId::UNKNOWN
     match vir_ref.as_ref() {
@@ -44,14 +50,17 @@ fn lower_expr_int_literal_no_type() {
 fn lower_expr_int_literal_with_type() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I32);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: node_id,
         kind: ExprKind::IntLiteral(99, None),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::IntLiteral { value: 99, ty } => {
@@ -65,14 +74,17 @@ fn lower_expr_int_literal_with_type() {
 fn lower_expr_int_literal_i128_becomes_wide() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I128);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: node_id,
         kind: ExprKind::IntLiteral(42, None),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::WideLiteral { low, high, ty } => {
@@ -88,14 +100,17 @@ fn lower_expr_int_literal_i128_becomes_wide() {
 fn lower_expr_negative_int_i128_sign_extends() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I128);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: node_id,
         kind: ExprKind::IntLiteral(-1, None),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::WideLiteral { low, high, ty } => {
@@ -112,14 +127,17 @@ fn lower_expr_negative_int_i128_sign_extends() {
 fn lower_expr_float_literal() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::F64);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: node_id,
         kind: ExprKind::FloatLiteral(3.14, None),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::FloatLiteral { value, ty } => {
@@ -134,6 +152,9 @@ fn lower_expr_float_literal() {
 fn lower_expr_grouping_strips_parens() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let inner = Expr {
         id: dummy_node_id(),
         kind: ExprKind::BoolLiteral(false),
@@ -144,7 +165,7 @@ fn lower_expr_grouping_strips_parens() {
         kind: ExprKind::Grouping(Box::new(inner)),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::BoolLiteral(false) => {}
@@ -156,12 +177,15 @@ fn lower_expr_grouping_strips_parens() {
 fn lower_expr_identifier_becomes_local_load() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(Symbol::UNKNOWN),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::LocalLoad { name, ty } => {
@@ -180,16 +204,19 @@ fn lower_expr_identifier_becomes_local_load() {
 fn lower_expr_string_literal() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::StringLiteral("hello world".to_string()),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::StringLiteral(sym) => {
-            assert_eq!(interner.resolve(*sym), "hello world");
+            assert_eq!(ctx.interner.resolve(*sym), "hello world");
         }
         other => panic!("expected StringLiteral, got {other:?}"),
     }
@@ -199,16 +226,19 @@ fn lower_expr_string_literal() {
 fn lower_expr_string_literal_empty() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::StringLiteral(String::new()),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::StringLiteral(sym) => {
-            assert_eq!(interner.resolve(*sym), "");
+            assert_eq!(ctx.interner.resolve(*sym), "");
         }
         other => panic!("expected StringLiteral for empty string, got {other:?}"),
     }
@@ -218,6 +248,9 @@ fn lower_expr_string_literal_empty() {
 fn lower_expr_string_literal_deduplicates() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr1 = Expr {
         id: dummy_node_id(),
         kind: ExprKind::StringLiteral("same".to_string()),
@@ -228,8 +261,8 @@ fn lower_expr_string_literal_deduplicates() {
         kind: ExprKind::StringLiteral("same".to_string()),
         span: dummy_span(),
     };
-    let vir1 = lower_expr(&expr1, &node_map, &mut interner);
-    let vir2 = lower_expr(&expr2, &node_map, &mut interner);
+    let vir1 = lower_expr(&expr1, &mut ctx);
+    let vir2 = lower_expr(&expr2, &mut ctx);
 
     // Both should produce the same Symbol
     let sym1 = match vir1.as_ref() {

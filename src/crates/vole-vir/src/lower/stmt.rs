@@ -2,15 +2,14 @@
 //
 // Statement lowering: AST `Stmt` → VIR `VirStmt`.
 
-use vole_frontend::Interner;
 use vole_frontend::ast::{LetInit, LetStmt, Stmt};
 use vole_identity::TypeId;
 use vole_sema::IterableKind;
-use vole_sema::node_map::NodeMap;
 
 use crate::expr::VirExpr;
 use crate::stmt::{VirFor, VirIterKind, VirStmt};
 
+use super::LoweringCtx;
 use super::expr::lower_expr;
 use super::lower_stmts;
 
@@ -21,27 +20,24 @@ use super::lower_stmts;
 ///
 /// Each variant is listed explicitly so that adding a new `Stmt` variant
 /// causes a compile error rather than silently falling through a wildcard.
-pub(crate) fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interner) -> VirStmt {
+pub(crate) fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     match stmt {
         Stmt::Expr(expr_stmt) => VirStmt::Expr {
-            value: lower_expr(&expr_stmt.expr, node_map, interner),
+            value: lower_expr(&expr_stmt.expr, ctx),
         },
-        Stmt::While(while_stmt) => lower_while(while_stmt, node_map, interner),
-        Stmt::If(if_stmt) => lower_if_stmt(if_stmt, node_map, interner),
+        Stmt::While(while_stmt) => lower_while(while_stmt, ctx),
+        Stmt::If(if_stmt) => lower_if_stmt(if_stmt, ctx),
         Stmt::Break(_) => VirStmt::Break,
         Stmt::Continue(_) => VirStmt::Continue,
-        Stmt::Raise(raise_stmt) => lower_raise(raise_stmt, node_map, interner),
-        Stmt::Let(let_stmt) => lower_let(let_stmt, node_map, interner),
-        Stmt::For(for_stmt) => lower_for(for_stmt, node_map, interner),
+        Stmt::Raise(raise_stmt) => lower_raise(raise_stmt, ctx),
+        Stmt::Let(let_stmt) => lower_let(let_stmt, ctx),
+        Stmt::For(for_stmt) => lower_for(for_stmt, ctx),
         Stmt::Return(ret) => {
-            let value = ret
-                .value
-                .as_ref()
-                .map(|v| lower_expr(v, node_map, interner));
+            let value = ret.value.as_ref().map(|v| lower_expr(v, ctx));
             VirStmt::Return { value }
         }
         Stmt::LetTuple(let_tuple) => {
-            let value = lower_expr(&let_tuple.init, node_map, interner);
+            let value = lower_expr(&let_tuple.init, ctx);
             VirStmt::LetTuple {
                 pattern: Box::new(let_tuple.pattern.clone()),
                 value,
@@ -53,13 +49,9 @@ pub(crate) fn lower_stmt(stmt: &Stmt, node_map: &NodeMap, interner: &mut Interne
 /// Lower a while statement to `VirStmt::While`.
 ///
 /// The condition expression and body statements are recursively lowered.
-fn lower_while(
-    while_stmt: &vole_frontend::ast::WhileStmt,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirStmt {
-    let cond = lower_expr(&while_stmt.condition, node_map, interner);
-    let body = lower_stmts(&while_stmt.body.stmts, node_map, interner);
+fn lower_while(while_stmt: &vole_frontend::ast::WhileStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
+    let cond = lower_expr(&while_stmt.condition, ctx);
+    let body = lower_stmts(&while_stmt.body.stmts, ctx);
     VirStmt::While { cond, body }
 }
 
@@ -67,15 +59,11 @@ fn lower_while(
 ///
 /// The error name and field value expressions are extracted from the AST.
 /// Field values are recursively lowered through `lower_expr`.
-fn lower_raise(
-    raise_stmt: &vole_frontend::ast::RaiseStmt,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirStmt {
+fn lower_raise(raise_stmt: &vole_frontend::ast::RaiseStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     let fields = raise_stmt
         .fields
         .iter()
-        .map(|f| (f.name, lower_expr(&f.value, node_map, interner)))
+        .map(|f| (f.name, lower_expr(&f.value, ctx)))
         .collect();
     VirStmt::Raise {
         error_name: raise_stmt.error_name,
@@ -93,7 +81,7 @@ fn lower_raise(
 ///    if one was provided in the source — this is the type the codegen
 ///    should coerce to.
 /// 2. Otherwise, the sema-computed expression type.
-fn lower_let(let_stmt: &LetStmt, node_map: &NodeMap, interner: &mut Interner) -> VirStmt {
+fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     let init_expr = match &let_stmt.init {
         LetInit::Expr(e) => e,
         // Type aliases produce no runtime code — skip entirely.
@@ -102,12 +90,15 @@ fn lower_let(let_stmt: &LetStmt, node_map: &NodeMap, interner: &mut Interner) ->
         }
     };
 
-    let value = lower_expr(init_expr, node_map, interner);
+    let value = lower_expr(init_expr, ctx);
 
     // Determine the binding type: use declared type if annotated, else the
     // init expression's inferred type.
-    let declared_ty = node_map.get_declared_var_type(init_expr.id);
-    let expr_ty = node_map.get_type(init_expr.id).unwrap_or(TypeId::UNKNOWN);
+    let declared_ty = ctx.node_map.get_declared_var_type(init_expr.id);
+    let expr_ty = ctx
+        .node_map
+        .get_type(init_expr.id)
+        .unwrap_or(TypeId::UNKNOWN);
     let ty = declared_ty.unwrap_or(expr_ty);
 
     VirStmt::Let {
@@ -123,20 +114,16 @@ fn lower_let(let_stmt: &LetStmt, node_map: &NodeMap, interner: &mut Interner) ->
 /// Looks up the `IterableKind` from the NodeMap (annotated by sema) and
 /// maps it to a `VirIterKind`.  The iterable expression, loop body, and
 /// iteration variable are recursively lowered.
-fn lower_for(
-    for_stmt: &vole_frontend::ast::ForStmt,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirStmt {
-    let iterable = lower_expr(&for_stmt.iterable, node_map, interner);
-    let body = lower_stmts(&for_stmt.body.stmts, node_map, interner);
+fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
+    let iterable = lower_expr(&for_stmt.iterable, ctx);
+    let body = lower_stmts(&for_stmt.body.stmts, ctx);
 
-    let sema_kind = node_map.get_iterable_kind(for_stmt.iterable.id);
+    let sema_kind = ctx.node_map.get_iterable_kind(for_stmt.iterable.id);
 
     let kind = match sema_kind {
         Some(IterableKind::Range) => VirIterKind::Range,
         Some(IterableKind::Array { elem_type }) => {
-            let union_storage = node_map.get_union_storage_kind(for_stmt.iterable.id);
+            let union_storage = ctx.node_map.get_union_storage_kind(for_stmt.iterable.id);
             VirIterKind::Array {
                 elem_type,
                 union_storage,
@@ -184,17 +171,13 @@ fn lower_for(
 ///
 /// Vole's VIR has no separate `VirStmt::If` — statement-level `if` is
 /// wrapped as a void-typed `VirExpr::If` inside `VirStmt::Expr`.
-fn lower_if_stmt(
-    if_stmt: &vole_frontend::ast::IfStmt,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirStmt {
-    let cond = lower_expr(&if_stmt.condition, node_map, interner);
-    let then_body = lower_stmts(&if_stmt.then_branch.stmts, node_map, interner);
+fn lower_if_stmt(if_stmt: &vole_frontend::ast::IfStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
+    let cond = lower_expr(&if_stmt.condition, ctx);
+    let then_body = lower_stmts(&if_stmt.then_branch.stmts, ctx);
     let else_body = if_stmt
         .else_branch
         .as_ref()
-        .map(|block| lower_stmts(&block.stmts, node_map, interner));
+        .map(|block| lower_stmts(&block.stmts, ctx));
     VirStmt::Expr {
         value: Box::new(VirExpr::If {
             cond,

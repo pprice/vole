@@ -14,6 +14,9 @@ use vole_frontend::NodeId;
 use vole_frontend::ast::{Block, Expr, ExprKind, FuncBody, FuncDecl, Stmt};
 use vole_identity::{FunctionId, ModuleId, NameId, Span, Symbol, TypeId};
 use vole_sema::node_map::NodeMap;
+use vole_sema::{EntityRegistry, TypeArena};
+
+use super::LoweringCtx;
 
 fn dummy_span() -> Span {
     Span::default()
@@ -92,4 +95,29 @@ fn empty_node_map() -> NodeMap {
 
 fn test_interner() -> Interner {
     Interner::new()
+}
+
+fn test_type_arena() -> TypeArena {
+    TypeArena::new()
+}
+
+fn test_entities() -> EntityRegistry {
+    EntityRegistry::default()
+}
+
+/// Create a `LoweringCtx` from test fixtures.
+///
+/// This is a convenience helper that bundles the common test parameters.
+fn make_ctx<'a>(
+    node_map: &'a NodeMap,
+    interner: &'a mut Interner,
+    type_arena: &'a TypeArena,
+    entities: &'a EntityRegistry,
+) -> LoweringCtx<'a> {
+    LoweringCtx {
+        node_map,
+        interner,
+        type_arena,
+        entities,
+    }
 }

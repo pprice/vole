@@ -14,6 +14,8 @@ fn lower_empty_block_function() {
     let func = make_block_func(vec![]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let ret_ty = dummy_type_id();
 
     let vir = lower_function(
@@ -24,6 +26,8 @@ fn lower_empty_block_function() {
         ret_ty,
         &node_map,
         &mut interner,
+        &type_arena,
+        &entities,
     );
 
     assert_eq!(vir.id, dummy_func_id());
@@ -38,6 +42,8 @@ fn lower_block_function_lowers_control_flow() {
     let func = make_block_func(vec![make_break_stmt(), make_continue_stmt()]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let ret_ty = dummy_type_id();
 
     let vir = lower_function(
@@ -48,6 +54,8 @@ fn lower_block_function_lowers_control_flow() {
         ret_ty,
         &node_map,
         &mut interner,
+        &type_arena,
+        &entities,
     );
 
     assert_eq!(vir.body.stmts.len(), 2);
@@ -68,6 +76,8 @@ fn lower_expr_body_function_sets_trailing() {
     let func = make_expr_func(make_bool_expr());
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let ret_ty = dummy_type_id();
 
     let vir = lower_function(
@@ -78,6 +88,8 @@ fn lower_expr_body_function_sets_trailing() {
         ret_ty,
         &node_map,
         &mut interner,
+        &type_arena,
+        &entities,
     );
 
     assert!(vir.body.stmts.is_empty());
@@ -95,6 +107,8 @@ fn lower_preserves_params_and_return_type() {
     let func = make_block_func(vec![]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let ret_ty = dummy_type_id();
     let param_a = TypeId::from_raw(10);
     let param_b = TypeId::from_raw(20);
@@ -108,6 +122,8 @@ fn lower_preserves_params_and_return_type() {
         ret_ty,
         &node_map,
         &mut interner,
+        &type_arena,
+        &entities,
     );
 
     assert_eq!(vir.params.len(), 2);
@@ -120,8 +136,11 @@ fn lower_preserves_params_and_return_type() {
 fn lower_stmts_preserves_order() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmts = vec![make_break_stmt(), make_continue_stmt(), make_break_stmt()];
-    let body = lower_stmts(&stmts, &node_map, &mut interner);
+    let body = lower_stmts(&stmts, &mut ctx);
 
     assert_eq!(body.stmts.len(), 3);
     assert!(body.trailing.is_none());
@@ -148,6 +167,7 @@ fn lower_stmts_preserves_order() {
 #[test]
 fn lower_monomorphized_with_concrete_types() {
     let arena = TypeArena::new();
+    let entities = test_entities();
     let func = make_block_func(vec![make_break_stmt()]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -165,6 +185,7 @@ fn lower_monomorphized_with_concrete_types() {
         &arena,
         dummy_name_id(),
         &mut interner,
+        &entities,
     );
 
     assert_eq!(vir.name, "identity__mono_0");
@@ -177,6 +198,7 @@ fn lower_monomorphized_with_concrete_types() {
 #[test]
 fn lower_monomorphized_expr_body() {
     let arena = TypeArena::new();
+    let entities = test_entities();
     let func = make_expr_func(make_bool_expr());
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -192,6 +214,7 @@ fn lower_monomorphized_expr_body() {
         &arena,
         dummy_name_id(),
         &mut interner,
+        &entities,
     );
 
     assert_eq!(vir.name, "to_bool__mono_0");
@@ -204,6 +227,7 @@ fn lower_monomorphized_expr_body() {
 #[should_panic(expected = "param 0 still contains a type parameter")]
 fn lower_monomorphized_rejects_type_param_in_params() {
     let mut arena = TypeArena::new();
+    let entities = test_entities();
     let func = make_block_func(vec![]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -223,6 +247,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
         &arena,
         dummy_name_id(),
         &mut interner,
+        &entities,
     );
 }
 
@@ -230,6 +255,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
 #[should_panic(expected = "return type still contains a type parameter")]
 fn lower_monomorphized_rejects_type_param_in_return() {
     let mut arena = TypeArena::new();
+    let entities = test_entities();
     let func = make_block_func(vec![]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -247,6 +273,7 @@ fn lower_monomorphized_rejects_type_param_in_return() {
         &arena,
         dummy_name_id(),
         &mut interner,
+        &entities,
     );
 }
 
@@ -258,12 +285,15 @@ fn lower_monomorphized_rejects_type_param_in_return() {
 fn lower_stmt_expr_produces_vir_expr() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     use vole_frontend::ast::ExprStmt;
     let stmt = Stmt::Expr(ExprStmt {
         expr: make_bool_expr(),
         span: dummy_span(),
     });
-    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
+    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &mut ctx);
 
     match &vir_stmt {
         VirStmt::Expr { value } => match value.as_ref() {
@@ -279,6 +309,9 @@ fn lower_stmt_let_becomes_vir_let() {
     use vole_frontend::ast::{LetInit, LetStmt};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     // Let with Expr init is now lowered to VirStmt::Let
     let stmt = Stmt::Let(LetStmt {
         name: Symbol::UNKNOWN,
@@ -287,7 +320,7 @@ fn lower_stmt_let_becomes_vir_let() {
         init: LetInit::Expr(make_int_expr(42)),
         span: dummy_span(),
     });
-    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
+    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &mut ctx);
 
     match &vir_stmt {
         VirStmt::Let {
@@ -312,7 +345,10 @@ fn lower_stmt_let_type_alias_becomes_noop() {
     use vole_frontend::ast::{LetInit, LetStmt, TypeExpr, TypeExprKind};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let sym = interner.intern("Foo");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     // Let with TypeAlias init is a compile-time construct: lowers to Noop
     let stmt = Stmt::Let(LetStmt {
         name: Symbol::UNKNOWN,
@@ -324,7 +360,7 @@ fn lower_stmt_let_type_alias_becomes_noop() {
         }),
         span: dummy_span(),
     });
-    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &node_map, &mut interner);
+    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &mut ctx);
 
     match &vir_stmt {
         VirStmt::Noop => {}

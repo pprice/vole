@@ -16,6 +16,9 @@ use crate::lower::expr::lower_expr;
 fn lower_expr_unreachable() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Unreachable,
@@ -24,7 +27,7 @@ fn lower_expr_unreachable() {
             ..dummy_span()
         },
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Unreachable { line: 42 } => {}
@@ -36,6 +39,9 @@ fn lower_expr_unreachable() {
 fn lower_expr_unreachable_preserves_line() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Unreachable,
@@ -44,7 +50,7 @@ fn lower_expr_unreachable_preserves_line() {
             ..dummy_span()
         },
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Unreachable { line: 0 } => {}
@@ -56,12 +62,15 @@ fn lower_expr_unreachable_preserves_line() {
 fn lower_expr_import() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Import("std:math".to_string()),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Import { ty } => {
@@ -75,14 +84,17 @@ fn lower_expr_import() {
 fn lower_expr_import_with_type() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, dummy_type_id());
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: node_id,
         kind: ExprKind::Import("std:io".to_string()),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Import { ty } => {
@@ -97,6 +109,9 @@ fn lower_expr_type_literal() {
     use vole_frontend::ast::{PrimitiveType, TypeExpr, TypeExprKind};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::TypeLiteral(Box::new(TypeExpr {
@@ -105,7 +120,7 @@ fn lower_expr_type_literal() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::TypeLiteral => {}
@@ -117,6 +132,9 @@ fn lower_expr_type_literal() {
 fn lower_expr_range_exclusive() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Range(Box::new(vole_frontend::ast::RangeExpr {
@@ -126,7 +144,7 @@ fn lower_expr_range_exclusive() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Range {
@@ -153,6 +171,9 @@ fn lower_expr_range_exclusive() {
 fn lower_expr_range_inclusive() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Range(Box::new(vole_frontend::ast::RangeExpr {
@@ -162,7 +183,7 @@ fn lower_expr_range_inclusive() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Range {
@@ -193,6 +214,9 @@ fn lower_expr_assign_variable_becomes_local_store() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -201,7 +225,7 @@ fn lower_expr_assign_variable_becomes_local_store() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::LocalStore { name, value } => {
@@ -221,6 +245,9 @@ fn lower_expr_compound_assign_variable_desugars_to_store() {
     use vole_frontend::ast::{AssignTarget, CompoundAssignExpr, CompoundOp};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::CompoundAssign(Box::new(CompoundAssignExpr {
@@ -230,7 +257,7 @@ fn lower_expr_compound_assign_variable_desugars_to_store() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::LocalStore { name, value } => {
@@ -256,6 +283,9 @@ fn lower_expr_compound_assign_index_desugars_to_index_store() {
     use vole_frontend::ast::{AssignTarget, CompoundAssignExpr, CompoundOp};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::CompoundAssign(Box::new(CompoundAssignExpr {
@@ -268,7 +298,7 @@ fn lower_expr_compound_assign_index_desugars_to_index_store() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     // Desugars to: IndexStore { object, index, value: BinaryOp { Add, Index { .. }, 1 } }
     match vir_ref.as_ref() {
@@ -288,12 +318,15 @@ fn lower_expr_compound_assign_index_desugars_to_index_store() {
 fn lower_expr_array_literal_becomes_vir() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::ArrayLiteral(vec![make_int_expr(1), make_int_expr(2), make_int_expr(3)]),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::ArrayLiteral { elements, ty } => {
@@ -308,6 +341,9 @@ fn lower_expr_array_literal_becomes_vir() {
 fn lower_expr_repeat_literal_becomes_vir() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::RepeatLiteral {
@@ -316,7 +352,7 @@ fn lower_expr_repeat_literal_becomes_vir() {
         },
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::RepeatLiteral { element, count, ty } => {
@@ -341,6 +377,9 @@ fn lower_expr_call_becomes_vir_call() {
     use vole_frontend::ast::{CallArg, CallExpr};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let callee = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(Symbol::UNKNOWN),
@@ -354,7 +393,7 @@ fn lower_expr_call_becomes_vir_call() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     // Calls are lowered to VirExpr::Call with CallTarget::Unresolved.
     // The unresolved variant carries the original AST CallExpr so codegen
@@ -374,6 +413,9 @@ fn lower_expr_call_no_args_becomes_vir_call() {
     use vole_frontend::ast::CallExpr;
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let callee = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(Symbol::UNKNOWN),
@@ -387,7 +429,7 @@ fn lower_expr_call_no_args_becomes_vir_call() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Call { target, args, .. } => {
@@ -403,8 +445,11 @@ fn lower_expr_call_preserves_type() {
     use vole_frontend::ast::CallExpr;
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I64);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let callee = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(Symbol::UNKNOWN),
@@ -418,7 +463,7 @@ fn lower_expr_call_preserves_type() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     // The VirExpr::Call should carry the sema-computed type
     match vir_ref.as_ref() {

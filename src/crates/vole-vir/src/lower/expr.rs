@@ -5,11 +5,9 @@
 // Includes all expression helpers: literal, binary, unary, control flow, yield.
 
 use vole_frontend::Expr;
-use vole_frontend::Interner;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
 use vole_identity::TypeId;
 use vole_sema::StringConversion;
-use vole_sema::node_map::NodeMap;
 
 use crate::calls::CallTarget;
 use crate::expr::{
@@ -20,6 +18,7 @@ use crate::func::VirBody;
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
 
+use super::LoweringCtx;
 use super::lower_func_body;
 use super::stmt::lower_stmt;
 
@@ -27,13 +26,13 @@ use super::stmt::lower_stmt;
 ///
 /// All `ExprKind` variants are lowered to concrete `VirExpr` nodes.
 /// Grouping parentheses are stripped transparently.
-pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interner) -> VirRef {
+pub(crate) fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
     // Strip grouping parentheses — lower the inner expression directly.
     if let ExprKind::Grouping(inner) = &expr.kind {
-        return lower_expr(inner, node_map, interner);
+        return lower_expr(inner, ctx);
     }
 
-    let ty = node_map.get_type(expr.id).unwrap_or(TypeId::UNKNOWN);
+    let ty = ctx.node_map.get_type(expr.id).unwrap_or(TypeId::UNKNOWN);
     match &expr.kind {
         ExprKind::IntLiteral(value, _suffix) => lower_int_literal(*value, ty),
         ExprKind::FloatLiteral(value, _suffix) => {
@@ -41,57 +40,49 @@ pub(crate) fn lower_expr(expr: &Expr, node_map: &NodeMap, interner: &mut Interne
         }
         ExprKind::BoolLiteral(value) => Box::new(VirExpr::BoolLiteral(*value)),
         ExprKind::StringLiteral(s) => {
-            let sym = interner.intern(s);
+            let sym = ctx.interner.intern(s);
             Box::new(VirExpr::StringLiteral(sym))
         }
-        ExprKind::Binary(bin_expr) => lower_binary(bin_expr, expr, ty, node_map, interner),
-        ExprKind::Unary(un_expr) => lower_unary(un_expr, ty, node_map, interner),
-        ExprKind::Call(call_expr) => lower_call(call_expr, expr, ty, node_map, interner),
-        ExprKind::If(if_expr) => lower_if_expr(if_expr, ty, node_map, interner),
-        ExprKind::Block(block_expr) => lower_block_expr(block_expr, ty, node_map, interner),
-        ExprKind::Yield(yield_expr) => lower_yield(yield_expr, node_map, interner),
+        ExprKind::Binary(bin_expr) => lower_binary(bin_expr, expr, ty, ctx),
+        ExprKind::Unary(un_expr) => lower_unary(un_expr, ty, ctx),
+        ExprKind::Call(call_expr) => lower_call(call_expr, expr, ty, ctx),
+        ExprKind::If(if_expr) => lower_if_expr(if_expr, ty, ctx),
+        ExprKind::Block(block_expr) => lower_block_expr(block_expr, ty, ctx),
+        ExprKind::Yield(yield_expr) => lower_yield(yield_expr, ctx),
         ExprKind::Unreachable => Box::new(VirExpr::Unreachable {
             line: expr.span.line,
         }),
         ExprKind::Import(_) => Box::new(VirExpr::Import { ty }),
         ExprKind::TypeLiteral(_) => Box::new(VirExpr::TypeLiteral),
-        ExprKind::Range(range_expr) => lower_range(range_expr, node_map, interner),
+        ExprKind::Range(range_expr) => lower_range(range_expr, ctx),
         ExprKind::Identifier(sym) => Box::new(VirExpr::LocalLoad { name: *sym, ty }),
-        ExprKind::Assign(assign_expr) => lower_assign(assign_expr, expr, ty, node_map, interner),
-        ExprKind::FieldAccess(fa) => lower_field_access(fa, ty, node_map, interner),
-        ExprKind::Is(is_expr) => lower_is_check(is_expr, expr, ty, node_map, interner),
-        ExprKind::AsCast(as_cast) => lower_as_cast(as_cast, expr, ty, node_map, interner),
+        ExprKind::Assign(assign_expr) => lower_assign(assign_expr, expr, ty, ctx),
+        ExprKind::FieldAccess(fa) => lower_field_access(fa, ty, ctx),
+        ExprKind::Is(is_expr) => lower_is_check(is_expr, expr, ty, ctx),
+        ExprKind::AsCast(as_cast) => lower_as_cast(as_cast, expr, ty, ctx),
         // Remaining variants — explicitly listed so new ExprKind variants
         // cause a compile error rather than silently falling through.
         ExprKind::Grouping(_) => unreachable!("handled above"),
-        ExprKind::InterpolatedString(parts) => lower_interpolated_string(parts, node_map, interner),
-        ExprKind::CompoundAssign(compound) => {
-            lower_compound_assign(compound, expr, ty, node_map, interner)
-        }
-        ExprKind::Index(idx) => lower_index(idx, expr, ty, node_map, interner),
-        ExprKind::MetaAccess(meta_access) => {
-            lower_meta_access(meta_access, expr, ty, node_map, interner)
-        }
-        ExprKind::Lambda(lambda) => lower_lambda(lambda, expr, ty, node_map, interner),
-        ExprKind::NullCoalesce(nc) => lower_null_coalesce(nc, expr, ty, node_map, interner),
-        ExprKind::OptionalChain(oc) => lower_optional_chain(oc, expr, ty, node_map, interner),
-        ExprKind::OptionalMethodCall(omc) => {
-            lower_optional_method_call(omc, expr, ty, node_map, interner)
-        }
-        ExprKind::Try(inner) => lower_try(inner, ty, node_map, interner),
-        ExprKind::ArrayLiteral(elements) => lower_array_literal(elements, ty, node_map, interner),
-        ExprKind::StructLiteral(struct_lit) => {
-            lower_struct_literal(struct_lit, expr, ty, node_map, interner)
-        }
-        ExprKind::When(when_expr) => lower_when_expr(when_expr, ty, node_map, interner),
-        ExprKind::Match(match_expr) => lower_match_expr(match_expr, expr, ty, node_map, interner),
+        ExprKind::InterpolatedString(parts) => lower_interpolated_string(parts, ctx),
+        ExprKind::CompoundAssign(compound) => lower_compound_assign(compound, expr, ty, ctx),
+        ExprKind::Index(idx) => lower_index(idx, expr, ty, ctx),
+        ExprKind::MetaAccess(meta_access) => lower_meta_access(meta_access, expr, ty, ctx),
+        ExprKind::Lambda(lambda) => lower_lambda(lambda, expr, ty, ctx),
+        ExprKind::NullCoalesce(nc) => lower_null_coalesce(nc, expr, ty, ctx),
+        ExprKind::OptionalChain(oc) => lower_optional_chain(oc, expr, ty, ctx),
+        ExprKind::OptionalMethodCall(omc) => lower_optional_method_call(omc, expr, ty, ctx),
+        ExprKind::Try(inner) => lower_try(inner, ty, ctx),
+        ExprKind::ArrayLiteral(elements) => lower_array_literal(elements, ty, ctx),
+        ExprKind::StructLiteral(struct_lit) => lower_struct_literal(struct_lit, expr, ty, ctx),
+        ExprKind::When(when_expr) => lower_when_expr(when_expr, ty, ctx),
+        ExprKind::Match(match_expr) => lower_match_expr(match_expr, expr, ty, ctx),
         ExprKind::MethodCall(mc) => Box::new(VirExpr::MethodCall {
             method_call: mc.clone(),
             node_id: expr.id,
             ty,
         }),
         ExprKind::RepeatLiteral { element, count } => {
-            let elem = lower_expr(element, node_map, interner);
+            let elem = lower_expr(element, ctx);
             Box::new(VirExpr::RepeatLiteral {
                 element: elem,
                 count: *count,
@@ -141,19 +132,18 @@ fn lower_binary(
     bin_expr: &vole_frontend::ast::BinaryExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     // And/Or: desugar to VirExpr::If for short-circuit evaluation.
     if bin_expr.op == BinaryOp::And {
-        return lower_and(bin_expr, ty, node_map, interner);
+        return lower_and(bin_expr, ty, ctx);
     }
     if bin_expr.op == BinaryOp::Or {
-        return lower_or(bin_expr, ty, node_map, interner);
+        return lower_or(bin_expr, ty, ctx);
     }
 
-    let lhs = lower_expr(&bin_expr.left, node_map, interner);
-    let rhs = lower_expr(&bin_expr.right, node_map, interner);
+    let lhs = lower_expr(&bin_expr.left, ctx);
+    let rhs = lower_expr(&bin_expr.right, ctx);
 
     // String concatenation: result type is STRING and op is Add.
     if ty == TypeId::STRING && bin_expr.op == BinaryOp::Add {
@@ -176,11 +166,10 @@ fn lower_binary(
 fn lower_and(
     bin_expr: &vole_frontend::ast::BinaryExpr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let cond = lower_expr(&bin_expr.left, node_map, interner);
-    let then_val = lower_expr(&bin_expr.right, node_map, interner);
+    let cond = lower_expr(&bin_expr.left, ctx);
+    let then_val = lower_expr(&bin_expr.right, ctx);
     Box::new(VirExpr::If {
         cond,
         then_body: VirBody {
@@ -199,11 +188,10 @@ fn lower_and(
 fn lower_or(
     bin_expr: &vole_frontend::ast::BinaryExpr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let cond = lower_expr(&bin_expr.left, node_map, interner);
-    let else_val = lower_expr(&bin_expr.right, node_map, interner);
+    let cond = lower_expr(&bin_expr.left, ctx);
+    let else_val = lower_expr(&bin_expr.right, ctx);
     Box::new(VirExpr::If {
         cond,
         then_body: VirBody {
@@ -222,10 +210,9 @@ fn lower_or(
 fn lower_unary(
     un_expr: &vole_frontend::ast::UnaryExpr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let operand = lower_expr(&un_expr.operand, node_map, interner);
+    let operand = lower_expr(&un_expr.operand, ctx);
     let vir_op = map_unary_op(un_expr.op);
     Box::new(VirExpr::UnaryOp {
         op: vir_op,
@@ -241,17 +228,16 @@ fn lower_unary(
 fn lower_if_expr(
     if_expr: &vole_frontend::ast::IfExpr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let cond = lower_expr(&if_expr.condition, node_map, interner);
-    let then_val = lower_expr(&if_expr.then_branch, node_map, interner);
+    let cond = lower_expr(&if_expr.condition, ctx);
+    let then_val = lower_expr(&if_expr.then_branch, ctx);
     let then_body = VirBody {
         stmts: Vec::new(),
         trailing: Some(then_val),
     };
     let else_body = if_expr.else_branch.as_ref().map(|else_branch| {
-        let else_val = lower_expr(else_branch, node_map, interner);
+        let else_val = lower_expr(else_branch, ctx);
         VirBody {
             stmts: Vec::new(),
             trailing: Some(else_val),
@@ -272,18 +258,17 @@ fn lower_if_expr(
 fn lower_block_expr(
     block_expr: &vole_frontend::ast::BlockExpr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     let stmts: Vec<VirStmt> = block_expr
         .stmts
         .iter()
-        .map(|s| lower_stmt(s, node_map, interner))
+        .map(|s| lower_stmt(s, ctx))
         .collect();
     let trailing = block_expr
         .trailing_expr
         .as_ref()
-        .map(|e| lower_expr(e, node_map, interner));
+        .map(|e| lower_expr(e, ctx));
     Box::new(VirExpr::Block {
         stmts,
         trailing,
@@ -294,12 +279,8 @@ fn lower_block_expr(
 /// Lower a yield expression to `VirExpr::Yield`.
 ///
 /// The yielded value is recursively lowered via `lower_expr`.
-fn lower_yield(
-    yield_expr: &vole_frontend::ast::YieldExpr,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirRef {
-    let value = lower_expr(&yield_expr.value, node_map, interner);
+fn lower_yield(yield_expr: &vole_frontend::ast::YieldExpr, ctx: &mut LoweringCtx<'_>) -> VirRef {
+    let value = lower_expr(&yield_expr.value, ctx);
     Box::new(VirExpr::Yield { value })
 }
 
@@ -330,13 +311,9 @@ pub(crate) fn map_binary_op(op: BinaryOp) -> VirBinOp {
 /// Lower a range expression to `VirExpr::Range`.
 ///
 /// Both `start` and `end` sub-expressions are recursively lowered.
-fn lower_range(
-    range_expr: &vole_frontend::ast::RangeExpr,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirRef {
-    let start = lower_expr(&range_expr.start, node_map, interner);
-    let end = lower_expr(&range_expr.end, node_map, interner);
+fn lower_range(range_expr: &vole_frontend::ast::RangeExpr, ctx: &mut LoweringCtx<'_>) -> VirRef {
+    let start = lower_expr(&range_expr.start, ctx);
+    let end = lower_expr(&range_expr.end, ctx);
     Box::new(VirExpr::Range {
         start,
         end,
@@ -354,17 +331,16 @@ fn lower_assign(
     assign_expr: &vole_frontend::ast::AssignExpr,
     expr: &Expr,
     _ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     match &assign_expr.target {
         vole_frontend::AssignTarget::Variable(sym) => {
-            let value = lower_expr(&assign_expr.value, node_map, interner);
+            let value = lower_expr(&assign_expr.value, ctx);
             Box::new(VirExpr::LocalStore { name: *sym, value })
         }
         vole_frontend::AssignTarget::Field { object, field, .. } => {
-            let obj = lower_expr(object, node_map, interner);
-            let value = lower_expr(&assign_expr.value, node_map, interner);
+            let obj = lower_expr(object, ctx);
+            let value = lower_expr(&assign_expr.value, ctx);
             Box::new(VirExpr::FieldStore {
                 object: obj,
                 field: *field,
@@ -373,10 +349,10 @@ fn lower_assign(
             })
         }
         vole_frontend::AssignTarget::Index { object, index } => {
-            let obj = lower_expr(object, node_map, interner);
-            let idx = lower_expr(index, node_map, interner);
-            let value = lower_expr(&assign_expr.value, node_map, interner);
-            let union_storage = node_map.get_union_storage_kind(expr.id);
+            let obj = lower_expr(object, ctx);
+            let idx = lower_expr(index, ctx);
+            let value = lower_expr(&assign_expr.value, ctx);
+            let union_storage = ctx.node_map.get_union_storage_kind(expr.id);
             Box::new(VirExpr::IndexStore {
                 object: obj,
                 index: idx,
@@ -385,7 +361,7 @@ fn lower_assign(
             })
         }
         // Discard target `_ = expr`: just evaluate the expression for side effects.
-        vole_frontend::AssignTarget::Discard => lower_expr(&assign_expr.value, node_map, interner),
+        vole_frontend::AssignTarget::Discard => lower_expr(&assign_expr.value, ctx),
     }
 }
 
@@ -411,10 +387,9 @@ fn lower_compound_assign(
     compound: &vole_frontend::ast::CompoundAssignExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let rhs = lower_expr(&compound.value, node_map, interner);
+    let rhs = lower_expr(&compound.value, ctx);
     let binary_op = map_binary_op(compound.op.to_binary_op());
 
     match &compound.target {
@@ -433,8 +408,8 @@ fn lower_compound_assign(
             })
         }
         vole_frontend::AssignTarget::Field { object, field, .. } => {
-            let obj_for_load = lower_expr(object, node_map, interner);
-            let obj_for_store = lower_expr(object, node_map, interner);
+            let obj_for_load = lower_expr(object, ctx);
+            let obj_for_store = lower_expr(object, ctx);
             let load = Box::new(VirExpr::FieldLoad {
                 object: obj_for_load,
                 field: *field,
@@ -456,11 +431,11 @@ fn lower_compound_assign(
             })
         }
         vole_frontend::AssignTarget::Index { object, index } => {
-            let obj_for_load = lower_expr(object, node_map, interner);
-            let idx_for_load = lower_expr(index, node_map, interner);
-            let obj_for_store = lower_expr(object, node_map, interner);
-            let idx_for_store = lower_expr(index, node_map, interner);
-            let union_storage = node_map.get_union_storage_kind(expr.id);
+            let obj_for_load = lower_expr(object, ctx);
+            let idx_for_load = lower_expr(index, ctx);
+            let obj_for_store = lower_expr(object, ctx);
+            let idx_for_store = lower_expr(index, ctx);
+            let union_storage = ctx.node_map.get_union_storage_kind(expr.id);
             let load = Box::new(VirExpr::Index {
                 object: obj_for_load,
                 index: idx_for_load,
@@ -492,14 +467,13 @@ fn lower_compound_assign(
 ///
 /// The object sub-expression is recursively lowered.  Storage resolution
 /// (`Direct` vs `Heap`) is deferred to codegen via `FieldStorage::ByName`
-/// because `TypeArena` is not available in the lowering context.
+/// because field layout is not yet resolved during lowering.
 fn lower_field_access(
     fa: &vole_frontend::ast::FieldAccessExpr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let object = lower_expr(&fa.object, node_map, interner);
+    let object = lower_expr(&fa.object, ctx);
     Box::new(VirExpr::FieldLoad {
         object,
         field: fa.field,
@@ -517,16 +491,18 @@ fn lower_is_check(
     is_expr: &vole_frontend::ast::IsExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let sema_result = node_map.get_is_check_result(expr.id).unwrap_or_else(|| {
-        panic!(
-            "VIR lower: missing sema is_check_result for NodeId {:?} (line {})",
-            expr.id, expr.span.line
-        )
-    });
-    let value = lower_expr(&is_expr.value, node_map, interner);
+    let sema_result = ctx
+        .node_map
+        .get_is_check_result(expr.id)
+        .unwrap_or_else(|| {
+            panic!(
+                "VIR lower: missing sema is_check_result for NodeId {:?} (line {})",
+                expr.id, expr.span.line
+            )
+        });
+    let value = lower_expr(&is_expr.value, ctx);
     let vir_result = convert_is_check_result(sema_result);
     Box::new(VirExpr::IsCheck {
         value,
@@ -544,16 +520,18 @@ fn lower_as_cast(
     as_cast: &vole_frontend::ast::AsCastExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let sema_result = node_map.get_is_check_result(expr.id).unwrap_or_else(|| {
-        panic!(
-            "VIR lower: missing sema is_check_result for as_cast NodeId {:?} (line {})",
-            expr.id, expr.span.line
-        )
-    });
-    let value = lower_expr(&as_cast.value, node_map, interner);
+    let sema_result = ctx
+        .node_map
+        .get_is_check_result(expr.id)
+        .unwrap_or_else(|| {
+            panic!(
+                "VIR lower: missing sema is_check_result for as_cast NodeId {:?} (line {})",
+                expr.id, expr.span.line
+            )
+        });
+    let value = lower_expr(&as_cast.value, ctx);
     let kind = match as_cast.kind {
         vole_frontend::ast::AsCastKind::Safe => AsCastKind::Checked,
         vole_frontend::ast::AsCastKind::Unsafe => AsCastKind::Unchecked,
@@ -585,18 +563,15 @@ fn convert_is_check_result(sema: vole_sema::IsCheckResult) -> IsCheckResult {
 /// Each part is lowered to a `VirStringPart`: literal fragments become
 /// `VirStringPart::Literal`, and expression fragments carry the
 /// sema-annotated `StringConversion` so codegen never re-detects types.
-fn lower_interpolated_string(
-    parts: &[StringPart],
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirRef {
+fn lower_interpolated_string(parts: &[StringPart], ctx: &mut LoweringCtx<'_>) -> VirRef {
     let vir_parts: Vec<VirStringPart> = parts
         .iter()
         .map(|part| match part {
-            StringPart::Literal(s) => VirStringPart::Literal(interner.intern(s)),
+            StringPart::Literal(s) => VirStringPart::Literal(ctx.interner.intern(s)),
             StringPart::Expr(expr) => {
-                let value = lower_expr(expr, node_map, interner);
-                let conversion = node_map
+                let value = lower_expr(expr, ctx);
+                let conversion = ctx
+                    .node_map
                     .get_string_conversion(expr.id)
                     .cloned()
                     .unwrap_or(StringConversion::Identity);
@@ -616,12 +591,11 @@ fn lower_index(
     idx: &vole_frontend::ast::IndexExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let object = lower_expr(&idx.object, node_map, interner);
-    let index = lower_expr(&idx.index, node_map, interner);
-    let union_storage = node_map.get_union_storage_kind(expr.id);
+    let object = lower_expr(&idx.object, ctx);
+    let index = lower_expr(&idx.index, ctx);
+    let union_storage = ctx.node_map.get_union_storage_kind(expr.id);
     Box::new(VirExpr::Index {
         object,
         index,
@@ -643,12 +617,11 @@ fn lower_meta_access(
     meta_access: &vole_frontend::ast::MetaAccessExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     use vole_sema::node_map::MetaAccessKind;
 
-    let Some(meta_kind) = node_map.get_meta_access(expr.id) else {
+    let Some(meta_kind) = ctx.node_map.get_meta_access(expr.id) else {
         panic!(
             "VIR lower: missing sema meta_access for NodeId {:?} (line {})",
             expr.id, expr.span.line
@@ -666,9 +639,9 @@ fn lower_meta_access(
                     // the object so codegen can inspect it for monomorphized
                     // re-derivation. The object won't be compiled in the
                     // non-monomorphized Static path.
-                    Some(lower_expr(&meta_access.object, node_map, interner))
+                    Some(lower_expr(&meta_access.object, ctx))
                 }
-                _ => Some(lower_expr(&meta_access.object, node_map, interner)),
+                _ => Some(lower_expr(&meta_access.object, ctx)),
             };
             VirMetaKind::Static {
                 type_def: type_def_id,
@@ -676,11 +649,11 @@ fn lower_meta_access(
             }
         }
         MetaAccessKind::Dynamic => {
-            let value = lower_expr(&meta_access.object, node_map, interner);
+            let value = lower_expr(&meta_access.object, ctx);
             VirMetaKind::Dynamic { value }
         }
         MetaAccessKind::TypeParam { name_id } => {
-            let value = lower_expr(&meta_access.object, node_map, interner);
+            let value = lower_expr(&meta_access.object, ctx);
             VirMetaKind::TypeParam { name_id, value }
         }
     };
@@ -693,19 +666,19 @@ fn lower_meta_access(
 /// Extracts parameter names from the AST, lowers the body to VIR, and
 /// collects captures from sema's `LambdaAnalysis`.  Individual parameter
 /// types are derived by codegen from the function type `ty` at compile
-/// time (the lowering context does not have access to `TypeArena`).
+/// time.
 fn lower_lambda(
     lambda: &vole_frontend::ast::LambdaExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     let params: Vec<_> = lambda.params.iter().map(|p| p.name).collect();
-    let body = lower_func_body(&lambda.body, node_map, interner);
+    let body = lower_func_body(&lambda.body, ctx);
 
     // Extract captures from sema's lambda analysis.
-    let captures = node_map
+    let captures = ctx
+        .node_map
         .get_lambda_analysis(expr.id)
         .map(|analysis| {
             analysis
@@ -737,13 +710,12 @@ fn lower_null_coalesce(
     nc: &vole_frontend::ast::NullCoalesceExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let value = lower_expr(&nc.value, node_map, interner);
-    let default = lower_expr(&nc.default, node_map, interner);
+    let value = lower_expr(&nc.value, ctx);
+    let default = lower_expr(&nc.default, ctx);
     // The expression type from sema is the non-nil result type (T from T | nil).
-    let inner_type = node_map.get_type(expr.id).unwrap_or(ty);
+    let inner_type = ctx.node_map.get_type(expr.id).unwrap_or(ty);
     Box::new(VirExpr::NullCoalesce {
         value,
         default,
@@ -760,16 +732,15 @@ fn lower_optional_chain(
     oc: &vole_frontend::ast::OptionalChainExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let info = node_map.get_optional_chain(expr.id).unwrap_or_else(|| {
+    let info = ctx.node_map.get_optional_chain(expr.id).unwrap_or_else(|| {
         panic!(
             "VIR lower: missing sema optional_chain for NodeId {:?} (line {})",
             expr.id, expr.span.line
         )
     });
-    let object = lower_expr(&oc.object, node_map, interner);
+    let object = lower_expr(&oc.object, ctx);
     Box::new(VirExpr::OptionalChain {
         object,
         field: oc.field,
@@ -788,16 +759,15 @@ fn lower_optional_method_call(
     omc: &vole_frontend::ast::OptionalMethodCallExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let info = node_map.get_optional_chain(expr.id).unwrap_or_else(|| {
+    let info = ctx.node_map.get_optional_chain(expr.id).unwrap_or_else(|| {
         panic!(
             "VIR lower: missing sema optional_chain for optional_method_call NodeId {:?} (line {})",
             expr.id, expr.span.line
         )
     });
-    let object = lower_expr(&omc.object, node_map, interner);
+    let object = lower_expr(&omc.object, ctx);
     Box::new(VirExpr::OptionalMethodCall {
         object,
         call_expr: Box::new(expr.clone()),
@@ -811,8 +781,8 @@ fn lower_optional_method_call(
 /// The inner fallible expression is recursively lowered.  `success_type` is
 /// the sema-computed type of the overall try expression (the unwrapped success
 /// type from the fallible).
-fn lower_try(inner: &Expr, ty: TypeId, node_map: &NodeMap, interner: &mut Interner) -> VirRef {
-    let value = lower_expr(inner, node_map, interner);
+fn lower_try(inner: &Expr, ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRef {
+    let value = lower_expr(inner, ctx);
     Box::new(VirExpr::Try {
         value,
         success_type: ty,
@@ -824,16 +794,8 @@ fn lower_try(inner: &Expr, ty: TypeId, node_map: &NodeMap, interner: &mut Intern
 /// Each element is recursively lowered. `ty` is the sema-inferred overall
 /// type (array or tuple); codegen uses `unwrap_array` / `unwrap_tuple` to
 /// dispatch between dynamic-array (heap) and tuple (stack) construction.
-fn lower_array_literal(
-    elements: &[Expr],
-    ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirRef {
-    let lowered: Vec<VirRef> = elements
-        .iter()
-        .map(|e| lower_expr(e, node_map, interner))
-        .collect();
+fn lower_array_literal(elements: &[Expr], ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRef {
+    let lowered: Vec<VirRef> = elements.iter().map(|e| lower_expr(e, ctx)).collect();
     Box::new(VirExpr::ArrayLiteral {
         elements: lowered,
         ty,
@@ -850,10 +812,10 @@ fn lower_struct_literal(
     sl: &vole_frontend::ast::StructLiteralExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let info = node_map
+    let info = ctx
+        .node_map
         .get_struct_literal_info(expr.id)
         .unwrap_or_else(|| {
             panic!(
@@ -865,7 +827,7 @@ fn lower_struct_literal(
     let fields: Vec<(vole_identity::Symbol, VirRef)> = sl
         .fields
         .iter()
-        .map(|f| (f.name, lower_expr(&f.value, node_map, interner)))
+        .map(|f| (f.name, lower_expr(&f.value, ctx)))
         .collect();
 
     if info.is_class {
@@ -902,8 +864,7 @@ fn lower_call(
     call_expr: &vole_frontend::ast::CallExpr,
     expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     // Lower argument expressions to VIR.
     // For Unresolved calls, codegen re-compiles from the AST CallExpr, but
@@ -912,7 +873,7 @@ fn lower_call(
     let args: Vec<VirRef> = call_expr
         .args
         .iter()
-        .map(|arg| lower_expr(arg.expr(), node_map, interner))
+        .map(|arg| lower_expr(arg.expr(), ctx))
         .collect();
 
     let target = CallTarget::Unresolved {
@@ -943,8 +904,7 @@ pub(crate) fn map_unary_op(op: UnaryOp) -> VirUnOp {
 fn lower_when_expr(
     when_expr: &vole_frontend::ast::WhenExpr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     // Separate conditional arms from the wildcard arm.
     let mut cond_arms: Vec<&vole_frontend::ast::WhenArm> = Vec::new();
@@ -960,7 +920,7 @@ fn lower_when_expr(
 
     // Build the else body from the wildcard arm (or void if none).
     let else_body = wildcard_arm.map(|arm| {
-        let body = lower_expr(&arm.body, node_map, interner);
+        let body = lower_expr(&arm.body, ctx);
         VirBody {
             stmts: Vec::new(),
             trailing: Some(body),
@@ -976,10 +936,9 @@ fn lower_when_expr(
             arm.condition
                 .as_ref()
                 .expect("INTERNAL: when arm: non-wildcard arm has no condition"),
-            node_map,
-            interner,
+            ctx,
         );
-        let then_val = lower_expr(&arm.body, node_map, interner);
+        let then_val = lower_expr(&arm.body, ctx);
         let then_body = VirBody {
             stmts: Vec::new(),
             trailing: Some(then_val),
@@ -1016,22 +975,21 @@ fn lower_match_expr(
     match_expr: &vole_frontend::ast::MatchExpr,
     _expr: &Expr,
     ty: TypeId,
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let scrutinee = lower_expr(&match_expr.scrutinee, node_map, interner);
+    let scrutinee = lower_expr(&match_expr.scrutinee, ctx);
 
     let arms: Vec<VirMatchArm> = match_expr
         .arms
         .iter()
         .map(|arm| {
             let pattern = VirPattern::Ast(Box::new(arm.pattern.clone()));
-            let guard = arm
-                .guard
-                .as_ref()
-                .map(|g| lower_expr(g, node_map, interner));
-            let body_ref = lower_expr(&arm.body, node_map, interner);
-            let arm_ty = node_map.get_type(arm.body.id).unwrap_or(TypeId::UNKNOWN);
+            let guard = arm.guard.as_ref().map(|g| lower_expr(g, ctx));
+            let body_ref = lower_expr(&arm.body, ctx);
+            let arm_ty = ctx
+                .node_map
+                .get_type(arm.body.id)
+                .unwrap_or(TypeId::UNKNOWN);
             VirMatchArm {
                 pattern,
                 guard,

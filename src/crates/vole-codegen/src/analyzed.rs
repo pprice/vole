@@ -72,6 +72,7 @@ impl AnalyzedProgram {
             &mut interner,
             &db.names,
             &db.entities,
+            &db.types,
             &output.node_map,
             output.module_id,
         );
@@ -79,6 +80,7 @@ impl AnalyzedProgram {
             &mut module_programs,
             &db.names,
             &db.entities,
+            &db.types,
             &output.node_map,
             &output.modules_with_errors,
             &mut vir_functions,
@@ -99,6 +101,7 @@ impl AnalyzedProgram {
             &mut interner,
             &db.names,
             &db.entities,
+            &db.types,
             &output.node_map,
             output.module_id,
             &mut vir_functions,
@@ -107,6 +110,7 @@ impl AnalyzedProgram {
             &mut module_programs,
             &db.names,
             &db.entities,
+            &db.types,
             &output.node_map,
             &output.modules_with_errors,
             &mut vir_functions,
@@ -114,7 +118,13 @@ impl AnalyzedProgram {
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
         let vir_function_map = build_vir_function_map(&vir_functions);
         let vir_method_map = build_vir_method_map(&vir_functions);
-        let vir_test_bodies = lower_test_bodies(&program, &output.node_map, &mut interner);
+        let vir_test_bodies = lower_test_bodies(
+            &program,
+            &output.node_map,
+            &mut interner,
+            &db.types,
+            &db.entities,
+        );
         Self {
             program,
             interner: Rc::new(interner),
@@ -213,11 +223,13 @@ impl AnalyzedProgram {
 /// in the entity registry, and calls `lower_function()` to produce a
 /// `VirFunction`.  Generic functions and implicit generics are skipped
 /// because they are monomorphized during codegen.
+#[allow(clippy::too_many_arguments)]
 fn lower_top_level_functions(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
+    type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
 ) -> Vec<VirFunction> {
@@ -263,6 +275,8 @@ fn lower_top_level_functions(
             func_def.signature.return_type_id,
             node_map,
             interner,
+            type_arena,
+            entities,
         );
         vir_functions.push(vir);
     }
@@ -319,6 +333,7 @@ fn lower_monomorphized_instances(
             type_arena,
             instance.mangled_name,
             interner,
+            entities,
         );
         vir_functions.push(vir);
     }
@@ -359,10 +374,12 @@ fn build_generic_func_map<'a>(
 /// the module's interner and module ID, and calls `lower_function()` for each
 /// non-generic, non-implicitly-generic function.  Modules with sema errors are
 /// skipped to avoid INVALID type IDs.
+#[allow(clippy::too_many_arguments)]
 fn lower_module_functions(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
     entities: &EntityRegistry,
+    type_arena: &TypeArena,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
@@ -380,6 +397,7 @@ fn lower_module_functions(
             interner,
             names,
             entities,
+            type_arena,
             node_map,
             module_id,
             vir_functions,
@@ -388,11 +406,13 @@ fn lower_module_functions(
 }
 
 /// Lower non-generic functions from a single module program to VIR.
+#[allow(clippy::too_many_arguments)]
 fn lower_module_program_functions(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
+    type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
@@ -436,6 +456,8 @@ fn lower_module_program_functions(
             func_def.signature.return_type_id,
             node_map,
             interner,
+            type_arena,
+            entities,
         );
         vir_functions.push(vir);
     }
@@ -488,11 +510,13 @@ fn build_vir_method_map(vir_functions: &[VirFunction]) -> FxHashMap<MethodId, us
 ///
 /// Iterates the program's class and struct declarations, looks up each type's
 /// methods in the entity registry, and lowers non-generic methods to VIR.
+#[allow(clippy::too_many_arguments)]
 fn lower_top_level_type_methods(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
+    type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
@@ -510,6 +534,7 @@ fn lower_top_level_type_methods(
                     interner,
                     names,
                     entities,
+                    type_arena,
                     node_map,
                     module_id,
                     vir_functions,
@@ -526,6 +551,7 @@ fn lower_top_level_type_methods(
                     interner,
                     names,
                     entities,
+                    type_arena,
                     node_map,
                     module_id,
                     vir_functions,
@@ -545,6 +571,7 @@ fn lower_type_methods(
     interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
+    type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
@@ -611,6 +638,8 @@ fn lower_type_methods(
             &type_name_str,
             interner,
             node_map,
+            type_arena,
+            entities,
             vir_functions,
         );
     }
@@ -631,6 +660,8 @@ fn lower_type_methods(
             method_def.signature_id,
             node_map,
             interner,
+            type_arena,
+            entities,
         ) {
             vir_functions.push(vir);
         }
@@ -638,6 +669,7 @@ fn lower_type_methods(
 }
 
 /// Lower a single instance method to VIR and push it onto the functions vec.
+#[allow(clippy::too_many_arguments)]
 fn lower_single_method(
     method: &vole_frontend::FuncDecl,
     method_id: MethodId,
@@ -645,6 +677,8 @@ fn lower_single_method(
     type_name_str: &str,
     interner: &mut Interner,
     node_map: &NodeMap,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
     vir_functions: &mut Vec<VirFunction>,
 ) {
     let arena_sig = method_def.signature_id;
@@ -672,15 +706,19 @@ fn lower_single_method(
         arena_sig, // return_type from entity registry
         node_map,
         interner,
+        type_arena,
+        entities,
     );
     vir_functions.push(vir);
 }
 
 /// Lower non-generic type methods from imported modules to VIR.
+#[allow(clippy::too_many_arguments)]
 fn lower_module_type_methods(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
     entities: &EntityRegistry,
+    type_arena: &TypeArena,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
@@ -707,6 +745,7 @@ fn lower_module_type_methods(
                         interner,
                         names,
                         entities,
+                        type_arena,
                         node_map,
                         module_id,
                         vir_functions,
@@ -723,6 +762,7 @@ fn lower_module_type_methods(
                         interner,
                         names,
                         entities,
+                        type_arena,
                         node_map,
                         module_id,
                         vir_functions,
@@ -743,11 +783,15 @@ fn lower_test_bodies(
     program: &Program,
     node_map: &NodeMap,
     interner: &mut Interner,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
 ) -> FxHashMap<Span, VirBody> {
     let mut map = FxHashMap::default();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
-            lower_tests_decl_bodies(tests_decl, node_map, interner, &mut map);
+            lower_tests_decl_bodies(
+                tests_decl, node_map, interner, type_arena, entities, &mut map,
+            );
         }
     }
     map
@@ -758,16 +802,18 @@ fn lower_tests_decl_bodies(
     tests_decl: &vole_frontend::ast::TestsDecl,
     node_map: &NodeMap,
     interner: &mut Interner,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
     map: &mut FxHashMap<Span, VirBody>,
 ) {
     for test in &tests_decl.tests {
-        let vir_body = lower_test_body(&test.body, node_map, interner);
+        let vir_body = lower_test_body(&test.body, node_map, interner, type_arena, entities);
         map.insert(test.span, vir_body);
     }
     // Recurse into nested tests blocks
     for decl in &tests_decl.decls {
         if let Decl::Tests(nested) = decl {
-            lower_tests_decl_bodies(nested, node_map, interner, map);
+            lower_tests_decl_bodies(nested, node_map, interner, type_arena, entities, map);
         }
     }
 }

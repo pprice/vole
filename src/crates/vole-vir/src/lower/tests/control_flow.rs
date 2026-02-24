@@ -31,8 +31,11 @@ fn make_if_expr(condition: Expr, then_branch: Expr, else_branch: Option<Expr>) -
 fn lower_if_expr_produces_vir_if() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = make_if_expr(make_bool_expr(), make_int_expr(1), Some(make_int_expr(2)));
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::If {
@@ -65,8 +68,11 @@ fn lower_if_expr_produces_vir_if() {
 fn lower_if_expr_no_else() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = make_if_expr(make_bool_expr(), make_int_expr(42), None);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::If {
@@ -83,9 +89,12 @@ fn lower_if_expr_no_else() {
 fn lower_if_expr_preserves_type() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let expr = make_if_expr(make_bool_expr(), make_int_expr(1), Some(make_int_expr(2)));
     node_map.set_type(expr.id, TypeId::I64);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::If { ty, .. } => assert_eq!(*ty, TypeId::I64),
@@ -97,6 +106,9 @@ fn lower_if_expr_preserves_type() {
 fn lower_if_expr_recursive_lowering() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     // if true { if false { 1 } else { 2 } } else { 3 }
     let inner_if = make_if_expr(
         Expr {
@@ -108,7 +120,7 @@ fn lower_if_expr_recursive_lowering() {
         Some(make_int_expr(2)),
     );
     let expr = make_if_expr(make_bool_expr(), inner_if, Some(make_int_expr(3)));
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::If { then_body, .. } => {
@@ -130,6 +142,9 @@ fn lower_if_expr_recursive_lowering() {
 fn lower_block_expr_empty() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Block(Box::new(vole_frontend::ast::BlockExpr {
@@ -139,7 +154,7 @@ fn lower_block_expr_empty() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Block {
@@ -156,6 +171,9 @@ fn lower_block_expr_empty() {
 fn lower_block_expr_with_trailing() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Block(Box::new(vole_frontend::ast::BlockExpr {
@@ -165,7 +183,7 @@ fn lower_block_expr_with_trailing() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Block {
@@ -185,6 +203,9 @@ fn lower_block_expr_with_trailing() {
 fn lower_block_expr_with_stmts_and_trailing() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Block(Box::new(vole_frontend::ast::BlockExpr {
@@ -194,7 +215,7 @@ fn lower_block_expr_with_stmts_and_trailing() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Block {
@@ -218,8 +239,11 @@ fn lower_block_expr_with_stmts_and_trailing() {
 fn lower_block_expr_preserves_type() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I64);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: node_id,
         kind: ExprKind::Block(Box::new(vole_frontend::ast::BlockExpr {
@@ -229,7 +253,7 @@ fn lower_block_expr_preserves_type() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Block { ty, .. } => assert_eq!(*ty, TypeId::I64),
@@ -246,6 +270,9 @@ fn lower_expr_yield_produces_vir_yield() {
     use vole_frontend::ast::YieldExpr;
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Yield(Box::new(YieldExpr {
@@ -254,7 +281,7 @@ fn lower_expr_yield_produces_vir_yield() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Yield { value } => match value.as_ref() {
@@ -270,6 +297,9 @@ fn lower_expr_yield_lowers_inner_recursively() {
     use vole_frontend::ast::YieldExpr;
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     // yield true -- the inner bool should be lowered to VirExpr::BoolLiteral
     let expr = Expr {
         id: dummy_node_id(),
@@ -279,7 +309,7 @@ fn lower_expr_yield_lowers_inner_recursively() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::Yield { value } => match value.as_ref() {
@@ -298,8 +328,11 @@ fn lower_expr_yield_lowers_inner_recursively() {
 fn lower_break_stmt() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_break_stmt();
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Break => {}
@@ -311,8 +344,11 @@ fn lower_break_stmt() {
 fn lower_continue_stmt() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_continue_stmt();
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Continue => {}
@@ -329,11 +365,14 @@ fn lower_return_with_value() {
     use vole_frontend::ast::ReturnStmt;
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = Stmt::Return(ReturnStmt {
         value: Some(make_int_expr(42)),
         span: dummy_span(),
     });
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Return { value: Some(v) } => match v.as_ref() {
@@ -349,11 +388,14 @@ fn lower_return_void() {
     use vole_frontend::ast::ReturnStmt;
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = Stmt::Return(ReturnStmt {
         value: None,
         span: dummy_span(),
     });
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Return { value: None } => {}
@@ -381,8 +423,11 @@ fn make_while_stmt(condition: Expr, body_stmts: Vec<Stmt>) -> Stmt {
 fn lower_while_empty_body() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_while_stmt(make_bool_expr(), vec![]);
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::While { cond, body } => {
@@ -401,8 +446,11 @@ fn lower_while_empty_body() {
 fn lower_while_with_body() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_while_stmt(make_bool_expr(), vec![make_break_stmt()]);
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::While { body, .. } => {
@@ -420,8 +468,11 @@ fn lower_while_with_body() {
 fn lower_while_lowers_condition_recursively() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_while_stmt(make_int_expr(1), vec![]);
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::While { cond, .. } => match cond.as_ref() {
@@ -456,8 +507,11 @@ fn make_if_stmt(condition: Expr, then_stmts: Vec<Stmt>, else_stmts: Option<Vec<S
 fn lower_if_stmt_no_else() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_if_stmt(make_bool_expr(), vec![make_break_stmt()], None);
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Expr { value } => match value.as_ref() {
@@ -490,12 +544,15 @@ fn lower_if_stmt_no_else() {
 fn lower_if_stmt_with_else() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_if_stmt(
         make_bool_expr(),
         vec![make_break_stmt()],
         Some(vec![make_continue_stmt()]),
     );
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Expr { value } => match value.as_ref() {
@@ -529,8 +586,11 @@ fn lower_if_stmt_with_else() {
 fn lower_if_stmt_is_void_typed() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_if_stmt(make_bool_expr(), vec![], None);
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Expr { value } => match value.as_ref() {
@@ -566,9 +626,12 @@ fn make_raise_stmt(error_name: Symbol, fields: Vec<(Symbol, Expr)>) -> Stmt {
 fn lower_raise_no_fields() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let error_sym = interner.intern("NotFound");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_raise_stmt(error_sym, vec![]);
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Raise {
@@ -585,10 +648,13 @@ fn lower_raise_no_fields() {
 fn lower_raise_single_field() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let error_sym = interner.intern("ParseError");
     let msg_sym = interner.intern("message");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_raise_stmt(error_sym, vec![(msg_sym, make_int_expr(42))]);
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Raise {
@@ -610,9 +676,12 @@ fn lower_raise_single_field() {
 fn lower_raise_multiple_fields() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let error_sym = interner.intern("IoError");
     let code_sym = interner.intern("code");
     let retry_sym = interner.intern("retry");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let stmt = make_raise_stmt(
         error_sym,
         vec![
@@ -620,7 +689,7 @@ fn lower_raise_multiple_fields() {
             (retry_sym, make_bool_expr()),
         ],
     );
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Raise {
@@ -647,11 +716,14 @@ fn lower_raise_multiple_fields() {
 fn lower_raise_field_values_lowered_recursively() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let error_sym = interner.intern("Err");
     let val_sym = interner.intern("val");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     // Field value is a bool literal — should be lowered to VirExpr::BoolLiteral
     let stmt = make_raise_stmt(error_sym, vec![(val_sym, make_bool_expr())]);
-    let vir = lower_stmt(&stmt, &node_map, &mut interner);
+    let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
         VirStmt::Raise { fields, .. } => {

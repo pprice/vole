@@ -32,9 +32,12 @@ fn make_unary_expr(op: UnaryOp, operand: Expr) -> Expr {
 fn lower_binary_add_produces_binary_op() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let expr = make_binary_expr(make_int_expr(1), BinaryOp::Add, make_int_expr(2));
     node_map.set_type(expr.id, TypeId::I64);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::BinaryOp {
@@ -59,9 +62,12 @@ fn lower_binary_add_produces_binary_op() {
 fn lower_binary_sub_produces_binary_op() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let expr = make_binary_expr(make_int_expr(10), BinaryOp::Sub, make_int_expr(5));
     node_map.set_type(expr.id, TypeId::I64);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::BinaryOp { op, .. } => assert_eq!(*op, VirBinOp::Sub),
@@ -73,9 +79,12 @@ fn lower_binary_sub_produces_binary_op() {
 fn lower_binary_comparison_produces_binary_op() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let expr = make_binary_expr(make_int_expr(1), BinaryOp::Lt, make_int_expr(2));
     node_map.set_type(expr.id, TypeId::BOOL);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::BinaryOp { op, ty, .. } => {
@@ -90,9 +99,12 @@ fn lower_binary_comparison_produces_binary_op() {
 fn lower_binary_bitwise_produces_binary_op() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let expr = make_binary_expr(make_int_expr(0xFF), BinaryOp::BitAnd, make_int_expr(0x0F));
     node_map.set_type(expr.id, TypeId::I64);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::BinaryOp { op, .. } => assert_eq!(*op, VirBinOp::BitAnd),
@@ -104,8 +116,11 @@ fn lower_binary_bitwise_produces_binary_op() {
 fn lower_binary_and_desugars_to_if() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = make_binary_expr(make_bool_expr(), BinaryOp::And, make_bool_expr());
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     // a && b -> if a { b } else { false }
     match vir_ref.as_ref() {
@@ -140,8 +155,11 @@ fn lower_binary_and_desugars_to_if() {
 fn lower_binary_or_desugars_to_if() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = make_binary_expr(make_bool_expr(), BinaryOp::Or, make_bool_expr());
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     // a || b -> if a { true } else { b }
     match vir_ref.as_ref() {
@@ -176,6 +194,8 @@ fn lower_binary_or_desugars_to_if() {
 fn lower_string_add_produces_string_concat() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let left = Expr {
         id: dummy_node_id(),
         kind: ExprKind::StringLiteral("hello".to_string()),
@@ -189,20 +209,21 @@ fn lower_string_add_produces_string_concat() {
     let expr = make_binary_expr(left, BinaryOp::Add, right);
     // Mark the outer expression as STRING to trigger string concat detection
     node_map.set_type(expr.id, TypeId::STRING);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::StringConcat { parts } => {
             assert_eq!(parts.len(), 2);
             match parts[0].as_ref() {
                 VirExpr::StringLiteral(sym) => {
-                    assert_eq!(interner.resolve(*sym), "hello");
+                    assert_eq!(ctx.interner.resolve(*sym), "hello");
                 }
                 other => panic!("expected StringLiteral part[0], got {other:?}"),
             }
             match parts[1].as_ref() {
                 VirExpr::StringLiteral(sym) => {
-                    assert_eq!(interner.resolve(*sym), " world");
+                    assert_eq!(ctx.interner.resolve(*sym), " world");
                 }
                 other => panic!("expected StringLiteral part[1], got {other:?}"),
             }
@@ -215,9 +236,12 @@ fn lower_string_add_produces_string_concat() {
 fn lower_non_string_add_is_not_string_concat() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let expr = make_binary_expr(make_int_expr(1), BinaryOp::Add, make_int_expr(2));
     node_map.set_type(expr.id, TypeId::I64);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     // Should be BinaryOp, not StringConcat
     match vir_ref.as_ref() {
@@ -230,12 +254,15 @@ fn lower_non_string_add_is_not_string_concat() {
 fn lower_binary_lowers_operands_recursively() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     // (1 + 2) * 3 -- the inner `1 + 2` should be lowered to BinaryOp too
     let inner = make_binary_expr(make_int_expr(1), BinaryOp::Add, make_int_expr(2));
     node_map.set_type(inner.id, TypeId::I64);
     let outer = make_binary_expr(inner, BinaryOp::Mul, make_int_expr(3));
     node_map.set_type(outer.id, TypeId::I64);
-    let vir_ref = lower_expr(&outer, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&outer, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::BinaryOp { op, lhs, .. } => {
@@ -260,9 +287,12 @@ fn lower_binary_lowers_operands_recursively() {
 fn lower_unary_neg_produces_unary_op() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let expr = make_unary_expr(UnaryOp::Neg, make_int_expr(42));
     node_map.set_type(expr.id, TypeId::I64);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::UnaryOp { op, operand, ty } => {
@@ -281,8 +311,11 @@ fn lower_unary_neg_produces_unary_op() {
 fn lower_unary_not_produces_unary_op() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = make_unary_expr(UnaryOp::Not, make_bool_expr());
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::UnaryOp { op, .. } => assert_eq!(*op, VirUnOp::Not),
@@ -294,9 +327,12 @@ fn lower_unary_not_produces_unary_op() {
 fn lower_unary_bitnot_produces_unary_op() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let expr = make_unary_expr(UnaryOp::BitNot, make_int_expr(0xFF));
     node_map.set_type(expr.id, TypeId::I64);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::UnaryOp { op, .. } => assert_eq!(*op, VirUnOp::BitNot),
@@ -308,12 +344,15 @@ fn lower_unary_bitnot_produces_unary_op() {
 fn lower_unary_nested_in_binary() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     // -1 + 2: unary neg on 1, then binary add with 2
     let neg = make_unary_expr(UnaryOp::Neg, make_int_expr(1));
     node_map.set_type(neg.id, TypeId::I64);
     let expr = make_binary_expr(neg, BinaryOp::Add, make_int_expr(2));
     node_map.set_type(expr.id, TypeId::I64);
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::BinaryOp { op, lhs, .. } => {

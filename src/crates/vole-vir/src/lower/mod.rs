@@ -16,13 +16,31 @@ mod tests;
 use vole_frontend::Interner;
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
 use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeId};
-use vole_sema::TypeArena;
 use vole_sema::node_map::NodeMap;
+use vole_sema::{EntityRegistry, TypeArena};
 
 use crate::func::{VirBody, VirFunction};
 
 use self::expr::lower_expr;
 use self::stmt::lower_stmt;
+
+/// Shared lowering context threaded through all lowering helpers.
+///
+/// Bundles the sema outputs needed during AST-to-VIR lowering:
+/// - `node_map`: per-node sema annotations (types, dispatch info, etc.)
+/// - `interner`: string interning (mutable for new literals)
+/// - `type_arena`: type resolution (unwrap_union, unwrap_fallible, etc.)
+/// - `entities`: entity lookups (field info, error types, etc.)
+///
+/// `type_arena` and `entities` are currently unused but will be needed
+/// by pattern lowering (VirPattern::Tuple, Record, Success, Error).
+#[allow(dead_code)] // type_arena + entities are infrastructure for pattern lowering
+pub(crate) struct LoweringCtx<'a> {
+    pub node_map: &'a NodeMap,
+    pub interner: &'a mut Interner,
+    pub type_arena: &'a TypeArena,
+    pub entities: &'a EntityRegistry,
+}
 
 /// Lower a single function declaration into a `VirFunction`.
 ///
@@ -32,6 +50,10 @@ use self::stmt::lower_stmt;
 ///
 /// `node_map` is used by expression lowering to look up sema-computed types,
 /// is-check results, optional chain info, and other annotations.
+///
+/// `type_arena` and `entities` are threaded into the lowering context for
+/// future use by pattern lowering.
+#[allow(clippy::too_many_arguments)]
 pub fn lower_function(
     func: &FuncDecl,
     func_id: FunctionId,
@@ -40,8 +62,16 @@ pub fn lower_function(
     return_type: TypeId,
     node_map: &NodeMap,
     interner: &mut Interner,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
 ) -> VirFunction {
-    let body = lower_func_body(&func.body, node_map, interner);
+    let mut ctx = LoweringCtx {
+        node_map,
+        interner,
+        type_arena,
+        entities,
+    };
+    let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: func_id,
         name,
@@ -76,6 +106,7 @@ pub fn lower_monomorphized_function(
     type_arena: &TypeArena,
     mangled_name_id: NameId,
     interner: &mut Interner,
+    entities: &EntityRegistry,
 ) -> VirFunction {
     debug_assert_concrete_types(param_types, return_type, type_arena, &name);
     let mut vir = lower_function(
@@ -86,6 +117,8 @@ pub fn lower_monomorphized_function(
         return_type,
         node_map,
         interner,
+        type_arena,
+        entities,
     );
     vir.mangled_name_id = Some(mangled_name_id);
     vir
@@ -97,6 +130,7 @@ pub fn lower_monomorphized_function(
 /// using the `FunctionId` for lookup.  The `func_id` is a dummy value
 /// (methods don't have a `FunctionId` in the entity registry); the real
 /// identity is carried by `method_id`.
+#[allow(clippy::too_many_arguments)]
 pub fn lower_method(
     func: &FuncDecl,
     method_id: MethodId,
@@ -105,8 +139,16 @@ pub fn lower_method(
     return_type: TypeId,
     node_map: &NodeMap,
     interner: &mut Interner,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
 ) -> VirFunction {
-    let body = lower_func_body(&func.body, node_map, interner);
+    let mut ctx = LoweringCtx {
+        node_map,
+        interner,
+        type_arena,
+        entities,
+    };
+    let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
@@ -122,6 +164,7 @@ pub fn lower_method(
 ///
 /// Interface methods use `InterfaceMethod` AST nodes (which have an optional
 /// body) rather than `FuncDecl`.  Only methods with a body should be lowered.
+#[allow(clippy::too_many_arguments)]
 pub fn lower_interface_method(
     method: &InterfaceMethod,
     method_id: MethodId,
@@ -130,9 +173,17 @@ pub fn lower_interface_method(
     return_type: TypeId,
     node_map: &NodeMap,
     interner: &mut Interner,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
 ) -> Option<VirFunction> {
     let body_ast = method.body.as_ref()?;
-    let body = lower_func_body(body_ast, node_map, interner);
+    let mut ctx = LoweringCtx {
+        node_map,
+        interner,
+        type_arena,
+        entities,
+    };
+    let body = lower_func_body(body_ast, &mut ctx);
     Some(VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
@@ -174,23 +225,31 @@ fn debug_assert_concrete_types(
 /// Test bodies use the same `FuncBody` type as functions, so this delegates
 /// to `lower_func_body`.  Exposed as a public API so the lowering pipeline
 /// in `analyzed.rs` can lower test bodies alongside function bodies.
-pub fn lower_test_body(body: &FuncBody, node_map: &NodeMap, interner: &mut Interner) -> VirBody {
-    lower_func_body(body, node_map, interner)
+pub fn lower_test_body(
+    body: &FuncBody,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
+) -> VirBody {
+    let mut ctx = LoweringCtx {
+        node_map,
+        interner,
+        type_arena,
+        entities,
+    };
+    lower_func_body(body, &mut ctx)
 }
 
 /// Lower a `FuncBody` (block or expression) into a `VirBody`.
 ///
 /// Block bodies have their statements walked individually; expression bodies
 /// become a single trailing VIR expression.
-pub(crate) fn lower_func_body(
-    body: &FuncBody,
-    node_map: &NodeMap,
-    interner: &mut Interner,
-) -> VirBody {
+pub(crate) fn lower_func_body(body: &FuncBody, ctx: &mut LoweringCtx<'_>) -> VirBody {
     match body {
-        FuncBody::Block(block) => lower_stmts(&block.stmts, node_map, interner),
+        FuncBody::Block(block) => lower_stmts(&block.stmts, ctx),
         FuncBody::Expr(expr) => {
-            let trailing = lower_expr(expr, node_map, interner);
+            let trailing = lower_expr(expr, ctx);
             VirBody {
                 stmts: Vec::new(),
                 trailing: Some(trailing),
@@ -206,13 +265,9 @@ pub(crate) fn lower_func_body(
 /// lowered recursively through `lower_expr`.
 pub(crate) fn lower_stmts(
     stmts: &[vole_frontend::ast::Stmt],
-    node_map: &NodeMap,
-    interner: &mut Interner,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirBody {
-    let vir_stmts = stmts
-        .iter()
-        .map(|s| lower_stmt(s, node_map, interner))
-        .collect();
+    let vir_stmts = stmts.iter().map(|s| lower_stmt(s, ctx)).collect();
     VirBody {
         stmts: vir_stmts,
         trailing: None,

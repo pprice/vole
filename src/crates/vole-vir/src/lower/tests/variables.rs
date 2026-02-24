@@ -14,13 +14,16 @@ use crate::lower::expr::lower_expr;
 fn lower_identifier_becomes_local_load() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let sym = interner.intern("x");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(sym),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::LocalLoad { name, ty } => {
@@ -35,15 +38,18 @@ fn lower_identifier_becomes_local_load() {
 fn lower_identifier_preserves_sema_type() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let sym = interner.intern("count");
     let node_id = NodeId::new(ModuleId::new(0), 100);
     node_map.set_type(node_id, TypeId::I64);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: node_id,
         kind: ExprKind::Identifier(sym),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::LocalLoad { name, ty } => {
@@ -58,15 +64,18 @@ fn lower_identifier_preserves_sema_type() {
 fn lower_identifier_bool_type() {
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let sym = interner.intern("flag");
     let node_id = NodeId::new(ModuleId::new(0), 101);
     node_map.set_type(node_id, TypeId::BOOL);
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: node_id,
         kind: ExprKind::Identifier(sym),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::LocalLoad { name, ty } => {
@@ -86,7 +95,10 @@ fn lower_assign_variable_becomes_local_store() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let sym = interner.intern("x");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -95,7 +107,7 @@ fn lower_assign_variable_becomes_local_store() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::LocalStore { name, value } => {
@@ -114,7 +126,10 @@ fn lower_assign_variable_lowers_value_recursively() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let sym = interner.intern("y");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -127,7 +142,7 @@ fn lower_assign_variable_lowers_value_recursively() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::LocalStore { name, value } => {
@@ -150,6 +165,9 @@ fn lower_assign_discard_evaluates_inner_expr() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -158,7 +176,7 @@ fn lower_assign_discard_evaluates_inner_expr() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     // Discard assign `_ = 42` lowers to just the inner expression `42`.
     match vir_ref.as_ref() {
@@ -173,7 +191,10 @@ fn lower_assign_field_becomes_field_store() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
     let sym = interner.intern("field");
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -186,7 +207,7 @@ fn lower_assign_field_becomes_field_store() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::FieldStore {
@@ -215,6 +236,9 @@ fn lower_assign_index_becomes_index_store() {
     use vole_frontend::ast::{AssignExpr, AssignTarget};
     let node_map = empty_node_map();
     let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -226,7 +250,7 @@ fn lower_assign_index_becomes_index_store() {
         })),
         span: dummy_span(),
     };
-    let vir_ref = lower_expr(&expr, &node_map, &mut interner);
+    let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
         VirExpr::IndexStore {
