@@ -798,8 +798,17 @@ impl Compiler<'_> {
             func_def.signature.return_type_id,
         );
 
+        // Check if a VIR function was lowered for this function
+        let vir_func = self.analyzed.get_vir_function(semantic_func_id);
+
         // Check if this is a generator function (sema annotated it with element type)
         if let Some(elem_type_id) = func_def.generator_element_type {
+            let vir = vir_func.unwrap_or_else(|| {
+                panic!(
+                    "VIR must be available for generator function '{}'",
+                    display_name,
+                )
+            });
             let source_file_ptr = self.source_file_ptr();
             let env = compile_env!(self, module_interner, module_global_inits, source_file_ptr);
             let gen_params = crate::generator::GeneratorParams {
@@ -809,6 +818,7 @@ impl Compiler<'_> {
                 param_type_ids: &param_type_ids,
                 elem_type_id,
                 module_id: Some(module_id),
+                vir_body: &vir.body,
             };
             let mut codegen_ctx = CodegenCtx::new(
                 &mut self.jit.module,
@@ -819,9 +829,6 @@ impl Compiler<'_> {
             self.jit.clear();
             return Ok(());
         }
-
-        // Check if a VIR function was lowered for this function
-        let vir_func = self.analyzed.get_vir_function(semantic_func_id);
 
         let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
@@ -896,8 +903,17 @@ impl Compiler<'_> {
             func_def.signature.return_type_id,
         );
 
+        // Check if a VIR function was lowered for this function
+        let vir_func = self.analyzed.get_vir_function(semantic_func_id);
+
         // Check if this is a generator function (sema annotated it with element type)
         if let Some(elem_type_id) = func_def.generator_element_type {
+            let vir = vir_func.unwrap_or_else(|| {
+                panic!(
+                    "VIR must be available for generator function '{}'",
+                    display_name,
+                )
+            });
             let source_file_ptr = self.source_file_ptr();
             let env = compile_env!(self, source_file_ptr);
             let gen_params = crate::generator::GeneratorParams {
@@ -907,6 +923,7 @@ impl Compiler<'_> {
                 param_type_ids: &param_type_ids,
                 elem_type_id,
                 module_id: None,
+                vir_body: &vir.body,
             };
             let mut codegen_ctx = CodegenCtx::new(
                 &mut self.jit.module,
@@ -917,9 +934,6 @@ impl Compiler<'_> {
             self.jit.clear();
             return Ok(());
         }
-
-        // Check if a VIR function was lowered for this function
-        let vir_func = self.analyzed.get_vir_function(semantic_func_id);
 
         // Create function signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);

@@ -16,8 +16,9 @@ use rustc_hash::FxHashMap;
 
 use vole_frontend::{FuncDecl, Symbol};
 use vole_sema::type_arena::TypeId;
+use vole_vir::VirBody;
 
-use crate::compiler::common::{DefaultReturn, compile_function_body_with_cg};
+use crate::compiler::common::{DefaultReturn, compile_vir_body_with_cg};
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::rc_state::compute_rc_state;
@@ -32,6 +33,7 @@ pub(crate) struct GeneratorParams<'a> {
     pub param_type_ids: &'a [TypeId],
     pub elem_type_id: TypeId,
     pub module_id: Option<vole_identity::ModuleId>,
+    pub vir_body: &'a VirBody,
 }
 
 /// Resolve a RuntimeKey to a FuncRef usable in a FunctionBuilder.
@@ -66,8 +68,14 @@ pub(crate) fn compile_generator_function<'ctx>(
     let param_type_ids = params.param_type_ids;
     let module_id = params.module_id;
     // Step 1: Compile the inner body function
-    let (body_func_id, has_captures) =
-        compile_generator_body(func, param_type_ids, module_id, codegen_ctx, env)?;
+    let (body_func_id, has_captures) = compile_generator_body(
+        func,
+        param_type_ids,
+        module_id,
+        params.vir_body,
+        codegen_ctx,
+        env,
+    )?;
 
     // Step 2: Compile the wrapper function
     compile_generator_wrapper(params, body_func_id, has_captures, codegen_ctx, env)?;
@@ -97,6 +105,7 @@ fn compile_generator_body<'ctx>(
     func: &FuncDecl,
     param_type_ids: &[TypeId],
     module_id: Option<vole_identity::ModuleId>,
+    vir_body: &VirBody,
     codegen_ctx: &mut CodegenCtx<'ctx>,
     env: &CompileEnv<'ctx>,
 ) -> CodegenResult<(cranelift_module::FuncId, bool)> {
@@ -168,7 +177,7 @@ fn compile_generator_body<'ctx>(
             .with_module(module_id)
             .with_yielder(yielder_var);
 
-        compile_function_body_with_cg(&mut cg, &func.body, DefaultReturn::Empty)?;
+        compile_vir_body_with_cg(&mut cg, vir_body, DefaultReturn::Empty)?;
         drop(cg);
 
         builder.seal_all_blocks();
