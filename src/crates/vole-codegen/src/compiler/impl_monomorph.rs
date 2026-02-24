@@ -1322,9 +1322,8 @@ impl Compiler<'_> {
                     } else {
                         Some(&type_param_subs)
                     };
-                    // VIR fallback: some default methods (e.g. range Iterable defaults)
-                    // don't have VIR bodies because resolve_implement_target doesn't
-                    // handle Named primitives like "range". Fall back to AST path.
+                    // Prefer VIR path when available, fall back to AST path
+                    // for methods not yet lowered to VIR.
                     if let Some(vir) = self.analyzed.get_vir_method(semantic_method_id) {
                         compile_function_inner_with_vir(
                             builder,

@@ -1582,8 +1582,14 @@ fn resolve_implement_target(
     use vole_frontend::TypeExprKind;
     match &target_type.kind {
         TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-            let name_id = names.name_id(module_id, &[*sym], interner)?;
-            entities.type_by_name(name_id)
+            // Try normal module-scoped lookup first (class/struct types)
+            if let Some(name_id) = names.name_id(module_id, &[*sym], interner)
+                && let Some(tdef) = entities.type_by_name(name_id) {
+                    return Some(tdef);
+                }
+            // Fall back to short-name lookup for named primitives (e.g. "range")
+            let sym_str = interner.resolve(*sym);
+            entities.type_by_short_name(sym_str, names)
         }
         TypeExprKind::Primitive(p) => {
             let prim_type = vole_sema::PrimitiveType::from_ast(*p);
