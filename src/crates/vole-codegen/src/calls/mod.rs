@@ -65,7 +65,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 return Ok(result);
             }
 
-            return self.call_module_binding(module_id, export_name, call, call_expr_id);
+            return self.call_module_binding(
+                module_id,
+                export_name,
+                &ArgSource::Ast(&call.args),
+                call_expr_id,
+            );
         }
 
         // Check if it's a closure variable
@@ -93,13 +98,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some((var, type_id)) = self.vars.get(&callee_sym) {
             let value = self.builder.use_var(*var);
             let obj = CompiledValue::new(value, self.cranelift_type(*type_id), *type_id);
-            if let Some(result) = self.try_call_functional_interface(&obj, &call.args)? {
+            if let Some(result) =
+                self.try_call_functional_interface(&obj, &ArgSource::Ast(&call.args))?
+            {
                 return Ok(result);
             }
         }
 
         // Check if it's a global lambda or global functional interface
-        if let Some(result) = self.try_call_global(callee_sym, call)? {
+        if let Some(result) =
+            self.try_call_global(callee_sym, &ArgSource::Ast(&call.args), call.callee.id)?
+        {
             return Ok(result);
         }
 
@@ -141,7 +150,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             // Try FFI call for external module functions
             if let Some(native_func) = self.native_registry().lookup(&module_path, callee_name) {
-                return self.call_native_external(native_func, callee_sym, call, &call_expr_id);
+                return self.call_native_external(
+                    native_func,
+                    callee_sym,
+                    &ArgSource::Ast(&call.args),
+                    &call_expr_id,
+                );
             }
 
             // Fall through to try prelude external functions
@@ -161,33 +175,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .last_segment_str(info.module_path)
                 .unwrap_or_default();
             if module_path_str == Cg::COMPILER_INTRINSIC_MODULE {
-                // Compile args and dispatch through intrinsic handler
-                let mut args = Vec::new();
-                for arg in &call.args {
-                    args.push(self.expr(arg.expr())?);
-                }
-                let native_name_str = self
-                    .name_table()
-                    .last_segment_str(info.native_name)
-                    .unwrap_or_default();
-                let return_type_id = self
-                    .get_expr_type(&call_expr_id)
-                    .expect("INTERNAL: compiler intrinsic call: missing sema return type");
-                let key = crate::IntrinsicKey::try_from_name(native_name_str.as_str()).ok_or_else(
-                    || {
-                        CodegenError::not_found(
-                            "intrinsic handler",
-                            format!(
-                                "\"{}\" (add handler in codegen/intrinsics.rs)",
-                                native_name_str.as_str()
-                            ),
-                        )
-                    },
-                )?;
-                return self.call_compiler_intrinsic_key_typed_with_line(
-                    key,
-                    &args,
-                    return_type_id,
+                return self.call_compiler_intrinsic_from_registry(
+                    info.native_name,
+                    &ArgSource::Ast(&call.args),
+                    &call_expr_id,
                     call_line,
                 );
             }
@@ -200,7 +191,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             Some((module_path.to_string(), native_name.to_string(), func))
         });
         if let Some((_module_path, _native_name, native_func)) = native_lookup {
-            return self.call_native_external(native_func, callee_sym, call, &call_expr_id);
+            return self.call_native_external(
+                native_func,
+                callee_sym,
+                &ArgSource::Ast(&call.args),
+                &call_expr_id,
+            );
         }
 
         // Try prelude Vole functions (e.g., assert from builtins.vole)
@@ -230,14 +226,53 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Err(CodegenError::not_found("function", callee_name))
     }
 
+    /// Compile and dispatch a compiler intrinsic call found via `implement_registry`.
+    ///
+    /// Compiles arguments from `ArgSource`, resolves the intrinsic key from
+    /// the native name, and delegates to `call_compiler_intrinsic_key_typed_with_line`.
+    fn call_compiler_intrinsic_from_registry(
+        &mut self,
+        native_name: NameId,
+        arg_source: &ArgSource<'_>,
+        call_expr_id: &NodeId,
+        call_line: u32,
+    ) -> CodegenResult<CompiledValue> {
+        let arg_count = arg_source.len();
+        let mut args = Vec::with_capacity(arg_count);
+        for i in 0..arg_count {
+            args.push(self.compile_arg_from_source(arg_source, i)?);
+        }
+        let native_name_str = self
+            .name_table()
+            .last_segment_str(native_name)
+            .unwrap_or_default();
+        let return_type_id = self
+            .get_expr_type(call_expr_id)
+            .expect("INTERNAL: compiler intrinsic call: missing sema return type");
+        let key =
+            crate::IntrinsicKey::try_from_name(native_name_str.as_str()).ok_or_else(|| {
+                CodegenError::not_found(
+                    "intrinsic handler",
+                    format!(
+                        "\"{}\" (add handler in codegen/intrinsics.rs)",
+                        native_name_str.as_str()
+                    ),
+                )
+            })?;
+        self.call_compiler_intrinsic_key_typed_with_line(key, &args, return_type_id, call_line)
+    }
+
     /// Try to call a global lambda or global functional interface.
     ///
     /// Returns `Some(result)` if the callee is a global with a lambda or interface
     /// initializer, `None` otherwise.
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    /// `call_expr_id` is used as a placeholder for default param lookup in closure calls.
     fn try_call_global(
         &mut self,
         callee_sym: Symbol,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
+        call_expr_id: NodeId,
     ) -> CodegenResult<Option<CompiledValue>> {
         let init_expr = match self.global_init(callee_sym).cloned() {
             Some(expr) => expr,
@@ -271,7 +306,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let boxed = self.box_interface_value(lambda_val, declared_type_id)?;
                 let result = self.interface_dispatch_call_args_by_type_def_id(
                     &boxed,
-                    &ArgSource::Ast(&call.args),
+                    arg_source,
                     type_def_id,
                     method_name_id,
                     func_type_id,
@@ -284,13 +319,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // If it's a function type, call as closure
-        // Note: Global lambdas don't support default params lookup (use call.callee.id as placeholder)
+        // Note: Global lambdas don't support default params lookup (call_expr_id is a placeholder)
         if self.arena().is_function(lambda_val.type_id) {
             let result = self.call_closure_value(
                 lambda_val.value,
                 lambda_val.type_id,
-                &ArgSource::Ast(&call.args),
-                call.callee.id,
+                arg_source,
+                call_expr_id,
             )?;
             // The global init re-compiles the lambda each call, creating a
             // fresh closure allocation. Dec it now that the call has finished.
@@ -300,7 +335,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // If it's an interface type (functional interface), call via vtable
-        if let Some(result) = self.try_call_functional_interface(&lambda_val, &call.args)? {
+        if let Some(result) = self.try_call_functional_interface(&lambda_val, arg_source)? {
             // Dec the interface instance created by the global init.
             self.emit_rc_dec_for_type(lambda_val.value, lambda_val.type_id)?;
             return Ok(Some(result));
@@ -654,17 +689,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.compile_function_defaults(func_id, start_index, &param_type_ids[start_index..])
     }
 
-    /// Compile call arguments for an external function, including defaults for omitted parameters.
-    /// Looks up the function by Symbol in EntityRegistry to get default expressions.
-    /// `expected_types` are the Cranelift types from the native function signature.
-    pub(super) fn compile_external_call_args(
+    /// Compile call arguments for an external function from an `ArgSource`.
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this
+    /// function.  Defaults for omitted parameters are always compiled from
+    /// AST expressions in the EntityRegistry.
+    pub(super) fn compile_external_call_args_from_source(
         &mut self,
         callee_sym: Symbol,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         expected_types: &[Type],
     ) -> CodegenResult<Vec<Value>> {
         // Compile provided arguments
-        let mut args = self.compile_call_args(&call.args)?;
+        let (mut args, _rc_temps) = self.compile_args_tracking_rc(arg_source)?;
 
         let expected_param_count = expected_types.len();
 
@@ -705,25 +742,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 continue;
             };
             let compiled = self.expr(default_expr)?;
-
-            // Narrow/extend integer types or promote/demote floats if needed
-            let arg_value = if compiled.ty.is_int()
-                && expected_ty.is_int()
-                && expected_ty.bits() < compiled.ty.bits()
-            {
-                self.builder.ins().ireduce(expected_ty, compiled.value)
-            } else if compiled.ty.is_int()
-                && expected_ty.is_int()
-                && expected_ty.bits() > compiled.ty.bits()
-            {
-                sextend_const(self.builder, expected_ty, compiled.value)
-            } else if compiled.ty == types::F32 && expected_ty == types::F64 {
-                self.builder.ins().fpromote(types::F64, compiled.value)
-            } else if compiled.ty == types::F64 && expected_ty == types::F32 {
-                self.builder.ins().fdemote(types::F32, compiled.value)
-            } else {
-                compiled.value
-            };
+            let arg_value = self.coerce_arg_to_sig_type(compiled, Some(expected_ty));
             args.push(arg_value);
         }
 

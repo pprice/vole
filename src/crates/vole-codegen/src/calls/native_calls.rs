@@ -23,11 +23,12 @@ impl Cg<'_, '_, '_> {
     /// Compile and execute a native (FFI) function call.
     ///
     /// Shared logic for module FFI calls, prelude external calls, and module binding calls.
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     pub(super) fn call_native_external(
         &mut self,
         native_func: &NativeFunction,
         callee_sym: Symbol,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         call_expr_id: &NodeId,
     ) -> CodegenResult<CompiledValue> {
         let expected_types: Vec<Type> = native_func
@@ -36,7 +37,8 @@ impl Cg<'_, '_, '_> {
             .iter()
             .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
             .collect();
-        let args = self.compile_external_call_args(callee_sym, call, &expected_types)?;
+        let args =
+            self.compile_external_call_args_from_source(callee_sym, arg_source, &expected_types)?;
         let call_inst = self.call_native_indirect(native_func, &args);
         if native_func.signature.return_type == NativeType::Nil {
             return Ok(self.void_value());
@@ -50,11 +52,12 @@ impl Cg<'_, '_, '_> {
 
     /// Call a function via destructured module binding.
     /// Looks up the function by module_id and export_name, then calls via FFI or compiled function.
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     pub(super) fn call_module_binding(
         &mut self,
         module_id: ModuleId,
         export_name: Symbol,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let module_path = self.name_table().module_path(module_id).to_string();
@@ -66,13 +69,22 @@ impl Cg<'_, '_, '_> {
             let func_key = self.funcs().intern_name_id(name_id);
             if let Some(func_id) = self.funcs_ref().func_id(func_key) {
                 // Found compiled module function
-                return self.call_func_id(func_key, func_id, call, export_name, call_expr_id);
+                let return_type_override = self.get_expr_type_substituted(&call_expr_id);
+                return self.call_func_id_impl(
+                    func_key,
+                    func_id,
+                    arg_source,
+                    Some(name_id),
+                    None,
+                    return_type_override,
+                    call_expr_id,
+                );
             }
         }
 
         // Try FFI call for external module functions
         if let Some(native_func) = self.native_registry().lookup(&module_path, export_name_str) {
-            return self.call_native_external(native_func, export_name, call, &call_expr_id);
+            return self.call_native_external(native_func, export_name, arg_source, &call_expr_id);
         }
 
         Err(CodegenError::not_found(
@@ -529,10 +541,11 @@ impl Cg<'_, '_, '_> {
 
     /// Try to call a value as a functional interface.
     /// Returns Some(result) if the value is a functional interface, None otherwise.
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     pub(super) fn try_call_functional_interface(
         &mut self,
         obj: &CompiledValue,
-        args: &[vole_frontend::ast::CallArg],
+        arg_source: &ArgSource<'_>,
     ) -> CodegenResult<Option<CompiledValue>> {
         let Some(iface_type_def_id) = self.interface_type_def_id(obj.type_id) else {
             return Ok(None);
@@ -548,7 +561,7 @@ impl Cg<'_, '_, '_> {
 
         self.interface_dispatch_call_args_by_type_def_id(
             obj,
-            &ArgSource::Ast(args),
+            arg_source,
             iface_type_def_id,
             method_name_id,
             func_type_id,
