@@ -90,10 +90,12 @@ impl AnalyzedProgram {
             build_generic_func_map(&program, &interner, &db.names, output.module_id);
         lower_monomorphized_instances(
             &generic_func_asts,
+            &mut module_programs,
             &db.names,
             &db.entities,
             &db.types,
             &output.node_map,
+            &output.modules_with_errors,
             &mut interner,
             &mut vir_functions,
         );
@@ -325,12 +327,59 @@ fn lower_top_level_functions(
 /// Lower monomorphized function instances to VIR.
 ///
 /// For each concrete instance in the monomorph cache, finds the generic
-/// function's AST via `generic_func_asts` and lowers it with the substituted
-/// (concrete) param and return types from the instance's `func_type`.
+/// function's AST in the main program (`generic_func_asts`) or in module
+/// programs and lowers it with the substituted (concrete) param and return
+/// types from the instance's `func_type`.
 ///
 /// Debug-asserts that no `TypeId` in the output contains a type parameter.
+#[allow(clippy::too_many_arguments)]
 fn lower_monomorphized_instances(
     generic_func_asts: &FxHashMap<NameId, &vole_frontend::FuncDecl>,
+    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    modules_with_errors: &HashSet<String>,
+    interner: &mut Interner,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    // Iterate all monomorphized instances in the cache
+    for (_, instance) in entities.monomorph_cache.instances() {
+        if let Some(func) = generic_func_asts.get(&instance.original_name) {
+            // Found in the main program — lower with the main interner
+            lower_single_monomorph(
+                func,
+                instance,
+                names,
+                entities,
+                type_arena,
+                node_map,
+                interner,
+                vir_functions,
+            );
+            continue;
+        }
+
+        // Not in the main program — search module programs
+        lower_module_monomorph(
+            instance,
+            module_programs,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            modules_with_errors,
+            vir_functions,
+        );
+    }
+}
+
+/// Lower a single monomorphized instance whose AST is in the main program.
+#[allow(clippy::too_many_arguments)]
+fn lower_single_monomorph(
+    func: &vole_frontend::FuncDecl,
+    instance: &vole_sema::generic::MonomorphInstance,
     names: &NameTable,
     entities: &EntityRegistry,
     type_arena: &TypeArena,
@@ -338,43 +387,152 @@ fn lower_monomorphized_instances(
     interner: &mut Interner,
     vir_functions: &mut Vec<VirFunction>,
 ) {
-    // Iterate all monomorphized instances in the cache
-    for (_, instance) in entities.monomorph_cache.instances() {
-        let Some(func) = generic_func_asts.get(&instance.original_name) else {
-            // AST not in the main program — may be in a module.
-            // Module-originating monomorphs are lowered separately (future).
-            continue;
+    let Some(func_id) = entities.function_by_name(instance.original_name) else {
+        return;
+    };
+    let param_types: Vec<_> = func
+        .params
+        .iter()
+        .zip(instance.func_type.params_id.iter())
+        .map(|(p, &ty)| (p.name, ty))
+        .collect();
+    let mangled_name = names.display(instance.mangled_name);
+    let vir = lower_monomorphized_function(
+        func,
+        func_id,
+        mangled_name,
+        &param_types,
+        instance.func_type.return_type_id,
+        node_map,
+        type_arena,
+        instance.mangled_name,
+        interner,
+        entities,
+        names,
+    );
+    vir_functions.push(vir);
+}
+
+/// Lower a single monomorphized instance whose AST originates from a module.
+///
+/// Resolves the module from `instance.original_name`, finds the generic
+/// function AST in that module's program, and lowers it with the module's
+/// interner.  Skips lowering if sema never analyzed the function body (i.e.,
+/// the NodeMap has no entries for body nodes) — codegen falls back to the
+/// AST path for those instances.
+#[allow(clippy::too_many_arguments)]
+fn lower_module_monomorph(
+    instance: &vole_sema::generic::MonomorphInstance,
+    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    modules_with_errors: &HashSet<String>,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let Some(func_id) = entities.function_by_name(instance.original_name) else {
+        return;
+    };
+    let module_id = names.module_of(instance.original_name);
+    let module_path = names.module_path(module_id).to_string();
+    if modules_with_errors.contains(&module_path) {
+        return;
+    }
+    let Some((module_program, module_interner)) = module_programs.get_mut(&module_path) else {
+        return;
+    };
+    let interner = Rc::make_mut(module_interner);
+
+    // Find the generic function in the module by checking all function decls
+    let func = module_program.declarations.iter().find_map(|decl| {
+        let Decl::Function(func) = decl else {
+            return None;
         };
+        if func.type_params.is_empty() {
+            return None;
+        }
+        let namer = NamerLookup::new(names, interner);
+        let name_id = namer.function(module_id, func.name)?;
+        if name_id == instance.original_name {
+            Some(func)
+        } else {
+            None
+        }
+    });
 
-        // Look up the original FunctionId for the generic template
-        let Some(func_id) = entities.function_by_name(instance.original_name) else {
-            continue;
-        };
+    let Some(func) = func else { return };
 
-        // Build (Symbol, TypeId) pairs from AST param names + substituted types
-        let param_types: Vec<_> = func
-            .params
-            .iter()
-            .zip(instance.func_type.params_id.iter())
-            .map(|(p, &ty)| (p.name, ty))
-            .collect();
+    // Check if sema analyzed this function's body.  Generic function bodies
+    // are skipped during initial module analysis and only analyzed later
+    // during `analyze_monomorph_bodies`.  If the body was never analyzed,
+    // the NodeMap won't have entries and VIR lowering would panic.
+    if !body_has_sema_data(&func.body, node_map) {
+        return;
+    }
 
-        let mangled_name = names.display(instance.mangled_name);
+    let param_types: Vec<_> = func
+        .params
+        .iter()
+        .zip(instance.func_type.params_id.iter())
+        .map(|(p, &ty)| (p.name, ty))
+        .collect();
+    let mangled_name = names.display(instance.mangled_name);
+    let vir = lower_monomorphized_function(
+        func,
+        func_id,
+        mangled_name,
+        &param_types,
+        instance.func_type.return_type_id,
+        node_map,
+        type_arena,
+        instance.mangled_name,
+        interner,
+        entities,
+        names,
+    );
+    vir_functions.push(vir);
+}
 
-        let vir = lower_monomorphized_function(
-            func,
-            func_id,
-            mangled_name,
-            &param_types,
-            instance.func_type.return_type_id,
-            node_map,
-            type_arena,
-            instance.mangled_name,
-            interner,
-            entities,
-            names,
-        );
-        vir_functions.push(vir);
+/// Check whether sema has analyzed a function body by probing for NodeMap
+/// entries.  Returns `true` if body node data exists, `false` otherwise.
+///
+/// Generic function bodies are skipped during initial sema analysis.  The
+/// monomorph body analysis pass (`analyze_monomorph_bodies`) re-analyzes them
+/// with concrete substitutions — for both main-program and module-originating
+/// generics.  This check is a safety guard: if sema analysis failed to
+/// populate the NodeMap for a body (e.g., due to errors), VIR lowering would
+/// panic, so we skip and let codegen fall back to the AST path.
+fn body_has_sema_data(body: &vole_frontend::ast::FuncBody, node_map: &NodeMap) -> bool {
+    use vole_frontend::ast::FuncBody;
+    match body {
+        FuncBody::Expr(expr) => node_map.get_type(expr.id).is_some(),
+        FuncBody::Block(block) => {
+            // Check the first expression NodeId reachable from the first statement
+            for stmt in &block.stmts {
+                if let Some(node_id) = first_expr_node_id(stmt) {
+                    return node_map.get_type(node_id).is_some();
+                }
+            }
+            // Empty body — trivially analyzed
+            true
+        }
+    }
+}
+
+/// Extract the first expression NodeId from a statement, if any.
+fn first_expr_node_id(stmt: &vole_frontend::ast::Stmt) -> Option<vole_identity::NodeId> {
+    use vole_frontend::ast::Stmt;
+    match stmt {
+        Stmt::Expr(s) => Some(s.expr.id),
+        Stmt::Let(s) => s.init.as_expr().map(|e| e.id),
+        Stmt::LetTuple(s) => Some(s.init.id),
+        Stmt::If(s) => Some(s.condition.id),
+        Stmt::While(s) => Some(s.condition.id),
+        Stmt::For(s) => Some(s.iterable.id),
+        Stmt::Return(s) => s.value.as_ref().map(|e| e.id),
+        Stmt::Raise(_) => None,
+        Stmt::Break(_) | Stmt::Continue(_) => None,
     }
 }
 

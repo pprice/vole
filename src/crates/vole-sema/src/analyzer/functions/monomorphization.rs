@@ -73,6 +73,11 @@ impl Analyzer {
 
     /// Analyze all monomorphized function bodies to discover nested generic calls.
     /// Iterates until no new MonomorphInstances are created (fixpoint).
+    ///
+    /// Covers both main-program generics (looked up in `generic_func_asts`) and
+    /// module-originating generics (looked up in `self.ctx.module_programs`).
+    /// Module-originating generic bodies are analyzed with the module's interner
+    /// and a temporarily switched `current_module`.
     pub(in crate::analyzer) fn analyze_monomorph_bodies(
         &mut self,
         program: &Program,
@@ -145,13 +150,89 @@ impl Analyzer {
                 );
                 analyzed_keys.insert(key);
 
-                // Find the function AST
+                // Find the function AST in the main program
                 if let Some(func) = generic_func_asts.get(&instance.original_name) {
                     // Analyze the body with substitutions
                     self.analyze_monomorph_body(func, &instance.substitutions, interner);
+                    continue;
                 }
+
+                // Not in the main program — try module programs
+                self.analyze_module_monomorph_body(&instance);
             }
         }
+    }
+
+    /// Analyze a module-originating monomorphized function body.
+    ///
+    /// Looks up the generic function AST in the module's program, temporarily
+    /// switches `current_module` to the module's ID, and calls
+    /// `analyze_monomorph_body` with the module's interner.  This populates the
+    /// NodeMap for module-originating generic bodies, enabling VIR lowering.
+    ///
+    /// The main analyzer's `SymbolTables` is temporarily swapped out to avoid
+    /// Symbol collisions: module AST symbols are from a different interner than
+    /// the main program's symbols, so a module Symbol(N) could match a
+    /// completely different main-program function at Symbol(N).  With empty
+    /// symbol tables, name resolution falls through to the NameId-based path
+    /// which correctly uses `current_module` + the module interner.
+    ///
+    /// Any diagnostics generated during module body analysis are suppressed —
+    /// module-level errors were already reported during the module's own
+    /// analysis pass.
+    fn analyze_module_monomorph_body(&mut self, instance: &MonomorphInstance) {
+        // Resolve the module from the instance's original_name
+        let (module_id, module_path) = {
+            let names = self.name_table();
+            let mid = names.module_of(instance.original_name);
+            let path = names.module_path(mid).to_string();
+            (mid, path)
+        };
+
+        // Use an Rc clone so the RefCell borrow on module_programs doesn't
+        // conflict with &mut self in analyze_monomorph_body.
+        let ctx = Rc::clone(&self.ctx);
+        let programs = ctx.module_programs.borrow();
+        let Some((module_program, module_interner)) = programs.get(&module_path) else {
+            return;
+        };
+
+        // Find the generic function AST by matching original_name
+        let func = module_program.declarations.iter().find_map(|decl| {
+            let Decl::Function(func) = decl else {
+                return None;
+            };
+            if func.type_params.is_empty() {
+                return None;
+            }
+            let name_id = self
+                .name_table()
+                .name_id(module_id, &[func.name], module_interner);
+            if name_id == Some(instance.original_name) {
+                Some(func)
+            } else {
+                None
+            }
+        });
+
+        let Some(func) = func else { return };
+
+        // Save and swap state to isolate module body analysis:
+        // 1. current_module — so NameId resolution uses the module's namespace
+        // 2. symbols — so Symbol-keyed lookups don't collide across interners
+        // 3. diagnostics.errors — so module body errors don't pollute the main program
+        let saved_module = self.module.current_module;
+        let saved_symbols = std::mem::take(&mut self.symbols);
+        let saved_errors = std::mem::take(&mut self.diagnostics.errors);
+
+        self.module.current_module = module_id;
+
+        self.analyze_monomorph_body(func, &instance.substitutions, module_interner);
+
+        // Restore state
+        self.module.current_module = saved_module;
+        self.symbols = saved_symbols;
+        self.diagnostics.errors = saved_errors;
     }
 
     /// Propagate concrete type substitutions to class method monomorphs created

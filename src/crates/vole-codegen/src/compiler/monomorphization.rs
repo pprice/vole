@@ -195,7 +195,7 @@ impl Compiler<'_> {
         self.compile_monomorphized_function_with_module(func, instance, module_interner, module_id)
     }
 
-    /// Compile a monomorphized function from a module with its own interner.
+    /// Compile a monomorphized function from a module via its VIR body.
     fn compile_monomorphized_function_with_module(
         &mut self,
         func: &FuncDecl,
@@ -212,6 +212,12 @@ impl Compiler<'_> {
         if self.defined_functions.contains(&func_id) {
             return Ok(true);
         }
+
+        // Get the VIR function (must be available — module monomorphs are always lowered)
+        let vir_func = self.analyzed.get_vir_monomorph(instance.mangled_name)
+            .unwrap_or_else(|| {
+                panic!("VIR must be available for module monomorphized function (mangled={mangled_name})")
+            });
 
         // Clear main-program module bindings while compiling module interner code.
         // The IIFE ensures bindings are restored even when `?` returns early.
@@ -251,11 +257,12 @@ impl Compiler<'_> {
 
                 let config =
                     FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
-                compile_function_inner_with_params(
+                compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
                     &env,
                     config,
+                    &vir_func.body,
                     Some(module_id),
                     Some(&instance.substitutions),
                 )?;
@@ -270,8 +277,8 @@ impl Compiler<'_> {
 
     /// Compile a single monomorphized function instance.
     ///
-    /// If a VIR function was lowered for this instance, compiles via the VIR
-    /// path (walking VirBody). Otherwise falls back to the AST path.
+    /// Uses VIR when available; falls back to AST for test-scoped generic
+    /// functions whose monomorphs are not yet lowered to VIR (see vol-6cii).
     fn compile_monomorphized_function(
         &mut self,
         func: &FuncDecl,
@@ -307,9 +314,6 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Get the VIR function lowered for this instance
-        let vir_func = self.analyzed.get_vir_monomorph(instance.mangled_name);
-
         let source_file_ptr = self.source_file_ptr();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -322,13 +326,16 @@ impl Compiler<'_> {
             );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
-            if let Some(vir) = vir_func {
+
+            // VIR path preferred; AST fallback for test-scoped generic monomorphs
+            // not yet lowered (build_generic_func_map doesn't recurse into Decl::Tests)
+            if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
                     &env,
                     config,
-                    &vir.body,
+                    &vir_func.body,
                     None,
                     Some(&instance.substitutions),
                 )?;

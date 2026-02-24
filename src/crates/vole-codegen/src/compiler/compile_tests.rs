@@ -3,8 +3,7 @@ use std::io::Write;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
 use super::common::{
-    DefaultReturn, FunctionCompileConfig, compile_function_inner_with_params,
-    compile_function_inner_with_vir, finalize_function_body,
+    DefaultReturn, FunctionCompileConfig, compile_function_inner_with_vir, finalize_function_body,
 };
 use super::{Compiler, TestInfo};
 
@@ -97,16 +96,14 @@ impl Compiler<'_> {
                 cg.block(&let_block)?;
             }
 
-            // Compile test body, using VIR path if available (AST fallback otherwise).
+            // Compile test body via VIR.
             // Note: For FuncBody::Expr, terminated=true but the block isn't actually
             // terminated (no return instruction). For FuncBody::Block, terminated=true
             // only if there's an explicit return/break. So we check both.
-            let vir_body = self.analyzed.get_vir_test(test.span);
-            let (block_terminated, expr_value) = if let Some(vir) = vir_body {
-                cg.compile_vir_body(vir)?
-            } else {
-                cg.compile_body(&test.body)?
-            };
+            let vir_body = self.analyzed.get_vir_test(test.span).unwrap_or_else(|| {
+                panic!("VIR must be available for test body (span={:?})", test.span)
+            });
+            let (block_terminated, expr_value) = cg.compile_vir_body(vir_body)?;
 
             // Tests always return 0. Add return if block didn't explicitly terminate
             // or if it's an expression body.
@@ -388,27 +385,19 @@ impl Compiler<'_> {
             );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
-            let vir_func = self.analyzed.get_vir_function(semantic_func_id);
-            if let Some(vir) = vir_func {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir.body,
-                    None,
-                    None,
-                )?;
-            } else {
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    None,
-                    None,
-                )?;
-            }
+            let vir_func = self.analyzed.get_vir_function(semantic_func_id)
+                .unwrap_or_else(|| {
+                    panic!("VIR must be available for test-scoped function (FunctionId={semantic_func_id:?})")
+                });
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir_func.body,
+                None,
+                None,
+            )?;
         }
 
         // NOTE: We intentionally do NOT call define_function here.
@@ -460,14 +449,12 @@ impl Compiler<'_> {
                 &mut self.func_registry,
                 &mut self.pending_monomorphs,
             );
-            let vir_body = self.analyzed.get_vir_test(test.span);
+            let vir_body = self.analyzed.get_vir_test(test.span).unwrap_or_else(|| {
+                panic!("VIR must be available for test body (span={:?})", test.span)
+            });
             let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env)
                 .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline);
-            let (terminated, _) = if let Some(vir) = vir_body {
-                cg.compile_vir_body(vir)?
-            } else {
-                cg.compile_body(&test.body)?
-            };
+            let (terminated, _) = cg.compile_vir_body(vir_body)?;
 
             finalize_function_body(builder, None, terminated, DefaultReturn::Zero);
         }

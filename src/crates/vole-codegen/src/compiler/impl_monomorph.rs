@@ -978,14 +978,15 @@ impl Compiler<'_> {
                     } else {
                         Some(&type_param_subs)
                     };
-                    let vir_func = self.analyzed.get_vir_method(semantic_method_id);
-                    if let Some(vir) = vir_func {
+                    // VIR path preferred; AST fallback for test-scoped implement
+                    // blocks whose default methods are not yet lowered (see vol-6cii)
+                    if let Some(vir_func) = self.analyzed.get_vir_method(semantic_method_id) {
                         compile_function_inner_with_vir(
                             builder,
                             &mut codegen_ctx,
                             &env,
                             config,
-                            &vir.body,
+                            &vir_func.body,
                             iface_module_id,
                             subs,
                         )?;
@@ -1321,8 +1322,10 @@ impl Compiler<'_> {
                     } else {
                         Some(&type_param_subs)
                     };
-                    let vir_func = self.analyzed.get_vir_method(semantic_method_id);
-                    if let Some(vir) = vir_func {
+                    // VIR fallback: some default methods (e.g. range Iterable defaults)
+                    // don't have VIR bodies because resolve_implement_target doesn't
+                    // handle Named primitives like "range". Fall back to AST path.
+                    if let Some(vir) = self.analyzed.get_vir_method(semantic_method_id) {
                         compile_function_inner_with_vir(
                             builder,
                             &mut codegen_ctx,
@@ -1446,8 +1449,11 @@ impl Compiler<'_> {
                 .map(|(_, ret, _)| ret)
         };
 
-        // Check if a VIR function was lowered for this method
-        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+        // Get the VIR function (must be available — implement block methods are always lowered)
+        let vir_func = self.analyzed.get_vir_method(semantic_method_id)
+            .unwrap_or_else(|| {
+                panic!("VIR must be available for module implement method (MethodId={semantic_method_id:?})")
+            });
 
         let no_global_inits = FxHashMap::default();
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -1468,26 +1474,15 @@ impl Compiler<'_> {
                 self_binding,
                 method_return_type_id,
             );
-            if let Some(vir) = vir_func {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir.body,
-                    Some(module_id),
-                    None,
-                )?;
-            } else {
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    Some(module_id),
-                    None,
-                )?;
-            }
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir_func.body,
+                Some(module_id),
+                None,
+            )?;
         }
 
         self.finalize_function(func_id)?;
@@ -1563,9 +1558,6 @@ impl Compiler<'_> {
             let source_file_ptr = self.source_file_ptr();
             let resolved_module_id = module_id;
 
-            // Check if a VIR function was lowered for this static method
-            let vir_func = self.analyzed.get_vir_method(method_id);
-
             // Create function builder and compile
             let no_global_inits = FxHashMap::default();
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -1586,13 +1578,16 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, return_type_id);
-                if let Some(vir) = vir_func {
+
+                // VIR path preferred; AST fallback for test-scoped implement
+                // blocks whose statics are not yet lowered (see vol-6cii)
+                if let Some(vir_func) = self.analyzed.get_vir_method(method_id) {
                     compile_function_inner_with_vir(
                         builder,
                         &mut codegen_ctx,
                         &env,
                         config,
-                        &vir.body,
+                        &vir_func.body,
                         resolved_module_id,
                         None,
                     )?;
@@ -1695,9 +1690,6 @@ impl Compiler<'_> {
                 .map(|(_, ret, _)| ret)
         };
 
-        // Check if a VIR function was lowered for this method
-        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
-
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -1718,13 +1710,16 @@ impl Compiler<'_> {
                 self_binding,
                 method_return_type_id,
             );
-            if let Some(vir) = vir_func {
+
+            // VIR path preferred; AST fallback for test-scoped implement
+            // blocks whose methods are not yet lowered (see vol-6cii)
+            if let Some(vir_func) = self.analyzed.get_vir_method(semantic_method_id) {
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
                     &env,
                     config,
-                    &vir.body,
+                    &vir_func.body,
                     None,
                     None,
                 )?;

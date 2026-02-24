@@ -50,27 +50,6 @@ impl Cg<'_, '_, '_> {
         Some(var)
     }
 
-    /// Compile a function body (block or expression).
-    ///
-    /// Returns (terminated, optional_value):
-    /// - For blocks: (true if explicitly terminated, None)
-    /// - For expressions: (true, Some(value))
-    pub fn compile_body(
-        &mut self,
-        body: &vole_frontend::FuncBody,
-    ) -> CodegenResult<(bool, Option<CompiledValue>)> {
-        match body {
-            vole_frontend::FuncBody::Block(block) => {
-                let terminated = self.block(block)?;
-                Ok((terminated, None))
-            }
-            vole_frontend::FuncBody::Expr(expr) => {
-                let value = self.expr(expr)?;
-                Ok((true, Some(value)))
-            }
-        }
-    }
-
     /// Compile a block of statements. Returns true if terminated (return/break).
     ///
     /// Note: This does NOT push/pop RC scopes. Statement blocks (if/while/for bodies)
@@ -1067,9 +1046,8 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR body (stmts + optional trailing expression).
     ///
-    /// Mirrors [`compile_body`] but operates on a `VirBody` instead of a
-    /// `FuncBody`.  Used for test function compilation where the caller
-    /// manages RC scopes and finalization externally.
+    /// Used for test function compilation where the caller manages RC
+    /// scopes and finalization externally.
     ///
     /// Returns `(terminated, Option<CompiledValue>)`:
     /// - If trailing is `Some`: compiles stmts then the trailing expr,
