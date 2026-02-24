@@ -140,8 +140,7 @@ fn extract_vir_int_literal(expr: &vole_vir::VirExpr) -> Option<i64> {
 /// Analyze VIR match arms to determine if Switch optimization is applicable.
 ///
 /// Same criteria as [`analyze_switch`] but operates on VIR match arms.
-/// Handles both `VirPattern::Ast`-wrapped AST patterns and concrete
-/// `VirPattern::Wildcard` / `VirPattern::Literal` variants.
+/// All patterns are concrete `VirPattern` variants (Wildcard, Literal, etc.).
 pub(crate) fn analyze_vir_switch(
     arms: &[vole_vir::VirMatchArm],
     scrutinee_type_id: TypeId,
@@ -173,21 +172,6 @@ pub(crate) fn analyze_vir_switch(
                     arm_values.push((i, val));
                 }
             }
-            vole_vir::VirPattern::Ast(pattern) => match &pattern.kind {
-                PatternKind::Wildcard => {
-                    if wildcard_idx.is_some() {
-                        return None;
-                    }
-                    wildcard_idx = Some(i);
-                }
-                PatternKind::Literal(lit_expr) => {
-                    let value = extract_int_literal(lit_expr)?;
-                    if seen_values.insert(value) {
-                        arm_values.push((i, value));
-                    }
-                }
-                _ => return None,
-            },
             // Any other VIR pattern (Binding, TypeCheck, Val) prevents switch
             _ => return None,
         }

@@ -879,10 +879,10 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR `Match` expression.
     ///
     /// Like [`match_expr`] but operates on VIR nodes: the scrutinee is a
-    /// `VirRef`, arms carry `VirPattern::Ast` patterns, VIR guards, and
-    /// `VirBody` bodies.  Pattern compilation still delegates to
-    /// [`compile_match_arm_pattern`] via the AST pattern inside
-    /// `VirPattern::Ast`.
+    /// `VirRef`, arms carry concrete `VirPattern` variants, VIR guards, and
+    /// `VirBody` bodies.  Pattern compilation dispatches on concrete VIR
+    /// pattern variants (Wildcard, Binding, TypeCheck, Literal, Val, Success,
+    /// Error, Tuple, Record).
     pub(super) fn compile_vir_match(
         &mut self,
         scrutinee_expr: &vole_vir::VirExpr,
@@ -1056,7 +1056,6 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR pattern, returning the condition value (if any).
     ///
     /// Dispatches concrete VIR pattern variants to specialised helpers.
-    /// `VirPattern::Ast` delegates to the existing AST pattern compiler.
     fn compile_vir_pattern(
         &mut self,
         pattern: &vole_vir::VirPattern,
@@ -1067,15 +1066,6 @@ impl Cg<'_, '_, '_> {
         effective_arm_block: &mut Block,
     ) -> CodegenResult<Option<Value>> {
         match pattern {
-            vole_vir::VirPattern::Ast(ast_pattern) => self.compile_match_arm_pattern(
-                scrutinee,
-                ast_pattern,
-                arm_variables,
-                arm_block,
-                next_block,
-                effective_arm_block,
-            ),
-
             vole_vir::VirPattern::Wildcard => Ok(None),
 
             vole_vir::VirPattern::Binding { name, ty: _ } => {

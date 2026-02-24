@@ -705,7 +705,6 @@ impl<'a> VirPrinter<'a> {
 
     fn fmt_pattern(&self, pattern: &VirPattern, out: &mut String, ind: usize) {
         match pattern {
-            VirPattern::Ast(p) => w!(out, "<ast:pattern({:?})>", p),
             VirPattern::Wildcard => w!(out, "_"),
             VirPattern::Binding { name, ty } => {
                 w!(out, "{}: {}", self.sym(*name), self.ty(*ty));

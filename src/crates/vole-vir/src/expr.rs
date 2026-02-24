@@ -3,7 +3,7 @@
 // VIR expression nodes and their supporting types.
 
 use vole_frontend::ast::MethodCallExpr;
-use vole_frontend::{Expr, NodeId, Pattern};
+use vole_frontend::{Expr, NodeId};
 use vole_identity::{NameId, Symbol, TypeDefId, TypeId};
 use vole_sema::{StringConversion, UnionStorageKind};
 
@@ -477,12 +477,6 @@ pub struct VirMatchArm {
 /// discrimination.
 #[derive(Debug, Clone)]
 pub enum VirPattern {
-    /// AST pattern that has not yet been lowered to VIR.
-    ///
-    /// Carries the original `Pattern` (for codegen's pattern compilation)
-    /// which includes the `NodeId` for sema lookup (is-check results, etc.).
-    Ast(Box<Pattern>),
-
     /// Wildcard pattern (`_`): always matches, binds nothing.
     Wildcard,
 
