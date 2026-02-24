@@ -11,6 +11,7 @@ use crate::commands::common::{PipelineOptions, compile_source, render_pipeline_e
 use crate::commands::mir_format::format_mir;
 use crate::frontend::{AstPrinter, ModuleId, Parser};
 use crate::sema::ModuleCache;
+use crate::vir::VirPrinter;
 
 /// Inspect compilation output for the given files
 pub fn inspect_files(
@@ -211,6 +212,18 @@ pub fn inspect_files(
                     println!("{}", format_mir(asm));
                 }
             }
+            InspectType::Vir => {
+                inspect_vir(
+                    &source,
+                    &file_path,
+                    project_root.as_deref(),
+                    &module_cache,
+                    color_mode,
+                    no_tests,
+                    show_all,
+                    &mut had_error,
+                );
+            }
         }
     }
 
@@ -218,6 +231,76 @@ pub fn inspect_files(
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// Run parse + sema + VIR lowering, then pretty-print all VIR functions.
+#[allow(clippy::too_many_arguments)]
+fn inspect_vir(
+    source: &str,
+    file_path: &str,
+    project_root: Option<&std::path::Path>,
+    module_cache: &Rc<RefCell<ModuleCache>>,
+    color_mode: ColorMode,
+    no_tests: bool,
+    show_all: bool,
+    had_error: &mut bool,
+) {
+    let result = compile_source(
+        PipelineOptions {
+            source,
+            file_path,
+            skip_tests: no_tests,
+            project_root,
+            module_cache: Some(module_cache.clone()),
+            color_mode,
+        },
+        &mut std::io::stderr(),
+    );
+    let analyzed = match result {
+        Ok(a) => a,
+        Err(ref e) => {
+            render_pipeline_error(
+                e,
+                file_path,
+                source,
+                &mut std::io::stderr(),
+                color_mode,
+                false,
+            );
+            *had_error = true;
+            return;
+        }
+    };
+
+    let printer = VirPrinter::new(
+        &analyzed.interner,
+        analyzed.type_arena(),
+        analyzed.entity_registry(),
+        analyzed.name_table(),
+    );
+
+    let include_tests = !no_tests;
+    let main_module = analyzed.module_id;
+    let entities = analyzed.entity_registry();
+
+    for func in &analyzed.vir_functions {
+        // Skip non-main-module functions unless --all
+        if !show_all && !is_main_module_vir_func(func, entities, main_module) {
+            continue;
+        }
+        if !include_tests && is_test_function(&func.name) {
+            continue;
+        }
+        print!("{}", printer.print_function(func));
+    }
+
+    // Print VIR test bodies
+    if include_tests {
+        for (span, body) in &analyzed.vir_test_bodies {
+            println!("// test @{}:{}", span.start, span.end);
+            print!("{}", printer.print_body(body));
+        }
     }
 }
 
@@ -235,4 +318,22 @@ fn is_prelude_function(name: &str) -> bool {
 fn is_test_function(name: &str) -> bool {
     // Test functions are named "__test_{idx}" by the compiler
     name.starts_with("__test_")
+}
+
+/// Check if a VIR function belongs to the main module.
+///
+/// Methods use their defining type's module; free functions use FunctionDef.module.
+fn is_main_module_vir_func(
+    func: &crate::vir::VirFunction,
+    entities: &crate::sema::EntityRegistry,
+    main_module: ModuleId,
+) -> bool {
+    if let Some(method_id) = func.method_id {
+        let method_def = entities.get_method(method_id);
+        let type_def = entities.get_type(method_def.defining_type);
+        type_def.module == main_module
+    } else {
+        let func_def = entities.get_function(func.id);
+        func_def.module == main_module
+    }
 }

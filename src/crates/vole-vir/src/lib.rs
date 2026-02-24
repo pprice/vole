@@ -15,6 +15,7 @@ pub mod expr;
 pub mod func;
 pub mod intrinsics;
 pub mod lower;
+pub mod printer;
 pub mod refs;
 pub mod stmt;
 pub mod types;
@@ -36,6 +37,7 @@ pub use lower::{
     lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
     lower_test_body,
 };
+pub use printer::VirPrinter;
 pub use refs::VirRef;
 pub use stmt::{AssignTarget, VirFor, VirIterKind, VirStmt};
 pub use types::{

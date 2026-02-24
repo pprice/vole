@@ -1700,6 +1700,7 @@ dependencies = [
  "vole-identity",
  "vole-runtime",
  "vole-sema",
+ "vole-vir",
 ]
 
 [[package]]

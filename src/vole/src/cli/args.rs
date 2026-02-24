@@ -201,4 +201,5 @@ pub enum InspectType {
     Ast,
     Ir,
     Mir,
+    Vir,
 }

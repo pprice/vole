@@ -24,7 +24,7 @@ pub(crate) mod analysis_cache;
 pub(crate) mod compatibility;
 pub(crate) mod resolve;
 pub(crate) mod scope;
-pub(crate) mod type_display;
+pub mod type_display;
 pub(crate) mod well_known;
 
 // Re-exports: public API surface

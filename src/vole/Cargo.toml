@@ -26,6 +26,7 @@ vole-identity = { path = "../crates/vole-identity" }
 vole-runtime = { path = "../crates/vole-runtime" }
 vole-sema = { path = "../crates/vole-sema" }
 vole-codegen = { path = "../crates/vole-codegen" }
+vole-vir = { path = "../crates/vole-vir" }
 
 # Error handling
 miette = { version = "7.4", features = ["fancy"] }
