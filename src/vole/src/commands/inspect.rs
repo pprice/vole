@@ -295,6 +295,14 @@ fn inspect_vir(
         print!("{}", printer.print_function(func));
     }
 
+    // Print generic VIR function templates (pre-monomorphization)
+    if !analyzed.generic_vir_functions.is_empty() {
+        println!("// --- generic VIR templates ---");
+        for func in &analyzed.generic_vir_functions {
+            print!("{}", printer.print_function(func));
+        }
+    }
+
     // Print VIR test bodies
     if include_tests {
         for test in &analyzed.vir_tests {

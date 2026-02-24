@@ -46,6 +46,9 @@ impl Cg<'_, '_, '_> {
                 native_name,
                 abi,
             } => self.compile_vir_native_call(*module_path, *native_name, *abi, args, ty),
+            CallTarget::GenericCall { .. } => {
+                unreachable!("CallTarget::GenericCall must be resolved before codegen")
+            }
             CallTarget::Unresolved {
                 callee_sym,
                 call_node_id,

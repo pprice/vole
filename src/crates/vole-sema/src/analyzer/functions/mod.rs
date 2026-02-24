@@ -1,6 +1,7 @@
 // src/sema/analyzer/functions/mod.rs
 //! Function and method checking: context management, body analysis, monomorphization.
 
+mod generic_vir;
 mod monomorphization;
 
 use super::*;

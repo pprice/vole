@@ -15,6 +15,7 @@ use std::rc::Rc;
 use vole_frontend::Span;
 use vole_frontend::ast::Symbol;
 use vole_identity::{MethodId, ModuleId, NameId};
+use vole_vir::func::VirFunction;
 
 use super::Analyzer;
 use super::context::AnalyzerContext;
@@ -69,6 +70,12 @@ pub struct AnalysisOutput {
     /// Codegen should skip compiling function bodies for these modules to avoid
     /// encountering INVALID type IDs from failed type checking.
     pub modules_with_errors: HashSet<String>,
+    /// Generic VIR function templates lowered with abstract type params.
+    ///
+    /// Populated during Pass 2a (generic body analysis) BEFORE the concrete
+    /// monomorphization fixpoint loop, so the NodeMap entries used here have
+    /// abstract TypeParam types.  Keyed by the function's original `NameId`.
+    pub generic_vir_functions: Vec<(NameId, VirFunction)>,
 }
 
 /// Analysis results collected during type checking for codegen.
@@ -84,6 +91,8 @@ pub(crate) struct AnalysisResults {
     /// Keyed by Span (not NodeId), accumulated here during analysis, then moved to
     /// AnalysisOutput (not NodeMap) since NodeMap is purely NodeId-keyed.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
+    /// Generic VIR function templates lowered during Pass 2a.
+    pub generic_vir_functions: Vec<(NameId, VirFunction)>,
 }
 
 /// Function and global variable symbol tables.

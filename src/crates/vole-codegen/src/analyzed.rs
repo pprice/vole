@@ -63,6 +63,16 @@ pub struct AnalyzedProgram {
     ///
     /// Keyed by module path, then by the `let` binding's `Symbol`.
     pub module_vir_global_inits: FxHashMap<String, FxHashMap<Symbol, VirRef>>,
+    /// Generic VIR function templates (pre-monomorphization).
+    ///
+    /// Each entry is a VIR function lowered with `generic: true` mode, where
+    /// type parameter types are preserved as `VirType::Param`.  These templates
+    /// are consumed by a future VIR-to-VIR monomorphization pass; they must NOT
+    /// reach codegen directly.
+    pub generic_vir_functions: Vec<VirFunction>,
+    /// Lookup map from the generic function's original `NameId` to its index
+    /// in `generic_vir_functions`.
+    pub generic_vir_map: FxHashMap<NameId, usize>,
     /// VIR type table populated during lowering.
     ///
     /// Maps `TypeId` → `VirTypeId` with interned VIR type descriptors and
@@ -214,6 +224,8 @@ impl AnalyzedProgram {
             &output.modules_with_errors,
             &mut type_table,
         );
+        let (generic_vir_functions, generic_vir_map) =
+            build_generic_vir_storage(output.generic_vir_functions);
         Self {
             program,
             interner: Rc::new(interner),
@@ -230,6 +242,8 @@ impl AnalyzedProgram {
             vir_tests,
             vir_global_inits,
             module_vir_global_inits,
+            generic_vir_functions,
+            generic_vir_map,
             vir_type_table: type_table,
         }
     }
@@ -300,6 +314,14 @@ impl AnalyzedProgram {
         self.vir_method_map
             .get(&method_id)
             .map(|&idx| &self.vir_functions[idx])
+    }
+
+    /// Look up a generic VIR function template by its original `NameId`.
+    /// Returns `None` if no generic VIR function was lowered for this name.
+    pub fn get_generic_vir_function(&self, original_name: NameId) -> Option<&VirFunction> {
+        self.generic_vir_map
+            .get(&original_name)
+            .map(|&idx| &self.generic_vir_functions[idx])
     }
 
     /// Look up a VIR test body by the test case's span.
@@ -2212,4 +2234,22 @@ fn lower_module_implement_block_methods(
             type_table,
         );
     }
+}
+
+/// Build generic VIR storage from the `(NameId, VirFunction)` pairs produced
+/// by sema's Pass 2a (generic body analysis + VIR lowering).
+///
+/// Returns the Vec of generic VirFunctions and a lookup map from NameId to
+/// index for O(1) access.
+fn build_generic_vir_storage(
+    pairs: Vec<(NameId, VirFunction)>,
+) -> (Vec<VirFunction>, FxHashMap<NameId, usize>) {
+    let mut map = FxHashMap::default();
+    let mut functions = Vec::with_capacity(pairs.len());
+    for (name_id, vir) in pairs {
+        let idx = functions.len();
+        map.insert(name_id, idx);
+        functions.push(vir);
+    }
+    (functions, map)
 }

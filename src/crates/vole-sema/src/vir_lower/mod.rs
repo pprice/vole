@@ -339,6 +339,57 @@ pub fn lower_interface_method(
     })
 }
 
+/// Lower a generic function declaration into a `VirFunction` template.
+///
+/// Like [`lower_function`], but uses `generic: true` mode so that missing
+/// or type-parameter-dependent NodeMap entries produce placeholder values
+/// instead of panicking.  The `param_types` and `return_type` should contain
+/// abstract `TypeParam` types from the function's `GenericFuncInfo`.
+///
+/// The resulting `VirFunction` is a **template** — it must NOT reach codegen
+/// directly.  A future VIR-to-VIR monomorphization pass substitutes type
+/// parameters with concrete types before compilation.
+#[allow(clippy::too_many_arguments)]
+pub fn lower_generic_function(
+    func: &FuncDecl,
+    func_id: FunctionId,
+    name: String,
+    param_types: &[(Symbol, TypeId)],
+    return_type: TypeId,
+    node_map: &NodeMap,
+    interner: &mut Interner,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
+    name_table: &NameTable,
+    type_table: &mut VirTypeTable,
+) -> VirFunction {
+    let mut ctx = LoweringCtx {
+        node_map,
+        interner,
+        type_arena,
+        entities,
+        name_table,
+        type_table,
+        generic: true,
+    };
+    let params = param_types
+        .iter()
+        .map(|(s, t)| (*s, *t, ctx.translate(*t)))
+        .collect();
+    let vir_return_type = ctx.translate(return_type);
+    let body = lower_func_body(&func.body, &mut ctx);
+    VirFunction {
+        id: func_id,
+        name,
+        params,
+        return_type,
+        vir_return_type,
+        body,
+        mangled_name_id: None,
+        method_id: None,
+    }
+}
+
 /// Assert (debug-only) that all types in a monomorphized function signature
 /// are concrete — no `TypeParam` or `TypeParamRef` remains.
 fn debug_assert_concrete_types(

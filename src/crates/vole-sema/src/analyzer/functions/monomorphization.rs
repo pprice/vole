@@ -7,7 +7,7 @@ use super::super::*;
 impl Analyzer {
     /// Analyze a generic function body with type substitutions applied.
     /// This discovers nested generic function calls and creates their MonomorphInstances.
-    fn analyze_monomorph_body(
+    pub(super) fn analyze_monomorph_body(
         &mut self,
         func: &FuncDecl,
         substitutions: &FxHashMap<NameId, ArenaTypeId>,
@@ -159,7 +159,7 @@ impl Analyzer {
     /// so that test-scoped generic functions are included in the map.
     /// Test-scoped functions are registered under the program's module_id,
     /// so the same `current_module` is used for name resolution.
-    fn collect_generic_func_asts<'a>(
+    pub(super) fn collect_generic_func_asts<'a>(
         &mut self,
         decls: &'a [Decl],
         interner: &Interner,

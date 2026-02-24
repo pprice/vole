@@ -584,6 +584,18 @@ impl<'a> VirPrinter<'a> {
                     abi_str,
                 );
             }
+            CallTarget::GenericCall {
+                function_id,
+                type_args,
+            } => {
+                let targs: Vec<String> = type_args.iter().map(|t| format!("{t:?}")).collect();
+                w!(
+                    out,
+                    "generic_call({:?}<{}>, ",
+                    function_id,
+                    targs.join(", ")
+                );
+            }
             CallTarget::Unresolved {
                 callee_sym, line, ..
             } => {

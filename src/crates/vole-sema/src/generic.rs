@@ -136,6 +136,16 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
         }
     }
 
+    /// Retain only instances whose keys satisfy the predicate.
+    ///
+    /// Entries for which `f` returns `false` are removed.
+    pub fn retain<F>(&mut self, f: F)
+    where
+        F: FnMut(&K, &mut V) -> bool,
+    {
+        self.instances.retain(f);
+    }
+
     /// Reset cache metrics to zero
     pub fn clear_metrics(&self) {
         self.hits.store(0, Ordering::Relaxed);

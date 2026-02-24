@@ -2,7 +2,7 @@
 //
 // Call target descriptors for VIR function calls.
 
-use vole_identity::{FunctionId, NodeId, Symbol};
+use vole_identity::{FunctionId, NodeId, Symbol, VirTypeId};
 
 use crate::intrinsics::IntrinsicKey;
 
@@ -36,6 +36,17 @@ pub enum CallTarget {
         module_path: Symbol,
         native_name: Symbol,
         abi: NativeAbi,
+    },
+
+    /// A call to a generic function with (possibly abstract) type arguments.
+    ///
+    /// Emitted during generic VIR lowering when a generic function body calls
+    /// another generic function with type args that may include type parameters.
+    /// Must be resolved to a concrete `CallTarget` during VIR monomorphization
+    /// before codegen.
+    GenericCall {
+        function_id: FunctionId,
+        type_args: Vec<VirTypeId>,
     },
 
     /// A call that could not be fully classified during VIR lowering.

@@ -171,6 +171,7 @@ impl Analyzer {
             db,
             module_id: current_module,
             modules_with_errors: modules_with_errors.into_iter().collect(),
+            generic_vir_functions: self.results.generic_vir_functions,
         }
     }
 
@@ -524,6 +525,12 @@ impl Analyzer {
 
         // Pass 2: type check function bodies and tests
         self.check_declaration_bodies(program, interner)?;
+
+        // Pass 2a: Analyze generic function bodies with abstract TypeParam types
+        // and lower them to VIR templates.  Must run BEFORE the concrete
+        // monomorphization fixpoint (Pass 3) because Pass 3 overwrites the
+        // NodeMap entries with concrete types.
+        self.results.generic_vir_functions = self.lower_generic_bodies_to_vir(program, interner);
 
         // Pass 2.5: Propagate concrete substitutions to class method monomorphs.
         // Generic class bodies record identity monomorphs for self-calls (T -> TypeParam(T)).
