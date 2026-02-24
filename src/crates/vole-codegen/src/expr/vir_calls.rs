@@ -385,9 +385,9 @@ impl Cg<'_, '_, '_> {
     /// instead of the original AST.
     fn compile_vir_unresolved_call(
         &mut self,
-        callee_sym: vole_frontend::Symbol,
+        callee_sym: vole_identity::Symbol,
         args: &[VirRef],
-        call_node_id: vole_frontend::NodeId,
+        call_node_id: vole_identity::NodeId,
         line: u32,
     ) -> CodegenResult<CompiledValue> {
         let arg_source = crate::structs::methods::ArgSource::Vir(args);

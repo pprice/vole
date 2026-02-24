@@ -10,9 +10,8 @@ mod operators;
 mod variables;
 
 use vole_frontend::Interner;
-use vole_frontend::NodeId;
 use vole_frontend::ast::{Block, Expr, ExprKind, FuncBody, FuncDecl, Stmt};
-use vole_identity::{FunctionId, ModuleId, NameId, NameTable, Span, Symbol, TypeId};
+use vole_identity::{FunctionId, ModuleId, NameId, NameTable, NodeId, Span, Symbol, TypeId};
 use vole_sema::node_map::NodeMap;
 use vole_sema::{EntityRegistry, TypeArena};
 

@@ -2,8 +2,7 @@
 //
 // VIR expression nodes and their supporting types.
 
-use vole_frontend::NodeId;
-use vole_identity::{NameId, Symbol, TypeDefId, TypeId};
+use vole_identity::{NameId, NodeId, Symbol, TypeDefId, TypeId};
 use vole_sema::{StringConversion, UnionStorageKind};
 
 use crate::calls::CallTarget;

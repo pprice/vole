@@ -2,8 +2,7 @@
 //
 // Call target descriptors for VIR function calls.
 
-use vole_frontend::NodeId;
-use vole_identity::{FunctionId, Symbol};
+use vole_identity::{FunctionId, NodeId, Symbol};
 
 use crate::intrinsics::IntrinsicKey;
 

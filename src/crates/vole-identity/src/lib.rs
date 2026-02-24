@@ -39,6 +39,61 @@ impl ModuleId {
     }
 }
 
+/// Unique identifier for AST nodes (expressions, statements, declarations).
+///
+/// Globally unique across all parse units: the `module` field identifies which
+/// source file/module produced the node, and `local` is a per-module counter.
+/// This eliminates cross-file NodeId collisions that previously required
+/// duplicated lookup tables (e.g., `get_generic` vs `get_generic_in_module`).
+///
+/// Defined in `vole-identity` (rather than `vole-frontend`) so that downstream
+/// crates like `vole-vir` can reference node IDs without depending on the full
+/// AST / parser infrastructure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NodeId {
+    /// The module this node belongs to.
+    pub module: ModuleId,
+    /// Per-module sequential counter assigned by the parser.
+    pub local: u32,
+}
+
+impl NodeId {
+    /// Create a NodeId for a given module and local index.
+    /// Only the parser and code generators should use this.
+    pub fn new(module: ModuleId, local: u32) -> Self {
+        Self { module, local }
+    }
+
+    /// Return the local (per-module) index.
+    pub fn local(self) -> u32 {
+        self.local
+    }
+
+    /// Create a NodeId with an arbitrary index in test code (uses main module).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn new_for_test(index: u32) -> Self {
+        Self {
+            module: ModuleId::new(0),
+            local: index,
+        }
+    }
+}
+
+impl Default for NodeId {
+    fn default() -> Self {
+        Self {
+            module: ModuleId::new(0),
+            local: 0,
+        }
+    }
+}
+
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "node#{}:{}", self.module.index(), self.local)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NameId(u32);
 
