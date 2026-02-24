@@ -3,7 +3,6 @@
 // Call target descriptors for VIR function calls.
 
 use vole_frontend::NodeId;
-use vole_frontend::ast::CallExpr;
 use vole_identity::{FunctionId, Symbol};
 
 use crate::intrinsics::IntrinsicKey;
@@ -45,14 +44,14 @@ pub enum CallTarget {
     /// Lowering can see the callee symbol and NodeMap annotations but lacks
     /// access to the function registry, variable table, and module context
     /// needed for full dispatch.  Codegen resolves these into concrete call
-    /// paths using the same dispatch logic as the legacy `call()` method.
+    /// paths using the same dispatch logic as the `call_dispatch()` method.
     ///
-    /// The `call_expr` carries the original AST so codegen can access
-    /// named-arg reordering, default-arg compilation, and type-coerced
-    /// argument compilation (via `expr_with_expected_type`).
+    /// The VIR `args` on the parent `VirExpr::Call` carry the lowered
+    /// arguments; codegen compiles them via `ArgSource::Vir` and threads
+    /// them through each dispatch path.
     Unresolved {
-        /// The original AST call expression, preserved for codegen dispatch.
-        call_expr: Box<CallExpr>,
+        /// The callee identifier symbol.
+        callee_sym: Symbol,
         /// NodeId of the call expression (for NodeMap lookups: monomorph key,
         /// named-arg mapping, lambda defaults, intrinsic key, etc.).
         call_node_id: NodeId,

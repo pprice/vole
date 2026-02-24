@@ -49,10 +49,10 @@ impl Cg<'_, '_, '_> {
                 abi,
             } => self.compile_vir_native_call(*module_path, *native_name, *abi, args, ty),
             CallTarget::Unresolved {
-                call_expr,
+                callee_sym,
                 call_node_id,
                 line,
-            } => self.compile_vir_unresolved_call(call_expr, *call_node_id, *line),
+            } => self.compile_vir_unresolved_call(*callee_sym, args, *call_node_id, *line),
         }
     }
 
@@ -376,24 +376,22 @@ impl Cg<'_, '_, '_> {
         self.native_call_result(call_inst, &native_func, return_ty)
     }
 
-    /// Compile an unresolved call by delegating to the legacy `call()` dispatcher.
+    /// Compile an unresolved call by delegating to `call_dispatch()`.
     ///
     /// The lowering pass emits `CallTarget::Unresolved` for call expressions
     /// that couldn't be classified without the function registry, variable
-    /// table, and module context.  This method bridges VIR back to the
-    /// existing AST-based dispatch in `calls/mod.rs`.
-    ///
-    /// The legacy `call()` method compiles arguments from the AST `CallExpr`
-    /// directly (with type hints, coercion, named-arg reordering, etc.),
-    /// so we do NOT use the lowered VIR `args` here — they were lowered for
-    /// forward compatibility but are unused in this code path.
+    /// table, and module context.  This method passes the VIR-lowered `args`
+    /// through `ArgSource::Vir` so all dispatch paths compile from VIR
+    /// instead of the original AST.
     fn compile_vir_unresolved_call(
         &mut self,
-        call_expr: &vole_frontend::ast::CallExpr,
+        callee_sym: vole_frontend::Symbol,
+        args: &[VirRef],
         call_node_id: vole_frontend::NodeId,
         line: u32,
     ) -> CodegenResult<CompiledValue> {
-        let result = self.call(call_expr, line, call_node_id)?;
+        let arg_source = crate::structs::methods::ArgSource::Vir(args);
+        let result = self.call_dispatch(callee_sym, &arg_source, line, call_node_id)?;
         Ok(self.mark_rc_owned(result))
     }
 

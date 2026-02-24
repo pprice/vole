@@ -561,8 +561,10 @@ impl<'a> VirPrinter<'a> {
                     abi_str,
                 );
             }
-            CallTarget::Unresolved { line, .. } => {
-                w!(out, "<ast:call@{}>(", line);
+            CallTarget::Unresolved {
+                callee_sym, line, ..
+            } => {
+                w!(out, "unresolved({}@{})(", self.sym(*callee_sym), line);
             }
         }
         self.fmt_comma_list(args, out, ind);

@@ -872,15 +872,15 @@ fn lower_struct_literal(
 /// registry, variable table, and module context — none of which are available
 /// during lowering.
 ///
-/// The lowering emits `CallTarget::Unresolved` which carries the original AST
-/// `CallExpr` so codegen can perform the full dispatch.  VIR arguments are
-/// lowered recursively but are NOT used by codegen for Unresolved calls
-/// (the AST `CallExpr` provides the args for type-coerced compilation).
+/// The lowering emits `CallTarget::Unresolved` which carries the callee
+/// symbol, call NodeId, and source line.  Codegen's `call_dispatch()` uses
+/// these plus the VIR-lowered `args` (compiled via `ArgSource::Vir`) to
+/// perform the full 15+ path dispatch.
 ///
 /// **Indirect calls** (non-identifier callee, e.g. `array[0]()`) are lowered
 /// as `CallTarget::Lambda` with the callee prepended as the first arg.
 /// Codegen's `compile_vir_lambda_call` handles these directly, so they bypass
-/// the legacy `call()` dispatcher entirely.
+/// the `call_dispatch()` dispatcher entirely.
 ///
 /// Over time, specific call patterns will be promoted from Unresolved to
 /// concrete `CallTarget` variants (Direct, Lambda, Intrinsic, etc.) as sema
@@ -900,7 +900,7 @@ fn lower_call(
         let mut args = Vec::with_capacity(1 + call_expr.args.len());
         args.push(callee_ref);
         for arg in &call_expr.args {
-            args.push(lower_expr(arg.expr(), ctx));
+            args.push(lower_call_arg(arg.expr(), ctx));
         }
         return Box::new(VirExpr::Call {
             target: CallTarget::Lambda,
@@ -909,18 +909,21 @@ fn lower_call(
         });
     }
 
-    // Lower argument expressions to VIR.
-    // For Unresolved calls, codegen re-compiles from the AST CallExpr, but
-    // lowered args are still recorded for future migration to concrete
-    // CallTarget variants.
+    // Extract the callee symbol from the identifier expression.
+    let callee_sym = match &call_expr.callee.kind {
+        ExprKind::Identifier(sym) => *sym,
+        _ => unreachable!("non-identifier callee handled above"),
+    };
+
+    // Lower argument expressions to VIR, handling implicit `it` lambdas.
     let args: Vec<VirRef> = call_expr
         .args
         .iter()
-        .map(|arg| lower_expr(arg.expr(), ctx))
+        .map(|arg| lower_call_arg(arg.expr(), ctx))
         .collect();
 
     let target = CallTarget::Unresolved {
-        call_expr: Box::new(call_expr.clone()),
+        callee_sym,
         call_node_id: expr.id,
         line: expr.span.line,
     };

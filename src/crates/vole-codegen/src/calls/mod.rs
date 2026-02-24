@@ -32,7 +32,11 @@ use crate::ops::sextend_const;
 use cranelift_module::FuncId;
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
-    /// Compile a function call
+    /// Compile a function call from an AST `CallExpr`.
+    ///
+    /// Thin wrapper: extracts `callee_sym` and wraps args as `ArgSource::Ast`,
+    /// then delegates to `call_dispatch()`.  Indirect calls (non-identifier
+    /// callee) are handled here because VIR lowers them as `CallTarget::Lambda`.
     #[tracing::instrument(skip(self, call))]
     pub fn call(
         &mut self,
@@ -45,14 +49,35 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             _ => return self.indirect_call(call),
         };
 
+        self.call_dispatch(
+            callee_sym,
+            &ArgSource::Ast(&call.args),
+            call_line,
+            call_expr_id,
+        )
+    }
+
+    /// Core call dispatch: routes a call by callee symbol through 15+ dispatch
+    /// paths (builtins, closures, modules, monomorphization, FFI, prelude, etc.).
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths share this function.
+    /// The AST path calls via `call()`, the VIR path calls directly from
+    /// `compile_vir_unresolved_call()`.
+    pub fn call_dispatch(
+        &mut self,
+        callee_sym: Symbol,
+        arg_source: &ArgSource<'_>,
+        call_line: u32,
+        call_expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
         let callee_name = self.interner().resolve(callee_sym);
 
         // Handle builtins
         // assert uses inline codegen (brif) to avoid function-call overhead
         // and a pre-existing class-field-access register clobber bug (v-a1f9).
         match callee_name {
-            "print_char" => return self.call_print_char(call),
-            "assert" => return self.call_assert(call, call_line),
+            "print_char" => return self.call_print_char(arg_source),
+            "assert" => return self.call_assert(arg_source, call_line),
             _ => {}
         }
 
@@ -60,24 +85,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some(&(module_id, export_name, _)) = self.lookup_module_binding(&callee_sym) {
             // Check if this is a generic external function that needs monomorphization
             if let Some(result) =
-                self.try_call_generic_external_intrinsic_from_monomorph(call_expr_id, call)?
+                self.try_call_generic_external_intrinsic_from_monomorph(call_expr_id, arg_source)?
             {
                 return Ok(result);
             }
 
-            return self.call_module_binding(
-                module_id,
-                export_name,
-                &ArgSource::Ast(&call.args),
-                call_expr_id,
-            );
+            return self.call_module_binding(module_id, export_name, arg_source, call_expr_id);
         }
 
         // Check if it's a closure variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
             && self.arena().is_function(*type_id)
         {
-            return self.call_closure(*var, *type_id, &ArgSource::Ast(&call.args), call_expr_id);
+            return self.call_closure(*var, *type_id, arg_source, call_expr_id);
         }
 
         // Check if it's a captured closure (e.g., recursive lambda or captured function)
@@ -89,7 +109,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return self.call_closure_value(
                 captured.value,
                 binding.vole_type,
-                &ArgSource::Ast(&call.args),
+                arg_source,
                 call_expr_id,
             );
         }
@@ -98,24 +118,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some((var, type_id)) = self.vars.get(&callee_sym) {
             let value = self.builder.use_var(*var);
             let obj = CompiledValue::new(value, self.cranelift_type(*type_id), *type_id);
-            if let Some(result) =
-                self.try_call_functional_interface(&obj, &ArgSource::Ast(&call.args))?
-            {
+            if let Some(result) = self.try_call_functional_interface(&obj, arg_source)? {
                 return Ok(result);
             }
         }
 
         // Check if it's a global lambda or global functional interface
-        if let Some(result) =
-            self.try_call_global(callee_sym, &ArgSource::Ast(&call.args), call.callee.id)?
-        {
+        if let Some(result) = self.try_call_global(callee_sym, arg_source, call_expr_id)? {
             return Ok(result);
         }
 
         // Check if this is a call to a generic function (via monomorphization)
         // Use module-aware lookup to handle per-module NodeId spaces correctly.
         if let Some(result) =
-            self.try_call_monomorphized_function(call_expr_id, call, callee_sym, callee_name)?
+            self.try_call_monomorphized_function(call_expr_id, arg_source, callee_sym, callee_name)?
         {
             return Ok(result);
         }
@@ -132,7 +148,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some(name_id) = direct_name_id {
             let func_key = self.funcs().intern_name_id(name_id);
             if let Some(func_id) = self.funcs_ref().func_id(func_key) {
-                return self.call_func_id(func_key, func_id, call, callee_sym, call_expr_id);
+                return self.call_func_id(func_key, func_id, arg_source, callee_sym, call_expr_id);
             }
         }
 
@@ -144,7 +160,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let func_key = self.funcs().intern_name_id(name_id);
                 if let Some(func_id) = self.funcs().func_id(func_key) {
                     // Found module function with qualified name
-                    return self.call_func_id(func_key, func_id, call, callee_sym, call_expr_id);
+                    return self.call_func_id(
+                        func_key,
+                        func_id,
+                        arg_source,
+                        callee_sym,
+                        call_expr_id,
+                    );
                 }
             }
 
@@ -153,7 +175,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 return self.call_native_external(
                     native_func,
                     callee_sym,
-                    &ArgSource::Ast(&call.args),
+                    arg_source,
                     &call_expr_id,
                 );
             }
@@ -177,7 +199,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if module_path_str == Cg::COMPILER_INTRINSIC_MODULE {
                 return self.call_compiler_intrinsic_from_registry(
                     info.native_name,
-                    &ArgSource::Ast(&call.args),
+                    arg_source,
                     &call_expr_id,
                     call_line,
                 );
@@ -191,12 +213,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             Some((module_path.to_string(), native_name.to_string(), func))
         });
         if let Some((_module_path, _native_name, native_func)) = native_lookup {
-            return self.call_native_external(
-                native_func,
-                callee_sym,
-                &ArgSource::Ast(&call.args),
-                &call_expr_id,
-            );
+            return self.call_native_external(native_func, callee_sym, arg_source, &call_expr_id);
         }
 
         // Try prelude Vole functions (e.g., assert from builtins.vole)
@@ -215,7 +232,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     return self.call_func_id_by_name_id(
                         func_key,
                         func_id,
-                        call,
+                        arg_source,
                         name_id,
                         call_expr_id,
                     );
@@ -345,11 +362,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Call a function by its FuncId, using Symbol to look up NameId for param types/defaults.
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     pub(super) fn call_func_id(
         &mut self,
         func_key: FunctionKey,
         func_id: FuncId,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         callee_sym: Symbol,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
@@ -366,7 +385,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.call_func_id_impl(
             func_key,
             func_id,
-            &ArgSource::Ast(&call.args),
+            arg_source,
             name_id,
             None,
             return_type_override,
@@ -376,11 +395,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a function by FuncId using NameId for default parameter lookup.
     /// Used for prelude Vole functions where the callee's NameId is already known.
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     fn call_func_id_by_name_id(
         &mut self,
         func_key: FunctionKey,
         func_id: FuncId,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         name_id: NameId,
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
@@ -388,7 +409,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.call_func_id_impl(
             func_key,
             func_id,
-            &ArgSource::Ast(&call.args),
+            arg_source,
             Some(name_id),
             None,
             return_type_override,
@@ -790,13 +811,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ))
     }
 
-    /// Compile print_char builtin for ASCII output
-    fn call_print_char(&mut self, call: &CallExpr) -> CodegenResult<CompiledValue> {
-        if call.args.len() != 1 {
-            return Err(CodegenError::arg_count("print_char", 1, call.args.len()));
+    /// Compile print_char builtin for ASCII output.
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    fn call_print_char(&mut self, arg_source: &ArgSource<'_>) -> CodegenResult<CompiledValue> {
+        if arg_source.len() != 1 {
+            return Err(CodegenError::arg_count("print_char", 1, arg_source.len()));
         }
 
-        let arg = self.expr(call.args[0].expr())?;
+        let arg = self.compile_arg_from_source(arg_source, 0)?;
 
         // Convert to u8 if needed (truncate from i64)
         let char_val = if arg.ty == types::I64 {
@@ -818,12 +841,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Compile assert as inline codegen.
     /// Uses brif + assert_fail instead of a function call to avoid
     /// a pre-existing class-field-access register clobber bug (v-a1f9).
-    fn call_assert(&mut self, call: &CallExpr, call_line: u32) -> CodegenResult<CompiledValue> {
-        if call.args.is_empty() {
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    fn call_assert(
+        &mut self,
+        arg_source: &ArgSource<'_>,
+        call_line: u32,
+    ) -> CodegenResult<CompiledValue> {
+        if arg_source.len() == 0 {
             return Err(CodegenError::arg_count("assert", 1, 0));
         }
 
-        let cond = self.expr(call.args[0].expr())?;
+        let cond = self.compile_arg_from_source(arg_source, 0)?;
 
         let pass_block = self.builder.create_block();
         let fail_block = self.builder.create_block();

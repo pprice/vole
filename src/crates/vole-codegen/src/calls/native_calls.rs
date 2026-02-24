@@ -6,7 +6,6 @@
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::ast::CallExpr;
 use vole_frontend::{NodeId, Symbol};
 use vole_identity::ModuleId;
 use vole_runtime::native_registry::{NativeFunction, NativeType};
@@ -257,16 +256,18 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(value, expected_ty, type_id))
     }
 
-    /// Compile a native function call with known Vole types (for generic external functions)
+    /// Compile a native function call with known Vole types (for generic external functions).
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     /// This uses the concrete types from the monomorphized FunctionType rather than
     /// inferring types from the native signature.
-    fn compile_native_call_with_types(
+    fn compile_native_call_with_types_from_source(
         &mut self,
         native_func: &NativeFunction,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         return_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let args = self.compile_call_args(&call.args)?;
+        let (args, _rc_temps) = self.compile_args_tracking_rc(arg_source)?;
         let call_inst = self.call_native_indirect(native_func, &args);
         let type_id = self.substitute_type(return_type_id);
         let type_id = self.maybe_convert_iterator_return_type(type_id);
@@ -343,86 +344,31 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
-    fn compile_intrinsic_args_with_expected_types(
-        &mut self,
-        args_exprs: &[vole_frontend::ast::CallArg],
-        expected_param_type_ids: Option<&[TypeId]>,
-    ) -> CodegenResult<Vec<CompiledValue>> {
-        let mut args = Vec::with_capacity(args_exprs.len());
-        for (index, arg_expr) in args_exprs.iter().enumerate() {
-            let expr = arg_expr.expr();
-            let compiled = if let Some(param_type_ids) = expected_param_type_ids
-                && let Some(&param_type_id) = param_type_ids.get(index)
-            {
-                let compiled = self.expr_with_expected_type(expr, param_type_id)?;
-                self.coerce_to_type(compiled, param_type_id)?
-            } else {
-                self.expr(expr)?
-            };
-            args.push(compiled);
-        }
-        Ok(args)
-    }
-
     /// Call a generic external function as a compiler intrinsic.
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     /// Uses the intrinsic key from type mappings to dispatch to the correct handler.
-    fn call_generic_external_intrinsic(
+    fn call_generic_external_intrinsic_with_source(
         &mut self,
         module_path: &str,
         intrinsic_key: &str,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         return_type_id: TypeId,
         expected_param_type_ids: Option<&[TypeId]>,
     ) -> CodegenResult<CompiledValue> {
-        self.call_generic_external_intrinsic_args(
+        self.call_generic_external_intrinsic_method_args(
             module_path,
             intrinsic_key,
-            &call.args,
+            arg_source,
             return_type_id,
             expected_param_type_ids,
         )
     }
 
-    /// Call a generic external function as a compiler intrinsic (takes args directly).
-    /// Used by both direct calls and module method calls.
-    pub(crate) fn call_generic_external_intrinsic_args(
-        &mut self,
-        module_path: &str,
-        intrinsic_key: &str,
-        args_exprs: &[vole_frontend::ast::CallArg],
-        return_type_id: TypeId,
-        expected_param_type_ids: Option<&[TypeId]>,
-    ) -> CodegenResult<CompiledValue> {
-        // Check if this is a compiler intrinsic module
-        if module_path == Self::COMPILER_INTRINSIC_MODULE {
-            let key = crate::IntrinsicKey::try_from_name(intrinsic_key).ok_or_else(|| {
-                CodegenError::not_found(
-                    "intrinsic handler",
-                    format!("\"{intrinsic_key}\" (add handler in codegen/intrinsics.rs)"),
-                )
-            })?;
-            let typed_args = self
-                .compile_intrinsic_args_with_expected_types(args_exprs, expected_param_type_ids)?;
-            return self.call_compiler_intrinsic_key_typed_with_line(
-                key,
-                &typed_args,
-                return_type_id,
-                0,
-            );
-        }
-
-        // Otherwise, look up in native registry (not supported for args-only version)
-        Err(CodegenError::not_found(
-            "generic external intrinsic",
-            format!(
-                "{}::{} (non-intrinsic native calls not supported via method syntax)",
-                module_path, intrinsic_key
-            ),
-        ))
-    }
-
-    /// Like `call_generic_external_intrinsic_args` but accepts an `ArgSource`
-    /// (either AST `CallArg` slice or VIR `VirRef` slice).
+    /// Call a generic external function as a compiler intrinsic.
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths, as well as method
+    /// call paths, can share this function.
     pub(crate) fn call_generic_external_intrinsic_method_args(
         &mut self,
         module_path: &str,
@@ -471,10 +417,12 @@ impl Cg<'_, '_, '_> {
 
     /// Try to call a generic external function via monomorphization intrinsic resolution.
     /// Returns Some(result) if the call was handled, None if it should fall through.
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     pub(super) fn try_call_generic_external_intrinsic_from_monomorph(
         &mut self,
         call_expr_id: NodeId,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
     ) -> CodegenResult<Option<CompiledValue>> {
         let Some(monomorph_key) = self.query().monomorph_for(call_expr_id) else {
             return Ok(None);
@@ -529,10 +477,10 @@ impl Cg<'_, '_, '_> {
             })
             .collect();
 
-        self.call_generic_external_intrinsic(
+        self.call_generic_external_intrinsic_with_source(
             &module_path,
             &key,
-            call,
+            arg_source,
             return_type_id,
             Some(&concrete_param_type_ids),
         )
@@ -571,10 +519,12 @@ impl Cg<'_, '_, '_> {
 
     /// Try to call a monomorphized function.
     /// Returns Some(result) if the call was handled, None if it should fall through.
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
     pub(super) fn try_call_monomorphized_function(
         &mut self,
         call_expr_id: NodeId,
-        call: &CallExpr,
+        arg_source: &ArgSource<'_>,
         _callee_sym: Symbol,
         callee_name: &str,
     ) -> CodegenResult<Option<CompiledValue>> {
@@ -637,7 +587,7 @@ impl Cg<'_, '_, '_> {
                 .call_func_id_impl(
                     func_key,
                     func_id,
-                    &ArgSource::Ast(&call.args),
+                    arg_source,
                     Some(original_name),
                     Some(param_type_ids),
                     self.get_expr_type_substituted(&call_expr_id),
@@ -677,10 +627,10 @@ impl Cg<'_, '_, '_> {
                 .collect();
 
             return self
-                .call_generic_external_intrinsic(
+                .call_generic_external_intrinsic_with_source(
                     &module_path,
                     &key,
-                    call,
+                    arg_source,
                     return_type_id,
                     Some(&concrete_param_type_ids),
                 )
@@ -702,7 +652,11 @@ impl Cg<'_, '_, '_> {
             {
                 let return_type_id = self.substitute_type(return_type_id);
                 return self
-                    .compile_native_call_with_types(native_func, call, return_type_id)
+                    .compile_native_call_with_types_from_source(
+                        native_func,
+                        arg_source,
+                        return_type_id,
+                    )
                     .map(Some);
             }
         }

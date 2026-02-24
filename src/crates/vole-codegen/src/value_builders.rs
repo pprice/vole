@@ -218,36 +218,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.convert_field_value(raw_value, type_id)
     }
 
-    // ========== Call argument compilation ==========
-
-    /// Compile a list of call arguments into Cranelift values.
-    /// Named args are treated positionally here; ordering validation is in sema (vol-4v7n).
-    pub fn compile_call_args(
-        &mut self,
-        args: &[vole_frontend::ast::CallArg],
-    ) -> CodegenResult<Vec<Value>> {
-        let (values, _) = self.compile_call_args_tracking_rc(args)?;
-        Ok(values)
-    }
-
-    /// Compile call arguments, returning both Cranelift values for the call
-    /// and owned `CompiledValue`s that need rc_dec after the call completes.
-    pub fn compile_call_args_tracking_rc(
-        &mut self,
-        args: &[vole_frontend::ast::CallArg],
-    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        let mut values = Vec::with_capacity(args.len());
-        let mut rc_temps = Vec::new();
-        for arg in args {
-            let compiled = self.expr(arg.expr())?;
-            if compiled.is_owned() {
-                rc_temps.push(compiled);
-            }
-            values.push(compiled.value);
-        }
-        Ok((values, rc_temps))
-    }
-
     // ========== Control flow helpers ==========
 
     /// Emit a conditional branch, or a direct jump when the condition is a known constant.

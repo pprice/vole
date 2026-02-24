@@ -487,11 +487,13 @@ fn lower_expr_call_becomes_vir_call() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     // Calls are lowered to VirExpr::Call with CallTarget::Unresolved.
-    // The unresolved variant carries the original AST CallExpr so codegen
-    // can perform full dispatch.
+    // The unresolved variant carries the callee symbol so codegen can
+    // perform full dispatch with the VIR args.
     match vir_ref.as_ref() {
         VirExpr::Call { target, args, .. } => {
-            assert!(matches!(target, CallTarget::Unresolved { .. }));
+            assert!(
+                matches!(target, CallTarget::Unresolved { callee_sym, .. } if *callee_sym == Symbol::UNKNOWN)
+            );
             assert_eq!(args.len(), 1, "call should have 1 lowered arg");
         }
         other => panic!("expected VirExpr::Call for Call, got {other:?}"),
