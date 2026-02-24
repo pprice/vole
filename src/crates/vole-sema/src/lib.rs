@@ -18,6 +18,7 @@ pub mod resolution;
 pub mod transforms;
 pub mod type_arena;
 pub mod types;
+pub mod vir_lower;
 
 // Internal modules (not part of the public API)
 pub(crate) mod analysis_cache;

@@ -9,12 +9,12 @@ mod literals;
 mod operators;
 mod variables;
 
+use crate::node_map::NodeMap;
+use crate::{EntityRegistry, TypeArena};
 use vole_frontend::ast::{Block, Expr, ExprKind, FuncBody, FuncDecl, Stmt};
 use vole_identity::{
     FunctionId, Interner, ModuleId, NameId, NameTable, NodeId, Span, Symbol, TypeId,
 };
-use vole_sema::node_map::NodeMap;
-use vole_sema::{EntityRegistry, TypeArena};
 use vole_vir::type_table::VirTypeTable;
 
 use super::LoweringCtx;

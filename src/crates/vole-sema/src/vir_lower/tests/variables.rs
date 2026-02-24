@@ -1,13 +1,13 @@
 // lower/tests/variables.rs
 //
-// Tests for Identifier → LocalLoad and Assign → LocalStore lowering.
+// Tests for Identifier -> LocalLoad and Assign -> LocalStore lowering.
 
 use super::*;
 use crate::vir_lower::expr::lower_expr;
 use vole_vir::expr::VirExpr;
 
 // -----------------------------------------------------------------------
-// Identifier → LocalLoad
+// Identifier -> LocalLoad
 // -----------------------------------------------------------------------
 
 #[test]
@@ -114,7 +114,7 @@ fn lower_identifier_bool_type() {
 }
 
 // -----------------------------------------------------------------------
-// Assign with Variable target → LocalStore
+// Assign with Variable target -> LocalStore
 // -----------------------------------------------------------------------
 
 #[test]
@@ -202,7 +202,7 @@ fn lower_assign_variable_lowers_value_recursively() {
 }
 
 // -----------------------------------------------------------------------
-// Assign with Discard target → evaluates inner expression only
+// Assign with Discard target -> evaluates inner expression only
 // -----------------------------------------------------------------------
 
 #[test]

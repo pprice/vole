@@ -1811,6 +1811,7 @@ dependencies = [
  "tracing",
  "vole-frontend",
  "vole-identity",
+ "vole-vir",
 ]
 
 [[package]]

@@ -8,17 +8,18 @@
 // codegen dispatch (`MethodCall`, `OptionalMethodCall`).  All pattern kinds
 // (including Record) are fully lowered to concrete `VirPattern` variants.
 
-pub(crate) mod expr;
-pub(crate) mod stmt;
-pub(crate) mod type_translate;
+pub mod expr;
+pub mod stmt;
+pub mod type_translate;
 
 #[cfg(test)]
 mod tests;
 
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
 use vole_identity::{FunctionId, Interner, MethodId, NameId, NameTable, Symbol, TypeId, VirTypeId};
-use vole_sema::node_map::NodeMap;
-use vole_sema::{EntityRegistry, TypeArena};
+
+use crate::node_map::NodeMap;
+use crate::{EntityRegistry, TypeArena};
 
 use vole_vir::func::{VirBody, VirFunction};
 use vole_vir::type_table::VirTypeTable;
@@ -36,7 +37,7 @@ use self::type_translate::translate_type_id;
 /// - `entities`: entity lookups (field info, error types, etc.)
 /// - `name_table`: name resolution (last_segment_str for error tag matching)
 /// - `type_table`: VIR type interning table (populated during lowering)
-pub(crate) struct LoweringCtx<'a> {
+pub struct LoweringCtx<'a> {
     pub node_map: &'a NodeMap,
     pub interner: &'a mut Interner,
     pub type_arena: &'a TypeArena,
@@ -47,7 +48,7 @@ pub(crate) struct LoweringCtx<'a> {
 
 impl LoweringCtx<'_> {
     /// Translate a sema `TypeId` to a `VirTypeId`, interning into the type table.
-    pub(crate) fn translate(&mut self, type_id: TypeId) -> VirTypeId {
+    pub fn translate(&mut self, type_id: TypeId) -> VirTypeId {
         translate_type_id(self.type_table, type_id, self.type_arena)
     }
 }
@@ -291,7 +292,7 @@ pub fn lower_test_body(
 ///
 /// Block bodies have their statements walked individually; expression bodies
 /// become a single trailing VIR expression.
-pub(crate) fn lower_func_body(body: &FuncBody, ctx: &mut LoweringCtx<'_>) -> VirBody {
+pub fn lower_func_body(body: &FuncBody, ctx: &mut LoweringCtx<'_>) -> VirBody {
     match body {
         FuncBody::Block(block) => lower_stmts(&block.stmts, ctx),
         FuncBody::Expr(expr) => {
@@ -309,10 +310,7 @@ pub(crate) fn lower_func_body(body: &FuncBody, ctx: &mut LoweringCtx<'_>) -> Vir
 /// Each statement is fully lowered to a typed `VirStmt` node via
 /// `lower_stmt`.  Expression statements have their inner expression
 /// lowered recursively through `lower_expr`.
-pub(crate) fn lower_stmts(
-    stmts: &[vole_frontend::ast::Stmt],
-    ctx: &mut LoweringCtx<'_>,
-) -> VirBody {
+pub fn lower_stmts(stmts: &[vole_frontend::ast::Stmt], ctx: &mut LoweringCtx<'_>) -> VirBody {
     let vir_stmts = stmts.iter().map(|s| lower_stmt(s, ctx)).collect();
     VirBody {
         stmts: vir_stmts,

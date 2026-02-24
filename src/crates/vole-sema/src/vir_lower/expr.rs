@@ -4,10 +4,10 @@
 //
 // Includes all expression helpers: literal, binary, unary, control flow, yield.
 
+use crate::{StringConversion, TypeArena};
 use vole_frontend::Expr;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
 use vole_identity::{TypeId, VirTypeId};
-use vole_sema::{StringConversion, TypeArena};
 
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{
@@ -28,7 +28,7 @@ use super::stmt::lower_stmt;
 /// All `ExprKind` variants are lowered to concrete `VirExpr` nodes.
 /// Grouping parentheses are stripped transparently.
 #[deny(clippy::wildcard_enum_match_arm)]
-pub(crate) fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
+pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
     // Strip grouping parentheses — lower the inner expression directly.
     if let ExprKind::Grouping(inner) = &expr.kind {
         return lower_expr(inner, ctx);
@@ -129,7 +129,7 @@ fn lower_int_literal(value: i64, ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRe
     if ty == TypeId::F128 {
         // Integer promoted to f128: convert to f64 first to get a float
         // bit-pattern, then store as the low 64 bits of a wide literal.
-        // The high 64 bits are zero so the i128→f128 bitcast in codegen
+        // The high 64 bits are zero so the i128->f128 bitcast in codegen
         // reproduces the same representation as the old int_const(n, f128)
         // path (f64 bits in the low half, zero-extended).
         let f64_bits = (value as f64).to_bits();
@@ -331,7 +331,7 @@ fn lower_yield(yield_expr: &vole_frontend::ast::YieldExpr, ctx: &mut LoweringCtx
 }
 
 /// Map an AST `BinaryOp` to the VIR `VirBinOp`.
-pub(crate) fn map_binary_op(op: BinaryOp) -> VirBinOp {
+pub fn map_binary_op(op: BinaryOp) -> VirBinOp {
     match op {
         BinaryOp::Add => VirBinOp::Add,
         BinaryOp::Sub => VirBinOp::Sub,
@@ -612,15 +612,12 @@ fn lower_as_cast(
 ///
 /// VIR defines its own copy of this enum to avoid circular dependencies
 /// and keep the VIR crate dependency-light.
-fn convert_is_check_result(
-    sema: vole_sema::IsCheckResult,
-    ctx: &mut LoweringCtx<'_>,
-) -> IsCheckResult {
+fn convert_is_check_result(sema: crate::IsCheckResult, ctx: &mut LoweringCtx<'_>) -> IsCheckResult {
     match sema {
-        vole_sema::IsCheckResult::AlwaysTrue => IsCheckResult::AlwaysTrue,
-        vole_sema::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
-        vole_sema::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(tag),
-        vole_sema::IsCheckResult::CheckUnknown(ty) => {
+        crate::IsCheckResult::AlwaysTrue => IsCheckResult::AlwaysTrue,
+        crate::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
+        crate::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(tag),
+        crate::IsCheckResult::CheckUnknown(ty) => {
             let vir_ty = ctx.translate(ty);
             IsCheckResult::CheckUnknown(ty, vir_ty)
         }
@@ -690,7 +687,7 @@ fn lower_meta_access(
     ty: TypeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    use vole_sema::node_map::MetaAccessKind;
+    use crate::node_map::MetaAccessKind;
 
     let Some(meta_kind) = ctx.node_map.get_meta_access(expr.id) else {
         panic!(
@@ -1023,7 +1020,7 @@ fn lower_call(
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.
-pub(crate) fn map_unary_op(op: UnaryOp) -> VirUnOp {
+pub fn map_unary_op(op: UnaryOp) -> VirUnOp {
     match op {
         UnaryOp::Neg => VirUnOp::Neg,
         UnaryOp::Not => VirUnOp::Not,
@@ -1302,7 +1299,7 @@ fn lower_error_pattern(
             type_name: Some(type_expr),
             fields,
         } => lower_error_record_pattern(type_expr, fields, scrutinee_ty, ctx),
-        // Other inner patterns (wildcard, etc.) → bare error match
+        // Other inner patterns (wildcard, etc.) -> bare error match
         _ => VirPattern::Error {
             kind: VirErrorPatternKind::Bare,
         },
@@ -1347,8 +1344,8 @@ fn lower_tuple_pattern(
 
 /// Lower an identifier inside an `error` pattern.
 ///
-/// Determines whether the identifier is an error type name (→ Specific)
-/// or a catch-all binding (→ CatchAll) by checking the fallible's error
+/// Determines whether the identifier is an error type name (-> Specific)
+/// or a catch-all binding (-> CatchAll) by checking the fallible's error
 /// union for a matching error type name.
 fn lower_error_identifier_pattern(
     name: vole_identity::Symbol,
@@ -1359,7 +1356,7 @@ fn lower_error_identifier_pattern(
     let error_tag = fallible.and_then(|(_, error_ty)| compute_error_tag(error_ty, name, ctx));
 
     if let Some(tag) = error_tag {
-        // Identifier matches an error type → specific error pattern
+        // Identifier matches an error type -> specific error pattern
         VirPattern::Error {
             kind: VirErrorPatternKind::Specific { error_tag: tag },
         }
@@ -1598,7 +1595,7 @@ fn record_source_type(
 /// Check whether a type is a class, struct, or error type (i.e. a record type).
 fn is_record_type(ty: TypeId, arena: &TypeArena) -> bool {
     arena.unwrap_nominal(ty).is_some_and(|(_, _, kind)| {
-        kind.is_class_or_struct() || matches!(kind, vole_sema::type_arena::NominalKind::Error)
+        kind.is_class_or_struct() || matches!(kind, crate::type_arena::NominalKind::Error)
     })
 }
 
@@ -1688,7 +1685,7 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
     // Check if sema marked this argument as an implicit `it` lambda.
     let it_info = ctx.node_map.get_it_lambda_info(arg_expr.id).copied();
     if let Some(info) = it_info {
-        // Resolve the `it` symbol (must exist — sema already verified it).
+        // Resolve the `it` symbol (must exist -- sema already verified it).
         let it_sym = ctx
             .interner
             .lookup("it")
@@ -1747,6 +1744,6 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
         });
     }
 
-    // No `it` lambda — lower normally.
+    // No `it` lambda -- lower normally.
     lower_expr(arg_expr, ctx)
 }

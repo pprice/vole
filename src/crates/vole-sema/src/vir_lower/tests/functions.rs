@@ -4,8 +4,8 @@
 // lower_method, lower_stmts.
 
 use super::*;
+use crate::TypeArena;
 use crate::vir_lower::{lower_function, lower_monomorphized_function, lower_stmts};
-use vole_sema::TypeArena;
 use vole_vir::expr::VirExpr;
 use vole_vir::stmt::VirStmt;
 

@@ -3,15 +3,15 @@
 // Translation from sema TypeId to VIR VirTypeId.
 //
 // These are free functions (not methods on VirTypeTable) because they need
-// access to sema's TypeArena, which lives in vole-sema — a dependency that
+// access to sema's TypeArena, which lives in vole-sema -- a dependency that
 // vole-vir intentionally does not have.
 //
 // Wired into the lowering pipeline: LoweringCtx::translate() calls
 // translate_type_id() for every VIR node that carries a VirTypeId.
 
+use crate::PrimitiveType;
+use crate::type_arena::{SemaType, TypeArena};
 use vole_identity::{TypeId, VirTypeId};
-use vole_sema::PrimitiveType;
-use vole_sema::type_arena::{SemaType, TypeArena};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -482,8 +482,8 @@ fn primitive_layout(prim: PrimitiveType) -> VirTypeLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::type_arena::TypeArena;
     use smallvec::smallvec;
-    use vole_sema::type_arena::TypeArena;
 
     /// Create a fresh TypeArena for testing.
     fn test_arena() -> TypeArena {
@@ -754,7 +754,7 @@ mod tests {
     fn translate_deduplicates_compound() {
         let mut arena = test_arena();
         let arr1 = arena.array(TypeId::I64);
-        // Intern the same array type again — should get same TypeId from arena
+        // Intern the same array type again -- should get same TypeId from arena
         let arr2 = arena.array(TypeId::I64);
         assert_eq!(arr1, arr2); // Sema deduplicates
 

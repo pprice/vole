@@ -13,7 +13,7 @@ use vole_sema::{
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirBody, VirFunction, VirRef, VirTest};
 
-use crate::vir_lower::{
+use vole_sema::vir_lower::{
     lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
     lower_test_body,
 };
@@ -325,8 +325,8 @@ fn lower_global_inits(
     names: &NameTable,
     type_table: &mut VirTypeTable,
 ) -> FxHashMap<Symbol, VirRef> {
-    use crate::vir_lower::LoweringCtx;
-    use crate::vir_lower::expr::lower_expr;
+    use vole_sema::vir_lower::LoweringCtx;
+    use vole_sema::vir_lower::expr::lower_expr;
 
     let mut ctx = LoweringCtx {
         node_map,
@@ -366,8 +366,8 @@ fn lower_module_global_inits(
     modules_with_errors: &HashSet<String>,
     type_table: &mut VirTypeTable,
 ) -> FxHashMap<String, FxHashMap<Symbol, VirRef>> {
-    use crate::vir_lower::LoweringCtx;
-    use crate::vir_lower::expr::lower_expr;
+    use vole_sema::vir_lower::LoweringCtx;
+    use vole_sema::vir_lower::expr::lower_expr;
 
     let mut result = FxHashMap::default();
     for (module_path, (program, module_interner)) in module_programs.iter_mut() {

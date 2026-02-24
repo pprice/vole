@@ -1,11 +1,11 @@
 // vir_lower/stmt.rs
 //
-// Statement lowering: AST `Stmt` → VIR `VirStmt`.
+// Statement lowering: AST `Stmt` -> VIR `VirStmt`.
 
+use crate::IterableKind;
 use vole_frontend::PatternKind;
 use vole_frontend::ast::{LetInit, LetStmt, Stmt};
 use vole_identity::TypeId;
-use vole_sema::IterableKind;
 
 use vole_vir::expr::VirExpr;
 use vole_vir::stmt::{
@@ -24,7 +24,7 @@ use super::lower_stmts;
 ///
 /// Each variant is listed explicitly so that adding a new `Stmt` variant
 /// causes a compile error rather than silently falling through a wildcard.
-pub(crate) fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
+pub fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     match stmt {
         Stmt::Expr(expr_stmt) => VirStmt::Expr {
             value: lower_expr(&expr_stmt.expr, ctx),
@@ -90,13 +90,13 @@ fn lower_raise(raise_stmt: &vole_frontend::ast::RaiseStmt, ctx: &mut LoweringCtx
 ///
 /// The binding type (`ty`) comes from:
 /// 1. The declared type annotation (via `node_map.get_declared_var_type`),
-///    if one was provided in the source — this is the type the codegen
+///    if one was provided in the source -- this is the type the codegen
 ///    should coerce to.
 /// 2. Otherwise, the sema-computed expression type.
 fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     let init_expr = match &let_stmt.init {
         LetInit::Expr(e) => e,
-        // Type aliases produce no runtime code — skip entirely.
+        // Type aliases produce no runtime code -- skip entirely.
         LetInit::TypeAlias(_) => {
             return VirStmt::Noop;
         }
@@ -158,7 +158,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
             vir_elem_type: ctx.translate(elem_type),
         },
         None => {
-            // Fallback for error types — treat as array of i64.
+            // Fallback for error types -- treat as array of i64.
             VirIterKind::Array {
                 elem_type: TypeId::I64,
                 vir_elem_type: ctx.translate(TypeId::I64),
@@ -190,7 +190,7 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
 
 /// Lower an if statement to `VirStmt::Expr { VirExpr::If { ... } }`.
 ///
-/// Vole's VIR has no separate `VirStmt::If` — statement-level `if` is
+/// Vole's VIR has no separate `VirStmt::If` -- statement-level `if` is
 /// wrapped as a void-typed `VirExpr::If` inside `VirStmt::Expr`.
 fn lower_if_stmt(if_stmt: &vole_frontend::ast::IfStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     let cond = lower_expr(&if_stmt.condition, ctx);
@@ -218,10 +218,10 @@ fn lower_if_stmt(if_stmt: &vole_frontend::ast::IfStmt, ctx: &mut LoweringCtx<'_>
 /// Lower an AST `Pattern` to a `VirDestructurePattern`.
 ///
 /// Handles the four `PatternKind` variants used in `LetTuple`:
-/// - `Identifier` → `VirDestructurePattern::Bind`
-/// - `Wildcard` → `VirDestructurePattern::Wildcard`
-/// - `Tuple` → `VirDestructurePattern::Tuple` (recursive)
-/// - `Record` → `VirDestructurePattern::Record` or `Module`
+/// - `Identifier` -> `VirDestructurePattern::Bind`
+/// - `Wildcard` -> `VirDestructurePattern::Wildcard`
+/// - `Tuple` -> `VirDestructurePattern::Tuple` (recursive)
+/// - `Record` -> `VirDestructurePattern::Record` or `Module`
 ///
 /// The `ty` parameter is the type of the value being destructured at this
 /// level of nesting (the init expression's type at the top level, or the

@@ -33,7 +33,6 @@ mod for_loop;
 mod interfaces;
 mod reflection;
 mod vir_for_loop;
-pub(crate) mod vir_lower;
 pub mod vir_printer;
 
 pub use callable_registry::{
@@ -53,8 +52,8 @@ pub use errors::{CodegenError, CodegenResult};
 // Analysis types
 pub use analyzed::AnalyzedProgram;
 
-// VIR lowering (AST → VIR conversion)
-pub use vir_lower::{
+// VIR lowering (AST → VIR conversion) — re-exported from vole-sema
+pub use vole_sema::vir_lower::{
     lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
     lower_test_body,
 };
