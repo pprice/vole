@@ -877,6 +877,11 @@ fn lower_struct_literal(
 /// lowered recursively but are NOT used by codegen for Unresolved calls
 /// (the AST `CallExpr` provides the args for type-coerced compilation).
 ///
+/// **Indirect calls** (non-identifier callee, e.g. `array[0]()`) are lowered
+/// as `CallTarget::Lambda` with the callee prepended as the first arg.
+/// Codegen's `compile_vir_lambda_call` handles these directly, so they bypass
+/// the legacy `call()` dispatcher entirely.
+///
 /// Over time, specific call patterns will be promoted from Unresolved to
 /// concrete `CallTarget` variants (Direct, Lambda, Intrinsic, etc.) as sema
 /// gains call classification annotations.
@@ -886,6 +891,24 @@ fn lower_call(
     ty: TypeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
+    // Indirect calls: callee is a non-identifier expression (e.g., `array[0]()`).
+    // Lower the callee as the first VIR arg, followed by the actual arguments,
+    // and emit CallTarget::Lambda so codegen's compile_vir_lambda_call handles
+    // the closure extraction and call directly.
+    if !matches!(&call_expr.callee.kind, ExprKind::Identifier(_)) {
+        let callee_ref = lower_expr(&call_expr.callee, ctx);
+        let mut args = Vec::with_capacity(1 + call_expr.args.len());
+        args.push(callee_ref);
+        for arg in &call_expr.args {
+            args.push(lower_expr(arg.expr(), ctx));
+        }
+        return Box::new(VirExpr::Call {
+            target: CallTarget::Lambda,
+            args,
+            ty,
+        });
+    }
+
     // Lower argument expressions to VIR.
     // For Unresolved calls, codegen re-compiles from the AST CallExpr, but
     // lowered args are still recorded for future migration to concrete

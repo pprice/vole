@@ -749,18 +749,36 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(args)
     }
 
-    /// Compile an indirect call (closure or function value)
+    /// Compile an indirect call (closure or function value) from an AST `CallExpr`.
+    ///
+    /// Compiles the callee expression, then delegates to `indirect_call_value`.
     fn indirect_call(&mut self, call: &CallExpr) -> CodegenResult<CompiledValue> {
-        let mut callee = self.expr(&call.callee)?;
+        let callee = self.expr(&call.callee)?;
+        self.indirect_call_value(callee, &ArgSource::Ast(&call.args), call.callee.id)
+    }
 
+    /// Compile an indirect call given a pre-compiled callee value and arguments.
+    ///
+    /// The callee must be a function/closure type.  Dispatches through
+    /// `call_closure_value` and handles RC cleanup of the callee after the call.
+    /// `placeholder_node_id` is used for default-param lookup (indirect calls
+    /// don't support defaults, so this is a no-op placeholder).
+    ///
+    /// Accepts `ArgSource` so both AST and VIR call paths can share this function.
+    pub(super) fn indirect_call_value(
+        &mut self,
+        callee: CompiledValue,
+        arg_source: &ArgSource<'_>,
+        placeholder_node_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
         if self.arena().is_function(callee.type_id) {
-            // Note: Indirect calls don't support default params lookup (use callee.id as placeholder)
             let result = self.call_closure_value(
                 callee.value,
                 callee.type_id,
-                &ArgSource::Ast(&call.args),
-                call.callee.id,
+                arg_source,
+                placeholder_node_id,
             )?;
+            let mut callee = callee;
             self.consume_rc_value(&mut callee)?;
             return Ok(result);
         }

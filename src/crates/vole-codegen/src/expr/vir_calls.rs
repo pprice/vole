@@ -92,6 +92,9 @@ impl Cg<'_, '_, '_> {
     /// The first VIR arg is the closure pointer; the remaining args are the
     /// actual parameters.  We extract the function pointer from the closure
     /// struct via `ClosureGetFunc`, build a signature, and emit an indirect call.
+    ///
+    /// If the closure value is an owned temporary (e.g. from an indirect call
+    /// like `array[0]()`), it is RC-decremented after the call completes.
     fn compile_vir_lambda_call(
         &mut self,
         args: &[VirRef],
@@ -123,6 +126,12 @@ impl Cg<'_, '_, '_> {
         let sig_ref = self.import_sig_and_coerce_args(sig, &mut call_args);
         let call_inst = self.emit_call_indirect(sig_ref, func_ptr, &call_args);
         self.consume_rc_args(&mut rc_temps)?;
+
+        // RC-cleanup the closure value if it was an owned temporary (e.g.
+        // indirect call like `array[0]()` produces an owned closure).
+        let mut closure_val = closure_val;
+        self.consume_rc_value(&mut closure_val)?;
+
         self.vir_closure_result(call_inst, return_ty)
     }
 
