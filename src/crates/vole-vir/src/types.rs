@@ -160,6 +160,8 @@ pub struct VirFieldInfo {
     pub name: Symbol,
     /// Concrete type of the field.
     pub ty: TypeId,
+    /// VIR type of the field (migration: `VirTypeId::INVALID`).
+    pub vir_ty: VirTypeId,
     /// How the field is stored in memory (inline vs. heap-indirect).
     pub storage: FieldStorage,
 }
@@ -169,6 +171,8 @@ pub struct VirFieldInfo {
 pub struct VirUnionLayout {
     /// The concrete variant types (order matches the tag values).
     pub variants: Vec<TypeId>,
+    /// VIR variant types (migration: all `VirTypeId::INVALID`).
+    pub vir_variants: Vec<VirTypeId>,
     /// Whether all variants fit inline (16-byte buffer) or require heap
     /// allocation.
     pub inline: bool,
@@ -215,6 +219,8 @@ pub struct VirFieldMeta {
     pub name: Symbol,
     /// Concrete field type.
     pub ty: TypeId,
+    /// VIR type of the field (migration: `VirTypeId::INVALID`).
+    pub vir_ty: VirTypeId,
     /// Annotations attached to this field.
     pub annotations: Vec<VirAnnotation>,
 }

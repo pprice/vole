@@ -33,7 +33,7 @@ fn lower_identifier_becomes_local_load() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::LocalLoad { name, ty } => {
+        VirExpr::LocalLoad { name, ty, .. } => {
             assert_eq!(*name, sym);
             assert_eq!(*ty, TypeId::UNKNOWN);
         }
@@ -66,7 +66,7 @@ fn lower_identifier_preserves_sema_type() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::LocalLoad { name, ty } => {
+        VirExpr::LocalLoad { name, ty, .. } => {
             assert_eq!(*name, sym);
             assert_eq!(*ty, TypeId::I64);
         }
@@ -99,7 +99,7 @@ fn lower_identifier_bool_type() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::LocalLoad { name, ty } => {
+        VirExpr::LocalLoad { name, ty, .. } => {
             assert_eq!(*name, sym);
             assert_eq!(*ty, TypeId::BOOL);
         }

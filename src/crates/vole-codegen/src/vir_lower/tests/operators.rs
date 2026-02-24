@@ -365,7 +365,9 @@ fn lower_unary_neg_produces_unary_op() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::UnaryOp { op, operand, ty } => {
+        VirExpr::UnaryOp {
+            op, operand, ty, ..
+        } => {
             assert_eq!(*op, VirUnOp::Neg);
             assert_eq!(*ty, TypeId::I64);
             match operand.as_ref() {

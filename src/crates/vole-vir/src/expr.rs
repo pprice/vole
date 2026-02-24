@@ -3,7 +3,7 @@
 // VIR expression nodes and their supporting types.
 
 use vole_identity::{
-    NameId, NodeId, StringConversion, Symbol, TypeDefId, TypeId, UnionStorageKind,
+    NameId, NodeId, StringConversion, Symbol, TypeDefId, TypeId, UnionStorageKind, VirTypeId,
 };
 
 use crate::calls::CallTarget;
@@ -24,13 +24,26 @@ use crate::stmt::VirStmt;
 pub enum VirExpr {
     // -- Literals -----------------------------------------------------------
     /// Integer literal that fits in 64 bits (i8..i64, u8..u64).
-    IntLiteral { value: i64, ty: TypeId },
+    IntLiteral {
+        value: i64,
+        ty: TypeId,
+        vir_ty: VirTypeId,
+    },
 
     /// Wide integer literal (i128) stored as two 64-bit halves.
-    WideLiteral { low: u64, high: u64, ty: TypeId },
+    WideLiteral {
+        low: u64,
+        high: u64,
+        ty: TypeId,
+        vir_ty: VirTypeId,
+    },
 
     /// Floating-point literal (f32 or f64).
-    FloatLiteral { value: f64, ty: TypeId },
+    FloatLiteral {
+        value: f64,
+        ty: TypeId,
+        vir_ty: VirTypeId,
+    },
 
     /// Boolean literal.
     BoolLiteral(bool),
@@ -50,7 +63,7 @@ pub enum VirExpr {
     ///
     /// At runtime this is just a zero value; actual function calls go through
     /// the method resolution mechanism.
-    Import { ty: TypeId },
+    Import { ty: TypeId, vir_ty: VirTypeId },
 
     /// Type literal used as a runtime value — always an error if reached.
     TypeLiteral,
@@ -70,7 +83,11 @@ pub enum VirExpr {
     /// `ty` is the overall inferred type (array or tuple) from sema.
     /// Codegen uses `unwrap_array(ty)` / `unwrap_tuple(ty)` to dispatch
     /// between dynamic array (heap) and tuple (stack) construction paths.
-    ArrayLiteral { elements: Vec<VirRef>, ty: TypeId },
+    ArrayLiteral {
+        elements: Vec<VirRef>,
+        ty: TypeId,
+        vir_ty: VirTypeId,
+    },
 
     /// Repeat literal `[value; count]` — fixed-size array with repeated value.
     ///
@@ -80,6 +97,7 @@ pub enum VirExpr {
         element: VirRef,
         count: usize,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     // -- Construction -------------------------------------------------------
@@ -93,6 +111,7 @@ pub enum VirExpr {
         type_def: TypeDefId,
         fields: Vec<(Symbol, VirRef)>,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Reference-counted class instance creation (heap-allocated).
@@ -105,6 +124,7 @@ pub enum VirExpr {
         type_def: TypeDefId,
         fields: Vec<(Symbol, VirRef)>,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     // -- Operators ----------------------------------------------------------
@@ -114,6 +134,7 @@ pub enum VirExpr {
         lhs: VirRef,
         rhs: VirRef,
         ty: TypeId,
+        vir_ty: VirTypeId,
         /// Source line for panic messages (division by zero, overflow).
         line: u32,
     },
@@ -123,6 +144,7 @@ pub enum VirExpr {
         op: VirUnOp,
         operand: VirRef,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// String concatenation of two or more parts.
@@ -142,6 +164,7 @@ pub enum VirExpr {
         target: CallTarget,
         args: Vec<VirRef>,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Method call on a receiver object.
@@ -160,6 +183,7 @@ pub enum VirExpr {
         args: Vec<VirRef>,
         node_id: NodeId,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     // -- Field access -------------------------------------------------------
@@ -169,6 +193,7 @@ pub enum VirExpr {
         field: Symbol,
         storage: FieldStorage,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Store a value into a field of a struct or class instance.
@@ -190,6 +215,7 @@ pub enum VirExpr {
         object: VirRef,
         index: VirRef,
         ty: TypeId,
+        vir_ty: VirTypeId,
         union_storage: Option<UnionStorageKind>,
     },
 
@@ -221,6 +247,8 @@ pub enum VirExpr {
         value: VirRef,
         from: TypeId,
         to: TypeId,
+        vir_from: VirTypeId,
+        vir_to: VirTypeId,
         kind: CoerceKind,
     },
 
@@ -231,6 +259,7 @@ pub enum VirExpr {
         then_body: VirBody,
         else_body: Option<VirBody>,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Pattern match expression.
@@ -238,6 +267,7 @@ pub enum VirExpr {
         scrutinee: VirRef,
         arms: Vec<VirMatchArm>,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Block expression with an optional trailing value.
@@ -245,6 +275,7 @@ pub enum VirExpr {
         stmts: Vec<VirStmt>,
         trailing: Option<VirRef>,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     // -- Type operations ----------------------------------------------------
@@ -254,6 +285,7 @@ pub enum VirExpr {
         value: VirRef,
         result: IsCheckResult,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Type cast (`x as T`).
@@ -264,17 +296,26 @@ pub enum VirExpr {
     AsCast {
         value: VirRef,
         target_ty: TypeId,
+        vir_target_ty: VirTypeId,
         kind: AsCastKind,
         result: IsCheckResult,
     },
 
     // -- Reflection ---------------------------------------------------------
     /// Meta-access (`T.@meta` or `val.@meta`).
-    MetaAccess { kind: VirMetaKind, ty: TypeId },
+    MetaAccess {
+        kind: VirMetaKind,
+        ty: TypeId,
+        vir_ty: VirTypeId,
+    },
 
     // -- Variables -----------------------------------------------------------
     /// Load a local variable.
-    LocalLoad { name: Symbol, ty: TypeId },
+    LocalLoad {
+        name: Symbol,
+        ty: TypeId,
+        vir_ty: VirTypeId,
+    },
 
     /// Store into a local variable.
     LocalStore { name: Symbol, value: VirRef },
@@ -299,6 +340,7 @@ pub enum VirExpr {
         body: VirBody,
         captures: Vec<VirCapture>,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     // -- Null / optional operations -----------------------------------------
@@ -312,7 +354,9 @@ pub enum VirExpr {
         value: VirRef,
         default: VirRef,
         inner_type: TypeId,
+        vir_inner_type: VirTypeId,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Optional chain field access (`obj?.field`).
@@ -325,7 +369,9 @@ pub enum VirExpr {
         object: VirRef,
         field: Symbol,
         inner_type: TypeId,
+        vir_inner_type: VirTypeId,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Optional chain method call (`obj?.method(args)`).
@@ -341,7 +387,9 @@ pub enum VirExpr {
         method_args: Vec<VirRef>,
         call_node_id: NodeId,
         inner_type: TypeId,
+        vir_inner_type: VirTypeId,
         ty: TypeId,
+        vir_ty: VirTypeId,
     },
 
     /// Try / error propagation (`expr?`).
@@ -349,7 +397,11 @@ pub enum VirExpr {
     /// Evaluates the fallible expression; on success, unwraps and returns
     /// the success payload.  On error, propagates via early return using
     /// the fallible return convention (tag + payload registers).
-    Try { value: VirRef, success_type: TypeId },
+    Try {
+        value: VirRef,
+        success_type: TypeId,
+        vir_success_type: VirTypeId,
+    },
 
     // -- Generator ----------------------------------------------------------
     /// Yield expression inside a generator body.
@@ -467,6 +519,8 @@ pub struct VirMatchArm {
     pub body: VirBody,
     /// The type of the arm's result expression.
     pub ty: TypeId,
+    /// VIR type of the arm's result expression (migration: `VirTypeId::INVALID`).
+    pub vir_ty: VirTypeId,
 }
 
 /// A pattern in a `Match` arm.
@@ -486,7 +540,11 @@ pub enum VirPattern {
     ///
     /// `ty` is the scrutinee's type at the point of binding (used by codegen
     /// to declare the variable with the right Cranelift type).
-    Binding { name: Symbol, ty: TypeId },
+    Binding {
+        name: Symbol,
+        ty: TypeId,
+        vir_ty: VirTypeId,
+    },
 
     /// Type-check pattern: tests the scrutinee against a type.
     ///
@@ -501,7 +559,8 @@ pub enum VirPattern {
     TypeCheck {
         result: IsCheckResult,
         tested_type: TypeId,
-        binding: Option<(Symbol, TypeId)>,
+        vir_tested_type: VirTypeId,
+        binding: Option<(Symbol, TypeId, VirTypeId)>,
     },
 
     /// Literal pattern: compares the scrutinee against a pre-lowered literal.
@@ -510,7 +569,11 @@ pub enum VirPattern {
     /// `VirExpr::IntLiteral`, `VirExpr::StringLiteral`).
     /// `scrutinee_ty` is the scrutinee's type, needed for selecting the
     /// correct equality comparison (integer, float, string).
-    Literal { value: VirRef, scrutinee_ty: TypeId },
+    Literal {
+        value: VirRef,
+        scrutinee_ty: TypeId,
+        vir_scrutinee_ty: VirTypeId,
+    },
 
     /// Val pattern (`val x`): compares the scrutinee against an existing
     /// variable's value.
@@ -524,6 +587,7 @@ pub enum VirPattern {
     Success {
         inner: Option<Box<VirPattern>>,
         success_type: TypeId,
+        vir_success_type: VirTypeId,
     },
 
     /// Error pattern for fallible match: `error`, `error e`, `error DivByZero`,
@@ -565,8 +629,10 @@ pub enum VirPattern {
     Record {
         type_check: Option<IsCheckResult>,
         tested_type: Option<TypeId>,
+        vir_tested_type: Option<VirTypeId>,
         fields: Vec<VirRecordFieldBinding>,
         source_ty: TypeId,
+        vir_source_ty: VirTypeId,
         is_union_payload: bool,
         is_struct: bool,
     },
@@ -588,7 +654,11 @@ pub enum VirErrorPatternKind {
     ///
     /// Matches any error and binds the error payload to `name`.
     /// `error_ty` is the fallible's error type for payload extraction.
-    CatchAll { name: Symbol, error_ty: TypeId },
+    CatchAll {
+        name: Symbol,
+        error_ty: TypeId,
+        vir_error_ty: VirTypeId,
+    },
 
     /// Specific error type match: `error DivByZero`.
     ///
@@ -633,6 +703,8 @@ pub struct VirTupleBinding {
     pub element_index: usize,
     /// The element type, pre-resolved from `TypeArena::unwrap_tuple`.
     pub ty: TypeId,
+    /// VIR type of the element (migration: `VirTypeId::INVALID`).
+    pub vir_ty: VirTypeId,
 }
 
 /// A single field binding in a record destructure pattern.
@@ -649,6 +721,8 @@ pub struct VirRecordFieldBinding {
     pub field_slot: u32,
     /// Pre-resolved field type from `EntityRegistry`.
     pub ty: TypeId,
+    /// VIR type of the field (migration: `VirTypeId::INVALID`).
+    pub vir_ty: VirTypeId,
 }
 
 /// Whether an `as` cast is checked or unchecked.
@@ -691,6 +765,8 @@ pub struct VirCapture {
     pub name: Symbol,
     /// The type of the captured variable.
     pub ty: TypeId,
+    /// VIR type of the captured variable (migration: `VirTypeId::INVALID`).
+    pub vir_ty: VirTypeId,
     /// Whether the variable is captured by reference (true) or by value
     /// (false).
     pub by_ref: bool,
@@ -726,5 +802,5 @@ pub enum IsCheckResult {
     CheckTag(u32),
     /// Runtime check needed for unknown type: compare against this type's
     /// runtime tag.  The `TypeId` indicates what type we are checking for.
-    CheckUnknown(TypeId),
+    CheckUnknown(TypeId, VirTypeId),
 }

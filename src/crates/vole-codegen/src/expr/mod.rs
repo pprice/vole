@@ -568,7 +568,7 @@ impl Cg<'_, '_, '_> {
     pub fn compile_vir_expr(&mut self, vir_expr: &VirExpr) -> CodegenResult<CompiledValue> {
         match vir_expr {
             // -- Lowered literals -----------------------------------------
-            VirExpr::IntLiteral { value, ty } => {
+            VirExpr::IntLiteral { value, ty, .. } => {
                 let type_id = if *ty == TypeId::UNKNOWN {
                     TypeId::I64
                 } else {
@@ -576,8 +576,10 @@ impl Cg<'_, '_, '_> {
                 };
                 Ok(self.int_const(*value, type_id))
             }
-            VirExpr::WideLiteral { low, high, ty } => Ok(self.wide_literal_const(*low, *high, *ty)),
-            VirExpr::FloatLiteral { value, ty } => {
+            VirExpr::WideLiteral { low, high, ty, .. } => {
+                Ok(self.wide_literal_const(*low, *high, *ty))
+            }
+            VirExpr::FloatLiteral { value, ty, .. } => {
                 let type_id = if *ty == TypeId::UNKNOWN {
                     TypeId::F64
                 } else {
@@ -597,7 +599,7 @@ impl Cg<'_, '_, '_> {
 
             // -- Simple expressions -----------------------------------------
             VirExpr::Unreachable { line } => self.unreachable_expr(*line),
-            VirExpr::Import { ty } => {
+            VirExpr::Import { ty, .. } => {
                 let type_id = if *ty == TypeId::UNKNOWN {
                     self.arena().primitives.i64
                 } else {
@@ -625,8 +627,11 @@ impl Cg<'_, '_, '_> {
                 rhs,
                 ty,
                 line,
+                ..
             } => self.compile_vir_binary_op(*op, lhs, rhs, *ty, *line),
-            VirExpr::UnaryOp { op, operand, ty } => self.compile_vir_unary_op(*op, operand, *ty),
+            VirExpr::UnaryOp {
+                op, operand, ty, ..
+            } => self.compile_vir_unary_op(*op, operand, *ty),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
             VirExpr::InterpolatedString { parts } => self.compile_vir_interpolated_string(parts),
 
@@ -636,19 +641,23 @@ impl Cg<'_, '_, '_> {
                 from,
                 to,
                 kind,
+                ..
             } => {
                 let compiled = self.compile_vir_expr(value)?;
                 self.compile_vir_coerce(compiled, *from, *to, *kind)
             }
 
             // -- Calls ----------------------------------------------------
-            VirExpr::Call { target, args, ty } => self.compile_vir_call(target, args, *ty),
+            VirExpr::Call {
+                target, args, ty, ..
+            } => self.compile_vir_call(target, args, *ty),
             VirExpr::MethodCall {
                 receiver,
                 method,
                 args,
                 node_id,
                 ty: _,
+                ..
             } => {
                 use crate::structs::methods::MethodCallSource;
                 let src = MethodCallSource::Vir {
@@ -666,12 +675,14 @@ impl Cg<'_, '_, '_> {
                 then_body,
                 else_body,
                 ty,
+                ..
             } => self.compile_vir_if(cond, then_body, else_body.as_ref(), *ty),
 
             VirExpr::Block {
                 stmts,
                 trailing,
                 ty: _,
+                ..
             } => self.compile_vir_block(stmts, trailing.as_deref()),
 
             // -- Pattern match ------------------------------------------------
@@ -679,14 +690,17 @@ impl Cg<'_, '_, '_> {
                 scrutinee,
                 arms,
                 ty,
+                ..
             } => self.compile_vir_match(scrutinee, arms, *ty),
 
             // -- Construction -------------------------------------------------
-            VirExpr::ArrayLiteral { elements, ty } => {
+            VirExpr::ArrayLiteral { elements, ty, .. } => {
                 let result = self.compile_vir_array_literal(elements, *ty)?;
                 Ok(self.mark_rc_owned(result))
             }
-            VirExpr::RepeatLiteral { element, count, ty } => {
+            VirExpr::RepeatLiteral {
+                element, count, ty, ..
+            } => {
                 let result = self.compile_vir_repeat_literal(element, *count, *ty)?;
                 Ok(self.mark_rc_owned(result))
             }
@@ -694,6 +708,7 @@ impl Cg<'_, '_, '_> {
                 type_def,
                 fields,
                 ty,
+                ..
             } => {
                 let result = self.compile_vir_struct_literal(*type_def, fields, *ty)?;
                 Ok(self.mark_rc_owned(result))
@@ -702,6 +717,7 @@ impl Cg<'_, '_, '_> {
                 type_def,
                 fields,
                 ty,
+                ..
             } => {
                 let result = self.compile_vir_class_instance(*type_def, fields, *ty)?;
                 Ok(self.mark_rc_owned(result))
@@ -713,6 +729,7 @@ impl Cg<'_, '_, '_> {
                 field,
                 storage: _,
                 ty,
+                ..
             } => self.compile_vir_field_load(object, *field, *ty),
             VirExpr::FieldStore {
                 object,
@@ -727,6 +744,7 @@ impl Cg<'_, '_, '_> {
                 index,
                 ty,
                 union_storage,
+                ..
             } => self.compile_vir_index(object, index, *ty, *union_storage),
             VirExpr::IndexStore {
                 object,
@@ -756,19 +774,21 @@ impl Cg<'_, '_, '_> {
                 value,
                 result,
                 ty: _,
+                ..
             } => self.compile_vir_is_check(value, *result),
             VirExpr::AsCast {
                 value,
                 target_ty,
                 kind,
                 result,
+                ..
             } => self.compile_vir_as_cast(value, *target_ty, *kind, *result),
 
             // -- Reflection ---------------------------------------------------
-            VirExpr::MetaAccess { kind, ty } => self.compile_vir_meta_access(kind, *ty),
+            VirExpr::MetaAccess { kind, ty, .. } => self.compile_vir_meta_access(kind, *ty),
 
             // -- Variables ------------------------------------------------
-            VirExpr::LocalLoad { name, ty } => self.compile_local_load(*name, *ty),
+            VirExpr::LocalLoad { name, ty, .. } => self.compile_local_load(*name, *ty),
             VirExpr::LocalStore { name, value } => self.compile_local_store(*name, value),
 
             // -- Null / optional operations --------------------------------
@@ -777,12 +797,14 @@ impl Cg<'_, '_, '_> {
                 default,
                 inner_type,
                 ty,
+                ..
             } => self.compile_vir_null_coalesce(value, default, *inner_type, *ty),
             VirExpr::OptionalChain {
                 object,
                 field,
                 inner_type,
                 ty,
+                ..
             } => self.compile_vir_optional_chain(object, *field, *inner_type, *ty),
             VirExpr::OptionalMethodCall {
                 object,
@@ -791,6 +813,7 @@ impl Cg<'_, '_, '_> {
                 call_node_id,
                 inner_type,
                 ty,
+                ..
             } => self.compile_vir_optional_method_call(
                 object,
                 *method,
@@ -802,6 +825,7 @@ impl Cg<'_, '_, '_> {
             VirExpr::Try {
                 value,
                 success_type,
+                ..
             } => self.compile_vir_try(value, *success_type),
 
             // -- Lambda / closure ------------------------------------------
@@ -810,6 +834,7 @@ impl Cg<'_, '_, '_> {
                 body,
                 captures,
                 ty,
+                ..
             } => {
                 let result = self.compile_vir_lambda(params, body, captures, *ty)?;
                 Ok(self.mark_rc_owned(result))
@@ -1500,7 +1525,7 @@ impl Cg<'_, '_, '_> {
                 let cmp = self.tag_eq(compiled.value, tag_index as i64);
                 Ok(self.bool_value(cmp))
             }
-            IsCheckResult::CheckUnknown(tested_type_id) => {
+            IsCheckResult::CheckUnknown(tested_type_id, _) => {
                 let compiled = self.compile_vir_expr(value)?;
                 let cmp = self.compile_unknown_is_check(compiled.value, tested_type_id);
                 Ok(self.bool_value(cmp))
@@ -1530,7 +1555,7 @@ impl Cg<'_, '_, '_> {
             IsCheckResult::CheckTag(tag_index) => {
                 self.vir_as_cast_check_tag(kind, value, tag_index, target_ty)
             }
-            IsCheckResult::CheckUnknown(tested_type_id) => {
+            IsCheckResult::CheckUnknown(tested_type_id, _) => {
                 self.vir_as_cast_check_unknown(kind, value, tested_type_id, target_ty)
             }
         }

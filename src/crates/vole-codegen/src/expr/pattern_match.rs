@@ -1068,7 +1068,7 @@ impl Cg<'_, '_, '_> {
         match pattern {
             vole_vir::VirPattern::Wildcard => Ok(None),
 
-            vole_vir::VirPattern::Binding { name, ty: _ } => {
+            vole_vir::VirPattern::Binding { name, ty: _, .. } => {
                 let var = self.builder.declare_var(scrutinee.ty);
                 self.builder.def_var(var, scrutinee.value);
                 arm_variables.insert(*name, (var, scrutinee.type_id));
@@ -1079,6 +1079,7 @@ impl Cg<'_, '_, '_> {
                 result,
                 tested_type,
                 binding,
+                ..
             } => {
                 // For monomorphized generics, recompute the IsCheckResult
                 // using substituted types.
@@ -1093,7 +1094,7 @@ impl Cg<'_, '_, '_> {
                 let cond = self.compile_is_check_result(&effective_result, scrutinee)?;
 
                 // If there's a binding, introduce the variable after the check.
-                if let Some((name, bind_ty)) = binding {
+                if let Some((name, bind_ty, _)) = binding {
                     let var = self.builder.declare_var(scrutinee.ty);
                     self.builder.def_var(var, scrutinee.value);
                     arm_variables.insert(*name, (var, *bind_ty));
@@ -1105,6 +1106,7 @@ impl Cg<'_, '_, '_> {
             vole_vir::VirPattern::Literal {
                 value: lit_expr,
                 scrutinee_ty,
+                ..
             } => {
                 // Save and restore vars for pattern matching (literal may
                 // reference arm-scoped variables in degenerate cases).
@@ -1136,6 +1138,7 @@ impl Cg<'_, '_, '_> {
             vole_vir::VirPattern::Success {
                 inner,
                 success_type,
+                ..
             } => self.compile_vir_success_pattern(inner, scrutinee, *success_type, arm_variables),
 
             vole_vir::VirPattern::Error { kind } => {
@@ -1154,6 +1157,7 @@ impl Cg<'_, '_, '_> {
                 source_ty,
                 is_union_payload,
                 is_struct,
+                ..
             } => self.compile_vir_record_pattern(
                 type_check,
                 tested_type,
@@ -1221,7 +1225,7 @@ impl Cg<'_, '_, '_> {
                 Ok(Some(is_error))
             }
 
-            vole_vir::VirErrorPatternKind::CatchAll { name, error_ty } => {
+            vole_vir::VirErrorPatternKind::CatchAll { name, error_ty, .. } => {
                 let is_error =
                     self.builder
                         .ins()
@@ -1553,6 +1557,6 @@ fn convert_vir_is_check(vir: &vole_vir::expr::IsCheckResult) -> IsCheckResult {
         vole_vir::expr::IsCheckResult::AlwaysTrue => IsCheckResult::AlwaysTrue,
         vole_vir::expr::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
         vole_vir::expr::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(*tag),
-        vole_vir::expr::IsCheckResult::CheckUnknown(ty) => IsCheckResult::CheckUnknown(*ty),
+        vole_vir::expr::IsCheckResult::CheckUnknown(ty, _) => IsCheckResult::CheckUnknown(*ty),
     }
 }

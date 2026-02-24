@@ -16,7 +16,7 @@ pub(crate) mod type_translate;
 mod tests;
 
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
-use vole_identity::{FunctionId, Interner, MethodId, NameId, NameTable, Symbol, TypeId};
+use vole_identity::{FunctionId, Interner, MethodId, NameId, NameTable, Symbol, TypeId, VirTypeId};
 use vole_sema::node_map::NodeMap;
 use vole_sema::{EntityRegistry, TypeArena};
 
@@ -76,8 +76,12 @@ pub fn lower_function(
     VirFunction {
         id: func_id,
         name,
-        params: param_types.to_vec(),
+        params: param_types
+            .iter()
+            .map(|(s, t)| (*s, *t, VirTypeId::INVALID))
+            .collect(),
         return_type,
+        vir_return_type: VirTypeId::INVALID,
         body,
         mangled_name_id: None,
         method_id: None,
@@ -155,8 +159,12 @@ pub fn lower_method(
     VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
-        params: param_types.to_vec(),
+        params: param_types
+            .iter()
+            .map(|(s, t)| (*s, *t, VirTypeId::INVALID))
+            .collect(),
         return_type,
+        vir_return_type: VirTypeId::INVALID,
         body,
         mangled_name_id: None,
         method_id: Some(method_id),
@@ -192,8 +200,12 @@ pub fn lower_interface_method(
     Some(VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
-        params: param_types.to_vec(),
+        params: param_types
+            .iter()
+            .map(|(s, t)| (*s, *t, VirTypeId::INVALID))
+            .collect(),
         return_type,
+        vir_return_type: VirTypeId::INVALID,
         body,
         mangled_name_id: None,
         method_id: Some(method_id),

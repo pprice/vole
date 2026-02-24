@@ -2,7 +2,7 @@
 //
 // VirBuilder: incremental construction of VIR trees.
 
-use vole_identity::{FunctionId, Symbol, TypeId};
+use vole_identity::{FunctionId, Symbol, TypeId, VirTypeId};
 
 use crate::calls::CallTarget;
 use crate::expr::{CoerceKind, FieldStorage, VirBinOp, VirExpr, VirUnOp};
@@ -61,17 +61,30 @@ impl VirBuilder {
 
     /// Integer literal that fits in 64 bits.
     pub fn build_int_literal(&mut self, value: i64, ty: TypeId) -> VirRef {
-        Box::new(VirExpr::IntLiteral { value, ty })
+        Box::new(VirExpr::IntLiteral {
+            value,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        })
     }
 
     /// Wide integer literal (i128) stored as two 64-bit halves.
     pub fn build_wide_literal(&mut self, low: u64, high: u64, ty: TypeId) -> VirRef {
-        Box::new(VirExpr::WideLiteral { low, high, ty })
+        Box::new(VirExpr::WideLiteral {
+            low,
+            high,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        })
     }
 
     /// Floating-point literal.
     pub fn build_float_literal(&mut self, value: f64, ty: TypeId) -> VirRef {
-        Box::new(VirExpr::FloatLiteral { value, ty })
+        Box::new(VirExpr::FloatLiteral {
+            value,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        })
     }
 
     /// Boolean literal.
@@ -103,18 +116,29 @@ impl VirBuilder {
             lhs,
             rhs,
             ty,
+            vir_ty: VirTypeId::INVALID,
             line,
         })
     }
 
     /// Unary operation (negation, logical/bitwise not).
     pub fn build_unary_op(&mut self, op: VirUnOp, operand: VirRef, ty: TypeId) -> VirRef {
-        Box::new(VirExpr::UnaryOp { op, operand, ty })
+        Box::new(VirExpr::UnaryOp {
+            op,
+            operand,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        })
     }
 
     /// Function or method call.
     pub fn build_call(&mut self, target: CallTarget, args: Vec<VirRef>, ty: TypeId) -> VirRef {
-        Box::new(VirExpr::Call { target, args, ty })
+        Box::new(VirExpr::Call {
+            target,
+            args,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        })
     }
 
     /// Type coercion (numeric widening, boxing, iterator wrapping, etc.).
@@ -129,6 +153,8 @@ impl VirBuilder {
             value,
             from,
             to,
+            vir_from: VirTypeId::INVALID,
+            vir_to: VirTypeId::INVALID,
             kind,
         })
     }
@@ -164,12 +190,17 @@ impl VirBuilder {
             field,
             storage,
             ty,
+            vir_ty: VirTypeId::INVALID,
         })
     }
 
     /// Load a local variable.
     pub fn build_local_load(&mut self, name: Symbol, ty: TypeId) -> VirRef {
-        Box::new(VirExpr::LocalLoad { name, ty })
+        Box::new(VirExpr::LocalLoad {
+            name,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        })
     }
 
     /// Conditional expression (if/else).
@@ -185,6 +216,7 @@ impl VirBuilder {
             then_body,
             else_body,
             ty,
+            vir_ty: VirTypeId::INVALID,
         })
     }
 
@@ -197,6 +229,7 @@ impl VirBuilder {
             value,
             mutable,
             ty,
+            vir_ty: VirTypeId::INVALID,
         }
     }
 
@@ -236,7 +269,7 @@ impl VirBuilder {
         self,
         id: FunctionId,
         name: String,
-        params: Vec<(Symbol, TypeId)>,
+        params: Vec<(Symbol, TypeId, VirTypeId)>,
         return_ty: TypeId,
         body: VirBody,
     ) -> VirFunction {
@@ -245,6 +278,7 @@ impl VirBuilder {
             name,
             params,
             return_type: return_ty,
+            vir_return_type: VirTypeId::INVALID,
             body,
             mangled_name_id: None,
             method_id: None,

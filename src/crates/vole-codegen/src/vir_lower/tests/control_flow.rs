@@ -646,6 +646,7 @@ fn lower_if_stmt_no_else() {
                 then_body,
                 else_body,
                 ty,
+                ..
             } => {
                 match cond.as_ref() {
                     VirExpr::BoolLiteral(true) => {}
@@ -1005,7 +1006,7 @@ fn lower_tuple_pattern_with_bindings() {
                     assert_eq!(bindings[0].element_index, 0);
                     assert_eq!(bindings[0].ty, TypeId::I64);
                     match &bindings[0].pattern {
-                        VirPattern::Binding { name, ty } => {
+                        VirPattern::Binding { name, ty, .. } => {
                             assert_eq!(*name, x_sym);
                             assert_eq!(*ty, TypeId::I64);
                         }
@@ -1015,7 +1016,7 @@ fn lower_tuple_pattern_with_bindings() {
                     assert_eq!(bindings[1].element_index, 1);
                     assert_eq!(bindings[1].ty, TypeId::BOOL);
                     match &bindings[1].pattern {
-                        VirPattern::Binding { name, ty } => {
+                        VirPattern::Binding { name, ty, .. } => {
                             assert_eq!(*name, y_sym);
                             assert_eq!(*ty, TypeId::BOOL);
                         }

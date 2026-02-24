@@ -2,7 +2,7 @@
 //
 // VIR function and body representations.
 
-use vole_identity::{FunctionId, MethodId, NameId, Span, Symbol, TypeId};
+use vole_identity::{FunctionId, MethodId, NameId, Span, Symbol, TypeId, VirTypeId};
 
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
@@ -19,10 +19,12 @@ pub struct VirFunction {
     pub id: FunctionId,
     /// Human-readable name (for diagnostics and debug output).
     pub name: String,
-    /// Typed parameter list: each entry is `(param_name, concrete_type)`.
-    pub params: Vec<(Symbol, TypeId)>,
+    /// Typed parameter list: each entry is `(param_name, concrete_type, vir_type)`.
+    pub params: Vec<(Symbol, TypeId, VirTypeId)>,
     /// Return type (concrete after monomorphization).
     pub return_type: TypeId,
+    /// VIR return type (migration: `VirTypeId::INVALID`).
+    pub vir_return_type: VirTypeId,
     /// The function body.
     pub body: VirBody,
     /// For monomorphized instances, the mangled NameId used by codegen for

@@ -14,6 +14,7 @@ use crate::types::{
 use crate::union_layout;
 
 use vole_frontend::{Expr, ExprKind, NodeId};
+use vole_identity::VirTypeId;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirExpr;
 
@@ -777,6 +778,7 @@ impl Cg<'_, '_, '_> {
         let receiver_vir = VirExpr::LocalLoad {
             name: oc_sym,
             ty: inner.type_id,
+            vir_ty: VirTypeId::INVALID,
         };
         use crate::structs::methods::MethodCallSource;
         let src = MethodCallSource::Vir {

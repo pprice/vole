@@ -53,7 +53,7 @@ fn lower_expr_int_literal_no_type() {
 
     // No type in NodeMap -> TypeId::UNKNOWN
     match vir_ref.as_ref() {
-        VirExpr::IntLiteral { value: 42, ty } => {
+        VirExpr::IntLiteral { value: 42, ty, .. } => {
             assert_eq!(*ty, TypeId::UNKNOWN);
         }
         other => panic!("expected IntLiteral, got {other:?}"),
@@ -84,7 +84,7 @@ fn lower_expr_int_literal_with_type() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::IntLiteral { value: 99, ty } => {
+        VirExpr::IntLiteral { value: 99, ty, .. } => {
             assert_eq!(*ty, TypeId::I32);
         }
         other => panic!("expected IntLiteral with I32, got {other:?}"),
@@ -115,7 +115,7 @@ fn lower_expr_int_literal_i128_becomes_wide() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::WideLiteral { low, high, ty } => {
+        VirExpr::WideLiteral { low, high, ty, .. } => {
             assert_eq!(*low, 42);
             assert_eq!(*high, 0);
             assert_eq!(*ty, TypeId::I128);
@@ -148,7 +148,7 @@ fn lower_expr_negative_int_i128_sign_extends() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::WideLiteral { low, high, ty } => {
+        VirExpr::WideLiteral { low, high, ty, .. } => {
             // -1 as i128 = all 1-bits -> low = u64::MAX, high = u64::MAX
             assert_eq!(*low, u64::MAX);
             assert_eq!(*high, u64::MAX);
@@ -182,7 +182,7 @@ fn lower_expr_float_literal() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::FloatLiteral { value, ty } => {
+        VirExpr::FloatLiteral { value, ty, .. } => {
             assert!((*value - 3.14).abs() < f64::EPSILON);
             assert_eq!(*ty, TypeId::F64);
         }
@@ -244,7 +244,7 @@ fn lower_expr_identifier_becomes_local_load() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::LocalLoad { name, ty } => {
+        VirExpr::LocalLoad { name, ty, .. } => {
             assert_eq!(*name, Symbol::UNKNOWN);
             assert_eq!(*ty, TypeId::UNKNOWN);
         }

@@ -6,7 +6,7 @@
 
 use vole_frontend::Expr;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_sema::{StringConversion, TypeArena};
 
 use vole_vir::calls::CallTarget;
@@ -37,9 +37,11 @@ pub(crate) fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
     let ty = ctx.node_map.get_type(expr.id).unwrap_or(TypeId::UNKNOWN);
     match &expr.kind {
         ExprKind::IntLiteral(value, _suffix) => lower_int_literal(*value, ty),
-        ExprKind::FloatLiteral(value, _suffix) => {
-            Box::new(VirExpr::FloatLiteral { value: *value, ty })
-        }
+        ExprKind::FloatLiteral(value, _suffix) => Box::new(VirExpr::FloatLiteral {
+            value: *value,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        }),
         ExprKind::BoolLiteral(value) => Box::new(VirExpr::BoolLiteral(*value)),
         ExprKind::StringLiteral(s) => {
             let sym = ctx.interner.intern(s);
@@ -54,10 +56,17 @@ pub(crate) fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
         ExprKind::Unreachable => Box::new(VirExpr::Unreachable {
             line: expr.span.line,
         }),
-        ExprKind::Import(_) => Box::new(VirExpr::Import { ty }),
+        ExprKind::Import(_) => Box::new(VirExpr::Import {
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        }),
         ExprKind::TypeLiteral(_) => Box::new(VirExpr::TypeLiteral),
         ExprKind::Range(range_expr) => lower_range(range_expr, ctx),
-        ExprKind::Identifier(sym) => Box::new(VirExpr::LocalLoad { name: *sym, ty }),
+        ExprKind::Identifier(sym) => Box::new(VirExpr::LocalLoad {
+            name: *sym,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        }),
         ExprKind::Assign(assign_expr) => lower_assign(assign_expr, expr, ty, ctx),
         ExprKind::FieldAccess(fa) => lower_field_access(fa, ty, ctx),
         ExprKind::Is(is_expr) => lower_is_check(is_expr, expr, ty, ctx),
@@ -91,6 +100,7 @@ pub(crate) fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                 args,
                 node_id: expr.id,
                 ty,
+                vir_ty: VirTypeId::INVALID,
             })
         }
         ExprKind::RepeatLiteral { element, count } => {
@@ -99,6 +109,7 @@ pub(crate) fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                 element: elem,
                 count: *count,
                 ty,
+                vir_ty: VirTypeId::INVALID,
             })
         }
     }
@@ -117,6 +128,7 @@ fn lower_int_literal(value: i64, ty: TypeId) -> VirRef {
             low: f64_bits,
             high: 0,
             ty,
+            vir_ty: VirTypeId::INVALID,
         })
     } else if ty == TypeId::I128 {
         // Sign-extend i64 to i128 then split into low/high u64.
@@ -125,9 +137,14 @@ fn lower_int_literal(value: i64, ty: TypeId) -> VirRef {
             low: wide as u64,
             high: (wide >> 64) as u64,
             ty,
+            vir_ty: VirTypeId::INVALID,
         })
     } else {
-        Box::new(VirExpr::IntLiteral { value, ty })
+        Box::new(VirExpr::IntLiteral {
+            value,
+            ty,
+            vir_ty: VirTypeId::INVALID,
+        })
     }
 }
 
@@ -170,6 +187,7 @@ fn lower_binary(
         lhs,
         rhs,
         ty,
+        vir_ty: VirTypeId::INVALID,
         line: expr.span.line,
     })
 }
@@ -193,6 +211,7 @@ fn lower_and(
             trailing: Some(Box::new(VirExpr::BoolLiteral(false))),
         }),
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -215,6 +234,7 @@ fn lower_or(
             trailing: Some(else_val),
         }),
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -230,6 +250,7 @@ fn lower_unary(
         op: vir_op,
         operand,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -260,6 +281,7 @@ fn lower_if_expr(
         then_body,
         else_body,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -285,6 +307,7 @@ fn lower_block_expr(
         stmts,
         trailing,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -406,12 +429,17 @@ fn lower_compound_assign(
 
     match &compound.target {
         vole_frontend::AssignTarget::Variable(sym) => {
-            let load = Box::new(VirExpr::LocalLoad { name: *sym, ty });
+            let load = Box::new(VirExpr::LocalLoad {
+                name: *sym,
+                ty,
+                vir_ty: VirTypeId::INVALID,
+            });
             let binop_result = Box::new(VirExpr::BinaryOp {
                 op: binary_op,
                 lhs: load,
                 rhs,
                 ty,
+                vir_ty: VirTypeId::INVALID,
                 line: expr.span.line,
             });
             Box::new(VirExpr::LocalStore {
@@ -427,12 +455,14 @@ fn lower_compound_assign(
                 field: *field,
                 storage: FieldStorage::ByName,
                 ty,
+                vir_ty: VirTypeId::INVALID,
             });
             let binop_result = Box::new(VirExpr::BinaryOp {
                 op: binary_op,
                 lhs: load,
                 rhs,
                 ty,
+                vir_ty: VirTypeId::INVALID,
                 line: expr.span.line,
             });
             Box::new(VirExpr::FieldStore {
@@ -452,6 +482,7 @@ fn lower_compound_assign(
                 object: obj_for_load,
                 index: idx_for_load,
                 ty,
+                vir_ty: VirTypeId::INVALID,
                 union_storage,
             });
             let binop_result = Box::new(VirExpr::BinaryOp {
@@ -459,6 +490,7 @@ fn lower_compound_assign(
                 lhs: load,
                 rhs,
                 ty,
+                vir_ty: VirTypeId::INVALID,
                 line: expr.span.line,
             });
             Box::new(VirExpr::IndexStore {
@@ -491,6 +523,7 @@ fn lower_field_access(
         field: fa.field,
         storage: FieldStorage::ByName,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -520,6 +553,7 @@ fn lower_is_check(
         value,
         result: vir_result,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -552,6 +586,7 @@ fn lower_as_cast(
     Box::new(VirExpr::AsCast {
         value,
         target_ty: ty,
+        vir_target_ty: VirTypeId::INVALID,
         kind,
         result: vir_result,
     })
@@ -566,7 +601,9 @@ fn convert_is_check_result(sema: vole_sema::IsCheckResult) -> IsCheckResult {
         vole_sema::IsCheckResult::AlwaysTrue => IsCheckResult::AlwaysTrue,
         vole_sema::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
         vole_sema::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(tag),
-        vole_sema::IsCheckResult::CheckUnknown(ty) => IsCheckResult::CheckUnknown(ty),
+        vole_sema::IsCheckResult::CheckUnknown(ty) => {
+            IsCheckResult::CheckUnknown(ty, VirTypeId::INVALID)
+        }
     }
 }
 
@@ -612,6 +649,7 @@ fn lower_index(
         object,
         index,
         ty,
+        vir_ty: VirTypeId::INVALID,
         union_storage,
     })
 }
@@ -671,7 +709,11 @@ fn lower_meta_access(
         }
     };
 
-    Box::new(VirExpr::MetaAccess { kind, ty })
+    Box::new(VirExpr::MetaAccess {
+        kind,
+        ty,
+        vir_ty: VirTypeId::INVALID,
+    })
 }
 
 /// Lower a lambda expression to `VirExpr::Lambda`.
@@ -700,6 +742,7 @@ fn lower_lambda(
                 .map(|c| VirCapture {
                     name: c.name,
                     ty: TypeId::UNKNOWN,
+                    vir_ty: VirTypeId::INVALID,
                     by_ref: false,
                 })
                 .collect()
@@ -711,6 +754,7 @@ fn lower_lambda(
         body,
         captures,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -733,7 +777,9 @@ fn lower_null_coalesce(
         value,
         default,
         inner_type,
+        vir_inner_type: VirTypeId::INVALID,
         ty: inner_type,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -758,7 +804,9 @@ fn lower_optional_chain(
         object,
         field: oc.field,
         inner_type: info.inner_type,
+        vir_inner_type: VirTypeId::INVALID,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -792,7 +840,9 @@ fn lower_optional_method_call(
         method_args,
         call_node_id: expr.id,
         inner_type: info.inner_type,
+        vir_inner_type: VirTypeId::INVALID,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -806,6 +856,7 @@ fn lower_try(inner: &Expr, ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRef {
     Box::new(VirExpr::Try {
         value,
         success_type: ty,
+        vir_success_type: VirTypeId::INVALID,
     })
 }
 
@@ -819,6 +870,7 @@ fn lower_array_literal(elements: &[Expr], ty: TypeId, ctx: &mut LoweringCtx<'_>)
     Box::new(VirExpr::ArrayLiteral {
         elements: lowered,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -855,12 +907,14 @@ fn lower_struct_literal(
             type_def: info.type_def_id,
             fields,
             ty,
+            vir_ty: VirTypeId::INVALID,
         })
     } else {
         Box::new(VirExpr::StructLiteral {
             type_def: info.type_def_id,
             fields,
             ty,
+            vir_ty: VirTypeId::INVALID,
         })
     }
 }
@@ -906,6 +960,7 @@ fn lower_call(
             target: CallTarget::Lambda,
             args,
             ty,
+            vir_ty: VirTypeId::INVALID,
         });
     }
 
@@ -928,7 +983,12 @@ fn lower_call(
         line: expr.span.line,
     };
 
-    Box::new(VirExpr::Call { target, args, ty })
+    Box::new(VirExpr::Call {
+        target,
+        args,
+        ty,
+        vir_ty: VirTypeId::INVALID,
+    })
 }
 
 /// Map an AST `UnaryOp` to the VIR `VirUnOp`.
@@ -997,6 +1057,7 @@ fn lower_when_expr(
                 then_body,
                 else_body: result_else,
                 ty,
+                vir_ty: VirTypeId::INVALID,
             })),
         });
     }
@@ -1048,6 +1109,7 @@ fn lower_match_expr(
                     trailing: Some(body_ref),
                 },
                 ty: arm_ty,
+                vir_ty: VirTypeId::INVALID,
             }
         })
         .collect();
@@ -1056,6 +1118,7 @@ fn lower_match_expr(
         scrutinee,
         arms,
         ty,
+        vir_ty: VirTypeId::INVALID,
     })
 }
 
@@ -1092,12 +1155,14 @@ fn lower_pattern(
                 VirPattern::TypeCheck {
                     result,
                     tested_type,
+                    vir_tested_type: VirTypeId::INVALID,
                     binding: None,
                 }
             } else {
                 VirPattern::Binding {
                     name: *name,
                     ty: scrutinee_ty,
+                    vir_ty: VirTypeId::INVALID,
                 }
             }
         }
@@ -1117,6 +1182,7 @@ fn lower_pattern(
             VirPattern::TypeCheck {
                 result,
                 tested_type,
+                vir_tested_type: VirTypeId::INVALID,
                 binding: None,
             }
         }
@@ -1126,6 +1192,7 @@ fn lower_pattern(
             VirPattern::Literal {
                 value,
                 scrutinee_ty,
+                vir_scrutinee_ty: VirTypeId::INVALID,
             }
         }
 
@@ -1164,6 +1231,7 @@ fn lower_success_pattern(
     VirPattern::Success {
         inner: inner_pat,
         success_type,
+        vir_success_type: VirTypeId::INVALID,
     }
 }
 
@@ -1229,6 +1297,7 @@ fn lower_tuple_pattern(
                 pattern: inner,
                 element_index: i,
                 ty: elem_ty,
+                vir_ty: VirTypeId::INVALID,
             }
         })
         .collect();
@@ -1258,7 +1327,11 @@ fn lower_error_identifier_pattern(
         // Identifier is a catch-all binding (error e => ...)
         let error_ty = fallible.map(|(_, e)| e).unwrap_or(TypeId::UNKNOWN);
         VirPattern::Error {
-            kind: VirErrorPatternKind::CatchAll { name, error_ty },
+            kind: VirErrorPatternKind::CatchAll {
+                name,
+                error_ty,
+                vir_error_ty: VirTypeId::INVALID,
+            },
         }
     }
 }
@@ -1439,8 +1512,10 @@ fn lower_record_pattern(
     VirPattern::Record {
         type_check,
         tested_type,
+        vir_tested_type: tested_type.map(|_| VirTypeId::INVALID),
         fields: vir_fields,
         source_ty,
+        vir_source_ty: VirTypeId::INVALID,
         is_union_payload,
         is_struct,
     }
@@ -1470,7 +1545,7 @@ fn record_source_type(
                     return scrutinee_ty;
                 }
             }
-            IsCheckResult::AlwaysFalse | IsCheckResult::CheckUnknown(_) => {}
+            IsCheckResult::AlwaysFalse | IsCheckResult::CheckUnknown(..) => {}
         }
     }
     scrutinee_ty
@@ -1509,6 +1584,7 @@ fn resolve_record_field_bindings(
                 binding_name: f.binding,
                 field_slot: slot as u32,
                 ty,
+                vir_ty: VirTypeId::INVALID,
             }
         })
         .collect()
@@ -1550,7 +1626,7 @@ fn recover_tested_type(
             .unwrap_union(scrutinee_ty)
             .and_then(|variants| variants.get(*tag as usize).copied())
             .unwrap_or(TypeId::UNKNOWN),
-        IsCheckResult::CheckUnknown(ty) => *ty,
+        IsCheckResult::CheckUnknown(ty, _) => *ty,
         IsCheckResult::AlwaysTrue => scrutinee_ty,
         IsCheckResult::AlwaysFalse => TypeId::UNKNOWN,
     }
@@ -1607,6 +1683,7 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                     .map(|c| VirCapture {
                         name: c.name,
                         ty: TypeId::UNKNOWN,
+                        vir_ty: VirTypeId::INVALID,
                         by_ref: false,
                     })
                     .collect()
@@ -1618,6 +1695,7 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
             body,
             captures,
             ty: func_ty,
+            vir_ty: VirTypeId::INVALID,
         });
     }
 

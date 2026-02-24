@@ -212,6 +212,7 @@ impl Cg<'_, '_, '_> {
         let VirIterKind::Array {
             elem_type: elem_type_id,
             union_storage,
+            ..
         } = &vir_for.kind
         else {
             unreachable!("compile_vir_for_array called with non-Array kind");
@@ -354,7 +355,7 @@ impl Cg<'_, '_, '_> {
                 self.enter_iter_rc_scope(&iter, Some(&string_val));
                 Ok((iter_val, TypeId::STRING, true))
             }
-            VirIterKind::IteratorInterface { elem_type } => {
+            VirIterKind::IteratorInterface { elem_type, .. } => {
                 let hint = *elem_type;
                 let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
                 let (elem_type_id, is_interface_iter) = {
@@ -373,7 +374,7 @@ impl Cg<'_, '_, '_> {
                 self.enter_iter_rc_scope(&iter, None);
                 Ok((iter.value, elem_type_id, false))
             }
-            VirIterKind::CustomIterator { elem_type } => {
+            VirIterKind::CustomIterator { elem_type, .. } => {
                 let elem_type_id = *elem_type;
                 let iterable = self.compile_vir_expr(&vir_for.iterable)?;
                 let iterator_type_def = self
@@ -392,7 +393,7 @@ impl Cg<'_, '_, '_> {
                 self.enter_iter_rc_scope(&iter, None);
                 Ok((iter.value, elem_type_id, false))
             }
-            VirIterKind::CustomIterable { elem_type } => {
+            VirIterKind::CustomIterable { elem_type, .. } => {
                 let elem_type_id = *elem_type;
                 let iterable = self.compile_vir_expr(&vir_for.iterable)?;
                 let iter_value = self.call_iterable_iter_method(&iterable, elem_type_id)?;

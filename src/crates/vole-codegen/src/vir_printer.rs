@@ -68,7 +68,7 @@ impl<'a> VirPrinter<'a> {
         let params = func
             .params
             .iter()
-            .map(|(sym, ty)| format!("{}: {}", self.sym(*sym), self.ty(*ty)))
+            .map(|(sym, ty, _)| format!("{}: {}", self.sym(*sym), self.ty(*ty)))
             .collect::<Vec<_>>()
             .join(", ");
         wln!(
@@ -111,6 +111,7 @@ impl<'a> VirPrinter<'a> {
                 value,
                 mutable,
                 ty,
+                ..
             } => {
                 let kw = if *mutable { "let mut" } else { "let" };
                 w!(out, "{} {}: {} = ", kw, self.sym(*name), self.ty(*ty));
@@ -121,6 +122,7 @@ impl<'a> VirPrinter<'a> {
                 pattern,
                 value,
                 init_ty,
+                ..
             } => {
                 w!(out, "let ");
                 self.fmt_destructure_pattern(pattern, out);
@@ -194,13 +196,13 @@ impl<'a> VirPrinter<'a> {
             VirIterKind::Range => "range".to_string(),
             VirIterKind::Array { elem_type, .. } => format!("array<{}>", self.ty(*elem_type)),
             VirIterKind::String => "string".to_string(),
-            VirIterKind::IteratorInterface { elem_type } => {
+            VirIterKind::IteratorInterface { elem_type, .. } => {
                 format!("iterator<{}>", self.ty(*elem_type))
             }
-            VirIterKind::CustomIterator { elem_type } => {
+            VirIterKind::CustomIterator { elem_type, .. } => {
                 format!("custom_iterator<{}>", self.ty(*elem_type))
             }
-            VirIterKind::CustomIterable { elem_type } => {
+            VirIterKind::CustomIterable { elem_type, .. } => {
                 format!("custom_iterable<{}>", self.ty(*elem_type))
             }
         };
@@ -243,14 +245,14 @@ impl<'a> VirPrinter<'a> {
 
     fn fmt_expr(&self, expr: &VirRef, out: &mut String, ind: usize) {
         match expr.as_ref() {
-            VirExpr::IntLiteral { value, ty } => {
+            VirExpr::IntLiteral { value, ty, .. } => {
                 w!(out, "{}: {}", value, self.ty(*ty));
             }
-            VirExpr::WideLiteral { low, high, ty } => {
+            VirExpr::WideLiteral { low, high, ty, .. } => {
                 let val = (*low as i128) | ((*high as i128) << 64);
                 w!(out, "{}: {}", val, self.ty(*ty));
             }
-            VirExpr::FloatLiteral { value, ty } => {
+            VirExpr::FloatLiteral { value, ty, .. } => {
                 w!(out, "{}: {}", value, self.ty(*ty));
             }
             VirExpr::BoolLiteral(b) => w!(out, "{}", b),
@@ -259,7 +261,7 @@ impl<'a> VirPrinter<'a> {
             }
             VirExpr::NilLiteral => w!(out, "nil"),
             VirExpr::Unreachable { line } => w!(out, "unreachable@{}", line),
-            VirExpr::Import { ty } => w!(out, "import: {}", self.ty(*ty)),
+            VirExpr::Import { ty, .. } => w!(out, "import: {}", self.ty(*ty)),
             VirExpr::TypeLiteral => w!(out, "type_literal"),
             VirExpr::Range {
                 start,
@@ -270,12 +272,14 @@ impl<'a> VirPrinter<'a> {
                 w!(out, "{}", if *inclusive { "..=" } else { ".." });
                 self.fmt_expr(end, out, ind);
             }
-            VirExpr::ArrayLiteral { elements, ty } => {
+            VirExpr::ArrayLiteral { elements, ty, .. } => {
                 w!(out, "[");
                 self.fmt_comma_list(elements, out, ind);
                 w!(out, "]: {}", self.ty(*ty));
             }
-            VirExpr::RepeatLiteral { element, count, ty } => {
+            VirExpr::RepeatLiteral {
+                element, count, ty, ..
+            } => {
                 w!(out, "[");
                 self.fmt_expr(element, out, ind);
                 w!(out, "; {}]: {}", count, self.ty(*ty));
@@ -284,6 +288,7 @@ impl<'a> VirPrinter<'a> {
                 type_def,
                 fields,
                 ty,
+                ..
             } => {
                 self.fmt_construction("struct", *type_def, fields, *ty, out, ind);
             }
@@ -291,6 +296,7 @@ impl<'a> VirPrinter<'a> {
                 type_def,
                 fields,
                 ty,
+                ..
             } => {
                 self.fmt_construction("class", *type_def, fields, *ty, out, ind);
             }
@@ -303,7 +309,9 @@ impl<'a> VirPrinter<'a> {
                 self.fmt_expr(rhs, out, ind);
                 w!(out, "): {}", self.ty(*ty));
             }
-            VirExpr::UnaryOp { op, operand, ty } => {
+            VirExpr::UnaryOp {
+                op, operand, ty, ..
+            } => {
                 w!(out, "({})", format_unop(*op));
                 self.fmt_expr(operand, out, ind);
                 w!(out, ": {}", self.ty(*ty));
@@ -316,7 +324,9 @@ impl<'a> VirPrinter<'a> {
             VirExpr::InterpolatedString { parts } => {
                 self.fmt_interpolated(parts, out, ind);
             }
-            VirExpr::Call { target, args, ty } => {
+            VirExpr::Call {
+                target, args, ty, ..
+            } => {
                 self.fmt_call(target, args, *ty, out, ind);
             }
             VirExpr::MethodCall {
@@ -341,6 +351,7 @@ impl<'a> VirPrinter<'a> {
                 field,
                 storage,
                 ty,
+                ..
             } => {
                 self.fmt_expr(object, out, ind);
                 w!(out, ".{}", self.sym(*field));
@@ -399,6 +410,7 @@ impl<'a> VirPrinter<'a> {
                 from,
                 to,
                 kind,
+                ..
             } => {
                 w!(
                     out,
@@ -415,6 +427,7 @@ impl<'a> VirPrinter<'a> {
                 then_body,
                 else_body,
                 ty,
+                ..
             } => {
                 self.fmt_if(cond, then_body, else_body.as_ref(), *ty, out, ind);
             }
@@ -422,6 +435,7 @@ impl<'a> VirPrinter<'a> {
                 scrutinee,
                 arms,
                 ty,
+                ..
             } => {
                 self.fmt_match(scrutinee, arms, *ty, out, ind);
             }
@@ -429,10 +443,13 @@ impl<'a> VirPrinter<'a> {
                 stmts,
                 trailing,
                 ty,
+                ..
             } => {
                 self.fmt_block(stmts, trailing.as_ref(), *ty, out, ind);
             }
-            VirExpr::IsCheck { value, result, ty } => {
+            VirExpr::IsCheck {
+                value, result, ty, ..
+            } => {
                 w!(out, "is_check[{}](", fmt_is_check(result, self));
                 self.fmt_expr(value, out, ind);
                 w!(out, "): {}", self.ty(*ty));
@@ -442,6 +459,7 @@ impl<'a> VirPrinter<'a> {
                 target_ty,
                 kind,
                 result,
+                ..
             } => {
                 let kw = match kind {
                     AsCastKind::Checked => "as?",
@@ -451,10 +469,10 @@ impl<'a> VirPrinter<'a> {
                 self.fmt_expr(value, out, ind);
                 w!(out, "): {}", self.ty(*target_ty));
             }
-            VirExpr::MetaAccess { kind, ty } => {
+            VirExpr::MetaAccess { kind, ty, .. } => {
                 self.fmt_meta_access(kind, *ty, out, ind);
             }
-            VirExpr::LocalLoad { name, ty } => {
+            VirExpr::LocalLoad { name, ty, .. } => {
                 w!(out, "{}: {}", self.sym(*name), self.ty(*ty));
             }
             VirExpr::LocalStore { name, value } => {
@@ -466,6 +484,7 @@ impl<'a> VirPrinter<'a> {
                 body,
                 captures,
                 ty,
+                ..
             } => {
                 self.fmt_lambda(params, body, captures, *ty, out, ind);
             }
@@ -504,6 +523,7 @@ impl<'a> VirPrinter<'a> {
             VirExpr::Try {
                 value,
                 success_type,
+                ..
             } => {
                 self.fmt_expr(value, out, ind);
                 w!(out, "?: {}", self.ty(*success_type));
@@ -734,23 +754,25 @@ impl<'a> VirPrinter<'a> {
     fn fmt_pattern(&self, pattern: &VirPattern, out: &mut String, ind: usize) {
         match pattern {
             VirPattern::Wildcard => w!(out, "_"),
-            VirPattern::Binding { name, ty } => {
+            VirPattern::Binding { name, ty, .. } => {
                 w!(out, "{}: {}", self.sym(*name), self.ty(*ty));
             }
             VirPattern::TypeCheck {
                 result,
                 tested_type,
                 binding,
+                ..
             } => {
                 w!(out, "is {}", self.ty(*tested_type));
                 w!(out, " [{}]", fmt_is_check(result, self));
-                if let Some((name, ty)) = binding {
+                if let Some((name, ty, _)) = binding {
                     w!(out, " as {}: {}", self.sym(*name), self.ty(*ty));
                 }
             }
             VirPattern::Literal {
                 value,
                 scrutinee_ty,
+                ..
             } => {
                 self.fmt_expr(value, out, ind);
                 w!(out, " [scrutinee: {}]", self.ty(*scrutinee_ty));
@@ -761,6 +783,7 @@ impl<'a> VirPrinter<'a> {
             VirPattern::Success {
                 inner,
                 success_type,
+                ..
             } => {
                 w!(out, "success");
                 if let Some(p) = inner {
@@ -789,6 +812,7 @@ impl<'a> VirPrinter<'a> {
                 source_ty,
                 is_union_payload,
                 is_struct,
+                ..
             } => {
                 if let Some(ty) = tested_type {
                     w!(out, "{}", self.ty(*ty));
@@ -830,7 +854,7 @@ impl<'a> VirPrinter<'a> {
         use vole_vir::expr::VirErrorPatternKind;
         match kind {
             VirErrorPatternKind::Bare => w!(out, "error"),
-            VirErrorPatternKind::CatchAll { name, error_ty } => {
+            VirErrorPatternKind::CatchAll { name, error_ty, .. } => {
                 w!(out, "error {}: {}", self.sym(*name), self.ty(*error_ty));
             }
             VirErrorPatternKind::Specific { error_tag } => {
@@ -865,7 +889,7 @@ impl<'a> VirPrinter<'a> {
     ) {
         use vole_vir::stmt::VirDestructurePattern;
         match pattern {
-            VirDestructurePattern::Bind { name, ty } => {
+            VirDestructurePattern::Bind { name, ty, .. } => {
                 w!(out, "{}: {}", self.sym(*name), self.ty(*ty));
             }
             VirDestructurePattern::Wildcard => w!(out, "_"),
@@ -1018,6 +1042,6 @@ fn fmt_is_check(result: &IsCheckResult, printer: &VirPrinter<'_>) -> String {
         IsCheckResult::AlwaysTrue => "always_true".to_string(),
         IsCheckResult::AlwaysFalse => "always_false".to_string(),
         IsCheckResult::CheckTag(tag) => format!("check_tag={}", tag),
-        IsCheckResult::CheckUnknown(ty) => format!("check_unknown={}", printer.ty(*ty)),
+        IsCheckResult::CheckUnknown(ty, _) => format!("check_unknown={}", printer.ty(*ty)),
     }
 }

@@ -94,7 +94,7 @@ fn lower_expr_import() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::Import { ty } => {
+        VirExpr::Import { ty, .. } => {
             assert_eq!(*ty, TypeId::UNKNOWN);
         }
         other => panic!("expected Import, got {other:?}"),
@@ -125,7 +125,7 @@ fn lower_expr_import_with_type() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::Import { ty } => {
+        VirExpr::Import { ty, .. } => {
             assert_eq!(*ty, dummy_type_id());
         }
         other => panic!("expected Import with type, got {other:?}"),
@@ -406,7 +406,7 @@ fn lower_expr_array_literal_becomes_vir() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::ArrayLiteral { elements, ty } => {
+        VirExpr::ArrayLiteral { elements, ty, .. } => {
             assert_eq!(elements.len(), 3);
             assert_eq!(*ty, TypeId::UNKNOWN);
         }
@@ -439,7 +439,9 @@ fn lower_expr_repeat_literal_becomes_vir() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::RepeatLiteral { element, count, ty } => {
+        VirExpr::RepeatLiteral {
+            element, count, ty, ..
+        } => {
             assert_eq!(*count, 10);
             assert_eq!(*ty, TypeId::UNKNOWN);
             match element.as_ref() {

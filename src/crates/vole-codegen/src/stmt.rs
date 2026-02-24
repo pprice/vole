@@ -1133,6 +1133,7 @@ impl Cg<'_, '_, '_> {
                 value,
                 mutable: _,
                 ty,
+                ..
             } => self.compile_vir_let(*name, value, *ty),
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
@@ -1583,7 +1584,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<()> {
         use vole_vir::VirDestructurePattern;
         match pattern {
-            VirDestructurePattern::Bind { name, ty } => {
+            VirDestructurePattern::Bind { name, ty, .. } => {
                 self.compile_vir_destructure_bind(*name, *ty, value)?;
             }
             VirDestructurePattern::Wildcard => {}
@@ -1594,6 +1595,7 @@ impl Cg<'_, '_, '_> {
                 fields,
                 source_ty,
                 is_struct,
+                ..
             } => {
                 self.compile_vir_destructure_record(fields, value, *source_ty, *is_struct)?;
             }
@@ -1656,7 +1658,7 @@ impl Cg<'_, '_, '_> {
                     self.compile_vir_destructure_pattern(&elem.pattern, elem_value)?;
                 }
             }
-            vole_vir::DestructureTupleKind::FixedArray { elem_ty } => {
+            vole_vir::DestructureTupleKind::FixedArray { elem_ty, .. } => {
                 // Fixed array: all elements have the same type and size.
                 let elem_cr_type = self.cranelift_type(elem_ty);
                 let elem_size = self.type_size(elem_ty).div_ceil(8) * 8;
