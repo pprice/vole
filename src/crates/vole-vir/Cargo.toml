@@ -8,6 +8,9 @@ description = "Vole Intermediate Representation — typed IR between sema and co
 # Workspace crates
 vole-identity = { path = "../vole-identity" }
 
+# Fast hashing for internal compiler maps (non-cryptographic)
+rustc-hash = "2.1"
+
 # Identifier concatenation for macros (used by define_int_op_enum)
 paste = "1.0"
 

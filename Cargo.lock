@@ -1842,6 +1842,7 @@ name = "vole-vir"
 version = "2026.2.4"
 dependencies = [
  "paste",
+ "rustc-hash",
  "vole-identity",
 ]
 

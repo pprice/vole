@@ -10,6 +10,7 @@
 
 pub(crate) mod expr;
 pub(crate) mod stmt;
+pub(crate) mod type_translate;
 
 #[cfg(test)]
 mod tests;

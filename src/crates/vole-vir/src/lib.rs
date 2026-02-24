@@ -19,6 +19,7 @@ pub mod func;
 pub mod intrinsics;
 pub mod refs;
 pub mod stmt;
+pub mod type_table;
 pub mod types;
 
 // Re-export paste so the define_int_op_enum macro works from downstream crates.
@@ -39,6 +40,7 @@ pub use stmt::{
     AssignTarget, DestructureTupleKind, VirDestructureElement, VirDestructureField,
     VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
+pub use type_table::VirTypeTable;
 pub use types::{
     StorageClass, VirAnnotation, VirAnnotationValue, VirConstant, VirFieldInfo, VirFieldMeta,
     VirLayout, VirPrimitiveKind, VirStructLayout, VirType, VirTypeLayout, VirTypeMeta,
