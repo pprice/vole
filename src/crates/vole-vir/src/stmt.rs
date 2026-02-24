@@ -2,7 +2,7 @@
 //
 // VIR statement nodes.
 
-use vole_identity::{Symbol, TypeId};
+use vole_identity::{ModuleId, Symbol, TypeId};
 use vole_sema::UnionStorageKind;
 
 use crate::expr::FieldStorage;
@@ -30,16 +30,15 @@ pub enum VirStmt {
         ty: TypeId,
     },
 
-    /// Tuple destructuring (`let (a, b) = ...`).
+    /// Tuple destructuring (`let [a, b] = ...`, `let { x, y } = ...`).
     ///
-    /// Carries the original AST `Pattern` because destructuring supports
-    /// nested tuples, records, wildcards, and module bindings — all of
-    /// which require TypeArena resolution at codegen time.
-    ///
-    /// `value` is the lowered init expression.
+    /// The pattern is fully lowered to VIR-native `VirDestructurePattern`
+    /// during AST-to-VIR lowering.  The `init_ty` is the sema-computed
+    /// type of the init expression, used by codegen for layout resolution.
     LetTuple {
-        pattern: Box<vole_frontend::Pattern>,
+        pattern: VirDestructurePattern,
         value: VirRef,
+        init_ty: TypeId,
     },
 
     // -- Assignment ---------------------------------------------------------
@@ -172,4 +171,95 @@ pub enum VirIterKind {
     /// Codegen calls `.iter()` to get `Iterator<T>`, then wraps via
     /// `InterfaceIter`.
     CustomIterable { elem_type: TypeId },
+}
+
+// ---------------------------------------------------------------------------
+// LetTuple destructuring patterns
+// ---------------------------------------------------------------------------
+
+/// A destructuring pattern for `LetTuple` statements.
+///
+/// This is a simpler subset of `VirPattern` (used for match arms) that
+/// covers only the patterns valid in `let` destructuring: binding,
+/// wildcard, nested tuple, record (struct/class), and module.
+///
+/// All type information is pre-resolved during lowering so codegen
+/// reads decisions rather than consulting the `TypeArena`.
+#[derive(Debug, Clone)]
+pub enum VirDestructurePattern {
+    /// Bind a variable: `a`.
+    Bind { name: Symbol, ty: TypeId },
+
+    /// Wildcard: `_` — matches but binds nothing.
+    Wildcard,
+
+    /// Tuple or fixed-array destructuring: `[a, b, c]`.
+    ///
+    /// Each element carries its pre-resolved type from
+    /// `TypeArena::unwrap_tuple` or `unwrap_fixed_array`.
+    Tuple {
+        elements: Vec<VirDestructureElement>,
+        kind: DestructureTupleKind,
+    },
+
+    /// Record (struct/class) destructuring: `let { x, y } = point`.
+    ///
+    /// Field slots and types are pre-resolved from `EntityRegistry`.
+    /// `is_struct` distinguishes flat struct layout from heap class layout.
+    Record {
+        fields: Vec<VirDestructureField>,
+        source_ty: TypeId,
+        is_struct: bool,
+    },
+
+    /// Module destructuring: `let { A, B } = import "mod"`.
+    ///
+    /// Module bindings are compile-time only (no runtime code generated).
+    /// Each binding maps an export name to a local binding symbol.
+    Module {
+        bindings: Vec<VirModuleBinding>,
+        module_id: ModuleId,
+    },
+}
+
+/// The kind of tuple-like destructuring.
+#[derive(Debug, Clone, Copy)]
+pub enum DestructureTupleKind {
+    /// True tuple: element types may differ.
+    Tuple,
+    /// Fixed-size array: all elements share the same type.
+    FixedArray { elem_ty: TypeId },
+}
+
+/// A single element in a tuple destructure pattern.
+#[derive(Debug, Clone)]
+pub struct VirDestructureElement {
+    /// The nested pattern for this element.
+    pub pattern: VirDestructurePattern,
+    /// Pre-resolved element type.
+    pub ty: TypeId,
+}
+
+/// A single field binding in a record destructure pattern.
+#[derive(Debug, Clone)]
+pub struct VirDestructureField {
+    /// The field name in the type definition.
+    pub field_name: Symbol,
+    /// The variable name to bind (may differ via rename syntax `x: alias`).
+    pub binding: Symbol,
+    /// Pre-resolved field slot index from `EntityRegistry`.
+    pub slot: u32,
+    /// Pre-resolved field type from `EntityRegistry`.
+    pub ty: TypeId,
+}
+
+/// A single binding in a module destructure pattern.
+#[derive(Debug, Clone)]
+pub struct VirModuleBinding {
+    /// The export name in the module.
+    pub export_name: Symbol,
+    /// The local binding name (may differ from export name).
+    pub binding: Symbol,
+    /// The export's type.
+    pub export_ty: TypeId,
 }

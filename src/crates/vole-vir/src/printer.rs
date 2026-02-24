@@ -117,8 +117,14 @@ impl<'a> VirPrinter<'a> {
                 self.fmt_expr(value, out, ind);
                 wln!(out);
             }
-            VirStmt::LetTuple { pattern, value } => {
-                w!(out, "let <pattern:{:?}> = ", pattern);
+            VirStmt::LetTuple {
+                pattern,
+                value,
+                init_ty,
+            } => {
+                w!(out, "let ");
+                self.fmt_destructure_pattern(pattern, out);
+                w!(out, ": {} = ", self.ty(*init_ty));
                 self.fmt_expr(value, out, ind);
                 wln!(out);
             }
@@ -822,6 +828,76 @@ impl<'a> VirPrinter<'a> {
                         self.sym(binding.field_name),
                         self.sym(binding.binding)
                     );
+                }
+                w!(out, " }}");
+            }
+        }
+    }
+
+    // -- Destructure patterns -----------------------------------------------
+
+    fn fmt_destructure_pattern(
+        &self,
+        pattern: &crate::stmt::VirDestructurePattern,
+        out: &mut String,
+    ) {
+        use crate::stmt::VirDestructurePattern;
+        match pattern {
+            VirDestructurePattern::Bind { name, ty } => {
+                w!(out, "{}: {}", self.sym(*name), self.ty(*ty));
+            }
+            VirDestructurePattern::Wildcard => w!(out, "_"),
+            VirDestructurePattern::Tuple { elements, .. } => {
+                w!(out, "[");
+                for (i, elem) in elements.iter().enumerate() {
+                    if i > 0 {
+                        w!(out, ", ");
+                    }
+                    self.fmt_destructure_pattern(&elem.pattern, out);
+                }
+                w!(out, "]");
+            }
+            VirDestructurePattern::Record {
+                fields, is_struct, ..
+            } => {
+                w!(out, "{{ ");
+                for (i, f) in fields.iter().enumerate() {
+                    if i > 0 {
+                        w!(out, ", ");
+                    }
+                    if f.field_name == f.binding {
+                        w!(out, "{}: {}", self.sym(f.field_name), self.ty(f.ty));
+                    } else {
+                        w!(
+                            out,
+                            "{}: {} as {}",
+                            self.sym(f.field_name),
+                            self.ty(f.ty),
+                            self.sym(f.binding)
+                        );
+                    }
+                }
+                w!(out, " }}");
+                if *is_struct {
+                    w!(out, " [struct]");
+                }
+            }
+            VirDestructurePattern::Module { bindings, .. } => {
+                w!(out, "module {{ ");
+                for (i, b) in bindings.iter().enumerate() {
+                    if i > 0 {
+                        w!(out, ", ");
+                    }
+                    if b.export_name == b.binding {
+                        w!(out, "{}", self.sym(b.export_name));
+                    } else {
+                        w!(
+                            out,
+                            "{} as {}",
+                            self.sym(b.export_name),
+                            self.sym(b.binding)
+                        );
+                    }
                 }
                 w!(out, " }}");
             }

@@ -1156,7 +1156,7 @@ impl Cg<'_, '_, '_> {
                 mutable: _,
                 ty,
             } => self.compile_vir_let(*name, value, *ty),
-            VirStmt::LetTuple { pattern, value } => self.compile_vir_let_tuple(pattern, value),
+            VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
             VirStmt::For(vir_for) => self.compile_vir_for(vir_for),
             VirStmt::Raise { error_name, fields } => self.compile_vir_raise(*error_name, fields),
@@ -1558,11 +1558,11 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR let-tuple destructuring statement.
     ///
     /// Compiles the init expression, registers composite RC cleanup for
-    /// owned temporaries, then delegates to `compile_destructure_pattern`
-    /// which handles tuple, fixed-array, record, and nested patterns.
+    /// owned temporaries, then delegates to `compile_vir_destructure_pattern`
+    /// which handles tuple, fixed-array, record, module, and nested patterns.
     fn compile_vir_let_tuple(
         &mut self,
-        pattern: &Pattern,
+        pattern: &vole_vir::VirDestructurePattern,
         value_expr: &vole_vir::VirExpr,
     ) -> CodegenResult<bool> {
         let mut init = self.compile_vir_expr(value_expr)?;
@@ -1585,10 +1585,159 @@ impl Cg<'_, '_, '_> {
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         }
 
-        self.compile_destructure_pattern(pattern, init.value, init.type_id)?;
+        self.compile_vir_destructure_pattern(pattern, init.value)?;
         init.mark_consumed();
         init.debug_assert_rc_handled("VirStmt::LetTuple");
         Ok(false)
+    }
+
+    /// Recursively compile a VIR destructuring pattern, binding variables
+    /// for the values extracted from tuples, fixed arrays, records, and
+    /// modules.
+    ///
+    /// Mirrors `compile_destructure_pattern` but reads from VIR-native
+    /// `VirDestructurePattern` nodes instead of AST `PatternKind` nodes.
+    /// All type/field information has been pre-resolved during lowering.
+    fn compile_vir_destructure_pattern(
+        &mut self,
+        pattern: &vole_vir::VirDestructurePattern,
+        value: Value,
+    ) -> CodegenResult<()> {
+        use vole_vir::VirDestructurePattern;
+        match pattern {
+            VirDestructurePattern::Bind { name, ty } => {
+                self.compile_vir_destructure_bind(*name, *ty, value)?;
+            }
+            VirDestructurePattern::Wildcard => {}
+            VirDestructurePattern::Tuple { elements, kind } => {
+                self.compile_vir_destructure_tuple(elements, *kind, value)?;
+            }
+            VirDestructurePattern::Record {
+                fields,
+                source_ty,
+                is_struct,
+            } => {
+                self.compile_vir_destructure_record(fields, value, *source_ty, *is_struct)?;
+            }
+            VirDestructurePattern::Module {
+                bindings,
+                module_id,
+            } => {
+                self.compile_vir_destructure_module(bindings, *module_id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Compile a binding in a destructure pattern.
+    ///
+    /// Declares a Cranelift variable, registers RC tracking if needed.
+    fn compile_vir_destructure_bind(
+        &mut self,
+        name: Symbol,
+        ty: TypeId,
+        value: Value,
+    ) -> CodegenResult<()> {
+        let cr_type = self.cranelift_type(ty);
+        let var = self.builder.declare_var(cr_type);
+        self.builder.def_var(var, value);
+        self.vars.insert(name, (var, ty));
+
+        // Extracted elements borrow from the parent composite.
+        // RC_inc + register so scope-exit dec balances the borrow.
+        if self.rc_scopes.has_active_scope() && self.rc_state(ty).needs_cleanup() {
+            self.emit_rc_inc_for_type(value, ty)?;
+            let drop_flag = self.register_rc_local(var, ty);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        }
+        Ok(())
+    }
+
+    /// Compile a tuple or fixed-array destructure pattern.
+    ///
+    /// Uses pre-resolved element types; computes byte offsets via
+    /// `tuple_layout()` or element size arithmetic at codegen time.
+    fn compile_vir_destructure_tuple(
+        &mut self,
+        elements: &[vole_vir::VirDestructureElement],
+        kind: vole_vir::DestructureTupleKind,
+        value: Value,
+    ) -> CodegenResult<()> {
+        match kind {
+            vole_vir::DestructureTupleKind::Tuple => {
+                // True tuple: compute layout from element types.
+                let elem_type_ids: Vec<TypeId> = elements.iter().map(|e| e.ty).collect();
+                let (_, offsets) = self.tuple_layout(&elem_type_ids);
+                for (i, elem) in elements.iter().enumerate() {
+                    let offset = offsets[i];
+                    let elem_cr_type = self.cranelift_type(elem.ty);
+                    let elem_value =
+                        self.builder
+                            .ins()
+                            .load(elem_cr_type, MemFlags::new(), value, offset);
+                    self.compile_vir_destructure_pattern(&elem.pattern, elem_value)?;
+                }
+            }
+            vole_vir::DestructureTupleKind::FixedArray { elem_ty } => {
+                // Fixed array: all elements have the same type and size.
+                let elem_cr_type = self.cranelift_type(elem_ty);
+                let elem_size = self.type_size(elem_ty).div_ceil(8) * 8;
+                for (i, elem) in elements.iter().enumerate() {
+                    let offset = (i as i32) * (elem_size as i32);
+                    let elem_value =
+                        self.builder
+                            .ins()
+                            .load(elem_cr_type, MemFlags::new(), value, offset);
+                    self.compile_vir_destructure_pattern(&elem.pattern, elem_value)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Compile a record (struct/class) destructure pattern.
+    ///
+    /// Uses pre-resolved field slots and types from lowering.
+    fn compile_vir_destructure_record(
+        &mut self,
+        fields: &[vole_vir::VirDestructureField],
+        value: Value,
+        source_ty: TypeId,
+        is_struct: bool,
+    ) -> CodegenResult<()> {
+        for field in fields {
+            let converted = if is_struct {
+                // Structs are stack-allocated: load field directly from pointer + offset
+                self.struct_field_load(value, field.slot as usize, field.ty, source_ty)?
+            } else {
+                // Classes are heap-allocated: use runtime field access
+                self.get_instance_field(value, field.slot as usize, field.ty)?
+            };
+
+            let var = self.builder.declare_var(converted.ty);
+            self.builder.def_var(var, converted.value);
+            self.vars.insert(field.binding, (var, field.ty));
+        }
+        Ok(())
+    }
+
+    /// Compile a module destructure pattern.
+    ///
+    /// Module bindings are compile-time only — registers bindings in
+    /// `local_module_bindings` for use by subsequent call compilation.
+    /// No runtime code is generated.
+    fn compile_vir_destructure_module(
+        &mut self,
+        bindings: &[vole_vir::VirModuleBinding],
+        module_id: vole_identity::ModuleId,
+    ) -> CodegenResult<()> {
+        for binding in bindings {
+            self.local_module_bindings.insert(
+                binding.binding,
+                (module_id, binding.export_name, binding.export_ty),
+            );
+        }
+        Ok(())
     }
 
     /// Pre-register a recursive lambda binding from a VIR init expression.

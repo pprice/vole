@@ -39,7 +39,10 @@ pub use lower::{
 };
 pub use printer::VirPrinter;
 pub use refs::VirRef;
-pub use stmt::{AssignTarget, VirFor, VirIterKind, VirStmt};
+pub use stmt::{
+    AssignTarget, DestructureTupleKind, VirDestructureElement, VirDestructureField,
+    VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
+};
 pub use types::{
     BitWidth, VirAnnotation, VirAnnotationValue, VirConstant, VirFieldInfo, VirFieldMeta,
     VirLayout, VirStructLayout, VirType, VirTypeMeta, VirUnionLayout,

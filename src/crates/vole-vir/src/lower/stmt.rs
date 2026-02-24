@@ -2,12 +2,16 @@
 //
 // Statement lowering: AST `Stmt` → VIR `VirStmt`.
 
+use vole_frontend::PatternKind;
 use vole_frontend::ast::{LetInit, LetStmt, Stmt};
 use vole_identity::TypeId;
 use vole_sema::IterableKind;
 
 use crate::expr::VirExpr;
-use crate::stmt::{VirFor, VirIterKind, VirStmt};
+use crate::stmt::{
+    DestructureTupleKind, VirDestructureElement, VirDestructureField, VirDestructurePattern,
+    VirFor, VirIterKind, VirModuleBinding, VirStmt,
+};
 
 use super::LoweringCtx;
 use super::expr::lower_expr;
@@ -38,9 +42,15 @@ pub(crate) fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
         }
         Stmt::LetTuple(let_tuple) => {
             let value = lower_expr(&let_tuple.init, ctx);
+            let init_ty = ctx
+                .node_map
+                .get_type(let_tuple.init.id)
+                .unwrap_or(TypeId::UNKNOWN);
+            let pattern = lower_destructure_pattern(&let_tuple.pattern, init_ty, ctx);
             VirStmt::LetTuple {
-                pattern: Box::new(let_tuple.pattern.clone()),
+                pattern,
                 value,
+                init_ty,
             }
         }
     }
@@ -186,4 +196,177 @@ fn lower_if_stmt(if_stmt: &vole_frontend::ast::IfStmt, ctx: &mut LoweringCtx<'_>
             ty: TypeId::VOID,
         }),
     }
+}
+
+// ---------------------------------------------------------------------------
+// LetTuple destructuring pattern lowering
+// ---------------------------------------------------------------------------
+
+/// Lower an AST `Pattern` to a `VirDestructurePattern`.
+///
+/// Handles the four `PatternKind` variants used in `LetTuple`:
+/// - `Identifier` → `VirDestructurePattern::Bind`
+/// - `Wildcard` → `VirDestructurePattern::Wildcard`
+/// - `Tuple` → `VirDestructurePattern::Tuple` (recursive)
+/// - `Record` → `VirDestructurePattern::Record` or `Module`
+///
+/// The `ty` parameter is the type of the value being destructured at this
+/// level of nesting (the init expression's type at the top level, or the
+/// element/field type for nested patterns).
+fn lower_destructure_pattern(
+    pattern: &vole_frontend::Pattern,
+    ty: TypeId,
+    ctx: &LoweringCtx<'_>,
+) -> VirDestructurePattern {
+    match &pattern.kind {
+        PatternKind::Identifier { name } => VirDestructurePattern::Bind { name: *name, ty },
+        PatternKind::Wildcard => VirDestructurePattern::Wildcard,
+        PatternKind::Tuple { elements } => lower_destructure_tuple(elements, ty, ctx),
+        PatternKind::Record { fields, .. } => lower_destructure_record(fields, ty, ctx),
+        // LetTuple patterns should only contain the above variants.
+        // Other pattern kinds (Literal, Type, Val, Success, Error) are match-only.
+        _ => VirDestructurePattern::Wildcard,
+    }
+}
+
+/// Lower a tuple/fixed-array destructuring pattern.
+///
+/// Pre-resolves element types from `TypeArena::unwrap_tuple` or
+/// `unwrap_fixed_array`.  Each element pattern is recursively lowered.
+fn lower_destructure_tuple(
+    elements: &[vole_frontend::Pattern],
+    ty: TypeId,
+    ctx: &LoweringCtx<'_>,
+) -> VirDestructurePattern {
+    // Try tuple first.
+    if let Some(elem_types) = ctx.type_arena.unwrap_tuple(ty).cloned() {
+        let elems = elements
+            .iter()
+            .enumerate()
+            .map(|(i, pat)| {
+                let elem_ty = elem_types.get(i).copied().unwrap_or(TypeId::UNKNOWN);
+                VirDestructureElement {
+                    pattern: lower_destructure_pattern(pat, elem_ty, ctx),
+                    ty: elem_ty,
+                }
+            })
+            .collect();
+        return VirDestructurePattern::Tuple {
+            elements: elems,
+            kind: DestructureTupleKind::Tuple,
+        };
+    }
+
+    // Try fixed array.
+    if let Some((elem_ty, _len)) = ctx.type_arena.unwrap_fixed_array(ty) {
+        let elems = elements
+            .iter()
+            .map(|pat| VirDestructureElement {
+                pattern: lower_destructure_pattern(pat, elem_ty, ctx),
+                ty: elem_ty,
+            })
+            .collect();
+        return VirDestructurePattern::Tuple {
+            elements: elems,
+            kind: DestructureTupleKind::FixedArray { elem_ty },
+        };
+    }
+
+    // Fallback: unknown element types.
+    let elems = elements
+        .iter()
+        .map(|pat| VirDestructureElement {
+            pattern: lower_destructure_pattern(pat, TypeId::UNKNOWN, ctx),
+            ty: TypeId::UNKNOWN,
+        })
+        .collect();
+    VirDestructurePattern::Tuple {
+        elements: elems,
+        kind: DestructureTupleKind::Tuple,
+    }
+}
+
+/// Lower a record destructuring pattern to `Record` or `Module`.
+///
+/// Checks whether the type is a module (compile-time only bindings) or a
+/// nominal type (struct/class with runtime field extraction).
+fn lower_destructure_record(
+    fields: &[vole_frontend::ast::RecordFieldPattern],
+    ty: TypeId,
+    ctx: &LoweringCtx<'_>,
+) -> VirDestructurePattern {
+    // Module destructuring: `let { A, B } = import "mod"`
+    if let Some(module_info) = ctx.type_arena.unwrap_module(ty) {
+        let bindings = fields
+            .iter()
+            .filter_map(|f| {
+                let export_name_str = ctx.interner.resolve(f.field_name);
+                let export_ty = module_info.exports.iter().find_map(|(name_id, ty)| {
+                    let name = ctx.name_table.last_segment_str(*name_id);
+                    if name.as_deref() == Some(export_name_str) {
+                        Some(*ty)
+                    } else {
+                        None
+                    }
+                })?;
+                Some(VirModuleBinding {
+                    export_name: f.field_name,
+                    binding: f.binding,
+                    export_ty,
+                })
+            })
+            .collect();
+        return VirDestructurePattern::Module {
+            bindings,
+            module_id: module_info.module_id,
+        };
+    }
+
+    // Struct/class destructuring: `let { x, y } = point`
+    let type_def_id = ctx
+        .type_arena
+        .unwrap_nominal(ty)
+        .map(|(def_id, _, _)| def_id);
+    let is_struct = ctx.type_arena.is_struct(ty);
+
+    let vir_fields = fields
+        .iter()
+        .map(|f| {
+            let (slot, field_ty) = type_def_id
+                .and_then(|def_id| find_destructure_field(def_id, f.field_name, ctx))
+                .unwrap_or((0, TypeId::UNKNOWN));
+            VirDestructureField {
+                field_name: f.field_name,
+                binding: f.binding,
+                slot,
+                ty: field_ty,
+            }
+        })
+        .collect();
+
+    VirDestructurePattern::Record {
+        fields: vir_fields,
+        source_ty: ty,
+        is_struct,
+    }
+}
+
+/// Find a field's slot index and type in a type definition.
+///
+/// Looks up the field by name in the entity registry and returns
+/// `(slot, type_id)`.
+fn find_destructure_field(
+    type_def_id: vole_identity::TypeDefId,
+    field_name: vole_identity::Symbol,
+    ctx: &LoweringCtx<'_>,
+) -> Option<(u32, TypeId)> {
+    let field_name_str = ctx.interner.resolve(field_name);
+    for field_id in ctx.entities.fields_on_type(type_def_id) {
+        let field = ctx.entities.get_field(field_id);
+        let name = ctx.name_table.last_segment_str(field.name_id);
+        if name.as_deref() == Some(field_name_str) {
+            return Some((field.slot as u32, field.ty));
+        }
+    }
+    None
 }
