@@ -51,6 +51,11 @@ you must follow these rules.
 8. Use your tools, `ast-grep`, `just`, `rg`, `lldb` etc; your default tools suck.
 9. If `just unit` (`vole test`) is failing, NEVER grep output if running >1 times
    you often fail to locate the issue without seeing full output.
+10. If you need a tool to help with the task, build it (script, `just` recipe, etc).
+11. If the tool is useful for future tasks, add it to `just agent`.
+12. Use `vole inspect [ast|vir|ir|mir] file.vole` to see how code is represented at
+    each compiler stage. Write a small .vole snippet and inspect it to understand
+    the shape of data you're working with before modifying lowering or codegen.
 
 ## Limits
 1. Functions should be no longer than ~80 lines, if they are, break them apart.
