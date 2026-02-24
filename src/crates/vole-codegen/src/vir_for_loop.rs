@@ -358,6 +358,8 @@ impl Cg<'_, '_, '_> {
             VirIterKind::IteratorInterface { elem_type, .. } => {
                 let hint = *elem_type;
                 let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
+                // NOTE: arena() retained — wrap_interface_iter requires sema TypeId.
+                // Remove when iterator dispatch uses VirTypeId (Phase D).
                 let (elem_type_id, is_interface_iter) = {
                     let arena = self.arena();
                     if let Some(elem_id) = arena.unwrap_runtime_iterator(iter.type_id) {
@@ -382,6 +384,9 @@ impl Cg<'_, '_, '_> {
                     .well_known
                     .iterator_type_def
                     .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
+                // NOTE: arena() retained — box_interface_value requires sema TypeId
+                // for the interface type.  Remove when interface boxing uses VirTypeId
+                // (Phase D).
                 let interface_type_id = self
                     .arena()
                     .lookup_interface(iterator_type_def, smallvec![elem_type_id])

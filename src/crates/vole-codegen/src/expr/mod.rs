@@ -551,7 +551,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(
             self.iconst_cached(types::I64, 0),
             types::I64,
-            self.arena().primitives.i64,
+            TypeId::I64,
         ))
     }
 
@@ -601,7 +601,7 @@ impl Cg<'_, '_, '_> {
             VirExpr::Unreachable { line } => self.unreachable_expr(*line),
             VirExpr::Import { ty, .. } => {
                 let type_id = if *ty == TypeId::UNKNOWN {
-                    self.arena().primitives.i64
+                    TypeId::I64
                 } else {
                     *ty
                 };
@@ -1112,7 +1112,8 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         runtime_iter_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        // Extract element type from RuntimeIterator(elem)
+        // NOTE: arena() retained — lookup_interface and box_interface_value
+        // require sema TypeId.  Remove when iterator boxing uses VirTypeId.
         let elem_type_id = self
             .arena()
             .unwrap_runtime_iterator(runtime_iter_type_id)
@@ -1160,6 +1161,7 @@ impl Cg<'_, '_, '_> {
     ///    (these will migrate to dedicated VIR nodes later).
     fn compile_local_load(&mut self, sym: Symbol, ty: TypeId) -> CodegenResult<CompiledValue> {
         // 1. Sentinel types — always i8(0).
+        // NOTE: arena() retained — no vir_is_sentinel helper yet.
         if self.arena().is_sentinel(ty) {
             let value = self.iconst_cached(types::I8, 0);
             return Ok(CompiledValue::new(value, types::I8, ty));
@@ -1196,12 +1198,13 @@ impl Cg<'_, '_, '_> {
         // the payload from the tagged union.
         let resolved_union_type_id = self.try_substitute_type(var_type_id);
         let narrowed_type_id = self.try_substitute_type(narrowed_ty);
-        if self.arena().is_union(resolved_union_type_id)
-            && !self.arena().is_union(narrowed_type_id)
+        if self.vir_query_is_union(resolved_union_type_id)
+            && !self.vir_query_is_union(narrowed_type_id)
             && narrowed_type_id != resolved_union_type_id
             && let Some(narrowed_variant) =
                 self.find_union_variant(resolved_union_type_id, narrowed_type_id)
         {
+            // NOTE: arena() retained for type_id_to_cranelift — needs sema TypeId.
             let payload_ty = type_id_to_cranelift(narrowed_variant, self.arena(), self.ptr_type());
             let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
             let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
@@ -1211,7 +1214,7 @@ impl Cg<'_, '_, '_> {
 
         // Unknown extraction: if declared type is unknown but VIR type is
         // concrete, extract the value from the TaggedValue.
-        if self.arena().is_unknown(var_type_id) && !self.arena().is_unknown(narrowed_type_id) {
+        if self.vir_query_is_unknown(var_type_id) && !self.vir_query_is_unknown(narrowed_type_id) {
             let raw_value = self.builder.ins().load(
                 types::I64,
                 MemFlags::new(),
@@ -1234,6 +1237,8 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Find a union variant matching the narrowed type, with integer fallback.
+    /// NOTE: arena() retained — unwrap_union returns sema TypeId variants which
+    /// are used by load_union_payload and extract_union_payload_typed.
     fn find_union_variant(
         &self,
         union_type_id: TypeId,
@@ -1286,6 +1291,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Function reference
+        // NOTE: arena() retained — no vir_is_function helper yet.
         if self.arena().is_function(ty) {
             return self.function_reference(sym, ty);
         }
@@ -1453,7 +1459,7 @@ impl Cg<'_, '_, '_> {
             VirExpr::LocalLoad { name, .. } => self.vars.get(name).map(|(_, ty)| *ty)?,
             _ => return None,
         };
-        let (type_def_id, _, _) = self.arena().unwrap_nominal(object_type_id)?;
+        let type_def_id = self.vir_query_unwrap_nominal(object_type_id)?;
         Some(type_def_id)
     }
 
@@ -1485,18 +1491,18 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // Interface types require dynamic dispatch via vtable.
-        if self.arena().is_interface(concrete_type_id) {
+        if self.vir_query_is_interface(concrete_type_id) {
             let obj = self.compile_vir_expr(value)?;
             return compile_dynamic_meta_from_value(self, obj, result_ty);
         }
 
         // Concrete nominal types (class/struct) are resolved statically.
-        if let Some((type_def_id, _, _)) = self.arena().unwrap_nominal(concrete_type_id) {
+        if let Some(type_def_id) = self.vir_query_unwrap_nominal(concrete_type_id) {
             return compile_static_meta_with_type(self, type_def_id, result_ty);
         }
 
         // Unsupported concrete type (primitive, array, function, etc.)
-        let display = self.arena().display_basic(concrete_type_id);
+        let display = self.vir_query_display_basic(concrete_type_id);
         Err(CodegenError::unsupported_with_context(
             "T.@meta: concrete type does not support reflection",
             display,
@@ -1618,6 +1624,8 @@ impl Cg<'_, '_, '_> {
         target_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Derive the tested type from the union variants.
+        // NOTE: arena() retained — extract_union_payload_typed requires sema TypeId.
+        // Remove when CompiledValue carries VirTypeId (Phase D).
         let tested_type_id = self
             .arena()
             .unwrap_union(value.type_id)
@@ -1654,7 +1662,7 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), value.value, 0);
-        let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
+        let expected_tag = self.vir_query_unknown_type_tag(tested_type_id);
         let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
         let is_match = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
         match kind {

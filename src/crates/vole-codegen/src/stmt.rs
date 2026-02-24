@@ -1205,9 +1205,11 @@ impl Cg<'_, '_, '_> {
         return_type_id: Option<TypeId>,
     ) -> CodegenResult<()> {
         // Interface boxing
+        // NOTE: box_interface_value requires sema TypeId (ret_type_id) for vtable
+        // generation.  The predicate is migrated; the call retains arena dependency.
         if let Some(ret_type_id) = return_type_id
-            && self.arena().is_interface(ret_type_id)
-            && !self.arena().is_interface(compiled.type_id)
+            && self.vir_query_is_interface(ret_type_id)
+            && !self.vir_query_is_interface(compiled.type_id)
             && !self.arena().is_runtime_iterator(compiled.type_id)
         {
             let boxed = self.box_interface_value(compiled, ret_type_id)?;
@@ -1217,8 +1219,8 @@ impl Cg<'_, '_, '_> {
 
         // Unknown boxing
         if let Some(ret_type_id) = return_type_id
-            && self.arena().is_unknown(ret_type_id)
-            && !self.arena().is_unknown(compiled.type_id)
+            && self.vir_query_is_unknown(ret_type_id)
+            && !self.vir_query_is_unknown(compiled.type_id)
         {
             let boxed = self.box_to_unknown_no_inc(compiled)?;
             self.builder.ins().return_(&[boxed.value]);
@@ -1227,10 +1229,10 @@ impl Cg<'_, '_, '_> {
 
         // Fallible return
         if let Some(ret_type_id) = return_type_id
-            && self.arena().unwrap_fallible(ret_type_id).is_some()
+            && self.vir_query_is_fallible(ret_type_id)
         {
             let tag_val = self.iconst_cached(types::I64, FALLIBLE_SUCCESS_TAG);
-            if is_wide_fallible(ret_type_id, self.arena()) {
+            if self.vir_query_is_wide_fallible(ret_type_id) {
                 let (low, high) = split_i128_for_storage(self.builder, compiled.value);
                 self.builder.ins().return_(&[tag_val, low, high]);
             } else {
@@ -1258,7 +1260,7 @@ impl Cg<'_, '_, '_> {
 
         // Union return
         if let Some(ret_type_id) = return_type_id
-            && self.arena().is_union(ret_type_id)
+            && self.vir_query_is_union(ret_type_id)
         {
             let wrapped = self.construct_union_id(compiled, ret_type_id)?;
             self.builder.ins().return_(&[wrapped.value]);
@@ -1266,6 +1268,8 @@ impl Cg<'_, '_, '_> {
         }
 
         // Plain value return (with type conversion if needed)
+        // NOTE: convert_to_type requires arena for detailed type inspection.
+        // This is a boundary case retained until CompiledValue carries VirTypeId.
         let return_value = if let Some(ret_type_id) = return_type_id {
             let arena = self.env.analyzed.type_arena();
             let ptr_type = self.ptr_type();
@@ -1361,6 +1365,8 @@ impl Cg<'_, '_, '_> {
             )
         })?;
 
+        // NOTE: arena() retained — error_tag_for/resolve_raise_error_type_def
+        // require sema TypeId.  Remove when error dispatch uses VirTypeId (Phase D).
         let (_success_type_id, error_type_id) = self
             .arena()
             .unwrap_fallible(return_type_id)
@@ -1392,7 +1398,7 @@ impl Cg<'_, '_, '_> {
 
         self.emit_rc_cleanup_all_scopes(None)?;
 
-        if is_wide_fallible(return_type_id, self.arena()) {
+        if self.vir_query_is_wide_fallible(return_type_id) {
             let zero = self.iconst_cached(types::I64, 0);
             self.builder.ins().return_(&[tag_val, payload_val, zero]);
         } else {
@@ -1421,8 +1427,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.iconst_cached(types::I64, 0));
         }
 
-        if error_fields.len() == 1 && !crate::types::is_wide_type(error_fields[0].ty, self.arena())
-        {
+        if error_fields.len() == 1 && !self.vir_query_is_wide(error_fields[0].ty) {
             let field_def = &error_fields[0];
             let field_name = self
                 .name_table()
@@ -1445,7 +1450,7 @@ impl Cg<'_, '_, '_> {
         // Multiple fields (or single i128 field) — heap-allocate payload.
         let error_payload_size: u32 = error_fields
             .iter()
-            .map(|f| crate::types::field_byte_size(f.ty, self.arena()))
+            .map(|f| self.vir_query_field_byte_size(f.ty))
             .sum();
         let slot = self.alloc_stack(error_payload_size);
 
@@ -1498,7 +1503,7 @@ impl Cg<'_, '_, '_> {
 
         // Struct copy: when binding a struct value, copy to a new stack slot
         // to maintain value semantics (structs are stack-allocated value types).
-        let mut init = if self.arena().is_struct(init.type_id) {
+        let mut init = if self.vir_query_is_struct(init.type_id) {
             self.copy_struct_value(init)?
         } else {
             init
@@ -1789,7 +1794,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<()> {
         // Detect whether coerce_let_init called box_to_unknown (new TaggedValue).
         let created_tagged_value =
-            self.arena().is_unknown(final_type_id) && !self.arena().is_unknown(init.type_id);
+            self.vir_query_is_unknown(final_type_id) && !self.vir_query_is_unknown(init.type_id);
 
         if self.rc_scopes.has_active_scope() && created_tagged_value {
             let drop_flag = self.register_rc_local(var, final_type_id);
@@ -1867,7 +1872,7 @@ impl Cg<'_, '_, '_> {
         final_type_id: TypeId,
         is_stack_union: bool,
     ) -> CodegenResult<()> {
-        if !(is_stack_union || self.arena().is_union(final_type_id)) {
+        if !(is_stack_union || self.vir_query_is_union(final_type_id)) {
             return Ok(());
         }
         // Already handled by composite RC path.

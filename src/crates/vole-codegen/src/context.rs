@@ -354,6 +354,190 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.analyzed.vir_type_table
     }
 
+    /// Translate a sema `TypeId` to a `VirTypeId` via the VIR type table's
+    /// sema mapping cache.
+    ///
+    /// Returns `VirTypeId::UNKNOWN` if no mapping exists.  This can happen
+    /// for types created during monomorphization (type substitution creates
+    /// sema TypeIds that weren't present during VIR lowering).  Callers
+    /// that need to handle monomorphized types should use the `vir_query_*`
+    /// helpers below which fall back to the sema arena when needed.
+    #[inline]
+    pub fn vir_lookup(&self, type_id: TypeId) -> vole_identity::VirTypeId {
+        self.vir_type_table()
+            .lookup_sema(type_id)
+            .unwrap_or(vole_identity::VirTypeId::UNKNOWN)
+    }
+
+    /// Check if a sema `TypeId` is a struct type, using VirTypeTable with
+    /// arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_struct(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            self.arena().is_struct(type_id)
+        } else {
+            crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Check if a sema `TypeId` is a union type, using VirTypeTable with
+    /// arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_union(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            self.arena().is_union(type_id)
+        } else {
+            crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Check if a sema `TypeId` is the unknown type, using VirTypeTable with
+    /// arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_unknown(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            self.arena().is_unknown(type_id)
+        } else {
+            crate::types::vir_conversions::vir_is_unknown(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Check if a sema `TypeId` is a payload-carrying union, using VirTypeTable
+    /// with arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_payload_union(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            crate::structs::helpers::is_payload_union(type_id, self.arena())
+        } else {
+            crate::types::vir_conversions::vir_is_payload_union(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Check if a sema `TypeId` is void, using VirTypeTable with arena
+    /// fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_void(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            self.arena().is_void(type_id)
+        } else {
+            crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Check if a sema `TypeId` is a fallible type, using VirTypeTable with
+    /// arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_fallible(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            self.arena().unwrap_fallible(type_id).is_some()
+        } else {
+            crate::types::vir_conversions::vir_is_fallible(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Check if a sema `TypeId` is a wide fallible (i128 success type), using
+    /// VirTypeTable with arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_wide_fallible(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            crate::types::is_wide_fallible(type_id, self.arena())
+        } else {
+            crate::types::vir_conversions::vir_is_wide_fallible(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Check if a sema `TypeId` is a wide type (i128/f128), using VirTypeTable
+    /// with arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_wide(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            crate::types::is_wide_type(type_id, self.arena())
+        } else {
+            crate::types::vir_conversions::vir_is_wide(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Check if a sema `TypeId` is an interface type, using VirTypeTable with
+    /// arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_is_interface(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            self.arena().is_interface(type_id)
+        } else {
+            crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Unwrap a nominal type to its TypeDefId, using VirTypeTable with arena
+    /// fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_unwrap_nominal(&self, type_id: TypeId) -> Option<vole_identity::TypeDefId> {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            self.arena().unwrap_nominal(type_id).map(|(id, _, _)| id)
+        } else {
+            crate::types::vir_conversions::vir_unwrap_nominal(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Get a human-readable type display string, using VirTypeTable with arena
+    /// fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_display_basic(&self, type_id: TypeId) -> String {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            self.arena().display_basic(type_id)
+        } else {
+            crate::types::vir_conversions::vir_display_basic(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Get the field byte size for a type, using VirTypeTable with arena
+    /// fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_field_byte_size(&self, type_id: TypeId) -> u32 {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            crate::types::field_byte_size(type_id, self.arena())
+        } else {
+            crate::types::vir_conversions::vir_field_byte_size(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Get the runtime type tag for boxing a value to unknown, using
+    /// VirTypeTable with arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_unknown_type_tag(&self, type_id: TypeId) -> u64 {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            crate::types::unknown_type_tag(type_id, self.arena())
+        } else {
+            crate::types::vir_conversions::vir_unknown_type_tag(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Map a sema `TypeId` to its Cranelift type, using VirTypeTable with
+    /// arena fallback for monomorphized types.
+    #[inline]
+    pub fn vir_query_type_to_cranelift(&self, type_id: TypeId) -> Type {
+        let vir_ty = self.vir_lookup(type_id);
+        let ptr = self.ptr_type();
+        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+            crate::types::type_id_to_cranelift(type_id, self.arena(), ptr)
+        } else {
+            crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
+        }
+    }
+
     /// Get expression type by NodeId.
     ///
     /// NodeIds are globally unique (they embed a ModuleId), so a single flat

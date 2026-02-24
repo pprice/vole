@@ -8,9 +8,7 @@ use cranelift_module::Module;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{
-    CompiledValue, is_wide_fallible, native_type_to_cranelift, type_id_to_cranelift,
-};
+use crate::types::{CompiledValue, native_type_to_cranelift};
 use crate::union_layout;
 
 use vole_runtime::native_registry::NativeType;
@@ -152,21 +150,17 @@ impl Cg<'_, '_, '_> {
             sig.params.push(AbiParam::new(ty));
         }
 
-        let arena = self.arena();
-        if !arena.is_void(return_ty) {
-            if is_wide_fallible(return_ty, arena) {
+        if !self.vir_query_is_void(return_ty) {
+            if self.vir_query_is_wide_fallible(return_ty) {
                 sig.returns.push(AbiParam::new(types::I64));
                 sig.returns.push(AbiParam::new(types::I64));
                 sig.returns.push(AbiParam::new(types::I64));
-            } else if arena.unwrap_fallible(return_ty).is_some() {
+            } else if self.vir_query_is_fallible(return_ty) {
                 sig.returns.push(AbiParam::new(types::I64));
                 sig.returns.push(AbiParam::new(types::I64));
             } else {
-                sig.returns.push(AbiParam::new(type_id_to_cranelift(
-                    return_ty,
-                    arena,
-                    self.ptr_type(),
-                )));
+                sig.returns
+                    .push(AbiParam::new(self.vir_query_type_to_cranelift(return_ty)));
             }
         }
 
@@ -184,8 +178,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.void_value());
         }
 
-        let arena = self.arena();
-        if results.len() == 2 && arena.unwrap_fallible(return_ty).is_some() {
+        if results.len() == 2 && self.vir_query_is_fallible(return_ty) {
             let tag = results[0];
             let payload = results[1];
             let slot = self.alloc_stack(union_layout::STANDARD_SIZE);
@@ -196,7 +189,7 @@ impl Cg<'_, '_, '_> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
             Ok(CompiledValue::new(ptr, ptr_type, return_ty))
-        } else if arena.is_union(return_ty) {
+        } else if self.vir_query_is_union(return_ty) {
             let src_ptr = results[0];
             Ok(self.copy_union_ptr_to_local(src_ptr, return_ty))
         } else {
@@ -270,7 +263,7 @@ impl Cg<'_, '_, '_> {
                 .load(word_type, MemFlags::new(), vtable_ptr, vtable_offset);
 
         // Build signature: all params and return are word-typed (interface ABI)
-        let is_void = self.arena().is_void(return_ty);
+        let is_void = self.vir_query_is_void(return_ty);
         let param_count = args.len(); // receiver + method params
         let mut sig = self.jit_module().make_signature();
         for _ in 0..param_count {

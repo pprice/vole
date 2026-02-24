@@ -176,15 +176,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         // Coerce to unknown when the field type is unknown.
         if let Some(&field_type_id) = field_types.get(field_name)
-            && self.arena().is_unknown(field_type_id)
-            && !self.arena().is_unknown(value.type_id)
+            && self.vir_query_is_unknown(field_type_id)
+            && !self.vir_query_is_unknown(value.type_id)
         {
             *value = self.box_to_unknown_no_inc(*value)?;
         }
         // Coerce non-union to union for payload-carrying union fields.
         if let Some(&field_type_id) = field_types.get(field_name)
-            && super::helpers::is_payload_union(field_type_id, self.arena())
-            && !self.arena().is_union(value.type_id)
+            && self.vir_query_is_payload_union(field_type_id)
+            && !self.vir_query_is_union(value.type_id)
         {
             *value = self.construct_union_id(*value, field_type_id)?;
         }
@@ -225,15 +225,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             };
             // Coerce concrete defaults to unknown.
             if let Some(&field_type_id) = field_types.get(&field_name)
-                && self.arena().is_unknown(field_type_id)
-                && !self.arena().is_unknown(value.type_id)
+                && self.vir_query_is_unknown(field_type_id)
+                && !self.vir_query_is_unknown(value.type_id)
             {
                 value = self.box_to_unknown(value)?;
             }
             // Coerce non-union defaults to union.
             if let Some(&field_type_id) = field_types.get(&field_name)
-                && super::helpers::is_payload_union(field_type_id, self.arena())
-                && !self.arena().is_union(value.type_id)
+                && self.vir_query_is_payload_union(field_type_id)
+                && !self.vir_query_is_union(value.type_id)
             {
                 value = self.construct_union_id(value, field_type_id)?;
             }
@@ -320,7 +320,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if self.rc_scopes.has_active_scope()
             && self.rc_state(value.type_id).needs_cleanup()
             && value.is_borrowed()
-            && !self.arena().is_union(value.type_id)
+            && !self.vir_query_is_union(value.type_id)
         {
             self.emit_rc_inc_for_type(value.value, value.type_id)?;
         }

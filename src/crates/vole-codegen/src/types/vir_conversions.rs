@@ -145,7 +145,10 @@ pub(crate) fn vir_is_unsigned(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
 
 /// Check if a `VirTypeId` is a union type.
 pub(crate) fn vir_is_union(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    matches!(table.get(vir_ty), VirType::Union { .. })
+    matches!(
+        table.get(vir_ty),
+        VirType::Union { .. } | VirType::Optional { .. }
+    )
 }
 
 /// Get the variant `VirTypeId`s from a union type.
@@ -318,6 +321,144 @@ pub(crate) fn vir_unwrap_class_or_struct(
             Some((*def, type_args))
         }
         _ => None,
+    }
+}
+
+/// Unwrap a nominal type (class, struct, or interface), returning its `TypeDefId`.
+///
+/// Returns `None` for non-nominal types (primitives, unions, etc.)
+/// and for sentinel types (Nil, Done).
+pub(crate) fn vir_unwrap_nominal(vir_ty: VirTypeId, table: &VirTypeTable) -> Option<TypeDefId> {
+    match table.get(vir_ty) {
+        VirType::Class { def, .. }
+        | VirType::Struct { def, .. }
+        | VirType::Interface { def, .. } => Some(*def),
+        _ => None,
+    }
+}
+
+/// Unwrap a runtime iterator type, returning the element `VirTypeId`.
+///
+/// Returns `None` if the type is not a runtime iterator.
+pub(crate) fn vir_unwrap_runtime_iterator(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<VirTypeId> {
+    match table.get(vir_ty) {
+        VirType::RuntimeIterator { elem } => Some(*elem),
+        _ => None,
+    }
+}
+
+/// Unwrap a function type, returning the return type `VirTypeId`.
+///
+/// Returns `None` if the type is not a function.
+pub(crate) fn vir_unwrap_function_ret(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<VirTypeId> {
+    match table.get(vir_ty) {
+        VirType::Function { ret, .. } => Some(*ret),
+        _ => None,
+    }
+}
+
+/// Check if a fallible type has a wide (i128) success type.
+///
+/// Returns true if the type is `Fallible { success, .. }` and `success`
+/// is a wide type.  When true, the fallible return convention uses 3
+/// registers instead of 2: (tag, payload_low, payload_high).
+pub(crate) fn vir_is_wide_fallible(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    vir_unwrap_fallible(vir_ty, table).is_some_and(|(success, _)| vir_is_wide(success, table))
+}
+
+/// Check if a union type has non-sentinel payload variants.
+///
+/// Returns `true` if the type is a union (or optional) and at least one
+/// variant is neither Nil, Done, nor Void.  `Optional<T>` is always a
+/// payload union because its inner type `T` is non-nil by construction.
+pub(crate) fn vir_is_payload_union(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    match table.get(vir_ty) {
+        VirType::Optional { .. } => true,
+        VirType::Union { variants } => variants
+            .iter()
+            .any(|&v| !matches!(table.get(v), VirType::Nil | VirType::Done | VirType::Void)),
+        _ => false,
+    }
+}
+
+/// Get the runtime type tag for boxing a value into the Unknown type
+/// (TaggedValue).
+///
+/// Maps VIR types to the corresponding `RuntimeTypeId` tag values used
+/// by the runtime's `TaggedValue.tag` field.
+pub(crate) fn vir_unknown_type_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> u64 {
+    use vole_runtime::value::RuntimeTypeId;
+    match table.get(vir_ty) {
+        VirType::Primitive(VirPrimitiveKind::String) => RuntimeTypeId::String as u64,
+        VirType::Primitive(
+            VirPrimitiveKind::I64
+            | VirPrimitiveKind::I32
+            | VirPrimitiveKind::I16
+            | VirPrimitiveKind::I8
+            | VirPrimitiveKind::U64
+            | VirPrimitiveKind::U32
+            | VirPrimitiveKind::U16
+            | VirPrimitiveKind::U8,
+        ) => RuntimeTypeId::I64 as u64,
+        VirType::Primitive(VirPrimitiveKind::F64 | VirPrimitiveKind::F32) => {
+            RuntimeTypeId::F64 as u64
+        }
+        VirType::Primitive(VirPrimitiveKind::Bool) => RuntimeTypeId::Bool as u64,
+        VirType::Array { .. } | VirType::FixedArray { .. } => RuntimeTypeId::Array as u64,
+        VirType::Function { .. } => RuntimeTypeId::Closure as u64,
+        VirType::Class { .. } => RuntimeTypeId::Instance as u64,
+        _ => RuntimeTypeId::I64 as u64,
+    }
+}
+
+/// Format a VIR type for diagnostic/error messages.
+///
+/// Returns a simple human-readable name (e.g., "i64", "String",
+/// "Class(42)", "Interface(7)").
+pub(crate) fn vir_display_basic(vir_ty: VirTypeId, table: &VirTypeTable) -> String {
+    match table.get(vir_ty) {
+        VirType::Primitive(kind) => match kind {
+            VirPrimitiveKind::I8 => "i8".into(),
+            VirPrimitiveKind::I16 => "i16".into(),
+            VirPrimitiveKind::I32 => "i32".into(),
+            VirPrimitiveKind::I64 => "i64".into(),
+            VirPrimitiveKind::I128 => "i128".into(),
+            VirPrimitiveKind::U8 => "u8".into(),
+            VirPrimitiveKind::U16 => "u16".into(),
+            VirPrimitiveKind::U32 => "u32".into(),
+            VirPrimitiveKind::U64 => "u64".into(),
+            VirPrimitiveKind::F32 => "f32".into(),
+            VirPrimitiveKind::F64 => "f64".into(),
+            VirPrimitiveKind::Bool => "bool".into(),
+            VirPrimitiveKind::String => "String".into(),
+            VirPrimitiveKind::Handle => "Handle".into(),
+        },
+        VirType::Void => "void".into(),
+        VirType::Nil => "nil".into(),
+        VirType::Done => "Done".into(),
+        VirType::Never => "never".into(),
+        VirType::Unknown => "unknown".into(),
+        VirType::Range => "Range".into(),
+        VirType::MetaType => "TypeMeta".into(),
+        VirType::Class { def, .. } => format!("Class({:?})", def),
+        VirType::Struct { def, .. } => format!("Struct({:?})", def),
+        VirType::Interface { def, .. } => format!("Interface({:?})", def),
+        VirType::Array { .. } => "Array".into(),
+        VirType::FixedArray { .. } => "FixedArray".into(),
+        VirType::Tuple { .. } => "Tuple".into(),
+        VirType::Optional { .. } => "Optional".into(),
+        VirType::Union { .. } => "Union".into(),
+        VirType::Fallible { .. } => "Fallible".into(),
+        VirType::Function { .. } => "Function".into(),
+        VirType::Error { .. } => "Error".into(),
+        VirType::RuntimeIterator { .. } => "RuntimeIterator".into(),
+        VirType::Param { .. } => "TypeParam".into(),
     }
 }
 
@@ -965,5 +1106,287 @@ mod tests {
         assert_eq!(args, &[VirTypeId::STRING]);
 
         assert!(vir_unwrap_class_or_struct(VirTypeId::I64, &table).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_unwrap_nominal
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unwrap_nominal_class() {
+        let mut table = test_table();
+        let def = TypeDefId::new(42);
+        let class_ty = table.intern(
+            VirType::Class {
+                def,
+                type_args: vec![],
+            },
+            None,
+        );
+        assert_eq!(vir_unwrap_nominal(class_ty, &table), Some(def));
+    }
+
+    #[test]
+    fn unwrap_nominal_struct() {
+        let mut table = test_table();
+        let def = TypeDefId::new(7);
+        let struct_ty = table.intern(
+            VirType::Struct {
+                def,
+                type_args: vec![],
+            },
+            None,
+        );
+        assert_eq!(vir_unwrap_nominal(struct_ty, &table), Some(def));
+    }
+
+    #[test]
+    fn unwrap_nominal_interface() {
+        let mut table = test_table();
+        let def = TypeDefId::new(99);
+        let iface_ty = table.intern(
+            VirType::Interface {
+                def,
+                type_args: vec![],
+            },
+            None,
+        );
+        assert_eq!(vir_unwrap_nominal(iface_ty, &table), Some(def));
+    }
+
+    #[test]
+    fn unwrap_nominal_non_nominal() {
+        let table = test_table();
+        assert!(vir_unwrap_nominal(VirTypeId::I64, &table).is_none());
+        assert!(vir_unwrap_nominal(VirTypeId::STRING, &table).is_none());
+        assert!(vir_unwrap_nominal(VirTypeId::UNKNOWN, &table).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_unwrap_runtime_iterator
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unwrap_runtime_iterator() {
+        let mut table = test_table();
+        let iter_ty = table.intern(
+            VirType::RuntimeIterator {
+                elem: VirTypeId::STRING,
+            },
+            None,
+        );
+        assert_eq!(
+            vir_unwrap_runtime_iterator(iter_ty, &table),
+            Some(VirTypeId::STRING)
+        );
+        assert!(vir_unwrap_runtime_iterator(VirTypeId::I64, &table).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_unwrap_function_ret
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unwrap_function_ret() {
+        let mut table = test_table();
+        let fn_ty = table.intern(
+            VirType::Function {
+                params: vec![VirTypeId::I64],
+                ret: VirTypeId::STRING,
+            },
+            None,
+        );
+        assert_eq!(
+            vir_unwrap_function_ret(fn_ty, &table),
+            Some(VirTypeId::STRING)
+        );
+        assert!(vir_unwrap_function_ret(VirTypeId::I64, &table).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_is_wide_fallible
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn wide_fallible_true() {
+        let mut table = test_table();
+        let err_ty = table.intern(
+            VirType::Error {
+                def: TypeDefId::new(1),
+            },
+            None,
+        );
+        let fallible = table.intern(
+            VirType::Fallible {
+                success: VirTypeId::I128,
+                errors: vec![err_ty],
+            },
+            None,
+        );
+        assert!(vir_is_wide_fallible(fallible, &table));
+    }
+
+    #[test]
+    fn wide_fallible_false_narrow_success() {
+        let mut table = test_table();
+        let err_ty = table.intern(
+            VirType::Error {
+                def: TypeDefId::new(1),
+            },
+            None,
+        );
+        let fallible = table.intern(
+            VirType::Fallible {
+                success: VirTypeId::I64,
+                errors: vec![err_ty],
+            },
+            None,
+        );
+        assert!(!vir_is_wide_fallible(fallible, &table));
+    }
+
+    #[test]
+    fn wide_fallible_false_non_fallible() {
+        let table = test_table();
+        assert!(!vir_is_wide_fallible(VirTypeId::I64, &table));
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_is_payload_union
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn payload_union_true() {
+        let mut table = test_table();
+        let union_ty = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::I64, VirTypeId::NIL],
+            },
+            None,
+        );
+        assert!(vir_is_payload_union(union_ty, &table));
+    }
+
+    #[test]
+    fn payload_union_false_all_sentinels() {
+        let mut table = test_table();
+        let union_ty = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::NIL, VirTypeId::DONE],
+            },
+            None,
+        );
+        assert!(!vir_is_payload_union(union_ty, &table));
+    }
+
+    #[test]
+    fn payload_union_false_non_union() {
+        let table = test_table();
+        assert!(!vir_is_payload_union(VirTypeId::I64, &table));
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_unknown_type_tag
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unknown_tag_string() {
+        use vole_runtime::value::RuntimeTypeId;
+        let table = test_table();
+        assert_eq!(
+            vir_unknown_type_tag(VirTypeId::STRING, &table),
+            RuntimeTypeId::String as u64
+        );
+    }
+
+    #[test]
+    fn unknown_tag_i64() {
+        use vole_runtime::value::RuntimeTypeId;
+        let table = test_table();
+        assert_eq!(
+            vir_unknown_type_tag(VirTypeId::I64, &table),
+            RuntimeTypeId::I64 as u64
+        );
+    }
+
+    #[test]
+    fn unknown_tag_f64() {
+        use vole_runtime::value::RuntimeTypeId;
+        let table = test_table();
+        assert_eq!(
+            vir_unknown_type_tag(VirTypeId::F64, &table),
+            RuntimeTypeId::F64 as u64
+        );
+    }
+
+    #[test]
+    fn unknown_tag_bool() {
+        use vole_runtime::value::RuntimeTypeId;
+        let table = test_table();
+        assert_eq!(
+            vir_unknown_type_tag(VirTypeId::BOOL, &table),
+            RuntimeTypeId::Bool as u64
+        );
+    }
+
+    #[test]
+    fn unknown_tag_array() {
+        use vole_runtime::value::RuntimeTypeId;
+        let mut table = test_table();
+        let arr_ty = table.intern(
+            VirType::Array {
+                elem: VirTypeId::I64,
+            },
+            None,
+        );
+        assert_eq!(
+            vir_unknown_type_tag(arr_ty, &table),
+            RuntimeTypeId::Array as u64
+        );
+    }
+
+    #[test]
+    fn unknown_tag_class() {
+        use vole_runtime::value::RuntimeTypeId;
+        let mut table = test_table();
+        let class_ty = table.intern(
+            VirType::Class {
+                def: TypeDefId::new(1),
+                type_args: vec![],
+            },
+            None,
+        );
+        assert_eq!(
+            vir_unknown_type_tag(class_ty, &table),
+            RuntimeTypeId::Instance as u64
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // vir_display_basic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn display_basic_primitives() {
+        let table = test_table();
+        assert_eq!(vir_display_basic(VirTypeId::I64, &table), "i64");
+        assert_eq!(vir_display_basic(VirTypeId::STRING, &table), "String");
+        assert_eq!(vir_display_basic(VirTypeId::BOOL, &table), "bool");
+        assert_eq!(vir_display_basic(VirTypeId::VOID, &table), "void");
+        assert_eq!(vir_display_basic(VirTypeId::NIL, &table), "nil");
+        assert_eq!(vir_display_basic(VirTypeId::NEVER, &table), "never");
+    }
+
+    #[test]
+    fn display_basic_compound() {
+        let mut table = test_table();
+        let class_ty = table.intern(
+            VirType::Class {
+                def: TypeDefId::new(42),
+                type_args: vec![],
+            },
+            None,
+        );
+        assert!(vir_display_basic(class_ty, &table).starts_with("Class("));
     }
 }
