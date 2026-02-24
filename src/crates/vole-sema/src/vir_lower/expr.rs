@@ -552,15 +552,7 @@ fn lower_is_check(
     ty: TypeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let sema_result = ctx
-        .node_map
-        .get_is_check_result(expr.id)
-        .unwrap_or_else(|| {
-            panic!(
-                "VIR lower: missing sema is_check_result for NodeId {:?} (line {})",
-                expr.id, expr.span.line
-            )
-        });
+    let sema_result = ctx.require_is_check_result(expr.id, expr.span.line);
     let value = lower_expr(&is_expr.value, ctx);
     let vir_result = convert_is_check_result(sema_result, ctx);
     let vir_ty = ctx.translate(ty);
@@ -583,15 +575,7 @@ fn lower_as_cast(
     ty: TypeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let sema_result = ctx
-        .node_map
-        .get_is_check_result(expr.id)
-        .unwrap_or_else(|| {
-            panic!(
-                "VIR lower: missing sema is_check_result for as_cast NodeId {:?} (line {})",
-                expr.id, expr.span.line
-            )
-        });
+    let sema_result = ctx.require_is_check_result(expr.id, expr.span.line);
     let value = lower_expr(&as_cast.value, ctx);
     let kind = match as_cast.kind {
         vole_frontend::ast::AsCastKind::Safe => AsCastKind::Checked,
@@ -640,7 +624,14 @@ fn lower_interpolated_string(parts: &[StringPart], ctx: &mut LoweringCtx<'_>) ->
                     .node_map
                     .get_string_conversion(expr.id)
                     .cloned()
-                    .unwrap_or(StringConversion::Identity);
+                    .unwrap_or_else(|| {
+                        if ctx.generic {
+                            let expr_ty = ctx.node_map.get_type(expr.id).unwrap_or(TypeId::UNKNOWN);
+                            StringConversion::Generic { type_id: expr_ty }
+                        } else {
+                            StringConversion::Identity
+                        }
+                    });
                 VirStringPart::Expr { value, conversion }
             }
         })
@@ -689,12 +680,7 @@ fn lower_meta_access(
 ) -> VirRef {
     use crate::node_map::MetaAccessKind;
 
-    let Some(meta_kind) = ctx.node_map.get_meta_access(expr.id) else {
-        panic!(
-            "VIR lower: missing sema meta_access for NodeId {:?} (line {})",
-            expr.id, expr.span.line
-        )
-    };
+    let meta_kind = ctx.require_meta_access(expr.id, expr.span.line);
 
     let kind = match meta_kind {
         MetaAccessKind::Static { type_def_id } => {
@@ -812,12 +798,7 @@ fn lower_optional_chain(
     ty: TypeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let info = ctx.node_map.get_optional_chain(expr.id).unwrap_or_else(|| {
-        panic!(
-            "VIR lower: missing sema optional_chain for NodeId {:?} (line {})",
-            expr.id, expr.span.line
-        )
-    });
+    let info = ctx.require_optional_chain(expr.id, expr.span.line);
     let object = lower_expr(&oc.object, ctx);
     let vir_inner_type = ctx.translate(info.inner_type);
     let vir_ty = ctx.translate(ty);
@@ -843,12 +824,7 @@ fn lower_optional_method_call(
     ty: TypeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let info = ctx.node_map.get_optional_chain(expr.id).unwrap_or_else(|| {
-        panic!(
-            "VIR lower: missing sema optional_chain for optional_method_call NodeId {:?} (line {})",
-            expr.id, expr.span.line
-        )
-    });
+    let info = ctx.require_optional_chain(expr.id, expr.span.line);
     let object = lower_expr(&omc.object, ctx);
     let method_args: Vec<VirRef> = omc
         .args
@@ -911,15 +887,7 @@ fn lower_struct_literal(
     ty: TypeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
-    let info = ctx
-        .node_map
-        .get_struct_literal_info(expr.id)
-        .unwrap_or_else(|| {
-            panic!(
-                "VIR lower: missing sema struct_literal_info for NodeId {:?} (line {})",
-                expr.id, expr.span.line
-            )
-        });
+    let info = ctx.require_struct_literal_info(expr.id, expr.span.line);
 
     let fields: Vec<(vole_identity::Symbol, VirRef)> = sl
         .fields
@@ -1201,15 +1169,7 @@ fn lower_pattern(
         }
 
         PatternKind::Type { .. } => {
-            let sema_result = ctx
-                .node_map
-                .get_is_check_result(pattern.id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "VIR lower: missing sema is_check_result for Type pattern NodeId {:?}",
-                        pattern.id
-                    )
-                });
+            let sema_result = ctx.require_is_check_result(pattern.id, 0);
             let result = convert_is_check_result(sema_result, ctx);
             let tested_type = recover_tested_type(&result, scrutinee_ty, ctx.type_arena);
             let vir_tested_type = ctx.translate(tested_type);

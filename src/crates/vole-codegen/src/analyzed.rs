@@ -335,6 +335,7 @@ fn lower_global_inits(
         entities,
         name_table: names,
         type_table,
+        generic: false,
     };
 
     let mut map = FxHashMap::default();
@@ -382,6 +383,7 @@ fn lower_module_global_inits(
             entities,
             name_table: names,
             type_table,
+            generic: false,
         };
 
         let mut map = FxHashMap::default();

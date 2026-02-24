@@ -59,4 +59,10 @@ pub enum StringConversion {
     UnionToString {
         variants: Vec<(TypeId, StringConversion)>,
     },
+    /// Placeholder for generic lowering mode.
+    ///
+    /// Used when converting `"${x}"` where `x: T` (a type parameter) to a
+    /// string.  The concrete conversion strategy is unknown until
+    /// monomorphization substitutes `T` with a concrete type.
+    Generic { type_id: TypeId },
 }

@@ -157,8 +157,25 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
             elem_type,
             vir_elem_type: ctx.translate(elem_type),
         },
+        Some(IterableKind::Generic { elem_type }) => VirIterKind::Generic {
+            elem_type,
+            vir_elem_type: ctx.translate(elem_type),
+        },
+        None if ctx.generic => {
+            // Generic mode: missing iterable kind is expected when the
+            // iterable type is a bare type parameter.  Use the iterable
+            // expression's sema type to derive a best-effort element type.
+            let iter_ty = ctx
+                .node_map
+                .get_type(for_stmt.iterable.id)
+                .unwrap_or(TypeId::UNKNOWN);
+            VirIterKind::Generic {
+                elem_type: iter_ty,
+                vir_elem_type: ctx.translate(iter_ty),
+            }
+        }
         None => {
-            // Fallback for error types -- treat as array of i64.
+            // Concrete mode fallback for error types -- treat as array of i64.
             VirIterKind::Array {
                 elem_type: TypeId::I64,
                 vir_elem_type: ctx.translate(TypeId::I64),
@@ -174,7 +191,8 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
         VirIterKind::String => TypeId::STRING,
         VirIterKind::IteratorInterface { elem_type, .. }
         | VirIterKind::CustomIterator { elem_type, .. }
-        | VirIterKind::CustomIterable { elem_type, .. } => elem_type,
+        | VirIterKind::CustomIterable { elem_type, .. }
+        | VirIterKind::Generic { elem_type, .. } => elem_type,
     };
 
     let vir_var_type = ctx.translate(var_type);

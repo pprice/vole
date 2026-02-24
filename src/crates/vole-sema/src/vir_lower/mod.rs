@@ -16,7 +16,9 @@ pub mod type_translate;
 mod tests;
 
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
-use vole_identity::{FunctionId, Interner, MethodId, NameId, NameTable, Symbol, TypeId, VirTypeId};
+use vole_identity::{
+    FunctionId, Interner, MethodId, NameId, NameTable, NodeId, Symbol, TypeDefId, TypeId, VirTypeId,
+};
 
 use crate::node_map::NodeMap;
 use crate::{EntityRegistry, TypeArena};
@@ -44,12 +46,108 @@ pub struct LoweringCtx<'a> {
     pub entities: &'a EntityRegistry,
     pub name_table: &'a NameTable,
     pub type_table: &'a mut VirTypeTable,
+    /// When `true`, NodeMap lookups that would normally panic on missing
+    /// entries instead produce placeholder/generic values.  Used when
+    /// lowering generic function bodies where sema decision data may be
+    /// absent for type-parameter-dependent expressions.
+    ///
+    /// Default: `false` (concrete mode — existing strict behaviour).
+    pub generic: bool,
 }
 
 impl LoweringCtx<'_> {
     /// Translate a sema `TypeId` to a `VirTypeId`, interning into the type table.
     pub fn translate(&mut self, type_id: TypeId) -> VirTypeId {
         translate_type_id(self.type_table, type_id, self.type_arena)
+    }
+
+    // -- Tolerant NodeMap query helpers -------------------------------------
+    //
+    // In generic mode (`self.generic == true`), these helpers return a
+    // placeholder value instead of panicking when sema decision data is
+    // missing.  In concrete mode they panic exactly as before.
+
+    /// Get the `IsCheckResult` for a node, with a tolerant fallback in
+    /// generic mode.
+    ///
+    /// Concrete mode: panics if missing (existing behaviour).
+    /// Generic mode: returns `CheckUnknown(UNKNOWN)` if missing.
+    pub fn require_is_check_result(&mut self, node_id: NodeId, line: u32) -> crate::IsCheckResult {
+        match self.node_map.get_is_check_result(node_id) {
+            Some(result) => result,
+            None if self.generic => crate::IsCheckResult::CheckUnknown(TypeId::UNKNOWN),
+            None => panic!(
+                "VIR lower: missing sema is_check_result for NodeId {node_id:?} (line {line})"
+            ),
+        }
+    }
+
+    /// Get the `MetaAccessKind` for a node, with a tolerant fallback in
+    /// generic mode.
+    ///
+    /// Concrete mode: panics if missing (existing behaviour).
+    /// Generic mode: returns `Dynamic` as a safe placeholder.
+    pub fn require_meta_access(
+        &self,
+        node_id: NodeId,
+        line: u32,
+    ) -> crate::node_map::MetaAccessKind {
+        match self.node_map.get_meta_access(node_id) {
+            Some(kind) => kind,
+            None if self.generic => crate::node_map::MetaAccessKind::Dynamic,
+            None => {
+                panic!("VIR lower: missing sema meta_access for NodeId {node_id:?} (line {line})")
+            }
+        }
+    }
+
+    /// Get the `OptionalChainInfo` for a node, with a tolerant fallback
+    /// in generic mode.
+    ///
+    /// Concrete mode: panics if missing.
+    /// Generic mode: returns a minimal placeholder with UNKNOWN types.
+    pub fn require_optional_chain(
+        &self,
+        node_id: NodeId,
+        line: u32,
+    ) -> crate::node_map::OptionalChainInfo {
+        match self.node_map.get_optional_chain(node_id) {
+            Some(info) => info.clone(),
+            None if self.generic => crate::node_map::OptionalChainInfo {
+                object_type: TypeId::UNKNOWN,
+                inner_type: TypeId::UNKNOWN,
+                result_type: TypeId::UNKNOWN,
+                kind: crate::node_map::OptionalChainKind::FieldAccess {
+                    field: Symbol::UNKNOWN,
+                },
+            },
+            None => panic!(
+                "VIR lower: missing sema optional_chain for NodeId {node_id:?} (line {line})"
+            ),
+        }
+    }
+
+    /// Get the `StructLiteralInfo` for a node, with a tolerant fallback
+    /// in generic mode.
+    ///
+    /// Concrete mode: panics if missing.
+    /// Generic mode: returns a placeholder with a zeroed TypeDefId and
+    /// `is_class = false`.
+    pub fn require_struct_literal_info(
+        &self,
+        node_id: NodeId,
+        line: u32,
+    ) -> crate::node_map::StructLiteralInfo {
+        match self.node_map.get_struct_literal_info(node_id) {
+            Some(info) => info,
+            None if self.generic => crate::node_map::StructLiteralInfo {
+                type_def_id: TypeDefId::new(0),
+                is_class: false,
+            },
+            None => panic!(
+                "VIR lower: missing sema struct_literal_info for NodeId {node_id:?} (line {line})"
+            ),
+        }
     }
 }
 
@@ -85,6 +183,7 @@ pub fn lower_function(
         entities,
         name_table,
         type_table,
+        generic: false,
     };
     let params = param_types
         .iter()
@@ -174,6 +273,7 @@ pub fn lower_method(
         entities,
         name_table,
         type_table,
+        generic: false,
     };
     let params = param_types
         .iter()
@@ -219,6 +319,7 @@ pub fn lower_interface_method(
         entities,
         name_table,
         type_table,
+        generic: false,
     };
     let params = param_types
         .iter()
@@ -284,6 +385,7 @@ pub fn lower_test_body(
         entities,
         name_table,
         type_table,
+        generic: false,
     };
     lower_func_body(body, &mut ctx)
 }

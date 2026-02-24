@@ -5,6 +5,7 @@
 mod ast_escape;
 mod control_flow;
 mod functions;
+mod generic_mode;
 mod literals;
 mod operators;
 mod variables;
@@ -114,7 +115,7 @@ fn test_type_table() -> VirTypeTable {
     VirTypeTable::new()
 }
 
-/// Create a `LoweringCtx` from test fixtures.
+/// Create a `LoweringCtx` from test fixtures (concrete mode).
 ///
 /// This is a convenience helper that bundles the common test parameters.
 fn make_ctx<'a>(
@@ -132,5 +133,28 @@ fn make_ctx<'a>(
         entities,
         name_table,
         type_table,
+        generic: false,
+    }
+}
+
+/// Create a `LoweringCtx` in generic mode.
+///
+/// Missing NodeMap decisions produce placeholder values instead of panicking.
+fn make_generic_ctx<'a>(
+    node_map: &'a NodeMap,
+    interner: &'a mut Interner,
+    type_arena: &'a TypeArena,
+    entities: &'a EntityRegistry,
+    name_table: &'a NameTable,
+    type_table: &'a mut VirTypeTable,
+) -> LoweringCtx<'a> {
+    LoweringCtx {
+        node_map,
+        interner,
+        type_arena,
+        entities,
+        name_table,
+        type_table,
+        generic: true,
     }
 }

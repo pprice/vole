@@ -218,6 +218,9 @@ impl Cg<'_, '_, '_> {
             StringConversion::UnionToString { variants } => {
                 self.union_to_string(val.value, variants)
             }
+            StringConversion::Generic { .. } => {
+                unreachable!("StringConversion::Generic should be resolved before codegen")
+            }
         }
     }
 

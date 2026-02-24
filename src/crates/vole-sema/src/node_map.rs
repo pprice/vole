@@ -49,6 +49,12 @@ pub enum IterableKind {
     CustomIterator { elem_type: TypeId },
     /// Class/struct implementing `Iterable<T>` — codegen calls `.iter()` first
     CustomIterable { elem_type: TypeId },
+    /// Placeholder for generic lowering mode.
+    ///
+    /// Used when the iterable expression has a bare type-parameter type (`T`)
+    /// and sema cannot classify the iteration strategy.  The concrete kind is
+    /// resolved during VIR monomorphization.
+    Generic { elem_type: TypeId },
 }
 
 /// Interface coercion annotation, stored by sema at sites where a value

@@ -184,6 +184,16 @@ pub enum VirIterKind {
         elem_type: TypeId,
         vir_elem_type: VirTypeId,
     },
+
+    /// Placeholder for generic lowering mode.
+    ///
+    /// Used when the iterable expression has a bare type-parameter type and
+    /// sema cannot determine the iteration strategy.  Resolved to a concrete
+    /// variant during VIR monomorphization.
+    Generic {
+        elem_type: TypeId,
+        vir_elem_type: VirTypeId,
+    },
 }
 
 // ---------------------------------------------------------------------------

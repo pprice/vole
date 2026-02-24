@@ -76,6 +76,9 @@ impl Cg<'_, '_, '_> {
             | VirIterKind::IteratorInterface { .. }
             | VirIterKind::CustomIterator { .. }
             | VirIterKind::CustomIterable { .. } => self.compile_vir_for_runtime_iter(vir_for),
+            VirIterKind::Generic { .. } => {
+                unreachable!("VirIterKind::Generic should be resolved before codegen")
+            }
         }
     }
 
@@ -408,6 +411,9 @@ impl Cg<'_, '_, '_> {
             }
             VirIterKind::Range | VirIterKind::Array { .. } => {
                 unreachable!("Range/Array handled before setup_vir_runtime_iter")
+            }
+            VirIterKind::Generic { .. } => {
+                unreachable!("VirIterKind::Generic should be resolved before codegen")
             }
         }
     }

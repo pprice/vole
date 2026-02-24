@@ -205,6 +205,9 @@ impl<'a> VirPrinter<'a> {
             VirIterKind::CustomIterable { elem_type, .. } => {
                 format!("custom_iterable<{}>", self.ty(*elem_type))
             }
+            VirIterKind::Generic { elem_type, .. } => {
+                format!("generic<{}>", self.ty(*elem_type))
+            }
         };
         w!(
             out,

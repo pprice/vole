@@ -409,6 +409,9 @@ impl Cg<'_, '_, '_> {
             IterableKind::Range | IterableKind::Array { .. } => {
                 unreachable!("Range/Array handled before setup_runtime_iter")
             }
+            IterableKind::Generic { .. } => {
+                unreachable!("IterableKind::Generic should be resolved before codegen")
+            }
         };
         match kind {
             IterableKind::String => {
@@ -429,6 +432,9 @@ impl Cg<'_, '_, '_> {
             }
             IterableKind::Range | IterableKind::Array { .. } => {
                 unreachable!("Range/Array handled before setup_runtime_iter")
+            }
+            IterableKind::Generic { .. } => {
+                unreachable!("IterableKind::Generic should be resolved before codegen")
             }
         }
     }
