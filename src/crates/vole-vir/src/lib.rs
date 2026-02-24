@@ -17,6 +17,7 @@ pub mod calls;
 pub mod expr;
 pub mod func;
 pub mod intrinsics;
+pub mod monomorph;
 pub mod program;
 pub mod refs;
 pub mod stmt;
@@ -36,6 +37,7 @@ pub use expr::{
 };
 pub use func::{VirBody, VirFunction, VirTest};
 pub use intrinsics::IntrinsicKey;
+pub use monomorph::{TypeSubstitution, substitute_types};
 pub use program::VirProgram;
 pub use refs::VirRef;
 pub use stmt::{
