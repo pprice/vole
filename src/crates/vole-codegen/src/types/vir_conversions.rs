@@ -293,6 +293,38 @@ pub(crate) fn vir_is_unknown(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
     matches!(table.get(vir_ty), VirType::Unknown)
 }
 
+/// Check if a `VirTypeId` is the void type.
+pub(crate) fn vir_is_void(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(table.get(vir_ty), VirType::Void)
+}
+
+/// Check if a `VirTypeId` is a struct or class type.
+pub(crate) fn vir_is_class_or_struct(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(
+        table.get(vir_ty),
+        VirType::Class { .. } | VirType::Struct { .. }
+    )
+}
+
+/// Unwrap a class or struct type, returning its `TypeDefId` and type arguments.
+///
+/// Returns `None` if the type is neither a class nor a struct.
+pub(crate) fn vir_unwrap_class_or_struct(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<(TypeDefId, &[VirTypeId])> {
+    match table.get(vir_ty) {
+        VirType::Class { def, type_args } | VirType::Struct { def, type_args } => {
+            Some((*def, type_args))
+        }
+        _ => None,
+    }
+}
+
+// Struct/class field layout helpers and convert_field_value are in
+// types::vir_struct_helpers (split for file size).
+// Callers import directly from that submodule.
+
 // ============================================================================
 // Unit tests
 // ============================================================================
@@ -862,5 +894,76 @@ mod tests {
         assert!(!vir_is_nil(VirTypeId::STRING, &table));
         assert!(!vir_is_error(VirTypeId::STRING, &table));
         assert!(vir_is_string(VirTypeId::STRING, &table));
+    }
+
+    // -----------------------------------------------------------------------
+    // Void predicate
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn void_predicate() {
+        let table = test_table();
+        assert!(vir_is_void(VirTypeId::VOID, &table));
+        assert!(!vir_is_void(VirTypeId::I64, &table));
+        assert!(!vir_is_void(VirTypeId::NIL, &table));
+    }
+
+    // -----------------------------------------------------------------------
+    // Class-or-struct helpers
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn class_or_struct_predicate() {
+        let mut table = test_table();
+        let def = TypeDefId::new(10);
+        let struct_ty = table.intern(
+            VirType::Struct {
+                def,
+                type_args: vec![],
+            },
+            None,
+        );
+        let class_ty = table.intern(
+            VirType::Class {
+                def,
+                type_args: vec![VirTypeId::I64],
+            },
+            None,
+        );
+        assert!(vir_is_class_or_struct(struct_ty, &table));
+        assert!(vir_is_class_or_struct(class_ty, &table));
+        assert!(!vir_is_class_or_struct(VirTypeId::I64, &table));
+        assert!(!vir_is_class_or_struct(VirTypeId::STRING, &table));
+    }
+
+    #[test]
+    fn unwrap_class_or_struct() {
+        let mut table = test_table();
+        let def_s = TypeDefId::new(5);
+        let def_c = TypeDefId::new(6);
+        let struct_ty = table.intern(
+            VirType::Struct {
+                def: def_s,
+                type_args: vec![],
+            },
+            None,
+        );
+        let class_ty = table.intern(
+            VirType::Class {
+                def: def_c,
+                type_args: vec![VirTypeId::STRING],
+            },
+            None,
+        );
+
+        let (d, args) = vir_unwrap_class_or_struct(struct_ty, &table).unwrap();
+        assert_eq!(d, def_s);
+        assert!(args.is_empty());
+
+        let (d, args) = vir_unwrap_class_or_struct(class_ty, &table).unwrap();
+        assert_eq!(d, def_c);
+        assert_eq!(args, &[VirTypeId::STRING]);
+
+        assert!(vir_unwrap_class_or_struct(VirTypeId::I64, &table).is_none());
     }
 }

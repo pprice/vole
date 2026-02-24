@@ -10,6 +10,7 @@ mod conversions;
 mod function_ctx;
 mod type_ctx;
 pub(crate) mod vir_conversions;
+pub(crate) mod vir_struct_helpers;
 pub(crate) mod wide_ops;
 
 // Re-export all public types and functions
