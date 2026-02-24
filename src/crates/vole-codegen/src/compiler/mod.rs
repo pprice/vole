@@ -40,7 +40,7 @@ mod signatures;
 mod state;
 mod type_registry;
 
-pub use signatures::SelfParam;
+pub use signatures::{SelfParam, VirSelfParam};
 
 use std::rc::Rc;
 
@@ -156,6 +156,12 @@ impl<'a> Compiler<'a> {
     #[inline]
     fn arena(&self) -> &vole_sema::TypeArena {
         self.analyzed.type_arena()
+    }
+
+    /// Get the VIR type table for `VirTypeId`-based queries.
+    #[inline]
+    fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
+        &self.analyzed.vir_type_table
     }
 
     /// Get the module ID for the program being compiled.

@@ -2,9 +2,11 @@ use cranelift::prelude::{Signature, Type as CraneliftType, types};
 use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
+use crate::types::vir_conversions::{vir_is_wide, vir_type_to_cranelift};
 use crate::types::{is_wide_fallible, type_id_to_cranelift};
-use vole_identity::{FunctionId, MethodId};
+use vole_identity::{FunctionId, MethodId, VirTypeId};
 use vole_sema::type_arena::TypeId;
+use vole_vir::types::VirType;
 
 /// SmallVec for function parameters - most functions have <= 8 params
 type ParamVec = SmallVec<[CraneliftType; 8]>;
@@ -17,6 +19,19 @@ pub enum SelfParam {
     Pointer,
     /// Self has a specific type using TypeId (implement blocks on primitives)
     TypedId(TypeId),
+}
+
+/// VIR-based equivalent of [`SelfParam`].
+///
+/// Uses `VirTypeId` instead of sema `TypeId`, for code paths that build
+/// signatures from VIR function data.
+pub enum VirSelfParam {
+    /// No self parameter (functions, static methods)
+    None,
+    /// Self is a pointer (regular methods)
+    Pointer,
+    /// Self has a specific type using VirTypeId (implement blocks on primitives)
+    Typed(VirTypeId),
 }
 
 impl Compiler<'_> {
@@ -98,29 +113,7 @@ impl Compiler<'_> {
         if let Some(ret_type_id) = return_type_id
             && let Some(field_count) = self.struct_field_count(ret_type_id)
         {
-            if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
-                // Small struct: return in two i64 registers
-                let mut returns: SmallVec<[CraneliftType; 2]> = SmallVec::new();
-                for _ in 0..field_count {
-                    returns.push(types::I64);
-                }
-                // Pad to 2 registers for consistent calling convention
-                while returns.len() < crate::MAX_SMALL_STRUCT_FIELDS {
-                    returns.push(types::I64);
-                }
-                return self
-                    .jit
-                    .create_signature_multi_return(&cranelift_params, &returns);
-            } else {
-                // Large struct: sret convention - add hidden first param for return buffer
-                let mut sret_params = SmallVec::<[CraneliftType; 8]>::new();
-                sret_params.push(self.pointer_type); // sret pointer
-                sret_params.extend_from_slice(&cranelift_params);
-                // Return the sret pointer
-                return self
-                    .jit
-                    .create_signature(&sret_params, Some(self.pointer_type));
-            }
+            return self.build_struct_return_sig(&cranelift_params, field_count);
         }
 
         // Convert return type (filter out void)
@@ -168,5 +161,124 @@ impl Compiler<'_> {
             .unwrap_function(method_def.signature_id)
             .expect("INTERNAL: method signature: missing function signature");
         self.build_signature_from_type_ids(params, Some(ret), self_param)
+    }
+
+    // ========================================================================
+    // VIR-based signature building (VirTypeTable instead of TypeArena)
+    // ========================================================================
+
+    /// Build a Cranelift signature from VIR types.
+    ///
+    /// VIR equivalent of [`build_signature_from_type_ids`](Self::build_signature_from_type_ids).
+    /// Reads the VirTypeTable for type conversion and fallible detection,
+    /// falling back to sema TypeId only for struct flat-slot counting (which
+    /// depends on EntityRegistry field types not yet in VIR).
+    pub fn build_signature_from_vir_types(
+        &self,
+        param_vir_types: &[VirTypeId],
+        return_vir_type: VirTypeId,
+        return_type_id: TypeId,
+        self_param: VirSelfParam,
+    ) -> Signature {
+        let table = self.vir_type_table();
+        let ptr = self.pointer_type;
+
+        // Build cranelift params starting with self if needed
+        let mut cranelift_params: ParamVec = match &self_param {
+            VirSelfParam::None => SmallVec::new(),
+            VirSelfParam::Pointer => smallvec![ptr],
+            VirSelfParam::Typed(vir_ty) => {
+                smallvec![vir_type_to_cranelift(*vir_ty, table, ptr)]
+            }
+        };
+
+        // Add param types via VirTypeTable
+        for &vir_ty in param_vir_types {
+            cranelift_params.push(vir_type_to_cranelift(vir_ty, table, ptr));
+        }
+
+        // Check for fallible return type via VirType variant
+        if let VirType::Fallible { success, .. } = table.get(return_vir_type) {
+            if vir_is_wide(*success, table) {
+                // Wide fallible (i128 success): (tag, low, high)
+                return self.jit.create_signature_multi_return(
+                    &cranelift_params,
+                    &[types::I64, types::I64, types::I64],
+                );
+            }
+            // Fallible: (tag, payload)
+            return self
+                .jit
+                .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64]);
+        }
+
+        // Struct return: still uses sema TypeId for flat-slot counting
+        // (EntityRegistry field types are not yet in VIR).
+        if matches!(table.get(return_vir_type), VirType::Struct { .. })
+            && let Some(field_count) = self.struct_field_count(return_type_id) {
+                return self.build_struct_return_sig(&cranelift_params, field_count);
+            }
+
+        // Normal return (filter out void)
+        let ret = (return_vir_type != VirTypeId::VOID)
+            .then(|| vir_type_to_cranelift(return_vir_type, table, ptr));
+
+        self.jit.create_signature(&cranelift_params, ret)
+    }
+
+    /// Build a Cranelift signature from a [`VirFunction`](vole_vir::func::VirFunction).
+    ///
+    /// Convenience wrapper that extracts VIR param/return types from the
+    /// function definition and delegates to
+    /// [`build_signature_from_vir_types`](Self::build_signature_from_vir_types).
+    pub fn build_vir_signature_for_function(&self, func_id: FunctionId) -> Signature {
+        let vir_func = self
+            .analyzed
+            .get_vir_function(func_id)
+            .unwrap_or_else(|| panic!("build_vir_signature_for_function: no VIR for {func_id:?}"));
+        let param_vir_types: SmallVec<[VirTypeId; 8]> = vir_func
+            .params
+            .iter()
+            .map(|(_, _, vir_ty)| *vir_ty)
+            .collect();
+        self.build_signature_from_vir_types(
+            &param_vir_types,
+            vir_func.vir_return_type,
+            vir_func.return_type,
+            VirSelfParam::None,
+        )
+    }
+
+    // ========================================================================
+    // Shared helpers
+    // ========================================================================
+
+    /// Build a struct return signature (small-struct multi-return or sret).
+    ///
+    /// Shared by both TypeId and VirTypeId code paths.
+    fn build_struct_return_sig(
+        &self,
+        cranelift_params: &[CraneliftType],
+        field_count: usize,
+    ) -> Signature {
+        if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
+            // Small struct: return in registers, padded to MAX_SMALL_STRUCT_FIELDS
+            let mut returns: SmallVec<[CraneliftType; 2]> = SmallVec::new();
+            for _ in 0..field_count {
+                returns.push(types::I64);
+            }
+            while returns.len() < crate::MAX_SMALL_STRUCT_FIELDS {
+                returns.push(types::I64);
+            }
+            self.jit
+                .create_signature_multi_return(cranelift_params, &returns)
+        } else {
+            // Large struct: sret convention - hidden first param for return buffer
+            let mut sret_params = SmallVec::<[CraneliftType; 8]>::new();
+            sret_params.push(self.pointer_type);
+            sret_params.extend_from_slice(cranelift_params);
+            self.jit
+                .create_signature(&sret_params, Some(self.pointer_type))
+        }
     }
 }
