@@ -745,6 +745,16 @@ impl<'a> VirPrinter<'a> {
             VirPattern::Error { kind } => {
                 self.fmt_error_pattern(kind, out);
             }
+            VirPattern::Tuple { bindings } => {
+                w!(out, "[");
+                for (i, binding) in bindings.iter().enumerate() {
+                    if i > 0 {
+                        w!(out, ", ");
+                    }
+                    self.fmt_pattern(&binding.pattern, out, ind);
+                }
+                w!(out, "]");
+            }
         }
     }
 

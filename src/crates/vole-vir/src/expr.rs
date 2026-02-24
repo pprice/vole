@@ -471,8 +471,9 @@ pub struct VirMatchArm {
 ///
 /// Simple patterns (Wildcard, Binding, TypeCheck, Literal, Val) are fully
 /// lowered to VIR.  Fallible patterns (Success, Error) are lowered to VIR
-/// with pre-resolved type information.  Complex patterns (Tuple, Record)
-/// remain wrapped in `Ast` until further migration.
+/// with pre-resolved type information.  Tuple patterns are fully lowered
+/// with pre-resolved element types.  Record patterns remain wrapped in
+/// `Ast` until further migration.
 #[derive(Debug, Clone)]
 pub enum VirPattern {
     /// AST pattern that has not yet been lowered to VIR.
@@ -534,6 +535,15 @@ pub enum VirPattern {
     /// The `kind` sub-enum encodes which of the four error sub-paths applies,
     /// with all type/tag information pre-resolved during lowering.
     Error { kind: VirErrorPatternKind },
+
+    /// Tuple destructuring pattern: `[a, b, c]`.
+    ///
+    /// Each element binding carries the nested pattern, its position in the
+    /// tuple, and its pre-resolved element type from `TypeArena::unwrap_tuple`.
+    /// Layout offsets (byte offsets, Cranelift types) are NOT pre-computed
+    /// because they depend on Cranelift type sizes — codegen calls
+    /// `tuple_layout()` and `cranelift_types()` at instruction selection time.
+    Tuple { bindings: Vec<VirTupleBinding> },
 }
 
 /// The sub-kind of an error pattern, pre-resolved during lowering.
@@ -582,6 +592,21 @@ pub struct VirErrorFieldBinding {
     pub field_name: Symbol,
     /// The variable name to bind the field value to.
     pub binding: Symbol,
+}
+
+/// A single element binding in a tuple destructure pattern.
+///
+/// Maps a nested pattern (typically `Binding` or `Wildcard`) to its
+/// position in the tuple and its pre-resolved element type.
+#[derive(Debug, Clone)]
+pub struct VirTupleBinding {
+    /// The nested pattern for this element (e.g. `Binding` for `x`,
+    /// `Wildcard` for `_`).
+    pub pattern: VirPattern,
+    /// Zero-based position of this element in the tuple.
+    pub element_index: usize,
+    /// The element type, pre-resolved from `TypeArena::unwrap_tuple`.
+    pub ty: TypeId,
 }
 
 /// Whether an `as` cast is checked or unchecked.

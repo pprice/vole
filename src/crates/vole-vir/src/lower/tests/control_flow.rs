@@ -905,3 +905,258 @@ fn lower_raise_field_values_lowered_recursively() {
         other => panic!("expected VirStmt::Raise, got {other:?}"),
     }
 }
+
+// -----------------------------------------------------------------------
+// Pattern lowering: Tuple (vol-oapf)
+// -----------------------------------------------------------------------
+
+fn make_match_arm(pattern: vole_frontend::Pattern, body: Expr) -> vole_frontend::ast::MatchArm {
+    vole_frontend::ast::MatchArm {
+        id: dummy_node_id(),
+        pattern,
+        guard: None,
+        body,
+        span: dummy_span(),
+    }
+}
+
+fn make_tuple_pattern(elements: Vec<vole_frontend::Pattern>) -> vole_frontend::Pattern {
+    vole_frontend::Pattern {
+        id: dummy_node_id(),
+        kind: vole_frontend::PatternKind::Tuple { elements },
+        span: dummy_span(),
+    }
+}
+
+fn make_binding_pattern(name: Symbol) -> vole_frontend::Pattern {
+    vole_frontend::Pattern {
+        id: dummy_node_id(),
+        kind: vole_frontend::PatternKind::Identifier { name },
+        span: dummy_span(),
+    }
+}
+
+fn make_wildcard_pattern() -> vole_frontend::Pattern {
+    vole_frontend::Pattern {
+        id: dummy_node_id(),
+        kind: vole_frontend::PatternKind::Wildcard,
+        span: dummy_span(),
+    }
+}
+
+#[test]
+fn lower_tuple_pattern_with_bindings() {
+    use crate::expr::VirPattern;
+    let mut node_map = empty_node_map();
+    let mut interner = test_interner();
+    let mut type_arena = test_type_arena();
+    let entities = test_entities();
+    let name_table = test_name_table();
+
+    let x_sym = interner.intern("x");
+    let y_sym = interner.intern("y");
+
+    // Create a tuple type [i64, bool] in the arena.
+    let tuple_ty = type_arena.tuple(vec![TypeId::I64, TypeId::BOOL]);
+
+    // Set up scrutinee with a known type.
+    let scrutinee_id = NodeId::new(ModuleId::new(0), 100);
+    node_map.set_type(scrutinee_id, tuple_ty);
+
+    let scrutinee_expr = Expr {
+        id: scrutinee_id,
+        kind: ExprKind::Identifier(interner.intern("t")),
+        span: dummy_span(),
+    };
+
+    let tuple_pat = make_tuple_pattern(vec![
+        make_binding_pattern(x_sym),
+        make_binding_pattern(y_sym),
+    ]);
+
+    let arm = make_match_arm(tuple_pat, make_int_expr(42));
+    let match_node_id = NodeId::new(ModuleId::new(0), 200);
+    let match_expr = Expr {
+        id: match_node_id,
+        kind: ExprKind::Match(Box::new(vole_frontend::ast::MatchExpr {
+            scrutinee: scrutinee_expr,
+            arms: vec![arm],
+            span: dummy_span(),
+        })),
+        span: dummy_span(),
+    };
+
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
+    let vir_ref = lower_expr(&match_expr, &mut ctx);
+
+    match vir_ref.as_ref() {
+        VirExpr::Match { arms, .. } => {
+            assert_eq!(arms.len(), 1);
+            match &arms[0].pattern {
+                VirPattern::Tuple { bindings } => {
+                    assert_eq!(bindings.len(), 2);
+
+                    assert_eq!(bindings[0].element_index, 0);
+                    assert_eq!(bindings[0].ty, TypeId::I64);
+                    match &bindings[0].pattern {
+                        VirPattern::Binding { name, ty } => {
+                            assert_eq!(*name, x_sym);
+                            assert_eq!(*ty, TypeId::I64);
+                        }
+                        other => panic!("expected Binding for x, got {other:?}"),
+                    }
+
+                    assert_eq!(bindings[1].element_index, 1);
+                    assert_eq!(bindings[1].ty, TypeId::BOOL);
+                    match &bindings[1].pattern {
+                        VirPattern::Binding { name, ty } => {
+                            assert_eq!(*name, y_sym);
+                            assert_eq!(*ty, TypeId::BOOL);
+                        }
+                        other => panic!("expected Binding for y, got {other:?}"),
+                    }
+                }
+                other => panic!("expected VirPattern::Tuple, got {other:?}"),
+            }
+        }
+        other => panic!("expected VirExpr::Match, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_tuple_pattern_with_wildcard() {
+    use crate::expr::VirPattern;
+    let mut node_map = empty_node_map();
+    let mut interner = test_interner();
+    let mut type_arena = test_type_arena();
+    let entities = test_entities();
+    let name_table = test_name_table();
+
+    let x_sym = interner.intern("x");
+
+    // Create a tuple type [i64, string] in the arena.
+    let tuple_ty = type_arena.tuple(vec![TypeId::I64, TypeId::STRING]);
+
+    let scrutinee_id = NodeId::new(ModuleId::new(0), 100);
+    node_map.set_type(scrutinee_id, tuple_ty);
+
+    let scrutinee_expr = Expr {
+        id: scrutinee_id,
+        kind: ExprKind::Identifier(interner.intern("t")),
+        span: dummy_span(),
+    };
+
+    // Pattern: [x, _]
+    let tuple_pat = make_tuple_pattern(vec![make_binding_pattern(x_sym), make_wildcard_pattern()]);
+
+    let arm = make_match_arm(tuple_pat, make_int_expr(1));
+    let match_expr = Expr {
+        id: NodeId::new(ModuleId::new(0), 200),
+        kind: ExprKind::Match(Box::new(vole_frontend::ast::MatchExpr {
+            scrutinee: scrutinee_expr,
+            arms: vec![arm],
+            span: dummy_span(),
+        })),
+        span: dummy_span(),
+    };
+
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
+    let vir_ref = lower_expr(&match_expr, &mut ctx);
+
+    match vir_ref.as_ref() {
+        VirExpr::Match { arms, .. } => {
+            assert_eq!(arms.len(), 1);
+            match &arms[0].pattern {
+                VirPattern::Tuple { bindings } => {
+                    assert_eq!(bindings.len(), 2);
+
+                    // First element: Binding
+                    assert_eq!(bindings[0].element_index, 0);
+                    assert_eq!(bindings[0].ty, TypeId::I64);
+                    assert!(matches!(&bindings[0].pattern, VirPattern::Binding { .. }));
+
+                    // Second element: Wildcard
+                    assert_eq!(bindings[1].element_index, 1);
+                    assert_eq!(bindings[1].ty, TypeId::STRING);
+                    assert!(matches!(&bindings[1].pattern, VirPattern::Wildcard));
+                }
+                other => panic!("expected VirPattern::Tuple, got {other:?}"),
+            }
+        }
+        other => panic!("expected VirExpr::Match, got {other:?}"),
+    }
+}
+
+#[test]
+fn lower_tuple_pattern_unknown_scrutinee_type() {
+    use crate::expr::VirPattern;
+    let node_map = empty_node_map();
+    let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let name_table = test_name_table();
+
+    let x_sym = interner.intern("x");
+
+    // No type set for scrutinee — element types should fall back to UNKNOWN.
+    let scrutinee_expr = Expr {
+        id: dummy_node_id(),
+        kind: ExprKind::Identifier(interner.intern("t")),
+        span: dummy_span(),
+    };
+
+    let tuple_pat = make_tuple_pattern(vec![make_binding_pattern(x_sym)]);
+
+    let arm = make_match_arm(tuple_pat, make_int_expr(1));
+    let match_expr = Expr {
+        id: dummy_node_id(),
+        kind: ExprKind::Match(Box::new(vole_frontend::ast::MatchExpr {
+            scrutinee: scrutinee_expr,
+            arms: vec![arm],
+            span: dummy_span(),
+        })),
+        span: dummy_span(),
+    };
+
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
+    let vir_ref = lower_expr(&match_expr, &mut ctx);
+
+    match vir_ref.as_ref() {
+        VirExpr::Match { arms, .. } => {
+            assert_eq!(arms.len(), 1);
+            match &arms[0].pattern {
+                VirPattern::Tuple { bindings } => {
+                    assert_eq!(bindings.len(), 1);
+                    assert_eq!(bindings[0].element_index, 0);
+                    assert_eq!(bindings[0].ty, TypeId::UNKNOWN);
+                    match &bindings[0].pattern {
+                        VirPattern::Binding { ty, .. } => {
+                            assert_eq!(*ty, TypeId::UNKNOWN);
+                        }
+                        other => panic!("expected Binding, got {other:?}"),
+                    }
+                }
+                other => panic!("expected VirPattern::Tuple, got {other:?}"),
+            }
+        }
+        other => panic!("expected VirExpr::Match, got {other:?}"),
+    }
+}

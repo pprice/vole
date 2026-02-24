@@ -12,7 +12,8 @@ use vole_sema::{StringConversion, TypeArena};
 use crate::calls::CallTarget;
 use crate::expr::{
     AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirErrorFieldBinding,
-    VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern, VirStringPart, VirUnOp,
+    VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern, VirStringPart,
+    VirTupleBinding, VirUnOp,
 };
 use crate::func::VirBody;
 use crate::refs::VirRef;
@@ -971,9 +972,8 @@ fn lower_when_expr(
 ///
 /// The scrutinee is recursively lowered. Most patterns are lowered to
 /// concrete `VirPattern` variants (Wildcard, Binding, TypeCheck, Literal,
-/// Val, Success, Error). Complex structural patterns (Tuple, Record)
-/// remain wrapped in `VirPattern::Ast`. Guards and bodies are recursively
-/// lowered.
+/// Val, Success, Error, Tuple). Record patterns remain wrapped in
+/// `VirPattern::Ast`. Guards and bodies are recursively lowered.
 fn lower_match_expr(
     match_expr: &vole_frontend::ast::MatchExpr,
     _expr: &Expr,
@@ -1018,7 +1018,7 @@ fn lower_match_expr(
 
 /// Lower an AST `Pattern` to a `VirPattern`.
 ///
-/// Simple patterns are lowered to concrete VIR variants:
+/// Most patterns are lowered to concrete VIR variants:
 /// - `Wildcard` -> `VirPattern::Wildcard`
 /// - `Identifier` with sema `IsCheckResult` -> `VirPattern::TypeCheck`
 /// - `Identifier` without `IsCheckResult` -> `VirPattern::Binding`
@@ -1027,9 +1027,9 @@ fn lower_match_expr(
 /// - `Val { .. }` -> `VirPattern::Val`
 /// - `Success { .. }` -> `VirPattern::Success`
 /// - `Error { .. }` -> `VirPattern::Error`
+/// - `Tuple { .. }` -> `VirPattern::Tuple`
 ///
-/// Complex patterns (Tuple, Record) are wrapped in
-/// `VirPattern::Ast` for later migration.
+/// Record patterns are wrapped in `VirPattern::Ast` for later migration.
 fn lower_pattern(
     pattern: &vole_frontend::Pattern,
     scrutinee_ty: TypeId,
@@ -1093,10 +1093,10 @@ fn lower_pattern(
 
         PatternKind::Error { inner } => lower_error_pattern(inner, scrutinee_ty, ctx),
 
+        PatternKind::Tuple { elements } => lower_tuple_pattern(elements, scrutinee_ty, ctx),
+
         // Complex patterns — keep as AST for now.
-        PatternKind::Tuple { .. } | PatternKind::Record { .. } => {
-            VirPattern::Ast(Box::new(pattern.clone()))
-        }
+        PatternKind::Record { .. } => VirPattern::Ast(Box::new(pattern.clone())),
     }
 }
 
@@ -1157,6 +1157,40 @@ fn lower_error_pattern(
             kind: VirErrorPatternKind::Bare,
         },
     }
+}
+
+/// Lower a tuple destructuring pattern to `VirPattern::Tuple`.
+///
+/// Pre-resolves element types from `TypeArena::unwrap_tuple(scrutinee_ty)`.
+/// Each element pattern is recursively lowered with the corresponding
+/// element type as the new scrutinee type.  If the scrutinee type is not
+/// a tuple (or element count mismatches), element types fall back to
+/// `TypeId::UNKNOWN`.
+fn lower_tuple_pattern(
+    elements: &[vole_frontend::Pattern],
+    scrutinee_ty: TypeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> VirPattern {
+    let elem_types = ctx.type_arena.unwrap_tuple(scrutinee_ty).cloned();
+
+    let bindings: Vec<VirTupleBinding> = elements
+        .iter()
+        .enumerate()
+        .map(|(i, pat)| {
+            let elem_ty = elem_types
+                .as_ref()
+                .and_then(|types| types.get(i).copied())
+                .unwrap_or(TypeId::UNKNOWN);
+            let inner = lower_pattern(pat, elem_ty, ctx);
+            VirTupleBinding {
+                pattern: inner,
+                element_index: i,
+                ty: elem_ty,
+            }
+        })
+        .collect();
+
+    VirPattern::Tuple { bindings }
 }
 
 /// Lower an identifier inside an `error` pattern.

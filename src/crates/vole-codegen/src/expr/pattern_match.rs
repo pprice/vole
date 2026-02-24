@@ -1151,6 +1151,10 @@ impl Cg<'_, '_, '_> {
                 let tag = load_fallible_tag(self.builder, scrutinee.value);
                 self.compile_vir_error_pattern(kind, scrutinee, tag, arm_variables)
             }
+
+            vole_vir::VirPattern::Tuple { bindings } => {
+                self.compile_vir_tuple_pattern(bindings, scrutinee, arm_variables)
+            }
         }
     }
 
@@ -1251,6 +1255,48 @@ impl Cg<'_, '_, '_> {
                 Ok(Some(is_this_error))
             }
         }
+    }
+
+    /// Compile a VIR tuple destructuring pattern.
+    ///
+    /// Loads each element from the tuple's stack slot at the pre-computed byte
+    /// offset and processes the nested pattern (typically `Binding` or
+    /// `Wildcard`).  Element types are pre-resolved during VIR lowering;
+    /// layout offsets and Cranelift types are computed here at instruction
+    /// selection time via `tuple_layout()` and `cranelift_types()`.
+    ///
+    /// Tuple patterns always match (no condition), so this returns `Ok(None)`.
+    fn compile_vir_tuple_pattern(
+        &mut self,
+        bindings: &[vole_vir::VirTupleBinding],
+        scrutinee: &CompiledValue,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+    ) -> CodegenResult<Option<Value>> {
+        let elem_type_ids = self.arena().unwrap_tuple(scrutinee.type_id).cloned();
+        if let Some(elem_type_ids) = elem_type_ids {
+            let (_, offsets) = self.tuple_layout(&elem_type_ids);
+            let elem_cr_types = self.cranelift_types(&elem_type_ids);
+            for binding in bindings {
+                let i = binding.element_index;
+                let offset = offsets[i];
+                let elem_type_id = elem_type_ids[i];
+                let elem_cr_type = elem_cr_types[i];
+
+                if let vole_vir::VirPattern::Binding { name, .. } = &binding.pattern {
+                    let value = self.builder.ins().load(
+                        elem_cr_type,
+                        MemFlags::new(),
+                        scrutinee.value,
+                        offset,
+                    );
+                    let var = self.builder.declare_var(elem_cr_type);
+                    self.builder.def_var(var, value);
+                    arm_variables.insert(*name, (var, elem_type_id));
+                }
+                // Wildcard and other patterns: nothing to bind.
+            }
+        }
+        Ok(None)
     }
 
     /// Compile an IsCheckResult into a condition value (if runtime check needed).
