@@ -320,14 +320,21 @@ impl<'a> VirPrinter<'a> {
                 self.fmt_call(target, args, *ty, out, ind);
             }
             VirExpr::MethodCall {
-                method_call, ty, ..
+                receiver,
+                method,
+                args,
+                ty,
+                ..
             } => {
-                w!(
-                    out,
-                    "<ast:method_call({})>: {}",
-                    self.sym(method_call.method),
-                    self.ty(*ty),
-                );
+                self.fmt_expr(receiver, out, ind);
+                w!(out, ".{}(", self.sym(*method));
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        w!(out, ", ");
+                    }
+                    self.fmt_expr(arg, out, ind);
+                }
+                w!(out, "): {}", self.ty(*ty));
             }
             VirExpr::FieldLoad {
                 object,
@@ -477,9 +484,22 @@ impl<'a> VirPrinter<'a> {
                 self.fmt_expr(object, out, ind);
                 w!(out, "?.{}: {}", self.sym(*field), self.ty(*ty));
             }
-            VirExpr::OptionalMethodCall { object, ty, .. } => {
+            VirExpr::OptionalMethodCall {
+                object,
+                method,
+                method_args,
+                ty,
+                ..
+            } => {
                 self.fmt_expr(object, out, ind);
-                w!(out, "?.<ast:method>: {}", self.ty(*ty));
+                w!(out, "?.{}(", self.sym(*method));
+                for (i, arg) in method_args.iter().enumerate() {
+                    if i > 0 {
+                        w!(out, ", ");
+                    }
+                    self.fmt_expr(arg, out, ind);
+                }
+                w!(out, "): {}", self.ty(*ty));
             }
             VirExpr::Try {
                 value,

@@ -118,7 +118,9 @@ impl Cg<'_, '_, '_> {
                 self.optional_chain(expr, expr.id)
             }
             ExprKind::MethodCall(mc) => {
-                let result = self.method_call(mc, expr.id)?;
+                use crate::structs::methods::MethodCallSource;
+                let src = MethodCallSource::Ast(mc);
+                let result = self.method_call(&src, expr.id)?;
                 Ok(self.mark_rc_owned(result))
             }
             ExprKind::Try(inner) => self.try_propagate(inner),
@@ -646,11 +648,19 @@ impl Cg<'_, '_, '_> {
             // -- Calls ----------------------------------------------------
             VirExpr::Call { target, args, ty } => self.compile_vir_call(target, args, *ty),
             VirExpr::MethodCall {
-                method_call,
+                receiver,
+                method,
+                args,
                 node_id,
                 ty: _,
             } => {
-                let result = self.method_call(method_call, *node_id)?;
+                use crate::structs::methods::MethodCallSource;
+                let src = MethodCallSource::Vir {
+                    receiver,
+                    method: *method,
+                    args,
+                };
+                let result = self.method_call(&src, *node_id)?;
                 Ok(self.mark_rc_owned(result))
             }
 
@@ -780,10 +790,19 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_optional_chain(object, *field, *inner_type, *ty),
             VirExpr::OptionalMethodCall {
                 object,
-                call_expr,
+                method,
+                method_args,
+                call_node_id,
                 inner_type,
                 ty,
-            } => self.compile_vir_optional_method_call(object, call_expr, *inner_type, *ty),
+            } => self.compile_vir_optional_method_call(
+                object,
+                *method,
+                method_args,
+                *call_node_id,
+                *inner_type,
+                *ty,
+            ),
             VirExpr::Try {
                 value,
                 success_type,

@@ -13,12 +13,13 @@ type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, module_name_id, type_id_to_cranelift};
-use vole_frontend::ast::CallArg;
-use vole_frontend::{MethodCallExpr, NodeId};
+use vole_frontend::NodeId;
 use vole_identity::TypeDefId;
 use vole_identity::{ModuleId, NameId};
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
+
+use super::methods::ArgSource;
 
 impl Cg<'_, '_, '_> {
     /// Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...)).
@@ -26,7 +27,7 @@ impl Cg<'_, '_, '_> {
     pub(super) fn module_method_call(
         &mut self,
         module_id: ModuleId,
-        mc: &MethodCallExpr,
+        arg_source: &ArgSource<'_>,
         expr_id: NodeId,
         method_name_str: &str,
     ) -> CodegenResult<CompiledValue> {
@@ -59,7 +60,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Compile arguments, tracking owned RC temps for cleanup
-        let (args, mut rc_temps) = self.compile_call_args_tracking_rc(&mc.args)?;
+        let (args, mut rc_temps) = self.compile_args_tracking_rc(arg_source)?;
 
         if let Some(ext_info) = external_info {
             // External FFI function
@@ -112,10 +113,10 @@ impl Cg<'_, '_, '_> {
                 // Clean up rc_temps from initial arg compilation
                 // (generic intrinsic recompiles args internally)
                 self.consume_rc_args(&mut rc_temps)?;
-                return self.call_generic_external_intrinsic_args(
+                return self.call_generic_external_intrinsic_method_args(
                     &ext_module_path,
                     &key,
-                    &mc.args,
+                    arg_source,
                     return_type_id,
                     Some(&concrete_param_type_ids),
                 );
@@ -174,7 +175,7 @@ impl Cg<'_, '_, '_> {
         func_ptr_or_closure: Value,
         func_type_id: TypeId,
         is_closure: bool,
-        mc: &MethodCallExpr,
+        arg_source: &ArgSource<'_>,
     ) -> CodegenResult<CompiledValue> {
         // Extract function type components from the arena
         let (param_ids, return_type_id) = {
@@ -214,8 +215,12 @@ impl Cg<'_, '_, '_> {
 
             // Compile arguments - closure pointer first, then user args
             let mut args: ArgVec = smallvec![func_ptr_or_closure];
-            for arg in &mc.args {
-                let compiled = self.expr(arg.expr())?;
+            let func_arg_count = match arg_source {
+                ArgSource::Ast(a) => a.len(),
+                ArgSource::Vir(r) => r.len(),
+            };
+            for i in 0..func_arg_count {
+                let compiled = self.compile_arg_from_source(arg_source, i)?;
                 args.push(compiled.value);
             }
 
@@ -243,7 +248,8 @@ impl Cg<'_, '_, '_> {
                 )));
             }
 
-            let mut args = self.compile_call_args(&mc.args)?;
+            let (values, _) = self.compile_args_tracking_rc(arg_source)?;
+            let mut args = values;
             let sig_ref = self.import_sig_and_coerce_args(sig, &mut args);
             let call_inst = self.emit_call_indirect(sig_ref, func_ptr_or_closure, &args);
             self.call_result(call_inst, return_type_id)
@@ -267,13 +273,13 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn interface_dispatch_call_args_by_type_def_id(
         &mut self,
         obj: &CompiledValue,
-        args: &[CallArg],
+        arg_source: &ArgSource<'_>,
         interface_type_id: TypeDefId,
         method_name_id: NameId,
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let slot = self.interface_method_slot(interface_type_id, method_name_id)?;
-        self.interface_dispatch_call_args_inner(obj, args, slot, func_type_id)
+        self.interface_dispatch_call_args_inner(obj, arg_source, slot, func_type_id)
     }
 
     /// Dispatch an interface method call with pre-computed vtable slot index.
@@ -281,17 +287,17 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn interface_dispatch_call_args_by_slot(
         &mut self,
         obj: &CompiledValue,
-        args: &[CallArg],
+        arg_source: &ArgSource<'_>,
         slot: u32,
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        self.interface_dispatch_call_args_inner(obj, args, slot as usize, func_type_id)
+        self.interface_dispatch_call_args_inner(obj, arg_source, slot as usize, func_type_id)
     }
 
     fn interface_dispatch_call_args_inner(
         &mut self,
         obj: &CompiledValue,
-        args: &[CallArg],
+        arg_source: &ArgSource<'_>,
         slot: usize,
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
@@ -351,12 +357,16 @@ impl Cg<'_, '_, '_> {
         // Pass the full boxed interface pointer (not just data_word) so wrappers can
         // access both data and vtable. This is needed for Iterator methods that create
         // RcIterator adapters via vole_interface_iter.
+        let iface_arg_count = match arg_source {
+            ArgSource::Ast(a) => a.len(),
+            ArgSource::Vir(r) => r.len(),
+        };
         let mut call_args: ArgVec = smallvec![obj.value];
-        for (i, arg) in args.iter().enumerate() {
+        for i in 0..iface_arg_count {
             let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {
-                self.expr_with_expected_type(arg.expr(), expected_type_id)?
+                self.compile_arg_with_expected_type(arg_source, i, expected_type_id)?
             } else {
-                self.expr(arg.expr())?
+                self.compile_arg_from_source(arg_source, i)?
             };
             // Coerce arguments to their expected parameter types before converting
             // to word representation. Without this, union-typed parameters would be

@@ -408,6 +408,57 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
+    /// Like `call_generic_external_intrinsic_args` but accepts an `ArgSource`
+    /// (either AST `CallArg` slice or VIR `VirRef` slice).
+    pub(crate) fn call_generic_external_intrinsic_method_args(
+        &mut self,
+        module_path: &str,
+        intrinsic_key: &str,
+        arg_source: &crate::structs::methods::ArgSource<'_>,
+        return_type_id: TypeId,
+        expected_param_type_ids: Option<&[TypeId]>,
+    ) -> CodegenResult<CompiledValue> {
+        if module_path == Self::COMPILER_INTRINSIC_MODULE {
+            let key = crate::IntrinsicKey::try_from_name(intrinsic_key).ok_or_else(|| {
+                CodegenError::not_found(
+                    "intrinsic handler",
+                    format!("\"{intrinsic_key}\" (add handler in codegen/intrinsics.rs)"),
+                )
+            })?;
+            let arg_count = match arg_source {
+                crate::structs::methods::ArgSource::Ast(a) => a.len(),
+                crate::structs::methods::ArgSource::Vir(r) => r.len(),
+            };
+            let mut typed_args = Vec::with_capacity(arg_count);
+            for index in 0..arg_count {
+                let compiled = if let Some(param_type_ids) = expected_param_type_ids
+                    && let Some(&param_type_id) = param_type_ids.get(index)
+                {
+                    let compiled =
+                        self.compile_arg_with_expected_type(arg_source, index, param_type_id)?;
+                    self.coerce_to_type(compiled, param_type_id)?
+                } else {
+                    self.compile_arg_from_source(arg_source, index)?
+                };
+                typed_args.push(compiled);
+            }
+            return self.call_compiler_intrinsic_key_typed_with_line(
+                key,
+                &typed_args,
+                return_type_id,
+                0,
+            );
+        }
+
+        Err(CodegenError::not_found(
+            "generic external intrinsic",
+            format!(
+                "{}::{} (non-intrinsic native calls not supported via method syntax)",
+                module_path, intrinsic_key
+            ),
+        ))
+    }
+
     /// Try to call a generic external function via monomorphization intrinsic resolution.
     /// Returns Some(result) if the call was handled, None if it should fall through.
     pub(super) fn try_call_generic_external_intrinsic_from_monomorph(
@@ -499,7 +550,7 @@ impl Cg<'_, '_, '_> {
 
         self.interface_dispatch_call_args_by_type_def_id(
             obj,
-            args,
+            &crate::structs::methods::ArgSource::Ast(args),
             iface_type_def_id,
             method_name_id,
             func_type_id,

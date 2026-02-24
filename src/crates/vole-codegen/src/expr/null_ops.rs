@@ -333,7 +333,9 @@ impl Cg<'_, '_, '_> {
             method_span: omc.method_span,
         };
 
-        let result = self.method_call(&mc, expr_id);
+        use crate::structs::methods::MethodCallSource;
+        let src = MethodCallSource::Ast(&mc);
+        let result = self.method_call(&src, expr_id);
 
         // Restore vars
         if let Some(old) = saved_entry {
@@ -693,12 +695,15 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR `OptionalMethodCall` expression (`obj?.method(args)`).
     ///
     /// Checks the object for nil; if nil produces a nil result, otherwise
-    /// extracts the inner value and dispatches the method call using the
-    /// original AST expression's NodeId for sema resolution.
+    /// extracts the inner value and dispatches the method call.  The VIR
+    /// fields carry the pre-lowered receiver, method name, args, and the
+    /// original NodeId for sema method dispatch lookups.
     pub(super) fn compile_vir_optional_method_call(
         &mut self,
         object_expr: &VirExpr,
-        call_expr: &Expr,
+        method: vole_frontend::Symbol,
+        method_args: &[vole_vir::VirRef],
+        call_node_id: NodeId,
         inner_type_id: TypeId,
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
@@ -731,10 +736,11 @@ impl Cg<'_, '_, '_> {
             merge_block,
         )?;
 
-        // Not-nil branch: extract inner, call method via AST method_call path
+        // Not-nil branch: extract inner, call method via VIR method_call path
         self.switch_and_seal(not_nil_block);
         let inner = self.extract_optional_inner(scrutinee, inner_type_id);
-        let body_val = self.optional_chain_method_call(call_expr, inner, call_expr.id)?;
+        let body_val =
+            self.vir_optional_chain_method_call(inner, method, method_args, call_node_id)?;
         let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
         self.jump_with_owned_result(
             body_coerced,
@@ -746,6 +752,48 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, false)
+    }
+
+    /// Compile a method call on the unwrapped inner value of a VIR optional chain.
+    ///
+    /// Temporarily inserts the inner value into vars under `$oc` so that
+    /// `method_call()` can compile the receiver via `LocalLoad`.
+    fn vir_optional_chain_method_call(
+        &mut self,
+        inner: CompiledValue,
+        method: vole_frontend::Symbol,
+        method_args: &[vole_vir::VirRef],
+        call_node_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        // Create a Cranelift variable for the inner value
+        let inner_var = self.builder.declare_var(inner.ty);
+        self.builder.def_var(inner_var, inner.value);
+
+        // Insert into vars under the $oc symbol
+        let oc_sym = self.interner().lookup("$oc").expect("$oc must be interned");
+        let saved_entry = self.vars.insert(oc_sym, (inner_var, inner.type_id));
+
+        // Build a VIR-native MethodCallSource with $oc as the receiver.
+        let receiver_vir = VirExpr::LocalLoad {
+            name: oc_sym,
+            ty: inner.type_id,
+        };
+        use crate::structs::methods::MethodCallSource;
+        let src = MethodCallSource::Vir {
+            receiver: &receiver_vir,
+            method,
+            args: method_args,
+        };
+        let result = self.method_call(&src, call_node_id);
+
+        // Restore vars
+        if let Some(old) = saved_entry {
+            self.vars.insert(oc_sym, old);
+        } else {
+            self.vars.remove(&oc_sym);
+        }
+
+        result
     }
 
     /// Compile a VIR `Try` expression (`expr?`).

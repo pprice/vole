@@ -13,10 +13,12 @@ type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
-use vole_frontend::{ExprKind, MethodCallExpr, NodeId};
+use vole_frontend::{ExprKind, NodeId};
 use vole_identity::TypeDefId;
 use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::TypeId;
+
+use super::methods::ArgSource;
 
 impl Cg<'_, '_, '_> {
     /// Resolve an Iterator interface method: find the external binding and
@@ -203,7 +205,7 @@ impl Cg<'_, '_, '_> {
     pub(super) fn runtime_iterator_method(
         &mut self,
         obj: &CompiledValue,
-        mc: &MethodCallExpr,
+        arg_source: &ArgSource<'_>,
         method_name: &str,
         elem_type_id: TypeId,
         expr_id: NodeId,
@@ -252,26 +254,46 @@ impl Cg<'_, '_, '_> {
         // Borrowed RC args for codegen_frees_closure methods inside an Iterable default body.
         // In that context the outer caller transferred ownership (no rc_dec), so the body
         // must emit the rc_dec here after the runtime call returns.
+        let iter_arg_count = match arg_source {
+            ArgSource::Ast(a) => a.len(),
+            ArgSource::Vir(r) => r.len(),
+        };
         let mut borrowed_closure_args: Vec<CompiledValue> = Vec::new();
-        for arg in &mc.args {
-            let expr = arg.expr();
+        for i in 0..iter_arg_count {
             // Check whether this arg is a local variable with scope-exit RC cleanup
             // BEFORE compiling, so we can see the variable binding.
-            let arg_var_has_scope_exit_cleanup = if let ExprKind::Identifier(sym) = &expr.kind {
-                self.vars
-                    .get(sym)
-                    .map(|(var, _)| {
-                        self.rc_scopes.is_rc_local(*var)
-                            || self.rc_scopes.is_composite_rc_local(*var)
-                            || self.rc_scopes.is_union_rc_local(*var)
-                    })
-                    .unwrap_or(false)
-            } else {
-                // Non-identifier expressions (inline lambdas, etc.) are Owned, not Borrowed.
-                // They won't enter borrowed-specific branches, so this value is unused.
-                false
+            let arg_var_has_scope_exit_cleanup = match arg_source {
+                ArgSource::Ast(args) => {
+                    let expr = args[i].expr();
+                    if let ExprKind::Identifier(sym) = &expr.kind {
+                        self.vars
+                            .get(sym)
+                            .map(|(var, _)| {
+                                self.rc_scopes.is_rc_local(*var)
+                                    || self.rc_scopes.is_composite_rc_local(*var)
+                                    || self.rc_scopes.is_union_rc_local(*var)
+                            })
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    }
+                }
+                ArgSource::Vir(refs) => {
+                    if let vole_vir::VirExpr::LocalLoad { name, .. } = refs[i].as_ref() {
+                        self.vars
+                            .get(name)
+                            .map(|(var, _)| {
+                                self.rc_scopes.is_rc_local(*var)
+                                    || self.rc_scopes.is_composite_rc_local(*var)
+                                    || self.rc_scopes.is_union_rc_local(*var)
+                            })
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    }
+                }
             };
-            let compiled = self.expr(expr)?;
+            let compiled = self.compile_arg_from_source(arg_source, i)?;
             if stores_closure
                 && compiled.is_borrowed()
                 && self.rc_state(compiled.type_id).needs_cleanup()

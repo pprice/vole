@@ -265,7 +265,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let boxed = self.box_interface_value(lambda_val, declared_type_id)?;
                 let result = self.interface_dispatch_call_args_by_type_def_id(
                     &boxed,
-                    &call.args,
+                    &crate::structs::methods::ArgSource::Ast(&call.args),
                     type_def_id,
                     method_name_id,
                     func_type_id,

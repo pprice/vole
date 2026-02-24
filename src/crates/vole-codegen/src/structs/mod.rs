@@ -8,7 +8,7 @@ pub(crate) mod helpers;
 mod iterator_methods;
 mod literals;
 mod method_dispatch;
-mod methods;
+pub(crate) mod methods;
 mod static_methods;
 mod vir_literals;
 

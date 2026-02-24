@@ -5,11 +5,11 @@
 use cranelift::prelude::*;
 
 use super::helpers::convert_to_i64_for_storage;
+use super::methods::ArgSource;
 use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, array_element_tag_id};
-use vole_frontend::MethodCallExpr;
 use vole_sema::type_arena::TypeId;
 
 impl Cg<'_, '_, '_> {
@@ -37,6 +37,34 @@ impl Cg<'_, '_, '_> {
         // Use sema's pre-computed RuntimeIterator type, or look it up from the
         // element type (needed for monomorphized generic functions where sema
         // resolution is skipped).
+        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+            self.arena()
+                .lookup_runtime_iterator(TypeId::I64)
+                .expect("INTERNAL: range iterator: RuntimeIterator<i64> type not pre-created")
+        });
+        Ok(CompiledValue::owned(result, self.ptr_type(), iter_type_id))
+    }
+
+    /// VIR path for range.iter() - compiles start/end from VIR expressions.
+    /// Mirrors [`range_iter()`] but works from VIR `VirExpr` nodes instead of AST.
+    pub(super) fn vir_range_iter(
+        &mut self,
+        start: &vole_vir::VirExpr,
+        end: &vole_vir::VirExpr,
+        inclusive: bool,
+        iter_type_hint: Option<TypeId>,
+    ) -> CodegenResult<CompiledValue> {
+        let start_val = self.compile_vir_expr(start)?;
+        let end_val = self.compile_vir_expr(end)?;
+
+        let end_value = if inclusive {
+            self.builder.ins().iadd_imm(end_val.value, 1)
+        } else {
+            end_val.value
+        };
+
+        let result = self.call_runtime(RuntimeKey::RangeIter, &[start_val.value, end_value])?;
+
         let iter_type_id = iter_type_hint.unwrap_or_else(|| {
             self.arena()
                 .lookup_runtime_iterator(TypeId::I64)
@@ -175,15 +203,19 @@ impl Cg<'_, '_, '_> {
     pub(super) fn array_push_call(
         &mut self,
         arr_obj: &CompiledValue,
-        mc: &MethodCallExpr,
+        arg_source: &ArgSource<'_>,
     ) -> CodegenResult<CompiledValue> {
+        let arg_count = match arg_source {
+            ArgSource::Ast(a) => a.len(),
+            ArgSource::Vir(r) => r.len(),
+        };
         // We expect exactly one argument
-        if mc.args.len() != 1 {
-            return Err(CodegenError::arg_count("array.push", 1, mc.args.len()));
+        if arg_count != 1 {
+            return Err(CodegenError::arg_count("array.push", 1, arg_count));
         }
 
         // Compile the argument
-        let value = self.expr(mc.args[0].expr())?;
+        let value = self.compile_arg_from_source(arg_source, 0)?;
 
         let elem_type = self.arena().unwrap_array(arr_obj.type_id);
         let (tag_val, value_bits, _value) = if let Some(elem_id) = elem_type {

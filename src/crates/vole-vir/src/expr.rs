@@ -2,8 +2,7 @@
 //
 // VIR expression nodes and their supporting types.
 
-use vole_frontend::ast::MethodCallExpr;
-use vole_frontend::{Expr, NodeId};
+use vole_frontend::NodeId;
 use vole_identity::{NameId, Symbol, TypeDefId, TypeId};
 use vole_sema::{StringConversion, UnionStorageKind};
 
@@ -152,12 +151,13 @@ pub enum VirExpr {
     /// specialisations.  Classification requires the function registry,
     /// variable table, and module context that lowering does not have.
     ///
-    /// The `method_call` field carries the original AST expression so
-    /// codegen can delegate to the existing `method_call()` dispatcher.
-    /// `node_id` is the expression's NodeId for NodeMap lookups
-    /// (method resolution, monomorphization keys, etc.).
+    /// The receiver and arguments are pre-lowered to VIR refs.  Codegen
+    /// reconstructs the dispatch data from the VIR fields and `node_id`
+    /// (for NodeMap lookups: method resolution, monomorphization keys, etc.).
     MethodCall {
-        method_call: Box<MethodCallExpr>,
+        receiver: VirRef,
+        method: Symbol,
+        args: Vec<VirRef>,
         node_id: NodeId,
         ty: TypeId,
     },
@@ -331,13 +331,15 @@ pub enum VirExpr {
     /// Optional chain method call (`obj?.method(args)`).
     ///
     /// Like `OptionalChain` but the body is a method call instead of a
-    /// field load.  `call_expr` carries the original AST expression so
-    /// codegen can build a synthetic `MethodCallExpr` using the NodeId
-    /// that sema annotated with method dispatch info.
+    /// field load.  The method receiver, name, and arguments are
+    /// pre-lowered to VIR refs.  `call_node_id` is the original
+    /// expression's NodeId for sema method dispatch lookups.
     /// `ty` is the overall expression type (e.g. `string | nil`).
     OptionalMethodCall {
         object: VirRef,
-        call_expr: Box<Expr>,
+        method: Symbol,
+        method_args: Vec<VirRef>,
+        call_node_id: NodeId,
         inner_type: TypeId,
         ty: TypeId,
     },

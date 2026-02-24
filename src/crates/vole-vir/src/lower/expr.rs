@@ -78,11 +78,21 @@ pub(crate) fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
         ExprKind::StructLiteral(struct_lit) => lower_struct_literal(struct_lit, expr, ty, ctx),
         ExprKind::When(when_expr) => lower_when_expr(when_expr, ty, ctx),
         ExprKind::Match(match_expr) => lower_match_expr(match_expr, expr, ty, ctx),
-        ExprKind::MethodCall(mc) => Box::new(VirExpr::MethodCall {
-            method_call: mc.clone(),
-            node_id: expr.id,
-            ty,
-        }),
+        ExprKind::MethodCall(mc) => {
+            let receiver = lower_expr(&mc.object, ctx);
+            let args: Vec<VirRef> = mc
+                .args
+                .iter()
+                .map(|a| lower_call_arg(a.expr(), ctx))
+                .collect();
+            Box::new(VirExpr::MethodCall {
+                receiver,
+                method: mc.method,
+                args,
+                node_id: expr.id,
+                ty,
+            })
+        }
         ExprKind::RepeatLiteral { element, count } => {
             let elem = lower_expr(element, ctx);
             Box::new(VirExpr::RepeatLiteral {
@@ -755,8 +765,8 @@ fn lower_optional_chain(
 /// Lower an optional method call (`obj?.method(args)`) to `VirExpr::OptionalMethodCall`.
 ///
 /// Extracts `OptionalChainInfo` from sema's NodeMap for the inner/result types.
-/// The original AST expression is preserved because method dispatch resolution is
-/// still keyed on NodeId (method calls carry the AST `MethodCallExpr`).
+/// The receiver and arguments are lowered to VIR refs; the original expression's
+/// NodeId is preserved for sema method dispatch lookups.
 /// Panics if sema didn't record the info.
 fn lower_optional_method_call(
     omc: &vole_frontend::ast::OptionalMethodCallExpr,
@@ -771,9 +781,16 @@ fn lower_optional_method_call(
         )
     });
     let object = lower_expr(&omc.object, ctx);
+    let method_args: Vec<VirRef> = omc
+        .args
+        .iter()
+        .map(|a| lower_call_arg(a.expr(), ctx))
+        .collect();
     Box::new(VirExpr::OptionalMethodCall {
         object,
-        call_expr: Box::new(expr.clone()),
+        method: omc.method,
+        method_args,
+        call_node_id: expr.id,
         inner_type: info.inner_type,
         ty,
     })
@@ -1511,4 +1528,73 @@ fn recover_tested_type(
         IsCheckResult::AlwaysTrue => scrutinee_ty,
         IsCheckResult::AlwaysFalse => TypeId::UNKNOWN,
     }
+}
+
+/// Lower a method/optional-method call argument, handling implicit `it` lambdas.
+///
+/// When sema has synthesized an implicit `it => expr` lambda for this argument
+/// (detectable via `ItLambdaInfo` on the expression's NodeId), the expression
+/// is wrapped into a `VirExpr::Lambda` with `it` as the single parameter and
+/// the original expression as the body.  Otherwise, the argument is lowered
+/// normally via `lower_expr`.
+fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
+    // Check if sema marked this argument as an implicit `it` lambda.
+    let it_info = ctx.node_map.get_it_lambda_info(arg_expr.id).copied();
+    if let Some(info) = it_info {
+        // Resolve the `it` symbol (must exist — sema already verified it).
+        let it_sym = ctx
+            .interner
+            .lookup("it")
+            .expect("VIR lower: `it` symbol must be interned for it-lambda");
+
+        // The function type for the synthesized lambda is the type sema assigned
+        // to this expression node (e.g. `(i64) -> i64`).
+        let func_ty = ctx
+            .node_map
+            .get_type(arg_expr.id)
+            .unwrap_or(TypeId::UNKNOWN);
+
+        // Lower the body expression (the original `it * 2`, `it > 0`, etc.).
+        let body_ref = lower_expr(arg_expr, ctx);
+        let body = if ctx.type_arena.is_void(info.return_type) {
+            // Void return: wrap as a statement body (no trailing expression).
+            VirBody {
+                stmts: vec![VirStmt::Expr { value: body_ref }],
+                trailing: None,
+            }
+        } else {
+            // Non-void: the expression is the trailing return value.
+            VirBody {
+                stmts: Vec::new(),
+                trailing: Some(body_ref),
+            }
+        };
+
+        // Extract captures from sema's lambda analysis.
+        let captures = ctx
+            .node_map
+            .get_lambda_analysis(arg_expr.id)
+            .map(|analysis| {
+                analysis
+                    .captures
+                    .iter()
+                    .map(|c| VirCapture {
+                        name: c.name,
+                        ty: TypeId::UNKNOWN,
+                        by_ref: false,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        return Box::new(VirExpr::Lambda {
+            params: vec![it_sym],
+            body,
+            captures,
+            ty: func_ty,
+        });
+    }
+
+    // No `it` lambda — lower normally.
+    lower_expr(arg_expr, ctx)
 }

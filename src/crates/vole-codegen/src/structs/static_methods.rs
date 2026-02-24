@@ -6,10 +6,12 @@ use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
-use vole_frontend::{MethodCallExpr, NodeId, Symbol};
+use vole_frontend::{NodeId, Symbol};
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::generic::{StaticMethodMonomorphInstance, StaticMethodMonomorphKey};
 use vole_sema::type_arena::TypeId;
+
+use super::methods::ArgSource;
 
 impl Cg<'_, '_, '_> {
     /// Handle static method call: TypeName.method(args)
@@ -19,19 +21,27 @@ impl Cg<'_, '_, '_> {
         type_def_id: TypeDefId,
         method_id: MethodId,
         func_type_id: TypeId,
-        mc: &MethodCallExpr,
+        arg_source: &ArgSource<'_>,
+        method_sym: Symbol,
         expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
+        let arg_count = match arg_source {
+            ArgSource::Ast(a) => a.len(),
+            ArgSource::Vir(r) => r.len(),
+        };
+
         // Check for float intrinsics (nan, infinity, neg_infinity, epsilon)
         // These are compiled directly to constants, no function call needed.
-        if mc.args.is_empty()
-            && let Some(result) = self.try_float_intrinsic(type_def_id, mc.method)?
+        if arg_count == 0
+            && let Some(result) = self.try_float_intrinsic(type_def_id, method_sym)?
         {
             return Ok(result);
         }
 
         // Check for Array.filled<T> intrinsic (compiled as ArrayFilled runtime call)
-        if let Some(result) = self.try_array_filled_intrinsic(type_def_id, mc, expr_id)? {
+        if let Some(result) =
+            self.try_array_filled_intrinsic(type_def_id, arg_source, method_sym, expr_id)?
+        {
             return Ok(result);
         }
 
@@ -43,7 +53,7 @@ impl Cg<'_, '_, '_> {
         if let Some(instance) =
             self.find_static_monomorph_instance(method_name_id, type_def_id, expr_id)
         {
-            return self.call_static_monomorph_instance(&instance, mc);
+            return self.call_static_monomorph_instance(&instance, arg_source);
         }
 
         // Look up the static method info via unified method_func_keys map
@@ -106,8 +116,8 @@ impl Cg<'_, '_, '_> {
             for (slot, opt_call_idx) in mapping.iter().enumerate() {
                 let param_id = param_ids[slot];
                 let compiled = if let Some(&Some(call_arg_idx)) = Some(opt_call_idx) {
-                    let arg = &mc.args[call_arg_idx];
-                    let compiled = self.expr_with_expected_type(arg.expr(), param_id)?;
+                    let compiled =
+                        self.compile_arg_with_expected_type(arg_source, call_arg_idx, param_id)?;
                     if compiled.is_owned() {
                         rc_temps.push(compiled);
                     }
@@ -126,8 +136,8 @@ impl Cg<'_, '_, '_> {
                 args.push(compiled.value);
             }
         } else {
-            for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
-                let compiled = self.expr_with_expected_type(arg.expr(), *param_id)?;
+            for (i, param_id) in param_ids.iter().enumerate().take(arg_count) {
+                let compiled = self.compile_arg_with_expected_type(arg_source, i, *param_id)?;
                 if compiled.is_owned() {
                     rc_temps.push(compiled);
                 }
@@ -299,14 +309,18 @@ impl Cg<'_, '_, '_> {
     fn call_static_monomorph_instance(
         &mut self,
         instance: &StaticMethodMonomorphInstance,
-        mc: &MethodCallExpr,
+        arg_source: &ArgSource<'_>,
     ) -> CodegenResult<CompiledValue> {
         // Compile arguments with substituted param types (TypeId-based)
         let param_type_ids = &instance.func_type.params_id;
+        let mono_arg_count = match arg_source {
+            ArgSource::Ast(a) => a.len(),
+            ArgSource::Vir(r) => r.len(),
+        };
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
-        for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-            let compiled = self.expr_with_expected_type(arg.expr(), param_type_id)?;
+        for (i, &param_type_id) in param_type_ids.iter().enumerate().take(mono_arg_count) {
+            let compiled = self.compile_arg_with_expected_type(arg_source, i, param_type_id)?;
             if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
@@ -417,7 +431,8 @@ impl Cg<'_, '_, '_> {
     fn try_array_filled_intrinsic(
         &mut self,
         type_def_id: TypeDefId,
-        mc: &MethodCallExpr,
+        arg_source: &ArgSource<'_>,
+        method_sym: Symbol,
         expr_id: NodeId,
     ) -> CodegenResult<Option<CompiledValue>> {
         // Check if this is Array.filled
@@ -426,14 +441,18 @@ impl Cg<'_, '_, '_> {
         if type_name.as_deref() != Some("Array") {
             return Ok(None);
         }
-        let method_name = self.interner().resolve(mc.method);
+        let method_name = self.interner().resolve(method_sym);
         if method_name != "filled" {
             return Ok(None);
         }
 
+        let filled_arg_count = match arg_source {
+            ArgSource::Ast(a) => a.len(),
+            ArgSource::Vir(r) => r.len(),
+        };
         // We expect exactly two arguments: count and value
-        if mc.args.len() != 2 {
-            return Err(CodegenError::arg_count("Array.filled", 2, mc.args.len()));
+        if filled_arg_count != 2 {
+            return Err(CodegenError::arg_count("Array.filled", 2, filled_arg_count));
         }
 
         // Get the return type [T] from sema to determine element type T
@@ -449,10 +468,10 @@ impl Cg<'_, '_, '_> {
         };
 
         // Compile count argument
-        let count = self.expr(mc.args[0].expr())?;
+        let count = self.compile_arg_from_source(arg_source, 0)?;
 
         // Compile value argument
-        let value = self.expr(mc.args[1].expr())?;
+        let value = self.compile_arg_from_source(arg_source, 1)?;
 
         let (tag_val, value_bits, mut stored_value) =
             self.prepare_dynamic_array_store(value, elem_type_id)?;
