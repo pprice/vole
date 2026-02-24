@@ -93,8 +93,6 @@ pub fn lower_function(
 /// In debug builds, asserts that no `TypeId` in the output still
 /// contains a type parameter — all types must be concrete after
 /// monomorphization.
-///
-/// The body remains Ast-wrapped (Phase 2 migrates bodies).
 #[allow(clippy::too_many_arguments)]
 pub fn lower_monomorphized_function(
     func: &FuncDecl,

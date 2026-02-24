@@ -13,9 +13,7 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use super::common::{
-    FunctionCompileConfig, compile_function_inner_with_params, compile_function_inner_with_vir,
-};
+use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::primitive_type_id_by_name;
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
@@ -978,28 +976,20 @@ impl Compiler<'_> {
                     } else {
                         Some(&type_param_subs)
                     };
-                    // VIR path preferred; AST fallback for test-scoped implement
-                    // blocks whose default methods are not yet lowered (see vol-6cii)
-                    if let Some(vir_func) = self.analyzed.get_vir_method(semantic_method_id) {
-                        compile_function_inner_with_vir(
-                            builder,
-                            &mut codegen_ctx,
-                            &env,
-                            config,
-                            &vir_func.body,
-                            iface_module_id,
-                            subs,
-                        )?;
-                    } else {
-                        compile_function_inner_with_params(
-                            builder,
-                            &mut codegen_ctx,
-                            &env,
-                            config,
-                            iface_module_id,
-                            subs,
-                        )?;
-                    }
+                    // VIR path — all implement block default methods are lowered
+                    let vir_func = self
+                        .analyzed
+                        .get_vir_method(semantic_method_id)
+                        .expect("implement block default method should have VIR");
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir_func.body,
+                        iface_module_id,
+                        subs,
+                    )?;
                 }
                 self.finalize_function(func_id)?;
             }
@@ -1322,28 +1312,20 @@ impl Compiler<'_> {
                     } else {
                         Some(&type_param_subs)
                     };
-                    // Prefer VIR path when available, fall back to AST path
-                    // for methods not yet lowered to VIR.
-                    if let Some(vir) = self.analyzed.get_vir_method(semantic_method_id) {
-                        compile_function_inner_with_vir(
-                            builder,
-                            &mut codegen_ctx,
-                            &env,
-                            config,
-                            &vir.body,
-                            iface_module_id,
-                            subs,
-                        )?;
-                    } else {
-                        compile_function_inner_with_params(
-                            builder,
-                            &mut codegen_ctx,
-                            &env,
-                            config,
-                            iface_module_id,
-                            subs,
-                        )?;
-                    }
+                    // VIR path — all implement block default methods are lowered
+                    let vir = self
+                        .analyzed
+                        .get_vir_method(semantic_method_id)
+                        .expect("implement block default method should have VIR");
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir.body,
+                        iface_module_id,
+                        subs,
+                    )?;
                 }
                 self.finalize_function(func_id)?;
             }
@@ -1578,28 +1560,20 @@ impl Compiler<'_> {
 
                 let config = FunctionCompileConfig::top_level(body, params, return_type_id);
 
-                // VIR path preferred; AST fallback for test-scoped implement
-                // blocks whose statics are not yet lowered (see vol-6cii)
-                if let Some(vir_func) = self.analyzed.get_vir_method(method_id) {
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir_func.body,
-                        resolved_module_id,
-                        None,
-                    )?;
-                } else {
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        resolved_module_id,
-                        None,
-                    )?;
-                }
+                // VIR path — all implement block statics are lowered
+                let vir_func = self
+                    .analyzed
+                    .get_vir_method(method_id)
+                    .expect("implement block static method should have VIR");
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir_func.body,
+                    resolved_module_id,
+                    None,
+                )?;
             }
 
             // Define the function
@@ -1710,28 +1684,20 @@ impl Compiler<'_> {
                 method_return_type_id,
             );
 
-            // VIR path preferred; AST fallback for test-scoped implement
-            // blocks whose methods are not yet lowered (see vol-6cii)
-            if let Some(vir_func) = self.analyzed.get_vir_method(semantic_method_id) {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir_func.body,
-                    None,
-                    None,
-                )?;
-            } else {
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    None,
-                    None,
-                )?;
-            }
+            // VIR path — all implement block methods are lowered
+            let vir_func = self
+                .analyzed
+                .get_vir_method(semantic_method_id)
+                .expect("implement block method should have VIR");
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir_func.body,
+                None,
+                None,
+            )?;
         }
 
         // Define the function (skip if already defined by an overlapping implement block)

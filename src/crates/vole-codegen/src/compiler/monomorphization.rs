@@ -277,8 +277,8 @@ impl Compiler<'_> {
 
     /// Compile a single monomorphized function instance.
     ///
-    /// Uses VIR when available; falls back to AST for test-scoped generic
-    /// functions whose monomorphs are not yet lowered to VIR (see vol-6cii).
+    /// Uses VIR when available; falls back to AST when sema data is
+    /// incomplete (e.g. structural type parameter monomorphs).
     fn compile_monomorphized_function(
         &mut self,
         func: &FuncDecl,
@@ -327,8 +327,8 @@ impl Compiler<'_> {
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
 
-            // VIR path preferred; AST fallback if VIR lowering was skipped
-            // (e.g. body_has_sema_data returned false for a module monomorph)
+            // VIR path preferred; AST fallback for monomorphs where sema data
+            // was incomplete (e.g. structural type parameters)
             if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
                 compile_function_inner_with_vir(
                     builder,
@@ -736,7 +736,9 @@ impl Compiler<'_> {
                     self_binding,
                     Some(return_type_id),
                 );
-                // VIR path preferred; AST fallback if VIR lowering was skipped
+                // VIR path preferred; AST fallback for class method monomorphs
+                // (NodeMap shares entries across instances, so VIR is not lowered
+                // for class method monomorphs — see analyzed.rs comment)
                 if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
                     compile_function_inner_with_vir(
                         builder,
@@ -968,7 +970,8 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
-                // VIR path preferred; AST fallback if VIR lowering was skipped
+                // VIR path preferred; AST fallback for static method monomorphs
+                // (not all static method monomorphs are VIR-lowered yet)
                 if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
                     compile_function_inner_with_vir(
                         builder,

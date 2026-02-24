@@ -1243,6 +1243,10 @@ impl Cg<'_, '_, '_> {
                 .coerce_global_to_declared_type(sym, &mut value)
                 .map(|()| value);
         }
+        // AST fallback: globals whose initializers weren't lowered to VIR
+        // (e.g. sema didn't record type info for the expression).
+        // This path is only reachable from functions compiled via the AST
+        // entry point (monomorphized class methods, expanded abstract methods).
         if let Some(global_init) = self.global_init(sym).cloned() {
             let mut value = self.expr(&global_init)?;
             return self

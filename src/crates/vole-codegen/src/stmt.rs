@@ -1744,13 +1744,10 @@ impl Cg<'_, '_, '_> {
 
     /// Determine the declared type for a VIR let binding.
     ///
-    /// For Ast-wrapped inits, the NodeMap's `declared_var_type` is
-    /// authoritative.  For pure VIR inits, the lowering phase encodes
-    /// the declared type (or inferred type) as `binding_ty`.
-    ///
-    /// We conservatively always pass `binding_ty` as the declared type.
-    /// This is safe because `coerce_let_init` is a no-op when the
-    /// declared type matches the init value type at the Cranelift level.
+    /// The lowering phase encodes the declared type (or inferred type)
+    /// as `binding_ty`.  We pass this as the declared type to
+    /// `coerce_let_init`, which is a no-op when the declared type
+    /// matches the init value type at the Cranelift level.
     /// We must include `TypeId::UNKNOWN` (the Vole `unknown` type) since
     /// it triggers `box_to_unknown` in `coerce_let_init` when the init
     /// value is a concrete type.
