@@ -18,3 +18,7 @@ merge-worktree name:
 
 verify-ticket ticket_id:
     @bash just/scripts/agents/verify-ticket.sh "{{ticket_id}}"
+
+# Show all files that reference an enum's variants, classified by role
+checklist enum_name:
+    @bash just/scripts/agents/checklist.sh "{{enum_name}}"

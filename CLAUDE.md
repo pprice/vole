@@ -54,6 +54,7 @@ just unit           # Run vole unit tests
 just snap           # Run snapshot tests
 just dev            # List dev tools (see just/dev.justfile)
 just agent          # List agent specific tools (e.g. work tree management)
+just agent checklist VirExpr  # Show all files referencing an enum, classified by role
 ```
 
 Cargo
