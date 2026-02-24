@@ -160,6 +160,14 @@ impl AnalyzedProgram {
             output.module_id,
             &mut vir_functions,
         );
+        // NOTE: Class method monomorphs (class_method_monomorph_cache) are NOT
+        // VIR-lowered here because the NodeMap shares entries across all
+        // monomorphized instances of the same method body.  Only the last
+        // re-analyzed instance's data survives, producing incorrect VIR for
+        // earlier instances (e.g., wrong union tag indices for Maybe<i64> vs
+        // Maybe<string>).  Class method monomorphs continue to use the AST
+        // path in compile_monomorphized_class_method.  VIR lowering requires
+        // per-instance NodeMap snapshots (tracked separately).
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
         let vir_function_map = build_vir_function_map(&vir_functions);
         let vir_method_map = build_vir_method_map(&vir_functions);
@@ -356,10 +364,11 @@ fn lower_module_global_inits(
         for decl in &program.declarations {
             if let Decl::Let(let_stmt) = decl
                 && let LetInit::Expr(expr) = &let_stmt.init
-                && node_map.get_type(expr.id).is_some() {
-                    let vir = lower_expr(expr, &mut ctx);
-                    map.insert(let_stmt.name, vir);
-                }
+                && node_map.get_type(expr.id).is_some()
+            {
+                let vir = lower_expr(expr, &mut ctx);
+                map.insert(let_stmt.name, vir);
+            }
         }
         if !map.is_empty() {
             result.insert(module_path.clone(), map);

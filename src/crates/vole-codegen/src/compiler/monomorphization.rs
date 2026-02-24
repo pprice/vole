@@ -736,14 +736,27 @@ impl Compiler<'_> {
                     self_binding,
                     Some(return_type_id),
                 );
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    cg_module_id,
-                    Some(&instance.substitutions),
-                )?;
+                // VIR path preferred; AST fallback if VIR lowering was skipped
+                if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir_func.body,
+                        cg_module_id,
+                        Some(&instance.substitutions),
+                    )?;
+                } else {
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        cg_module_id,
+                        Some(&instance.substitutions),
+                    )?;
+                }
             }
 
             // Define the function
@@ -955,14 +968,27 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    cg_module_id,
-                    Some(&instance.substitutions),
-                )?;
+                // VIR path preferred; AST fallback if VIR lowering was skipped
+                if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir_func.body,
+                        cg_module_id,
+                        Some(&instance.substitutions),
+                    )?;
+                } else {
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        cg_module_id,
+                        Some(&instance.substitutions),
+                    )?;
+                }
             }
 
             // Define the function

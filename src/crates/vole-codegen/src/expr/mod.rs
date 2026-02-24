@@ -261,19 +261,15 @@ impl Cg<'_, '_, '_> {
         {
             // Module binding - look up the constant value
             self.module_binding_value(module_id, export_name, export_type_id)
+        } else if let Some(vir_init) = self.global_vir_init(sym).cloned() {
+            // Compile global's VIR-lowered initializer inline
+            let mut value = self.compile_vir_expr(&vir_init)?;
+            self.coerce_global_to_declared_type(sym, &mut value)?;
+            Ok(value)
         } else if let Some(global_init) = self.global_init(sym).cloned() {
-            // Compile global's initializer inline
+            // AST fallback for global initializers not yet lowered to VIR
             let mut value = self.expr(&global_init)?;
-
-            // If the global has a declared interface type, box the value
-            // Use GlobalDef.type_id instead of re-resolving TypeExpr
-            let name_table = self.name_table();
-            let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
-            if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
-                && let Some(global_def) = self.query().global(name_id)
-            {
-                value = self.coerce_to_type(value, global_def.type_id)?;
-            }
+            self.coerce_global_to_declared_type(sym, &mut value)?;
             Ok(value)
         } else if let Some(func_type_id) = self.get_expr_type(&expr.id)
             && self.arena().is_function(func_type_id)
@@ -1240,17 +1236,18 @@ impl Cg<'_, '_, '_> {
             return self.module_binding_value(module_id, export_name, export_type_id);
         }
 
-        // Global initializer
+        // Global initializer — VIR path preferred, AST fallback.
+        if let Some(vir_init) = self.global_vir_init(sym).cloned() {
+            let mut value = self.compile_vir_expr(&vir_init)?;
+            return self
+                .coerce_global_to_declared_type(sym, &mut value)
+                .map(|()| value);
+        }
         if let Some(global_init) = self.global_init(sym).cloned() {
             let mut value = self.expr(&global_init)?;
-            let name_table = self.name_table();
-            let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
-            if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
-                && let Some(global_def) = self.query().global(name_id)
-            {
-                value = self.coerce_to_type(value, global_def.type_id)?;
-            }
-            return Ok(value);
+            return self
+                .coerce_global_to_declared_type(sym, &mut value)
+                .map(|()| value);
         }
 
         // Function reference
@@ -1273,6 +1270,26 @@ impl Cg<'_, '_, '_> {
             "variable",
             self.interner().resolve(sym),
         ))
+    }
+
+    /// Coerce a global initializer value to its declared type (if any).
+    ///
+    /// Looks up the `GlobalDef` via the name table and, when the declared
+    /// type differs from the compiled value's type, inserts a coercion
+    /// (e.g. boxing to an interface type).
+    fn coerce_global_to_declared_type(
+        &mut self,
+        sym: Symbol,
+        value: &mut CompiledValue,
+    ) -> CodegenResult<()> {
+        let name_table = self.name_table();
+        let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
+        if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
+            && let Some(global_def) = self.query().global(name_id)
+        {
+            *value = self.coerce_to_type(*value, global_def.type_id)?;
+        }
+        Ok(())
     }
 
     /// Compile a VIR `LocalStore` — variable assignment.
