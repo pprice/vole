@@ -2,53 +2,142 @@
 //
 // VIR type representations, memory layout descriptors, and reflection metadata.
 
-use vole_identity::{Symbol, TypeDefId, TypeId};
+use vole_identity::{NameId, Symbol, TypeDefId, TypeId, VirTypeId};
 
 use crate::expr::FieldStorage;
 
 // ---------------------------------------------------------------------------
-// VirType — concrete, fully-resolved types
+// VirType — self-contained type representation
 // ---------------------------------------------------------------------------
 
-/// Concrete, fully-resolved type in the VIR.
+/// Self-contained type in the VIR.
 ///
-/// After monomorphization every type parameter has been substituted, so all
-/// variants here are concrete.  `cranelift_type` is deliberately omitted:
-/// vole-vir must not depend on Cranelift.  Codegen maps `VirType` to
-/// Cranelift types at instruction-selection time.
+/// After monomorphization every type parameter has been substituted, so most
+/// variants are fully concrete.  The `Param` variant represents an unresolved
+/// generic type parameter (pre-monomorphization only).
+///
+/// `cranelift_type` is deliberately omitted: vole-vir must not depend on
+/// Cranelift.  Codegen maps `VirType` to Cranelift types at instruction-
+/// selection time.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VirType {
-    /// A type that has already been resolved to a `TypeId` in sema.
-    Resolved(TypeId),
-
-    /// Integer type with a specific bit width.
-    Int(BitWidth),
-    /// Floating-point type with a specific bit width.
-    Float(BitWidth),
-    /// Boolean.
-    Bool,
-    /// Interned string (reference-counted).
-    String,
-    /// The nil / void type.
+    /// Primitive scalar type (integers, floats, bool, string, handle).
+    Primitive(VirPrimitiveKind),
+    /// Generic type parameter (pre-monomorphization only).
+    Param { name: NameId },
+    /// Dynamically-sized array.
+    Array { elem: VirTypeId },
+    /// Fixed-size array (e.g. `[i32; 4]`).
+    FixedArray { elem: VirTypeId, len: u32 },
+    /// Tuple of heterogeneous types.
+    Tuple { elems: Vec<VirTypeId> },
+    /// Tagged union of variant types.
+    Union { variants: Vec<VirTypeId> },
+    /// Optional type (`T?`).
+    Optional { inner: VirTypeId },
+    /// Fallible return type (success or one of several error types).
+    Fallible {
+        success: VirTypeId,
+        errors: Vec<VirTypeId>,
+    },
+    /// Function type with parameter types and a return type.
+    Function {
+        params: Vec<VirTypeId>,
+        ret: VirTypeId,
+    },
+    /// Reference-counted class instance.
+    Class {
+        def: TypeDefId,
+        type_args: Vec<VirTypeId>,
+    },
+    /// Value-type struct.
+    Struct {
+        def: TypeDefId,
+        type_args: Vec<VirTypeId>,
+    },
+    /// Interface (trait object).
+    Interface {
+        def: TypeDefId,
+        type_args: Vec<VirTypeId>,
+    },
+    /// Error type.
+    Error { def: TypeDefId },
+    /// Runtime iterator wrapping an `Iterator<T>` interface.
+    RuntimeIterator { elem: VirTypeId },
+    /// The void type (no value).
+    Void,
+    /// The nil literal type.
     Nil,
-    /// Opaque pointer (used for FFI / runtime handles).
-    Ptr,
-    /// Opaque handle (file, socket, etc.).
-    Handle,
-    /// A value-type struct.
-    Struct(VirStructLayout),
-    /// A tagged union.
-    Union(VirUnionLayout),
+    /// The bottom type (never returns).
+    Never,
+    /// Integer range.
+    Range,
+    /// Iterator exhaustion sentinel.
+    Done,
+    /// Compile-time type metadata (`T.@meta`).
+    MetaType,
+    /// Unknown / unresolved type (error recovery).
+    Unknown,
 }
 
-/// Bit width of an integer or float type.
+// ---------------------------------------------------------------------------
+// VirPrimitiveKind — scalar primitive types
+// ---------------------------------------------------------------------------
+
+/// Scalar primitive types in the VIR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum BitWidth {
-    B8,
-    B16,
-    B32,
-    B64,
-    B128,
+pub enum VirPrimitiveKind {
+    I8,
+    I16,
+    I32,
+    I64,
+    I128,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64,
+    Bool,
+    String,
+    Handle,
+}
+
+// ---------------------------------------------------------------------------
+// StorageClass and VirTypeLayout
+// ---------------------------------------------------------------------------
+
+/// The register class / allocation strategy for a VIR type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StorageClass {
+    /// Integer registers (i8–i64, u8–u64, bool, handle).
+    Word,
+    /// Float registers (f32, f64).
+    Float,
+    /// Reference-counted heap allocation (class, string, array).
+    Pointer,
+    /// Two registers (i128).
+    Wide,
+    /// No storage (void, never, done).
+    Void,
+}
+
+/// Physical layout descriptor for a VIR type.
+///
+/// Layout computation is deferred to the `VirTypeTable` (vol-56s0).
+/// This struct is the *shape* that will be stored per type entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VirTypeLayout {
+    /// Whether this type is reference-counted.
+    pub is_rc: bool,
+    /// Whether this type lives on the heap.
+    pub is_heap: bool,
+    /// Whether this type requires two registers (i128).
+    pub is_wide: bool,
+    /// Number of register slots: 0 for void, 1 for most, 2 for i128.
+    pub slot_count: u8,
+    /// The register class / allocation strategy.
+    pub storage: StorageClass,
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +175,7 @@ pub struct VirUnionLayout {
 }
 
 // ---------------------------------------------------------------------------
-// VirLayout — physical memory layout
+// VirLayout — physical memory layout (legacy, kept for compatibility)
 // ---------------------------------------------------------------------------
 
 /// Physical memory layout for a VIR value.

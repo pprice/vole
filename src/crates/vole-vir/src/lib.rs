@@ -40,6 +40,7 @@ pub use stmt::{
     VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
 pub use types::{
-    BitWidth, VirAnnotation, VirAnnotationValue, VirConstant, VirFieldInfo, VirFieldMeta,
-    VirLayout, VirStructLayout, VirType, VirTypeMeta, VirUnionLayout,
+    StorageClass, VirAnnotation, VirAnnotationValue, VirConstant, VirFieldInfo, VirFieldMeta,
+    VirLayout, VirPrimitiveKind, VirStructLayout, VirType, VirTypeLayout, VirTypeMeta,
+    VirUnionLayout,
 };
