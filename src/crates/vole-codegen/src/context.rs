@@ -572,6 +572,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.global_inits.get(&name)
     }
 
+    /// Get VIR-lowered global variable initializer by name.
+    ///
+    /// Looks up in the main program's VIR global inits, or the current
+    /// module's VIR global inits if compiling in a module context.
+    pub fn global_vir_init(&self, name: Symbol) -> Option<&vole_vir::VirExpr> {
+        let analyzed = self.analyzed();
+        if let Some(module_id) = self.current_module() {
+            let module_path = self.name_table().module_path(module_id);
+            if let Some(module_map) = analyzed.module_vir_global_inits.get(module_path) {
+                return module_map.get(&name).map(|r| r.as_ref());
+            }
+        }
+        analyzed.vir_global_inits.get(&name).map(|r| r.as_ref())
+    }
+
     /// Get source file pointer for error reporting
     #[inline]
     pub fn source_file(&self) -> (*const u8, usize) {

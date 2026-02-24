@@ -5,12 +5,12 @@ use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use vole_frontend::{Decl, Interner, Program, Span};
+use vole_frontend::{Decl, Interner, LetInit, Program, Span, Symbol};
 use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
-use vole_vir::{VirBody, VirFunction, VirTest};
+use vole_vir::{VirBody, VirFunction, VirRef, VirTest};
 
 use crate::vir_lower::{
     lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
@@ -52,6 +52,16 @@ pub struct AnalyzedProgram {
     pub vir_method_map: FxHashMap<MethodId, usize>,
     /// VIR-lowered test cases with names and bodies.
     pub vir_tests: Vec<VirTest>,
+    /// VIR-lowered global variable initializer expressions for the main program.
+    ///
+    /// Keyed by the `let` binding's `Symbol`.  Used by `try_call_global()` to
+    /// compile global lambda/functional-interface initializers through the VIR
+    /// path instead of falling back to `self.expr()` (AST path).
+    pub vir_global_inits: FxHashMap<Symbol, VirRef>,
+    /// VIR-lowered global variable initializer expressions for imported modules.
+    ///
+    /// Keyed by module path, then by the `let` binding's `Symbol`.
+    pub module_vir_global_inits: FxHashMap<String, FxHashMap<Symbol, VirRef>>,
 }
 
 impl AnalyzedProgram {
@@ -161,6 +171,22 @@ impl AnalyzedProgram {
             &db.entities,
             &db.names,
         );
+        let vir_global_inits = lower_global_inits(
+            &program,
+            &mut interner,
+            &output.node_map,
+            &db.types,
+            &db.entities,
+            &db.names,
+        );
+        let module_vir_global_inits = lower_module_global_inits(
+            &mut module_programs,
+            &db.names,
+            &output.node_map,
+            &db.types,
+            &db.entities,
+            &output.modules_with_errors,
+        );
         Self {
             program,
             interner: Rc::new(interner),
@@ -175,6 +201,8 @@ impl AnalyzedProgram {
             vir_function_map,
             vir_method_map,
             vir_tests,
+            vir_global_inits,
+            module_vir_global_inits,
         }
     }
 
@@ -254,6 +282,90 @@ impl AnalyzedProgram {
             .find(|t| t.span == span)
             .map(|t| &t.body)
     }
+}
+
+/// Lower global variable initializer expressions from the main program to VIR.
+///
+/// Iterates `Decl::Let` declarations and lowers each initializer expression
+/// using `lower_expr`.  The resulting map is keyed by the binding's `Symbol`.
+fn lower_global_inits(
+    program: &Program,
+    interner: &mut Interner,
+    node_map: &NodeMap,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
+    names: &NameTable,
+) -> FxHashMap<Symbol, VirRef> {
+    use crate::vir_lower::LoweringCtx;
+    use crate::vir_lower::expr::lower_expr;
+
+    let mut ctx = LoweringCtx {
+        node_map,
+        interner,
+        type_arena,
+        entities,
+        name_table: names,
+    };
+
+    let mut map = FxHashMap::default();
+    for decl in &program.declarations {
+        if let Decl::Let(let_stmt) = decl
+            && let LetInit::Expr(expr) = &let_stmt.init
+        {
+            // Only lower if sema analyzed the expression (has type info)
+            if node_map.get_type(expr.id).is_some() {
+                let vir = lower_expr(expr, &mut ctx);
+                map.insert(let_stmt.name, vir);
+            }
+        }
+    }
+    map
+}
+
+/// Lower global variable initializer expressions from imported modules to VIR.
+///
+/// Iterates each module's `Decl::Let` declarations and lowers their
+/// initializer expressions.  Returns a nested map keyed first by module path,
+/// then by the binding's `Symbol`.
+fn lower_module_global_inits(
+    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
+    names: &NameTable,
+    node_map: &NodeMap,
+    type_arena: &TypeArena,
+    entities: &EntityRegistry,
+    modules_with_errors: &HashSet<String>,
+) -> FxHashMap<String, FxHashMap<Symbol, VirRef>> {
+    use crate::vir_lower::LoweringCtx;
+    use crate::vir_lower::expr::lower_expr;
+
+    let mut result = FxHashMap::default();
+    for (module_path, (program, module_interner)) in module_programs.iter_mut() {
+        if modules_with_errors.contains(module_path.as_str()) {
+            continue;
+        }
+        let interner = Rc::make_mut(module_interner);
+        let mut ctx = LoweringCtx {
+            node_map,
+            interner,
+            type_arena,
+            entities,
+            name_table: names,
+        };
+
+        let mut map = FxHashMap::default();
+        for decl in &program.declarations {
+            if let Decl::Let(let_stmt) = decl
+                && let LetInit::Expr(expr) = &let_stmt.init
+                && node_map.get_type(expr.id).is_some() {
+                    let vir = lower_expr(expr, &mut ctx);
+                    map.insert(let_stmt.name, vir);
+                }
+        }
+        if !map.is_empty() {
+            result.insert(module_path.clone(), map);
+        }
+    }
+    result
 }
 
 /// Lower top-level non-generic functions to VIR.
@@ -826,7 +938,7 @@ fn lower_top_level_type_methods(
 fn lower_type_methods(
     methods: &[vole_frontend::FuncDecl],
     statics: Option<&vole_frontend::ast::StaticsBlock>,
-    type_name: vole_frontend::Symbol,
+    type_name: Symbol,
     interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
@@ -938,7 +1050,7 @@ fn lower_type_methods(
 #[allow(clippy::too_many_arguments)]
 fn lower_type_default_methods(
     direct_method_names: &HashSet<String>,
-    type_name: vole_frontend::Symbol,
+    type_name: Symbol,
     interner: &mut Interner,
     names: &NameTable,
     entities: &EntityRegistry,
@@ -1070,7 +1182,7 @@ fn lower_module_type_methods(
     // Also collect (module_path, type_name, direct_method_names) for pass 2.
     struct DefaultMethodWork {
         module_path: String,
-        type_name: vole_frontend::Symbol,
+        type_name: Symbol,
         direct_method_names: HashSet<String>,
     }
     let mut default_method_work: Vec<DefaultMethodWork> = Vec::new();
@@ -1584,9 +1696,10 @@ fn resolve_implement_target(
         TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
             // Try normal module-scoped lookup first (class/struct types)
             if let Some(name_id) = names.name_id(module_id, &[*sym], interner)
-                && let Some(tdef) = entities.type_by_name(name_id) {
-                    return Some(tdef);
-                }
+                && let Some(tdef) = entities.type_by_name(name_id)
+            {
+                return Some(tdef);
+            }
             // Fall back to short-name lookup for named primitives (e.g. "range")
             let sym_str = interner.resolve(*sym);
             entities.type_by_short_name(sym_str, names)

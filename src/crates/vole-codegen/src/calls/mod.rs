@@ -291,13 +291,32 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         arg_source: &ArgSource<'_>,
         call_expr_id: NodeId,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let init_expr = match self.global_init(callee_sym).cloned() {
-            Some(expr) => expr,
-            None => return Ok(None),
-        };
+        // Try VIR path first (avoids AST bridge for global lambda initializers)
+        let has_vir = self.global_vir_init(callee_sym).is_some();
+        if !has_vir {
+            // No VIR init — check AST path
+            if self.global_init(callee_sym).is_none() {
+                return Ok(None);
+            }
+        }
 
         // Compile the global's initializer to get its value
-        let lambda_val = self.expr(&init_expr)?;
+        let lambda_val = if has_vir {
+            // Safe to unwrap: we checked `is_some()` above and nothing
+            // mutates the analyzed program between the check and here.
+            let vir_init = self
+                .global_vir_init(callee_sym)
+                .expect("INTERNAL: VIR global init disappeared between check and use");
+            // Clone the VirExpr to avoid borrow conflict with &mut self
+            let vir_init = vir_init.clone();
+            self.compile_vir_expr(&vir_init)?
+        } else {
+            let init_expr = self
+                .global_init(callee_sym)
+                .cloned()
+                .expect("INTERNAL: AST global init disappeared between check and use");
+            self.expr(&init_expr)?
+        };
 
         // Get declared type from GlobalDef (uses sema-resolved type, not TypeExpr)
         // Scope the name_table borrow to avoid conflicts with later mutable borrows
