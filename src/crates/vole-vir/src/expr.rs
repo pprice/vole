@@ -470,7 +470,8 @@ pub struct VirMatchArm {
 /// A pattern in a `Match` arm.
 ///
 /// Simple patterns (Wildcard, Binding, TypeCheck, Literal, Val) are fully
-/// lowered to VIR.  Complex patterns (Tuple, Record, Success, Error)
+/// lowered to VIR.  Fallible patterns (Success, Error) are lowered to VIR
+/// with pre-resolved type information.  Complex patterns (Tuple, Record)
 /// remain wrapped in `Ast` until further migration.
 #[derive(Debug, Clone)]
 pub enum VirPattern {
@@ -516,6 +517,71 @@ pub enum VirPattern {
     /// Val pattern (`val x`): compares the scrutinee against an existing
     /// variable's value.
     Val { name: Symbol },
+
+    /// Success pattern for fallible match: `success x`, `success`, etc.
+    ///
+    /// Checks the fallible tag against `FALLIBLE_SUCCESS_TAG`.  If an inner
+    /// pattern is present, extracts the success payload and binds it.
+    /// `success_type` is pre-resolved from `TypeArena::unwrap_fallible`.
+    Success {
+        inner: Option<Box<VirPattern>>,
+        success_type: TypeId,
+    },
+
+    /// Error pattern for fallible match: `error`, `error e`, `error DivByZero`,
+    /// `error DivByZero { msg }`.
+    ///
+    /// The `kind` sub-enum encodes which of the four error sub-paths applies,
+    /// with all type/tag information pre-resolved during lowering.
+    Error { kind: VirErrorPatternKind },
+}
+
+/// The sub-kind of an error pattern, pre-resolved during lowering.
+///
+/// Error patterns have four forms with increasing complexity:
+/// 1. Bare `error` — matches any error (tag != SUCCESS)
+/// 2. `error e` (catch-all) — matches any error and binds the payload
+/// 3. `error SpecificType` — matches a specific error type by pre-computed tag
+/// 4. `error SpecificType { field, ... }` — specific type with field destructuring
+#[derive(Debug, Clone)]
+pub enum VirErrorPatternKind {
+    /// Bare `error` pattern: matches any error (tag != SUCCESS).
+    Bare,
+
+    /// Catch-all error with binding: `error e`.
+    ///
+    /// Matches any error and binds the error payload to `name`.
+    /// `error_ty` is the fallible's error type for payload extraction.
+    CatchAll { name: Symbol, error_ty: TypeId },
+
+    /// Specific error type match: `error DivByZero`.
+    ///
+    /// `error_tag` is the pre-computed tag value for the error type within
+    /// the fallible's error union.
+    Specific { error_tag: i64 },
+
+    /// Specific error type with record destructuring: `error Overflow { value, max }`.
+    ///
+    /// `error_tag` is the pre-computed tag value.  `type_def` is the error
+    /// type's `TypeDefId` for field layout resolution.  `fields` lists the
+    /// field bindings to extract from the error payload.
+    SpecificRecord {
+        error_tag: i64,
+        type_def: TypeDefId,
+        fields: Vec<VirErrorFieldBinding>,
+    },
+}
+
+/// A single field binding in an error record destructure pattern.
+///
+/// Maps a field name (from the source pattern) to a binding name
+/// (the variable name in the match arm body).
+#[derive(Debug, Clone)]
+pub struct VirErrorFieldBinding {
+    /// The field name in the error type definition.
+    pub field_name: Symbol,
+    /// The variable name to bind the field value to.
+    pub binding: Symbol,
 }
 
 /// Whether an `as` cast is checked or unchecked.

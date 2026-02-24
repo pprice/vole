@@ -1141,6 +1141,115 @@ impl Cg<'_, '_, '_> {
                 let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
                 Ok(Some(cmp))
             }
+
+            vole_vir::VirPattern::Success {
+                inner,
+                success_type,
+            } => self.compile_vir_success_pattern(inner, scrutinee, *success_type, arm_variables),
+
+            vole_vir::VirPattern::Error { kind } => {
+                let tag = load_fallible_tag(self.builder, scrutinee.value);
+                self.compile_vir_error_pattern(kind, scrutinee, tag, arm_variables)
+            }
+        }
+    }
+
+    /// Compile a VIR success pattern: check tag == SUCCESS, optionally
+    /// extract payload and match inner pattern.
+    fn compile_vir_success_pattern(
+        &mut self,
+        inner: &Option<Box<vole_vir::VirPattern>>,
+        scrutinee: &CompiledValue,
+        success_type: TypeId,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+    ) -> CodegenResult<Option<Value>> {
+        let tag = load_fallible_tag(self.builder, scrutinee.value);
+        let is_success = self
+            .builder
+            .ins()
+            .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
+
+        if let Some(inner_pat) = inner {
+            let success_type_id = self.try_substitute_type(success_type);
+            let ptr_type = self.ptr_type();
+            let payload_ty = {
+                let arena = self.arena();
+                type_id_to_cranelift(success_type_id, arena, ptr_type)
+            };
+            let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
+
+            // The inner pattern is a VIR pattern (e.g. Binding for `success x`).
+            if let vole_vir::VirPattern::Binding { name, .. } = inner_pat.as_ref() {
+                let var = self.builder.declare_var(payload_ty);
+                self.builder.def_var(var, payload);
+                arm_variables.insert(*name, (var, success_type_id));
+            }
+        }
+        Ok(Some(is_success))
+    }
+
+    /// Compile a VIR error pattern from the pre-resolved `VirErrorPatternKind`.
+    fn compile_vir_error_pattern(
+        &mut self,
+        kind: &vole_vir::VirErrorPatternKind,
+        scrutinee: &CompiledValue,
+        tag: Value,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+    ) -> CodegenResult<Option<Value>> {
+        match kind {
+            vole_vir::VirErrorPatternKind::Bare => {
+                let is_error =
+                    self.builder
+                        .ins()
+                        .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
+                Ok(Some(is_error))
+            }
+
+            vole_vir::VirErrorPatternKind::CatchAll { name, error_ty } => {
+                let is_error =
+                    self.builder
+                        .ins()
+                        .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
+                let error_type_id = self.try_substitute_type(*error_ty);
+                let ptr_type = self.ptr_type();
+                let payload_ty = {
+                    let arena = self.arena();
+                    type_id_to_cranelift(error_type_id, arena, ptr_type)
+                };
+                let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
+                let var = self.builder.declare_var(payload_ty);
+                self.builder.def_var(var, payload);
+                arm_variables.insert(*name, (var, error_type_id));
+                Ok(Some(is_error))
+            }
+
+            vole_vir::VirErrorPatternKind::Specific { error_tag } => {
+                let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, *error_tag);
+                Ok(Some(is_this_error))
+            }
+
+            vole_vir::VirErrorPatternKind::SpecificRecord {
+                error_tag,
+                type_def,
+                fields,
+            } => {
+                let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, *error_tag);
+                let ast_fields: Vec<_> = fields
+                    .iter()
+                    .map(|f| RecordFieldPattern {
+                        field_name: f.field_name,
+                        binding: f.binding,
+                        span: vole_identity::Span::default(),
+                    })
+                    .collect();
+                self.extract_error_field_bindings(
+                    *type_def,
+                    scrutinee.value,
+                    &ast_fields,
+                    arm_variables,
+                )?;
+                Ok(Some(is_this_error))
+            }
         }
     }
 

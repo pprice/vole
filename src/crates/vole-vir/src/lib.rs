@@ -26,8 +26,9 @@ pub use paste;
 pub use builder::VirBuilder;
 pub use calls::{BuiltinMethod, CallTarget, NativeAbi};
 pub use expr::{
-    AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirExpr,
-    VirMatchArm, VirMetaKind, VirPattern, VirStringPart, VirUnOp,
+    AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture,
+    VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern,
+    VirStringPart, VirUnOp,
 };
 pub use func::{VirBody, VirFunction};
 pub use intrinsics::IntrinsicKey;

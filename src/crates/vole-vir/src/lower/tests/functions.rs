@@ -16,6 +16,7 @@ fn lower_empty_block_function() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let ret_ty = dummy_type_id();
 
     let vir = lower_function(
@@ -28,6 +29,7 @@ fn lower_empty_block_function() {
         &mut interner,
         &type_arena,
         &entities,
+        &name_table,
     );
 
     assert_eq!(vir.id, dummy_func_id());
@@ -44,6 +46,7 @@ fn lower_block_function_lowers_control_flow() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let ret_ty = dummy_type_id();
 
     let vir = lower_function(
@@ -56,6 +59,7 @@ fn lower_block_function_lowers_control_flow() {
         &mut interner,
         &type_arena,
         &entities,
+        &name_table,
     );
 
     assert_eq!(vir.body.stmts.len(), 2);
@@ -78,6 +82,7 @@ fn lower_expr_body_function_sets_trailing() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let ret_ty = dummy_type_id();
 
     let vir = lower_function(
@@ -90,6 +95,7 @@ fn lower_expr_body_function_sets_trailing() {
         &mut interner,
         &type_arena,
         &entities,
+        &name_table,
     );
 
     assert!(vir.body.stmts.is_empty());
@@ -109,6 +115,7 @@ fn lower_preserves_params_and_return_type() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let ret_ty = dummy_type_id();
     let param_a = TypeId::from_raw(10);
     let param_b = TypeId::from_raw(20);
@@ -124,6 +131,7 @@ fn lower_preserves_params_and_return_type() {
         &mut interner,
         &type_arena,
         &entities,
+        &name_table,
     );
 
     assert_eq!(vir.params.len(), 2);
@@ -138,7 +146,14 @@ fn lower_stmts_preserves_order() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmts = vec![make_break_stmt(), make_continue_stmt(), make_break_stmt()];
     let body = lower_stmts(&stmts, &mut ctx);
 
@@ -168,6 +183,7 @@ fn lower_stmts_preserves_order() {
 fn lower_monomorphized_with_concrete_types() {
     let arena = TypeArena::new();
     let entities = test_entities();
+    let name_table = test_name_table();
     let func = make_block_func(vec![make_break_stmt()]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -186,6 +202,7 @@ fn lower_monomorphized_with_concrete_types() {
         dummy_name_id(),
         &mut interner,
         &entities,
+        &name_table,
     );
 
     assert_eq!(vir.name, "identity__mono_0");
@@ -199,6 +216,7 @@ fn lower_monomorphized_with_concrete_types() {
 fn lower_monomorphized_expr_body() {
     let arena = TypeArena::new();
     let entities = test_entities();
+    let name_table = test_name_table();
     let func = make_expr_func(make_bool_expr());
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -215,6 +233,7 @@ fn lower_monomorphized_expr_body() {
         dummy_name_id(),
         &mut interner,
         &entities,
+        &name_table,
     );
 
     assert_eq!(vir.name, "to_bool__mono_0");
@@ -228,6 +247,7 @@ fn lower_monomorphized_expr_body() {
 fn lower_monomorphized_rejects_type_param_in_params() {
     let mut arena = TypeArena::new();
     let entities = test_entities();
+    let name_table = test_name_table();
     let func = make_block_func(vec![]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -248,6 +268,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
         dummy_name_id(),
         &mut interner,
         &entities,
+        &name_table,
     );
 }
 
@@ -256,6 +277,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
 fn lower_monomorphized_rejects_type_param_in_return() {
     let mut arena = TypeArena::new();
     let entities = test_entities();
+    let name_table = test_name_table();
     let func = make_block_func(vec![]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
@@ -274,6 +296,7 @@ fn lower_monomorphized_rejects_type_param_in_return() {
         dummy_name_id(),
         &mut interner,
         &entities,
+        &name_table,
     );
 }
 
@@ -287,7 +310,14 @@ fn lower_stmt_expr_produces_vir_expr() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     use vole_frontend::ast::ExprStmt;
     let stmt = Stmt::Expr(ExprStmt {
         expr: make_bool_expr(),
@@ -311,7 +341,14 @@ fn lower_stmt_let_becomes_vir_let() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     // Let with Expr init is now lowered to VirStmt::Let
     let stmt = Stmt::Let(LetStmt {
         name: Symbol::UNKNOWN,
@@ -347,8 +384,15 @@ fn lower_stmt_let_type_alias_becomes_noop() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let sym = interner.intern("Foo");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     // Let with TypeAlias init is a compile-time construct: lowers to Noop
     let stmt = Stmt::Let(LetStmt {
         name: Symbol::UNKNOWN,

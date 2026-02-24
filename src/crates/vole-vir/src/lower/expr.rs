@@ -11,8 +11,8 @@ use vole_sema::{StringConversion, TypeArena};
 
 use crate::calls::CallTarget;
 use crate::expr::{
-    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirExpr, VirMatchArm,
-    VirMetaKind, VirPattern, VirStringPart, VirUnOp,
+    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirErrorFieldBinding,
+    VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern, VirStringPart, VirUnOp,
 };
 use crate::func::VirBody;
 use crate::refs::VirRef;
@@ -967,10 +967,11 @@ fn lower_when_expr(
 
 /// Lower a `match` expression to `VirExpr::Match`.
 ///
-/// The scrutinee is recursively lowered. Simple patterns (Wildcard, Binding,
-/// TypeCheck, Literal, Val) are lowered to concrete `VirPattern` variants.
-/// Complex patterns (Tuple, Record, Success, Error) remain wrapped in
-/// `VirPattern::Ast`. Guards and bodies are recursively lowered.
+/// The scrutinee is recursively lowered. Most patterns are lowered to
+/// concrete `VirPattern` variants (Wildcard, Binding, TypeCheck, Literal,
+/// Val, Success, Error). Complex structural patterns (Tuple, Record)
+/// remain wrapped in `VirPattern::Ast`. Guards and bodies are recursively
+/// lowered.
 fn lower_match_expr(
     match_expr: &vole_frontend::ast::MatchExpr,
     _expr: &Expr,
@@ -1022,8 +1023,10 @@ fn lower_match_expr(
 /// - `Type { .. }` -> `VirPattern::TypeCheck`
 /// - `Literal(..)` -> `VirPattern::Literal`
 /// - `Val { .. }` -> `VirPattern::Val`
+/// - `Success { .. }` -> `VirPattern::Success`
+/// - `Error { .. }` -> `VirPattern::Error`
 ///
-/// Complex patterns (Tuple, Record, Success, Error) are wrapped in
+/// Complex patterns (Tuple, Record) are wrapped in
 /// `VirPattern::Ast` for later migration.
 fn lower_pattern(
     pattern: &vole_frontend::Pattern,
@@ -1084,12 +1087,233 @@ fn lower_pattern(
 
         PatternKind::Val { name } => VirPattern::Val { name: *name },
 
+        PatternKind::Success { inner } => lower_success_pattern(inner, scrutinee_ty, ctx),
+
+        PatternKind::Error { inner } => lower_error_pattern(inner, scrutinee_ty, ctx),
+
         // Complex patterns — keep as AST for now.
-        PatternKind::Tuple { .. }
-        | PatternKind::Record { .. }
-        | PatternKind::Success { .. }
-        | PatternKind::Error { .. } => VirPattern::Ast(Box::new(pattern.clone())),
+        PatternKind::Tuple { .. } | PatternKind::Record { .. } => {
+            VirPattern::Ast(Box::new(pattern.clone()))
+        }
     }
+}
+
+/// Lower a `success` pattern to `VirPattern::Success`.
+///
+/// Pre-resolves the success type from `TypeArena::unwrap_fallible`.
+/// If an inner pattern is present, it is recursively lowered with the
+/// success type as the new scrutinee type.
+fn lower_success_pattern(
+    inner: &Option<Box<vole_frontend::Pattern>>,
+    scrutinee_ty: TypeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> VirPattern {
+    let fallible = ctx.type_arena.unwrap_fallible(scrutinee_ty);
+    let success_type = fallible.map(|(s, _)| s).unwrap_or(TypeId::UNKNOWN);
+
+    let inner_pat = inner.as_ref().map(|pat| {
+        let lowered = lower_pattern(pat, success_type, ctx);
+        Box::new(lowered)
+    });
+
+    VirPattern::Success {
+        inner: inner_pat,
+        success_type,
+    }
+}
+
+/// Lower an `error` pattern to `VirPattern::Error`.
+///
+/// Classifies the error sub-pattern into one of four kinds:
+/// - Bare `error`: no inner pattern
+/// - Catch-all `error e`: identifier not matching an error type
+/// - Specific `error DivByZero`: identifier matching an error type
+/// - Record `error DivByZero { msg }`: error type with field destructuring
+fn lower_error_pattern(
+    inner: &Option<Box<vole_frontend::Pattern>>,
+    scrutinee_ty: TypeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> VirPattern {
+    use vole_frontend::PatternKind;
+
+    let Some(inner_pat) = inner else {
+        return VirPattern::Error {
+            kind: VirErrorPatternKind::Bare,
+        };
+    };
+
+    match &inner_pat.kind {
+        PatternKind::Identifier { name } => {
+            lower_error_identifier_pattern(*name, scrutinee_ty, ctx)
+        }
+        PatternKind::Record {
+            type_name: Some(type_expr),
+            fields,
+        } => lower_error_record_pattern(type_expr, fields, scrutinee_ty, ctx),
+        // Other inner patterns (wildcard, etc.) → bare error match
+        _ => VirPattern::Error {
+            kind: VirErrorPatternKind::Bare,
+        },
+    }
+}
+
+/// Lower an identifier inside an `error` pattern.
+///
+/// Determines whether the identifier is an error type name (→ Specific)
+/// or a catch-all binding (→ CatchAll) by checking the fallible's error
+/// union for a matching error type name.
+fn lower_error_identifier_pattern(
+    name: vole_identity::Symbol,
+    scrutinee_ty: TypeId,
+    ctx: &LoweringCtx<'_>,
+) -> VirPattern {
+    let fallible = ctx.type_arena.unwrap_fallible(scrutinee_ty);
+    let error_tag = fallible.and_then(|(_, error_ty)| compute_error_tag(error_ty, name, ctx));
+
+    if let Some(tag) = error_tag {
+        // Identifier matches an error type → specific error pattern
+        VirPattern::Error {
+            kind: VirErrorPatternKind::Specific { error_tag: tag },
+        }
+    } else {
+        // Identifier is a catch-all binding (error e => ...)
+        let error_ty = fallible.map(|(_, e)| e).unwrap_or(TypeId::UNKNOWN);
+        VirPattern::Error {
+            kind: VirErrorPatternKind::CatchAll { name, error_ty },
+        }
+    }
+}
+
+/// Lower a record pattern inside an `error` pattern.
+///
+/// Resolves the error type's tag and TypeDefId, then extracts field
+/// bindings for the destructure.
+fn lower_error_record_pattern(
+    type_expr: &vole_frontend::TypeExpr,
+    fields: &[vole_frontend::ast::RecordFieldPattern],
+    scrutinee_ty: TypeId,
+    ctx: &LoweringCtx<'_>,
+) -> VirPattern {
+    use vole_frontend::TypeExprKind;
+
+    let type_name_sym = match &type_expr.kind {
+        TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => Some(*sym),
+        TypeExprKind::QualifiedPath { segments, .. } => segments.last().copied(),
+        _ => None,
+    };
+
+    let Some(name) = type_name_sym else {
+        return VirPattern::Error {
+            kind: VirErrorPatternKind::Bare,
+        };
+    };
+
+    let fallible = ctx.type_arena.unwrap_fallible(scrutinee_ty);
+    let error_tag = fallible.and_then(|(_, error_ty)| compute_error_tag(error_ty, name, ctx));
+
+    let type_def = fallible.and_then(|(_, error_ty)| find_error_type_def(error_ty, name, ctx));
+
+    match (error_tag, type_def) {
+        (Some(tag), Some(def_id)) => {
+            let vir_fields: Vec<VirErrorFieldBinding> = fields
+                .iter()
+                .map(|f| VirErrorFieldBinding {
+                    field_name: f.field_name,
+                    binding: f.binding,
+                })
+                .collect();
+            VirPattern::Error {
+                kind: VirErrorPatternKind::SpecificRecord {
+                    error_tag: tag,
+                    type_def: def_id,
+                    fields: vir_fields,
+                },
+            }
+        }
+        _ => VirPattern::Error {
+            kind: VirErrorPatternKind::Bare,
+        },
+    }
+}
+
+/// Compute the numeric error tag for a named error type within a fallible's
+/// error union.
+///
+/// Mirrors `fallible_error_tag_by_id` from codegen, using the lowering
+/// context's `TypeArena`, `Interner`, `NameTable`, and `EntityRegistry`.
+fn compute_error_tag(
+    error_type_id: TypeId,
+    error_name: vole_identity::Symbol,
+    ctx: &LoweringCtx<'_>,
+) -> Option<i64> {
+    let error_name_str = ctx.interner.resolve(error_name);
+
+    // Check if error_type_id is a single Error type
+    if let Some(type_def_id) = ctx.type_arena.unwrap_error(error_type_id) {
+        let info_name = ctx
+            .name_table
+            .last_segment_str(ctx.entities.name_id(type_def_id));
+        if info_name.as_deref() == Some(error_name_str) {
+            return Some(1); // Single error type always gets tag 1
+        }
+        return None;
+    }
+
+    // Check if error_type_id is a Union of error types
+    if let Some(variants) = ctx.type_arena.unwrap_union(error_type_id) {
+        for (idx, &variant) in variants.iter().enumerate() {
+            if let Some(type_def_id) = ctx.type_arena.unwrap_error(variant) {
+                let info_name = ctx
+                    .name_table
+                    .last_segment_str(ctx.entities.name_id(type_def_id));
+                if info_name.as_deref() == Some(error_name_str) {
+                    return Some((idx + 1) as i64);
+                }
+            }
+        }
+        return None;
+    }
+
+    None
+}
+
+/// Find the `TypeDefId` for a named error type in a fallible's error union.
+///
+/// Used for record destructuring patterns where codegen needs the TypeDefId
+/// to look up field layout.
+fn find_error_type_def(
+    error_type_id: TypeId,
+    error_name: vole_identity::Symbol,
+    ctx: &LoweringCtx<'_>,
+) -> Option<vole_identity::TypeDefId> {
+    let error_name_str = ctx.interner.resolve(error_name);
+
+    // Single error type
+    if let Some(type_def_id) = ctx.type_arena.unwrap_error(error_type_id) {
+        let info_name = ctx
+            .name_table
+            .last_segment_str(ctx.entities.name_id(type_def_id));
+        if info_name.as_deref() == Some(error_name_str) {
+            return Some(type_def_id);
+        }
+        return None;
+    }
+
+    // Union of error types
+    if let Some(variants) = ctx.type_arena.unwrap_union(error_type_id) {
+        for &variant in variants {
+            if let Some(type_def_id) = ctx.type_arena.unwrap_error(variant) {
+                let info_name = ctx
+                    .name_table
+                    .last_segment_str(ctx.entities.name_id(type_def_id));
+                if info_name.as_deref() == Some(error_name_str) {
+                    return Some(type_def_id);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Recover the tested type from an `IsCheckResult` and the scrutinee type.

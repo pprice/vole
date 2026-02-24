@@ -15,7 +15,7 @@ mod tests;
 
 use vole_frontend::Interner;
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
-use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeId};
+use vole_identity::{FunctionId, MethodId, NameId, NameTable, Symbol, TypeId};
 use vole_sema::node_map::NodeMap;
 use vole_sema::{EntityRegistry, TypeArena};
 
@@ -31,15 +31,13 @@ use self::stmt::lower_stmt;
 /// - `interner`: string interning (mutable for new literals)
 /// - `type_arena`: type resolution (unwrap_union, unwrap_fallible, etc.)
 /// - `entities`: entity lookups (field info, error types, etc.)
-///
-/// `type_arena` and `entities` are currently unused but will be needed
-/// by pattern lowering (VirPattern::Tuple, Record, Success, Error).
-#[allow(dead_code)] // type_arena + entities are infrastructure for pattern lowering
+/// - `name_table`: name resolution (last_segment_str for error tag matching)
 pub(crate) struct LoweringCtx<'a> {
     pub node_map: &'a NodeMap,
     pub interner: &'a mut Interner,
     pub type_arena: &'a TypeArena,
     pub entities: &'a EntityRegistry,
+    pub name_table: &'a NameTable,
 }
 
 /// Lower a single function declaration into a `VirFunction`.
@@ -64,12 +62,14 @@ pub fn lower_function(
     interner: &mut Interner,
     type_arena: &TypeArena,
     entities: &EntityRegistry,
+    name_table: &NameTable,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
         interner,
         type_arena,
         entities,
+        name_table,
     };
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
@@ -107,6 +107,7 @@ pub fn lower_monomorphized_function(
     mangled_name_id: NameId,
     interner: &mut Interner,
     entities: &EntityRegistry,
+    name_table: &NameTable,
 ) -> VirFunction {
     debug_assert_concrete_types(param_types, return_type, type_arena, &name);
     let mut vir = lower_function(
@@ -119,6 +120,7 @@ pub fn lower_monomorphized_function(
         interner,
         type_arena,
         entities,
+        name_table,
     );
     vir.mangled_name_id = Some(mangled_name_id);
     vir
@@ -141,12 +143,14 @@ pub fn lower_method(
     interner: &mut Interner,
     type_arena: &TypeArena,
     entities: &EntityRegistry,
+    name_table: &NameTable,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
         interner,
         type_arena,
         entities,
+        name_table,
     };
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
@@ -175,6 +179,7 @@ pub fn lower_interface_method(
     interner: &mut Interner,
     type_arena: &TypeArena,
     entities: &EntityRegistry,
+    name_table: &NameTable,
 ) -> Option<VirFunction> {
     let body_ast = method.body.as_ref()?;
     let mut ctx = LoweringCtx {
@@ -182,6 +187,7 @@ pub fn lower_interface_method(
         interner,
         type_arena,
         entities,
+        name_table,
     };
     let body = lower_func_body(body_ast, &mut ctx);
     Some(VirFunction {
@@ -231,12 +237,14 @@ pub fn lower_test_body(
     interner: &mut Interner,
     type_arena: &TypeArena,
     entities: &EntityRegistry,
+    name_table: &NameTable,
 ) -> VirBody {
     let mut ctx = LoweringCtx {
         node_map,
         interner,
         type_arena,
         entities,
+        name_table,
     };
     lower_func_body(body, &mut ctx)
 }

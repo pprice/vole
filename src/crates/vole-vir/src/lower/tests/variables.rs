@@ -16,8 +16,15 @@ fn lower_identifier_becomes_local_load() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let sym = interner.intern("x");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(sym),
@@ -40,10 +47,17 @@ fn lower_identifier_preserves_sema_type() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let sym = interner.intern("count");
     let node_id = NodeId::new(ModuleId::new(0), 100);
     node_map.set_type(node_id, TypeId::I64);
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: node_id,
         kind: ExprKind::Identifier(sym),
@@ -66,10 +80,17 @@ fn lower_identifier_bool_type() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let sym = interner.intern("flag");
     let node_id = NodeId::new(ModuleId::new(0), 101);
     node_map.set_type(node_id, TypeId::BOOL);
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: node_id,
         kind: ExprKind::Identifier(sym),
@@ -97,8 +118,15 @@ fn lower_assign_variable_becomes_local_store() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let sym = interner.intern("x");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -128,8 +156,15 @@ fn lower_assign_variable_lowers_value_recursively() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let sym = interner.intern("y");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -167,7 +202,14 @@ fn lower_assign_discard_evaluates_inner_expr() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -193,8 +235,15 @@ fn lower_assign_field_becomes_field_store() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let sym = interner.intern("field");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -238,7 +287,14 @@ fn lower_assign_index_becomes_index_store() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {

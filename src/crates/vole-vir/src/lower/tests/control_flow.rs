@@ -33,7 +33,14 @@ fn lower_if_expr_produces_vir_if() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = make_if_expr(make_bool_expr(), make_int_expr(1), Some(make_int_expr(2)));
     let vir_ref = lower_expr(&expr, &mut ctx);
 
@@ -70,7 +77,14 @@ fn lower_if_expr_no_else() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = make_if_expr(make_bool_expr(), make_int_expr(42), None);
     let vir_ref = lower_expr(&expr, &mut ctx);
 
@@ -91,9 +105,16 @@ fn lower_if_expr_preserves_type() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let expr = make_if_expr(make_bool_expr(), make_int_expr(1), Some(make_int_expr(2)));
     node_map.set_type(expr.id, TypeId::I64);
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
@@ -108,7 +129,14 @@ fn lower_if_expr_recursive_lowering() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     // if true { if false { 1 } else { 2 } } else { 3 }
     let inner_if = make_if_expr(
         Expr {
@@ -144,7 +172,14 @@ fn lower_block_expr_empty() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Block(Box::new(vole_frontend::ast::BlockExpr {
@@ -173,7 +208,14 @@ fn lower_block_expr_with_trailing() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Block(Box::new(vole_frontend::ast::BlockExpr {
@@ -205,7 +247,14 @@ fn lower_block_expr_with_stmts_and_trailing() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Block(Box::new(vole_frontend::ast::BlockExpr {
@@ -241,9 +290,16 @@ fn lower_block_expr_preserves_type() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I64);
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: node_id,
         kind: ExprKind::Block(Box::new(vole_frontend::ast::BlockExpr {
@@ -272,7 +328,14 @@ fn lower_expr_yield_produces_vir_yield() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Yield(Box::new(YieldExpr {
@@ -299,7 +362,14 @@ fn lower_expr_yield_lowers_inner_recursively() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     // yield true -- the inner bool should be lowered to VirExpr::BoolLiteral
     let expr = Expr {
         id: dummy_node_id(),
@@ -330,7 +400,14 @@ fn lower_break_stmt() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_break_stmt();
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -346,7 +423,14 @@ fn lower_continue_stmt() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_continue_stmt();
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -367,7 +451,14 @@ fn lower_return_with_value() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = Stmt::Return(ReturnStmt {
         value: Some(make_int_expr(42)),
         span: dummy_span(),
@@ -390,7 +481,14 @@ fn lower_return_void() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = Stmt::Return(ReturnStmt {
         value: None,
         span: dummy_span(),
@@ -425,7 +523,14 @@ fn lower_while_empty_body() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_while_stmt(make_bool_expr(), vec![]);
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -448,7 +553,14 @@ fn lower_while_with_body() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_while_stmt(make_bool_expr(), vec![make_break_stmt()]);
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -470,7 +582,14 @@ fn lower_while_lowers_condition_recursively() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_while_stmt(make_int_expr(1), vec![]);
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -509,7 +628,14 @@ fn lower_if_stmt_no_else() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_if_stmt(make_bool_expr(), vec![make_break_stmt()], None);
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -546,7 +672,14 @@ fn lower_if_stmt_with_else() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_if_stmt(
         make_bool_expr(),
         vec![make_break_stmt()],
@@ -588,7 +721,14 @@ fn lower_if_stmt_is_void_typed() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_if_stmt(make_bool_expr(), vec![], None);
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -628,8 +768,15 @@ fn lower_raise_no_fields() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let error_sym = interner.intern("NotFound");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_raise_stmt(error_sym, vec![]);
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -650,9 +797,16 @@ fn lower_raise_single_field() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let error_sym = interner.intern("ParseError");
     let msg_sym = interner.intern("message");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_raise_stmt(error_sym, vec![(msg_sym, make_int_expr(42))]);
     let vir = lower_stmt(&stmt, &mut ctx);
 
@@ -678,10 +832,17 @@ fn lower_raise_multiple_fields() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let error_sym = interner.intern("IoError");
     let code_sym = interner.intern("code");
     let retry_sym = interner.intern("retry");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let stmt = make_raise_stmt(
         error_sym,
         vec![
@@ -718,9 +879,16 @@ fn lower_raise_field_values_lowered_recursively() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let error_sym = interner.intern("Err");
     let val_sym = interner.intern("val");
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     // Field value is a bool literal — should be lowered to VirExpr::BoolLiteral
     let stmt = make_raise_stmt(error_sym, vec![(val_sym, make_bool_expr())]);
     let vir = lower_stmt(&stmt, &mut ctx);

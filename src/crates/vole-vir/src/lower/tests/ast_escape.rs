@@ -18,7 +18,14 @@ fn lower_expr_unreachable() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Unreachable,
@@ -41,7 +48,14 @@ fn lower_expr_unreachable_preserves_line() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Unreachable,
@@ -64,7 +78,14 @@ fn lower_expr_import() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Import("std:math".to_string()),
@@ -86,9 +107,16 @@ fn lower_expr_import_with_type() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, dummy_type_id());
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: node_id,
         kind: ExprKind::Import("std:io".to_string()),
@@ -111,7 +139,14 @@ fn lower_expr_type_literal() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::TypeLiteral(Box::new(TypeExpr {
@@ -134,7 +169,14 @@ fn lower_expr_range_exclusive() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Range(Box::new(vole_frontend::ast::RangeExpr {
@@ -173,7 +215,14 @@ fn lower_expr_range_inclusive() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Range(Box::new(vole_frontend::ast::RangeExpr {
@@ -216,7 +265,14 @@ fn lower_expr_assign_variable_becomes_local_store() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Assign(Box::new(AssignExpr {
@@ -247,7 +303,14 @@ fn lower_expr_compound_assign_variable_desugars_to_store() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::CompoundAssign(Box::new(CompoundAssignExpr {
@@ -285,7 +348,14 @@ fn lower_expr_compound_assign_index_desugars_to_index_store() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::CompoundAssign(Box::new(CompoundAssignExpr {
@@ -320,7 +390,14 @@ fn lower_expr_array_literal_becomes_vir() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::ArrayLiteral(vec![make_int_expr(1), make_int_expr(2), make_int_expr(3)]),
@@ -343,7 +420,14 @@ fn lower_expr_repeat_literal_becomes_vir() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let expr = Expr {
         id: dummy_node_id(),
         kind: ExprKind::RepeatLiteral {
@@ -379,7 +463,14 @@ fn lower_expr_call_becomes_vir_call() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let callee = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(Symbol::UNKNOWN),
@@ -415,7 +506,14 @@ fn lower_expr_call_no_args_becomes_vir_call() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let name_table = test_name_table();
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let callee = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(Symbol::UNKNOWN),
@@ -447,9 +545,16 @@ fn lower_expr_call_preserves_type() {
     let mut interner = test_interner();
     let type_arena = test_type_arena();
     let entities = test_entities();
+    let name_table = test_name_table();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I64);
-    let mut ctx = make_ctx(&node_map, &mut interner, &type_arena, &entities);
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+    );
     let callee = Expr {
         id: dummy_node_id(),
         kind: ExprKind::Identifier(Symbol::UNKNOWN),

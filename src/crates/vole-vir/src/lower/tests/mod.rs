@@ -12,7 +12,7 @@ mod variables;
 use vole_frontend::Interner;
 use vole_frontend::NodeId;
 use vole_frontend::ast::{Block, Expr, ExprKind, FuncBody, FuncDecl, Stmt};
-use vole_identity::{FunctionId, ModuleId, NameId, Span, Symbol, TypeId};
+use vole_identity::{FunctionId, ModuleId, NameId, NameTable, Span, Symbol, TypeId};
 use vole_sema::node_map::NodeMap;
 use vole_sema::{EntityRegistry, TypeArena};
 
@@ -105,6 +105,10 @@ fn test_entities() -> EntityRegistry {
     EntityRegistry::default()
 }
 
+fn test_name_table() -> NameTable {
+    NameTable::new()
+}
+
 /// Create a `LoweringCtx` from test fixtures.
 ///
 /// This is a convenience helper that bundles the common test parameters.
@@ -113,11 +117,13 @@ fn make_ctx<'a>(
     interner: &'a mut Interner,
     type_arena: &'a TypeArena,
     entities: &'a EntityRegistry,
+    name_table: &'a NameTable,
 ) -> LoweringCtx<'a> {
     LoweringCtx {
         node_map,
         interner,
         type_arena,
         entities,
+        name_table,
     }
 }

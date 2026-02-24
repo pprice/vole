@@ -124,6 +124,7 @@ impl AnalyzedProgram {
             &mut interner,
             &db.types,
             &db.entities,
+            &db.names,
         );
         Self {
             program,
@@ -277,6 +278,7 @@ fn lower_top_level_functions(
             interner,
             type_arena,
             entities,
+            names,
         );
         vir_functions.push(vir);
     }
@@ -334,6 +336,7 @@ fn lower_monomorphized_instances(
             instance.mangled_name,
             interner,
             entities,
+            names,
         );
         vir_functions.push(vir);
     }
@@ -458,6 +461,7 @@ fn lower_module_program_functions(
             interner,
             type_arena,
             entities,
+            names,
         );
         vir_functions.push(vir);
     }
@@ -637,6 +641,7 @@ fn lower_type_methods(
             method_def,
             &type_name_str,
             interner,
+            names,
             node_map,
             type_arena,
             entities,
@@ -662,6 +667,7 @@ fn lower_type_methods(
             interner,
             type_arena,
             entities,
+            names,
         ) {
             vir_functions.push(vir);
         }
@@ -676,6 +682,7 @@ fn lower_single_method(
     method_def: &vole_sema::MethodDef,
     type_name_str: &str,
     interner: &mut Interner,
+    names: &NameTable,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     entities: &EntityRegistry,
@@ -708,6 +715,7 @@ fn lower_single_method(
         interner,
         type_arena,
         entities,
+        names,
     );
     vir_functions.push(vir);
 }
@@ -785,12 +793,13 @@ fn lower_test_bodies(
     interner: &mut Interner,
     type_arena: &TypeArena,
     entities: &EntityRegistry,
+    names: &NameTable,
 ) -> FxHashMap<Span, VirBody> {
     let mut map = FxHashMap::default();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
             lower_tests_decl_bodies(
-                tests_decl, node_map, interner, type_arena, entities, &mut map,
+                tests_decl, node_map, interner, type_arena, entities, names, &mut map,
             );
         }
     }
@@ -798,22 +807,24 @@ fn lower_test_bodies(
 }
 
 /// Recursively lower test bodies from a single `TestsDecl`.
+#[allow(clippy::too_many_arguments)]
 fn lower_tests_decl_bodies(
     tests_decl: &vole_frontend::ast::TestsDecl,
     node_map: &NodeMap,
     interner: &mut Interner,
     type_arena: &TypeArena,
     entities: &EntityRegistry,
+    names: &NameTable,
     map: &mut FxHashMap<Span, VirBody>,
 ) {
     for test in &tests_decl.tests {
-        let vir_body = lower_test_body(&test.body, node_map, interner, type_arena, entities);
+        let vir_body = lower_test_body(&test.body, node_map, interner, type_arena, entities, names);
         map.insert(test.span, vir_body);
     }
     // Recurse into nested tests blocks
     for decl in &tests_decl.decls {
         if let Decl::Tests(nested) = decl {
-            lower_tests_decl_bodies(nested, node_map, interner, type_arena, entities, map);
+            lower_tests_decl_bodies(nested, node_map, interner, type_arena, entities, names, map);
         }
     }
 }
