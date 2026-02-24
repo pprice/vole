@@ -26,6 +26,7 @@ use super::stmt::lower_stmt;
 ///
 /// All `ExprKind` variants are lowered to concrete `VirExpr` nodes.
 /// Grouping parentheses are stripped transparently.
+#[deny(clippy::wildcard_enum_match_arm)]
 pub(crate) fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
     // Strip grouping parentheses — lower the inner expression directly.
     if let ExprKind::Grouping(inner) = &expr.kind {
@@ -632,6 +633,7 @@ fn lower_meta_access(
         MetaAccessKind::Static { type_def_id } => {
             // Determine whether this is a type-name access (no object needed)
             // or a value-expression access (object needed for re-derivation).
+            #[allow(clippy::wildcard_enum_match_arm)] // AST ExprKind, not VIR dispatch
             let object = match &meta_access.object.kind {
                 ExprKind::TypeLiteral(_) => None,
                 ExprKind::Identifier(_) => {

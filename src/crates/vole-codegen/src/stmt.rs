@@ -1110,6 +1110,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR statement node.
     ///
     /// All VIR statement variants are handled directly.
+    #[deny(clippy::wildcard_enum_match_arm)]
     pub fn compile_vir_stmt(&mut self, vir_stmt: &VirStmt) -> CodegenResult<bool> {
         match vir_stmt {
             VirStmt::Expr { value } => {
@@ -1707,6 +1708,7 @@ impl Cg<'_, '_, '_> {
 
         // Detect struct copy: init is a variable that is already tracked as a
         // composite RC local.
+        #[allow(clippy::wildcard_enum_match_arm)] // predicate query, not dispatch
         let is_struct_copy = match value_expr {
             vole_vir::VirExpr::LocalLoad { name, .. } => self
                 .vars

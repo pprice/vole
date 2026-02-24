@@ -566,6 +566,7 @@ impl Cg<'_, '_, '_> {
     /// All VIR variants are handled directly.  A few (`MethodCall`,
     /// `OptionalMethodCall`) delegate to existing AST-based methods for
     /// dispatch logic that has not yet been fully migrated.
+    #[deny(clippy::wildcard_enum_match_arm)]
     pub fn compile_vir_expr(&mut self, vir_expr: &VirExpr) -> CodegenResult<CompiledValue> {
         match vir_expr {
             // -- Lowered literals -----------------------------------------
@@ -920,6 +921,7 @@ impl Cg<'_, '_, '_> {
                 }
                 VirStringPart::Expr { value, conversion } => {
                     let compiled = self.compile_vir_expr(value)?;
+                    #[allow(clippy::wildcard_enum_match_arm)] // sema enum, not VIR dispatch
                     match conversion {
                         vole_sema::StringConversion::Identity => {
                             (compiled.value, compiled.is_owned())
@@ -1375,6 +1377,7 @@ impl Cg<'_, '_, '_> {
     /// from the object's concrete type in the current codegen scope.
     fn resolve_vir_static_meta_type_def(&self, object: Option<&VirExpr>) -> Option<TypeDefId> {
         let object = object?;
+        #[allow(clippy::wildcard_enum_match_arm)] // predicate query, not dispatch
         let object_type_id = match object {
             VirExpr::LocalLoad { name, .. } => self.vars.get(name).map(|(_, ty)| *ty)?,
             _ => return None,

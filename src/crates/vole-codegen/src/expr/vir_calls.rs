@@ -23,6 +23,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a VIR call expression.
     ///
     /// Dispatches on `CallTarget` to select the correct calling convention.
+    #[deny(clippy::wildcard_enum_match_arm)]
     pub fn compile_vir_call(
         &mut self,
         target: &CallTarget,
