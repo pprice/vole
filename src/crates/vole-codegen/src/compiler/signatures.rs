@@ -215,9 +215,10 @@ impl Compiler<'_> {
         // Struct return: still uses sema TypeId for flat-slot counting
         // (EntityRegistry field types are not yet in VIR).
         if matches!(table.get(return_vir_type), VirType::Struct { .. })
-            && let Some(field_count) = self.struct_field_count(return_type_id) {
-                return self.build_struct_return_sig(&cranelift_params, field_count);
-            }
+            && let Some(field_count) = self.struct_field_count(return_type_id)
+        {
+            return self.build_struct_return_sig(&cranelift_params, field_count);
+        }
 
         // Normal return (filter out void)
         let ret = (return_vir_type != VirTypeId::VOID)
