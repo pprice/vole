@@ -145,6 +145,7 @@ impl AnalyzedProgram {
             &output.node_map,
             &output.tests_virtual_modules,
             Some(&module_programs),
+            output.module_id,
             &mut vir_functions,
         );
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
@@ -1010,6 +1011,7 @@ fn lower_test_scoped_type_methods(
     node_map: &NodeMap,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
+    module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
 ) {
     for decl in &program.declarations {
@@ -1024,6 +1026,7 @@ fn lower_test_scoped_type_methods(
                 node_map,
                 tests_virtual_modules,
                 module_programs,
+                module_id,
                 vir_functions,
             );
         }
@@ -1042,6 +1045,7 @@ fn lower_tests_decl_type_methods(
     node_map: &NodeMap,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
+    module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
 ) {
     let virtual_module_id = tests_virtual_modules
@@ -1049,9 +1053,10 @@ fn lower_tests_decl_type_methods(
         .copied()
         .unwrap_or_else(|| names.main_module());
 
-    // Test-scoped functions are registered under the *main* module (not the virtual
-    // test module), so use main_module for function name resolution.
-    let main_module_id = names.main_module();
+    // Test-scoped functions are registered under the program's module_id (not the virtual
+    // test module), so use the passed module_id for function name resolution. This must
+    // match what codegen uses in compile_function (program_module = analyzed.module_id).
+    let main_module_id = module_id;
 
     for inner_decl in &tests_decl.decls {
         match inner_decl {
@@ -1222,6 +1227,7 @@ fn lower_tests_decl_type_methods(
                     node_map,
                     tests_virtual_modules,
                     module_programs,
+                    module_id,
                     vir_functions,
                 );
             }

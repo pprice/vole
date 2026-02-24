@@ -2032,27 +2032,19 @@ impl Compiler<'_> {
                         Some(return_type_id),
                     )
                     .with_iterable_default_body();
-                    let vir_func = self.analyzed.get_vir_method(*semantic_method_id);
-                    if let Some(vir) = vir_func {
-                        compile_function_inner_with_vir(
-                            builder,
-                            &mut codegen_ctx,
-                            &env,
-                            config,
-                            &vir.body,
-                            iface_module_id,
-                            Some(&concrete_subs),
-                        )?;
-                    } else {
-                        compile_function_inner_with_params(
-                            builder,
-                            &mut codegen_ctx,
-                            &env,
-                            config,
-                            iface_module_id,
-                            Some(&concrete_subs),
-                        )?;
-                    }
+                    let vir_func = self.analyzed.get_vir_method(*semantic_method_id)
+                        .unwrap_or_else(|| {
+                            panic!("VIR must be available for array iterable default method (MethodId={semantic_method_id:?})")
+                        });
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir_func.body,
+                        iface_module_id,
+                        Some(&concrete_subs),
+                    )?;
                 }
                 self.finalize_function(func_id)?;
             }

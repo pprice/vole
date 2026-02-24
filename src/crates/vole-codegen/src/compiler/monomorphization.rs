@@ -323,7 +323,6 @@ impl Compiler<'_> {
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
             if let Some(vir) = vir_func {
-                tracing::debug!(name = %mangled_name, "compiling monomorph via VIR path");
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
@@ -334,7 +333,6 @@ impl Compiler<'_> {
                     Some(&instance.substitutions),
                 )?;
             } else {
-                tracing::debug!(name = %mangled_name, "compiling monomorph via AST fallback");
                 compile_function_inner_with_params(
                     builder,
                     &mut codegen_ctx,

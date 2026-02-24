@@ -4,9 +4,7 @@ use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
-use super::common::{
-    FunctionCompileConfig, compile_function_inner_with_params, compile_function_inner_with_vir,
-};
+use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::{Compiler, DeclareMode};
 
 use crate::FunctionKey;
@@ -959,26 +957,21 @@ impl Compiler<'_> {
             // Use pre-resolved return type (None for void)
             let return_type_opt = Some(return_type_id).filter(|id| !id.is_void());
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_opt);
-            if let Some(vir) = vir_func {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir.body,
-                    None,
-                    None,
-                )?;
-            } else {
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    None,
-                    None,
-                )?;
-            }
+            let vir = vir_func.unwrap_or_else(|| {
+                panic!(
+                    "VIR must be available for non-generic, non-generator function '{}'",
+                    display_name,
+                )
+            });
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir.body,
+                None,
+                None,
+            )?;
         }
 
         // Define the function
