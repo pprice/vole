@@ -6,9 +6,8 @@
 // access to sema's TypeArena, which lives in vole-sema — a dependency that
 // vole-vir intentionally does not have.
 //
-// Not yet wired into the lowering pipeline; will be called from
-// LoweringCtx once VirTypeId fields are added to VIR nodes (vol-dsap).
-#![allow(dead_code)]
+// Wired into the lowering pipeline: LoweringCtx::translate() calls
+// translate_type_id() for every VIR node that carries a VirTypeId.
 
 use vole_identity::{TypeId, VirTypeId};
 use vole_sema::PrimitiveType;

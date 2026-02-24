@@ -19,12 +19,14 @@ fn lower_expr_unreachable() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -49,12 +51,14 @@ fn lower_expr_unreachable_preserves_line() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -79,12 +83,14 @@ fn lower_expr_import() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -110,12 +116,14 @@ fn lower_expr_import_with_type() {
     let name_table = test_name_table();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, dummy_type_id());
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: node_id,
@@ -140,12 +148,14 @@ fn lower_expr_type_literal() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -170,12 +180,14 @@ fn lower_expr_range_exclusive() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -216,12 +228,14 @@ fn lower_expr_range_inclusive() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -266,12 +280,14 @@ fn lower_expr_assign_variable_becomes_local_store() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -304,12 +320,14 @@ fn lower_expr_compound_assign_variable_desugars_to_store() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -349,12 +367,14 @@ fn lower_expr_compound_assign_index_desugars_to_index_store() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -391,12 +411,14 @@ fn lower_expr_array_literal_becomes_vir() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -421,12 +443,14 @@ fn lower_expr_repeat_literal_becomes_vir() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -466,12 +490,14 @@ fn lower_expr_call_becomes_vir_call() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let callee = Expr {
         id: dummy_node_id(),
@@ -511,12 +537,14 @@ fn lower_expr_call_no_args_becomes_vir_call() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let callee = Expr {
         id: dummy_node_id(),
@@ -552,12 +580,14 @@ fn lower_expr_call_preserves_type() {
     let name_table = test_name_table();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I64);
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let callee = Expr {
         id: dummy_node_id(),

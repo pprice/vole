@@ -19,6 +19,7 @@ fn lower_empty_block_function() {
     let name_table = test_name_table();
     let ret_ty = dummy_type_id();
 
+    let mut type_table = test_type_table();
     let vir = lower_function(
         &func,
         dummy_func_id(),
@@ -30,6 +31,7 @@ fn lower_empty_block_function() {
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
 
     assert_eq!(vir.id, dummy_func_id());
@@ -49,6 +51,7 @@ fn lower_block_function_lowers_control_flow() {
     let name_table = test_name_table();
     let ret_ty = dummy_type_id();
 
+    let mut type_table = test_type_table();
     let vir = lower_function(
         &func,
         dummy_func_id(),
@@ -60,6 +63,7 @@ fn lower_block_function_lowers_control_flow() {
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
 
     assert_eq!(vir.body.stmts.len(), 2);
@@ -85,6 +89,7 @@ fn lower_expr_body_function_sets_trailing() {
     let name_table = test_name_table();
     let ret_ty = dummy_type_id();
 
+    let mut type_table = test_type_table();
     let vir = lower_function(
         &func,
         dummy_func_id(),
@@ -96,6 +101,7 @@ fn lower_expr_body_function_sets_trailing() {
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
 
     assert!(vir.body.stmts.is_empty());
@@ -117,10 +123,11 @@ fn lower_preserves_params_and_return_type() {
     let entities = test_entities();
     let name_table = test_name_table();
     let ret_ty = dummy_type_id();
-    let param_a = TypeId::from_raw(10);
-    let param_b = TypeId::from_raw(20);
+    let param_a = TypeId::I64;
+    let param_b = TypeId::STRING;
     let params = vec![(Symbol::UNKNOWN, param_a), (Symbol::UNKNOWN, param_b)];
 
+    let mut type_table = test_type_table();
     let vir = lower_function(
         &func,
         dummy_func_id(),
@@ -132,6 +139,7 @@ fn lower_preserves_params_and_return_type() {
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
 
     assert_eq!(vir.params.len(), 2);
@@ -147,12 +155,14 @@ fn lower_stmts_preserves_order() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmts = vec![make_break_stmt(), make_continue_stmt(), make_break_stmt()];
     let body = lower_stmts(&stmts, &mut ctx);
@@ -191,6 +201,7 @@ fn lower_monomorphized_with_concrete_types() {
     let string_ty = arena.string();
     let params = vec![(Symbol::UNKNOWN, i64_ty)];
 
+    let mut type_table = test_type_table();
     let vir = lower_monomorphized_function(
         &func,
         dummy_func_id(),
@@ -203,6 +214,7 @@ fn lower_monomorphized_with_concrete_types() {
         &mut interner,
         &entities,
         &name_table,
+        &mut type_table,
     );
 
     assert_eq!(vir.name, "identity__mono_0");
@@ -222,6 +234,7 @@ fn lower_monomorphized_expr_body() {
     let mut interner = test_interner();
     let bool_ty = arena.bool();
 
+    let mut type_table = test_type_table();
     let vir = lower_monomorphized_function(
         &func,
         dummy_func_id(),
@@ -234,6 +247,7 @@ fn lower_monomorphized_expr_body() {
         &mut interner,
         &entities,
         &name_table,
+        &mut type_table,
     );
 
     assert_eq!(vir.name, "to_bool__mono_0");
@@ -257,6 +271,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
     let type_param = arena.type_param(t_name_id);
     let params = vec![(Symbol::UNKNOWN, type_param)];
 
+    let mut type_table = test_type_table();
     let _ = lower_monomorphized_function(
         &func,
         dummy_func_id(),
@@ -269,6 +284,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
         &mut interner,
         &entities,
         &name_table,
+        &mut type_table,
     );
 }
 
@@ -285,6 +301,7 @@ fn lower_monomorphized_rejects_type_param_in_return() {
     let t_name_id = names.intern_raw(names.main_module(), &["T"]);
     let type_param = arena.type_param(t_name_id);
 
+    let mut type_table = test_type_table();
     let _ = lower_monomorphized_function(
         &func,
         dummy_func_id(),
@@ -297,6 +314,7 @@ fn lower_monomorphized_rejects_type_param_in_return() {
         &mut interner,
         &entities,
         &name_table,
+        &mut type_table,
     );
 }
 
@@ -311,12 +329,14 @@ fn lower_stmt_expr_produces_vir_expr() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     use vole_frontend::ast::ExprStmt;
     let stmt = Stmt::Expr(ExprStmt {
@@ -342,12 +362,14 @@ fn lower_stmt_let_becomes_vir_let() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     // Let with Expr init is now lowered to VirStmt::Let
     let stmt = Stmt::Let(LetStmt {
@@ -386,12 +408,14 @@ fn lower_stmt_let_type_alias_becomes_noop() {
     let entities = test_entities();
     let name_table = test_name_table();
     let sym = interner.intern("Foo");
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     // Let with TypeAlias init is a compile-time construct: lowers to Noop
     let stmt = Stmt::Let(LetStmt {

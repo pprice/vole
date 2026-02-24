@@ -15,6 +15,7 @@ use vole_identity::{
 };
 use vole_sema::node_map::NodeMap;
 use vole_sema::{EntityRegistry, TypeArena};
+use vole_vir::type_table::VirTypeTable;
 
 use super::LoweringCtx;
 
@@ -31,7 +32,7 @@ fn dummy_func_id() -> FunctionId {
 }
 
 fn dummy_type_id() -> TypeId {
-    TypeId::from_raw(999)
+    TypeId::VOID
 }
 
 fn dummy_name_id() -> NameId {
@@ -109,6 +110,10 @@ fn test_name_table() -> NameTable {
     NameTable::new()
 }
 
+fn test_type_table() -> VirTypeTable {
+    VirTypeTable::new()
+}
+
 /// Create a `LoweringCtx` from test fixtures.
 ///
 /// This is a convenience helper that bundles the common test parameters.
@@ -118,6 +123,7 @@ fn make_ctx<'a>(
     type_arena: &'a TypeArena,
     entities: &'a EntityRegistry,
     name_table: &'a NameTable,
+    type_table: &'a mut VirTypeTable,
 ) -> LoweringCtx<'a> {
     LoweringCtx {
         node_map,
@@ -125,5 +131,6 @@ fn make_ctx<'a>(
         type_arena,
         entities,
         name_table,
+        type_table,
     }
 }

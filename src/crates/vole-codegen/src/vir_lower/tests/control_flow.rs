@@ -34,12 +34,14 @@ fn lower_if_expr_produces_vir_if() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = make_if_expr(make_bool_expr(), make_int_expr(1), Some(make_int_expr(2)));
     let vir_ref = lower_expr(&expr, &mut ctx);
@@ -78,12 +80,14 @@ fn lower_if_expr_no_else() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = make_if_expr(make_bool_expr(), make_int_expr(42), None);
     let vir_ref = lower_expr(&expr, &mut ctx);
@@ -108,12 +112,14 @@ fn lower_if_expr_preserves_type() {
     let name_table = test_name_table();
     let expr = make_if_expr(make_bool_expr(), make_int_expr(1), Some(make_int_expr(2)));
     node_map.set_type(expr.id, TypeId::I64);
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let vir_ref = lower_expr(&expr, &mut ctx);
 
@@ -130,12 +136,14 @@ fn lower_if_expr_recursive_lowering() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     // if true { if false { 1 } else { 2 } } else { 3 }
     let inner_if = make_if_expr(
@@ -173,12 +181,14 @@ fn lower_block_expr_empty() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -209,12 +219,14 @@ fn lower_block_expr_with_trailing() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -248,12 +260,14 @@ fn lower_block_expr_with_stmts_and_trailing() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -293,12 +307,14 @@ fn lower_block_expr_preserves_type() {
     let name_table = test_name_table();
     let node_id = dummy_node_id();
     node_map.set_type(node_id, TypeId::I64);
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: node_id,
@@ -329,12 +345,14 @@ fn lower_expr_yield_produces_vir_yield() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let expr = Expr {
         id: dummy_node_id(),
@@ -363,12 +381,14 @@ fn lower_expr_yield_lowers_inner_recursively() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     // yield true -- the inner bool should be lowered to VirExpr::BoolLiteral
     let expr = Expr {
@@ -401,12 +421,14 @@ fn lower_break_stmt() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_break_stmt();
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -424,12 +446,14 @@ fn lower_continue_stmt() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_continue_stmt();
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -452,12 +476,14 @@ fn lower_return_with_value() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = Stmt::Return(ReturnStmt {
         value: Some(make_int_expr(42)),
@@ -482,12 +508,14 @@ fn lower_return_void() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = Stmt::Return(ReturnStmt {
         value: None,
@@ -524,12 +552,14 @@ fn lower_while_empty_body() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_while_stmt(make_bool_expr(), vec![]);
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -554,12 +584,14 @@ fn lower_while_with_body() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_while_stmt(make_bool_expr(), vec![make_break_stmt()]);
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -583,12 +615,14 @@ fn lower_while_lowers_condition_recursively() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_while_stmt(make_int_expr(1), vec![]);
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -629,12 +663,14 @@ fn lower_if_stmt_no_else() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_if_stmt(make_bool_expr(), vec![make_break_stmt()], None);
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -674,12 +710,14 @@ fn lower_if_stmt_with_else() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_if_stmt(
         make_bool_expr(),
@@ -723,12 +761,14 @@ fn lower_if_stmt_is_void_typed() {
     let type_arena = test_type_arena();
     let entities = test_entities();
     let name_table = test_name_table();
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_if_stmt(make_bool_expr(), vec![], None);
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -771,12 +811,14 @@ fn lower_raise_no_fields() {
     let entities = test_entities();
     let name_table = test_name_table();
     let error_sym = interner.intern("NotFound");
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_raise_stmt(error_sym, vec![]);
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -801,12 +843,14 @@ fn lower_raise_single_field() {
     let name_table = test_name_table();
     let error_sym = interner.intern("ParseError");
     let msg_sym = interner.intern("message");
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_raise_stmt(error_sym, vec![(msg_sym, make_int_expr(42))]);
     let vir = lower_stmt(&stmt, &mut ctx);
@@ -837,12 +881,14 @@ fn lower_raise_multiple_fields() {
     let error_sym = interner.intern("IoError");
     let code_sym = interner.intern("code");
     let retry_sym = interner.intern("retry");
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let stmt = make_raise_stmt(
         error_sym,
@@ -883,12 +929,14 @@ fn lower_raise_field_values_lowered_recursively() {
     let name_table = test_name_table();
     let error_sym = interner.intern("Err");
     let val_sym = interner.intern("val");
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     // Field value is a bool literal — should be lowered to VirExpr::BoolLiteral
     let stmt = make_raise_stmt(error_sym, vec![(val_sym, make_bool_expr())]);
@@ -987,12 +1035,14 @@ fn lower_tuple_pattern_with_bindings() {
         span: dummy_span(),
     };
 
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let vir_ref = lower_expr(&match_expr, &mut ctx);
 
@@ -1067,12 +1117,14 @@ fn lower_tuple_pattern_with_wildcard() {
         span: dummy_span(),
     };
 
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let vir_ref = lower_expr(&match_expr, &mut ctx);
 
@@ -1131,12 +1183,14 @@ fn lower_tuple_pattern_unknown_scrutinee_type() {
         span: dummy_span(),
     };
 
+    let mut type_table = test_type_table();
     let mut ctx = make_ctx(
         &node_map,
         &mut interner,
         &type_arena,
         &entities,
         &name_table,
+        &mut type_table,
     );
     let vir_ref = lower_expr(&match_expr, &mut ctx);
 

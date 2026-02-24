@@ -10,6 +10,7 @@ use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLook
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
+use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirBody, VirFunction, VirRef, VirTest};
 
 use crate::vir_lower::{
@@ -62,6 +63,12 @@ pub struct AnalyzedProgram {
     ///
     /// Keyed by module path, then by the `let` binding's `Symbol`.
     pub module_vir_global_inits: FxHashMap<String, FxHashMap<Symbol, VirRef>>,
+    /// VIR type table populated during lowering.
+    ///
+    /// Maps `TypeId` → `VirTypeId` with interned VIR type descriptors and
+    /// layout information.  Shared across all lowered functions and used by
+    /// codegen for type queries.
+    pub vir_type_table: VirTypeTable,
 }
 
 impl AnalyzedProgram {
@@ -78,6 +85,7 @@ impl AnalyzedProgram {
             Err(rc) => rc.to_codegen_shared(),
         };
         let mut module_programs = output.module_programs;
+        let mut type_table = VirTypeTable::new();
         let mut vir_functions = lower_top_level_functions(
             &program,
             &mut interner,
@@ -86,6 +94,7 @@ impl AnalyzedProgram {
             &db.types,
             &output.node_map,
             output.module_id,
+            &mut type_table,
         );
         lower_module_functions(
             &mut module_programs,
@@ -95,6 +104,7 @@ impl AnalyzedProgram {
             &output.node_map,
             &output.modules_with_errors,
             &mut vir_functions,
+            &mut type_table,
         );
         let generic_func_asts =
             build_generic_func_map(&program, &interner, &db.names, output.module_id);
@@ -108,6 +118,7 @@ impl AnalyzedProgram {
             &output.modules_with_errors,
             &mut interner,
             &mut vir_functions,
+            &mut type_table,
         );
         lower_top_level_type_methods(
             &program,
@@ -119,6 +130,7 @@ impl AnalyzedProgram {
             output.module_id,
             Some(&module_programs),
             &mut vir_functions,
+            &mut type_table,
         );
         lower_module_type_methods(
             &mut module_programs,
@@ -128,6 +140,7 @@ impl AnalyzedProgram {
             &output.node_map,
             &output.modules_with_errors,
             &mut vir_functions,
+            &mut type_table,
         );
         lower_implement_block_methods(
             &program,
@@ -138,6 +151,7 @@ impl AnalyzedProgram {
             &output.node_map,
             output.module_id,
             &mut vir_functions,
+            &mut type_table,
         );
         lower_module_implement_block_methods(
             &mut module_programs,
@@ -147,6 +161,7 @@ impl AnalyzedProgram {
             &output.node_map,
             &output.modules_with_errors,
             &mut vir_functions,
+            &mut type_table,
         );
         lower_test_scoped_type_methods(
             &program,
@@ -159,6 +174,7 @@ impl AnalyzedProgram {
             Some(&module_programs),
             output.module_id,
             &mut vir_functions,
+            &mut type_table,
         );
         // NOTE: Class method monomorphs (class_method_monomorph_cache) are NOT
         // VIR-lowered here because the NodeMap shares entries across all
@@ -178,6 +194,7 @@ impl AnalyzedProgram {
             &db.types,
             &db.entities,
             &db.names,
+            &mut type_table,
         );
         let vir_global_inits = lower_global_inits(
             &program,
@@ -186,6 +203,7 @@ impl AnalyzedProgram {
             &db.types,
             &db.entities,
             &db.names,
+            &mut type_table,
         );
         let module_vir_global_inits = lower_module_global_inits(
             &mut module_programs,
@@ -194,6 +212,7 @@ impl AnalyzedProgram {
             &db.types,
             &db.entities,
             &output.modules_with_errors,
+            &mut type_table,
         );
         Self {
             program,
@@ -211,6 +230,7 @@ impl AnalyzedProgram {
             vir_tests,
             vir_global_inits,
             module_vir_global_inits,
+            vir_type_table: type_table,
         }
     }
 
@@ -303,6 +323,7 @@ fn lower_global_inits(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     names: &NameTable,
+    type_table: &mut VirTypeTable,
 ) -> FxHashMap<Symbol, VirRef> {
     use crate::vir_lower::LoweringCtx;
     use crate::vir_lower::expr::lower_expr;
@@ -313,6 +334,7 @@ fn lower_global_inits(
         type_arena,
         entities,
         name_table: names,
+        type_table,
     };
 
     let mut map = FxHashMap::default();
@@ -342,6 +364,7 @@ fn lower_module_global_inits(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     modules_with_errors: &HashSet<String>,
+    type_table: &mut VirTypeTable,
 ) -> FxHashMap<String, FxHashMap<Symbol, VirRef>> {
     use crate::vir_lower::LoweringCtx;
     use crate::vir_lower::expr::lower_expr;
@@ -358,6 +381,7 @@ fn lower_module_global_inits(
             type_arena,
             entities,
             name_table: names,
+            type_table,
         };
 
         let mut map = FxHashMap::default();
@@ -392,6 +416,7 @@ fn lower_top_level_functions(
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
+    type_table: &mut VirTypeTable,
 ) -> Vec<VirFunction> {
     // Collect (func_decl, func_id, func_def) tuples first while interner is
     // borrowed immutably by NamerLookup, then lower with &mut interner.
@@ -438,6 +463,7 @@ fn lower_top_level_functions(
             type_arena,
             entities,
             names,
+            type_table,
         );
         vir_functions.push(vir);
     }
@@ -464,6 +490,7 @@ fn lower_monomorphized_instances(
     modules_with_errors: &HashSet<String>,
     interner: &mut Interner,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     // Iterate all monomorphized instances in the cache
     for (_, instance) in entities.monomorph_cache.instances() {
@@ -478,6 +505,7 @@ fn lower_monomorphized_instances(
                 node_map,
                 interner,
                 vir_functions,
+                type_table,
             );
             continue;
         }
@@ -492,6 +520,7 @@ fn lower_monomorphized_instances(
             node_map,
             modules_with_errors,
             vir_functions,
+            type_table,
         );
     }
 }
@@ -507,6 +536,7 @@ fn lower_single_monomorph(
     node_map: &NodeMap,
     interner: &mut Interner,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let Some(func_id) = entities.function_by_name(instance.original_name) else {
         return;
@@ -530,6 +560,7 @@ fn lower_single_monomorph(
         interner,
         entities,
         names,
+        type_table,
     );
     vir_functions.push(vir);
 }
@@ -551,6 +582,7 @@ fn lower_module_monomorph(
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let Some(func_id) = entities.function_by_name(instance.original_name) else {
         return;
@@ -611,6 +643,7 @@ fn lower_module_monomorph(
         interner,
         entities,
         names,
+        type_table,
     );
     vir_functions.push(vir);
 }
@@ -723,6 +756,7 @@ fn lower_module_functions(
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     for (module_path, (program, module_interner)) in module_programs.iter_mut() {
         if modules_with_errors.contains(module_path.as_str()) {
@@ -741,6 +775,7 @@ fn lower_module_functions(
             node_map,
             module_id,
             vir_functions,
+            type_table,
         );
     }
 }
@@ -756,6 +791,7 @@ fn lower_module_program_functions(
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let resolved: Vec<_> = {
         let namer = NamerLookup::new(names, interner);
@@ -799,6 +835,7 @@ fn lower_module_program_functions(
             type_arena,
             entities,
             names,
+            type_table,
         );
         vir_functions.push(vir);
     }
@@ -862,6 +899,7 @@ fn lower_top_level_type_methods(
     module_id: ModuleId,
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     for decl in &program.declarations {
         match decl {
@@ -880,6 +918,7 @@ fn lower_top_level_type_methods(
                     node_map,
                     module_id,
                     vir_functions,
+                    type_table,
                 );
                 // Also lower default methods from implemented interfaces
                 let direct_method_names: HashSet<String> = class
@@ -899,6 +938,7 @@ fn lower_top_level_type_methods(
                     program,
                     module_programs,
                     vir_functions,
+                    type_table,
                 );
             }
             Decl::Struct(s) => {
@@ -916,6 +956,7 @@ fn lower_top_level_type_methods(
                     node_map,
                     module_id,
                     vir_functions,
+                    type_table,
                 );
                 // Also lower default methods from implemented interfaces
                 let direct_method_names: HashSet<String> = s
@@ -935,6 +976,7 @@ fn lower_top_level_type_methods(
                     program,
                     module_programs,
                     vir_functions,
+                    type_table,
                 );
             }
             _ => {}
@@ -955,6 +997,7 @@ fn lower_type_methods(
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     // Resolve all name lookups first while interner is borrowed immutably
     let (type_def_id, resolved_methods, resolved_statics) = {
@@ -1022,6 +1065,7 @@ fn lower_type_methods(
             type_arena,
             entities,
             vir_functions,
+            type_table,
         );
     }
 
@@ -1044,6 +1088,7 @@ fn lower_type_methods(
             type_arena,
             entities,
             names,
+            type_table,
         ) {
             vir_functions.push(vir);
         }
@@ -1069,6 +1114,7 @@ fn lower_type_default_methods(
     program: &Program,
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     // Resolve type_def_id
     let Some(type_name_id) = names.name_id(module_id, &[type_name], interner) else {
@@ -1118,6 +1164,7 @@ fn lower_type_default_methods(
             type_arena,
             entities,
             names,
+            type_table,
         ) {
             vir_functions.push(vir);
         }
@@ -1137,6 +1184,7 @@ fn lower_single_method(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let arena_sig = method_def.signature_id;
     // We need the type arena to unwrap the signature, but we don't have it here.
@@ -1166,6 +1214,7 @@ fn lower_single_method(
         type_arena,
         entities,
         names,
+        type_table,
     );
     vir_functions.push(vir);
 }
@@ -1186,6 +1235,7 @@ fn lower_module_type_methods(
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     // --- Pass 1: lower direct + static methods (needs &mut interner) ---
     // Also collect (module_path, type_name, direct_method_names) for pass 2.
@@ -1222,6 +1272,7 @@ fn lower_module_type_methods(
                         node_map,
                         module_id,
                         vir_functions,
+                        type_table,
                     );
                     let direct_method_names: HashSet<String> = class
                         .methods
@@ -1249,6 +1300,7 @@ fn lower_module_type_methods(
                         node_map,
                         module_id,
                         vir_functions,
+                        type_table,
                     );
                     let direct_method_names: HashSet<String> = s
                         .methods
@@ -1293,6 +1345,7 @@ fn lower_module_type_methods(
             program,
             None, // cross-module lookup not available in this pass
             vir_functions,
+            type_table,
         );
     }
 }
@@ -1314,6 +1367,7 @@ fn lower_test_scoped_type_methods(
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
@@ -1329,6 +1383,7 @@ fn lower_test_scoped_type_methods(
                 module_programs,
                 module_id,
                 vir_functions,
+                type_table,
             );
         }
     }
@@ -1348,6 +1403,7 @@ fn lower_tests_decl_type_methods(
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let virtual_module_id = tests_virtual_modules
         .get(&tests_decl.span)
@@ -1397,6 +1453,7 @@ fn lower_tests_decl_type_methods(
                         type_arena,
                         entities,
                         names,
+                        type_table,
                     );
                     vir_functions.push(vir);
                 }
@@ -1416,6 +1473,7 @@ fn lower_tests_decl_type_methods(
                     node_map,
                     virtual_module_id,
                     vir_functions,
+                    type_table,
                 );
                 let direct_method_names: HashSet<String> = class
                     .methods
@@ -1434,6 +1492,7 @@ fn lower_tests_decl_type_methods(
                     program,
                     module_programs,
                     vir_functions,
+                    type_table,
                 );
             }
             Decl::Struct(s) => {
@@ -1451,6 +1510,7 @@ fn lower_tests_decl_type_methods(
                     node_map,
                     virtual_module_id,
                     vir_functions,
+                    type_table,
                 );
                 let direct_method_names: HashSet<String> = s
                     .methods
@@ -1469,6 +1529,7 @@ fn lower_tests_decl_type_methods(
                     program,
                     module_programs,
                     vir_functions,
+                    type_table,
                 );
             }
             Decl::Implement(impl_block) => {
@@ -1489,6 +1550,7 @@ fn lower_tests_decl_type_methods(
                         type_arena,
                         node_map,
                         vir_functions,
+                        type_table,
                     );
                     if let Some(ref statics) = impl_block.statics {
                         lower_implement_static_methods(
@@ -1500,6 +1562,7 @@ fn lower_tests_decl_type_methods(
                             type_arena,
                             node_map,
                             vir_functions,
+                            type_table,
                         );
                     }
                     lower_implement_default_methods(
@@ -1514,6 +1577,7 @@ fn lower_tests_decl_type_methods(
                         program,
                         module_programs,
                         vir_functions,
+                        type_table,
                     );
                 }
             }
@@ -1530,6 +1594,7 @@ fn lower_tests_decl_type_methods(
                     module_programs,
                     module_id,
                     vir_functions,
+                    type_table,
                 );
             }
             _ => {}
@@ -1549,12 +1614,13 @@ fn lower_test_bodies(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     names: &NameTable,
+    type_table: &mut VirTypeTable,
 ) -> Vec<VirTest> {
     let mut tests = Vec::new();
     for decl in &program.declarations {
         if let Decl::Tests(tests_decl) = decl {
             lower_tests_decl_bodies(
-                tests_decl, node_map, interner, type_arena, entities, names, &mut tests,
+                tests_decl, node_map, interner, type_arena, entities, names, &mut tests, type_table,
             );
         }
     }
@@ -1571,9 +1637,12 @@ fn lower_tests_decl_bodies(
     entities: &EntityRegistry,
     names: &NameTable,
     tests: &mut Vec<VirTest>,
+    type_table: &mut VirTypeTable,
 ) {
     for test in &tests_decl.tests {
-        let vir_body = lower_test_body(&test.body, node_map, interner, type_arena, entities, names);
+        let vir_body = lower_test_body(
+            &test.body, node_map, interner, type_arena, entities, names, type_table,
+        );
         tests.push(VirTest {
             name: test.name.clone(),
             body: vir_body,
@@ -1584,7 +1653,7 @@ fn lower_tests_decl_bodies(
     for decl in &tests_decl.decls {
         if let Decl::Tests(nested) = decl {
             lower_tests_decl_bodies(
-                nested, node_map, interner, type_arena, entities, names, tests,
+                nested, node_map, interner, type_arena, entities, names, tests, type_table,
             );
         }
     }
@@ -1606,6 +1675,7 @@ fn lower_implement_block_methods(
     node_map: &NodeMap,
     module_id: ModuleId,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     for decl in &program.declarations {
         let Decl::Implement(impl_block) = decl else {
@@ -1621,6 +1691,7 @@ fn lower_implement_block_methods(
             module_id,
             program,
             vir_functions,
+            type_table,
         );
     }
 }
@@ -1637,6 +1708,7 @@ fn lower_single_implement_block(
     module_id: ModuleId,
     program: &Program,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let Some(type_def_id) = resolve_implement_target(
         &impl_block.target_type,
@@ -1658,6 +1730,7 @@ fn lower_single_implement_block(
         type_arena,
         node_map,
         vir_functions,
+        type_table,
     );
 
     // Lower static methods
@@ -1671,6 +1744,7 @@ fn lower_single_implement_block(
             type_arena,
             node_map,
             vir_functions,
+            type_table,
         );
     }
 
@@ -1687,6 +1761,7 @@ fn lower_single_implement_block(
         program,
         None,
         vir_functions,
+        type_table,
     );
 }
 
@@ -1737,6 +1812,7 @@ fn lower_implement_direct_methods(
     type_arena: &TypeArena,
     node_map: &NodeMap,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let type_name_str = names
         .last_segment_str(entities.get_type(type_def_id).name_id)
@@ -1782,6 +1858,7 @@ fn lower_implement_direct_methods(
             type_arena,
             entities,
             names,
+            type_table,
         );
         vir_functions.push(vir);
     }
@@ -1798,6 +1875,7 @@ fn lower_implement_static_methods(
     type_arena: &TypeArena,
     node_map: &NodeMap,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let type_name_str = names
         .last_segment_str(entities.get_type(type_def_id).name_id)
@@ -1842,6 +1920,7 @@ fn lower_implement_static_methods(
             type_arena,
             entities,
             names,
+            type_table,
         ) {
             vir_functions.push(vir);
         }
@@ -1867,6 +1946,7 @@ fn lower_implement_default_methods(
     program: &Program,
     module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     let type_name_str = names
         .last_segment_str(entities.get_type(type_def_id).name_id)
@@ -1919,6 +1999,7 @@ fn lower_implement_default_methods(
             type_arena,
             entities,
             names,
+            type_table,
         ) {
             vir_functions.push(vir);
         }
@@ -2026,6 +2107,7 @@ fn lower_module_implement_block_methods(
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
+    type_table: &mut VirTypeTable,
 ) {
     // --- Pass 1: lower direct + static methods, collect default method work items ---
     struct ImplDefaultWork {
@@ -2068,6 +2150,7 @@ fn lower_module_implement_block_methods(
                 type_arena,
                 node_map,
                 vir_functions,
+                type_table,
             );
 
             if let Some(ref statics) = impl_block.statics {
@@ -2080,6 +2163,7 @@ fn lower_module_implement_block_methods(
                     type_arena,
                     node_map,
                     vir_functions,
+                    type_table,
                 );
             }
 
@@ -2123,6 +2207,7 @@ fn lower_module_implement_block_methods(
             program,
             Some(module_programs),
             vir_functions,
+            type_table,
         );
     }
 }

@@ -4,7 +4,7 @@
 
 use vole_frontend::PatternKind;
 use vole_frontend::ast::{LetInit, LetStmt, Stmt};
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::TypeId;
 use vole_sema::IterableKind;
 
 use vole_vir::expr::VirExpr;
@@ -47,11 +47,12 @@ pub(crate) fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
                 .get_type(let_tuple.init.id)
                 .unwrap_or(TypeId::UNKNOWN);
             let pattern = lower_destructure_pattern(&let_tuple.pattern, init_ty, ctx);
+            let vir_init_ty = ctx.translate(init_ty);
             VirStmt::LetTuple {
                 pattern,
                 value,
                 init_ty,
-                vir_init_ty: VirTypeId::INVALID,
+                vir_init_ty,
             }
         }
     }
@@ -112,12 +113,13 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
         .unwrap_or(TypeId::UNKNOWN);
     let ty = declared_ty.unwrap_or(expr_ty);
 
+    let vir_ty = ctx.translate(ty);
     VirStmt::Let {
         name: let_stmt.name,
         value,
         mutable: let_stmt.mutable,
         ty,
-        vir_ty: VirTypeId::INVALID,
+        vir_ty,
     }
 }
 
@@ -138,28 +140,28 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
             let union_storage = ctx.node_map.get_union_storage_kind(for_stmt.iterable.id);
             VirIterKind::Array {
                 elem_type,
-                vir_elem_type: VirTypeId::INVALID,
+                vir_elem_type: ctx.translate(elem_type),
                 union_storage,
             }
         }
         Some(IterableKind::String) => VirIterKind::String,
         Some(IterableKind::IteratorInterface { elem_type }) => VirIterKind::IteratorInterface {
             elem_type,
-            vir_elem_type: VirTypeId::INVALID,
+            vir_elem_type: ctx.translate(elem_type),
         },
         Some(IterableKind::CustomIterator { elem_type }) => VirIterKind::CustomIterator {
             elem_type,
-            vir_elem_type: VirTypeId::INVALID,
+            vir_elem_type: ctx.translate(elem_type),
         },
         Some(IterableKind::CustomIterable { elem_type }) => VirIterKind::CustomIterable {
             elem_type,
-            vir_elem_type: VirTypeId::INVALID,
+            vir_elem_type: ctx.translate(elem_type),
         },
         None => {
             // Fallback for error types — treat as array of i64.
             VirIterKind::Array {
                 elem_type: TypeId::I64,
-                vir_elem_type: VirTypeId::INVALID,
+                vir_elem_type: ctx.translate(TypeId::I64),
                 union_storage: None,
             }
         }
@@ -175,10 +177,11 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
         | VirIterKind::CustomIterable { elem_type, .. } => elem_type,
     };
 
+    let vir_var_type = ctx.translate(var_type);
     VirStmt::For(VirFor {
         var_name: for_stmt.var_name,
         var_type,
-        vir_var_type: VirTypeId::INVALID,
+        vir_var_type,
         iterable,
         body,
         kind,
@@ -196,13 +199,14 @@ fn lower_if_stmt(if_stmt: &vole_frontend::ast::IfStmt, ctx: &mut LoweringCtx<'_>
         .else_branch
         .as_ref()
         .map(|block| lower_stmts(&block.stmts, ctx));
+    let vir_ty = ctx.translate(TypeId::VOID);
     VirStmt::Expr {
         value: Box::new(VirExpr::If {
             cond,
             then_body,
             else_body,
             ty: TypeId::VOID,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty,
         }),
     }
 }
@@ -225,14 +229,17 @@ fn lower_if_stmt(if_stmt: &vole_frontend::ast::IfStmt, ctx: &mut LoweringCtx<'_>
 fn lower_destructure_pattern(
     pattern: &vole_frontend::Pattern,
     ty: TypeId,
-    ctx: &LoweringCtx<'_>,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirDestructurePattern {
     match &pattern.kind {
-        PatternKind::Identifier { name } => VirDestructurePattern::Bind {
-            name: *name,
-            ty,
-            vir_ty: VirTypeId::INVALID,
-        },
+        PatternKind::Identifier { name } => {
+            let vir_ty = ctx.translate(ty);
+            VirDestructurePattern::Bind {
+                name: *name,
+                ty,
+                vir_ty,
+            }
+        }
         PatternKind::Wildcard => VirDestructurePattern::Wildcard,
         PatternKind::Tuple { elements } => lower_destructure_tuple(elements, ty, ctx),
         PatternKind::Record { fields, .. } => lower_destructure_record(fields, ty, ctx),
@@ -249,7 +256,7 @@ fn lower_destructure_pattern(
 fn lower_destructure_tuple(
     elements: &[vole_frontend::Pattern],
     ty: TypeId,
-    ctx: &LoweringCtx<'_>,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirDestructurePattern {
     // Try tuple first.
     if let Some(elem_types) = ctx.type_arena.unwrap_tuple(ty).cloned() {
@@ -258,10 +265,11 @@ fn lower_destructure_tuple(
             .enumerate()
             .map(|(i, pat)| {
                 let elem_ty = elem_types.get(i).copied().unwrap_or(TypeId::UNKNOWN);
+                let vir_ty = ctx.translate(elem_ty);
                 VirDestructureElement {
                     pattern: lower_destructure_pattern(pat, elem_ty, ctx),
                     ty: elem_ty,
-                    vir_ty: VirTypeId::INVALID,
+                    vir_ty,
                 }
             })
             .collect();
@@ -273,30 +281,32 @@ fn lower_destructure_tuple(
 
     // Try fixed array.
     if let Some((elem_ty, _len)) = ctx.type_arena.unwrap_fixed_array(ty) {
+        let vir_elem_ty = ctx.translate(elem_ty);
         let elems = elements
             .iter()
             .map(|pat| VirDestructureElement {
                 pattern: lower_destructure_pattern(pat, elem_ty, ctx),
                 ty: elem_ty,
-                vir_ty: VirTypeId::INVALID,
+                vir_ty: vir_elem_ty,
             })
             .collect();
         return VirDestructurePattern::Tuple {
             elements: elems,
             kind: DestructureTupleKind::FixedArray {
                 elem_ty,
-                vir_elem_ty: VirTypeId::INVALID,
+                vir_elem_ty,
             },
         };
     }
 
     // Fallback: unknown element types.
+    let vir_unknown = ctx.translate(TypeId::UNKNOWN);
     let elems = elements
         .iter()
         .map(|pat| VirDestructureElement {
             pattern: lower_destructure_pattern(pat, TypeId::UNKNOWN, ctx),
             ty: TypeId::UNKNOWN,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: vir_unknown,
         })
         .collect();
     VirDestructurePattern::Tuple {
@@ -312,7 +322,7 @@ fn lower_destructure_tuple(
 fn lower_destructure_record(
     fields: &[vole_frontend::ast::RecordFieldPattern],
     ty: TypeId,
-    ctx: &LoweringCtx<'_>,
+    ctx: &mut LoweringCtx<'_>,
 ) -> VirDestructurePattern {
     // Module destructuring: `let { A, B } = import "mod"`
     if let Some(module_info) = ctx.type_arena.unwrap_module(ty) {
@@ -328,11 +338,12 @@ fn lower_destructure_record(
                         None
                     }
                 })?;
+                let vir_export_ty = ctx.translate(export_ty);
                 Some(VirModuleBinding {
                     export_name: f.field_name,
                     binding: f.binding,
                     export_ty,
-                    vir_export_ty: VirTypeId::INVALID,
+                    vir_export_ty,
                 })
             })
             .collect();
@@ -355,20 +366,22 @@ fn lower_destructure_record(
             let (slot, field_ty) = type_def_id
                 .and_then(|def_id| find_destructure_field(def_id, f.field_name, ctx))
                 .unwrap_or((0, TypeId::UNKNOWN));
+            let vir_ty = ctx.translate(field_ty);
             VirDestructureField {
                 field_name: f.field_name,
                 binding: f.binding,
                 slot,
                 ty: field_ty,
-                vir_ty: VirTypeId::INVALID,
+                vir_ty,
             }
         })
         .collect();
 
+    let vir_source_ty = ctx.translate(ty);
     VirDestructurePattern::Record {
         fields: vir_fields,
         source_ty: ty,
-        vir_source_ty: VirTypeId::INVALID,
+        vir_source_ty,
         is_struct,
     }
 }

@@ -21,9 +21,11 @@ use vole_sema::node_map::NodeMap;
 use vole_sema::{EntityRegistry, TypeArena};
 
 use vole_vir::func::{VirBody, VirFunction};
+use vole_vir::type_table::VirTypeTable;
 
 use self::expr::lower_expr;
 use self::stmt::lower_stmt;
+use self::type_translate::translate_type_id;
 
 /// Shared lowering context threaded through all lowering helpers.
 ///
@@ -33,12 +35,21 @@ use self::stmt::lower_stmt;
 /// - `type_arena`: type resolution (unwrap_union, unwrap_fallible, etc.)
 /// - `entities`: entity lookups (field info, error types, etc.)
 /// - `name_table`: name resolution (last_segment_str for error tag matching)
+/// - `type_table`: VIR type interning table (populated during lowering)
 pub(crate) struct LoweringCtx<'a> {
     pub node_map: &'a NodeMap,
     pub interner: &'a mut Interner,
     pub type_arena: &'a TypeArena,
     pub entities: &'a EntityRegistry,
     pub name_table: &'a NameTable,
+    pub type_table: &'a mut VirTypeTable,
+}
+
+impl LoweringCtx<'_> {
+    /// Translate a sema `TypeId` to a `VirTypeId`, interning into the type table.
+    pub(crate) fn translate(&mut self, type_id: TypeId) -> VirTypeId {
+        translate_type_id(self.type_table, type_id, self.type_arena)
+    }
 }
 
 /// Lower a single function declaration into a `VirFunction`.
@@ -64,6 +75,7 @@ pub fn lower_function(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     name_table: &NameTable,
+    type_table: &mut VirTypeTable,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -71,17 +83,20 @@ pub fn lower_function(
         type_arena,
         entities,
         name_table,
+        type_table,
     };
+    let params = param_types
+        .iter()
+        .map(|(s, t)| (*s, *t, ctx.translate(*t)))
+        .collect();
+    let vir_return_type = ctx.translate(return_type);
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: func_id,
         name,
-        params: param_types
-            .iter()
-            .map(|(s, t)| (*s, *t, VirTypeId::INVALID))
-            .collect(),
+        params,
         return_type,
-        vir_return_type: VirTypeId::INVALID,
+        vir_return_type,
         body,
         mangled_name_id: None,
         method_id: None,
@@ -111,6 +126,7 @@ pub fn lower_monomorphized_function(
     interner: &mut Interner,
     entities: &EntityRegistry,
     name_table: &NameTable,
+    type_table: &mut VirTypeTable,
 ) -> VirFunction {
     debug_assert_concrete_types(param_types, return_type, type_arena, &name);
     let mut vir = lower_function(
@@ -124,6 +140,7 @@ pub fn lower_monomorphized_function(
         type_arena,
         entities,
         name_table,
+        type_table,
     );
     vir.mangled_name_id = Some(mangled_name_id);
     vir
@@ -147,6 +164,7 @@ pub fn lower_method(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     name_table: &NameTable,
+    type_table: &mut VirTypeTable,
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -154,17 +172,20 @@ pub fn lower_method(
         type_arena,
         entities,
         name_table,
+        type_table,
     };
+    let params = param_types
+        .iter()
+        .map(|(s, t)| (*s, *t, ctx.translate(*t)))
+        .collect();
+    let vir_return_type = ctx.translate(return_type);
     let body = lower_func_body(&func.body, &mut ctx);
     VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
-        params: param_types
-            .iter()
-            .map(|(s, t)| (*s, *t, VirTypeId::INVALID))
-            .collect(),
+        params,
         return_type,
-        vir_return_type: VirTypeId::INVALID,
+        vir_return_type,
         body,
         mangled_name_id: None,
         method_id: Some(method_id),
@@ -187,6 +208,7 @@ pub fn lower_interface_method(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     name_table: &NameTable,
+    type_table: &mut VirTypeTable,
 ) -> Option<VirFunction> {
     let body_ast = method.body.as_ref()?;
     let mut ctx = LoweringCtx {
@@ -195,17 +217,20 @@ pub fn lower_interface_method(
         type_arena,
         entities,
         name_table,
+        type_table,
     };
+    let params = param_types
+        .iter()
+        .map(|(s, t)| (*s, *t, ctx.translate(*t)))
+        .collect();
+    let vir_return_type = ctx.translate(return_type);
     let body = lower_func_body(body_ast, &mut ctx);
     Some(VirFunction {
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
-        params: param_types
-            .iter()
-            .map(|(s, t)| (*s, *t, VirTypeId::INVALID))
-            .collect(),
+        params,
         return_type,
-        vir_return_type: VirTypeId::INVALID,
+        vir_return_type,
         body,
         mangled_name_id: None,
         method_id: Some(method_id),
@@ -249,6 +274,7 @@ pub fn lower_test_body(
     type_arena: &TypeArena,
     entities: &EntityRegistry,
     name_table: &NameTable,
+    type_table: &mut VirTypeTable,
 ) -> VirBody {
     let mut ctx = LoweringCtx {
         node_map,
@@ -256,6 +282,7 @@ pub fn lower_test_body(
         type_arena,
         entities,
         name_table,
+        type_table,
     };
     lower_func_body(body, &mut ctx)
 }
