@@ -3,8 +3,8 @@
 // Tests for Identifier → LocalLoad and Assign → LocalStore lowering.
 
 use super::*;
-use crate::expr::VirExpr;
-use crate::lower::expr::lower_expr;
+use crate::vir_lower::expr::lower_expr;
+use vole_vir::expr::VirExpr;
 
 // -----------------------------------------------------------------------
 // Identifier → LocalLoad
@@ -229,8 +229,8 @@ fn lower_assign_discard_evaluates_inner_expr() {
 
 #[test]
 fn lower_assign_field_becomes_field_store() {
-    use crate::expr::FieldStorage;
     use vole_frontend::ast::{AssignExpr, AssignTarget};
+    use vole_vir::expr::FieldStorage;
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let type_arena = test_type_arena();

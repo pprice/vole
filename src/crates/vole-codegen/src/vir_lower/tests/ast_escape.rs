@@ -5,8 +5,8 @@
 // ArrayLiteral, RepeatLiteral, and Call VIR lowering.
 
 use super::*;
-use crate::expr::VirExpr;
-use crate::lower::expr::lower_expr;
+use crate::vir_lower::expr::lower_expr;
+use vole_vir::expr::VirExpr;
 
 // -----------------------------------------------------------------------
 // Proper VIR lowering: Unreachable, Import, TypeLiteral, Range
@@ -297,8 +297,8 @@ fn lower_expr_assign_variable_becomes_local_store() {
 
 #[test]
 fn lower_expr_compound_assign_variable_desugars_to_store() {
-    use crate::expr::VirBinOp;
     use vole_frontend::ast::{AssignTarget, CompoundAssignExpr, CompoundOp};
+    use vole_vir::expr::VirBinOp;
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let type_arena = test_type_arena();
@@ -342,8 +342,8 @@ fn lower_expr_compound_assign_variable_desugars_to_store() {
 
 #[test]
 fn lower_expr_compound_assign_index_desugars_to_index_store() {
-    use crate::expr::VirBinOp;
     use vole_frontend::ast::{AssignTarget, CompoundAssignExpr, CompoundOp};
+    use vole_vir::expr::VirBinOp;
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let type_arena = test_type_arena();
@@ -457,8 +457,8 @@ fn lower_expr_repeat_literal_becomes_vir() {
 
 #[test]
 fn lower_expr_call_becomes_vir_call() {
-    use crate::CallTarget;
     use vole_frontend::ast::{CallArg, CallExpr};
+    use vole_vir::CallTarget;
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let type_arena = test_type_arena();
@@ -502,8 +502,8 @@ fn lower_expr_call_becomes_vir_call() {
 
 #[test]
 fn lower_expr_call_no_args_becomes_vir_call() {
-    use crate::CallTarget;
     use vole_frontend::ast::CallExpr;
+    use vole_vir::CallTarget;
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let type_arena = test_type_arena();

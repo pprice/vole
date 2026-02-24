@@ -1,4 +1,4 @@
-// printer.rs
+// vir_printer.rs
 //
 // Pretty-printing for VIR functions, statements, and expressions.
 //
@@ -13,14 +13,14 @@ use vole_sema::entity_registry::EntityRegistry;
 use vole_sema::type_arena::TypeArena;
 use vole_sema::type_display::display_type_id_short;
 
-use crate::calls::{CallTarget, NativeAbi};
-use crate::expr::{
+use vole_vir::calls::{CallTarget, NativeAbi};
+use vole_vir::expr::{
     AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirExpr, VirMetaKind,
     VirPattern, VirStringPart, VirUnOp,
 };
-use crate::func::{VirBody, VirFunction};
-use crate::refs::VirRef;
-use crate::stmt::{AssignTarget, VirIterKind, VirStmt};
+use vole_vir::func::{VirBody, VirFunction};
+use vole_vir::refs::VirRef;
+use vole_vir::stmt::{AssignTarget, VirIterKind, VirStmt};
 
 /// Writes to a String, ignoring the infallible Result.
 macro_rules! w {
@@ -189,7 +189,7 @@ impl<'a> VirPrinter<'a> {
         }
     }
 
-    fn fmt_for(&self, vir_for: &crate::stmt::VirFor, out: &mut String, ind: usize) {
+    fn fmt_for(&self, vir_for: &vole_vir::stmt::VirFor, out: &mut String, ind: usize) {
         let kind_label = match &vir_for.kind {
             VirIterKind::Range => "range".to_string(),
             VirIterKind::Array { elem_type, .. } => format!("array<{}>", self.ty(*elem_type)),
@@ -596,7 +596,7 @@ impl<'a> VirPrinter<'a> {
     fn fmt_match(
         &self,
         scrutinee: &VirRef,
-        arms: &[crate::expr::VirMatchArm],
+        arms: &[vole_vir::expr::VirMatchArm],
         ty: TypeId,
         out: &mut String,
         ind: usize,
@@ -645,7 +645,7 @@ impl<'a> VirPrinter<'a> {
         &self,
         params: &[Symbol],
         body: &VirBody,
-        captures: &[crate::expr::VirCapture],
+        captures: &[vole_vir::expr::VirCapture],
         ty: TypeId,
         out: &mut String,
         ind: usize,
@@ -826,8 +826,8 @@ impl<'a> VirPrinter<'a> {
         }
     }
 
-    fn fmt_error_pattern(&self, kind: &crate::expr::VirErrorPatternKind, out: &mut String) {
-        use crate::expr::VirErrorPatternKind;
+    fn fmt_error_pattern(&self, kind: &vole_vir::expr::VirErrorPatternKind, out: &mut String) {
+        use vole_vir::expr::VirErrorPatternKind;
         match kind {
             VirErrorPatternKind::Bare => w!(out, "error"),
             VirErrorPatternKind::CatchAll { name, error_ty } => {
@@ -860,10 +860,10 @@ impl<'a> VirPrinter<'a> {
 
     fn fmt_destructure_pattern(
         &self,
-        pattern: &crate::stmt::VirDestructurePattern,
+        pattern: &vole_vir::stmt::VirDestructurePattern,
         out: &mut String,
     ) {
-        use crate::stmt::VirDestructurePattern;
+        use vole_vir::stmt::VirDestructurePattern;
         match pattern {
             VirDestructurePattern::Bind { name, ty } => {
                 w!(out, "{}: {}", self.sym(*name), self.ty(*ty));

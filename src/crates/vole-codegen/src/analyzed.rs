@@ -10,9 +10,11 @@ use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLook
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
-use vole_vir::{
-    VirBody, VirFunction, VirTest, lower_function, lower_interface_method, lower_method,
-    lower_monomorphized_function, lower_test_body,
+use vole_vir::{VirBody, VirFunction, VirTest};
+
+use crate::vir_lower::{
+    lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
+    lower_test_body,
 };
 
 /// Result of parsing and analyzing a source file.

@@ -4,8 +4,8 @@
 // grouping, and unknown-kind fallback.
 
 use super::*;
-use crate::expr::VirExpr;
-use crate::lower::expr::lower_expr;
+use crate::vir_lower::expr::lower_expr;
+use vole_vir::expr::VirExpr;
 
 #[test]
 fn lower_expr_bool_literal() {

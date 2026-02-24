@@ -6,12 +6,12 @@ use std::process::ExitCode;
 use std::rc::Rc;
 
 use crate::cli::{ColorMode, InspectType, expand_paths_flat};
+use crate::codegen::VirPrinter;
 use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::commands::common::{PipelineOptions, compile_source, render_pipeline_error};
 use crate::commands::mir_format::format_mir;
 use crate::frontend::{AstPrinter, ModuleId, Parser};
 use crate::sema::ModuleCache;
-use crate::vir::VirPrinter;
 
 /// Inspect compilation output for the given files
 pub fn inspect_files(

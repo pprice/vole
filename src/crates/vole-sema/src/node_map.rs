@@ -23,29 +23,13 @@ use crate::type_arena::TypeId;
 use vole_frontend::{Capture, LambdaPurity, NodeId, Symbol};
 use vole_identity::{ModuleId, NameId, TypeDefId};
 
+// Re-export annotation types from vole-identity so existing consumers
+// that import from `vole_sema::node_map` or `vole_sema::*` continue to work.
+pub use vole_identity::{StringConversion, UnionStorageKind};
+
 // ---------------------------------------------------------------------------
 // Supporting types (previously in expression_data.rs)
 // ---------------------------------------------------------------------------
-
-/// Union storage strategy for array elements, annotated by sema.
-///
-/// When an array's element type is a union, codegen must choose between
-/// inline storage (tag + payload in each TaggedValue slot) and heap-boxed
-/// storage (pointer to a heap-allocated union buffer).
-///
-/// Inline is preferred when each variant maps to a unique runtime tag.
-/// Heap is required when two variants would collide (e.g. `nil | i64`
-/// both map to RuntimeTypeId::I64, making round-trip decode ambiguous).
-///
-/// Sema computes this once during type resolution; codegen reads it
-/// to avoid re-detecting union storage decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnionStorageKind {
-    /// Each variant has a unique runtime tag — store inline as (tag, payload).
-    Inline,
-    /// Tag collision — store as a heap-boxed union buffer pointer.
-    Heap,
-}
 
 /// Classification of a for-loop's iterable, annotated by sema.
 ///
@@ -65,47 +49,6 @@ pub enum IterableKind {
     CustomIterator { elem_type: TypeId },
     /// Class/struct implementing `Iterable<T>` — codegen calls `.iter()` first
     CustomIterable { elem_type: TypeId },
-}
-
-/// String conversion annotation for interpolation parts, annotated by sema.
-///
-/// Codegen reads this to apply the correct conversion without type inspection.
-/// For union/optional types, per-variant conversion info is carried so codegen
-/// can generate branching code without re-detecting types.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StringConversion {
-    /// Already a string — no conversion needed.
-    Identity,
-    /// i64 (or smaller integer widths that sext to i64) → string
-    I64ToString,
-    /// i128 → string
-    I128ToString,
-    /// f32 → string
-    F32ToString,
-    /// f64 → string
-    F64ToString,
-    /// f128 → string (passed as i128 bits)
-    F128ToString,
-    /// bool → string
-    BoolToString,
-    /// nil → string (always "nil")
-    NilToString,
-    /// Array → string
-    ArrayToString,
-    /// Optional (union with nil) → branches on tag, converts inner value.
-    /// `nil_index` is the tag index for nil in the union variants.
-    /// `variants` is the full variant type list for codegen layout.
-    /// `inner_conversion` is the conversion for the non-nil variant.
-    OptionalToString {
-        nil_index: usize,
-        variants: Vec<TypeId>,
-        inner_conversion: Box<StringConversion>,
-    },
-    /// General union → branches on tag, converts each variant.
-    /// Each entry is `(variant_type_id, conversion)`.
-    UnionToString {
-        variants: Vec<(TypeId, StringConversion)>,
-    },
 }
 
 /// Interface coercion annotation, stored by sema at sites where a value

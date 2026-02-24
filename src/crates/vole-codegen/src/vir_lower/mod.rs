@@ -1,4 +1,4 @@
-// lower/mod.rs
+// vir_lower/mod.rs
 //
 // AST-to-VIR lowering.
 //
@@ -8,19 +8,18 @@
 // codegen dispatch (`MethodCall`, `OptionalMethodCall`).  All pattern kinds
 // (including Record) are fully lowered to concrete `VirPattern` variants.
 
-mod expr;
-mod stmt;
+pub(crate) mod expr;
+pub(crate) mod stmt;
 
 #[cfg(test)]
 mod tests;
 
-use vole_frontend::Interner;
 use vole_frontend::ast::{FuncBody, FuncDecl, InterfaceMethod};
-use vole_identity::{FunctionId, MethodId, NameId, NameTable, Symbol, TypeId};
+use vole_identity::{FunctionId, Interner, MethodId, NameId, NameTable, Symbol, TypeId};
 use vole_sema::node_map::NodeMap;
 use vole_sema::{EntityRegistry, TypeArena};
 
-use crate::func::{VirBody, VirFunction};
+use vole_vir::func::{VirBody, VirFunction};
 
 use self::expr::lower_expr;
 use self::stmt::lower_stmt;

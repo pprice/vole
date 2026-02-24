@@ -8,14 +8,15 @@
 //! All expression and statement kinds are fully lowered to typed VIR nodes.
 //! A few variants (`MethodCall`, `OptionalMethodCall`) still carry AST
 //! fragments for codegen dispatch, but there are no generic escape hatches.
+//!
+//! AST-to-VIR lowering lives in `vole-codegen::vir_lower` (moved out of this
+//! crate to break the `vole-frontend` dependency).
 
 pub mod builder;
 pub mod calls;
 pub mod expr;
 pub mod func;
 pub mod intrinsics;
-pub mod lower;
-pub mod printer;
 pub mod refs;
 pub mod stmt;
 pub mod types;
@@ -33,11 +34,6 @@ pub use expr::{
 };
 pub use func::{VirBody, VirFunction, VirTest};
 pub use intrinsics::IntrinsicKey;
-pub use lower::{
-    lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
-    lower_test_body,
-};
-pub use printer::VirPrinter;
 pub use refs::VirRef;
 pub use stmt::{
     AssignTarget, DestructureTupleKind, VirDestructureElement, VirDestructureField,

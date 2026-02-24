@@ -2,8 +2,9 @@
 //
 // VIR expression nodes and their supporting types.
 
-use vole_identity::{NameId, NodeId, Symbol, TypeDefId, TypeId};
-use vole_sema::{StringConversion, UnionStorageKind};
+use vole_identity::{
+    NameId, NodeId, StringConversion, Symbol, TypeDefId, TypeId, UnionStorageKind,
+};
 
 use crate::calls::CallTarget;
 use crate::func::VirBody;

@@ -2,8 +2,7 @@
 //
 // VIR statement nodes.
 
-use vole_identity::{ModuleId, Symbol, TypeId};
-use vole_sema::UnionStorageKind;
+use vole_identity::{ModuleId, Symbol, TypeId, UnionStorageKind};
 
 use crate::expr::FieldStorage;
 use crate::func::VirBody;

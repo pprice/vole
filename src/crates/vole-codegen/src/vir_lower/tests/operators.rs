@@ -4,9 +4,9 @@
 // string concat, operator mapping coverage.
 
 use super::*;
-use crate::expr::{VirBinOp, VirExpr, VirUnOp};
-use crate::lower::expr::{lower_expr, map_binary_op, map_unary_op};
+use crate::vir_lower::expr::{lower_expr, map_binary_op, map_unary_op};
 use vole_frontend::ast::{BinaryExpr, BinaryOp, UnaryExpr, UnaryOp};
+use vole_vir::expr::{VirBinOp, VirExpr, VirUnOp};
 
 fn make_binary_expr(left: Expr, op: BinaryOp, right: Expr) -> Expr {
     Expr {

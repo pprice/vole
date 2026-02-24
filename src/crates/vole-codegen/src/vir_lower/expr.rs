@@ -1,4 +1,4 @@
-// lower/expr.rs
+// vir_lower/expr.rs
 //
 // Expression lowering: AST `Expr` → VIR `VirExpr`.
 //
@@ -9,15 +9,15 @@ use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
 use vole_identity::TypeId;
 use vole_sema::{StringConversion, TypeArena};
 
-use crate::calls::CallTarget;
-use crate::expr::{
+use vole_vir::calls::CallTarget;
+use vole_vir::expr::{
     AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirErrorFieldBinding,
     VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern, VirRecordFieldBinding,
     VirStringPart, VirTupleBinding, VirUnOp,
 };
-use crate::func::VirBody;
-use crate::refs::VirRef;
-use crate::stmt::VirStmt;
+use vole_vir::func::VirBody;
+use vole_vir::refs::VirRef;
+use vole_vir::stmt::VirStmt;
 
 use super::LoweringCtx;
 use super::lower_func_body;

@@ -1,4 +1,4 @@
-// lower/tests/mod.rs
+// vir_lower/tests/mod.rs
 //
 // Test modules for AST-to-VIR lowering.
 
@@ -9,9 +9,10 @@ mod literals;
 mod operators;
 mod variables;
 
-use vole_frontend::Interner;
 use vole_frontend::ast::{Block, Expr, ExprKind, FuncBody, FuncDecl, Stmt};
-use vole_identity::{FunctionId, ModuleId, NameId, NameTable, NodeId, Span, Symbol, TypeId};
+use vole_identity::{
+    FunctionId, Interner, ModuleId, NameId, NameTable, NodeId, Span, Symbol, TypeId,
+};
 use vole_sema::node_map::NodeMap;
 use vole_sema::{EntityRegistry, TypeArena};
 

@@ -7,11 +7,13 @@ use std::hash::{BuildHasher, Hash, Hasher};
 
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
+mod annotations;
 mod intern;
 mod primitive_type;
 mod span;
 mod symbol;
 
+pub use annotations::{StringConversion, UnionStorageKind};
 pub use intern::Interner;
 pub use primitive_type::PrimitiveType;
 pub use span::Span;

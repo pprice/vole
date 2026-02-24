@@ -4,10 +4,10 @@
 // and While, If, Break, Continue, Return statements.
 
 use super::*;
-use crate::expr::VirExpr;
-use crate::lower::expr::lower_expr;
-use crate::lower::stmt::lower_stmt;
-use crate::stmt::VirStmt;
+use crate::vir_lower::expr::lower_expr;
+use crate::vir_lower::stmt::lower_stmt;
+use vole_vir::expr::VirExpr;
+use vole_vir::stmt::VirStmt;
 
 // -----------------------------------------------------------------------
 // If expression lowering
@@ -946,7 +946,7 @@ fn make_wildcard_pattern() -> vole_frontend::Pattern {
 
 #[test]
 fn lower_tuple_pattern_with_bindings() {
-    use crate::expr::VirPattern;
+    use vole_vir::expr::VirPattern;
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
     let mut type_arena = test_type_arena();
@@ -1031,7 +1031,7 @@ fn lower_tuple_pattern_with_bindings() {
 
 #[test]
 fn lower_tuple_pattern_with_wildcard() {
-    use crate::expr::VirPattern;
+    use vole_vir::expr::VirPattern;
     let mut node_map = empty_node_map();
     let mut interner = test_interner();
     let mut type_arena = test_type_arena();
@@ -1101,7 +1101,7 @@ fn lower_tuple_pattern_with_wildcard() {
 
 #[test]
 fn lower_tuple_pattern_unknown_scrutinee_type() {
-    use crate::expr::VirPattern;
+    use vole_vir::expr::VirPattern;
     let node_map = empty_node_map();
     let mut interner = test_interner();
     let type_arena = test_type_arena();

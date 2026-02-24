@@ -2,7 +2,7 @@
 //
 // VIR function and body representations.
 
-use vole_identity::{FunctionId, MethodId, NameId, Symbol, TypeId};
+use vole_identity::{FunctionId, MethodId, NameId, Span, Symbol, TypeId};
 
 use crate::refs::VirRef;
 use crate::stmt::VirStmt;
@@ -52,5 +52,5 @@ pub struct VirTest {
     /// The test body.
     pub body: VirBody,
     /// Source span for span-based lookup in codegen.
-    pub span: vole_frontend::Span,
+    pub span: Span,
 }

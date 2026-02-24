@@ -1,4 +1,4 @@
-// lower/stmt.rs
+// vir_lower/stmt.rs
 //
 // Statement lowering: AST `Stmt` → VIR `VirStmt`.
 
@@ -7,8 +7,8 @@ use vole_frontend::ast::{LetInit, LetStmt, Stmt};
 use vole_identity::TypeId;
 use vole_sema::IterableKind;
 
-use crate::expr::VirExpr;
-use crate::stmt::{
+use vole_vir::expr::VirExpr;
+use vole_vir::stmt::{
     DestructureTupleKind, VirDestructureElement, VirDestructureField, VirDestructurePattern,
     VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };

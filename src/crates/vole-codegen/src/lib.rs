@@ -33,6 +33,8 @@ mod for_loop;
 mod interfaces;
 mod reflection;
 mod vir_for_loop;
+pub(crate) mod vir_lower;
+pub mod vir_printer;
 
 pub use callable_registry::{
     CallableBackendPreference, CallableKey, CallableResolutionError, ResolvedCallable,
@@ -50,6 +52,15 @@ pub use errors::{CodegenError, CodegenResult};
 
 // Analysis types
 pub use analyzed::AnalyzedProgram;
+
+// VIR lowering (AST → VIR conversion)
+pub use vir_lower::{
+    lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
+    lower_test_body,
+};
+
+// VIR printer
+pub use vir_printer::VirPrinter;
 
 // Loop analysis (re-exported from control_flow)
 pub use control_flow::{

@@ -4,10 +4,10 @@
 // lower_method, lower_stmts.
 
 use super::*;
-use crate::expr::VirExpr;
-use crate::lower::{lower_function, lower_monomorphized_function, lower_stmts};
-use crate::stmt::VirStmt;
+use crate::vir_lower::{lower_function, lower_monomorphized_function, lower_stmts};
 use vole_sema::TypeArena;
+use vole_vir::expr::VirExpr;
+use vole_vir::stmt::VirStmt;
 
 #[test]
 fn lower_empty_block_function() {
@@ -252,7 +252,7 @@ fn lower_monomorphized_rejects_type_param_in_params() {
     let node_map = empty_node_map();
     let mut interner = test_interner();
     // Create a type parameter — this should trigger the assertion
-    let mut names = vole_identity::NameTable::new();
+    let mut names = NameTable::new();
     let t_name_id = names.intern_raw(names.main_module(), &["T"]);
     let type_param = arena.type_param(t_name_id);
     let params = vec![(Symbol::UNKNOWN, type_param)];
@@ -281,7 +281,7 @@ fn lower_monomorphized_rejects_type_param_in_return() {
     let func = make_block_func(vec![]);
     let node_map = empty_node_map();
     let mut interner = test_interner();
-    let mut names = vole_identity::NameTable::new();
+    let mut names = NameTable::new();
     let t_name_id = names.intern_raw(names.main_module(), &["T"]);
     let type_param = arena.type_param(t_name_id);
 
@@ -323,7 +323,7 @@ fn lower_stmt_expr_produces_vir_expr() {
         expr: make_bool_expr(),
         span: dummy_span(),
     });
-    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &mut ctx);
+    let vir_stmt = crate::vir_lower::stmt::lower_stmt(&stmt, &mut ctx);
 
     match &vir_stmt {
         VirStmt::Expr { value } => match value.as_ref() {
@@ -357,7 +357,7 @@ fn lower_stmt_let_becomes_vir_let() {
         init: LetInit::Expr(make_int_expr(42)),
         span: dummy_span(),
     });
-    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &mut ctx);
+    let vir_stmt = crate::vir_lower::stmt::lower_stmt(&stmt, &mut ctx);
 
     match &vir_stmt {
         VirStmt::Let {
@@ -404,7 +404,7 @@ fn lower_stmt_let_type_alias_becomes_noop() {
         }),
         span: dummy_span(),
     });
-    let vir_stmt = crate::lower::stmt::lower_stmt(&stmt, &mut ctx);
+    let vir_stmt = crate::vir_lower::stmt::lower_stmt(&stmt, &mut ctx);
 
     match &vir_stmt {
         VirStmt::Noop => {}
