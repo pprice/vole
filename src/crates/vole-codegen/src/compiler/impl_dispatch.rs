@@ -11,9 +11,7 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use super::common::{
-    FunctionCompileConfig, compile_function_inner_with_params, compile_function_inner_with_vir,
-};
+use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::{ModuleCompileInfo, TypeDeclInfo, TypeMethodsData};
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
@@ -387,26 +385,16 @@ impl Compiler<'_> {
                 self_binding,
                 method_return_type_id,
             );
-            if let Some(vir) = vir_func {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir.body,
-                    None,
-                    None,
-                )?;
-            } else {
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    None,
-                    None,
-                )?;
-            }
+            let vir = vir_func.expect("VIR must be available for implement block method");
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir.body,
+                None,
+                None,
+            )?;
         }
 
         // Define the function
@@ -504,26 +492,16 @@ impl Compiler<'_> {
 
             let config =
                 FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
-            if let Some(vir) = vir_func {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir.body,
-                    None,
-                    None,
-                )?;
-            } else {
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    None,
-                    None,
-                )?;
-            }
+            let vir = vir_func.expect("VIR must be available for default method");
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir.body,
+                None,
+                None,
+            )?;
         }
 
         // Define the function
@@ -632,26 +610,16 @@ impl Compiler<'_> {
 
             let config =
                 FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
-            if let Some(vir) = vir_func {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir.body,
-                    module_id,
-                    None,
-                )?;
-            } else {
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    module_id,
-                    None,
-                )?;
-            }
+            let vir = vir_func.expect("VIR must be available for module default method");
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir.body,
+                module_id,
+                None,
+            )?;
         }
 
         // Define the function
@@ -758,26 +726,16 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
-                if let Some(vir) = vir_func {
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir.body,
-                        None,
-                        None,
-                    )?;
-                } else {
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        None,
-                        None,
-                    )?;
-                }
+                let vir = vir_func.expect("VIR must be available for static method");
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    None,
+                    None,
+                )?;
             }
 
             // Define the function
@@ -975,26 +933,16 @@ impl Compiler<'_> {
                     self_binding,
                     return_type_id,
                 );
-                if let Some(vir) = vir_func {
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir.body,
-                        Some(module_info.module_id),
-                        None,
-                    )?;
-                } else {
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        Some(module_info.module_id),
-                        None,
-                    )?;
-                }
+                let vir = vir_func.expect("VIR must be available for module method");
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    Some(module_info.module_id),
+                    None,
+                )?;
             }
 
             // Define the function
@@ -1107,26 +1055,16 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, return_type_id);
-                if let Some(vir) = vir_func {
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir.body,
-                        Some(module_info.module_id),
-                        None,
-                    )?;
-                } else {
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        Some(module_info.module_id),
-                        None,
-                    )?;
-                }
+                let vir = vir_func.expect("VIR must be available for module static method");
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    Some(module_info.module_id),
+                    None,
+                )?;
             }
 
             // Define the function

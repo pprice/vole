@@ -13,7 +13,9 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
+use super::common::{
+    FunctionCompileConfig, compile_function_inner_with_params, compile_function_inner_with_vir,
+};
 use super::impls::primitive_type_id_by_name;
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
@@ -971,18 +973,32 @@ impl Compiler<'_> {
                     // see the return of self.iter() as Iterator<T> (abstract interface type)
                     // and use vtable dispatch for the chained .take(n) call, causing a
                     // segfault when the actual runtime value is a raw *mut RcIterator.
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        iface_module_id,
-                        if type_param_subs.is_empty() {
-                            None
-                        } else {
-                            Some(&type_param_subs)
-                        },
-                    )?;
+                    let subs = if type_param_subs.is_empty() {
+                        None
+                    } else {
+                        Some(&type_param_subs)
+                    };
+                    let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+                    if let Some(vir) = vir_func {
+                        compile_function_inner_with_vir(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            &vir.body,
+                            iface_module_id,
+                            subs,
+                        )?;
+                    } else {
+                        compile_function_inner_with_params(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            iface_module_id,
+                            subs,
+                        )?;
+                    }
                 }
                 self.finalize_function(func_id)?;
             }
@@ -1300,18 +1316,32 @@ impl Compiler<'_> {
                     // see the return of self.iter() as Iterator<T> (abstract interface type)
                     // and use vtable dispatch for the chained .take(n) call, causing a
                     // segfault when the actual runtime value is a raw *mut RcIterator.
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        iface_module_id,
-                        if type_param_subs.is_empty() {
-                            None
-                        } else {
-                            Some(&type_param_subs)
-                        },
-                    )?;
+                    let subs = if type_param_subs.is_empty() {
+                        None
+                    } else {
+                        Some(&type_param_subs)
+                    };
+                    let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+                    if let Some(vir) = vir_func {
+                        compile_function_inner_with_vir(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            &vir.body,
+                            iface_module_id,
+                            subs,
+                        )?;
+                    } else {
+                        compile_function_inner_with_params(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            iface_module_id,
+                            subs,
+                        )?;
+                    }
                 }
                 self.finalize_function(func_id)?;
             }
@@ -1416,6 +1446,9 @@ impl Compiler<'_> {
                 .map(|(_, ret, _)| ret)
         };
 
+        // Check if a VIR function was lowered for this method
+        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+
         let no_global_inits = FxHashMap::default();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -1435,14 +1468,26 @@ impl Compiler<'_> {
                 self_binding,
                 method_return_type_id,
             );
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                Some(module_id),
-                None,
-            )?;
+            if let Some(vir) = vir_func {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    Some(module_id),
+                    None,
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    Some(module_id),
+                    None,
+                )?;
+            }
         }
 
         self.finalize_function(func_id)?;
@@ -1518,6 +1563,9 @@ impl Compiler<'_> {
             let source_file_ptr = self.source_file_ptr();
             let resolved_module_id = module_id;
 
+            // Check if a VIR function was lowered for this static method
+            let vir_func = self.analyzed.get_vir_method(method_id);
+
             // Create function builder and compile
             let no_global_inits = FxHashMap::default();
             let mut builder_ctx = FunctionBuilderContext::new();
@@ -1538,14 +1586,26 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, return_type_id);
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    resolved_module_id,
-                    None,
-                )?;
+                if let Some(vir) = vir_func {
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir.body,
+                        resolved_module_id,
+                        None,
+                    )?;
+                } else {
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        resolved_module_id,
+                        None,
+                    )?;
+                }
             }
 
             // Define the function
@@ -1635,6 +1695,9 @@ impl Compiler<'_> {
                 .map(|(_, ret, _)| ret)
         };
 
+        // Check if a VIR function was lowered for this method
+        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
+
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -1655,14 +1718,26 @@ impl Compiler<'_> {
                 self_binding,
                 method_return_type_id,
             );
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                None,
-                None,
-            )?;
+            if let Some(vir) = vir_func {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    None,
+                    None,
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    None,
+                    None,
+                )?;
+            }
         }
 
         // Define the function (skip if already defined by an overlapping implement block)
@@ -1957,14 +2032,27 @@ impl Compiler<'_> {
                         Some(return_type_id),
                     )
                     .with_iterable_default_body();
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        iface_module_id,
-                        Some(&concrete_subs),
-                    )?;
+                    let vir_func = self.analyzed.get_vir_method(*semantic_method_id);
+                    if let Some(vir) = vir_func {
+                        compile_function_inner_with_vir(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            &vir.body,
+                            iface_module_id,
+                            Some(&concrete_subs),
+                        )?;
+                    } else {
+                        compile_function_inner_with_params(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            iface_module_id,
+                            Some(&concrete_subs),
+                        )?;
+                    }
                 }
                 self.finalize_function(func_id)?;
             }

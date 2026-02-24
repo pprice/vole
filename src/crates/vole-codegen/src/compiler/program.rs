@@ -861,26 +861,16 @@ impl Compiler<'_> {
             );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
-            if let Some(vir) = vir_func {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir.body,
-                    Some(module_id),
-                    None,
-                )?;
-            } else {
-                compile_function_inner_with_params(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    Some(module_id),
-                    None,
-                )?;
-            }
+            let vir = vir_func.expect("VIR must be available for module function");
+            compile_function_inner_with_vir(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                &vir.body,
+                Some(module_id),
+                None,
+            )?;
         }
 
         // Define the function

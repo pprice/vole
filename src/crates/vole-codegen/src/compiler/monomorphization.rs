@@ -307,11 +307,8 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Check if a VIR function was lowered for this instance
-        let vir_body = self.analyzed.get_vir_monomorph(instance.mangled_name);
-        if vir_body.is_some() {
-            tracing::debug!(name = %mangled_name, "compiling monomorph via VIR path");
-        }
+        // Get the VIR function lowered for this instance
+        let vir_func = self.analyzed.get_vir_monomorph(instance.mangled_name);
 
         let source_file_ptr = self.source_file_ptr();
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -325,17 +322,19 @@ impl Compiler<'_> {
             );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
-            if let Some(vir_func) = vir_body {
+            if let Some(vir) = vir_func {
+                tracing::debug!(name = %mangled_name, "compiling monomorph via VIR path");
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
                     &env,
                     config,
-                    &vir_func.body,
+                    &vir.body,
                     None,
                     Some(&instance.substitutions),
                 )?;
             } else {
+                tracing::debug!(name = %mangled_name, "compiling monomorph via AST fallback");
                 compile_function_inner_with_params(
                     builder,
                     &mut codegen_ctx,

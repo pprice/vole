@@ -6,13 +6,13 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use vole_frontend::{Decl, Interner, Program, Span};
-use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup};
+use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
 use vole_vir::{
-    VirBody, VirFunction, VirTest, lower_function, lower_method, lower_monomorphized_function,
-    lower_test_body,
+    VirBody, VirFunction, VirTest, lower_function, lower_interface_method, lower_method,
+    lower_monomorphized_function, lower_test_body,
 };
 
 /// Result of parsing and analyzing a source file.
@@ -103,6 +103,7 @@ impl AnalyzedProgram {
             &db.types,
             &output.node_map,
             output.module_id,
+            Some(&module_programs),
             &mut vir_functions,
         );
         lower_module_type_methods(
@@ -112,6 +113,36 @@ impl AnalyzedProgram {
             &db.types,
             &output.node_map,
             &output.modules_with_errors,
+            &mut vir_functions,
+        );
+        lower_implement_block_methods(
+            &program,
+            &mut interner,
+            &db.names,
+            &db.entities,
+            &db.types,
+            &output.node_map,
+            output.module_id,
+            &mut vir_functions,
+        );
+        lower_module_implement_block_methods(
+            &mut module_programs,
+            &db.names,
+            &db.entities,
+            &db.types,
+            &output.node_map,
+            &output.modules_with_errors,
+            &mut vir_functions,
+        );
+        lower_test_scoped_type_methods(
+            &program,
+            &mut interner,
+            &db.names,
+            &db.entities,
+            &db.types,
+            &output.node_map,
+            &output.tests_virtual_modules,
+            Some(&module_programs),
             &mut vir_functions,
         );
         let vir_monomorph_map = build_vir_monomorph_map(&vir_functions);
@@ -525,6 +556,7 @@ fn lower_top_level_type_methods(
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
+    module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
     vir_functions: &mut Vec<VirFunction>,
 ) {
     for decl in &program.declarations {
@@ -545,6 +577,25 @@ fn lower_top_level_type_methods(
                     module_id,
                     vir_functions,
                 );
+                // Also lower default methods from implemented interfaces
+                let direct_method_names: HashSet<String> = class
+                    .methods
+                    .iter()
+                    .map(|m| interner.resolve(m.name).to_string())
+                    .collect();
+                lower_type_default_methods(
+                    &direct_method_names,
+                    class.name,
+                    interner,
+                    names,
+                    entities,
+                    type_arena,
+                    node_map,
+                    module_id,
+                    program,
+                    module_programs,
+                    vir_functions,
+                );
             }
             Decl::Struct(s) => {
                 if !s.type_params.is_empty() {
@@ -560,6 +611,25 @@ fn lower_top_level_type_methods(
                     type_arena,
                     node_map,
                     module_id,
+                    vir_functions,
+                );
+                // Also lower default methods from implemented interfaces
+                let direct_method_names: HashSet<String> = s
+                    .methods
+                    .iter()
+                    .map(|m| interner.resolve(m.name).to_string())
+                    .collect();
+                lower_type_default_methods(
+                    &direct_method_names,
+                    s.name,
+                    interner,
+                    names,
+                    entities,
+                    type_arena,
+                    node_map,
+                    module_id,
+                    program,
+                    module_programs,
                     vir_functions,
                 );
             }
@@ -659,9 +729,83 @@ fn lower_type_methods(
             .iter()
             .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
             .collect();
-        if let Some(vir) = vole_vir::lower_interface_method(
+        if let Some(vir) = lower_interface_method(
             method,
             mid,
+            display_name,
+            &param_types,
+            method_def.signature_id,
+            node_map,
+            interner,
+            type_arena,
+            entities,
+            names,
+        ) {
+            vir_functions.push(vir);
+        }
+    }
+}
+
+/// Lower default methods from implemented interfaces for a class or struct.
+///
+/// Finds interface default methods inherited by `type_name` and lowers them to VIR.
+/// Direct methods (explicitly defined on the type) are skipped since they override
+/// the default. This covers default methods from the type's own `implements` clause,
+/// as opposed to `lower_implement_default_methods` which covers `extend T with I` blocks.
+#[allow(clippy::too_many_arguments)]
+fn lower_type_default_methods(
+    direct_method_names: &HashSet<String>,
+    type_name: vole_frontend::Symbol,
+    interner: &mut Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    module_id: ModuleId,
+    program: &Program,
+    module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    // Resolve type_def_id
+    let Some(type_name_id) = names.name_id(module_id, &[type_name], interner) else {
+        return;
+    };
+    let Some(type_def_id) = entities.type_by_name(type_name_id) else {
+        return;
+    };
+
+    let type_name_str = interner.resolve(type_name).to_string();
+
+    // Find default methods from implemented interfaces
+    let default_methods =
+        collect_default_method_ids(type_def_id, entities, names, direct_method_names);
+
+    for (impl_method_id, method_name_str, interface_tdef_id) in default_methods {
+        let iface_name_str = names
+            .last_segment_str(entities.get_type(interface_tdef_id).name_id)
+            .unwrap_or_default();
+        let iface_method = find_interface_method_ast(
+            &iface_name_str,
+            &method_name_str,
+            program,
+            interner,
+            module_programs,
+        );
+        let Some(iface_method) = iface_method else {
+            continue;
+        };
+
+        let method_def = entities.get_method(impl_method_id);
+        let display_name = format!("{}::{}", type_name_str, method_name_str);
+        let param_types: Vec<_> = iface_method
+            .params
+            .iter()
+            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+            .collect();
+
+        if let Some(vir) = lower_interface_method(
+            iface_method,
+            impl_method_id,
             display_name,
             &param_types,
             method_def.signature_id,
@@ -723,6 +867,12 @@ fn lower_single_method(
 }
 
 /// Lower non-generic type methods from imported modules to VIR.
+///
+/// Two passes: first lowers direct instance + static methods, then lowers
+/// default methods from implemented interfaces.  The second pass needs
+/// immutable access to `module_programs` for cross-module interface AST
+/// lookup, so we collect per-type work items during the first (mutable) pass
+/// and process them in a second (immutable) pass.
 #[allow(clippy::too_many_arguments)]
 fn lower_module_type_methods(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
@@ -733,6 +883,15 @@ fn lower_module_type_methods(
     modules_with_errors: &HashSet<String>,
     vir_functions: &mut Vec<VirFunction>,
 ) {
+    // --- Pass 1: lower direct + static methods (needs &mut interner) ---
+    // Also collect (module_path, type_name, direct_method_names) for pass 2.
+    struct DefaultMethodWork {
+        module_path: String,
+        type_name: vole_frontend::Symbol,
+        direct_method_names: HashSet<String>,
+    }
+    let mut default_method_work: Vec<DefaultMethodWork> = Vec::new();
+
     for (module_path, (program, module_interner)) in module_programs.iter_mut() {
         if modules_with_errors.contains(module_path.as_str()) {
             continue;
@@ -760,6 +919,16 @@ fn lower_module_type_methods(
                         module_id,
                         vir_functions,
                     );
+                    let direct_method_names: HashSet<String> = class
+                        .methods
+                        .iter()
+                        .map(|m| interner.resolve(m.name).to_string())
+                        .collect();
+                    default_method_work.push(DefaultMethodWork {
+                        module_path: module_path.clone(),
+                        type_name: class.name,
+                        direct_method_names,
+                    });
                 }
                 Decl::Struct(s) => {
                     if !s.type_params.is_empty() {
@@ -777,9 +946,284 @@ fn lower_module_type_methods(
                         module_id,
                         vir_functions,
                     );
+                    let direct_method_names: HashSet<String> = s
+                        .methods
+                        .iter()
+                        .map(|m| interner.resolve(m.name).to_string())
+                        .collect();
+                    default_method_work.push(DefaultMethodWork {
+                        module_path: module_path.clone(),
+                        type_name: s.name,
+                        direct_method_names,
+                    });
                 }
                 _ => {}
             }
+        }
+    }
+
+    // --- Pass 2: lower default methods from interfaces (needs shared module_programs) ---
+    for work in default_method_work {
+        let Some((program, module_interner)) = module_programs.get_mut(&work.module_path) else {
+            continue;
+        };
+        let module_id = names
+            .module_id_if_known(&work.module_path)
+            .unwrap_or_else(|| names.main_module());
+        let interner = Rc::make_mut(module_interner);
+
+        // For module types, pass only the module's own program for interface lookup.
+        // Cross-module interface lookup is not available here (borrow limitation),
+        // but module types typically implement interfaces defined in the same module
+        // or in the stdlib (which is also in module_programs).  The implement-block
+        // lowering handles cross-module cases separately.
+        lower_type_default_methods(
+            &work.direct_method_names,
+            work.type_name,
+            interner,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            module_id,
+            program,
+            None, // cross-module lookup not available in this pass
+            vir_functions,
+        );
+    }
+}
+
+/// Lower type methods for classes/structs declared inside test blocks.
+///
+/// Test blocks can contain `Decl::Class` and `Decl::Struct` declarations that
+/// are scoped to a virtual module.  This function recursively walks `Decl::Tests`
+/// blocks and lowers their class/struct methods (direct + default) to VIR.
+#[allow(clippy::too_many_arguments)]
+fn lower_test_scoped_type_methods(
+    program: &Program,
+    interner: &mut Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
+    module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    for decl in &program.declarations {
+        if let Decl::Tests(tests_decl) = decl {
+            lower_tests_decl_type_methods(
+                tests_decl,
+                program,
+                interner,
+                names,
+                entities,
+                type_arena,
+                node_map,
+                tests_virtual_modules,
+                module_programs,
+                vir_functions,
+            );
+        }
+    }
+}
+
+/// Recursively lower type methods from a single `TestsDecl`.
+#[allow(clippy::too_many_arguments)]
+fn lower_tests_decl_type_methods(
+    tests_decl: &vole_frontend::ast::TestsDecl,
+    program: &Program,
+    interner: &mut Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
+    module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let virtual_module_id = tests_virtual_modules
+        .get(&tests_decl.span)
+        .copied()
+        .unwrap_or_else(|| names.main_module());
+
+    // Test-scoped functions are registered under the *main* module (not the virtual
+    // test module), so use main_module for function name resolution.
+    let main_module_id = names.main_module();
+
+    for inner_decl in &tests_decl.decls {
+        match inner_decl {
+            Decl::Function(func) => {
+                if !func.type_params.is_empty() {
+                    continue;
+                }
+                // Resolve the function in the main module (test-scoped functions use
+                // program_module for name resolution, same as top-level functions)
+                let func_id_and_def = {
+                    let namer = NamerLookup::new(names, interner);
+                    let name_id = namer.function(main_module_id, func.name);
+                    name_id.and_then(|nid| {
+                        let fid = entities.function_by_name(nid)?;
+                        let fdef = entities.get_function(fid);
+                        if fdef.generic_info.is_some() {
+                            return None;
+                        }
+                        Some((fid, fdef))
+                    })
+                };
+                if let Some((func_id, func_def)) = func_id_and_def {
+                    let param_types: Vec<_> = func
+                        .params
+                        .iter()
+                        .zip(func_def.signature.params_id.iter())
+                        .map(|(p, &ty)| (p.name, ty))
+                        .collect();
+                    let vir = lower_function(
+                        func,
+                        func_id,
+                        interner.resolve(func.name).to_string(),
+                        &param_types,
+                        func_def.signature.return_type_id,
+                        node_map,
+                        interner,
+                        type_arena,
+                        entities,
+                        names,
+                    );
+                    vir_functions.push(vir);
+                }
+            }
+            Decl::Class(class) => {
+                if !class.type_params.is_empty() {
+                    continue;
+                }
+                lower_type_methods(
+                    &class.methods,
+                    class.statics.as_ref(),
+                    class.name,
+                    interner,
+                    names,
+                    entities,
+                    type_arena,
+                    node_map,
+                    virtual_module_id,
+                    vir_functions,
+                );
+                let direct_method_names: HashSet<String> = class
+                    .methods
+                    .iter()
+                    .map(|m| interner.resolve(m.name).to_string())
+                    .collect();
+                lower_type_default_methods(
+                    &direct_method_names,
+                    class.name,
+                    interner,
+                    names,
+                    entities,
+                    type_arena,
+                    node_map,
+                    virtual_module_id,
+                    program,
+                    module_programs,
+                    vir_functions,
+                );
+            }
+            Decl::Struct(s) => {
+                if !s.type_params.is_empty() {
+                    continue;
+                }
+                lower_type_methods(
+                    &s.methods,
+                    s.statics.as_ref(),
+                    s.name,
+                    interner,
+                    names,
+                    entities,
+                    type_arena,
+                    node_map,
+                    virtual_module_id,
+                    vir_functions,
+                );
+                let direct_method_names: HashSet<String> = s
+                    .methods
+                    .iter()
+                    .map(|m| interner.resolve(m.name).to_string())
+                    .collect();
+                lower_type_default_methods(
+                    &direct_method_names,
+                    s.name,
+                    interner,
+                    names,
+                    entities,
+                    type_arena,
+                    node_map,
+                    virtual_module_id,
+                    program,
+                    module_programs,
+                    vir_functions,
+                );
+            }
+            Decl::Implement(impl_block) => {
+                let type_def_id = resolve_implement_target(
+                    &impl_block.target_type,
+                    interner,
+                    names,
+                    entities,
+                    virtual_module_id,
+                );
+                if let Some(type_def_id) = type_def_id {
+                    lower_implement_direct_methods(
+                        &impl_block.methods,
+                        type_def_id,
+                        interner,
+                        names,
+                        entities,
+                        type_arena,
+                        node_map,
+                        vir_functions,
+                    );
+                    if let Some(ref statics) = impl_block.statics {
+                        lower_implement_static_methods(
+                            statics,
+                            type_def_id,
+                            interner,
+                            names,
+                            entities,
+                            type_arena,
+                            node_map,
+                            vir_functions,
+                        );
+                    }
+                    lower_implement_default_methods(
+                        impl_block,
+                        type_def_id,
+                        interner,
+                        names,
+                        entities,
+                        type_arena,
+                        node_map,
+                        virtual_module_id,
+                        program,
+                        module_programs,
+                        vir_functions,
+                    );
+                }
+            }
+            Decl::Tests(nested) => {
+                lower_tests_decl_type_methods(
+                    nested,
+                    program,
+                    interner,
+                    names,
+                    entities,
+                    type_arena,
+                    node_map,
+                    tests_virtual_modules,
+                    module_programs,
+                    vir_functions,
+                );
+            }
+            _ => {}
         }
     }
 }
@@ -834,5 +1278,535 @@ fn lower_tests_decl_bodies(
                 nested, node_map, interner, type_arena, entities, names, tests,
             );
         }
+    }
+}
+
+/// Lower implement block methods (direct + statics) to VIR.
+///
+/// Iterates `Decl::Implement` blocks in the main program, resolves each
+/// method's `MethodId` from the entity registry, and lowers the body.
+/// Default interface methods (not in the implement block AST) are handled
+/// by [`lower_implement_default_methods`].
+#[allow(clippy::too_many_arguments)]
+fn lower_implement_block_methods(
+    program: &Program,
+    interner: &mut Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    module_id: ModuleId,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    for decl in &program.declarations {
+        let Decl::Implement(impl_block) = decl else {
+            continue;
+        };
+        lower_single_implement_block(
+            impl_block,
+            interner,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            module_id,
+            program,
+            vir_functions,
+        );
+    }
+}
+
+/// Lower a single implement block's direct methods and statics to VIR.
+#[allow(clippy::too_many_arguments)]
+fn lower_single_implement_block(
+    impl_block: &vole_frontend::ast::ImplementBlock,
+    interner: &mut Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    module_id: ModuleId,
+    program: &Program,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let Some(type_def_id) = resolve_implement_target(
+        &impl_block.target_type,
+        interner,
+        names,
+        entities,
+        module_id,
+    ) else {
+        return;
+    };
+
+    // Lower direct instance methods
+    lower_implement_direct_methods(
+        &impl_block.methods,
+        type_def_id,
+        interner,
+        names,
+        entities,
+        type_arena,
+        node_map,
+        vir_functions,
+    );
+
+    // Lower static methods
+    if let Some(ref statics) = impl_block.statics {
+        lower_implement_static_methods(
+            statics,
+            type_def_id,
+            interner,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            vir_functions,
+        );
+    }
+
+    // Lower interface default methods (inherited, not overridden)
+    lower_implement_default_methods(
+        impl_block,
+        type_def_id,
+        interner,
+        names,
+        entities,
+        type_arena,
+        node_map,
+        module_id,
+        program,
+        None,
+        vir_functions,
+    );
+}
+
+/// Resolve the target type of an implement block to a `TypeDefId`.
+///
+/// Handles `Named`, `Generic`, `Primitive`, `Handle`, and `Array` target types.
+fn resolve_implement_target(
+    target_type: &vole_frontend::TypeExpr,
+    interner: &Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    module_id: ModuleId,
+) -> Option<TypeDefId> {
+    use vole_frontend::TypeExprKind;
+    match &target_type.kind {
+        TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
+            let name_id = names.name_id(module_id, &[*sym], interner)?;
+            entities.type_by_name(name_id)
+        }
+        TypeExprKind::Primitive(p) => {
+            let prim_type = vole_sema::PrimitiveType::from_ast(*p);
+            let prim_name = prim_type.name();
+            entities.type_by_short_name(prim_name, names)
+        }
+        TypeExprKind::Handle => entities.type_by_short_name("handle", names),
+        TypeExprKind::Array(_) => entities
+            .array_name_id()
+            .and_then(|n| entities.type_by_name(n)),
+        _ => None,
+    }
+}
+
+/// Lower direct instance methods from an implement block to VIR.
+#[allow(clippy::too_many_arguments)]
+fn lower_implement_direct_methods(
+    methods: &[vole_frontend::FuncDecl],
+    type_def_id: TypeDefId,
+    interner: &mut Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let type_name_str = names
+        .last_segment_str(entities.get_type(type_def_id).name_id)
+        .unwrap_or_default();
+
+    // Resolve all methods first while interner is borrowed immutably
+    let resolved: Vec<_> = {
+        let namer = NamerLookup::new(names, interner);
+        methods
+            .iter()
+            .filter_map(|method| {
+                if !method.type_params.is_empty() {
+                    return None;
+                }
+                let method_name_id = namer.method(method.name)?;
+                let mid = entities.find_method_on_type(type_def_id, method_name_id)?;
+                let method_def = entities.get_method(mid);
+                if !method_def.method_type_params.is_empty() {
+                    return None;
+                }
+                Some((method, mid, method_def))
+            })
+            .collect()
+    };
+
+    for (method, mid, method_def) in resolved {
+        let method_name_str = interner.resolve(method.name);
+        let display_name = format!("{}::{}", type_name_str, method_name_str);
+        let param_types: Vec<_> = method
+            .params
+            .iter()
+            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+            .collect();
+
+        let vir = lower_method(
+            method,
+            mid,
+            display_name,
+            &param_types,
+            method_def.signature_id,
+            node_map,
+            interner,
+            type_arena,
+            entities,
+            names,
+        );
+        vir_functions.push(vir);
+    }
+}
+
+/// Lower static methods from an implement block's statics section to VIR.
+#[allow(clippy::too_many_arguments)]
+fn lower_implement_static_methods(
+    statics: &vole_frontend::ast::StaticsBlock,
+    type_def_id: TypeDefId,
+    interner: &mut Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let type_name_str = names
+        .last_segment_str(entities.get_type(type_def_id).name_id)
+        .unwrap_or_default();
+
+    let resolved: Vec<_> = {
+        let namer = NamerLookup::new(names, interner);
+        statics
+            .methods
+            .iter()
+            .filter_map(|method| {
+                if method.body.is_none() || !method.type_params.is_empty() {
+                    return None;
+                }
+                let method_name_id = namer.method(method.name)?;
+                let mid = entities.find_static_method_on_type(type_def_id, method_name_id)?;
+                let method_def = entities.get_method(mid);
+                if !method_def.method_type_params.is_empty() {
+                    return None;
+                }
+                Some((method, mid, method_def))
+            })
+            .collect()
+    };
+
+    for (method, mid, method_def) in resolved {
+        let method_name_str = interner.resolve(method.name);
+        let display_name = format!("{}::{}", type_name_str, method_name_str);
+        let param_types: Vec<_> = method
+            .params
+            .iter()
+            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+            .collect();
+        if let Some(vir) = lower_interface_method(
+            method,
+            mid,
+            display_name,
+            &param_types,
+            method_def.signature_id,
+            node_map,
+            interner,
+            type_arena,
+            entities,
+            names,
+        ) {
+            vir_functions.push(vir);
+        }
+    }
+}
+
+/// Lower interface default methods for an implement block.
+///
+/// Finds default methods from implemented interfaces that are NOT overridden
+/// by the implement block's direct methods. For each such default method,
+/// locates the interface's AST body and lowers it with the implementing
+/// type's MethodId.
+#[allow(clippy::too_many_arguments)]
+fn lower_implement_default_methods(
+    impl_block: &vole_frontend::ast::ImplementBlock,
+    type_def_id: TypeDefId,
+    interner: &mut Interner,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    _module_id: ModuleId,
+    program: &Program,
+    module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    let type_name_str = names
+        .last_segment_str(entities.get_type(type_def_id).name_id)
+        .unwrap_or_default();
+
+    // Collect direct method names to skip
+    let direct_method_names: HashSet<String> = impl_block
+        .methods
+        .iter()
+        .map(|m| interner.resolve(m.name).to_string())
+        .collect();
+
+    // Find default methods from implemented interfaces
+    let default_methods =
+        collect_default_method_ids(type_def_id, entities, names, &direct_method_names);
+
+    for (impl_method_id, method_name_str, interface_tdef_id) in default_methods {
+        // Find the interface AST method body
+        let iface_name_str = names
+            .last_segment_str(entities.get_type(interface_tdef_id).name_id)
+            .unwrap_or_default();
+        let iface_method = find_interface_method_ast(
+            &iface_name_str,
+            &method_name_str,
+            program,
+            interner,
+            module_programs,
+        );
+        let Some(iface_method) = iface_method else {
+            continue;
+        };
+
+        let method_def = entities.get_method(impl_method_id);
+        let display_name = format!("{}::{}", type_name_str, method_name_str);
+        let param_types: Vec<_> = iface_method
+            .params
+            .iter()
+            .map(|p| (p.name, vole_identity::TypeId::UNKNOWN))
+            .collect();
+
+        // Use lower_interface_method since the AST is an InterfaceMethod
+        if let Some(vir) = lower_interface_method(
+            iface_method,
+            impl_method_id,
+            display_name,
+            &param_types,
+            method_def.signature_id,
+            node_map,
+            interner,
+            type_arena,
+            entities,
+            names,
+        ) {
+            vir_functions.push(vir);
+        }
+    }
+}
+
+/// Collect interface default method IDs for a type, skipping overridden ones.
+///
+/// Returns `(impl_method_id, method_name_str, interface_tdef_id)` tuples.
+fn collect_default_method_ids(
+    type_def_id: TypeDefId,
+    entities: &EntityRegistry,
+    names: &NameTable,
+    direct_method_names: &HashSet<String>,
+) -> Vec<(MethodId, String, TypeDefId)> {
+    let mut results = Vec::new();
+    for interface_tdef_id in entities.get_implemented_interfaces(type_def_id) {
+        // Note: we intentionally do NOT skip interfaces with abstract type params
+        // (e.g. Iterable<T> on [T]). The VIR body is the same regardless of T —
+        // substitutions are applied at compile time by passing `concrete_subs`.
+        // Skipping abstract params would leave array Iterable default methods
+        // without VIR bodies.
+
+        for iface_method_id in entities.methods_on_type(interface_tdef_id) {
+            let method_def = entities.get_method(iface_method_id);
+            if !method_def.has_default || method_def.external_binding.is_some() {
+                continue;
+            }
+            let method_name_str = names
+                .last_segment_str(method_def.name_id)
+                .unwrap_or_default();
+            if direct_method_names.contains(&method_name_str) {
+                continue;
+            }
+            if let Some(impl_method_id) =
+                entities.find_method_on_type(type_def_id, method_def.name_id)
+            {
+                results.push((impl_method_id, method_name_str, interface_tdef_id));
+            }
+        }
+    }
+    results
+}
+
+/// Find an interface method's AST node by interface and method name.
+///
+/// Searches the main program and optionally module programs for the
+/// interface declaration, then finds the default method with a body.
+fn find_interface_method_ast<'a>(
+    interface_name: &str,
+    method_name: &str,
+    program: &'a Program,
+    interner: &Interner,
+    module_programs: Option<&'a FxHashMap<String, (Program, Rc<Interner>)>>,
+) -> Option<&'a vole_frontend::ast::InterfaceMethod> {
+    // Search main program using the main interner
+    for decl in &program.declarations {
+        if let Decl::Interface(iface) = decl {
+            if interner.resolve(iface.name) != interface_name {
+                continue;
+            }
+            for method in &iface.methods {
+                if interner.resolve(method.name) == method_name && method.body.is_some() {
+                    return Some(method);
+                }
+            }
+        }
+    }
+
+    // Search module programs using their interners
+    if let Some(module_programs) = module_programs {
+        for (program, module_interner) in module_programs.values() {
+            for decl in &program.declarations {
+                if let Decl::Interface(iface) = decl {
+                    if module_interner.resolve(iface.name) != interface_name {
+                        continue;
+                    }
+                    for method in &iface.methods {
+                        if module_interner.resolve(method.name) == method_name
+                            && method.body.is_some()
+                        {
+                            return Some(method);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Lower implement block methods from imported modules to VIR.
+///
+/// Two passes: first lowers direct instance + static methods, then lowers
+/// default methods from implemented interfaces.  The second pass needs
+/// immutable access to `module_programs` for cross-module interface AST
+/// lookup, so we collect per-block work items during the first pass.
+#[allow(clippy::too_many_arguments)]
+fn lower_module_implement_block_methods(
+    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+    node_map: &NodeMap,
+    modules_with_errors: &HashSet<String>,
+    vir_functions: &mut Vec<VirFunction>,
+) {
+    // --- Pass 1: lower direct + static methods, collect default method work items ---
+    struct ImplDefaultWork {
+        module_path: String,
+        /// Index of the Decl::Implement within the module's declarations.
+        impl_decl_index: usize,
+        type_def_id: TypeDefId,
+    }
+    let mut default_work: Vec<ImplDefaultWork> = Vec::new();
+
+    for (module_path, (program, module_interner)) in module_programs.iter_mut() {
+        if modules_with_errors.contains(module_path.as_str()) {
+            continue;
+        }
+        let module_id = names
+            .module_id_if_known(module_path)
+            .unwrap_or_else(|| names.main_module());
+        let interner = Rc::make_mut(module_interner);
+
+        for (decl_idx, decl) in program.declarations.iter().enumerate() {
+            let Decl::Implement(impl_block) = decl else {
+                continue;
+            };
+            let Some(type_def_id) = resolve_implement_target(
+                &impl_block.target_type,
+                interner,
+                names,
+                entities,
+                module_id,
+            ) else {
+                continue;
+            };
+
+            lower_implement_direct_methods(
+                &impl_block.methods,
+                type_def_id,
+                interner,
+                names,
+                entities,
+                type_arena,
+                node_map,
+                vir_functions,
+            );
+
+            if let Some(ref statics) = impl_block.statics {
+                lower_implement_static_methods(
+                    statics,
+                    type_def_id,
+                    interner,
+                    names,
+                    entities,
+                    type_arena,
+                    node_map,
+                    vir_functions,
+                );
+            }
+
+            default_work.push(ImplDefaultWork {
+                module_path: module_path.clone(),
+                impl_decl_index: decl_idx,
+                type_def_id,
+            });
+        }
+    }
+
+    // --- Pass 2: lower default methods from interfaces ---
+    // We need both &mut Interner (for the current module) and &module_programs
+    // (for cross-module interface AST lookup). Clone the Rc<Interner> so we can
+    // borrow module_programs immutably while mutating our own copy.
+    for work in default_work {
+        let module_id = names
+            .module_id_if_known(&work.module_path)
+            .unwrap_or_else(|| names.main_module());
+
+        // Clone the Rc<Interner> so we can mutate it independently
+        let Some((program, module_interner_rc)) = module_programs.get(&work.module_path) else {
+            continue;
+        };
+        let mut interner_clone = (**module_interner_rc).clone();
+
+        // Re-extract the implement block from the known index
+        let Decl::Implement(impl_block) = &program.declarations[work.impl_decl_index] else {
+            continue;
+        };
+
+        lower_implement_default_methods(
+            impl_block,
+            work.type_def_id,
+            &mut interner_clone,
+            names,
+            entities,
+            type_arena,
+            node_map,
+            module_id,
+            program,
+            Some(module_programs),
+            vir_functions,
+        );
     }
 }

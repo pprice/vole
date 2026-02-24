@@ -4,7 +4,7 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
 use super::common::{
     DefaultReturn, FunctionCompileConfig, compile_function_inner_with_params,
-    finalize_function_body,
+    compile_function_inner_with_vir, finalize_function_body,
 };
 use super::{Compiler, TestInfo};
 
@@ -388,14 +388,27 @@ impl Compiler<'_> {
             );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                None,
-                None,
-            )?;
+            let vir_func = self.analyzed.get_vir_function(semantic_func_id);
+            if let Some(vir) = vir_func {
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir.body,
+                    None,
+                    None,
+                )?;
+            } else {
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    None,
+                    None,
+                )?;
+            }
         }
 
         // NOTE: We intentionally do NOT call define_function here.
