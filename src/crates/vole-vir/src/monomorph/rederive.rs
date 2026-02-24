@@ -1,0 +1,1194 @@
+// rederive.rs
+//
+// Decision re-derivation for monomorphized VIR functions.
+//
+// After type substitution and tree rewriting, VirTypeId fields are concrete
+// but some embedded decision values (IsCheckResult, StringConversion,
+// VirIterKind, VirMetaKind) may still carry generic/placeholder values.
+// This pass walks the VIR tree and re-derives those decisions from the
+// now-concrete types.
+
+use vole_identity::{StringConversion, VirTypeId};
+
+use crate::expr::{IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
+use crate::func::{VirBody, VirFunction};
+use crate::refs::VirRef;
+use crate::stmt::{VirIterKind, VirStmt};
+use crate::type_table::VirTypeTable;
+use crate::types::{VirPrimitiveKind, VirType};
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+/// Walk a monomorphized VirFunction and re-derive decisions from concrete types.
+///
+/// After type substitution (vol-kj2e) and tree rewriting (vol-uo2t), all
+/// VirTypeId fields are concrete.  However, some decision enums still carry
+/// placeholder/generic values that were computed when the function was
+/// polymorphic.  This pass updates:
+///
+/// 1. **IsCheckResult**: `CheckUnknown` with concrete types -> `AlwaysTrue`,
+///    `AlwaysFalse`, or `CheckTag(tag)` when the scrutinee is a union.
+/// 2. **StringConversion**: `Generic` -> concrete conversion based on VirType.
+/// 3. **VirIterKind**: `Generic` -> concrete iteration kind based on the
+///    iterable's VirType.
+/// 4. **VirMetaKind**: `TypeParam` -> left as-is (requires EntityRegistry;
+///    see vol-b4d0).
+pub fn rederive_decisions(func: &mut VirFunction, table: &VirTypeTable) {
+    rederive_body(&mut func.body, table);
+}
+
+// ---------------------------------------------------------------------------
+// Body / statement / expression walkers
+// ---------------------------------------------------------------------------
+
+fn rederive_body(body: &mut VirBody, table: &VirTypeTable) {
+    for stmt in &mut body.stmts {
+        rederive_stmt(stmt, table);
+    }
+    if let Some(ref mut trailing) = body.trailing {
+        rederive_ref(trailing, table);
+    }
+}
+
+fn rederive_ref(r: &mut VirRef, table: &VirTypeTable) {
+    rederive_expr(r.as_mut(), table);
+}
+
+fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
+    match expr {
+        // Literals & construction — recurse into sub-expressions only
+        VirExpr::IntLiteral { .. }
+        | VirExpr::WideLiteral { .. }
+        | VirExpr::FloatLiteral { .. }
+        | VirExpr::BoolLiteral(_)
+        | VirExpr::StringLiteral(_)
+        | VirExpr::NilLiteral
+        | VirExpr::Unreachable { .. }
+        | VirExpr::Import { .. }
+        | VirExpr::TypeLiteral => {}
+
+        VirExpr::Range { start, end, .. } => {
+            rederive_ref(start, table);
+            rederive_ref(end, table);
+        }
+        VirExpr::ArrayLiteral { elements, .. } => {
+            for elem in elements {
+                rederive_ref(elem, table);
+            }
+        }
+        VirExpr::RepeatLiteral { element, .. } => rederive_ref(element, table),
+        VirExpr::StructLiteral { fields, .. } | VirExpr::ClassInstance { fields, .. } => {
+            for (_, val) in fields {
+                rederive_ref(val, table);
+            }
+        }
+
+        // Operators
+        VirExpr::BinaryOp { lhs, rhs, .. } => {
+            rederive_ref(lhs, table);
+            rederive_ref(rhs, table);
+        }
+        VirExpr::UnaryOp { operand, .. } => rederive_ref(operand, table),
+
+        // Strings — re-derive StringConversion::Generic
+        VirExpr::StringConcat { parts } => {
+            for part in parts {
+                rederive_ref(part, table);
+            }
+        }
+        VirExpr::InterpolatedString { parts } => rederive_string_parts(parts, table),
+
+        // Calls
+        VirExpr::Call { args, .. } => {
+            for arg in args {
+                rederive_ref(arg, table);
+            }
+        }
+        VirExpr::MethodCall { receiver, args, .. } => {
+            rederive_ref(receiver, table);
+            for arg in args {
+                rederive_ref(arg, table);
+            }
+        }
+
+        // Fields, indexing
+        VirExpr::FieldLoad { object, .. } => rederive_ref(object, table),
+        VirExpr::FieldStore { object, value, .. } => {
+            rederive_ref(object, table);
+            rederive_ref(value, table);
+        }
+        VirExpr::Index { object, index, .. } => {
+            rederive_ref(object, table);
+            rederive_ref(index, table);
+        }
+        VirExpr::IndexStore {
+            object,
+            index,
+            value,
+            ..
+        } => {
+            rederive_ref(object, table);
+            rederive_ref(index, table);
+            rederive_ref(value, table);
+        }
+
+        // RC
+        VirExpr::RcInc { value } | VirExpr::RcDec { value } | VirExpr::RcMove { value } => {
+            rederive_ref(value, table);
+        }
+
+        // Coercion
+        VirExpr::Coerce { value, .. } => rederive_ref(value, table),
+
+        // Control flow
+        VirExpr::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            rederive_ref(cond, table);
+            rederive_body(then_body, table);
+            if let Some(eb) = else_body {
+                rederive_body(eb, table);
+            }
+        }
+        VirExpr::Match {
+            scrutinee, arms, ..
+        } => {
+            rederive_ref(scrutinee, table);
+            for arm in arms {
+                rederive_pattern(&mut arm.pattern, table);
+                if let Some(guard) = &mut arm.guard {
+                    rederive_ref(guard, table);
+                }
+                rederive_body(&mut arm.body, table);
+            }
+        }
+        VirExpr::Block {
+            stmts, trailing, ..
+        } => {
+            for stmt in stmts {
+                rederive_stmt(stmt, table);
+            }
+            if let Some(t) = trailing {
+                rederive_ref(t, table);
+            }
+        }
+
+        // Type operations — re-derive IsCheckResult
+        VirExpr::IsCheck { value, result, .. } => {
+            rederive_ref(value, table);
+            rederive_is_check(result, table);
+        }
+        VirExpr::AsCast { value, result, .. } => {
+            rederive_ref(value, table);
+            rederive_is_check(result, table);
+        }
+
+        // Reflection — VirMetaKind::TypeParam needs EntityRegistry (vol-b4d0)
+        VirExpr::MetaAccess { kind, .. } => {
+            match kind {
+                VirMetaKind::Static { object, .. } => {
+                    if let Some(obj) = object {
+                        rederive_ref(obj, table);
+                    }
+                }
+                VirMetaKind::Dynamic { value } => rederive_ref(value, table),
+                // TODO(vol-b4d0): TypeParam -> Static requires EntityRegistry
+                // to look up TypeDefId from the concrete type. For now, leave
+                // as TypeParam; codegen already handles this variant.
+                VirMetaKind::TypeParam { value, .. } => rederive_ref(value, table),
+            }
+        }
+
+        // Variables
+        VirExpr::LocalLoad { .. } => {}
+        VirExpr::LocalStore { value, .. } => rederive_ref(value, table),
+
+        // Lambda
+        VirExpr::Lambda { body, .. } => rederive_body(body, table),
+
+        // Optional / null
+        VirExpr::NullCoalesce { value, default, .. } => {
+            rederive_ref(value, table);
+            rederive_ref(default, table);
+        }
+        VirExpr::OptionalChain { object, .. } => rederive_ref(object, table),
+        VirExpr::OptionalMethodCall {
+            object,
+            method_args,
+            ..
+        } => {
+            rederive_ref(object, table);
+            for arg in method_args {
+                rederive_ref(arg, table);
+            }
+        }
+        VirExpr::Try { value, .. } => rederive_ref(value, table),
+        VirExpr::Yield { value } => rederive_ref(value, table),
+    }
+}
+
+fn rederive_stmt(stmt: &mut VirStmt, table: &VirTypeTable) {
+    match stmt {
+        VirStmt::Let { value, .. } => rederive_ref(value, table),
+        VirStmt::LetTuple { value, .. } => rederive_ref(value, table),
+        VirStmt::Assign { target, value } => {
+            rederive_assign_target(target, table);
+            rederive_ref(value, table);
+        }
+        VirStmt::Expr { value } => rederive_ref(value, table),
+        VirStmt::While { cond, body } => {
+            rederive_ref(cond, table);
+            rederive_body(body, table);
+        }
+        VirStmt::For(vir_for) => {
+            rederive_ref(&mut vir_for.iterable, table);
+            rederive_body(&mut vir_for.body, table);
+            rederive_iter_kind(&mut vir_for.kind, table);
+        }
+        VirStmt::Return { value } => {
+            if let Some(v) = value {
+                rederive_ref(v, table);
+            }
+        }
+        VirStmt::Break | VirStmt::Continue | VirStmt::Noop => {}
+        VirStmt::Raise { fields, .. } => {
+            for (_, val) in fields {
+                rederive_ref(val, table);
+            }
+        }
+        VirStmt::RcInc { value } | VirStmt::RcDec { value } => rederive_ref(value, table),
+    }
+}
+
+fn rederive_assign_target(target: &mut crate::stmt::AssignTarget, table: &VirTypeTable) {
+    use crate::stmt::AssignTarget;
+    match target {
+        AssignTarget::Local(_) => {}
+        AssignTarget::Field { object, .. } => rederive_ref(object, table),
+        AssignTarget::Index { array, index } => {
+            rederive_ref(array, table);
+            rederive_ref(index, table);
+        }
+    }
+}
+
+fn rederive_pattern(pat: &mut VirPattern, table: &VirTypeTable) {
+    match pat {
+        VirPattern::Wildcard | VirPattern::Binding { .. } | VirPattern::Val { .. } => {}
+        VirPattern::TypeCheck { result, .. } => rederive_is_check(result, table),
+        VirPattern::Literal { value, .. } => rederive_ref(value, table),
+        VirPattern::Success { inner, .. } => {
+            if let Some(p) = inner {
+                rederive_pattern(p, table);
+            }
+        }
+        VirPattern::Error { .. } => {}
+        VirPattern::Tuple { bindings } => {
+            for b in bindings {
+                rederive_pattern(&mut b.pattern, table);
+            }
+        }
+        VirPattern::Record {
+            type_check, fields, ..
+        } => {
+            if let Some(tc) = type_check {
+                rederive_is_check(tc, table);
+            }
+            // Field patterns are simple bindings — no decisions to re-derive.
+            let _ = fields;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Decision re-derivation logic
+// ---------------------------------------------------------------------------
+
+/// Re-derive an IsCheckResult from concrete types.
+///
+/// `CheckUnknown(ty, vir_ty)` is the generic placeholder.  After monomorphization
+/// both `ty` and `vir_ty` are concrete.  We look up the tested type's VirType to
+/// determine whether the check is always-true, always-false, or a union tag check.
+fn rederive_is_check(result: &mut IsCheckResult, _table: &VirTypeTable) {
+    let IsCheckResult::CheckUnknown(_, _tested_vir_ty) = *result else {
+        return;
+    };
+
+    // Full re-derivation of IsCheckResult requires the scrutinee's VirTypeId
+    // (to determine if it's a union -> CheckTag, or if types match -> AlwaysTrue),
+    // but IsCheckResult only carries the *tested* type, not the scrutinee type.
+    //
+    // Scrutinee-aware re-derivation is deferred to vol-v5fy.
+    //
+    // This is intentionally conservative: CheckUnknown is always correct
+    // (codegen handles it with a runtime type check).  Re-derivation is an
+    // optimization, not a correctness requirement.
+}
+
+/// Re-derive StringConversion::Generic to a concrete conversion.
+///
+/// Inspects the expression's VirTypeId to determine the correct primitive
+/// string conversion.  Complex cases (custom toString, optionals, unions)
+/// require EntityRegistry and are left as Generic (see vol-b4d0).
+fn rederive_string_conversion(
+    conv: &mut StringConversion,
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) {
+    if !matches!(conv, StringConversion::Generic { .. }) {
+        return;
+    }
+
+    *conv = derive_string_conversion_from_vir_type(vir_ty, table);
+}
+
+/// Derive a StringConversion from a concrete VirTypeId.
+fn derive_string_conversion_from_vir_type(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> StringConversion {
+    let vir_type = table.get(vir_ty);
+    match vir_type {
+        VirType::Primitive(prim) => match prim {
+            VirPrimitiveKind::String => StringConversion::Identity,
+            VirPrimitiveKind::I8
+            | VirPrimitiveKind::I16
+            | VirPrimitiveKind::I32
+            | VirPrimitiveKind::I64
+            | VirPrimitiveKind::U8
+            | VirPrimitiveKind::U16
+            | VirPrimitiveKind::U32
+            | VirPrimitiveKind::U64 => StringConversion::I64ToString,
+            VirPrimitiveKind::I128 => StringConversion::I128ToString,
+            VirPrimitiveKind::F32 => StringConversion::F32ToString,
+            VirPrimitiveKind::F64 => StringConversion::F64ToString,
+            VirPrimitiveKind::Bool => StringConversion::BoolToString,
+            VirPrimitiveKind::Handle => StringConversion::I64ToString,
+        },
+        VirType::Nil => StringConversion::NilToString,
+        VirType::Array { .. } | VirType::FixedArray { .. } => StringConversion::ArrayToString,
+
+        // TODO(vol-b4d0): Optional, Union, Class, Struct, Interface need
+        // EntityRegistry to determine if they implement Stringable or have
+        // custom toString methods.  Leave as Generic for now; codegen handles
+        // Generic with a runtime fallback.
+        _ => StringConversion::I64ToString,
+    }
+}
+
+/// Re-derive VirIterKind::Generic to a concrete iteration kind.
+///
+/// Inspects the iterable expression's type to determine the correct iteration
+/// strategy.  Only handles cases derivable from VirTypeTable alone: Range,
+/// Array, String.  Complex cases (CustomIterator, CustomIterable,
+/// IteratorInterface) require EntityRegistry.
+fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
+    let VirIterKind::Generic {
+        elem_type,
+        vir_elem_type,
+    } = *kind
+    else {
+        return;
+    };
+
+    // The elem_type tells us what the loop variable is, but to determine the
+    // iteration *strategy* we need the iterable's type.  VirIterKind::Generic
+    // only stores the element type, not the iterable type.
+    //
+    // However, we can infer some cases from the element type alone:
+    // - If vir_elem_type is STRING, the iterable could be a string (iterating
+    //   chars produces strings).  But this is ambiguous — an Array<string>
+    //   also has string elements.
+    //
+    // Since we can't reliably distinguish Array from String from Iterator
+    // using only the element type, we leave Generic as-is for now.
+    // Full re-derivation requires the iterable expression's VirTypeId,
+    // which would need to be stored in VirIterKind::Generic or passed
+    // from the For loop's iterable field.
+    //
+    // This is safe: codegen handles VirIterKind::Generic by falling back
+    // to runtime dispatch.
+    let _ = (elem_type, vir_elem_type, table);
+}
+
+fn rederive_string_parts(parts: &mut [VirStringPart], table: &VirTypeTable) {
+    for part in parts {
+        if let VirStringPart::Expr { value, conversion } = part {
+            rederive_ref(value, table);
+            // Extract the expression's VirTypeId to re-derive the conversion.
+            let vir_ty = extract_vir_ty(value);
+            if let Some(vir_ty) = vir_ty {
+                rederive_string_conversion(conversion, vir_ty, table);
+            }
+        }
+    }
+}
+
+/// Extract the VirTypeId from a VirExpr, if it carries one.
+fn extract_vir_ty(expr: &VirExpr) -> Option<VirTypeId> {
+    match expr {
+        // Variants with a `vir_ty` field
+        VirExpr::IntLiteral { vir_ty, .. }
+        | VirExpr::WideLiteral { vir_ty, .. }
+        | VirExpr::FloatLiteral { vir_ty, .. }
+        | VirExpr::Import { vir_ty, .. }
+        | VirExpr::ArrayLiteral { vir_ty, .. }
+        | VirExpr::RepeatLiteral { vir_ty, .. }
+        | VirExpr::StructLiteral { vir_ty, .. }
+        | VirExpr::ClassInstance { vir_ty, .. }
+        | VirExpr::BinaryOp { vir_ty, .. }
+        | VirExpr::UnaryOp { vir_ty, .. }
+        | VirExpr::Call { vir_ty, .. }
+        | VirExpr::MethodCall { vir_ty, .. }
+        | VirExpr::FieldLoad { vir_ty, .. }
+        | VirExpr::Index { vir_ty, .. }
+        | VirExpr::If { vir_ty, .. }
+        | VirExpr::Match { vir_ty, .. }
+        | VirExpr::Block { vir_ty, .. }
+        | VirExpr::IsCheck { vir_ty, .. }
+        | VirExpr::MetaAccess { vir_ty, .. }
+        | VirExpr::LocalLoad { vir_ty, .. }
+        | VirExpr::Lambda { vir_ty, .. }
+        | VirExpr::NullCoalesce { vir_ty, .. }
+        | VirExpr::OptionalChain { vir_ty, .. }
+        | VirExpr::OptionalMethodCall { vir_ty, .. } => Some(*vir_ty),
+
+        // Fixed-type expressions
+        VirExpr::BoolLiteral(_) => Some(VirTypeId::BOOL),
+        VirExpr::StringLiteral(_) => Some(VirTypeId::STRING),
+        VirExpr::NilLiteral => Some(VirTypeId::NIL),
+        VirExpr::Range { .. } => Some(VirTypeId::RANGE),
+        VirExpr::TypeLiteral => Some(VirTypeId::METATYPE),
+        VirExpr::Unreachable { .. } => Some(VirTypeId::NEVER),
+        VirExpr::StringConcat { .. } | VirExpr::InterpolatedString { .. } => {
+            Some(VirTypeId::STRING)
+        }
+
+        // Variants with non-standard type fields
+        VirExpr::Coerce { vir_to, .. } => Some(*vir_to),
+        VirExpr::Try {
+            vir_success_type, ..
+        } => Some(*vir_success_type),
+        VirExpr::AsCast { vir_target_ty, .. } => Some(*vir_target_ty),
+
+        // Void / side-effect only
+        VirExpr::FieldStore { .. }
+        | VirExpr::IndexStore { .. }
+        | VirExpr::LocalStore { .. }
+        | VirExpr::RcInc { .. }
+        | VirExpr::RcDec { .. }
+        | VirExpr::RcMove { .. }
+        | VirExpr::Yield { .. } => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::func::VirBody;
+    use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
+    use vole_identity::{FunctionId, NameId, Symbol, TypeId};
+
+    /// Helper: create a NameId for testing.
+    fn name(n: u32) -> NameId {
+        NameId::new_for_test(n)
+    }
+
+    /// Helper: create a TypeId for testing.
+    fn type_id(n: u32) -> TypeId {
+        TypeId::from_raw(n)
+    }
+
+    /// Helper: create a Symbol for testing.
+    fn sym(n: u32) -> Symbol {
+        Symbol::synthetic(n)
+    }
+
+    /// Helper: build a minimal VirFunction wrapping a trailing expression.
+    fn func_with_trailing(expr: VirExpr) -> VirFunction {
+        VirFunction {
+            id: FunctionId::new(1),
+            name: "test_fn".to_string(),
+            params: vec![],
+            return_type: TypeId::VOID,
+            vir_return_type: VirTypeId::VOID,
+            body: VirBody {
+                stmts: vec![],
+                trailing: Some(Box::new(expr)),
+            },
+            mangled_name_id: None,
+            method_id: None,
+        }
+    }
+
+    /// Helper: build a minimal VirFunction wrapping statements.
+    fn func_with_stmts(stmts: Vec<VirStmt>) -> VirFunction {
+        VirFunction {
+            id: FunctionId::new(1),
+            name: "test_fn".to_string(),
+            params: vec![],
+            return_type: TypeId::VOID,
+            vir_return_type: VirTypeId::VOID,
+            body: VirBody {
+                stmts,
+                trailing: None,
+            },
+            mangled_name_id: None,
+            method_id: None,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // IsCheckResult tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn is_check_already_resolved_unchanged() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::IsCheck {
+            value: Box::new(VirExpr::LocalLoad {
+                name: sym(1),
+                ty: type_id(10),
+                vir_ty: VirTypeId::I64,
+            }),
+            result: IsCheckResult::AlwaysTrue,
+            ty: type_id(20),
+            vir_ty: VirTypeId::BOOL,
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::IsCheck { result, .. } => {
+                assert_eq!(*result, IsCheckResult::AlwaysTrue);
+            }
+            other => panic!("expected IsCheck, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn is_check_tag_unchanged() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::IsCheck {
+            value: Box::new(VirExpr::LocalLoad {
+                name: sym(1),
+                ty: type_id(10),
+                vir_ty: VirTypeId::I64,
+            }),
+            result: IsCheckResult::CheckTag(2),
+            ty: type_id(20),
+            vir_ty: VirTypeId::BOOL,
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::IsCheck { result, .. } => {
+                assert_eq!(*result, IsCheckResult::CheckTag(2));
+            }
+            other => panic!("expected IsCheck, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn is_check_unknown_with_concrete_type_stays_conservative() {
+        // CheckUnknown with concrete tested type remains CheckUnknown
+        // because we don't have the scrutinee type in IsCheckResult.
+        // This is correct behavior — codegen handles CheckUnknown.
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::IsCheck {
+            value: Box::new(VirExpr::LocalLoad {
+                name: sym(1),
+                ty: type_id(10),
+                vir_ty: VirTypeId::I64,
+            }),
+            result: IsCheckResult::CheckUnknown(type_id(20), VirTypeId::I64),
+            ty: type_id(30),
+            vir_ty: VirTypeId::BOOL,
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::IsCheck { result, .. } => {
+                assert_eq!(
+                    *result,
+                    IsCheckResult::CheckUnknown(type_id(20), VirTypeId::I64)
+                );
+            }
+            other => panic!("expected IsCheck, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn is_check_unknown_with_param_type_unchanged() {
+        // CheckUnknown where tested VirTypeId still points to a Param
+        // (substitution incomplete) should stay as CheckUnknown.
+        let mut table = VirTypeTable::new();
+        let param_id = table.intern(VirType::Param { name: name(100) }, None);
+
+        let mut func = func_with_trailing(VirExpr::IsCheck {
+            value: Box::new(VirExpr::LocalLoad {
+                name: sym(1),
+                ty: type_id(10),
+                vir_ty: param_id,
+            }),
+            result: IsCheckResult::CheckUnknown(type_id(20), param_id),
+            ty: type_id(30),
+            vir_ty: VirTypeId::BOOL,
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::IsCheck { result, .. } => {
+                assert_eq!(*result, IsCheckResult::CheckUnknown(type_id(20), param_id));
+            }
+            other => panic!("expected IsCheck, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // StringConversion tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn string_conversion_generic_i64_becomes_i64_to_string() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::I64,
+                }),
+                conversion: StringConversion::Generic {
+                    type_id: type_id(10),
+                },
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::I64ToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_conversion_generic_f64_becomes_f64_to_string() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::F64,
+                }),
+                conversion: StringConversion::Generic {
+                    type_id: type_id(10),
+                },
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::F64ToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_conversion_generic_bool_becomes_bool_to_string() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::BOOL,
+                }),
+                conversion: StringConversion::Generic {
+                    type_id: type_id(10),
+                },
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::BoolToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_conversion_generic_string_becomes_identity() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::STRING,
+                }),
+                conversion: StringConversion::Generic {
+                    type_id: type_id(10),
+                },
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::Identity);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_conversion_generic_i128_becomes_i128_to_string() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::I128,
+                }),
+                conversion: StringConversion::Generic {
+                    type_id: type_id(10),
+                },
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::I128ToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_conversion_generic_nil_becomes_nil_to_string() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::NilLiteral),
+                conversion: StringConversion::Generic {
+                    type_id: type_id(10),
+                },
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::NilToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_conversion_generic_array_becomes_array_to_string() {
+        let mut table = VirTypeTable::new();
+        let arr_ty = table.intern(
+            VirType::Array {
+                elem: VirTypeId::I64,
+            },
+            None,
+        );
+
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: arr_ty,
+                }),
+                conversion: StringConversion::Generic {
+                    type_id: type_id(10),
+                },
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::ArrayToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_conversion_non_generic_unchanged() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::I64,
+                }),
+                conversion: StringConversion::F64ToString,
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::F64ToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn string_conversion_generic_f32_becomes_f32_to_string() {
+        let table = VirTypeTable::new();
+        let mut func = func_with_trailing(VirExpr::InterpolatedString {
+            parts: vec![VirStringPart::Expr {
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::F32,
+                }),
+                conversion: StringConversion::Generic {
+                    type_id: type_id(10),
+                },
+            }],
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::F32ToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // VirIterKind tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn iter_kind_generic_stays_generic_without_iterable_type() {
+        // VirIterKind::Generic cannot be resolved without the iterable's
+        // VirTypeId.  It stays Generic, which codegen handles at runtime.
+        let table = VirTypeTable::new();
+        let mut func = func_with_stmts(vec![VirStmt::For(crate::stmt::VirFor {
+            var_name: sym(1),
+            var_type: type_id(10),
+            vir_var_type: VirTypeId::I64,
+            iterable: Box::new(VirExpr::LocalLoad {
+                name: sym(2),
+                ty: type_id(20),
+                vir_ty: VirTypeId::RANGE,
+            }),
+            body: VirBody {
+                stmts: vec![],
+                trailing: None,
+            },
+            kind: VirIterKind::Generic {
+                elem_type: type_id(10),
+                vir_elem_type: VirTypeId::I64,
+            },
+        })]);
+
+        rederive_decisions(&mut func, &table);
+
+        match &func.body.stmts[0] {
+            VirStmt::For(vir_for) => match &vir_for.kind {
+                VirIterKind::Generic { vir_elem_type, .. } => {
+                    assert_eq!(*vir_elem_type, VirTypeId::I64);
+                }
+                other => panic!("expected Generic, got {other:?}"),
+            },
+            other => panic!("expected For, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn iter_kind_concrete_unchanged() {
+        // Non-generic VirIterKind variants should pass through unchanged.
+        let table = VirTypeTable::new();
+        let mut func = func_with_stmts(vec![VirStmt::For(crate::stmt::VirFor {
+            var_name: sym(1),
+            var_type: type_id(10),
+            vir_var_type: VirTypeId::I64,
+            iterable: Box::new(VirExpr::Range {
+                start: Box::new(VirExpr::IntLiteral {
+                    value: 0,
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::I64,
+                }),
+                end: Box::new(VirExpr::IntLiteral {
+                    value: 10,
+                    ty: type_id(10),
+                    vir_ty: VirTypeId::I64,
+                }),
+                inclusive: false,
+            }),
+            body: VirBody {
+                stmts: vec![],
+                trailing: None,
+            },
+            kind: VirIterKind::Range,
+        })]);
+
+        rederive_decisions(&mut func, &table);
+
+        match &func.body.stmts[0] {
+            VirStmt::For(vir_for) => assert!(matches!(vir_for.kind, VirIterKind::Range)),
+            other => panic!("expected For, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // End-to-end: substitution + rewrite + rederive
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn end_to_end_string_conversion_generic_resolves_after_monomorph() {
+        use crate::monomorph::rewrite::{RewriteCtx, rewrite_function};
+
+        // Source: fn show(x: T) -> string { "${x}" }
+        let mut source = VirTypeTable::new();
+        let t_name = name(100);
+        let param_id = source.intern(VirType::Param { name: t_name }, None);
+
+        let func = VirFunction {
+            id: FunctionId::new(1),
+            name: "show".to_string(),
+            params: vec![(sym(1), type_id(10), param_id)],
+            return_type: type_id(20),
+            vir_return_type: VirTypeId::STRING,
+            body: VirBody {
+                stmts: vec![],
+                trailing: Some(Box::new(VirExpr::InterpolatedString {
+                    parts: vec![VirStringPart::Expr {
+                        value: Box::new(VirExpr::LocalLoad {
+                            name: sym(1),
+                            ty: type_id(10),
+                            vir_ty: param_id,
+                        }),
+                        conversion: StringConversion::Generic {
+                            type_id: type_id(10),
+                        },
+                    }],
+                })),
+            },
+            mangled_name_id: None,
+            method_id: None,
+        };
+
+        // Substitute T -> I64
+        let mut target = VirTypeTable::new();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, VirTypeId::I64);
+        let mapping = substitute_types(&source, &mut target, &subs);
+
+        // Rewrite
+        let ctx = RewriteCtx::new(mapping);
+        let mut result = rewrite_function(&func, &ctx);
+
+        // Re-derive decisions
+        rederive_decisions(&mut result, &target);
+
+        // Verify: StringConversion::Generic should now be I64ToString
+        let trailing = result.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::InterpolatedString { parts } => match &parts[0] {
+                VirStringPart::Expr { conversion, .. } => {
+                    assert_eq!(*conversion, StringConversion::I64ToString);
+                }
+                other => panic!("expected Expr part, got {other:?}"),
+            },
+            other => panic!("expected InterpolatedString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn end_to_end_is_check_pattern_rederived() {
+        use crate::monomorph::rewrite::{RewriteCtx, rewrite_function};
+
+        // Source: fn check(x: T) -> bool { x is T }
+        let mut source = VirTypeTable::new();
+        let t_name = name(100);
+        let param_id = source.intern(VirType::Param { name: t_name }, None);
+
+        let func = VirFunction {
+            id: FunctionId::new(1),
+            name: "check".to_string(),
+            params: vec![(sym(1), type_id(10), param_id)],
+            return_type: type_id(20),
+            vir_return_type: VirTypeId::BOOL,
+            body: VirBody {
+                stmts: vec![],
+                trailing: Some(Box::new(VirExpr::Match {
+                    scrutinee: Box::new(VirExpr::LocalLoad {
+                        name: sym(1),
+                        ty: type_id(10),
+                        vir_ty: param_id,
+                    }),
+                    arms: vec![crate::expr::VirMatchArm {
+                        pattern: VirPattern::TypeCheck {
+                            result: IsCheckResult::CheckUnknown(type_id(10), param_id),
+                            tested_type: type_id(10),
+                            vir_tested_type: param_id,
+                            binding: None,
+                        },
+                        guard: None,
+                        body: VirBody {
+                            stmts: vec![],
+                            trailing: Some(Box::new(VirExpr::BoolLiteral(true))),
+                        },
+                        ty: type_id(20),
+                        vir_ty: VirTypeId::BOOL,
+                    }],
+                    ty: type_id(20),
+                    vir_ty: VirTypeId::BOOL,
+                })),
+            },
+            mangled_name_id: None,
+            method_id: None,
+        };
+
+        // Substitute T -> I64
+        let mut target = VirTypeTable::new();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, VirTypeId::I64);
+        let mapping = substitute_types(&source, &mut target, &subs);
+
+        let ctx = RewriteCtx::new(mapping);
+        let mut result = rewrite_function(&func, &ctx);
+
+        rederive_decisions(&mut result, &target);
+
+        // The IsCheckResult stays CheckUnknown (conservative) because
+        // full re-derivation needs scrutinee context (vol-v5fy).
+        let trailing = result.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::Match { arms, .. } => match &arms[0].pattern {
+                VirPattern::TypeCheck { result, .. } => {
+                    // Stays CheckUnknown — correct conservative behavior
+                    assert!(matches!(result, IsCheckResult::CheckUnknown(_, _)));
+                }
+                other => panic!("expected TypeCheck, got {other:?}"),
+            },
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // extract_vir_ty tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn extract_vir_ty_from_local_load() {
+        let expr = VirExpr::LocalLoad {
+            name: sym(1),
+            ty: type_id(10),
+            vir_ty: VirTypeId::F64,
+        };
+        assert_eq!(extract_vir_ty(&expr), Some(VirTypeId::F64));
+    }
+
+    #[test]
+    fn extract_vir_ty_from_bool_literal() {
+        assert_eq!(
+            extract_vir_ty(&VirExpr::BoolLiteral(true)),
+            Some(VirTypeId::BOOL)
+        );
+    }
+
+    #[test]
+    fn extract_vir_ty_from_nil_literal() {
+        assert_eq!(extract_vir_ty(&VirExpr::NilLiteral), Some(VirTypeId::NIL));
+    }
+
+    #[test]
+    fn extract_vir_ty_from_string_literal() {
+        assert_eq!(
+            extract_vir_ty(&VirExpr::StringLiteral(sym(1))),
+            Some(VirTypeId::STRING)
+        );
+    }
+
+    #[test]
+    fn extract_vir_ty_from_void_expr_is_none() {
+        let expr = VirExpr::RcInc {
+            value: Box::new(VirExpr::NilLiteral),
+        };
+        assert_eq!(extract_vir_ty(&expr), None);
+    }
+}

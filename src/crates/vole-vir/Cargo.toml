@@ -14,5 +14,8 @@ rustc-hash = "2.1"
 # Identifier concatenation for macros (used by define_int_op_enum)
 paste = "1.0"
 
+[dev-dependencies]
+vole-identity = { path = "../vole-identity", features = ["testing"] }
+
 [lints]
 workspace = true

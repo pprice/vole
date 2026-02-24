@@ -37,7 +37,9 @@ pub use expr::{
 };
 pub use func::{VirBody, VirFunction, VirTest};
 pub use intrinsics::IntrinsicKey;
-pub use monomorph::{RewriteCtx, TypeSubstitution, rewrite_function, substitute_types};
+pub use monomorph::{
+    RewriteCtx, TypeSubstitution, rederive_decisions, rewrite_function, substitute_types,
+};
 pub use program::VirProgram;
 pub use refs::VirRef;
 pub use stmt::{
