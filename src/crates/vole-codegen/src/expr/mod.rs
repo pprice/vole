@@ -638,13 +638,14 @@ impl Cg<'_, '_, '_> {
             // -- Coercion -------------------------------------------------
             VirExpr::Coerce {
                 value,
-                from,
                 to,
                 kind,
+                vir_from,
+                vir_to,
                 ..
             } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.compile_vir_coerce(compiled, *from, *to, *kind)
+                self.compile_vir_coerce(compiled, *to, *vir_from, *vir_to, *kind)
             }
 
             // -- Calls ----------------------------------------------------
@@ -1008,16 +1009,20 @@ impl Cg<'_, '_, '_> {
     fn compile_vir_coerce(
         &mut self,
         value: CompiledValue,
-        from: TypeId,
         to: TypeId,
+        vir_from: vole_identity::VirTypeId,
+        vir_to: vole_identity::VirTypeId,
         kind: CoerceKind,
     ) -> CodegenResult<CompiledValue> {
         use crate::ops::{sextend_const, uextend_const};
+        use crate::types::vir_conversions::{vir_is_unsigned, vir_type_to_cranelift};
 
-        let target_ty = self.cranelift_type(to);
+        let table = self.vir_type_table();
+        let ptr = self.ptr_type();
+        let target_ty = vir_type_to_cranelift(vir_to, table, ptr);
         match kind {
             CoerceKind::IntExtend => {
-                let result = if self.arena().is_unsigned(from) {
+                let result = if vir_is_unsigned(vir_from, table) {
                     uextend_const(self.builder, target_ty, value.value)
                 } else {
                     sextend_const(self.builder, target_ty, value.value)
@@ -1029,7 +1034,7 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::IntToFloat => {
-                let result = if self.arena().is_unsigned(from) {
+                let result = if vir_is_unsigned(vir_from, table) {
                     self.builder.ins().fcvt_from_uint(target_ty, value.value)
                 } else {
                     self.builder.ins().fcvt_from_sint(target_ty, value.value)
@@ -1037,7 +1042,7 @@ impl Cg<'_, '_, '_> {
                 Ok(CompiledValue::new(result, target_ty, to))
             }
             CoerceKind::FloatToInt => {
-                let result = if self.arena().is_unsigned(to) {
+                let result = if vir_is_unsigned(vir_to, table) {
                     self.builder.ins().fcvt_to_uint(target_ty, value.value)
                 } else {
                     self.builder.ins().fcvt_to_sint(target_ty, value.value)
@@ -1052,6 +1057,7 @@ impl Cg<'_, '_, '_> {
                 let result = self.builder.ins().fdemote(target_ty, value.value);
                 Ok(CompiledValue::new(result, target_ty, to))
             }
+            // Box/Unbox/IteratorWrap still use TypeId (migrated in later tickets)
             CoerceKind::Box => self.compile_coerce_box(value, to),
             CoerceKind::Unbox => self.compile_coerce_unbox(value, to),
             CoerceKind::IteratorWrap => self.compile_coerce_iterator_wrap(value, to),

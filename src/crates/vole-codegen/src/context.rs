@@ -348,6 +348,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.type_arena()
     }
 
+    /// Get the VIR type table for `VirTypeId`-based queries.
+    #[inline]
+    pub fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
+        &self.env.analyzed.vir_type_table
+    }
+
     /// Get expression type by NodeId.
     ///
     /// NodeIds are globally unique (they embed a ModuleId), so a single flat

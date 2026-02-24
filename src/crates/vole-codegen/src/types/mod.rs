@@ -9,6 +9,7 @@ mod compile_env;
 mod conversions;
 mod function_ctx;
 mod type_ctx;
+pub(crate) mod vir_conversions;
 pub(crate) mod wide_ops;
 
 // Re-export all public types and functions
@@ -29,3 +30,6 @@ pub(crate) use conversions::{
     native_type_to_cranelift, tuple_layout_id, type_id_size, type_id_to_cranelift,
     type_metadata_by_name_id, unknown_type_tag, value_to_word, word_to_value_type_id,
 };
+
+// VirTypeTable-based conversion functions are in types::vir_conversions.
+// Callers import directly from the submodule as needed.

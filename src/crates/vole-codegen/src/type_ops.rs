@@ -76,6 +76,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_id_to_cranelift(ty, self.arena(), self.ptr_type())
     }
 
+    /// Convert a `VirTypeId` to a Cranelift type via the VIR type table.
+    #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
+    pub fn vir_cranelift_type(&self, vir_ty: vole_identity::VirTypeId) -> Type {
+        super::types::vir_conversions::vir_type_to_cranelift(
+            vir_ty,
+            self.vir_type_table(),
+            self.ptr_type(),
+        )
+    }
+
     /// Convert a slice of TypeIds to Cranelift types
     pub fn cranelift_types(&self, type_ids: &[TypeId]) -> Vec<Type> {
         let arena = self.arena();

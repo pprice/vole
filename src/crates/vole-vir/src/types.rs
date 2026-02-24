@@ -103,6 +103,13 @@ pub enum VirPrimitiveKind {
     Handle,
 }
 
+impl VirPrimitiveKind {
+    /// Whether this primitive is an unsigned integer type.
+    pub fn is_unsigned(self) -> bool {
+        matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // StorageClass and VirTypeLayout
 // ---------------------------------------------------------------------------
