@@ -49,6 +49,17 @@ impl Cg<'_, '_, '_> {
             CallTarget::GenericCall { .. } => {
                 unreachable!("CallTarget::GenericCall must be resolved before codegen")
             }
+            CallTarget::VirDirect { .. } => {
+                // VirDirect is produced by the VIR monomorphization pass.
+                // Codegen for VIR-monomorphized functions is not yet
+                // implemented — the sema monomorph path still handles all
+                // generic instantiation.  This will be enabled once VIR
+                // monomorph fully replaces the sema path.
+                unreachable!(
+                    "CallTarget::VirDirect not yet supported in codegen; \
+                     sema monomorph path should be handling this call"
+                )
+            }
             CallTarget::Unresolved {
                 callee_sym,
                 call_node_id,

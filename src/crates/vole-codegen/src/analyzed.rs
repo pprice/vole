@@ -189,7 +189,7 @@ impl AnalyzedProgram {
         );
         let (generic_vir_functions, generic_vir_map) =
             build_generic_vir_storage(output.generic_vir_functions);
-        let vir_program = VirProgram {
+        let mut vir_program = VirProgram {
             type_table,
             functions: vir_functions,
             monomorph_map: vir_monomorph_map,
@@ -201,6 +201,7 @@ impl AnalyzedProgram {
             global_inits: vir_global_inits,
             module_global_inits: module_vir_global_inits,
         };
+        run_vir_monomorphize(&mut vir_program);
         Self {
             program,
             interner: Rc::new(interner),
@@ -2207,4 +2208,35 @@ fn build_generic_vir_storage(
         functions.push(vir);
     }
     (functions, map)
+}
+
+/// Run the VIR monomorphization pass: discover generic calls in concrete
+/// functions, instantiate generic templates, and resolve call targets.
+///
+/// Currently a no-op in practice because concrete VIR functions do not yet
+/// emit `CallTarget::GenericCall` (they use `Unresolved` for all calls).
+/// Once VIR lowering starts emitting `GenericCall` for calls to generic
+/// functions, this pass will produce concrete monomorphized instances and
+/// resolve them to `VirDirect` call targets.
+fn run_vir_monomorphize(program: &mut VirProgram) {
+    let result = vole_vir::monomorphize(program);
+    if result.functions.is_empty() {
+        return;
+    }
+
+    // Compute the base index where new functions will be appended.
+    let base_index = program.functions.len();
+
+    // Build the absolute instance index (base + relative offset).
+    let abs_index: vole_vir::InstanceIndex = result
+        .instance_map
+        .into_iter()
+        .map(|(instance, rel_idx)| (instance, base_index + rel_idx))
+        .collect();
+
+    // Append the monomorphized functions to the program.
+    program.functions.extend(result.functions);
+
+    // Resolve GenericCall -> VirDirect in all concrete functions.
+    vole_vir::resolve_generic_calls(&mut program.functions, &abs_index);
 }

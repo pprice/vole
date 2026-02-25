@@ -49,6 +49,15 @@ pub enum CallTarget {
         type_args: Vec<VirTypeId>,
     },
 
+    /// A direct call to a VIR-monomorphized function by its index in
+    /// `VirProgram.functions`.
+    ///
+    /// Produced by the VIR monomorphization post-pass when resolving
+    /// `GenericCall` targets.  Unlike `Direct`, this does not require an
+    /// entity registry lookup — the function index points directly into the
+    /// VIR function array.
+    VirDirect { function_index: usize },
+
     /// A call that could not be fully classified during VIR lowering.
     ///
     /// Lowering can see the callee symbol and NodeMap annotations but lacks

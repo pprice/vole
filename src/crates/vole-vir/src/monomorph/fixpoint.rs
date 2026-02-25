@@ -32,10 +32,17 @@ pub struct MonomorphInstance {
     pub type_args: Vec<VirTypeId>,
 }
 
-/// Result of monomorphization: concrete functions and the updated type table.
+/// Result of monomorphization: concrete functions and an instance-to-index
+/// mapping for resolving `GenericCall` targets.
 pub struct MonomorphResult {
     /// All newly monomorphized concrete functions.
     pub functions: Vec<VirFunction>,
+    /// Maps each `MonomorphInstance` to its index within `functions`.
+    ///
+    /// After the caller appends `functions` to `VirProgram.functions` at
+    /// some base offset, it must add that offset to each value to get the
+    /// absolute index.
+    pub instance_map: FxHashMap<MonomorphInstance, usize>,
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +66,7 @@ pub fn monomorphize(program: &mut VirProgram) -> MonomorphResult {
     let mut worklist: Vec<MonomorphInstance> = Vec::new();
     let mut seen: FxHashSet<MonomorphInstance> = FxHashSet::default();
     let mut result_functions: Vec<VirFunction> = Vec::new();
+    let mut instance_map: FxHashMap<MonomorphInstance, usize> = FxHashMap::default();
 
     // Seed the worklist from all existing concrete functions.
     for func in &program.functions {
@@ -78,11 +86,14 @@ pub fn monomorphize(program: &mut VirProgram) -> MonomorphResult {
 
         // Scan the newly created function for nested generic calls.
         collect_generic_calls_from_function(&concrete, &mut worklist);
+        let idx = result_functions.len();
+        instance_map.insert(instance, idx);
         result_functions.push(concrete);
     }
 
     MonomorphResult {
         functions: result_functions,
+        instance_map,
     }
 }
 

@@ -596,6 +596,9 @@ impl<'a> VirPrinter<'a> {
                     targs.join(", ")
                 );
             }
+            CallTarget::VirDirect { function_index } => {
+                w!(out, "vir_direct(idx={}, ", function_index);
+            }
             CallTarget::Unresolved {
                 callee_sym, line, ..
             } => {
