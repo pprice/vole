@@ -403,6 +403,9 @@ impl Compiler<'_> {
         // Declare monomorphized function instances before second pass
         self.declare_all_monomorphized_instances()?;
 
+        // Declare VIR-monomorphized functions (produced by run_vir_monomorphize).
+        self.declare_vir_monomorphized_functions()?;
+
         // Expand abstract class method templates for program-level generics.
         // MUST run after declarations (which provide concrete substitutions) but
         // before any body compilation (which may call expanded methods).
@@ -423,6 +426,9 @@ impl Compiler<'_> {
 
         // Compile monomorphized instances
         self.compile_all_monomorphized_instances(Some(program))?;
+
+        // Compile VIR-monomorphized function bodies.
+        self.compile_vir_monomorphized_functions()?;
 
         // Compile any monomorphs that were lazily declared during expression compilation.
         // This fixpoint loop handles transitive demand-declarations: compiling one pending
@@ -991,6 +997,74 @@ impl Compiler<'_> {
         // Define the function
         self.finalize_function(jit_func_id)?;
 
+        Ok(())
+    }
+
+    // =====================================================================
+    // VIR-monomorphized function declaration and compilation
+    // =====================================================================
+
+    /// Declare VIR-monomorphized functions in the JIT module.
+    ///
+    /// Functions at indices `>= vir_monomorph_base` in `VirProgram.functions`
+    /// were produced by `run_vir_monomorphize`.  Each is declared with a
+    /// unique name derived from the VIR function's mangled name, and the
+    /// resulting `FuncId` is stored in `state.vir_direct_func_ids` for lookup
+    /// during `CallTarget::VirDirect` compilation.
+    fn declare_vir_monomorphized_functions(&mut self) -> CodegenResult<()> {
+        let base = self.analyzed.vir_program.vir_monomorph_base;
+        if base == usize::MAX {
+            return Ok(());
+        }
+        let count = self.analyzed.vir_program.functions.len();
+        for idx in base..count {
+            let vir_func = &self.analyzed.vir_program.functions[idx];
+            let sig = self.build_signature_for_vir_func(vir_func);
+            let jit_name = format!("__vir_monomorph_{}", vir_func.name);
+            let func_id = self.jit.declare_function(&jit_name, &sig);
+            self.state.vir_direct_func_ids.insert(idx, func_id);
+        }
+        Ok(())
+    }
+
+    /// Compile VIR-monomorphized function bodies.
+    ///
+    /// Must be called after [`declare_vir_monomorphized_functions`] so that
+    /// all VirDirect targets have FuncIds for cross-referencing.
+    fn compile_vir_monomorphized_functions(&mut self) -> CodegenResult<()> {
+        let base = self.analyzed.vir_program.vir_monomorph_base;
+        if base == usize::MAX {
+            return Ok(());
+        }
+        let count = self.analyzed.vir_program.functions.len();
+        for idx in base..count {
+            let func_id = self.state.vir_direct_func_ids[&idx];
+            if self.defined_functions.contains(&func_id) {
+                continue;
+            }
+            let vir_func = &self.analyzed.vir_program.functions[idx];
+            let sig = self.build_signature_for_vir_func(vir_func);
+            self.jit.ctx.func.signature = sig;
+
+            let source_file_ptr = self.source_file_ptr();
+            let mut builder_ctx = FunctionBuilderContext::new();
+            {
+                let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+                let env = compile_env!(self, source_file_ptr);
+                let mut codegen_ctx = CodegenCtx::new(
+                    &mut self.jit.module,
+                    &mut self.func_registry,
+                    &mut self.pending_monomorphs,
+                );
+                super::common::compile_vir_monomorph_function(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    vir_func,
+                )?;
+            }
+            self.finalize_function(func_id)?;
+        }
         Ok(())
     }
 }

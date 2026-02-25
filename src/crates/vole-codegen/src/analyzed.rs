@@ -200,6 +200,7 @@ impl AnalyzedProgram {
             tests: vir_tests,
             global_inits: vir_global_inits,
             module_global_inits: module_vir_global_inits,
+            vir_monomorph_base: usize::MAX,
         };
         run_vir_monomorphize(&mut vir_program);
         Self {
@@ -2226,6 +2227,7 @@ fn run_vir_monomorphize(program: &mut VirProgram) {
 
     // Compute the base index where new functions will be appended.
     let base_index = program.functions.len();
+    program.vir_monomorph_base = base_index;
 
     // Build the absolute instance index (base + relative offset).
     let abs_index: vole_vir::InstanceIndex = result

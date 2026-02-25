@@ -55,6 +55,13 @@ pub struct VirProgram {
     ///
     /// Keyed by module path, then by the `let` binding's `Symbol`.
     pub module_global_inits: FxHashMap<String, FxHashMap<Symbol, VirRef>>,
+
+    /// Base index of VIR-monomorphized functions within `functions`.
+    ///
+    /// Functions at indices `>= vir_monomorph_base` were produced by the VIR
+    /// monomorphization pass and are referenced by `CallTarget::VirDirect`.
+    /// Set by `run_vir_monomorphize`; defaults to `usize::MAX` (no VIR monomorphs).
+    pub vir_monomorph_base: usize,
 }
 
 impl VirProgram {

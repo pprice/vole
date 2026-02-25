@@ -250,6 +250,29 @@ impl Compiler<'_> {
         )
     }
 
+    /// Build a Cranelift signature directly from a `VirFunction` reference.
+    ///
+    /// Unlike [`build_vir_signature_for_function`](Self::build_vir_signature_for_function)
+    /// which looks up the function by `FunctionId`, this takes the function
+    /// directly.  Used for VIR-monomorphized functions whose `FunctionId` is
+    /// shared with the generic template.
+    pub fn build_signature_for_vir_func(
+        &self,
+        vir_func: &vole_vir::func::VirFunction,
+    ) -> Signature {
+        let param_vir_types: SmallVec<[VirTypeId; 8]> = vir_func
+            .params
+            .iter()
+            .map(|(_, _, vir_ty)| *vir_ty)
+            .collect();
+        self.build_signature_from_vir_types(
+            &param_vir_types,
+            vir_func.vir_return_type,
+            vir_func.return_type,
+            VirSelfParam::None,
+        )
+    }
+
     // ========================================================================
     // Shared helpers
     // ========================================================================

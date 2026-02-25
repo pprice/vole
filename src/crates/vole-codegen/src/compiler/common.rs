@@ -743,6 +743,74 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
     Ok(())
 }
 
+/// Compile a VIR-monomorphized function body using only VIR data.
+///
+/// Unlike [`compile_function_inner_with_vir`] which requires a
+/// [`FunctionCompileConfig`] (which includes an AST body reference),
+/// this helper works entirely from VIR: the parameter list is extracted
+/// from the `VirFunction` and no AST body is needed.
+///
+/// Used for functions produced by VIR monomorphization that have no
+/// corresponding AST declaration.
+pub(crate) fn compile_vir_monomorph_function<'ctx>(
+    mut builder: FunctionBuilder,
+    codegen_ctx: &mut CodegenCtx<'ctx>,
+    env: &CompileEnv<'ctx>,
+    vir_func: &vole_vir::func::VirFunction,
+) -> CodegenResult<()> {
+    let return_type_id = Some(vir_func.return_type).filter(|id| !id.is_void());
+
+    // Auto-detect sret convention.
+    let skip_block_params = if let Some(ret_type_id) = return_type_id {
+        let arena = env.analyzed.type_arena();
+        let entities = env.analyzed.entity_registry();
+        if let Some(flat_count) =
+            crate::structs::struct_flat_slot_count(ret_type_id, arena, entities)
+        {
+            if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
+                1
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
+    // Create entry block.
+    let entry_block = builder.create_block();
+    builder.append_block_params_for_function_params(entry_block);
+    builder.switch_to_block(entry_block);
+
+    let block_params = builder.block_params(entry_block).to_vec();
+    let mut variables: FxHashMap<Symbol, (Variable, TypeId)> = FxHashMap::default();
+    let arena = env.analyzed.type_arena();
+    let ptr = codegen_ctx.ptr_type();
+
+    for (i, (name, type_id, _vir_ty)) in vir_func.params.iter().enumerate() {
+        let cl_ty = crate::types::type_id_to_cranelift(*type_id, arena, ptr);
+        let var = builder.declare_var(cl_ty);
+        builder.def_var(var, block_params[skip_block_params + i]);
+        variables.insert(*name, (var, *type_id));
+    }
+
+    let mut cg = Cg::new(&mut builder, codegen_ctx, env)
+        .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
+        .with_vars(variables)
+        .with_return_type(return_type_id);
+
+    compile_vir_body_with_cg(&mut cg, &vir_func.body, DefaultReturn::Empty)?;
+
+    drop(cg);
+
+    builder.seal_all_blocks();
+    builder.finalize();
+
+    Ok(())
+}
+
 /// Finalize a function body by adding implicit return and sealing blocks.
 ///
 /// NOTE: This helper takes ownership of the builder because `finalize()` consumes it.

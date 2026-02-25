@@ -1,0 +1,51 @@
+// Test generic function chains - exercises the call path that VirDirect
+// will use once VIR monomorphization replaces sema monomorphization.
+
+func wrap<T>(x: T) -> T {
+    return x
+}
+
+func double_wrap<T>(x: T) -> T {
+    return wrap(wrap(x))
+}
+
+func apply_twice<T>(x: T, f: (T) -> T) -> T {
+    return f(f(x))
+}
+
+func add_one(n: i64) -> i64 {
+    return n + 1
+}
+
+func prepend_hello(s: string) -> string {
+    return "hello " + s
+}
+
+tests "generic function chain calls" {
+    test "wrap preserves i64" {
+        assert(wrap(42) == 42)
+    }
+
+    test "wrap preserves string" {
+        assert(wrap("abc") == "abc")
+    }
+
+    test "double_wrap calls generic from generic" {
+        assert(double_wrap(99) == 99)
+        assert(double_wrap("test") == "test")
+    }
+
+    test "apply_twice with i64" {
+        assert(apply_twice(0, add_one) == 2)
+        assert(apply_twice(10, add_one) == 12)
+    }
+
+    test "apply_twice with string" {
+        assert(apply_twice("world", prepend_hello) == "hello hello world")
+    }
+
+    test "mixed generic chains" {
+        assert(wrap(double_wrap(7)) == 7)
+        assert(double_wrap(wrap(42)) == 42)
+    }
+}

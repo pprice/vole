@@ -49,16 +49,8 @@ impl Cg<'_, '_, '_> {
             CallTarget::GenericCall { .. } => {
                 unreachable!("CallTarget::GenericCall must be resolved before codegen")
             }
-            CallTarget::VirDirect { .. } => {
-                // VirDirect is produced by the VIR monomorphization pass.
-                // Codegen for VIR-monomorphized functions is not yet
-                // implemented — the sema monomorph path still handles all
-                // generic instantiation.  This will be enabled once VIR
-                // monomorph fully replaces the sema path.
-                unreachable!(
-                    "CallTarget::VirDirect not yet supported in codegen; \
-                     sema monomorph path should be handling this call"
-                )
+            CallTarget::VirDirect { function_index } => {
+                self.compile_vir_direct_call_by_index(*function_index, args, ty)
             }
             CallTarget::Unresolved {
                 callee_sym,
@@ -87,6 +79,38 @@ impl Cg<'_, '_, '_> {
             .funcs_ref()
             .func_id(func_key)
             .ok_or_else(|| CodegenError::not_found("compiled function for VIR direct call", ""))?;
+
+        let func_ref = self
+            .codegen_ctx
+            .jit_module()
+            .declare_func_in_func(func_id, self.builder.func);
+
+        let (arg_values, mut rc_temps) = self.compile_vir_args(args)?;
+        let call_inst = self.emit_call(func_ref, &arg_values);
+        self.consume_rc_args(&mut rc_temps)?;
+        self.call_result(call_inst, return_ty)
+    }
+
+    /// Compile a direct call to a VIR-monomorphized function by its index
+    /// in `VirProgram.functions`.
+    ///
+    /// Looks up the pre-declared `FuncId` from `state.vir_direct_func_ids`,
+    /// imports it into the current function, compiles VIR arguments, and
+    /// emits the call instruction.
+    fn compile_vir_direct_call_by_index(
+        &mut self,
+        function_index: usize,
+        args: &[VirRef],
+        return_ty: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let func_id = *self
+            .env
+            .state
+            .vir_direct_func_ids
+            .get(&function_index)
+            .ok_or_else(|| {
+                CodegenError::not_found("VirDirect function", format!("index {function_index}"))
+            })?;
 
         let func_ref = self
             .codegen_ctx

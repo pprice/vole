@@ -13,6 +13,8 @@ use vole_sema::generic::{
 };
 use vole_sema::type_arena::TypeId;
 
+use cranelift_module::FuncId;
+
 use crate::FunctionKey;
 use crate::interfaces::InterfaceVtableRegistry;
 use crate::intrinsics::IntrinsicsRegistry;
@@ -160,6 +162,13 @@ pub(crate) struct CodegenState {
     /// Classes use their runtime type_id; structs (type_id=0) get a freshly
     /// allocated ID so that different struct types don't collide in the cache.
     pub meta_cache_keys: RefCell<FxHashMap<TypeDefId, u32>>,
+    /// JIT `FuncId` for each VIR-monomorphized function, keyed by its index
+    /// in `VirProgram.functions`.
+    ///
+    /// Populated during the declaration pass for VIR-monomorphized functions
+    /// (those at indices `>= vir_monomorph_base`).  Read by `compile_vir_call`
+    /// when handling `CallTarget::VirDirect`.
+    pub vir_direct_func_ids: FxHashMap<usize, FuncId>,
 }
 
 impl CodegenState {
@@ -187,6 +196,7 @@ impl CodegenState {
             monomorph_index: FxHashMap::default(),
             annotation_type_ids: RefCell::new(FxHashMap::default()),
             meta_cache_keys: RefCell::new(FxHashMap::default()),
+            vir_direct_func_ids: FxHashMap::default(),
         }
     }
 }
