@@ -9,12 +9,16 @@
 
 use super::*;
 use crate::analysis_cache::IsCheckResult as SemaIsCheckResult;
+use crate::generic::MonomorphKey;
+use crate::types::FunctionType;
 use crate::vir_lower::expr::lower_expr;
 use crate::vir_lower::stmt::lower_stmt;
 use vole_frontend::ast::{
-    AsCastExpr, AsCastKind, ExprKind, ForStmt, IsExpr, Stmt, StringPart, TypeExpr, TypeExprKind,
+    AsCastExpr, AsCastKind, CallArg, CallExpr, ExprKind, ForStmt, IsExpr, Stmt, StringPart,
+    TypeExpr, TypeExprKind,
 };
 use vole_identity::StringConversion;
+use vole_vir::calls::CallTarget;
 use vole_vir::expr::{IsCheckResult, VirExpr, VirStringPart};
 use vole_vir::stmt::{VirIterKind, VirStmt};
 
@@ -425,4 +429,180 @@ fn require_is_check_result_generic_returns_present_data() {
 
     let result = ctx.require_is_check_result(node, 1);
     assert_eq!(result, SemaIsCheckResult::AlwaysFalse);
+}
+
+// -----------------------------------------------------------------------
+// generic call — GenericCall emitted for calls to other generics
+// -----------------------------------------------------------------------
+
+#[test]
+fn generic_mode_call_with_monomorph_key_emits_generic_call() {
+    let mut interner = test_interner();
+    let mut type_arena = test_type_arena();
+    let mut entities = test_entities();
+    let mut name_table = test_name_table();
+    let mut type_table = test_type_table();
+
+    // Register a generic callee function so function_by_name resolves.
+    let callee_sym = interner.intern("identity");
+    let callee_name_id = name_table.intern(name_table.main_module(), &[callee_sym], &interner);
+    let sig = FunctionType::unary(TypeId::I64, TypeId::I64);
+    let func_id = entities.register_function(callee_name_id, callee_name_id, ModuleId::new(0), sig);
+
+    // Build a call expression: `identity(42)`.
+    let arg_expr = make_int_expr(42);
+    let call_node_id = NodeId::new(ModuleId::new(0), 500);
+    let call_expr = Expr {
+        id: call_node_id,
+        kind: ExprKind::Call(Box::new(CallExpr {
+            callee: Expr {
+                id: dummy_node_id(),
+                kind: ExprKind::Identifier(callee_sym),
+                span: dummy_span(),
+            },
+            args: vec![CallArg::Positional(arg_expr)],
+        })),
+        span: dummy_span(),
+    };
+
+    // Set the MonomorphKey on the call node — type arg is a type param T.
+    let t_name_id = name_table.intern_raw(name_table.main_module(), &["T"]);
+    let t_type_id = type_arena.type_param(t_name_id);
+    let key = MonomorphKey::new(callee_name_id, vec![t_type_id]);
+
+    let mut node_map = empty_node_map();
+    node_map.set_generic(call_node_id, key);
+
+    let mut ctx = make_generic_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+        &mut type_table,
+    );
+
+    let vir_ref = lower_expr(&call_expr, &mut ctx);
+    match vir_ref.as_ref() {
+        VirExpr::Call { target, args, .. } => {
+            match target {
+                CallTarget::GenericCall {
+                    function_id,
+                    type_args,
+                } => {
+                    assert_eq!(*function_id, func_id);
+                    assert_eq!(type_args.len(), 1);
+                    // The type arg should be a Param (translated from TypeParam).
+                    let vir_ty = ctx.type_table.get(type_args[0]);
+                    assert!(
+                        matches!(vir_ty, vole_vir::types::VirType::Param { name } if *name == t_name_id),
+                        "expected VirType::Param for T, got {vir_ty:?}"
+                    );
+                }
+                other => panic!("expected CallTarget::GenericCall, got {other:?}"),
+            }
+            assert_eq!(args.len(), 1);
+        }
+        other => panic!("expected VirExpr::Call, got {other:?}"),
+    }
+}
+
+#[test]
+fn generic_mode_call_without_monomorph_key_emits_unresolved() {
+    let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let name_table = test_name_table();
+    let mut type_table = test_type_table();
+
+    let callee_sym = interner.intern("println");
+    let call_node_id = NodeId::new(ModuleId::new(0), 600);
+    let call_expr = Expr {
+        id: call_node_id,
+        kind: ExprKind::Call(Box::new(CallExpr {
+            callee: Expr {
+                id: dummy_node_id(),
+                kind: ExprKind::Identifier(callee_sym),
+                span: dummy_span(),
+            },
+            args: vec![],
+        })),
+        span: dummy_span(),
+    };
+
+    let node_map = empty_node_map();
+    let mut ctx = make_generic_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+        &mut type_table,
+    );
+
+    let vir_ref = lower_expr(&call_expr, &mut ctx);
+    match vir_ref.as_ref() {
+        VirExpr::Call { target, .. } => {
+            assert!(
+                matches!(target, CallTarget::Unresolved { .. }),
+                "expected Unresolved for non-generic call, got {target:?}"
+            );
+        }
+        other => panic!("expected VirExpr::Call, got {other:?}"),
+    }
+}
+
+#[test]
+fn concrete_mode_call_with_monomorph_key_still_emits_unresolved() {
+    let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let mut entities = test_entities();
+    let mut name_table = test_name_table();
+    let mut type_table = test_type_table();
+
+    let callee_sym = interner.intern("identity");
+    let callee_name_id = name_table.intern(name_table.main_module(), &[callee_sym], &interner);
+    let sig = FunctionType::unary(TypeId::I64, TypeId::I64);
+    let _func_id =
+        entities.register_function(callee_name_id, callee_name_id, ModuleId::new(0), sig);
+
+    let call_node_id = NodeId::new(ModuleId::new(0), 700);
+    let call_expr = Expr {
+        id: call_node_id,
+        kind: ExprKind::Call(Box::new(CallExpr {
+            callee: Expr {
+                id: dummy_node_id(),
+                kind: ExprKind::Identifier(callee_sym),
+                span: dummy_span(),
+            },
+            args: vec![],
+        })),
+        span: dummy_span(),
+    };
+
+    let key = MonomorphKey::new(callee_name_id, vec![TypeId::I64]);
+    let mut node_map = empty_node_map();
+    node_map.set_generic(call_node_id, key);
+
+    // Concrete mode — should still emit Unresolved (GenericCall is only
+    // for generic templates).
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+        &mut type_table,
+    );
+
+    let vir_ref = lower_expr(&call_expr, &mut ctx);
+    match vir_ref.as_ref() {
+        VirExpr::Call { target, .. } => {
+            assert!(
+                matches!(target, CallTarget::Unresolved { .. }),
+                "expected Unresolved in concrete mode, got {target:?}"
+            );
+        }
+        other => panic!("expected VirExpr::Call, got {other:?}"),
+    }
 }

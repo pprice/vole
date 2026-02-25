@@ -972,10 +972,21 @@ fn lower_call(
         .map(|arg| lower_call_arg(arg.expr(), ctx))
         .collect();
 
-    let target = CallTarget::Unresolved {
-        callee_sym,
-        call_node_id: expr.id,
-        line: expr.span.line,
+    // In generic mode, check if this call has a MonomorphKey — that means
+    // it targets another generic function.  Emit GenericCall so the VIR
+    // monomorphization pass can resolve it to a concrete callee later.
+    let target = if ctx.generic {
+        generic_call_target(expr, ctx).unwrap_or(CallTarget::Unresolved {
+            callee_sym,
+            call_node_id: expr.id,
+            line: expr.span.line,
+        })
+    } else {
+        CallTarget::Unresolved {
+            callee_sym,
+            call_node_id: expr.id,
+            line: expr.span.line,
+        }
     };
 
     let vir_ty = ctx.translate(ty);
@@ -984,6 +995,19 @@ fn lower_call(
         args,
         ty,
         vir_ty,
+    })
+}
+
+/// Try to build a `CallTarget::GenericCall` from the MonomorphKey on a call
+/// node.  Returns `None` when the node has no MonomorphKey or when the
+/// target function cannot be resolved to a `FunctionId`.
+fn generic_call_target(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> Option<CallTarget> {
+    let key = ctx.node_map.get_generic(expr.id)?;
+    let function_id = ctx.entities.function_by_name(key.func_name)?;
+    let type_args: Vec<VirTypeId> = key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect();
+    Some(CallTarget::GenericCall {
+        function_id,
+        type_args,
     })
 }
 
