@@ -9,7 +9,7 @@ pub mod resolve;
 pub mod rewrite;
 pub mod substitute;
 
-pub use fixpoint::{MonomorphInstance, MonomorphResult, monomorphize};
+pub use fixpoint::{MonomorphInstance, MonomorphResult, monomorphize, monomorphize_with_seeds};
 pub use rederive::rederive_decisions;
 pub use resolve::{InstanceIndex, resolve_generic_calls};
 pub use rewrite::{RewriteCtx, rewrite_function};

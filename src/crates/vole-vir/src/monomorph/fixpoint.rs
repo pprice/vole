@@ -63,6 +63,20 @@ pub struct MonomorphResult {
 /// Returns the newly created concrete functions.  The caller is responsible
 /// for adding them to `VirProgram.functions`.
 pub fn monomorphize(program: &mut VirProgram) -> MonomorphResult {
+    monomorphize_with_seeds(program, Vec::new())
+}
+
+/// Monomorphize with external seeds in addition to scanning concrete functions.
+///
+/// External seeds are `MonomorphInstance`s injected by the caller (e.g.,
+/// derived from the sema monomorph cache) so that VIR monomorphization
+/// can produce concrete functions for instances that sema has discovered.
+/// The fixpoint loop processes both seeds and `GenericCall` sites found
+/// in concrete functions, transitively discovering further instances.
+pub fn monomorphize_with_seeds(
+    program: &mut VirProgram,
+    seeds: Vec<MonomorphInstance>,
+) -> MonomorphResult {
     let mut worklist: Vec<MonomorphInstance> = Vec::new();
     let mut seen: FxHashSet<MonomorphInstance> = FxHashSet::default();
     let mut result_functions: Vec<VirFunction> = Vec::new();
@@ -72,6 +86,9 @@ pub fn monomorphize(program: &mut VirProgram) -> MonomorphResult {
     for func in &program.functions {
         collect_generic_calls_from_function(func, &mut worklist);
     }
+
+    // Inject external seeds (from sema monomorph cache).
+    worklist.extend(seeds);
 
     while let Some(instance) = worklist.pop() {
         if seen.contains(&instance) {

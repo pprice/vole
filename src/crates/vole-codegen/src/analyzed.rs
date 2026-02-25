@@ -79,6 +79,35 @@ impl AnalyzedProgram {
             &mut vir_functions,
             &mut type_table,
         );
+
+        // --- VIR monomorphization (before sema-based lowering) ---
+        //
+        // Build generic VIR storage early so we can run VIR monomorph
+        // before lower_monomorphized_instances.  VIR monomorph produces
+        // concrete functions from generic templates via type substitution,
+        // eliminating the need for sema body re-analysis + AST lowering
+        // for those instances.
+        //
+        // Generic VIR templates use VirTypeIds from their own type table
+        // (built during sema Pass 2a).  We must merge that table into the
+        // main type_table and remap all VirTypeIds in the templates so that
+        // VIR monomorphization operates on a single unified type table.
+        let generic_type_remap = type_table.merge_from(&output.generic_vir_type_table);
+        let (generic_vir_functions, generic_vir_map) =
+            build_generic_vir_storage_remapped(output.generic_vir_functions, &generic_type_remap);
+
+        // Convert sema monomorph cache entries to VIR MonomorphInstance seeds
+        // and run VIR monomorphization.  Collect which FunctionIds were handled
+        // so we can skip them in the sema-based lowering path.
+        let vir_handled_function_ids = run_early_vir_monomorphize(
+            &mut vir_functions,
+            &generic_vir_functions,
+            &generic_vir_map,
+            &mut type_table,
+            &db.entities,
+            &db.types,
+        );
+
         let generic_func_asts =
             build_generic_func_map(&program, &interner, &db.names, output.module_id);
         lower_monomorphized_instances(
@@ -92,6 +121,7 @@ impl AnalyzedProgram {
             &mut interner,
             &mut vir_functions,
             &mut type_table,
+            &vir_handled_function_ids,
         );
         lower_top_level_type_methods(
             &program,
@@ -187,8 +217,6 @@ impl AnalyzedProgram {
             &output.modules_with_errors,
             &mut type_table,
         );
-        let (generic_vir_functions, generic_vir_map) =
-            build_generic_vir_storage(output.generic_vir_functions);
         let mut vir_program = VirProgram {
             type_table,
             functions: vir_functions,
@@ -202,6 +230,11 @@ impl AnalyzedProgram {
             module_global_inits: module_vir_global_inits,
             vir_monomorph_base: usize::MAX,
         };
+        // Run VIR monomorph again on the full program to resolve any
+        // GenericCall targets in concrete functions (e.g., from VIR-lowered
+        // monomorphs that call other generics).  The early run above handles
+        // sema-seeded instances; this run catches GenericCall sites in all
+        // concrete functions.
         run_vir_monomorphize(&mut vir_program);
         Self {
             program,
@@ -459,6 +492,10 @@ fn lower_top_level_functions(
 /// programs and lowers it with the substituted (concrete) param and return
 /// types from the instance's `func_type`.
 ///
+/// Instances whose `original_name` resolves to a `FunctionId` in
+/// `vir_handled_function_ids` are skipped — those were already produced
+/// by the VIR monomorphization pass and don't need sema body re-analysis.
+///
 /// Debug-asserts that no `TypeId` in the output contains a type parameter.
 #[allow(clippy::too_many_arguments)]
 fn lower_monomorphized_instances(
@@ -472,9 +509,20 @@ fn lower_monomorphized_instances(
     interner: &mut Interner,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
+    vir_handled_function_ids: &HashSet<FunctionId>,
 ) {
     // Iterate all monomorphized instances in the cache
     for (_, instance) in entities.monomorph_cache.instances() {
+        // Skip instances already handled by VIR monomorphization.
+        // VIR monomorph produced concrete functions for these via type
+        // substitution on generic templates, so sema body re-analysis
+        // and AST-based VIR lowering are unnecessary.
+        if let Some(func_id) = entities.function_by_name(instance.original_name)
+            && vir_handled_function_ids.contains(&func_id)
+        {
+            continue;
+        }
+
         if let Some(func) = generic_func_asts.get(&instance.original_name) {
             // Found in the main program — lower with the main interner
             lower_single_monomorph(
@@ -2193,32 +2241,146 @@ fn lower_module_implement_block_methods(
     }
 }
 
-/// Build generic VIR storage from the `(NameId, VirFunction)` pairs produced
-/// by sema's Pass 2a (generic body analysis + VIR lowering).
+/// Build generic VIR storage with VirTypeId remapping.
 ///
-/// Returns the Vec of generic VirFunctions and a lookup map from NameId to
-/// index for O(1) access.
-fn build_generic_vir_storage(
+/// Like `build_generic_vir_storage` but applies a VirTypeId remapping to
+/// each generic function template.  This is needed because generic templates
+/// are lowered with their own type table (in sema Pass 2a) and their
+/// VirTypeIds must be translated to the program's main type table.
+fn build_generic_vir_storage_remapped(
     pairs: Vec<(NameId, VirFunction)>,
+    type_remap: &FxHashMap<vole_identity::VirTypeId, vole_identity::VirTypeId>,
 ) -> (Vec<VirFunction>, FxHashMap<NameId, usize>) {
+    let ctx = vole_vir::RewriteCtx::new(type_remap.clone());
     let mut map = FxHashMap::default();
     let mut functions = Vec::with_capacity(pairs.len());
     for (name_id, vir) in pairs {
         let idx = functions.len();
         map.insert(name_id, idx);
-        functions.push(vir);
+        functions.push(vole_vir::rewrite_function(&vir, &ctx));
     }
     (functions, map)
+}
+
+/// Run VIR monomorphization early, before sema-based monomorph lowering.
+///
+/// Converts sema monomorph cache entries into VIR `MonomorphInstance` seeds,
+/// builds a temporary `VirProgram`, runs VIR monomorphization with those
+/// seeds, and merges the produced concrete functions back into the working
+/// `vir_functions` vec and `type_table`.
+///
+/// Returns the set of `FunctionId`s for generic functions that were
+/// successfully monomorphized — `lower_monomorphized_instances` should skip
+/// all sema cache entries whose `original_name` resolves to one of these.
+#[allow(clippy::too_many_arguments)]
+fn run_early_vir_monomorphize(
+    vir_functions: &mut Vec<VirFunction>,
+    generic_vir_functions: &[VirFunction],
+    generic_vir_map: &FxHashMap<NameId, usize>,
+    type_table: &mut VirTypeTable,
+    entities: &EntityRegistry,
+    type_arena: &TypeArena,
+) -> HashSet<FunctionId> {
+    use vole_sema::vir_lower::type_translate::translate_type_id;
+
+    let mut handled = HashSet::new();
+
+    // Build seeds from the sema monomorph cache.
+    let mut seeds: Vec<vole_vir::MonomorphInstance> = Vec::new();
+    for (_, sema_instance) in entities.monomorph_cache.instances() {
+        let Some(func_id) = entities.function_by_name(sema_instance.original_name) else {
+            continue;
+        };
+
+        // Find the generic VIR template to get the type param order.
+        let template = generic_vir_functions.iter().find(|f| f.id == func_id);
+        let Some(template) = template else {
+            // No generic VIR template — can't VIR-monomorphize this one.
+            continue;
+        };
+
+        // Convert sema substitutions to ordered VIR type args.
+        let mut type_args = Vec::with_capacity(template.type_params.len());
+        let mut all_resolved = true;
+        for &param_name in &template.type_params {
+            if let Some(&sema_ty) = sema_instance.substitutions.get(&param_name) {
+                let vir_ty = translate_type_id(type_table, sema_ty, type_arena);
+                type_args.push(vir_ty);
+            } else {
+                // Substitution missing for this param — skip this instance.
+                all_resolved = false;
+                break;
+            }
+        }
+        if !all_resolved {
+            continue;
+        }
+
+        seeds.push(vole_vir::MonomorphInstance {
+            function_id: func_id,
+            type_args,
+        });
+    }
+
+    if seeds.is_empty() {
+        return handled;
+    }
+
+    // Build a temporary VirProgram for VIR monomorphization.
+    let mut temp_program = VirProgram {
+        type_table: std::mem::take(type_table),
+        functions: std::mem::take(vir_functions),
+        monomorph_map: FxHashMap::default(),
+        function_map: FxHashMap::default(),
+        method_map: FxHashMap::default(),
+        generic_functions: generic_vir_functions.to_vec(),
+        generic_map: generic_vir_map.clone(),
+        tests: Vec::new(),
+        global_inits: FxHashMap::default(),
+        module_global_inits: FxHashMap::default(),
+        vir_monomorph_base: usize::MAX,
+    };
+
+    let result = vole_vir::monomorphize_with_seeds(&mut temp_program, seeds);
+
+    if !result.functions.is_empty() {
+        // Record which generic FunctionIds were handled.
+        for instance in result.instance_map.keys() {
+            handled.insert(instance.function_id);
+        }
+
+        // Compute the base index where new functions will be appended.
+        let base_index = temp_program.functions.len();
+        temp_program.vir_monomorph_base = base_index;
+
+        // Build the absolute instance index (base + relative offset).
+        let abs_index: vole_vir::InstanceIndex = result
+            .instance_map
+            .into_iter()
+            .map(|(instance, rel_idx)| (instance, base_index + rel_idx))
+            .collect();
+
+        // Append the monomorphized functions.
+        temp_program.functions.extend(result.functions);
+
+        // Resolve GenericCall -> VirDirect in all concrete functions.
+        vole_vir::resolve_generic_calls(&mut temp_program.functions, &abs_index);
+    }
+
+    // Move the (possibly updated) type_table and functions back.
+    *type_table = temp_program.type_table;
+    *vir_functions = temp_program.functions;
+
+    handled
 }
 
 /// Run the VIR monomorphization pass: discover generic calls in concrete
 /// functions, instantiate generic templates, and resolve call targets.
 ///
-/// Currently a no-op in practice because concrete VIR functions do not yet
-/// emit `CallTarget::GenericCall` (they use `Unresolved` for all calls).
-/// Once VIR lowering starts emitting `GenericCall` for calls to generic
-/// functions, this pass will produce concrete monomorphized instances and
-/// resolve them to `VirDirect` call targets.
+/// This is the final VIR monomorph pass that runs on the fully assembled
+/// VirProgram.  It catches any `GenericCall` sites in concrete functions
+/// (including those produced by the early VIR monomorph pass) and resolves
+/// them to `VirDirect` call targets.
 fn run_vir_monomorphize(program: &mut VirProgram) {
     let result = vole_vir::monomorphize(program);
     if result.functions.is_empty() {

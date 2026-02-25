@@ -97,6 +97,42 @@ impl VirTypeTable {
         self.sema_map.insert(type_id, vir_id);
     }
 
+    /// Merge all non-reserved types from `other` into `self`.
+    ///
+    /// Returns a mapping from `other`'s VirTypeIds to `self`'s VirTypeIds.
+    /// Reserved entries (indices < FIRST_DYNAMIC) map to themselves.
+    /// Non-reserved types from `other` are interned into `self`, producing
+    /// either an existing ID (if the same type was already in `self`) or a
+    /// new ID.
+    ///
+    /// This is used to merge the generic VIR type table into the program's
+    /// main type table so that VIR monomorphization can operate on a single
+    /// unified type table.
+    pub fn merge_from(&mut self, other: &VirTypeTable) -> FxHashMap<VirTypeId, VirTypeId> {
+        let mut mapping = FxHashMap::default();
+
+        // Reserved entries map to themselves (both tables have identical
+        // reserved entries at the same indices).
+        for i in 0..VirTypeId::FIRST_DYNAMIC {
+            let id = VirTypeId::from_raw(i);
+            mapping.insert(id, id);
+        }
+
+        // Non-reserved entries: intern each type from `other` into `self`.
+        // Compound types may reference other VirTypeIds from `other`, so
+        // we must recursively remap those references.
+        for i in VirTypeId::FIRST_DYNAMIC..other.types.len() as u32 {
+            let old_id = VirTypeId::from_raw(i);
+            let ty = &other.types[i as usize];
+            let remapped_ty = remap_type_ids_in_type(ty, &mapping);
+            let layout = other.layouts[i as usize];
+            let new_id = self.intern(remapped_ty, layout);
+            mapping.insert(old_id, new_id);
+        }
+
+        mapping
+    }
+
     /// Number of interned types (including reserved entries).
     pub fn len(&self) -> usize {
         self.types.len()
@@ -105,6 +141,70 @@ impl VirTypeTable {
     /// Whether the table is empty (it never is after `new()`).
     pub fn is_empty(&self) -> bool {
         self.types.is_empty()
+    }
+}
+
+/// Remap VirTypeId references inside a VirType using a mapping.
+///
+/// Compound types (Array, Tuple, etc.) contain inner VirTypeIds that must
+/// be remapped when moving types between type tables.
+fn remap_type_ids_in_type(ty: &VirType, mapping: &FxHashMap<VirTypeId, VirTypeId>) -> VirType {
+    let remap = |id: &VirTypeId| mapping.get(id).copied().unwrap_or(*id);
+    let remap_vec = |ids: &[VirTypeId]| ids.iter().map(&remap).collect();
+
+    match ty {
+        // Leaf types: no inner VirTypeIds.
+        VirType::Primitive(_)
+        | VirType::Void
+        | VirType::Nil
+        | VirType::Done
+        | VirType::Never
+        | VirType::Range
+        | VirType::MetaType
+        | VirType::Unknown => ty.clone(),
+
+        // Param: no inner VirTypeIds (name is a NameId, not VirTypeId).
+        VirType::Param { .. } => ty.clone(),
+
+        // Error: no inner VirTypeIds (def is a TypeDefId).
+        VirType::Error { .. } => ty.clone(),
+
+        // Compound types with inner VirTypeIds.
+        VirType::Array { elem } => VirType::Array { elem: remap(elem) },
+        VirType::FixedArray { elem, len } => VirType::FixedArray {
+            elem: remap(elem),
+            len: *len,
+        },
+        VirType::Tuple { elems } => VirType::Tuple {
+            elems: remap_vec(elems),
+        },
+        VirType::Union { variants } => VirType::Union {
+            variants: remap_vec(variants),
+        },
+        VirType::Optional { inner } => VirType::Optional {
+            inner: remap(inner),
+        },
+        VirType::Fallible { success, errors } => VirType::Fallible {
+            success: remap(success),
+            errors: remap_vec(errors),
+        },
+        VirType::Function { params, ret } => VirType::Function {
+            params: remap_vec(params),
+            ret: remap(ret),
+        },
+        VirType::Class { def, type_args } => VirType::Class {
+            def: *def,
+            type_args: remap_vec(type_args),
+        },
+        VirType::Struct { def, type_args } => VirType::Struct {
+            def: *def,
+            type_args: remap_vec(type_args),
+        },
+        VirType::Interface { def, type_args } => VirType::Interface {
+            def: *def,
+            type_args: remap_vec(type_args),
+        },
+        VirType::RuntimeIterator { elem } => VirType::RuntimeIterator { elem: remap(elem) },
     }
 }
 

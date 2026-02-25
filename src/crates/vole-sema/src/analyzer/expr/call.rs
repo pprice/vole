@@ -352,20 +352,14 @@ impl Analyzer {
                     "generic instantiation"
                 );
                 let type_keys: Vec<_> = type_args_id.to_vec();
-                let module_id = self.name_table().main_module();
-                let name_id = {
-                    let mut table = self.name_table_mut();
-                    let mut namer = Namer::new(&mut table, interner);
-                    namer.intern_symbol(module_id, *sym)
-                };
-                let key = MonomorphKey::new(name_id, type_keys);
+                let key = MonomorphKey::new(original_name_id, type_keys);
 
                 if !self.entity_registry_mut().monomorph_cache.contains(&key) {
                     let id = self.entity_registry_mut().monomorph_cache.next_unique_id();
-                    let module_id = self.name_table().module_of(name_id);
+                    let module_id = self.name_table().module_of(original_name_id);
                     let base_str = self
                         .name_table()
-                        .last_segment_str(name_id)
+                        .last_segment_str(original_name_id)
                         .unwrap_or_else(|| interner.resolve(*sym).to_string());
                     let mangled_name = {
                         let mut table = self.name_table_mut();

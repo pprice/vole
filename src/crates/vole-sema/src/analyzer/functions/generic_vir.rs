@@ -29,7 +29,7 @@ impl Analyzer {
         &mut self,
         program: &Program,
         interner: &Interner,
-    ) -> Vec<(NameId, VirFunction)> {
+    ) -> (Vec<(NameId, VirFunction)>, VirTypeTable) {
         let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
         self.collect_generic_func_asts(&program.declarations, interner, &mut generic_func_asts);
 
@@ -46,8 +46,15 @@ impl Analyzer {
         let entries: Vec<_> = generic_func_asts.into_iter().collect();
         let mut results = Vec::new();
 
+        // Use a shared type table across all generic templates so that
+        // VirTypeIds are consistent and can be consumed by VIR monomorphization
+        // (which needs a single type table for substitution/rewriting).
+        let mut shared_type_table = VirTypeTable::new();
+
         for (name_id, func) in entries {
-            if let Some(vir) = self.analyze_and_lower_generic(name_id, func, interner) {
+            if let Some(vir) =
+                self.analyze_and_lower_generic(name_id, func, interner, &mut shared_type_table)
+            {
                 results.push((name_id, vir));
             }
         }
@@ -59,7 +66,7 @@ impl Analyzer {
         // preserved because Pass 2.5 needs them for propagation.
         self.purge_new_type_param_monomorph_entries(&pre_existing_keys);
 
-        results
+        (results, shared_type_table)
     }
 
     /// Analyze a single generic function body with identity substitutions,
@@ -71,6 +78,7 @@ impl Analyzer {
         name_id: NameId,
         func: &FuncDecl,
         interner: &Interner,
+        shared_type_table: &mut VirTypeTable,
     ) -> Option<VirFunction> {
         let (func_id, generic_info) = {
             let registry = self.entity_registry();
@@ -99,7 +107,8 @@ impl Analyzer {
         }
 
         // Immediately lower to VIR while NodeMap has abstract types.
-        let vir = self.lower_analyzed_generic(func, func_id, &generic_info, interner);
+        let vir =
+            self.lower_analyzed_generic(func, func_id, &generic_info, interner, shared_type_table);
 
         Some(vir)
     }
@@ -154,6 +163,7 @@ impl Analyzer {
         func_id: vole_identity::FunctionId,
         generic_info: &GenericFuncInfo,
         interner: &Interner,
+        shared_type_table: &mut VirTypeTable,
     ) -> VirFunction {
         let param_types: Vec<_> = func
             .params
@@ -167,7 +177,6 @@ impl Analyzer {
         // Clone the interner for VIR lowering (the lowering may intern
         // new string literals, requiring &mut Interner).
         let mut lowering_interner = interner.clone();
-        let mut type_table = VirTypeTable::new();
 
         let node_map = &self.results.node_map;
         let type_arena = self.type_arena();
@@ -191,7 +200,7 @@ impl Analyzer {
             &type_arena,
             &entities,
             &names,
-            &mut type_table,
+            shared_type_table,
             &type_param_names,
         )
     }

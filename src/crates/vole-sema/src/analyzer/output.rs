@@ -16,6 +16,7 @@ use vole_frontend::Span;
 use vole_frontend::ast::Symbol;
 use vole_identity::{MethodId, ModuleId, NameId};
 use vole_vir::func::VirFunction;
+use vole_vir::type_table::VirTypeTable;
 
 use super::Analyzer;
 use super::context::AnalyzerContext;
@@ -76,6 +77,12 @@ pub struct AnalysisOutput {
     /// monomorphization fixpoint loop, so the NodeMap entries used here have
     /// abstract TypeParam types.  Keyed by the function's original `NameId`.
     pub generic_vir_functions: Vec<(NameId, VirFunction)>,
+    /// Shared type table for all generic VIR templates.
+    ///
+    /// All generic VIR functions use VirTypeIds from this table.  VIR
+    /// monomorphization merges this into the program's type table so that
+    /// type substitution can correctly remap generic type references.
+    pub generic_vir_type_table: VirTypeTable,
 }
 
 /// Analysis results collected during type checking for codegen.
@@ -93,6 +100,8 @@ pub(crate) struct AnalysisResults {
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Generic VIR function templates lowered during Pass 2a.
     pub generic_vir_functions: Vec<(NameId, VirFunction)>,
+    /// Shared type table for all generic VIR templates.
+    pub generic_vir_type_table: VirTypeTable,
 }
 
 /// Function and global variable symbol tables.

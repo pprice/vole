@@ -172,6 +172,7 @@ impl Analyzer {
             module_id: current_module,
             modules_with_errors: modules_with_errors.into_iter().collect(),
             generic_vir_functions: self.results.generic_vir_functions,
+            generic_vir_type_table: self.results.generic_vir_type_table,
         }
     }
 
@@ -530,7 +531,9 @@ impl Analyzer {
         // and lower them to VIR templates.  Must run BEFORE the concrete
         // monomorphization fixpoint (Pass 3) because Pass 3 overwrites the
         // NodeMap entries with concrete types.
-        self.results.generic_vir_functions = self.lower_generic_bodies_to_vir(program, interner);
+        let (generic_vir_fns, generic_vir_tt) = self.lower_generic_bodies_to_vir(program, interner);
+        self.results.generic_vir_functions = generic_vir_fns;
+        self.results.generic_vir_type_table = generic_vir_tt;
 
         // Pass 2.5: Propagate concrete substitutions to class method monomorphs.
         // Generic class bodies record identity monomorphs for self-calls (T -> TypeParam(T)).
