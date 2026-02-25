@@ -174,6 +174,12 @@ impl Analyzer {
         let entities = self.entity_registry();
         let names = self.name_table();
 
+        let type_param_names: Vec<_> = generic_info
+            .type_params
+            .iter()
+            .map(|tp| tp.name_id)
+            .collect();
+
         crate::vir_lower::lower_generic_function(
             func,
             func_id,
@@ -186,6 +192,7 @@ impl Analyzer {
             &entities,
             &names,
             &mut type_table,
+            &type_param_names,
         )
     }
 }

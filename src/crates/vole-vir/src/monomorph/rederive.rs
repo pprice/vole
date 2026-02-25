@@ -527,6 +527,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         }
     }
 
@@ -544,6 +545,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         }
     }
 
@@ -1049,6 +1051,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         // Substitute T -> I64
@@ -1121,6 +1124,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         // Substitute T -> I64

@@ -58,6 +58,7 @@ pub fn rewrite_function(func: &VirFunction, ctx: &RewriteCtx) -> VirFunction {
         body: rewrite_body(&func.body, ctx),
         mangled_name_id: func.mangled_name_id,
         method_id: func.method_id,
+        type_params: func.type_params.clone(),
     }
 }
 
@@ -1045,6 +1046,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);
@@ -1114,6 +1116,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);
@@ -1191,6 +1194,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);
@@ -1266,6 +1270,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);
@@ -1332,6 +1337,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);
@@ -1389,6 +1395,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);
@@ -1440,6 +1447,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);
@@ -1476,6 +1484,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         // Empty mapping.
@@ -1532,6 +1541,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);
@@ -1580,6 +1590,7 @@ mod tests {
             },
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         };
 
         let ctx = RewriteCtx::new(mapping);

@@ -34,6 +34,14 @@ pub struct VirFunction {
     /// `None` for free functions.  Used by `vir_method_map` for O(1) lookup
     /// when routing method compilation through VIR.
     pub method_id: Option<MethodId>,
+    /// Type parameter names for generic function templates.
+    ///
+    /// Empty for concrete (non-generic) functions.  For generic templates
+    /// lowered with `VirType::Param` entries, this stores the ordered list
+    /// of type parameter `NameId`s.  The VIR monomorphization fixpoint loop
+    /// uses this to build the substitution map: `type_params[i]` maps to
+    /// `CallTarget::GenericCall::type_args[i]`.
+    pub type_params: Vec<NameId>,
 }
 
 /// The body of a VIR function: a linear sequence of statements with an

@@ -18,6 +18,7 @@ use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 ///
 /// The `sema_map` caches `TypeId -> VirTypeId` translations so each sema type
 /// is translated at most once.
+#[derive(Clone)]
 pub struct VirTypeTable {
     /// Interned types, indexed by VirTypeId.
     types: Vec<VirType>,

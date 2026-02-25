@@ -200,6 +200,7 @@ pub fn lower_function(
         body,
         mangled_name_id: None,
         method_id: None,
+        type_params: Vec::new(),
     }
 }
 
@@ -290,6 +291,7 @@ pub fn lower_method(
         body,
         mangled_name_id: None,
         method_id: Some(method_id),
+        type_params: Vec::new(),
     }
 }
 
@@ -336,6 +338,7 @@ pub fn lower_interface_method(
         body,
         mangled_name_id: None,
         method_id: Some(method_id),
+        type_params: Vec::new(),
     })
 }
 
@@ -362,6 +365,7 @@ pub fn lower_generic_function(
     entities: &EntityRegistry,
     name_table: &NameTable,
     type_table: &mut VirTypeTable,
+    type_param_names: &[NameId],
 ) -> VirFunction {
     let mut ctx = LoweringCtx {
         node_map,
@@ -387,6 +391,7 @@ pub fn lower_generic_function(
         body,
         mangled_name_id: None,
         method_id: None,
+        type_params: type_param_names.to_vec(),
     }
 }
 

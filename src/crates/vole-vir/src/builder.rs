@@ -282,6 +282,7 @@ impl VirBuilder {
             body,
             mangled_name_id: None,
             method_id: None,
+            type_params: Vec::new(),
         }
     }
 }
