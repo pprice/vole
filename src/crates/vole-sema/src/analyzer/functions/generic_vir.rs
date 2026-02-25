@@ -2,12 +2,13 @@
 //! Pass 2a: Analyze generic function bodies with abstract type params and
 //! lower them to VIR templates.
 //!
-//! Runs BEFORE the concrete monomorphization fixpoint loop (Pass 3) so that
-//! the NodeMap entries used for lowering contain abstract TypeParam types,
-//! not concrete substitutions from a specific monomorph instance.
+//! The NodeMap entries used for lowering contain abstract TypeParam types
+//! (identity substitutions), not concrete types from any specific instance.
 //!
 //! The resulting `VirFunction` templates preserve `VirType::Param` for type
-//! parameters and are consumed by a future VIR-to-VIR monomorphization pass.
+//! parameters and are consumed by the VIR monomorph pass
+//! (`vole_vir::monomorph`) which produces concrete instantiations via type
+//! substitution.
 
 use super::super::*;
 use vole_vir::func::VirFunction;
@@ -61,9 +62,10 @@ impl Analyzer {
 
         // Clean up: remove monomorph cache entries that were newly created
         // during generic analysis AND whose type_keys contain TypeParam types.
-        // These identity-substitution entries would confuse the concrete
-        // fixpoint loop in Pass 3.  Pre-existing entries (from Pass 2) are
-        // preserved because Pass 2.5 needs them for propagation.
+        // These identity-substitution entries are not valid concrete instances
+        // and would pollute the monomorph cache consumed by VIR monomorph and
+        // codegen lowering.  Pre-existing entries (from Pass 2) are preserved
+        // because Pass 2.5 needs them for propagation.
         self.purge_new_type_param_monomorph_entries(&pre_existing_keys);
 
         (results, shared_type_table)
@@ -134,8 +136,8 @@ impl Analyzer {
     /// During generic body analysis with identity substitutions, calls to
     /// other generic functions create monomorph instances keyed by TypeParam
     /// types (e.g., `MonomorphKey { type_keys: [TypeParam(T)] }`).  These
-    /// must be removed before the concrete fixpoint loop (Pass 3) runs,
-    /// otherwise it would attempt to analyze bodies with abstract types.
+    /// are not valid concrete instances and must be removed so they don't
+    /// pollute the cache consumed by VIR monomorphization and codegen lowering.
     ///
     /// Pre-existing entries (created during Pass 2) are preserved because
     /// Pass 2.5 (propagate_class_method_monomorphs) needs them.

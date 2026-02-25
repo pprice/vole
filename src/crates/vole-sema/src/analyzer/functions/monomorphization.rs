@@ -1,6 +1,12 @@
 // src/sema/analyzer/functions/monomorphization.rs
-//! Monomorphization analysis: body analysis, propagation, and derivation of
-//! concrete monomorph instances for generic functions and class/static methods.
+//! Monomorphization: body analysis, propagation, and derivation of concrete
+//! monomorph instances for generic functions and class/static methods.
+//!
+//! Free-function monomorphization is primarily handled by the VIR monomorph
+//! pass (see `vole_vir::monomorph`).  Functions whose VIR templates could not
+//! be produced (e.g. structural-constraint generics) fall back to sema body
+//! re-analysis in `analyze_monomorph_bodies_fallback`.  Class/static method
+//! propagation is not yet on the VIR path.
 
 use super::super::*;
 
@@ -71,30 +77,26 @@ impl Analyzer {
         self.exit_function_context(saved_ctx);
     }
 
-    /// Analyze all monomorphized function bodies to discover nested generic calls.
-    /// Iterates until no new MonomorphInstances are created (fixpoint).
+    /// Fallback body re-analysis for monomorph instances not fully handled
+    /// by VIR monomorph.
     ///
-    /// Covers both main-program generics (looked up in `generic_func_asts`) and
-    /// module-originating generics (looked up in `self.ctx.module_programs`).
-    /// Module-originating generic bodies are analyzed with the module's interner
-    /// and a temporarily switched `current_module`.
-    pub(in crate::analyzer) fn analyze_monomorph_bodies(
+    /// Functions with VIR templates (from Pass 2a) are monomorphized by the
+    /// VIR monomorph pass.  However, those VIR-handled functions may call
+    /// generic functions that lack VIR templates (e.g. structural-constraint
+    /// generics).  To discover such nested calls and populate the NodeMap for
+    /// the non-VIR instances, this fixpoint loop re-analyzes ALL bodies.
+    ///
+    /// When all generic functions can be lowered to VIR templates, this
+    /// entire fallback can be removed.
+    pub(in crate::analyzer) fn analyze_monomorph_bodies_fallback(
         &mut self,
         program: &Program,
         interner: &Interner,
     ) {
-        // Build map of generic function names to their ASTs.
-        // Include both explicit generics (type_params in AST) and implicit generics
-        // (structural type params that create generic_info in entity registry).
-        // Recurses into Decl::Tests blocks so that test-scoped generic functions
-        // are available for monomorphized body analysis.
         let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
         self.collect_generic_func_asts(&program.declarations, interner, &mut generic_func_asts);
 
-        // Make test-scoped types visible to the resolver during monomorph body
-        // analysis.  Virtual modules hold types defined inside tests blocks
-        // (e.g., `TbgHolder`); pushing them to `parent_modules` lets the
-        // resolver find them when analyzing test-scoped generic function bodies.
+        // Make test-scoped types visible during monomorph body analysis.
         let virtual_module_ids: Vec<ModuleId> = self
             .results
             .tests_virtual_modules
@@ -104,12 +106,9 @@ impl Analyzer {
         let num_virtual = virtual_module_ids.len();
         self.env.parent_modules.extend(virtual_module_ids);
 
-        // Track which instances we've already analyzed
         let mut analyzed_keys: HashSet<MonomorphKey> = HashSet::new();
 
-        // Iterate until fixpoint
         loop {
-            // Collect current instances that haven't been analyzed yet
             let instances: Vec<_> = self
                 .entity_registry()
                 .monomorph_cache
@@ -129,28 +128,73 @@ impl Analyzer {
             }
 
             for instance in instances {
-                // Mark as analyzed
                 let key = MonomorphKey::new(
                     instance.original_name,
                     instance.substitutions.values().copied().collect(),
                 );
                 analyzed_keys.insert(key);
 
-                // Find the function AST in the main program
                 if let Some(func) = generic_func_asts.get(&instance.original_name) {
-                    // Analyze the body with substitutions
                     self.analyze_monomorph_body(func, &instance.substitutions, interner);
                     continue;
                 }
 
-                // Not in the main program — try module programs
                 self.analyze_module_monomorph_body(&instance);
             }
         }
 
-        // Remove the virtual modules we added for test-scoped type resolution.
         let new_len = self.env.parent_modules.len() - num_virtual;
         self.env.parent_modules.truncate(new_len);
+    }
+
+    /// Analyze a module-originating monomorphized function body.
+    ///
+    /// Looks up the generic function AST in the module's program, temporarily
+    /// switches `current_module` to the module's ID, and calls
+    /// `analyze_monomorph_body` with the module's interner.
+    fn analyze_module_monomorph_body(&mut self, instance: &MonomorphInstance) {
+        let (module_id, module_path) = {
+            let names = self.name_table();
+            let mid = names.module_of(instance.original_name);
+            let path = names.module_path(mid).to_string();
+            (mid, path)
+        };
+
+        let ctx = Rc::clone(&self.ctx);
+        let programs = ctx.module_programs.borrow();
+        let Some((module_program, module_interner)) = programs.get(&module_path) else {
+            return;
+        };
+
+        let func = module_program.declarations.iter().find_map(|decl| {
+            let Decl::Function(func) = decl else {
+                return None;
+            };
+            if func.type_params.is_empty() {
+                return None;
+            }
+            let name_id = self
+                .name_table()
+                .name_id(module_id, &[func.name], module_interner);
+            if name_id == Some(instance.original_name) {
+                Some(func)
+            } else {
+                None
+            }
+        });
+
+        let Some(func) = func else { return };
+
+        let saved_module = self.module.current_module;
+        let saved_symbols = std::mem::take(&mut self.symbols);
+        let saved_errors = std::mem::take(&mut self.diagnostics.errors);
+
+        self.module.current_module = module_id;
+        self.analyze_monomorph_body(func, &instance.substitutions, module_interner);
+
+        self.module.current_module = saved_module;
+        self.symbols = saved_symbols;
+        self.diagnostics.errors = saved_errors;
     }
 
     /// Recursively collect generic function ASTs from declarations.
@@ -196,78 +240,6 @@ impl Analyzer {
                 _ => {}
             }
         }
-    }
-
-    /// Analyze a module-originating monomorphized function body.
-    ///
-    /// Looks up the generic function AST in the module's program, temporarily
-    /// switches `current_module` to the module's ID, and calls
-    /// `analyze_monomorph_body` with the module's interner.  This populates the
-    /// NodeMap for module-originating generic bodies, enabling VIR lowering.
-    ///
-    /// The main analyzer's `SymbolTables` is temporarily swapped out to avoid
-    /// Symbol collisions: module AST symbols are from a different interner than
-    /// the main program's symbols, so a module Symbol(N) could match a
-    /// completely different main-program function at Symbol(N).  With empty
-    /// symbol tables, name resolution falls through to the NameId-based path
-    /// which correctly uses `current_module` + the module interner.
-    ///
-    /// Any diagnostics generated during module body analysis are suppressed —
-    /// module-level errors were already reported during the module's own
-    /// analysis pass.
-    fn analyze_module_monomorph_body(&mut self, instance: &MonomorphInstance) {
-        // Resolve the module from the instance's original_name
-        let (module_id, module_path) = {
-            let names = self.name_table();
-            let mid = names.module_of(instance.original_name);
-            let path = names.module_path(mid).to_string();
-            (mid, path)
-        };
-
-        // Use an Rc clone so the RefCell borrow on module_programs doesn't
-        // conflict with &mut self in analyze_monomorph_body.
-        let ctx = Rc::clone(&self.ctx);
-        let programs = ctx.module_programs.borrow();
-        let Some((module_program, module_interner)) = programs.get(&module_path) else {
-            return;
-        };
-
-        // Find the generic function AST by matching original_name
-        let func = module_program.declarations.iter().find_map(|decl| {
-            let Decl::Function(func) = decl else {
-                return None;
-            };
-            if func.type_params.is_empty() {
-                return None;
-            }
-            let name_id = self
-                .name_table()
-                .name_id(module_id, &[func.name], module_interner);
-            if name_id == Some(instance.original_name) {
-                Some(func)
-            } else {
-                None
-            }
-        });
-
-        let Some(func) = func else { return };
-
-        // Save and swap state to isolate module body analysis:
-        // 1. current_module — so NameId resolution uses the module's namespace
-        // 2. symbols — so Symbol-keyed lookups don't collide across interners
-        // 3. diagnostics.errors — so module body errors don't pollute the main program
-        let saved_module = self.module.current_module;
-        let saved_symbols = std::mem::take(&mut self.symbols);
-        let saved_errors = std::mem::take(&mut self.diagnostics.errors);
-
-        self.module.current_module = module_id;
-
-        self.analyze_monomorph_body(func, &instance.substitutions, module_interner);
-
-        // Restore state
-        self.module.current_module = saved_module;
-        self.symbols = saved_symbols;
-        self.diagnostics.errors = saved_errors;
     }
 
     /// Propagate concrete type substitutions to class method monomorphs created

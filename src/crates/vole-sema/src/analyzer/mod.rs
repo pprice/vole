@@ -528,9 +528,9 @@ impl Analyzer {
         self.check_declaration_bodies(program, interner)?;
 
         // Pass 2a: Analyze generic function bodies with abstract TypeParam types
-        // and lower them to VIR templates.  Must run BEFORE the concrete
-        // monomorphization fixpoint (Pass 3) because Pass 3 overwrites the
-        // NodeMap entries with concrete types.
+        // and lower them to VIR templates.  These templates are consumed by
+        // the VIR monomorph pass (in codegen's `from_analysis`) which handles
+        // free-function monomorphization via type substitution.
         let (generic_vir_fns, generic_vir_tt) = self.lower_generic_bodies_to_vir(program, interner);
         self.results.generic_vir_functions = generic_vir_fns;
         self.results.generic_vir_type_table = generic_vir_tt;
@@ -541,9 +541,13 @@ impl Analyzer {
         self.propagate_class_method_monomorphs();
         self.propagate_static_method_monomorphs();
 
-        // Pass 3: analyze monomorphized function bodies to discover nested generic calls
-        // This iterates until no new MonomorphInstances are created
-        self.analyze_monomorph_bodies(program, interner);
+        // Pass 3: Fallback body re-analysis for monomorph instance discovery.
+        // VIR monomorph handles instances with VIR templates; this fallback
+        // re-analyzes bodies to discover nested generic calls transitively and
+        // populate NodeMap for instances that lack VIR templates (e.g.
+        // structural-constraint generics).  Can be removed when all generic
+        // functions produce VIR templates in Pass 2a.
+        self.analyze_monomorph_bodies_fallback(program, interner);
 
         if self.diagnostics.errors.is_empty() {
             Ok(())

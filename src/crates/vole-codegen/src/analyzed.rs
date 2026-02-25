@@ -80,13 +80,11 @@ impl AnalyzedProgram {
             &mut type_table,
         );
 
-        // --- VIR monomorphization (before sema-based lowering) ---
+        // --- VIR monomorphization ---
         //
-        // Build generic VIR storage early so we can run VIR monomorph
-        // before lower_monomorphized_instances.  VIR monomorph produces
-        // concrete functions from generic templates via type substitution,
-        // eliminating the need for sema body re-analysis + AST lowering
-        // for those instances.
+        // Run VIR monomorph to produce concrete functions from generic
+        // templates via type substitution.  This is the primary
+        // monomorphization path for free functions.
         //
         // Generic VIR templates use VirTypeIds from their own type table
         // (built during sema Pass 2a).  We must merge that table into the
@@ -98,7 +96,7 @@ impl AnalyzedProgram {
 
         // Convert sema monomorph cache entries to VIR MonomorphInstance seeds
         // and run VIR monomorphization.  Collect which FunctionIds were handled
-        // so we can skip them in the sema-based lowering path.
+        // so we can skip them in the AST-based lowering fallback path.
         let vir_handled_function_ids = run_early_vir_monomorphize(
             &mut vir_functions,
             &generic_vir_functions,
@@ -485,7 +483,7 @@ fn lower_top_level_functions(
     vir_functions
 }
 
-/// Lower monomorphized function instances to VIR.
+/// AST-based fallback for monomorphized instances not handled by VIR monomorph.
 ///
 /// For each concrete instance in the monomorph cache, finds the generic
 /// function's AST in the main program (`generic_func_asts`) or in module
@@ -493,8 +491,9 @@ fn lower_top_level_functions(
 /// types from the instance's `func_type`.
 ///
 /// Instances whose `original_name` resolves to a `FunctionId` in
-/// `vir_handled_function_ids` are skipped — those were already produced
-/// by the VIR monomorphization pass and don't need sema body re-analysis.
+/// `vir_handled_function_ids` are skipped -- those were already produced
+/// by the VIR monomorphization pass.  The remaining instances (e.g.,
+/// module-originating generics without VIR templates) are lowered here.
 ///
 /// Debug-asserts that no `TypeId` in the output contains a type parameter.
 #[allow(clippy::too_many_arguments)]
@@ -515,8 +514,7 @@ fn lower_monomorphized_instances(
     for (_, instance) in entities.monomorph_cache.instances() {
         // Skip instances already handled by VIR monomorphization.
         // VIR monomorph produced concrete functions for these via type
-        // substitution on generic templates, so sema body re-analysis
-        // and AST-based VIR lowering are unnecessary.
+        // substitution on generic templates.
         if let Some(func_id) = entities.function_by_name(instance.original_name)
             && vir_handled_function_ids.contains(&func_id)
         {
@@ -2262,7 +2260,7 @@ fn build_generic_vir_storage_remapped(
     (functions, map)
 }
 
-/// Run VIR monomorphization early, before sema-based monomorph lowering.
+/// Run VIR monomorphization for free-function generics.
 ///
 /// Converts sema monomorph cache entries into VIR `MonomorphInstance` seeds,
 /// builds a temporary `VirProgram`, runs VIR monomorphization with those
@@ -2270,7 +2268,7 @@ fn build_generic_vir_storage_remapped(
 /// `vir_functions` vec and `type_table`.
 ///
 /// Returns the set of `FunctionId`s for generic functions that were
-/// successfully monomorphized — `lower_monomorphized_instances` should skip
+/// successfully monomorphized -- `lower_monomorphized_instances` should skip
 /// all sema cache entries whose `original_name` resolves to one of these.
 #[allow(clippy::too_many_arguments)]
 fn run_early_vir_monomorphize(
