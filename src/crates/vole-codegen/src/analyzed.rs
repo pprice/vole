@@ -416,6 +416,32 @@ impl AnalyzedProgram {
         &self.implements
     }
 
+    /// Look up external function binding metadata by short function name.
+    pub fn external_func_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&vole_sema::implement_registry::ExternalMethodInfo> {
+        self.implement_registry().get_external_func(name)
+    }
+
+    /// Look up generic external function metadata by short function name.
+    pub fn generic_external_by_name(
+        &self,
+        name: &str,
+    ) -> Option<&vole_sema::implement_registry::GenericExternalInfo> {
+        self.implement_registry().get_generic_external(name)
+    }
+
+    /// Look up generic external method metadata by defining type and method name.
+    pub fn generic_external_method(
+        &self,
+        type_def_id: TypeDefId,
+        method_name: NameId,
+    ) -> Option<&vole_sema::implement_registry::GenericExternalInfo> {
+        self.implement_registry()
+            .get_generic_external_method(type_def_id, method_name)
+    }
+
     /// Get the free-function monomorph cache.
     pub fn monomorph_cache(&self) -> &vole_sema::generic::MonomorphCache {
         &self.entity_registry().monomorph_cache

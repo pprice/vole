@@ -210,10 +210,12 @@ impl<'a> Compiler<'a> {
             .name_table()
             .last_segment_str(name_id)
             .map(|short_name| {
-                let registry = self.analyzed.implement_registry();
                 // Check both regular external functions and generic external functions with type mappings
-                registry.get_external_func(&short_name).is_some()
-                    || registry.get_generic_external(&short_name).is_some()
+                self.analyzed.external_func_by_name(&short_name).is_some()
+                    || self
+                        .analyzed
+                        .generic_external_by_name(&short_name)
+                        .is_some()
             })
             .unwrap_or(false)
     }

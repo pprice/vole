@@ -446,11 +446,7 @@ impl Cg<'_, '_, '_> {
             return Ok(None);
         };
 
-        let Some(generic_ext_info) = self
-            .analyzed()
-            .implement_registry()
-            .get_generic_external(&callee_name)
-        else {
+        let Some(generic_ext_info) = self.analyzed().generic_external_by_name(&callee_name) else {
             return Ok(None);
         };
 
@@ -603,11 +599,7 @@ impl Cg<'_, '_, '_> {
         tracing::trace!("no func_id, checking for external function");
 
         // For generic external functions with type mappings, look up intrinsic by concrete type
-        if let Some(generic_ext_info) = self
-            .analyzed()
-            .implement_registry()
-            .get_generic_external(callee_name)
-        {
+        if let Some(generic_ext_info) = self.analyzed().generic_external_by_name(callee_name) {
             let key = self.resolve_intrinsic_key_for_monomorph(
                 callee_name,
                 &generic_ext_info.type_mappings,
@@ -643,11 +635,7 @@ impl Cg<'_, '_, '_> {
 
         // Fallback: For generic external functions without type mappings,
         // call them directly with type erasure via native_registry
-        if let Some(ext_info) = self
-            .analyzed()
-            .implement_registry()
-            .get_external_func(callee_name)
-        {
+        if let Some(ext_info) = self.analyzed().external_func_by_name(callee_name) {
             let name_table = self.name_table();
             let module_path = name_table.last_segment_str(ext_info.module_path);
             let native_name = name_table.last_segment_str(ext_info.native_name);

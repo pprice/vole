@@ -186,11 +186,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Try prelude external functions (works in module context too)
         // Look up the external info (module path and native name) from implement_registry
-        let ext_info = self
-            .analyzed()
-            .implement_registry()
-            .get_external_func(callee_name)
-            .copied();
+        let ext_info = self.analyzed().external_func_by_name(callee_name).copied();
         if let Some(ref info) = ext_info {
             // Check if this is a compiler intrinsic (e.g., panic)
             let module_path_str = self

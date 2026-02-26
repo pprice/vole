@@ -133,10 +133,8 @@ impl Cg<'_, '_, '_> {
             if let Some((original_name, mono_param_type_ids, mono_return_type_id, substitutions)) =
                 instance_data
                 && let Some(callee_name) = self.name_table().last_segment_str(original_name)
-                && let Some(generic_ext_info) = self
-                    .analyzed()
-                    .implement_registry()
-                    .get_generic_external(&callee_name)
+                && let Some(generic_ext_info) =
+                    self.analyzed().generic_external_by_name(&callee_name)
             {
                 let key = self.resolve_intrinsic_key_for_monomorph(
                     &callee_name,

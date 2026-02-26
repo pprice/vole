@@ -833,8 +833,7 @@ impl Cg<'_, '_, '_> {
                 if let Some(type_def_id) = resolved.type_def_id()
                     && let Some(generic_ext_info) = self
                         .analyzed()
-                        .implement_registry()
-                        .get_generic_external_method(type_def_id, method_name_id)
+                        .generic_external_method(type_def_id, method_name_id)
                 {
                     let empty_substitutions = rustc_hash::FxHashMap::default();
                     let substitutions = self.substitutions.unwrap_or(&empty_substitutions);
