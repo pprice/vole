@@ -315,7 +315,7 @@ impl Cg<'_, '_, '_> {
         crate::interfaces::interface_method_slot_by_type_def_id(
             interface_type_id,
             method_name_id,
-            self.analyzed().entity_registry(),
+            self.analyzed(),
         )
     }
 

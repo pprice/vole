@@ -7,6 +7,7 @@ use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 
 use super::vtable_ctx::{VtableCtx, VtableCtxView};
 use crate::RuntimeKey;
+use crate::analyzed::AnalyzedProgram;
 use crate::calls::string_ops::{declare_string_data, reference_string_data};
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
@@ -18,7 +19,6 @@ use crate::types::{
 use crate::union_layout;
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
-use vole_sema::EntityRegistry;
 use vole_sema::type_arena::{SemaType, TypeId};
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
@@ -1649,13 +1649,13 @@ fn emit_build_field_array<C: VtableCtx>(
 
 /// Collect all method IDs for an interface using the vtable context.
 ///
-/// Consolidates `collect_interface_methods_via_entity_registry(id, ctx.analyzed().entity_registry())`
+/// Consolidates `collect_interface_methods_via_entity_registry(id, ctx.analyzed())`
 /// at vtable construction sites.
 fn collect_interface_methods_ctx<C: VtableCtx>(
     interface_id: TypeDefId,
     ctx: &C,
 ) -> CodegenResult<Vec<MethodId>> {
-    collect_interface_methods_via_entity_registry(interface_id, ctx.analyzed().entity_registry())
+    collect_interface_methods_via_entity_registry(interface_id, ctx.analyzed())
 }
 
 /// Convert an i64 word back to its properly typed Cranelift value.
@@ -1981,10 +1981,11 @@ fn compile_external_wrapper<C: VtableCtx>(
 pub(crate) fn interface_method_slot_by_type_def_id(
     interface_id: TypeDefId,
     method_name_id: NameId,
-    entity_registry: &EntityRegistry,
+    analyzed: &AnalyzedProgram,
 ) -> CodegenResult<usize> {
+    let entity_registry = analyzed.entity_registry();
     // Collect all methods from the interface and its parents
-    let methods = collect_interface_methods_via_entity_registry(interface_id, entity_registry)?;
+    let methods = collect_interface_methods_via_entity_registry(interface_id, analyzed)?;
 
     // Find the method by its name_id
     methods
@@ -2012,8 +2013,9 @@ pub(crate) fn interface_method_slot_by_type_def_id(
 /// Collect all methods from an interface and its parent interfaces using EntityRegistry
 pub(crate) fn collect_interface_methods_via_entity_registry(
     interface_id: TypeDefId,
-    entity_registry: &EntityRegistry,
+    analyzed: &AnalyzedProgram,
 ) -> CodegenResult<Vec<MethodId>> {
+    let entity_registry = analyzed.entity_registry();
     let interface = entity_registry.get_type(interface_id);
 
     // Verify this is an interface
@@ -2031,7 +2033,7 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
 
     collect_interface_methods_inner_entity_registry(
         interface_id,
-        entity_registry,
+        analyzed,
         &mut methods,
         &mut seen_interfaces,
         &mut seen_methods,
@@ -2042,11 +2044,12 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
 
 fn collect_interface_methods_inner_entity_registry(
     interface_id: TypeDefId,
-    entity_registry: &EntityRegistry,
+    analyzed: &AnalyzedProgram,
     methods: &mut Vec<MethodId>,
     seen_interfaces: &mut HashSet<TypeDefId>,
     seen_methods: &mut HashSet<NameId>,
 ) {
+    let entity_registry = analyzed.entity_registry();
     if !seen_interfaces.insert(interface_id) {
         return;
     }
@@ -2057,7 +2060,7 @@ fn collect_interface_methods_inner_entity_registry(
     for parent_id in interface.extends.clone() {
         collect_interface_methods_inner_entity_registry(
             parent_id,
-            entity_registry,
+            analyzed,
             methods,
             seen_interfaces,
             seen_methods,
