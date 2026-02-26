@@ -489,9 +489,8 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
     // Auto-detect sret convention.
     let config = if let Some(ret_type_id) = config.return_type_id {
         let arena = env.analyzed.type_arena();
-        let entities = env.analyzed.entity_registry();
         if let Some(flat_count) =
-            crate::structs::struct_flat_slot_count(ret_type_id, arena, entities)
+            crate::structs::struct_flat_slot_count(ret_type_id, arena, env.analyzed)
         {
             if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
                 config.with_sret()

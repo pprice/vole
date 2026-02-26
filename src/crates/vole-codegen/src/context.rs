@@ -1600,7 +1600,7 @@ fn build_monomorph_signature(
 
     // Struct return type -> multi-value or sret
     if let Some(field_count) =
-        crate::structs::struct_flat_slot_count(return_type_id, arena, analyzed.entity_registry())
+        crate::structs::struct_flat_slot_count(return_type_id, arena, analyzed)
     {
         if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
             // Small struct: return in registers, padded to MAX_SMALL_STRUCT_FIELDS

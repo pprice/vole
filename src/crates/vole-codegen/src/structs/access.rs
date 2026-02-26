@@ -14,22 +14,13 @@ use vole_sema::types::ConstantValue;
 impl Cg<'_, '_, '_> {
     /// Convenience wrapper: compute struct field byte offset, panicking on invalid types.
     pub(crate) fn struct_field_byte_offset(&self, type_id: TypeId, slot: usize) -> i32 {
-        super::helpers::struct_field_byte_offset(
-            type_id,
-            slot,
-            self.arena(),
-            self.analyzed().entity_registry(),
-        )
-        .expect("INTERNAL: struct field offset must be computable for valid struct type")
+        super::helpers::struct_field_byte_offset(type_id, slot, self.arena(), self.analyzed())
+            .expect("INTERNAL: struct field offset must be computable for valid struct type")
     }
 
     /// Compute total byte size of a struct type (None if type is not a struct).
     pub(crate) fn struct_total_byte_size(&self, type_id: TypeId) -> Option<u32> {
-        super::helpers::struct_total_byte_size(
-            type_id,
-            self.arena(),
-            self.analyzed().entity_registry(),
-        )
+        super::helpers::struct_total_byte_size(type_id, self.arena(), self.analyzed())
     }
 
     /// Return (byte_offset, cranelift_type) pairs for all flat fields of a struct.
@@ -39,11 +30,7 @@ impl Cg<'_, '_, '_> {
         &self,
         type_id: TypeId,
     ) -> Option<Vec<(i32, Type)>> {
-        super::helpers::struct_flat_field_cranelift_types(
-            type_id,
-            self.arena(),
-            self.analyzed().entity_registry(),
-        )
+        super::helpers::struct_flat_field_cranelift_types(type_id, self.arena(), self.analyzed())
     }
 
     #[tracing::instrument(skip(self, fa), fields(field = %self.interner().resolve(fa.field)))]
