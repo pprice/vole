@@ -7,13 +7,13 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{Block, Capture, Expr, FuncBody, LambdaExpr, NodeId, Stmt, Symbol};
+use vole_frontend::{Block, Capture, Expr, FuncBody, LambdaExpr, NodeId, Symbol};
 use vole_sema::type_arena::{TypeArena, TypeId};
 use vole_vir::VirBody;
 use vole_vir::expr::VirCapture;
 
 use super::RuntimeKey;
-use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
+use super::compiler::common::FunctionCompileConfig;
 use super::context::Cg;
 use super::types::{CompiledValue, is_wide_fallible};
 use crate::errors::{CodegenError, CodegenResult};
@@ -58,36 +58,6 @@ pub(crate) fn build_capture_bindings(
 }
 
 impl Cg<'_, '_, '_> {
-    /// Get lambda param and return types from sema analysis.
-    ///
-    /// Returns the function type ID and decomposed param/return types from sema.
-    /// Errors if sema did not store the lambda's type (which would be a bug).
-    fn get_lambda_types(&self, node_id: NodeId) -> CodegenResult<(TypeId, Vec<TypeId>, TypeId)> {
-        let lambda_type_id = self.get_expr_type(&node_id).ok_or_else(|| {
-            CodegenError::not_found("lambda type in sema for node", format!("{node_id:?}"))
-        })?;
-
-        let arena = self.arena();
-        let (sema_params, ret_id, _) = arena.unwrap_function(lambda_type_id).ok_or_else(|| {
-            CodegenError::type_mismatch(
-                "lambda expression",
-                "function type",
-                format!("{lambda_type_id:?}"),
-            )
-        })?;
-
-        // In monomorphized context, substitute type parameters in the individual
-        // param/return types. We can't substitute the whole function type because
-        // the substituted function type may not be pre-computed in the arena.
-        let param_type_ids: Vec<TypeId> = sema_params
-            .iter()
-            .map(|&p| self.substitute_type(p))
-            .collect();
-        let return_type_id = self.substitute_type(ret_id);
-
-        Ok((lambda_type_id, param_type_ids, return_type_id))
-    }
-
     /// Build the Cranelift signature for a lambda function.
     ///
     /// All lambdas use the closure calling convention: the first parameter is
@@ -116,136 +86,6 @@ impl Cg<'_, '_, '_> {
             sig.returns.push(AbiParam::new(return_type));
         }
         sig
-    }
-
-    /// Compile a closure from a body and params, handling captures, signature,
-    /// body compilation, and closure allocation.
-    ///
-    /// Shared by both `compile_lambda_inner` (explicit lambdas) and
-    /// `compile_it_lambda` (implicit `it` lambdas).
-    fn compile_closure(
-        &mut self,
-        body: &FuncBody,
-        params: Vec<(Symbol, TypeId, Type)>,
-        node_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
-        let captures = self
-            .get_lambda_analysis(node_id)
-            .map(|a| a.captures.clone())
-            .unwrap_or_default();
-        let num_captures = captures.len();
-        let has_captures = num_captures > 0;
-
-        let lambda_id = self.next_lambda_id();
-
-        // Get param and return types from sema
-        let (func_type_id, _, return_type_id) = self.get_lambda_types(node_id)?;
-
-        // Convert to Cranelift types
-        let return_type = self.cranelift_type(return_type_id);
-        let ptr_type = self.ptr_type();
-        let param_types: Vec<Type> = params.iter().map(|&(_, _, cr_ty)| cr_ty).collect();
-
-        let sig = self.build_lambda_signature(&param_types, return_type, return_type_id);
-
-        let func_key = self.funcs().intern_lambda(lambda_id);
-        let lambda_name = self.funcs().display(func_key);
-        let func_id = self
-            .jit_module()
-            .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
-            .map_err(CodegenError::cranelift)?;
-
-        self.funcs().set_func_id(func_key, func_id);
-        self.funcs().set_return_type(func_key, return_type_id);
-
-        // Build capture bindings if this lambda captures variables
-        let capture_bindings = if has_captures {
-            let parent_captures = self.captures.as_ref().map(|c| c.bindings);
-            Some(build_capture_bindings(
-                &captures,
-                &self.vars,
-                parent_captures,
-                self.arena(),
-            ))
-        } else {
-            None
-        };
-
-        let mut lambda_ctx = self.jit_module().make_context();
-        lambda_ctx.func.signature = sig;
-
-        // Compile the lambda body
-        {
-            let mut lambda_builder_ctx = FunctionBuilderContext::new();
-            let lambda_builder =
-                FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
-
-            let config = FunctionCompileConfig::lambda(
-                body,
-                params,
-                return_type_id,
-                capture_bindings.as_ref(),
-                ptr_type,
-            );
-
-            // Forward parent substitutions so lambdas inside monomorphized
-            // methods re-resolve type-parameter method calls on concrete types.
-            compile_function_inner_with_params(
-                lambda_builder,
-                self.codegen_ctx,
-                self.env,
-                config,
-                self.current_module(),
-                self.substitutions,
-            )?;
-        }
-
-        self.jit_module()
-            .define_function(func_id, &mut lambda_ctx)
-            .map_err(CodegenError::cranelift)?;
-
-        let func_ref = self
-            .codegen_ctx
-            .module
-            .declare_func_in_func(func_id, self.builder.func);
-        let func_addr = self.builder.ins().func_addr(ptr_type, func_ref);
-
-        // Allocate closure
-        let alloc_ref = self.runtime_func_ref(RuntimeKey::ClosureAlloc)?;
-        let num_captures_val = self.iconst_cached(types::I64, num_captures as i64);
-        let alloc_call = self
-            .builder
-            .ins()
-            .call(alloc_ref, &[func_addr, num_captures_val]);
-        let closure_ptr = self.builder.inst_results(alloc_call)[0];
-
-        // Set up captures if this is a capturing lambda
-        if has_captures {
-            self.setup_closure_captures(&captures, closure_ptr)?;
-        }
-
-        Ok(CompiledValue::new(closure_ptr, ptr_type, func_type_id))
-    }
-
-    /// Compile a lambda expression (pure or capturing) - returns a closure pointer.
-    fn compile_lambda_inner(
-        &mut self,
-        lambda: &LambdaExpr,
-        node_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
-        // Get param and return types from sema
-        let (_, param_type_ids, _) = self.get_lambda_types(node_id)?;
-        let param_types = self.cranelift_types(&param_type_ids);
-
-        // Build params: Vec<(Symbol, TypeId, Type)>
-        let params: Vec<(Symbol, TypeId, Type)> = lambda
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
-            .collect();
-
-        self.compile_closure(&lambda.body, params, node_id)
     }
 
     /// Compile a VIR lambda expression — the VIR-path counterpart to
@@ -601,40 +441,24 @@ impl Cg<'_, '_, '_> {
     /// returns) so it can be compiled through the standard lambda machinery.
     pub fn compile_it_lambda(
         &mut self,
-        expr: &Expr,
+        _expr: &Expr,
         node_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
-        // Get param and return types from sema
-        let (_, param_type_ids, return_type_id) = self.get_lambda_types(node_id)?;
-        let param_types = self.cranelift_types(&param_type_ids);
-
-        // Resolve the `it` symbol -- must exist since sema already synthesized this
-        let it_sym = self
-            .interner()
-            .lookup("it")
-            .ok_or_else(|| CodegenError::not_found("it symbol", "interner"))?;
-
-        // Build params: single `it` parameter
-        let params: Vec<(Symbol, TypeId, Type)> = vec![(it_sym, param_type_ids[0], param_types[0])];
-
-        // Build body from the original expression
-        let body = if self.arena().is_void(return_type_id) {
-            FuncBody::Block(Block {
-                stmts: vec![Stmt::Expr(vole_frontend::ast::ExprStmt {
-                    expr: expr.clone(),
-                    span: expr.span,
-                })],
-                span: expr.span,
-            })
-        } else {
-            FuncBody::Expr(Box::new(expr.clone()))
-        };
-
-        self.compile_closure(&body, params, node_id)
+        Err(CodegenError::internal_with_context(
+            "unexpected AST implicit it-lambda compilation path",
+            format!("node={node_id:?}"),
+        ))
     }
 
     /// Compile a lambda expression
-    pub fn lambda(&mut self, lambda: &LambdaExpr, node_id: NodeId) -> CodegenResult<CompiledValue> {
-        self.compile_lambda_inner(lambda, node_id)
+    pub fn lambda(
+        &mut self,
+        _lambda: &LambdaExpr,
+        node_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
+        Err(CodegenError::internal_with_context(
+            "unexpected AST lambda compilation path",
+            format!("node={node_id:?}"),
+        ))
     }
 }

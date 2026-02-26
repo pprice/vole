@@ -7,7 +7,7 @@
 use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
-use vole_frontend::{ExprKind, FuncBody, Stmt, Symbol};
+use vole_frontend::{FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
@@ -32,8 +32,6 @@ pub enum DefaultReturn {
 /// This struct captures the common parameters needed by all function compilation
 /// paths, allowing them to share the core compilation logic.
 pub struct FunctionCompileConfig<'a> {
-    /// Function body to compile
-    pub body: &'a FuncBody,
     /// Parameters: (name, vole_type_id, cranelift_type)
     pub params: Vec<(Symbol, TypeId, Type)>,
     /// Self binding for methods: (name, vole_type_id, cranelift_type)
@@ -58,12 +56,11 @@ pub struct FunctionCompileConfig<'a> {
 impl<'a> FunctionCompileConfig<'a> {
     /// Create a config for a top-level function (no self, no captures)
     pub fn top_level(
-        body: &'a FuncBody,
+        _body: &'a FuncBody,
         params: Vec<(Symbol, TypeId, Type)>,
         return_type_id: Option<TypeId>,
     ) -> Self {
         Self {
-            body,
             params,
             self_binding: None,
             capture_bindings: None,
@@ -89,13 +86,12 @@ impl<'a> FunctionCompileConfig<'a> {
 
     /// Create a config for a method (has self, no captures)
     pub fn method(
-        body: &'a FuncBody,
+        _body: &'a FuncBody,
         params: Vec<(Symbol, TypeId, Type)>,
         self_binding: (Symbol, TypeId, Type),
         return_type_id: Option<TypeId>,
     ) -> Self {
         Self {
-            body,
             params,
             self_binding: Some(self_binding),
             capture_bindings: None,
@@ -114,14 +110,13 @@ impl<'a> FunctionCompileConfig<'a> {
     /// the closure pointer parameter is still present (for calling convention
     /// consistency) but ignored.
     pub fn lambda(
-        body: &'a FuncBody,
+        _body: &'a FuncBody,
         params: Vec<(Symbol, TypeId, Type)>,
         return_type_id: TypeId,
         capture_bindings: Option<&'a FxHashMap<Symbol, CaptureBinding>>,
         closure_ptr_type: Type,
     ) -> Self {
         Self {
-            body,
             params,
             self_binding: None,
             capture_bindings,
@@ -316,144 +311,10 @@ fn emit_implicit_return(
     Ok(())
 }
 
-/// Compile function body using Cg context.
-///
-/// This is the new Cg-based compilation path. The caller is responsible for:
-/// - Setting up the function entry (call `setup_function_entry`)
-/// - Creating the Cg context
-/// - Calling seal_all_blocks and finalize after this returns
-///
-/// # Arguments
-/// * `cg` - The Cg context with builder, variables, captures, etc.
-/// * `body` - The function body to compile
-/// * `default_return` - What to return if body doesn't terminate explicitly
-///
-/// # Returns
-/// Ok(()) on success, Err with message on failure
-pub(crate) fn compile_function_body_with_cg(
-    cg: &mut Cg,
-    body: &FuncBody,
-    default_return: DefaultReturn,
-) -> CodegenResult<()> {
-    // Push function-level RC scope for tracking RC locals
-    cg.push_rc_scope();
-
-    // Compile function body
-    let (terminated, expr_value) = match body {
-        FuncBody::Block(block) => {
-            // Check if the block ends with an expression statement and the
-            // function has a non-void return type. If so, treat the trailing
-            // expression as an implicit return value (like Rust blocks).
-            let has_trailing_expr = cg.return_type.is_some_and(|ret| !cg.arena().is_void(ret))
-                && matches!(block.stmts.last(), Some(Stmt::Expr(_)));
-
-            if has_trailing_expr {
-                // Compile all statements except the trailing expression
-                let mut terminated = false;
-                for stmt in &block.stmts[..block.stmts.len() - 1] {
-                    if terminated {
-                        break;
-                    }
-                    terminated = cg.stmt(stmt)?;
-                }
-                if terminated {
-                    (true, None)
-                } else {
-                    // Compile the trailing expression and use as implicit return
-                    let trailing = match block.stmts.last() {
-                        Some(Stmt::Expr(expr_stmt)) => &expr_stmt.expr,
-                        _ => unreachable!(),
-                    };
-                    let mut value = cg.expr(trailing)?;
-
-                    // RC bookkeeping (same as FuncBody::Expr path)
-                    let skip_var = if let ExprKind::Identifier(sym) = &trailing.kind
-                        && let Some((var, _)) = cg.vars.get(sym)
-                        && (cg.rc_scopes.is_rc_local(*var)
-                            || cg.rc_scopes.is_composite_rc_local(*var)
-                            || cg.rc_scopes.is_union_rc_local(*var))
-                    {
-                        Some(*var)
-                    } else {
-                        None
-                    };
-                    if skip_var.is_none() && value.is_borrowed() {
-                        if cg.rc_state(value.type_id).needs_cleanup() {
-                            cg.emit_rc_inc_for_type(value.value, value.type_id)?;
-                        } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
-                            cg.emit_union_rc_inc(value.value, rc_tags)?;
-                        }
-                    }
-
-                    value.mark_consumed();
-                    value.debug_assert_rc_handled("implicit block return");
-                    (false, Some((value, skip_var)))
-                }
-            } else {
-                let terminated = cg.block(block)?;
-                (terminated, None)
-            }
-        }
-        FuncBody::Expr(expr) => {
-            let mut value = cg.expr(expr)?;
-
-            // RC bookkeeping for expression-bodied returns (mirrors Stmt::Return logic):
-            // If the return expression is a borrow (variable read, index, field access),
-            // we must rc_inc before scope cleanup so the caller receives an owned +1 ref.
-            let skip_var = if let ExprKind::Identifier(sym) = &expr.kind
-                && let Some((var, _)) = cg.vars.get(sym)
-                && (cg.rc_scopes.is_rc_local(*var)
-                    || cg.rc_scopes.is_composite_rc_local(*var)
-                    || cg.rc_scopes.is_union_rc_local(*var))
-            {
-                Some(*var)
-            } else {
-                None
-            };
-            if skip_var.is_none() && value.is_borrowed() {
-                if cg.rc_state(value.type_id).needs_cleanup() {
-                    cg.emit_rc_inc_for_type(value.value, value.type_id)?;
-                } else if let Some(rc_tags) = cg.rc_state(value.type_id).union_variants() {
-                    // Union with RC variants (e.g. [string]?): rc_inc the inner
-                    // payload so the caller's copy owns its own reference.
-                    // Without this, the caller's consume_rc_args and the
-                    // return value's scope-exit cleanup both rc_dec the same
-                    // inner value, causing a double-free / heap corruption.
-                    cg.emit_union_rc_inc(value.value, rc_tags)?;
-                }
-            }
-
-            // The return value is consumed — ownership transfers to the caller.
-            value.mark_consumed();
-            value.debug_assert_rc_handled("implicit return");
-            (true, Some((value, skip_var)))
-        }
-    };
-
-    // Emit RC cleanup for function-level scope before implicit returns.
-    // Explicit returns are handled in stmt.rs (Stmt::Return).
-    // If the function terminated (via explicit return/break), cleanup was already
-    // emitted at that point, so we only clean up for non-terminated paths.
-    if !terminated || expr_value.is_some() {
-        let skip_var = expr_value.as_ref().and_then(|(_, sv)| *sv);
-        cg.pop_rc_scope_with_cleanup(skip_var)?;
-    } else {
-        // Just pop the scope marker (cleanup was emitted by the return/break)
-        cg.rc_scopes.pop_scope();
-    }
-
-    // Emit implicit return
-    let return_value = expr_value.map(|(value, _skip_var)| value);
-    emit_implicit_return(cg, return_value, terminated, default_return)?;
-
-    Ok(())
-}
-
 /// Compile a VIR function body using the Cg context.
 ///
-/// Mirrors [`compile_function_body_with_cg`] but walks `VirBody` (typed VIR
-/// nodes) instead of `FuncBody` (raw AST).  All expression and statement
-/// kinds are fully lowered to VIR.
+/// Walks `VirBody` (typed VIR nodes). All expression and statement kinds are
+/// fully lowered to VIR.
 ///
 /// # Body structure
 /// - `trailing: Some(expr)` — expression body (`=> expr`), treated as implicit return.
@@ -486,7 +347,7 @@ pub(crate) fn compile_vir_body_with_cg(
         compile_vir_block_body(cg, &body.stmts)?
     };
 
-    // RC scope cleanup (same as compile_function_body_with_cg)
+    // RC scope cleanup.
     if !terminated || expr_value.is_some() {
         let skip_var = expr_value.as_ref().and_then(|(_, sv)| *sv);
         cg.pop_rc_scope_with_cleanup(skip_var)?;
@@ -502,8 +363,7 @@ pub(crate) fn compile_vir_body_with_cg(
 
 /// Compile the trailing VIR expression of an expression-bodied function.
 ///
-/// Handles RC bookkeeping for implicit returns, matching the `FuncBody::Expr`
-/// path in `compile_function_body_with_cg`.
+/// Handles RC bookkeeping for implicit returns.
 fn compile_trailing_vir_expr(
     cg: &mut Cg,
     vir_expr: &VirExpr,
@@ -609,84 +469,10 @@ fn extract_rc_skip_var_for_sym(cg: &Cg, sym: Symbol) -> Option<Variable> {
     }
 }
 
-/// Compile the inner logic of a function using split contexts.
+/// Compile a function using its VIR representation.
 ///
-/// This uses the new split context architecture:
-/// - CodegenCtx for mutable JIT infrastructure (module, func_registry)
-/// - CompileEnv for session/unit level context (analyzed program, type metadata, etc.)
-/// - module_id and substitutions for per-function context
-///
-/// # Arguments
-/// * `builder` - The FunctionBuilder for this function (consumed by finalize)
-/// * `codegen_ctx` - Mutable JIT infrastructure (module, func_registry)
-/// * `env` - Compilation environment (session/unit level)
-/// * `config` - Configuration specifying the function to compile
-/// * `module_id` - Current module (None for main program)
-/// * `substitutions` - Type parameter substitutions for monomorphized generics
-///
-/// # Returns
-/// Ok(()) on success, Err with message on failure
-pub(crate) fn compile_function_inner_with_params<'ctx>(
-    mut builder: FunctionBuilder,
-    codegen_ctx: &mut CodegenCtx<'ctx>,
-    env: &CompileEnv<'ctx>,
-    config: FunctionCompileConfig,
-    module_id: Option<vole_identity::ModuleId>,
-    substitutions: Option<&FxHashMap<vole_identity::NameId, TypeId>>,
-) -> CodegenResult<()> {
-    // Auto-detect sret convention: if return type is a large struct (3+ flat slots),
-    // the signature has a hidden sret pointer as the first parameter.
-    let config = if let Some(ret_type_id) = config.return_type_id {
-        let arena = env.analyzed.type_arena();
-        let entities = env.analyzed.entity_registry();
-        if let Some(flat_count) =
-            crate::structs::struct_flat_slot_count(ret_type_id, arena, entities)
-        {
-            if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
-                config.with_sret()
-            } else {
-                config
-            }
-        } else {
-            config
-        }
-    } else {
-        config
-    };
-
-    // Set up entry block and bind parameters
-    let (variables, captures) = setup_function_entry(&mut builder, &config);
-
-    // Create Cg with split contexts
-    let mut cg = Cg::new(&mut builder, codegen_ctx, env)
-        .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
-        .with_vars(variables)
-        .with_return_type(config.return_type_id)
-        .with_captures(captures)
-        .with_module(module_id)
-        .with_substitutions(substitutions);
-
-    if config.in_iterable_default_body {
-        cg = cg.with_iterable_default_body();
-    }
-
-    compile_function_body_with_cg(&mut cg, config.body, config.default_return)?;
-
-    // Cg borrow ends here, builder is accessible again
-    drop(cg);
-
-    builder.seal_all_blocks();
-    builder.finalize();
-
-    Ok(())
-}
-
-/// Compile a monomorphized function using its VIR representation.
-///
-/// This is the VIR-path counterpart to [`compile_function_inner_with_params`].
-/// It uses the same setup (entry block, parameter binding, Cg creation) but
-/// compiles the body via [`compile_vir_body_with_cg`] instead of
-/// [`compile_function_body_with_cg`].
+/// Uses shared setup (entry block, parameter binding, Cg creation) and then
+/// compiles the body via [`compile_vir_body_with_cg`].
 ///
 /// Substitutions are still passed through because some VIR variants (e.g.
 /// `MethodCall`) delegate to old codegen helpers that read the NodeMap with
@@ -700,7 +486,7 @@ pub(crate) fn compile_function_inner_with_vir<'ctx>(
     module_id: Option<vole_identity::ModuleId>,
     substitutions: Option<&FxHashMap<vole_identity::NameId, TypeId>>,
 ) -> CodegenResult<()> {
-    // Auto-detect sret convention (same as compile_function_inner_with_params)
+    // Auto-detect sret convention.
     let config = if let Some(ret_type_id) = config.return_type_id {
         let arena = env.analyzed.type_arena();
         let entities = env.analyzed.entity_registry();
