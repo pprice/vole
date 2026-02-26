@@ -36,6 +36,10 @@ struct ExpandedMethodData {
     func_key: Option<crate::FunctionKey>,
 }
 
+fn vir_body_uses_interface_dispatch(body: &vole_vir::VirBody) -> bool {
+    format!("{body:?}").contains("InterfaceMethod")
+}
+
 impl Compiler<'_> {
     /// Declare a single monomorphized instance using the common trait interface.
     /// `has_self_param` indicates if a self pointer should be prepended to parameters.
@@ -341,15 +345,29 @@ impl Compiler<'_> {
 
             if use_vir_monomorph {
                 if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir_func.body,
-                        None,
-                        Some(&instance.substitutions),
-                    )?;
+                    if vir_body_uses_interface_dispatch(&vir_func.body) {
+                        // TEMP(vol-eenl): interface-dispatch in unconstrained
+                        // generic VIR bodies still diverges from AST behavior
+                        // in some cases (tracked by vol-o61p).
+                        compile_function_inner_with_params(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            None,
+                            Some(&instance.substitutions),
+                        )?;
+                    } else {
+                        compile_function_inner_with_vir(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            &vir_func.body,
+                            None,
+                            Some(&instance.substitutions),
+                        )?;
+                    }
                 } else {
                     // TEMP(vol-eenl): some unconstrained generic monomorph
                     // instances still arrive without a VIR lookup key.

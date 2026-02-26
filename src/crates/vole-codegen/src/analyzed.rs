@@ -2324,14 +2324,6 @@ fn run_early_vir_monomorphize(
     use vole_sema::vir_lower::type_translate::translate_type_id;
 
     let mut handled = HashSet::new();
-    let generic_functions_with_nested_calls: HashSet<FunctionId> = generic_vir_functions
-        .iter()
-        .filter_map(|func| {
-            format!("{:?}", func.body)
-                .contains("GenericCall")
-                .then_some(func.id)
-        })
-        .collect();
 
     // Build seeds from the sema monomorph cache.
     let mut seeds: Vec<vole_vir::MonomorphInstance> = Vec::new();
@@ -2374,7 +2366,7 @@ fn run_early_vir_monomorphize(
             function_id: func_id,
             type_args,
         };
-        if is_unconstrained_generic && generic_functions_with_nested_calls.contains(&func_id) {
+        if is_unconstrained_generic {
             seed_mangled_names.insert(seed.clone(), sema_instance.mangled_name);
         }
         seeds.push(seed);
