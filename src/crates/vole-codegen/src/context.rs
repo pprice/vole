@@ -1417,7 +1417,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         key: FunctionKey,
         entry: &MonomorphIndexEntry,
     ) -> Option<FuncId> {
-        let registry = self.analyzed().entity_registry();
         let arena = self.arena();
         let ptr_type = self.ptr_type();
 
@@ -1451,7 +1450,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             func_type,
             has_self,
             arena,
-            registry,
+            self.analyzed(),
             ptr_type,
             self.codegen_ctx.module,
         );
@@ -1563,7 +1562,7 @@ fn build_monomorph_signature(
     func_type: &vole_sema::types::FunctionType,
     has_self_param: bool,
     arena: &vole_sema::type_arena::TypeArena,
-    registry: &vole_sema::EntityRegistry,
+    analyzed: &crate::analyzed::AnalyzedProgram,
     ptr_type: Type,
     module: &cranelift_jit::JITModule,
 ) -> cranelift::prelude::Signature {
@@ -1601,7 +1600,7 @@ fn build_monomorph_signature(
 
     // Struct return type -> multi-value or sret
     if let Some(field_count) =
-        crate::structs::struct_flat_slot_count(return_type_id, arena, registry)
+        crate::structs::struct_flat_slot_count(return_type_id, arena, analyzed.entity_registry())
     {
         if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
             // Small struct: return in registers, padded to MAX_SMALL_STRUCT_FIELDS
