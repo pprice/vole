@@ -25,7 +25,6 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::{ImplementBlock, StaticsBlock};
 use vole_frontend::{FuncDecl, Interner, Symbol, TypeExprKind};
 use vole_identity::{MethodId, ModuleId, NameId, TypeDefId};
-use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 
 impl Compiler<'_> {
@@ -65,23 +64,15 @@ impl Compiler<'_> {
 
         // Get TypeId for self binding (same as register_implement_block_with_interner).
         // Handles primitive types, handle, array, and named/generic types.
-        let (self_type_id, impl_type_id) = match &impl_block.target_type.kind {
+        let (self_type_id, impl_type_name_id) = match &impl_block.target_type.kind {
             TypeExprKind::Primitive(p) => {
                 let type_id = ast_primitive_type_id(*p);
-                let impl_id = ImplTypeId::from_type_id(
-                    type_id,
-                    self.arena(),
-                    self.analyzed.entity_registry(),
-                );
+                let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
                 (type_id, impl_id)
             }
             TypeExprKind::Handle => {
                 let type_id = TypeId::HANDLE;
-                let impl_id = ImplTypeId::from_type_id(
-                    type_id,
-                    self.arena(),
-                    self.analyzed.entity_registry(),
-                );
+                let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
                 (type_id, impl_id)
             }
             // Array target type: `extend [T] with Iterable<T>`.
@@ -94,7 +85,7 @@ impl Compiler<'_> {
                     Some(id) => id,
                     None => return Ok(()),
                 };
-                let impl_id = Some(ImplTypeId::from_name_id(array_name_id));
+                let impl_id = Some(array_name_id);
                 (type_id, impl_id)
             }
             TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
@@ -102,11 +93,9 @@ impl Compiler<'_> {
                 let type_name_str = interner.resolve(*sym).to_string();
                 let primitive_type_id = primitive_type_id_by_name(&type_name_str);
                 if !primitive_type_id.is_invalid() {
-                    let impl_id = ImplTypeId::from_type_id(
-                        primitive_type_id,
-                        self.arena(),
-                        self.analyzed.entity_registry(),
-                    );
+                    let impl_id = self
+                        .analyzed
+                        .impl_type_name_id_from_type_id(primitive_type_id);
                     (primitive_type_id, impl_id)
                 } else {
                     // Use module-specific interner for symbol resolution
@@ -127,11 +116,9 @@ impl Compiler<'_> {
                             format!("{:?}", type_def_id),
                         )
                     })?;
-                    let impl_id = ImplTypeId::from_type_id(
-                        metadata.vole_type,
-                        self.arena(),
-                        self.analyzed.entity_registry(),
-                    );
+                    let impl_id = self
+                        .analyzed
+                        .impl_type_name_id_from_type_id(metadata.vole_type);
                     (metadata.vole_type, impl_id)
                 }
             }
@@ -142,15 +129,15 @@ impl Compiler<'_> {
             }
         };
 
-        let impl_type_id_for_def = impl_type_id;
-        let type_def_id_opt =
-            impl_type_id_for_def.and_then(|id| self.analyzed.query().try_type_def_id(id.name_id()));
+        let impl_type_name_id_for_def = impl_type_name_id;
+        let type_def_id_opt = impl_type_name_id_for_def
+            .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
 
         // Import explicitly declared instance methods
         for method in &impl_block.methods {
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
-            let type_def_id = impl_type_id_for_def
-                .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()));
+            let type_def_id = impl_type_name_id_for_def
+                .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
 
             let (sig, semantic_method_id) = {
                 let tdef_id = type_def_id.ok_or_else(|| {
@@ -375,29 +362,21 @@ impl Compiler<'_> {
 
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
         // Get type_id directly from metadata to avoid to_type() conversion
-        let (self_type_id, impl_type_id) = match &impl_block.target_type.kind {
+        let (self_type_id, impl_type_name_id) = match &impl_block.target_type.kind {
             TypeExprKind::Primitive(p) => {
                 let type_id = ast_primitive_type_id(*p);
-                let impl_id = ImplTypeId::from_type_id(
-                    type_id,
-                    self.arena(),
-                    self.analyzed.entity_registry(),
-                );
+                let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
                 (type_id, impl_id)
             }
             TypeExprKind::Handle => {
                 let type_id = TypeId::HANDLE;
-                let impl_id = ImplTypeId::from_type_id(
-                    type_id,
-                    self.arena(),
-                    self.analyzed.entity_registry(),
-                );
+                let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
                 (type_id, impl_id)
             }
             // Array target type: `extend [T] with Iterable<T>`.
             // All array TypeIds map to pointer_type in Cranelift, so any existing
             // array TypeId can be used as self_type_id for signature building.
-            // The ImplTypeId is derived from the entity registry's array_name_id,
+            // The implement type key is derived from the entity registry's array_name_id,
             // which is independent of the element type.
             TypeExprKind::Array(_) => {
                 // Find any existing array TypeId (arena is immutable in codegen).
@@ -407,13 +386,13 @@ impl Compiler<'_> {
                         "extend [T] with Iterable<T>: no array type found in arena (prelude not loaded?)",
                     )
                 })?;
-                // Construct ImplTypeId directly from array_name_id (avoids need for specific TypeId).
+                // Use array_name_id directly as the implement type key.
                 let array_name_id = self.analyzed.entity_registry().array_name_id().ok_or_else(|| {
                     CodegenError::internal(
                         "extend [T] with Iterable<T>: array_name_id not registered in entity registry",
                     )
                 })?;
-                let impl_id = Some(ImplTypeId::from_name_id(array_name_id));
+                let impl_id = Some(array_name_id);
                 (type_id, impl_id)
             }
             TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
@@ -426,11 +405,7 @@ impl Compiler<'_> {
                 let primitive_type_id = primitive_type_id_by_name(&type_name_str);
                 if !primitive_type_id.is_invalid() {
                     let type_id = primitive_type_id;
-                    let impl_id = ImplTypeId::from_type_id(
-                        type_id,
-                        self.arena(),
-                        self.analyzed.entity_registry(),
-                    );
+                    let impl_id = self.analyzed.impl_type_name_id_from_type_id(type_id);
                     (type_id, impl_id)
                 } else {
                     // Look up TypeDefId from Symbol (for Generic, uses the base class name)
@@ -469,11 +444,9 @@ impl Compiler<'_> {
                         )
                     })?;
                     // Use TypeId directly
-                    let impl_id = ImplTypeId::from_type_id(
-                        metadata.vole_type,
-                        self.arena(),
-                        self.analyzed.entity_registry(),
-                    );
+                    let impl_id = self
+                        .analyzed
+                        .impl_type_name_id_from_type_id(metadata.vole_type);
                     (metadata.vole_type, impl_id)
                 }
             }
@@ -488,8 +461,8 @@ impl Compiler<'_> {
         for method in &impl_block.methods {
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
             // Get TypeDefId if available
-            let type_def_id = impl_type_id
-                .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()));
+            let type_def_id = impl_type_name_id
+                .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
 
             // Build signature from pre-resolved types via sema
             let (sig, semantic_method_id) = {
@@ -544,8 +517,8 @@ impl Compiler<'_> {
         // The explicit methods in impl_block.methods have been registered above.
         // Default methods (not overridden) also need to be registered so that
         // codegen can find them via method_func_keys at call sites.
-        if let Some(type_def_id) = impl_type_id
-            .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()))
+        if let Some(type_def_id) =
+            impl_type_name_id.and_then(|name_id| self.analyzed.query().try_type_def_id(name_id))
         {
             // Collect direct method names (to skip explicitly implemented ones)
             let direct_method_name_strs: std::collections::HashSet<String> = impl_block
@@ -660,8 +633,8 @@ impl Compiler<'_> {
         if let Some(ref statics) = impl_block.statics {
             // Reuse the already-resolved impl type identity.
             // This works for module-local types and avoids program_module()-only lookup.
-            let type_def_id = impl_type_id
-                .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()));
+            let type_def_id = impl_type_name_id
+                .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
 
             for method in &statics.methods {
                 // Only register methods with bodies
@@ -799,10 +772,9 @@ impl Compiler<'_> {
             }
         };
         // Get TypeDefId for method lookup via method_func_keys
-        let impl_type_id =
-            ImplTypeId::from_type_id(self_type_id, self.arena(), self.analyzed.entity_registry());
+        let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
         let type_def_id =
-            impl_type_id.and_then(|id| self.analyzed.query().try_type_def_id(id.name_id()));
+            impl_type_name_id.and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
 
         for method in &impl_block.methods {
             let method_key = if let Some(type_def_id) = type_def_id {
@@ -1128,10 +1100,9 @@ impl Compiler<'_> {
             }
         };
 
-        let impl_type_id =
-            ImplTypeId::from_type_id(self_type_id, self.arena(), self.analyzed.entity_registry());
-        let type_def_id = impl_type_id
-            .and_then(|id: ImplTypeId| self.analyzed.query().try_type_def_id(id.name_id()));
+        let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
+        let type_def_id =
+            impl_type_name_id.and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
 
         // Compile instance methods using module interner for name resolution
         for method in &impl_block.methods {
@@ -1409,10 +1380,9 @@ impl Compiler<'_> {
         interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        let impl_type_id =
-            ImplTypeId::from_type_id(self_type_id, self.arena(), self.analyzed.entity_registry());
-        let type_def_id = impl_type_id
-            .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()));
+        let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
+        let type_def_id =
+            impl_type_name_id.and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
         let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name)
             .ok_or_else(|| {
                 CodegenError::internal_with_context(
@@ -1650,9 +1620,10 @@ impl Compiler<'_> {
         method_info: Option<MethodInfo>,
     ) -> CodegenResult<()> {
         // Look up MethodId from entity_registry first (needed for func_key and signature)
-        let type_def_id =
-            ImplTypeId::from_type_id(self_type_id, self.arena(), self.analyzed.entity_registry())
-                .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()));
+        let type_def_id = self
+            .analyzed
+            .impl_type_name_id_from_type_id(self_type_id)
+            .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
         let method_name_id = self.method_name_id(method.name)?;
 
         let semantic_method_id = type_def_id
