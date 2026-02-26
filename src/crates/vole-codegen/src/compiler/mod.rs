@@ -141,12 +141,6 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Get the entity registry directly
-    #[inline]
-    fn registry(&self) -> &vole_sema::EntityRegistry {
-        self.analyzed.entity_registry()
-    }
-
     /// Get the type arena directly
     #[inline]
     fn arena(&self) -> &vole_sema::TypeArena {
@@ -188,7 +182,7 @@ impl<'a> Compiler<'a> {
 
     /// Get ImplTypeId from a TypeId
     fn impl_type_id_from_type_id(&self, ty: TypeId) -> Option<ImplTypeId> {
-        ImplTypeId::from_type_id(ty, self.arena(), self.registry())
+        ImplTypeId::from_type_id(ty, self.arena(), self.analyzed.entity_registry())
     }
 
     /// Check if a function has implicit generic info (structural type params).

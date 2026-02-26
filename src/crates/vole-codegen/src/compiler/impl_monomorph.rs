@@ -82,7 +82,7 @@ impl Compiler<'_> {
                     Some(id) => id,
                     None => return Ok(()), // No array type in arena yet, skip
                 };
-                let array_name_id = match self.registry().array_name_id() {
+                let array_name_id = match self.analyzed.entity_registry().array_name_id() {
                     Some(id) => id,
                     None => return Ok(()),
                 };
@@ -384,7 +384,7 @@ impl Compiler<'_> {
                     )
                 })?;
                 // Construct ImplTypeId directly from array_name_id (avoids need for specific TypeId).
-                let array_name_id = self.registry().array_name_id().ok_or_else(|| {
+                let array_name_id = self.analyzed.entity_registry().array_name_id().ok_or_else(|| {
                     CodegenError::internal(
                         "extend [T] with Iterable<T>: array_name_id not registered in entity registry",
                     )
@@ -1813,7 +1813,7 @@ impl Compiler<'_> {
     pub(super) fn compile_array_iterable_default_methods(&mut self) -> CodegenResult<()> {
         // Get array TypeDefId and Iterable TypeDefId
         let array_tdef_id = {
-            let array_name_id = match self.registry().array_name_id() {
+            let array_name_id = match self.analyzed.entity_registry().array_name_id() {
                 Some(id) => id,
                 None => return Ok(()), // array not registered, nothing to do
             };
@@ -2051,7 +2051,7 @@ impl Compiler<'_> {
     pub(super) fn import_array_iterable_default_methods(&mut self) -> CodegenResult<()> {
         // Get array TypeDefId and Iterable TypeDefId
         let array_tdef_id = {
-            let array_name_id = match self.registry().array_name_id() {
+            let array_name_id = match self.analyzed.entity_registry().array_name_id() {
                 Some(id) => id,
                 None => return Ok(()),
             };

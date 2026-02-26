@@ -1008,12 +1008,14 @@ impl Compiler<'_> {
 
         // Early-exit if monomorph caches haven't grown since last expansion
         let current_cache_size = self
-            .registry()
+            .analyzed
+            .entity_registry()
             .class_method_monomorph_cache
             .instances()
             .count()
             + self
-                .registry()
+                .analyzed
+                .entity_registry()
                 .static_method_monomorph_cache
                 .instances()
                 .count();
@@ -1032,7 +1034,8 @@ impl Compiler<'_> {
         );
 
         let abstract_templates: Vec<(ClassMethodMonomorphKey, ClassMethodMonomorphInstance)> = self
-            .registry()
+            .analyzed
+            .entity_registry()
             .class_method_monomorph_cache
             .instances()
             .filter(|(_, inst)| {
@@ -1068,7 +1071,12 @@ impl Compiler<'_> {
             FxHashMap::default();
 
         // Collect from concrete static method monomorphs
-        for (key, inst) in self.registry().static_method_monomorph_cache.instances() {
+        for (key, inst) in self
+            .analyzed
+            .entity_registry()
+            .static_method_monomorph_cache
+            .instances()
+        {
             // Skip abstract entries (TypeParam in substitutions)
             if inst
                 .substitutions
@@ -1118,7 +1126,12 @@ impl Compiler<'_> {
         }
 
         // Collect from concrete class method monomorphs
-        for (key, inst) in self.registry().class_method_monomorph_cache.instances() {
+        for (key, inst) in self
+            .analyzed
+            .entity_registry()
+            .class_method_monomorph_cache
+            .instances()
+        {
             // Skip abstract entries
             if inst
                 .substitutions
@@ -1229,7 +1242,8 @@ impl Compiler<'_> {
 
                 // Skip if already in sema cache or already expanded
                 if self
-                    .registry()
+                    .analyzed
+                    .entity_registry()
                     .class_method_monomorph_cache
                     .get(&concrete_key)
                     .is_some()
@@ -1889,7 +1903,7 @@ impl Compiler<'_> {
     /// Called before body compilation in both `compile_module_functions` and
     /// `compile_program_body`.
     pub(super) fn build_monomorph_index(&mut self) {
-        let registry = self.registry();
+        let registry = self.analyzed.entity_registry();
         let arena = self.arena();
         let mut index = FxHashMap::default();
 
