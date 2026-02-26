@@ -8,15 +8,49 @@ use rustc_hash::FxHashMap;
 
 use crate::AnalyzedProgram;
 use crate::errors::{CodegenError, CodegenResult};
+use crate::structs::helpers::StructEntityLookup;
 use crate::union_layout;
 use vole_frontend::{Interner, PrimitiveType as AstPrimitiveType, Symbol};
-use vole_identity::{ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
+use vole_identity::{FieldId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
 use vole_runtime::native_registry::NativeType;
-use vole_sema::EntityRegistry;
 use vole_sema::type_arena::{TypeArena, TypeId};
 
 use super::codegen_state::TypeMetadataMap;
 use crate::ops::{sextend_const, uextend_const};
+
+pub(crate) trait TypeEntityLookup: StructEntityLookup {
+    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId>;
+    fn field_type(&self, field_id: FieldId) -> TypeId;
+    fn type_name_id(&self, type_def_id: TypeDefId) -> NameId;
+}
+
+impl TypeEntityLookup for AnalyzedProgram {
+    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+        self.entity_registry().fields_on_type(type_def_id).collect()
+    }
+
+    fn field_type(&self, field_id: FieldId) -> TypeId {
+        self.entity_registry().get_field(field_id).ty
+    }
+
+    fn type_name_id(&self, type_def_id: TypeDefId) -> NameId {
+        self.entity_registry().name_id(type_def_id)
+    }
+}
+
+impl TypeEntityLookup for vole_sema::entity_registry::EntityRegistry {
+    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+        self.fields_on_type(type_def_id).collect()
+    }
+
+    fn field_type(&self, field_id: FieldId) -> TypeId {
+        self.get_field(field_id).ty
+    }
+
+    fn type_name_id(&self, type_def_id: TypeDefId) -> NameId {
+        self.name_id(type_def_id)
+    }
+}
 
 /// Lifecycle state for reference-counted values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -355,14 +389,15 @@ pub(crate) fn is_wide_fallible(ty: TypeId, arena: &TypeArena) -> bool {
 fn error_fields_size(
     type_def_id: TypeDefId,
     pointer_type: Type,
-    entity_registry: &EntityRegistry,
+    entities: &impl TypeEntityLookup,
     arena: &TypeArena,
 ) -> u32 {
-    entity_registry
-        .fields_on_type(type_def_id)
+    entities
+        .field_ids_on_type(type_def_id)
+        .into_iter()
         .map(|field_id| {
-            let field = entity_registry.get_field(field_id);
-            type_id_size(field.ty, pointer_type, entity_registry, arena)
+            let field_type = entities.field_type(field_id);
+            type_id_size(field_type, pointer_type, entities, arena)
         })
         .sum()
 }
@@ -376,7 +411,7 @@ fn error_fields_size(
 pub(crate) fn type_id_size(
     ty: TypeId,
     pointer_type: Type,
-    entity_registry: &EntityRegistry,
+    entities: &impl TypeEntityLookup,
     arena: &TypeArena,
 ) -> u32 {
     // Defensive check: INVALID types should never reach codegen.
@@ -418,7 +453,7 @@ pub(crate) fn type_id_size(
                     if arena.is_struct(t) {
                         pointer_type.bytes()
                     } else {
-                        type_id_size(t, pointer_type, entity_registry, arena)
+                        type_id_size(t, pointer_type, entities, arena)
                     }
                 })
                 .max()
@@ -426,13 +461,13 @@ pub(crate) fn type_id_size(
             union_layout::TAG_ONLY_SIZE + max_payload.div_ceil(8) * 8
         }
         ArenaType::Error { type_def_id } => {
-            error_fields_size(*type_def_id, pointer_type, entity_registry, arena).div_ceil(8) * 8
+            error_fields_size(*type_def_id, pointer_type, entities, arena).div_ceil(8) * 8
         }
         ArenaType::Fallible { success, error } => {
-            let success_size = type_id_size(*success, pointer_type, entity_registry, arena);
+            let success_size = type_id_size(*success, pointer_type, entities, arena);
             let error_size = match arena.get(*error) {
                 ArenaType::Error { type_def_id } => {
-                    error_fields_size(*type_def_id, pointer_type, entity_registry, arena)
+                    error_fields_size(*type_def_id, pointer_type, entities, arena)
                 }
                 ArenaType::Union(variants) => variants
                     .iter()
@@ -440,7 +475,7 @@ pub(crate) fn type_id_size(
                         ArenaType::Error { type_def_id } => Some(error_fields_size(
                             *type_def_id,
                             pointer_type,
-                            entity_registry,
+                            entities,
                             arena,
                         )),
                         _ => None,
@@ -454,16 +489,15 @@ pub(crate) fn type_id_size(
         }
         ArenaType::Tuple(elements) => elements
             .iter()
-            .map(|&t| type_id_size(t, pointer_type, entity_registry, arena).div_ceil(8) * 8)
+            .map(|&t| type_id_size(t, pointer_type, entities, arena).div_ceil(8) * 8)
             .sum(),
         ArenaType::FixedArray { element, size } => {
-            let elem_size =
-                type_id_size(*element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
+            let elem_size = type_id_size(*element, pointer_type, entities, arena).div_ceil(8) * 8;
             elem_size * (*size as u32)
         }
         // Struct types: use flat slot count to account for nested struct fields
         ArenaType::Struct { .. } => {
-            crate::structs::struct_total_byte_size(ty, arena, entity_registry)
+            crate::structs::struct_total_byte_size(ty, arena, entities)
                 .expect("INTERNAL: valid struct must have computable size")
         }
         // Unknown type uses TaggedValue representation: 8-byte tag + 8-byte value = 16 bytes
@@ -495,7 +529,7 @@ pub(crate) fn type_id_size(
 pub(crate) fn tuple_layout_id(
     elements: &[TypeId],
     pointer_type: Type,
-    entity_registry: &EntityRegistry,
+    entities: &impl TypeEntityLookup,
     arena: &TypeArena,
 ) -> (u32, Vec<i32>) {
     let mut offsets = Vec::with_capacity(elements.len());
@@ -503,7 +537,7 @@ pub(crate) fn tuple_layout_id(
 
     for &elem in elements {
         offsets.push(offset);
-        let elem_size = type_id_size(elem, pointer_type, entity_registry, arena).div_ceil(8) * 8;
+        let elem_size = type_id_size(elem, pointer_type, entities, arena).div_ceil(8) * 8;
         offset += elem_size as i32;
     }
 
@@ -555,13 +589,13 @@ pub(crate) fn fallible_error_tag_by_id(
     arena: &TypeArena,
     interner: &Interner,
     name_table: &NameTable,
-    entity_registry: &EntityRegistry,
+    entities: &impl TypeEntityLookup,
 ) -> Option<i64> {
     let error_name_str = interner.resolve(error_name);
 
     // Check if error_type_id is a single Error type
     if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
-        let info_name = name_table.last_segment_str(entity_registry.name_id(type_def_id));
+        let info_name = name_table.last_segment_str(entities.type_name_id(type_def_id));
         if info_name.as_deref() == Some(error_name_str) {
             return Some(1); // Single error type always gets tag 1
         }
@@ -572,7 +606,7 @@ pub(crate) fn fallible_error_tag_by_id(
     if let Some(variants) = arena.unwrap_union(error_type_id) {
         for (idx, &variant) in variants.iter().enumerate() {
             if let Some(type_def_id) = arena.unwrap_error(variant) {
-                let info_name = name_table.last_segment_str(entity_registry.name_id(type_def_id));
+                let info_name = name_table.last_segment_str(entities.type_name_id(type_def_id));
                 if info_name.as_deref() == Some(error_name_str) {
                     return Some((idx + 1) as i64);
                 }
@@ -691,11 +725,11 @@ pub(crate) fn value_to_word(
     pointer_type: Type,
     heap_alloc_ref: Option<FuncRef>,
     arena: &TypeArena,
-    entity_registry: &EntityRegistry,
+    entities: &impl TypeEntityLookup,
 ) -> CodegenResult<Value> {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let value_size = type_id_size(value.type_id, pointer_type, entity_registry, arena);
+    let value_size = type_id_size(value.type_id, pointer_type, entities, arena);
     let needs_box = value_size > word_bytes;
 
     if needs_box {
@@ -765,12 +799,12 @@ pub(crate) fn word_to_value_type_id(
     word: Value,
     type_id: TypeId,
     pointer_type: Type,
-    entity_registry: &EntityRegistry,
+    entities: &impl TypeEntityLookup,
     arena: &TypeArena,
 ) -> Value {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let needs_unbox = type_id_size(type_id, pointer_type, entity_registry, arena) > word_bytes;
+    let needs_unbox = type_id_size(type_id, pointer_type, entities, arena) > word_bytes;
 
     if needs_unbox {
         // If the target Cranelift type is pointer_type (e.g., unions), the word is

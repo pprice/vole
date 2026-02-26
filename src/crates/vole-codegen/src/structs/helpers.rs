@@ -479,14 +479,15 @@ fn collect_leaf_slots(
 ) {
     // Recursively flatten nested structs
     if let Some((nested_def, nested_args)) = arena.unwrap_struct(type_id)
-        && let Some(nested_field_types) = entities.generic_field_types(nested_def) {
-            let nested_subs = build_type_arg_subs(nested_def, nested_args, entities);
-            for field_type in &nested_field_types {
-                let concrete = substitute_field_type(*field_type, &nested_subs, arena);
-                collect_leaf_slots(concrete, arena, entities, offset, out);
-            }
-            return;
+        && let Some(nested_field_types) = entities.generic_field_types(nested_def)
+    {
+        let nested_subs = build_type_arg_subs(nested_def, nested_args, entities);
+        for field_type in &nested_field_types {
+            let concrete = substitute_field_type(*field_type, &nested_subs, arena);
+            collect_leaf_slots(concrete, arena, entities, offset, out);
         }
+        return;
+    }
     // Payload-carrying unions occupy 2 x 8-byte slots (tag + payload) inline,
     // comparable as two i64 words (like i128 but without reconstruction).
     if is_payload_union(type_id, arena) {
