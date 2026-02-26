@@ -17,11 +17,3 @@
     ·                                      ╰── type mismatch
  21 │ }
     ╰────
-  × [E2001]: expected string, found i64
-    ╭─[<path>/cross_param_constraint_mismatch.vole:20:29]
- 19 │ func pipe<T, P: Producer<T>, C: Consumer<T>>(producer: P, consumer: C) -> string {
- 20 │     return consumer.consume(producer.produce())
-    ·                             ─────────┬────────
-    ·                                      ╰── type mismatch
- 21 │ }
-    ╰────

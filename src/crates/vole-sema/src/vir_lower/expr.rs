@@ -11,9 +11,11 @@ use vole_identity::{TypeId, VirTypeId};
 
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{
-    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirErrorFieldBinding,
-    VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern, VirRecordFieldBinding,
-    VirStringPart, VirTupleBinding, VirUnOp,
+    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirClassMethodMonomorphKey,
+    VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirExternalMethodInfo,
+    VirFunctionMonomorphKey, VirMatchArm, VirMetaKind, VirMethodDispatchKind,
+    VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern, VirRecordFieldBinding,
+    VirResolvedMethod, VirStaticMethodMonomorphKey, VirStringPart, VirTupleBinding, VirUnOp,
 };
 use vole_vir::func::VirBody;
 use vole_vir::refs::VirRef;
@@ -105,6 +107,7 @@ pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                 receiver,
                 method: mc.method,
                 args,
+                dispatch: lower_method_dispatch_meta(expr.id, ctx),
                 node_id: expr.id,
                 ty,
                 vir_ty,
@@ -837,12 +840,208 @@ fn lower_optional_method_call(
         object,
         method: omc.method,
         method_args,
+        dispatch: lower_method_dispatch_meta(expr.id, ctx),
         call_node_id: expr.id,
         inner_type: info.inner_type,
         vir_inner_type,
         ty,
         vir_ty,
     })
+}
+
+/// Lower sema method-dispatch annotations into VIR method metadata.
+///
+/// The metadata is sema-independent and uses identity types only so downstream
+/// passes can consume it without NodeId-indexed map lookups.
+fn lower_method_dispatch_meta(
+    expr_id: vole_identity::NodeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> VirMethodDispatchMeta {
+    let dispatch_kind = ctx
+        .node_map
+        .get_method_dispatch_kind(expr_id)
+        .map(|kind| match kind {
+            crate::node_map::MethodDispatchKind::Module(module_id) => {
+                VirMethodDispatchKind::Module { module_id }
+            }
+            crate::node_map::MethodDispatchKind::Builtin => VirMethodDispatchKind::Builtin,
+            crate::node_map::MethodDispatchKind::ArrayPush => VirMethodDispatchKind::ArrayPush,
+            crate::node_map::MethodDispatchKind::Standard => VirMethodDispatchKind::Standard,
+        });
+
+    let receiver_coercion = ctx
+        .node_map
+        .get_coercion_kind(expr_id)
+        .map(|kind| match kind {
+            crate::node_map::CoercionKind::IteratorWrap { elem_type } => {
+                VirMethodReceiverCoercion::IteratorWrap {
+                    elem_type,
+                    vir_elem_type: ctx.translate(elem_type),
+                }
+            }
+        });
+
+    let resolved_method = ctx
+        .node_map
+        .get_method(expr_id)
+        .map(|resolved| lower_resolved_method(resolved, ctx));
+
+    let generic_monomorph = ctx
+        .node_map
+        .get_generic(expr_id)
+        .map(|key| VirFunctionMonomorphKey {
+            func_name: key.func_name,
+            type_keys: key.type_keys.clone(),
+            vir_type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
+        });
+
+    let substituted_return_type = ctx.node_map.get_substituted_return_type(expr_id);
+    let vir_substituted_return_type = substituted_return_type.map(|ty| ctx.translate(ty));
+    let resolved_call_args = ctx
+        .node_map
+        .get_resolved_call_args(expr_id)
+        .map(|m| m.to_vec());
+    let class_method_generic =
+        ctx.node_map
+            .get_class_method_generic(expr_id)
+            .map(|key| VirClassMethodMonomorphKey {
+                class_name: key.class_name,
+                method_name: key.method_name,
+                type_keys: key.type_keys.clone(),
+                vir_type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
+            });
+    let static_method_generic =
+        ctx.node_map
+            .get_static_method_generic(expr_id)
+            .map(|key| VirStaticMethodMonomorphKey {
+                class_name: key.class_name,
+                method_name: key.method_name,
+                class_type_keys: key.class_type_keys.clone(),
+                vir_class_type_keys: key
+                    .class_type_keys
+                    .iter()
+                    .map(|&ty| ctx.translate(ty))
+                    .collect(),
+                method_type_keys: key.method_type_keys.clone(),
+                vir_method_type_keys: key
+                    .method_type_keys
+                    .iter()
+                    .map(|&ty| ctx.translate(ty))
+                    .collect(),
+            });
+
+    VirMethodDispatchMeta {
+        dispatch_kind,
+        receiver_coercion,
+        resolved_method,
+        generic_monomorph,
+        substituted_return_type,
+        vir_substituted_return_type,
+        resolved_call_args,
+        class_method_generic,
+        static_method_generic,
+    }
+}
+
+fn lower_resolved_method(
+    resolved: &crate::resolution::ResolvedMethod,
+    ctx: &mut LoweringCtx<'_>,
+) -> VirResolvedMethod {
+    match resolved {
+        crate::resolution::ResolvedMethod::Direct {
+            type_def_id,
+            func_type_id,
+            return_type_id,
+            method_id,
+            ..
+        } => VirResolvedMethod::Direct {
+            type_def_id: *type_def_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.translate(*func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.translate(*return_type_id),
+            method_id: *method_id,
+        },
+        crate::resolution::ResolvedMethod::Implemented {
+            type_def_id,
+            func_type_id,
+            return_type_id,
+            is_builtin,
+            external_info,
+            concrete_return_hint,
+            ..
+        } => VirResolvedMethod::Implemented {
+            type_def_id: *type_def_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.translate(*func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.translate(*return_type_id),
+            is_builtin: *is_builtin,
+            external_info: external_info.map(|info| VirExternalMethodInfo {
+                module_path: info.module_path,
+                native_name: info.native_name,
+            }),
+            concrete_return_hint: *concrete_return_hint,
+            vir_concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
+        },
+        crate::resolution::ResolvedMethod::FunctionalInterface {
+            func_type_id,
+            return_type_id,
+            ..
+        } => VirResolvedMethod::FunctionalInterface {
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.translate(*func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.translate(*return_type_id),
+        },
+        crate::resolution::ResolvedMethod::DefaultMethod {
+            type_def_id,
+            interface_type_def_id,
+            func_type_id,
+            return_type_id,
+            external_info,
+            ..
+        } => VirResolvedMethod::DefaultMethod {
+            type_def_id: *type_def_id,
+            interface_type_def_id: *interface_type_def_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.translate(*func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.translate(*return_type_id),
+            external_info: external_info.map(|info| VirExternalMethodInfo {
+                module_path: info.module_path,
+                native_name: info.native_name,
+            }),
+        },
+        crate::resolution::ResolvedMethod::InterfaceMethod {
+            interface_type_def_id,
+            func_type_id,
+            return_type_id,
+            method_index,
+            ..
+        } => VirResolvedMethod::InterfaceMethod {
+            interface_type_def_id: *interface_type_def_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.translate(*func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.translate(*return_type_id),
+            method_index: *method_index,
+        },
+        crate::resolution::ResolvedMethod::Static {
+            type_def_id,
+            method_id,
+            func_type_id,
+            return_type_id,
+            ..
+        } => VirResolvedMethod::Static {
+            type_def_id: *type_def_id,
+            method_id: *method_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.translate(*func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.translate(*return_type_id),
+        },
+    }
 }
 
 /// Lower a try expression (`expr?`) to `VirExpr::Try`.

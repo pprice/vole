@@ -25,14 +25,6 @@
     ·                              ╰── type mismatch
  20 │ 
     ╰────
-  × [E2001]: expected i64, found handle
-    ╭─[<path>/handle_cast.vole:19:24]
- 18 │     // handle passed to i64 parameter
- 19 │     let r1 = takes_i64(get_handle())
-    ·                        ──────┬─────
-    ·                              ╰── type mismatch
- 20 │ 
-    ╰────
   × [E2001]: expected handle, found integer literal
     ╭─[<path>/handle_cast.vole:22:27]
  21 │     // i64 passed to handle parameter

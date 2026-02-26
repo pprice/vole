@@ -29,8 +29,9 @@ impl Cg<'_, '_, '_> {
     fn resolve_iterator_method(
         &self,
         method_name: &str,
-        expr_id: NodeId,
+        expr_id: Option<NodeId>,
         fallback_elem_type: Option<TypeId>,
+        return_type_hint: Option<TypeId>,
     ) -> CodegenResult<(ExternalMethodInfo, TypeId)> {
         // Look up the Iterator interface via well-known type metadata
         let iter_type_id = self
@@ -65,9 +66,9 @@ impl Cg<'_, '_, '_> {
         // When compiling Iterable default method bodies (e.g. `map` in traits.vole),
         // sema never analyzes the expression so both lookups return None.
         // In that case, derive the return type from the method name + fallback_elem_type.
-        let return_type_id = self
-            .get_substituted_return_type(&expr_id)
-            .or_else(|| self.get_expr_type(&expr_id))
+        let return_type_id = return_type_hint
+            .or_else(|| expr_id.and_then(|id| self.get_substituted_return_type(&id)))
+            .or_else(|| expr_id.and_then(|id| self.get_expr_type(&id)))
             .or_else(|| {
                 fallback_elem_type.and_then(|elem_type_id| {
                     self.derive_iterator_return_type(method_name, elem_type_id, iter_type_id)
@@ -208,10 +209,15 @@ impl Cg<'_, '_, '_> {
         arg_source: &ArgSource<'_>,
         method_name: &str,
         elem_type_id: TypeId,
-        expr_id: NodeId,
+        expr_id: Option<NodeId>,
+        return_type_hint: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
-        let (external_info, return_type_id) =
-            self.resolve_iterator_method(method_name, expr_id, Some(elem_type_id))?;
+        let (external_info, return_type_id) = self.resolve_iterator_method(
+            method_name,
+            expr_id,
+            Some(elem_type_id),
+            return_type_hint,
+        )?;
 
         // When the iterator comes from a variable (borrowed), rc_inc it before
         // pipeline and terminal method calls. Both categories assume ownership

@@ -89,14 +89,38 @@ impl Analyzer {
         block.stmts.iter().any(Self::stmt_definitely_returns)
     }
 
-    /// Check if an expression kind is a literal that can benefit from bidirectional type inference.
-    /// This includes int literals and float literals - types that can be inferred from context.
-    fn is_inferable_literal(kind: &ExprKind) -> bool {
-        matches!(
-            kind,
-            ExprKind::IntLiteral(_, None)   // Int without suffix
-                | ExprKind::FloatLiteral(_, None) // Float without suffix
-        )
+    /// Check whether a return expression should use expected-type propagation.
+    ///
+    /// This covers literal-heavy numeric expressions (including unary/binary
+    /// compositions) so declarations like `func min_value() -> i8 { return -128 }`
+    /// and `func max_value() -> u64 { return 9223372036854775807_u64 * 2 + 1 }`
+    /// infer correctly from return context.
+    fn is_inferable_return_expr(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::IntLiteral(_, _) | ExprKind::FloatLiteral(_, _) => true,
+            ExprKind::Grouping(inner) => Self::is_inferable_return_expr(inner),
+            ExprKind::Unary(unary) => {
+                matches!(unary.op, UnaryOp::Neg | UnaryOp::BitNot)
+                    && Self::is_inferable_return_expr(&unary.operand)
+            }
+            ExprKind::Binary(binary) => {
+                matches!(
+                    binary.op,
+                    BinaryOp::Add
+                        | BinaryOp::Sub
+                        | BinaryOp::Mul
+                        | BinaryOp::Div
+                        | BinaryOp::Mod
+                        | BinaryOp::BitAnd
+                        | BinaryOp::BitOr
+                        | BinaryOp::BitXor
+                        | BinaryOp::Shl
+                        | BinaryOp::Shr
+                ) && Self::is_inferable_return_expr(&binary.left)
+                    && Self::is_inferable_return_expr(&binary.right)
+            }
+            _ => false,
+        }
     }
 
     pub(crate) fn check_block(
@@ -599,11 +623,12 @@ impl Analyzer {
         let ret_value_span = ret.value.as_ref().map(|v| v.span).unwrap_or(ret.span);
 
         // Type check the return expression.
-        // For numeric/float literals, use bidirectional inference to infer type from return type.
-        // For other expressions, check normally and report E2096 for mismatches.
+        // For inferable numeric literal expressions, use bidirectional inference
+        // from return type. For other expressions, check normally and report
+        // E2096 for mismatches.
         let ret_type_id = if let Some(value) = &ret.value {
-            if Self::is_inferable_literal(&value.kind) {
-                // Use bidirectional inference for literals (e.g., return 0.0 in f32 func)
+            if Self::is_inferable_return_expr(value) {
+                // Use bidirectional inference for literal numeric expressions.
                 self.check_expr_expecting_id(value, expected_value_type_id, interner)?
             } else {
                 // For non-literals, check without expected type to avoid double errors

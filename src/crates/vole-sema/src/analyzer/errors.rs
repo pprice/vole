@@ -12,6 +12,16 @@ use super::Analyzer;
 impl Analyzer {
     /// Helper to add a type error
     pub(super) fn add_error(&mut self, error: SemanticError, span: Span) {
+        let incoming_kind = std::mem::discriminant(&error);
+        let incoming_message = error.to_string();
+        if self.diagnostics.errors.iter().any(|existing| {
+            existing.span == span
+                && std::mem::discriminant(&existing.error) == incoming_kind
+                && existing.error.to_string() == incoming_message
+        }) {
+            return;
+        }
+
         self.diagnostics.errors.push(TypeError::new(error, span));
     }
 

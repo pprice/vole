@@ -10,21 +10,37 @@ use vole_frontend::{NodeId, Symbol};
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::generic::{StaticMethodMonomorphInstance, StaticMethodMonomorphKey};
 use vole_sema::type_arena::TypeId;
+use vole_vir::expr::{VirMethodDispatchMeta, VirResolvedMethod, VirStaticMethodMonomorphKey};
 
 use super::methods::ArgSource;
+
+pub(super) struct StaticMethodCallArgs<'a> {
+    pub type_def_id: TypeDefId,
+    pub method_id: MethodId,
+    pub func_type_id: TypeId,
+    pub arg_source: &'a ArgSource<'a>,
+    pub method_sym: Symbol,
+    pub expr_id: NodeId,
+    pub vir_dispatch: Option<&'a VirMethodDispatchMeta>,
+}
 
 impl Cg<'_, '_, '_> {
     /// Handle static method call: TypeName.method(args)
     /// Static methods don't have a receiver, so we don't compile the object expression.
     pub(super) fn static_method_call(
         &mut self,
-        type_def_id: TypeDefId,
-        method_id: MethodId,
-        func_type_id: TypeId,
-        arg_source: &ArgSource<'_>,
-        method_sym: Symbol,
-        expr_id: NodeId,
+        args: StaticMethodCallArgs<'_>,
     ) -> CodegenResult<CompiledValue> {
+        let StaticMethodCallArgs {
+            type_def_id,
+            method_id,
+            func_type_id,
+            arg_source,
+            method_sym,
+            expr_id,
+            vir_dispatch,
+        } = args;
+
         let arg_count = match arg_source {
             ArgSource::Ast(a) => a.len(),
             ArgSource::Vir(r) => r.len(),
@@ -38,10 +54,26 @@ impl Cg<'_, '_, '_> {
             return Ok(result);
         }
 
+        let return_type_hint = vir_dispatch
+            .and_then(|dispatch| dispatch.substituted_return_type)
+            .or_else(|| {
+                vir_dispatch
+                    .and_then(|dispatch| dispatch.resolved_method.as_ref())
+                    .map(VirResolvedMethod::return_type_id)
+            });
+
         // Check for Array.filled<T> intrinsic (compiled as ArrayFilled runtime call)
-        if let Some(result) =
-            self.try_array_filled_intrinsic(type_def_id, arg_source, method_sym, expr_id)?
-        {
+        if let Some(result) = self.try_array_filled_intrinsic(
+            type_def_id,
+            arg_source,
+            method_sym,
+            if vir_dispatch.is_some() {
+                None
+            } else {
+                Some(expr_id)
+            },
+            return_type_hint,
+        )? {
             return Ok(result);
         }
 
@@ -50,9 +82,18 @@ impl Cg<'_, '_, '_> {
         let method_name_id = method_def.name_id;
 
         // Check for monomorphized static method (generic classes)
-        if let Some(instance) =
-            self.find_static_monomorph_instance(method_name_id, type_def_id, expr_id)
-        {
+        let vir_static_key =
+            vir_dispatch.and_then(|dispatch| dispatch.static_method_generic.as_ref());
+        if let Some(instance) = self.find_static_monomorph_instance(
+            method_name_id,
+            type_def_id,
+            if vir_dispatch.is_some() {
+                None
+            } else {
+                Some(expr_id)
+            },
+            vir_static_key,
+        ) {
             return self.call_static_monomorph_instance(&instance, arg_source);
         }
 
@@ -106,11 +147,18 @@ impl Cg<'_, '_, '_> {
         // us which call.args[j] fills each parameter slot i (and None means use the default).
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
-        let named_mapping = self
-            .analyzed()
-            .node_map
-            .get_resolved_call_args(expr_id)
-            .map(|s| s.to_vec());
+        let named_mapping = vir_dispatch
+            .and_then(|dispatch| dispatch.resolved_call_args.clone())
+            .or_else(|| {
+                if vir_dispatch.is_some() {
+                    None
+                } else {
+                    self.analyzed()
+                        .node_map
+                        .get_resolved_call_args(expr_id)
+                        .map(|s| s.to_vec())
+                }
+            });
         if let Some(ref mapping) = named_mapping {
             // Named arg reordering: compile each slot in parameter order using the mapping.
             for (slot, opt_call_idx) in mapping.iter().enumerate() {
@@ -198,10 +246,22 @@ impl Cg<'_, '_, '_> {
         &self,
         method_name_id: NameId,
         type_def_id: TypeDefId,
-        expr_id: NodeId,
+        expr_id: Option<NodeId>,
+        vir_key: Option<&VirStaticMethodMonomorphKey>,
     ) -> Option<StaticMethodMonomorphInstance> {
+        let mono_key = vir_key
+            .map(|key| {
+                StaticMethodMonomorphKey::new(
+                    key.class_name,
+                    key.method_name,
+                    key.class_type_keys.clone(),
+                    key.method_type_keys.clone(),
+                )
+            })
+            .or_else(|| expr_id.and_then(|id| self.query().static_method_generic_at(id).cloned()));
+
         // Try direct monomorph lookup with key rewriting
-        if let Some(mono_key) = self.query().static_method_generic_at(expr_id) {
+        if let Some(mono_key) = mono_key.as_ref() {
             // Static method call sites inside generic class methods are often recorded
             // with abstract TypeParam keys. Rewrite those keys through the current
             // substitution map before looking in the monomorph cache.
@@ -433,7 +493,8 @@ impl Cg<'_, '_, '_> {
         type_def_id: TypeDefId,
         arg_source: &ArgSource<'_>,
         method_sym: Symbol,
-        expr_id: NodeId,
+        expr_id: Option<NodeId>,
+        return_type_hint: Option<TypeId>,
     ) -> CodegenResult<Option<CompiledValue>> {
         // Check if this is Array.filled
         let type_name_id = self.query().get_type(type_def_id).name_id;
@@ -456,9 +517,13 @@ impl Cg<'_, '_, '_> {
         }
 
         // Get the return type [T] from sema to determine element type T
-        let return_type_id = self
-            .get_expr_type_substituted(&expr_id)
-            .ok_or_else(|| CodegenError::missing_resource("Array.filled return type from sema"))?;
+        let return_type_id = return_type_hint
+            .or_else(|| expr_id.and_then(|id| self.get_expr_type_substituted(&id)))
+            .ok_or_else(|| {
+                CodegenError::missing_resource(
+                    "Array.filled return type from sema/VIR dispatch metadata",
+                )
+            })?;
         let elem_type_id = self.arena().unwrap_array(return_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("Array.filled", "array type", "non-array")
         })?;

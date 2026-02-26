@@ -16,8 +16,11 @@ use crate::types::{CompiledValue, module_name_id, type_id_to_cranelift};
 use vole_frontend::NodeId;
 use vole_identity::TypeDefId;
 use vole_identity::{ModuleId, NameId};
+use vole_sema::generic::MonomorphKey;
+use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
+use vole_vir::expr::{VirFunctionMonomorphKey, VirResolvedMethod};
 
 use super::methods::ArgSource;
 
@@ -28,8 +31,10 @@ impl Cg<'_, '_, '_> {
         &mut self,
         module_id: ModuleId,
         arg_source: &ArgSource<'_>,
-        expr_id: NodeId,
         method_name_str: &str,
+        expr_id: Option<NodeId>,
+        vir_resolution: Option<&VirResolvedMethod>,
+        vir_generic_key: Option<&VirFunctionMonomorphKey>,
     ) -> CodegenResult<CompiledValue> {
         let module_path = self
             .analyzed()
@@ -37,24 +42,52 @@ impl Cg<'_, '_, '_> {
             .module_path(module_id)
             .to_string();
         let name_id = module_name_id(self.analyzed(), module_id, method_name_str);
-        let resolution = self.analyzed().query().method_at(expr_id);
-        let Some(ResolvedMethod::Implemented {
-            external_info,
-            func_type_id,
-            ..
-        }) = resolution
-        else {
-            return Err(CodegenError::not_found(
-                "module method",
-                format!("{}::{}", module_path, method_name_str),
-            ));
+        let (external_info, func_type_id) = if let Some(resolved) = vir_resolution {
+            match resolved {
+                VirResolvedMethod::Implemented {
+                    external_info,
+                    func_type_id,
+                    ..
+                } => (
+                    external_info.map(|info| ExternalMethodInfo {
+                        module_path: info.module_path,
+                        native_name: info.native_name,
+                    }),
+                    *func_type_id,
+                ),
+                _ => {
+                    return Err(CodegenError::not_found(
+                        "module method",
+                        format!("{}::{}", module_path, method_name_str),
+                    ));
+                }
+            }
+        } else {
+            let expr_id = expr_id.ok_or_else(|| {
+                CodegenError::missing_resource(
+                    "module method call is missing expr_id and VIR resolution metadata",
+                )
+            })?;
+            let resolution = self.analyzed().query().method_at(expr_id);
+            let Some(ResolvedMethod::Implemented {
+                external_info,
+                func_type_id,
+                ..
+            }) = resolution
+            else {
+                return Err(CodegenError::not_found(
+                    "module method",
+                    format!("{}::{}", module_path, method_name_str),
+                ));
+            };
+            (*external_info, *func_type_id)
         };
 
         // Get return type from arena
         let return_type_id = {
             let arena = self.arena();
             let (_, ret, _) = arena
-                .unwrap_function(*func_type_id)
+                .unwrap_function(func_type_id)
                 .expect("INTERNAL: module method: missing function type");
             ret
         };
@@ -64,13 +97,32 @@ impl Cg<'_, '_, '_> {
 
         if let Some(ext_info) = external_info {
             // External FFI function
-            let result = self.call_external_id(ext_info, &args, return_type_id)?;
+            let result = self.call_external_id(&ext_info, &args, return_type_id)?;
             self.consume_rc_args(&mut rc_temps)?;
             return Ok(result);
         }
 
         // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
-        if let Some(monomorph_key) = self.query().monomorph_for(expr_id) {
+        let monomorph_key = vir_generic_key
+            .map(|key| {
+                let effective_type_keys: Vec<TypeId> = key
+                    .type_keys
+                    .iter()
+                    .map(|&type_id| {
+                        if let Some(subs) = self.substitutions
+                            && let Some(name_id) = self.arena().unwrap_type_param(type_id)
+                        {
+                            subs.get(&name_id).copied().unwrap_or(type_id)
+                        } else {
+                            type_id
+                        }
+                    })
+                    .collect();
+                MonomorphKey::new(key.func_name, effective_type_keys)
+            })
+            .or_else(|| expr_id.and_then(|id| self.query().monomorph_for(id).cloned()));
+
+        if let Some(monomorph_key) = monomorph_key.as_ref() {
             let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
                 (
                     inst.original_name,

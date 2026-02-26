@@ -120,7 +120,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::MethodCall(mc) => {
                 use crate::structs::methods::MethodCallSource;
                 let src = MethodCallSource::Ast(mc);
-                let result = self.method_call(&src, expr.id)?;
+                let result = self.method_call(&src, expr.id, None)?;
                 Ok(self.mark_rc_owned(result))
             }
             ExprKind::Try(inner) => self.try_propagate(inner),
@@ -656,6 +656,7 @@ impl Cg<'_, '_, '_> {
                 receiver,
                 method,
                 args,
+                dispatch,
                 node_id,
                 ty: _,
                 ..
@@ -666,7 +667,7 @@ impl Cg<'_, '_, '_> {
                     method: *method,
                     args,
                 };
-                let result = self.method_call(&src, *node_id)?;
+                let result = self.method_call(&src, *node_id, Some(dispatch))?;
                 Ok(self.mark_rc_owned(result))
             }
 
@@ -811,18 +812,20 @@ impl Cg<'_, '_, '_> {
                 object,
                 method,
                 method_args,
+                dispatch,
                 call_node_id,
                 inner_type,
                 ty,
                 ..
-            } => self.compile_vir_optional_method_call(
-                object,
-                *method,
+            } => self.compile_vir_optional_method_call(null_ops::VirOptionalMethodCallArgs {
+                object_expr: object,
+                method: *method,
                 method_args,
-                *call_node_id,
-                *inner_type,
-                *ty,
-            ),
+                dispatch,
+                call_node_id: *call_node_id,
+                inner_type_id: *inner_type,
+                result_type_id: *ty,
+            }),
             VirExpr::Try {
                 value,
                 success_type,

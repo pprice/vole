@@ -17,8 +17,19 @@ use vole_frontend::{Expr, ExprKind, NodeId};
 use vole_identity::VirTypeId;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirExpr;
+use vole_vir::expr::VirMethodDispatchMeta;
 
 use super::super::context::Cg;
+
+pub(super) struct VirOptionalMethodCallArgs<'a> {
+    pub object_expr: &'a VirExpr,
+    pub method: vole_frontend::Symbol,
+    pub method_args: &'a [vole_vir::VirRef],
+    pub dispatch: &'a VirMethodDispatchMeta,
+    pub call_node_id: NodeId,
+    pub inner_type_id: TypeId,
+    pub result_type_id: TypeId,
+}
 
 impl Cg<'_, '_, '_> {
     /// Compile a null coalesce expression (??)
@@ -336,7 +347,7 @@ impl Cg<'_, '_, '_> {
 
         use crate::structs::methods::MethodCallSource;
         let src = MethodCallSource::Ast(&mc);
-        let result = self.method_call(&src, expr_id);
+        let result = self.method_call(&src, expr_id, None);
 
         // Restore vars
         if let Some(old) = saved_entry {
@@ -701,13 +712,18 @@ impl Cg<'_, '_, '_> {
     /// original NodeId for sema method dispatch lookups.
     pub(super) fn compile_vir_optional_method_call(
         &mut self,
-        object_expr: &VirExpr,
-        method: vole_frontend::Symbol,
-        method_args: &[vole_vir::VirRef],
-        call_node_id: NodeId,
-        inner_type_id: TypeId,
-        result_type_id: TypeId,
+        args: VirOptionalMethodCallArgs<'_>,
     ) -> CodegenResult<CompiledValue> {
+        let VirOptionalMethodCallArgs {
+            object_expr,
+            method,
+            method_args,
+            dispatch,
+            call_node_id,
+            inner_type_id,
+            result_type_id,
+        } = args;
+
         let scrutinee = self.compile_vir_expr(object_expr)?;
         let nil_tag = self.find_nil_variant(scrutinee.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("optional chain operator", "optional type", "non-optional")
@@ -740,8 +756,13 @@ impl Cg<'_, '_, '_> {
         // Not-nil branch: extract inner, call method via VIR method_call path
         self.switch_and_seal(not_nil_block);
         let inner = self.extract_optional_inner(scrutinee, inner_type_id);
-        let body_val =
-            self.vir_optional_chain_method_call(inner, method, method_args, call_node_id)?;
+        let body_val = self.vir_optional_chain_method_call(
+            inner,
+            method,
+            method_args,
+            dispatch,
+            call_node_id,
+        )?;
         let body_coerced = self.coerce_to_type(body_val, result_type_id)?;
         self.jump_with_owned_result(
             body_coerced,
@@ -764,6 +785,7 @@ impl Cg<'_, '_, '_> {
         inner: CompiledValue,
         method: vole_frontend::Symbol,
         method_args: &[vole_vir::VirRef],
+        dispatch: &VirMethodDispatchMeta,
         call_node_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         // Create a Cranelift variable for the inner value
@@ -786,7 +808,7 @@ impl Cg<'_, '_, '_> {
             method,
             args: method_args,
         };
-        let result = self.method_call(&src, call_node_id);
+        let result = self.method_call(&src, call_node_id, Some(dispatch));
 
         // Restore vars
         if let Some(old) = saved_entry {

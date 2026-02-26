@@ -32,11 +32,3 @@
     ·                        ╰── type mismatch
  25 │ }
     ╰────
-  × [E2001]: expected main::Getter, found main::Counter
-    ╭─[<path>/unknown_type_interface_call.vole:24:24]
- 23 │     let c = Counter { value: 42 }
- 24 │     let x = use_getter(c)
-    ·                        ┬
-    ·                        ╰── type mismatch
- 25 │ }
-    ╰────

@@ -5,7 +5,7 @@
 // Lives in vole-vir (no sema dependency). Translation from sema TypeId to
 // VirTypeId happens in vole-codegen::vir_lower::type_translate.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use vole_identity::{TypeId, VirTypeId};
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
@@ -110,6 +110,7 @@ impl VirTypeTable {
     /// unified type table.
     pub fn merge_from(&mut self, other: &VirTypeTable) -> FxHashMap<VirTypeId, VirTypeId> {
         let mut mapping = FxHashMap::default();
+        let mut in_progress = FxHashSet::default();
 
         // Reserved entries map to themselves (both tables have identical
         // reserved entries at the same indices).
@@ -118,16 +119,12 @@ impl VirTypeTable {
             mapping.insert(id, id);
         }
 
-        // Non-reserved entries: intern each type from `other` into `self`.
-        // Compound types may reference other VirTypeIds from `other`, so
-        // we must recursively remap those references.
+        // Non-reserved entries: recursively merge each type from `other`.
+        // This handles forward references where a type at index N refers to
+        // type IDs that appear later in `other`.
         for i in VirTypeId::FIRST_DYNAMIC..other.types.len() as u32 {
             let old_id = VirTypeId::from_raw(i);
-            let ty = &other.types[i as usize];
-            let remapped_ty = remap_type_ids_in_type(ty, &mapping);
-            let layout = other.layouts[i as usize];
-            let new_id = self.intern(remapped_ty, layout);
-            mapping.insert(old_id, new_id);
+            merge_one(old_id, other, self, &mut mapping, &mut in_progress);
         }
 
         mapping
@@ -206,6 +203,81 @@ fn remap_type_ids_in_type(ty: &VirType, mapping: &FxHashMap<VirTypeId, VirTypeId
         },
         VirType::RuntimeIterator { elem } => VirType::RuntimeIterator { elem: remap(elem) },
     }
+}
+
+/// Recursively merge one type ID from `other` into `this`, memoizing in `mapping`.
+fn merge_one(
+    old_id: VirTypeId,
+    other: &VirTypeTable,
+    this: &mut VirTypeTable,
+    mapping: &mut FxHashMap<VirTypeId, VirTypeId>,
+    in_progress: &mut FxHashSet<VirTypeId>,
+) -> VirTypeId {
+    if let Some(&mapped) = mapping.get(&old_id) {
+        return mapped;
+    }
+
+    // Defensive cycle guard; recursive type cycles are not expected here.
+    if !in_progress.insert(old_id) {
+        return old_id;
+    }
+
+    let ty = &other.types[old_id.raw() as usize];
+    match ty {
+        VirType::Array { elem } => {
+            merge_one(*elem, other, this, mapping, in_progress);
+        }
+        VirType::FixedArray { elem, .. } => {
+            merge_one(*elem, other, this, mapping, in_progress);
+        }
+        VirType::Tuple { elems }
+        | VirType::Union { variants: elems }
+        | VirType::Class {
+            type_args: elems, ..
+        }
+        | VirType::Struct {
+            type_args: elems, ..
+        }
+        | VirType::Interface {
+            type_args: elems, ..
+        } => {
+            for &id in elems {
+                merge_one(id, other, this, mapping, in_progress);
+            }
+        }
+        VirType::Optional { inner } | VirType::RuntimeIterator { elem: inner } => {
+            merge_one(*inner, other, this, mapping, in_progress);
+        }
+        VirType::Fallible { success, errors } => {
+            merge_one(*success, other, this, mapping, in_progress);
+            for &id in errors {
+                merge_one(id, other, this, mapping, in_progress);
+            }
+        }
+        VirType::Function { params, ret } => {
+            for &id in params {
+                merge_one(id, other, this, mapping, in_progress);
+            }
+            merge_one(*ret, other, this, mapping, in_progress);
+        }
+        VirType::Primitive(_)
+        | VirType::Void
+        | VirType::Nil
+        | VirType::Done
+        | VirType::Never
+        | VirType::Range
+        | VirType::MetaType
+        | VirType::Unknown
+        | VirType::Param { .. }
+        | VirType::Error { .. } => {}
+    }
+
+    let remapped_ty = remap_type_ids_in_type(ty, mapping);
+    let layout = other.layouts[old_id.raw() as usize];
+    let new_id = this.intern(remapped_ty, layout);
+    mapping.insert(old_id, new_id);
+    in_progress.remove(&old_id);
+    new_id
 }
 
 impl Default for VirTypeTable {

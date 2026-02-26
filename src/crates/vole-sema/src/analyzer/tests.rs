@@ -11,6 +11,15 @@ fn check(source: &str) -> Result<(), Vec<TypeError>> {
     analyzer.analyze(&program, &interner)
 }
 
+fn analyze_output(source: &str) -> AnalysisOutput {
+    let mut parser = Parser::new(source, ModuleId::new(0));
+    let program = parser.parse_program().unwrap();
+    let interner = parser.into_interner();
+    let mut analyzer = Analyzer::new("test.vole");
+    analyzer.analyze(&program, &interner).unwrap();
+    analyzer.into_analysis_results()
+}
+
 // Tests for miette error integration
 #[test]
 fn type_error_contains_semantic_error() {
@@ -181,6 +190,48 @@ fn analyze_tests_block_with_invalid_assert() {
 }
 
 #[test]
+fn generic_structural_field_access_produces_generic_vir_template() {
+    let source = r#"
+        class Person { name: string }
+
+        func get_name<T: { name: string }>(x: T) -> string {
+            return x.name
+        }
+    "#;
+
+    let output = analyze_output(source);
+    assert_eq!(output.generic_vir_functions.len(), 1);
+    assert_eq!(output.generic_vir_functions[0].1.name, "get_name");
+}
+
+#[test]
+fn tests_block_generic_function_produces_generic_vir_template() {
+    let source = r#"
+        class Person { name: string }
+
+        tests {
+            func get_name<T: { name: string }>(x: T) -> string {
+                return x.name
+            }
+
+            test "can call tests-scoped generic" {
+                let p = Person { name: "alice" }
+                assert(get_name(p) == "alice")
+            }
+        }
+    "#;
+
+    let output = analyze_output(source);
+    assert!(
+        output
+            .generic_vir_functions
+            .iter()
+            .any(|(_, vir)| vir.name == "get_name"),
+        "expected tests-scoped generic function to produce a VIR template"
+    );
+}
+
+#[test]
 fn analyze_i32_literal_coercion() {
     let source = "func main() { let x: i32 = 42 }";
     assert!(check(source).is_ok());
@@ -190,6 +241,130 @@ fn analyze_i32_literal_coercion() {
 fn analyze_i32_binary_coercion() {
     let source = "func main() { let x: i32 = 42 * 3 }";
     assert!(check(source).is_ok());
+}
+
+#[test]
+fn analyze_i8_return_negative_literal_inference() {
+    let source = "func min_value() -> i8 { return -128 }";
+    assert!(check(source).is_ok());
+}
+
+#[test]
+fn analyze_u64_return_binary_literal_inference() {
+    let source = "func max_value() -> u64 { return 9223372036854775807_u64 * 2 + 1 }";
+    assert!(check(source).is_ok());
+}
+
+#[test]
+fn generic_nested_call_records_correct_callee_monomorph_key() {
+    let source = r#"
+        func wrap<T>(x: T) -> T { return x }
+        func double_wrap<T>(x: T) -> T { return wrap(wrap(x)) }
+    "#;
+    let mut parser = Parser::new(source, ModuleId::new(0));
+    let program = parser.parse_program().unwrap();
+    let interner = parser.into_interner();
+    let mut analyzer = Analyzer::new("test.vole");
+    analyzer.analyze(&program, &interner).unwrap();
+    let output = analyzer.into_analysis_results();
+    let node_map = output.node_map;
+    let names = output.db.names();
+
+    let double_wrap = program
+        .declarations
+        .iter()
+        .find_map(|decl| match decl {
+            Decl::Function(func) if interner.resolve(func.name) == "double_wrap" => Some(func),
+            _ => None,
+        })
+        .expect("missing double_wrap decl");
+
+    let FuncBody::Block(body) = &double_wrap.body else {
+        panic!("expected block body");
+    };
+    let Stmt::Return(ret) = &body.stmts[0] else {
+        panic!("expected return stmt");
+    };
+    let outer = ret.value.as_ref().expect("missing return value");
+    let ExprKind::Call(outer_call) = &outer.kind else {
+        panic!("expected outer call");
+    };
+    let inner = outer_call.args[0].expr();
+    let ExprKind::Call(_) = &inner.kind else {
+        panic!("expected inner call");
+    };
+
+    let outer_key = node_map
+        .get_generic(outer.id)
+        .expect("missing generic key on outer call");
+    let inner_key = node_map
+        .get_generic(inner.id)
+        .expect("missing generic key on inner call");
+
+    assert_eq!(
+        names.last_segment_str(outer_key.func_name).as_deref(),
+        Some("wrap")
+    );
+    assert_eq!(
+        names.last_segment_str(inner_key.func_name).as_deref(),
+        Some("wrap")
+    );
+}
+
+#[test]
+fn generic_template_nested_call_targets_wrap_function_id() {
+    let source = r#"
+        func wrap<T>(x: T) -> T { return x }
+        func double_wrap<T>(x: T) -> T { return wrap(wrap(x)) }
+    "#;
+    let output = analyze_output(source);
+    let names = output.db.names();
+    let entities = output.db.entities();
+
+    let wrap_name_id = output
+        .generic_vir_functions
+        .iter()
+        .find_map(|(name_id, _)| {
+            (names.last_segment_str(*name_id).as_deref() == Some("wrap")).then_some(*name_id)
+        })
+        .expect("missing wrap template");
+    let double_wrap = output
+        .generic_vir_functions
+        .iter()
+        .find_map(|(name_id, vir)| {
+            (names.last_segment_str(*name_id).as_deref() == Some("double_wrap")).then_some(vir)
+        })
+        .expect("missing double_wrap template");
+
+    let wrap_func_id = entities
+        .function_by_name(wrap_name_id)
+        .expect("missing wrap function id");
+    assert_ne!(double_wrap.id, wrap_func_id);
+
+    let outer_call = match double_wrap.body.stmts.first() {
+        Some(vole_vir::stmt::VirStmt::Return { value: Some(ret) }) => match ret.as_ref() {
+            vole_vir::expr::VirExpr::Call { target, args, .. } => (target, args),
+            _ => panic!("expected return call in double_wrap template"),
+        },
+        _ => panic!("expected return call in double_wrap template"),
+    };
+    let inner_call = match outer_call.1[0].as_ref() {
+        vole_vir::expr::VirExpr::Call { target, .. } => target,
+        _ => panic!("expected nested inner call"),
+    };
+
+    match outer_call.0 {
+        vole_vir::calls::CallTarget::GenericCall { function_id, .. } => {
+            assert_eq!(*function_id, wrap_func_id)
+        }
+        _ => panic!("expected generic call target for outer call"),
+    }
+    match inner_call {
+        vole_vir::calls::CallTarget::GenericCall { function_id, .. } => {
+            assert_eq!(*function_id, wrap_func_id)
+        }
+        _ => panic!("expected generic call target for inner call"),
+    }
 }
 
 #[test]

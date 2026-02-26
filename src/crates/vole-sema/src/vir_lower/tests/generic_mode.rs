@@ -9,13 +9,15 @@
 
 use super::*;
 use crate::analysis_cache::IsCheckResult as SemaIsCheckResult;
-use crate::generic::MonomorphKey;
+use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
+use crate::node_map::{CoercionKind, MethodDispatchKind};
+use crate::resolution::ResolvedMethod;
 use crate::types::FunctionType;
 use crate::vir_lower::expr::lower_expr;
 use crate::vir_lower::stmt::lower_stmt;
 use vole_frontend::ast::{
-    AsCastExpr, AsCastKind, CallArg, CallExpr, ExprKind, ForStmt, IsExpr, Stmt, StringPart,
-    TypeExpr, TypeExprKind,
+    AsCastExpr, AsCastKind, CallArg, CallExpr, ExprKind, ForStmt, IsExpr, MethodCallExpr, Stmt,
+    StringPart, TypeExpr, TypeExprKind,
 };
 use vole_identity::StringConversion;
 use vole_vir::calls::CallTarget;
@@ -604,5 +606,163 @@ fn concrete_mode_call_with_monomorph_key_still_emits_unresolved() {
             );
         }
         other => panic!("expected VirExpr::Call, got {other:?}"),
+    }
+}
+
+#[test]
+fn concrete_mode_method_call_lowers_dispatch_metadata() {
+    let mut node_map = empty_node_map();
+    let mut interner = test_interner();
+    let type_arena = test_type_arena();
+    let entities = test_entities();
+    let name_table = test_name_table();
+    let mut type_table = test_type_table();
+
+    let receiver_id = NodeId::new(ModuleId::new(0), 900);
+    let call_id = NodeId::new(ModuleId::new(0), 901);
+
+    node_map.set_type(receiver_id, TypeId::I64);
+    node_map.set_type(call_id, TypeId::STRING);
+    node_map.set_method_dispatch_kind(call_id, MethodDispatchKind::Builtin);
+    node_map.set_coercion_kind(
+        call_id,
+        CoercionKind::IteratorWrap {
+            elem_type: TypeId::I64,
+        },
+    );
+    node_map.set_method(
+        call_id,
+        ResolvedMethod::Implemented {
+            type_def_id: Some(vole_identity::TypeDefId::new(42)),
+            method_name_id: NameId::new_for_test(302),
+            trait_name: None,
+            func_type_id: TypeId::UNKNOWN,
+            return_type_id: TypeId::STRING,
+            is_builtin: true,
+            external_info: None,
+            concrete_return_hint: Some(TypeId::STRING),
+        },
+    );
+    node_map.set_generic(
+        call_id,
+        MonomorphKey::new(NameId::new_for_test(400), vec![TypeId::I64]),
+    );
+    node_map.set_substituted_return_type(call_id, TypeId::STRING);
+    node_map.set_resolved_call_args(call_id, vec![Some(0), None]);
+    node_map.set_class_method_generic(
+        call_id,
+        ClassMethodMonomorphKey::new(
+            NameId::new_for_test(300),
+            NameId::new_for_test(301),
+            vec![TypeId::I64, TypeId::BOOL],
+        ),
+    );
+    node_map.set_static_method_generic(
+        call_id,
+        StaticMethodMonomorphKey::new(
+            NameId::new_for_test(500),
+            NameId::new_for_test(501),
+            vec![TypeId::I64],
+            vec![TypeId::BOOL],
+        ),
+    );
+
+    let mut ctx = make_ctx(
+        &node_map,
+        &mut interner,
+        &type_arena,
+        &entities,
+        &name_table,
+        &mut type_table,
+    );
+
+    let receiver = Expr {
+        id: receiver_id,
+        kind: ExprKind::Identifier(Symbol::synthetic(7)),
+        span: dummy_span(),
+    };
+    let method_expr = Expr {
+        id: call_id,
+        kind: ExprKind::MethodCall(Box::new(MethodCallExpr {
+            object: receiver,
+            method: Symbol::synthetic(8),
+            type_args: vec![],
+            args: vec![CallArg::Positional(make_int_expr(1))],
+            method_span: dummy_span(),
+        })),
+        span: dummy_span(),
+    };
+
+    let vir_ref = lower_expr(&method_expr, &mut ctx);
+    match vir_ref.as_ref() {
+        VirExpr::MethodCall { dispatch, .. } => {
+            assert!(matches!(
+                dispatch.dispatch_kind,
+                Some(vole_vir::expr::VirMethodDispatchKind::Builtin)
+            ));
+            assert!(matches!(
+                dispatch.receiver_coercion,
+                Some(vole_vir::expr::VirMethodReceiverCoercion::IteratorWrap {
+                    elem_type: TypeId::I64,
+                    ..
+                })
+            ));
+            let resolved = dispatch
+                .resolved_method
+                .as_ref()
+                .expect("expected resolved_method");
+            assert_eq!(
+                resolved.type_def_id(),
+                Some(vole_identity::TypeDefId::new(42))
+            );
+            assert_eq!(resolved.return_type_id(), TypeId::STRING);
+            let generic_key = dispatch
+                .generic_monomorph
+                .as_ref()
+                .expect("expected generic_monomorph");
+            assert_eq!(generic_key.func_name, NameId::new_for_test(400));
+            assert_eq!(generic_key.type_keys, vec![TypeId::I64]);
+            assert_eq!(
+                generic_key.vir_type_keys,
+                vec![vole_identity::VirTypeId::I64]
+            );
+            assert_eq!(dispatch.substituted_return_type, Some(TypeId::STRING));
+            assert_eq!(
+                dispatch.vir_substituted_return_type,
+                Some(vole_identity::VirTypeId::STRING)
+            );
+            assert_eq!(dispatch.resolved_call_args, Some(vec![Some(0), None]));
+            let class_key = dispatch
+                .class_method_generic
+                .as_ref()
+                .expect("expected class_method_generic");
+            assert_eq!(class_key.class_name, NameId::new_for_test(300));
+            assert_eq!(class_key.method_name, NameId::new_for_test(301));
+            assert_eq!(class_key.type_keys, vec![TypeId::I64, TypeId::BOOL]);
+            assert_eq!(
+                class_key.vir_type_keys,
+                vec![
+                    vole_identity::VirTypeId::I64,
+                    vole_identity::VirTypeId::BOOL
+                ]
+            );
+            let static_key = dispatch
+                .static_method_generic
+                .as_ref()
+                .expect("expected static_method_generic");
+            assert_eq!(static_key.class_name, NameId::new_for_test(500));
+            assert_eq!(static_key.method_name, NameId::new_for_test(501));
+            assert_eq!(static_key.class_type_keys, vec![TypeId::I64]);
+            assert_eq!(static_key.method_type_keys, vec![TypeId::BOOL]);
+            assert_eq!(
+                static_key.vir_class_type_keys,
+                vec![vole_identity::VirTypeId::I64]
+            );
+            assert_eq!(
+                static_key.vir_method_type_keys,
+                vec![vole_identity::VirTypeId::BOOL]
+            );
+        }
+        other => panic!("expected MethodCall, got {other:?}"),
     }
 }

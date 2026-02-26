@@ -3,7 +3,8 @@
 // VIR expression nodes and their supporting types.
 
 use vole_identity::{
-    NameId, NodeId, StringConversion, Symbol, TypeDefId, TypeId, UnionStorageKind, VirTypeId,
+    MethodId, ModuleId, NameId, NodeId, StringConversion, Symbol, TypeDefId, TypeId,
+    UnionStorageKind, VirTypeId,
 };
 
 use crate::calls::CallTarget;
@@ -171,16 +172,17 @@ pub enum VirExpr {
     ///
     /// Method dispatch has 6+ paths (direct, implemented, interface,
     /// default, functional-interface, static) plus builtin and iterator
-    /// specialisations.  Classification requires the function registry,
-    /// variable table, and module context that lowering does not have.
+    /// specialisations.  `dispatch` carries all sema-resolved routing metadata
+    /// needed for VIR-native codegen dispatch.
     ///
     /// The receiver and arguments are pre-lowered to VIR refs.  Codegen
-    /// reconstructs the dispatch data from the VIR fields and `node_id`
-    /// (for NodeMap lookups: method resolution, monomorphization keys, etc.).
+    /// consumes `dispatch` directly; `node_id` is retained only as a legacy
+    /// compatibility field for non-dispatch uses.
     MethodCall {
         receiver: VirRef,
         method: Symbol,
         args: Vec<VirRef>,
+        dispatch: VirMethodDispatchMeta,
         node_id: NodeId,
         ty: TypeId,
         vir_ty: VirTypeId,
@@ -378,13 +380,15 @@ pub enum VirExpr {
     ///
     /// Like `OptionalChain` but the body is a method call instead of a
     /// field load.  The method receiver, name, and arguments are
-    /// pre-lowered to VIR refs.  `call_node_id` is the original
-    /// expression's NodeId for sema method dispatch lookups.
+    /// pre-lowered to VIR refs.  `dispatch` carries sema-resolved method
+    /// routing metadata; `call_node_id` is retained as a legacy field for
+    /// non-dispatch compatibility paths.
     /// `ty` is the overall expression type (e.g. `string | nil`).
     OptionalMethodCall {
         object: VirRef,
         method: Symbol,
         method_args: Vec<VirRef>,
+        dispatch: VirMethodDispatchMeta,
         call_node_id: NodeId,
         inner_type: TypeId,
         vir_inner_type: VirTypeId,
@@ -506,6 +510,250 @@ pub enum CoerceKind {
     Unbox,
     /// Wrap a concrete iterator into a `RuntimeIterator`.
     IteratorWrap,
+}
+
+/// Sema-independent dispatch kind annotation for VIR method calls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VirMethodDispatchKind {
+    /// Module-scoped function call dispatch.
+    Module { module_id: ModuleId },
+    /// Built-in method dispatch.
+    Builtin,
+    /// Array push special-case dispatch.
+    ArrayPush,
+    /// Standard method dispatch path.
+    Standard,
+}
+
+/// Method-receiver coercion hints for VIR method dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VirMethodReceiverCoercion {
+    /// Receiver should be boxed to `Iterator<T>` then wrapped as
+    /// `RuntimeIterator<T>` before dispatch.
+    IteratorWrap {
+        elem_type: TypeId,
+        vir_elem_type: VirTypeId,
+    },
+}
+
+/// External/native method information used by VIR method dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VirExternalMethodInfo {
+    pub module_path: NameId,
+    pub native_name: NameId,
+}
+
+/// Sema-independent resolved method descriptor for VIR method dispatch.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum VirResolvedMethod {
+    Direct {
+        type_def_id: Option<TypeDefId>,
+        func_type_id: TypeId,
+        vir_func_type_id: VirTypeId,
+        return_type_id: TypeId,
+        vir_return_type_id: VirTypeId,
+        method_id: Option<MethodId>,
+    },
+    Implemented {
+        type_def_id: Option<TypeDefId>,
+        func_type_id: TypeId,
+        vir_func_type_id: VirTypeId,
+        return_type_id: TypeId,
+        vir_return_type_id: VirTypeId,
+        is_builtin: bool,
+        external_info: Option<VirExternalMethodInfo>,
+        concrete_return_hint: Option<TypeId>,
+        vir_concrete_return_hint: Option<VirTypeId>,
+    },
+    FunctionalInterface {
+        func_type_id: TypeId,
+        vir_func_type_id: VirTypeId,
+        return_type_id: TypeId,
+        vir_return_type_id: VirTypeId,
+    },
+    DefaultMethod {
+        type_def_id: Option<TypeDefId>,
+        interface_type_def_id: TypeDefId,
+        func_type_id: TypeId,
+        vir_func_type_id: VirTypeId,
+        return_type_id: TypeId,
+        vir_return_type_id: VirTypeId,
+        external_info: Option<VirExternalMethodInfo>,
+    },
+    InterfaceMethod {
+        interface_type_def_id: TypeDefId,
+        func_type_id: TypeId,
+        vir_func_type_id: VirTypeId,
+        return_type_id: TypeId,
+        vir_return_type_id: VirTypeId,
+        method_index: u32,
+    },
+    Static {
+        type_def_id: TypeDefId,
+        method_id: MethodId,
+        func_type_id: TypeId,
+        vir_func_type_id: VirTypeId,
+        return_type_id: TypeId,
+        vir_return_type_id: VirTypeId,
+    },
+}
+
+impl VirResolvedMethod {
+    pub fn func_type_id(&self) -> TypeId {
+        match self {
+            VirResolvedMethod::Direct { func_type_id, .. }
+            | VirResolvedMethod::Implemented { func_type_id, .. }
+            | VirResolvedMethod::FunctionalInterface { func_type_id, .. }
+            | VirResolvedMethod::DefaultMethod { func_type_id, .. }
+            | VirResolvedMethod::InterfaceMethod { func_type_id, .. }
+            | VirResolvedMethod::Static { func_type_id, .. } => *func_type_id,
+        }
+    }
+
+    pub fn return_type_id(&self) -> TypeId {
+        match self {
+            VirResolvedMethod::Direct { return_type_id, .. }
+            | VirResolvedMethod::Implemented { return_type_id, .. }
+            | VirResolvedMethod::FunctionalInterface { return_type_id, .. }
+            | VirResolvedMethod::DefaultMethod { return_type_id, .. }
+            | VirResolvedMethod::InterfaceMethod { return_type_id, .. }
+            | VirResolvedMethod::Static { return_type_id, .. } => *return_type_id,
+        }
+    }
+
+    pub fn method_id(&self) -> Option<MethodId> {
+        match self {
+            VirResolvedMethod::Direct { method_id, .. } => *method_id,
+            VirResolvedMethod::Static { method_id, .. } => Some(*method_id),
+            VirResolvedMethod::Implemented { .. }
+            | VirResolvedMethod::FunctionalInterface { .. }
+            | VirResolvedMethod::DefaultMethod { .. }
+            | VirResolvedMethod::InterfaceMethod { .. } => None,
+        }
+    }
+
+    pub fn type_def_id(&self) -> Option<TypeDefId> {
+        match self {
+            VirResolvedMethod::Direct { type_def_id, .. } => *type_def_id,
+            VirResolvedMethod::Implemented { type_def_id, .. } => *type_def_id,
+            VirResolvedMethod::DefaultMethod { type_def_id, .. } => *type_def_id,
+            VirResolvedMethod::Static { type_def_id, .. } => Some(*type_def_id),
+            VirResolvedMethod::InterfaceMethod {
+                interface_type_def_id,
+                ..
+            } => Some(*interface_type_def_id),
+            VirResolvedMethod::FunctionalInterface { .. } => None,
+        }
+    }
+
+    pub fn external_info(&self) -> Option<VirExternalMethodInfo> {
+        match self {
+            VirResolvedMethod::Implemented { external_info, .. }
+            | VirResolvedMethod::DefaultMethod { external_info, .. } => *external_info,
+            VirResolvedMethod::Direct { .. }
+            | VirResolvedMethod::FunctionalInterface { .. }
+            | VirResolvedMethod::InterfaceMethod { .. }
+            | VirResolvedMethod::Static { .. } => None,
+        }
+    }
+
+    pub fn concrete_return_hint(&self) -> Option<TypeId> {
+        match self {
+            VirResolvedMethod::Implemented {
+                concrete_return_hint,
+                ..
+            } => *concrete_return_hint,
+            VirResolvedMethod::Direct { .. }
+            | VirResolvedMethod::FunctionalInterface { .. }
+            | VirResolvedMethod::DefaultMethod { .. }
+            | VirResolvedMethod::InterfaceMethod { .. }
+            | VirResolvedMethod::Static { .. } => None,
+        }
+    }
+
+    pub fn is_builtin(&self) -> bool {
+        matches!(
+            self,
+            VirResolvedMethod::Implemented {
+                is_builtin: true,
+                ..
+            }
+        )
+    }
+
+    pub fn method_index(&self) -> Option<u32> {
+        match self {
+            VirResolvedMethod::InterfaceMethod { method_index, .. } => Some(*method_index),
+            VirResolvedMethod::Direct { .. }
+            | VirResolvedMethod::Implemented { .. }
+            | VirResolvedMethod::FunctionalInterface { .. }
+            | VirResolvedMethod::DefaultMethod { .. }
+            | VirResolvedMethod::Static { .. } => None,
+        }
+    }
+
+    pub fn default_interface_type_def_id(&self) -> Option<TypeDefId> {
+        match self {
+            VirResolvedMethod::DefaultMethod {
+                interface_type_def_id,
+                ..
+            } => Some(*interface_type_def_id),
+            VirResolvedMethod::Direct { .. }
+            | VirResolvedMethod::Implemented { .. }
+            | VirResolvedMethod::FunctionalInterface { .. }
+            | VirResolvedMethod::InterfaceMethod { .. }
+            | VirResolvedMethod::Static { .. } => None,
+        }
+    }
+
+    pub fn is_interface_method(&self) -> bool {
+        matches!(self, VirResolvedMethod::InterfaceMethod { .. })
+    }
+}
+
+/// Generic function monomorph key carried by VIR method metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VirFunctionMonomorphKey {
+    pub func_name: NameId,
+    pub type_keys: Vec<TypeId>,
+    pub vir_type_keys: Vec<VirTypeId>,
+}
+
+/// Generic class-method monomorph key carried by VIR method metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VirClassMethodMonomorphKey {
+    pub class_name: NameId,
+    pub method_name: NameId,
+    pub type_keys: Vec<TypeId>,
+    pub vir_type_keys: Vec<VirTypeId>,
+}
+
+/// Generic static-method monomorph key carried by VIR method metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VirStaticMethodMonomorphKey {
+    pub class_name: NameId,
+    pub method_name: NameId,
+    pub class_type_keys: Vec<TypeId>,
+    pub vir_class_type_keys: Vec<VirTypeId>,
+    pub method_type_keys: Vec<TypeId>,
+    pub vir_method_type_keys: Vec<VirTypeId>,
+}
+
+/// Dispatch metadata carried on VIR method-call expressions.
+///
+/// This is the NodeId-free contract for method-dispatch inputs that were
+/// previously fetched ad-hoc from sema maps during codegen.
+#[derive(Debug, Clone, Default)]
+pub struct VirMethodDispatchMeta {
+    pub dispatch_kind: Option<VirMethodDispatchKind>,
+    pub receiver_coercion: Option<VirMethodReceiverCoercion>,
+    pub resolved_method: Option<VirResolvedMethod>,
+    pub generic_monomorph: Option<VirFunctionMonomorphKey>,
+    pub substituted_return_type: Option<TypeId>,
+    pub vir_substituted_return_type: Option<VirTypeId>,
+    pub resolved_call_args: Option<Vec<Option<usize>>>,
+    pub class_method_generic: Option<VirClassMethodMonomorphKey>,
+    pub static_method_generic: Option<VirStaticMethodMonomorphKey>,
 }
 
 /// A single arm of a `Match` expression.

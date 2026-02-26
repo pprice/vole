@@ -4,9 +4,9 @@
 //
 // Walks the AST and lowers all expression and statement kinds to typed VIR
 // nodes.  Every `ExprKind` variant maps to a concrete `VirExpr` variant
-// (no escape hatches).  A few VIR nodes still carry AST fragments for
-// codegen dispatch (`MethodCall`, `OptionalMethodCall`).  All pattern kinds
-// (including Record) are fully lowered to concrete `VirPattern` variants.
+// (no escape hatches). Method calls carry explicit VIR dispatch metadata.
+// All pattern kinds (including Record) are fully lowered to concrete
+// `VirPattern` variants.
 
 pub mod expr;
 pub mod stmt;

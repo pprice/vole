@@ -6,8 +6,8 @@
 //! Cranelift IR.
 //!
 //! All expression and statement kinds are fully lowered to typed VIR nodes.
-//! A few variants (`MethodCall`, `OptionalMethodCall`) still carry AST
-//! fragments for codegen dispatch, but there are no generic escape hatches.
+//! Method call nodes carry explicit VIR dispatch metadata; there are no
+//! generic AST escape hatches.
 //!
 //! AST-to-VIR lowering lives in `vole-codegen::vir_lower` (moved out of this
 //! crate to break the `vole-frontend` dependency).
@@ -32,8 +32,11 @@ pub use builder::VirBuilder;
 pub use calls::{BuiltinMethod, CallTarget, NativeAbi};
 pub use expr::{
     AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture,
-    VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern,
-    VirRecordFieldBinding, VirStringPart, VirTupleBinding, VirUnOp,
+    VirClassMethodMonomorphKey, VirErrorFieldBinding, VirErrorPatternKind, VirExpr,
+    VirExternalMethodInfo, VirFunctionMonomorphKey, VirMatchArm, VirMetaKind,
+    VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern,
+    VirRecordFieldBinding, VirResolvedMethod, VirStaticMethodMonomorphKey, VirStringPart,
+    VirTupleBinding, VirUnOp,
 };
 pub use func::{VirBody, VirFunction, VirTest};
 pub use intrinsics::IntrinsicKey;

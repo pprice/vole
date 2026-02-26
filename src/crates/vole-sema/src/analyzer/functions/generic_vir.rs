@@ -32,7 +32,11 @@ impl Analyzer {
         interner: &Interner,
     ) -> (Vec<(NameId, VirFunction)>, VirTypeTable) {
         let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
-        self.collect_generic_func_asts(&program.declarations, interner, &mut generic_func_asts);
+        self.collect_generic_func_asts_for_vir(
+            &program.declarations,
+            interner,
+            &mut generic_func_asts,
+        );
 
         // Snapshot the monomorph cache keys that exist BEFORE generic analysis.
         // Pass 2 may have already created entries with TypeParam keys (from class
@@ -97,14 +101,21 @@ impl Analyzer {
         // operations that are only valid with concrete types.
         let saved_errors = std::mem::take(&mut self.diagnostics.errors);
         let saved_warnings = std::mem::take(&mut self.diagnostics.warnings);
-        self.analyze_monomorph_body(func, &substitutions, interner);
+        self.analyze_generic_body_for_vir(func, &substitutions, interner);
         let generic_errors = self.diagnostics.errors.len();
         self.diagnostics.errors = saved_errors;
         self.diagnostics.warnings = saved_warnings;
 
         // If the generic body analysis produced errors, the NodeMap entries
-        // may be incomplete.  Skip VIR lowering for this function.
-        if generic_errors > 0 {
+        // may be incomplete. Keep constrained generics on the VIR-template
+        // path even when identity analysis reports errors: those errors are
+        // often due to abstract structural dispatch and are intentionally
+        // suppressed above.
+        let has_constraints = generic_info
+            .type_params
+            .iter()
+            .any(|tp| tp.constraint.is_some());
+        if generic_errors > 0 && !has_constraints {
             return None;
         }
 
@@ -113,6 +124,56 @@ impl Analyzer {
             self.lower_analyzed_generic(func, func_id, &generic_info, interner, shared_type_table);
 
         Some(vir)
+    }
+
+    /// Analyze one generic function body with the given substitutions to
+    /// populate NodeMap entries for Pass 2a VIR lowering.
+    fn analyze_generic_body_for_vir(
+        &mut self,
+        func: &FuncDecl,
+        substitutions: &FxHashMap<NameId, ArenaTypeId>,
+        interner: &Interner,
+    ) {
+        // Get the generic function info to resolve parameter and return types.
+        let name_id =
+            self.name_table_mut()
+                .intern(self.module.current_module, &[func.name], interner);
+        let generic_info = {
+            let registry = self.entity_registry();
+            registry
+                .function_by_name(name_id)
+                .and_then(|fid| registry.get_function(fid).generic_info.clone())
+        };
+
+        let Some(generic_info) = generic_info else {
+            return;
+        };
+
+        let (concrete_param_ids, concrete_return_id) = {
+            let mut arena = self.type_arena_mut();
+            let param_ids: Vec<_> = generic_info
+                .param_types
+                .iter()
+                .map(|&t| arena.substitute(t, substitutions))
+                .collect();
+            let return_id = arena.substitute(generic_info.return_type, substitutions);
+            (param_ids, return_id)
+        };
+
+        let saved_ctx = self.enter_function_context(concrete_return_id);
+        self.enter_param_scope(&func.params, &concrete_param_ids);
+
+        let mut type_param_scope = TypeParamScope::new();
+        for tp in &generic_info.type_params {
+            type_param_scope.add(tp.clone());
+        }
+        self.env.type_param_stack.push_scope(type_param_scope);
+
+        let _ = self.check_func_body(&func.body, interner);
+
+        self.env.type_param_stack.pop();
+        self.pop_scope();
+        self.exit_function_context(saved_ctx);
     }
 
     /// Build identity substitutions: each type param maps to its own
@@ -128,6 +189,49 @@ impl Analyzer {
             subs.insert(tp.name_id, param_type_id);
         }
         subs
+    }
+
+    /// Recursively collect generic function ASTs from declarations.
+    ///
+    /// Walks `Decl::Function` entries and recurses into `Decl::Tests` blocks
+    /// so that test-scoped generic functions are included.
+    fn collect_generic_func_asts_for_vir<'a>(
+        &mut self,
+        decls: &'a [Decl],
+        interner: &Interner,
+        map: &mut FxHashMap<NameId, &'a FuncDecl>,
+    ) {
+        for decl in decls {
+            match decl {
+                Decl::Function(func) => {
+                    let name_id = self.name_table_mut().intern(
+                        self.module.current_module,
+                        &[func.name],
+                        interner,
+                    );
+
+                    let has_explicit_type_params = !func.type_params.is_empty();
+                    let has_implicit_generic_info = self
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+
+                    if has_explicit_type_params || has_implicit_generic_info {
+                        map.insert(name_id, func);
+                    }
+                }
+                Decl::Tests(tests_decl) => {
+                    self.collect_generic_func_asts_for_vir(&tests_decl.decls, interner, map);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Remove monomorph cache entries that were newly created during generic

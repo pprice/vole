@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
@@ -16,6 +17,11 @@ use vole_frontend::{
 };
 use vole_identity::{ModuleId, NameId};
 use vole_sema::type_arena::TypeId;
+use vole_vir::calls::CallTarget;
+use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
+use vole_vir::func::VirBody;
+use vole_vir::refs::VirRef;
+use vole_vir::stmt::VirStmt;
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> CodegenResult<(FunctionKey, String)> {
@@ -1004,6 +1010,19 @@ impl Compiler<'_> {
     // VIR-monomorphized function declaration and compilation
     // =====================================================================
 
+    /// Return sorted indices of VIR monomorphized functions that may be
+    /// targeted by `CallTarget::VirDirect`.
+    ///
+    /// Roots:
+    /// - regular concrete VIR functions (non-monomorphized names), and
+    /// - VIR-backed monomorphized instances (`mangled_name_id.is_some()`).
+    ///
+    /// From those roots, walk `VirDirect` edges transitively and collect
+    /// target indices that must be declared/compiled.
+    fn vir_monomorph_indices(&self) -> Vec<usize> {
+        collect_reachable_vir_direct_targets(&self.analyzed.vir_program.functions)
+    }
+
     /// Declare VIR-monomorphized functions in the JIT module.
     ///
     /// Functions at indices `>= vir_monomorph_base` in `VirProgram.functions`
@@ -1012,12 +1031,11 @@ impl Compiler<'_> {
     /// resulting `FuncId` is stored in `state.vir_direct_func_ids` for lookup
     /// during `CallTarget::VirDirect` compilation.
     fn declare_vir_monomorphized_functions(&mut self) -> CodegenResult<()> {
-        let base = self.analyzed.vir_program.vir_monomorph_base;
-        if base == usize::MAX {
+        let indices = self.vir_monomorph_indices();
+        if indices.is_empty() {
             return Ok(());
         }
-        let count = self.analyzed.vir_program.functions.len();
-        for idx in base..count {
+        for idx in indices {
             let vir_func = &self.analyzed.vir_program.functions[idx];
             let sig = self.build_signature_for_vir_func(vir_func);
             let jit_name = format!("__vir_monomorph_{}", vir_func.name);
@@ -1032,13 +1050,14 @@ impl Compiler<'_> {
     /// Must be called after [`declare_vir_monomorphized_functions`] so that
     /// all VirDirect targets have FuncIds for cross-referencing.
     fn compile_vir_monomorphized_functions(&mut self) -> CodegenResult<()> {
-        let base = self.analyzed.vir_program.vir_monomorph_base;
-        if base == usize::MAX {
+        let indices = self.vir_monomorph_indices();
+        if indices.is_empty() {
             return Ok(());
         }
-        let count = self.analyzed.vir_program.functions.len();
-        for idx in base..count {
-            let func_id = self.state.vir_direct_func_ids[&idx];
+        for idx in indices {
+            let Some(&func_id) = self.state.vir_direct_func_ids.get(&idx) else {
+                continue;
+            };
             if self.defined_functions.contains(&func_id) {
                 continue;
             }
@@ -1066,5 +1085,263 @@ impl Compiler<'_> {
             self.finalize_function(func_id)?;
         }
         Ok(())
+    }
+}
+
+fn collect_reachable_vir_direct_targets(functions: &[vole_vir::func::VirFunction]) -> Vec<usize> {
+    let mut worklist: Vec<usize> = Vec::new();
+    for (idx, func) in functions.iter().enumerate() {
+        let is_early_vir_monomorph = func.name.contains("<VirTypeId(");
+        if func.mangled_name_id.is_some() || !is_early_vir_monomorph {
+            worklist.push(idx);
+        }
+    }
+
+    let mut visited = BTreeSet::new();
+    let mut targets = BTreeSet::new();
+
+    while let Some(func_idx) = worklist.pop() {
+        if func_idx >= functions.len() || !visited.insert(func_idx) {
+            continue;
+        }
+
+        let mut direct_targets = BTreeSet::new();
+        collect_vir_direct_in_body(&functions[func_idx].body, &mut direct_targets);
+        for target_idx in direct_targets {
+            if targets.insert(target_idx) {
+                worklist.push(target_idx);
+            }
+        }
+    }
+
+    targets.into_iter().collect()
+}
+
+fn collect_vir_direct_in_body(body: &VirBody, out: &mut BTreeSet<usize>) {
+    for stmt in &body.stmts {
+        collect_vir_direct_in_stmt(stmt, out);
+    }
+    if let Some(trailing) = &body.trailing {
+        collect_vir_direct_in_ref(trailing, out);
+    }
+}
+
+fn collect_vir_direct_in_ref(r: &VirRef, out: &mut BTreeSet<usize>) {
+    collect_vir_direct_in_expr(r, out);
+}
+
+fn collect_vir_direct_in_stmt(stmt: &VirStmt, out: &mut BTreeSet<usize>) {
+    match stmt {
+        VirStmt::Let { value, .. } => collect_vir_direct_in_ref(value, out),
+        VirStmt::LetTuple { value, .. } => collect_vir_direct_in_ref(value, out),
+        VirStmt::Assign { target, value } => {
+            match target {
+                vole_vir::stmt::AssignTarget::Local(_) => {}
+                vole_vir::stmt::AssignTarget::Field { object, .. } => {
+                    collect_vir_direct_in_ref(object, out)
+                }
+                vole_vir::stmt::AssignTarget::Index { array, index } => {
+                    collect_vir_direct_in_ref(array, out);
+                    collect_vir_direct_in_ref(index, out);
+                }
+            }
+            collect_vir_direct_in_ref(value, out);
+        }
+        VirStmt::Expr { value } => collect_vir_direct_in_ref(value, out),
+        VirStmt::While { cond, body } => {
+            collect_vir_direct_in_ref(cond, out);
+            collect_vir_direct_in_body(body, out);
+        }
+        VirStmt::For(vir_for) => {
+            collect_vir_direct_in_ref(&vir_for.iterable, out);
+            collect_vir_direct_in_body(&vir_for.body, out);
+        }
+        VirStmt::Return { value } => {
+            if let Some(v) = value {
+                collect_vir_direct_in_ref(v, out);
+            }
+        }
+        VirStmt::Raise { fields, .. } => {
+            for (_, val) in fields {
+                collect_vir_direct_in_ref(val, out);
+            }
+        }
+        VirStmt::RcInc { value } | VirStmt::RcDec { value } => {
+            collect_vir_direct_in_ref(value, out)
+        }
+        VirStmt::Break | VirStmt::Continue | VirStmt::Noop => {}
+    }
+}
+
+fn collect_vir_direct_in_expr(expr: &VirExpr, out: &mut BTreeSet<usize>) {
+    match expr {
+        VirExpr::Call { target, args, .. } => {
+            if let CallTarget::VirDirect { function_index } = target {
+                out.insert(*function_index);
+            }
+            for arg in args {
+                collect_vir_direct_in_ref(arg, out);
+            }
+        }
+        VirExpr::Range { start, end, .. } => {
+            collect_vir_direct_in_ref(start, out);
+            collect_vir_direct_in_ref(end, out);
+        }
+        VirExpr::ArrayLiteral { elements, .. } => {
+            for e in elements {
+                collect_vir_direct_in_ref(e, out);
+            }
+        }
+        VirExpr::RepeatLiteral { element, .. } => collect_vir_direct_in_ref(element, out),
+        VirExpr::StructLiteral { fields, .. } | VirExpr::ClassInstance { fields, .. } => {
+            for (_, val) in fields {
+                collect_vir_direct_in_ref(val, out);
+            }
+        }
+        VirExpr::BinaryOp { lhs, rhs, .. } => {
+            collect_vir_direct_in_ref(lhs, out);
+            collect_vir_direct_in_ref(rhs, out);
+        }
+        VirExpr::UnaryOp { operand, .. } => collect_vir_direct_in_ref(operand, out),
+        VirExpr::StringConcat { parts } => {
+            for p in parts {
+                collect_vir_direct_in_ref(p, out);
+            }
+        }
+        VirExpr::InterpolatedString { parts } => {
+            for part in parts {
+                if let VirStringPart::Expr { value, .. } = part {
+                    collect_vir_direct_in_ref(value, out);
+                }
+            }
+        }
+        VirExpr::MethodCall { receiver, args, .. } => {
+            collect_vir_direct_in_ref(receiver, out);
+            for arg in args {
+                collect_vir_direct_in_ref(arg, out);
+            }
+        }
+        VirExpr::FieldLoad { object, .. } => collect_vir_direct_in_ref(object, out),
+        VirExpr::FieldStore { object, value, .. } => {
+            collect_vir_direct_in_ref(object, out);
+            collect_vir_direct_in_ref(value, out);
+        }
+        VirExpr::Index { object, index, .. } => {
+            collect_vir_direct_in_ref(object, out);
+            collect_vir_direct_in_ref(index, out);
+        }
+        VirExpr::IndexStore {
+            object,
+            index,
+            value,
+            ..
+        } => {
+            collect_vir_direct_in_ref(object, out);
+            collect_vir_direct_in_ref(index, out);
+            collect_vir_direct_in_ref(value, out);
+        }
+        VirExpr::RcInc { value } | VirExpr::RcDec { value } | VirExpr::RcMove { value } => {
+            collect_vir_direct_in_ref(value, out);
+        }
+        VirExpr::Coerce { value, .. } => collect_vir_direct_in_ref(value, out),
+        VirExpr::If {
+            cond,
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_vir_direct_in_ref(cond, out);
+            collect_vir_direct_in_body(then_body, out);
+            if let Some(else_body) = else_body {
+                collect_vir_direct_in_body(else_body, out);
+            }
+        }
+        VirExpr::Match {
+            scrutinee, arms, ..
+        } => {
+            collect_vir_direct_in_ref(scrutinee, out);
+            for arm in arms {
+                if let Some(guard) = &arm.guard {
+                    collect_vir_direct_in_ref(guard, out);
+                }
+                collect_vir_direct_in_body(&arm.body, out);
+                collect_vir_direct_in_pattern(&arm.pattern, out);
+            }
+        }
+        VirExpr::Block {
+            stmts, trailing, ..
+        } => {
+            for stmt in stmts {
+                collect_vir_direct_in_stmt(stmt, out);
+            }
+            if let Some(trailing) = trailing {
+                collect_vir_direct_in_ref(trailing, out);
+            }
+        }
+        VirExpr::IsCheck { value, .. } | VirExpr::AsCast { value, .. } => {
+            collect_vir_direct_in_ref(value, out);
+        }
+        VirExpr::MetaAccess { kind, .. } => match kind {
+            VirMetaKind::Static { object, .. } => {
+                if let Some(obj) = object {
+                    collect_vir_direct_in_ref(obj, out);
+                }
+            }
+            VirMetaKind::Dynamic { value } | VirMetaKind::TypeParam { value, .. } => {
+                collect_vir_direct_in_ref(value, out);
+            }
+        },
+        VirExpr::LocalStore { value, .. } => collect_vir_direct_in_ref(value, out),
+        VirExpr::Lambda { body, .. } => collect_vir_direct_in_body(body, out),
+        VirExpr::NullCoalesce { value, default, .. } => {
+            collect_vir_direct_in_ref(value, out);
+            collect_vir_direct_in_ref(default, out);
+        }
+        VirExpr::OptionalChain { object, .. } => collect_vir_direct_in_ref(object, out),
+        VirExpr::OptionalMethodCall {
+            object,
+            method_args,
+            ..
+        } => {
+            collect_vir_direct_in_ref(object, out);
+            for arg in method_args {
+                collect_vir_direct_in_ref(arg, out);
+            }
+        }
+        VirExpr::Try { value, .. } | VirExpr::Yield { value } => {
+            collect_vir_direct_in_ref(value, out);
+        }
+        VirExpr::IntLiteral { .. }
+        | VirExpr::WideLiteral { .. }
+        | VirExpr::FloatLiteral { .. }
+        | VirExpr::BoolLiteral(_)
+        | VirExpr::StringLiteral(_)
+        | VirExpr::NilLiteral
+        | VirExpr::Unreachable { .. }
+        | VirExpr::Import { .. }
+        | VirExpr::TypeLiteral
+        | VirExpr::LocalLoad { .. } => {}
+    }
+}
+
+fn collect_vir_direct_in_pattern(pattern: &VirPattern, out: &mut BTreeSet<usize>) {
+    match pattern {
+        VirPattern::Literal { value, .. } => collect_vir_direct_in_ref(value, out),
+        VirPattern::Success { inner, .. } => {
+            if let Some(inner) = inner {
+                collect_vir_direct_in_pattern(inner, out);
+            }
+        }
+        VirPattern::Tuple { bindings } => {
+            for binding in bindings {
+                collect_vir_direct_in_pattern(&binding.pattern, out);
+            }
+        }
+        VirPattern::Wildcard
+        | VirPattern::Binding { .. }
+        | VirPattern::Val { .. }
+        | VirPattern::Error { .. }
+        | VirPattern::Record { .. }
+        | VirPattern::TypeCheck { .. } => {}
     }
 }

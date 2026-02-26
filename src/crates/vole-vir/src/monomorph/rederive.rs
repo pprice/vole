@@ -8,7 +8,8 @@
 // This pass walks the VIR tree and re-derives those decisions from the
 // now-concrete types.
 
-use vole_identity::{StringConversion, VirTypeId};
+use rustc_hash::FxHashSet;
+use vole_identity::{StringConversion, TypeId, UnionStorageKind, VirTypeId};
 
 use crate::expr::{IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use crate::func::{VirBody, VirFunction};
@@ -119,19 +120,27 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
             rederive_ref(object, table);
             rederive_ref(value, table);
         }
-        VirExpr::Index { object, index, .. } => {
+        VirExpr::Index {
+            object,
+            index,
+            union_storage,
+            ..
+        } => {
             rederive_ref(object, table);
             rederive_ref(index, table);
+            rederive_union_storage_from_array_expr(object, union_storage, table);
         }
         VirExpr::IndexStore {
             object,
             index,
             value,
+            union_storage,
             ..
         } => {
             rederive_ref(object, table);
             rederive_ref(index, table);
             rederive_ref(value, table);
+            rederive_union_storage_from_array_expr(object, union_storage, table);
         }
 
         // RC
@@ -159,8 +168,9 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
             scrutinee, arms, ..
         } => {
             rederive_ref(scrutinee, table);
+            let scrutinee_vir_ty = extract_vir_ty(scrutinee);
             for arm in arms {
-                rederive_pattern(&mut arm.pattern, table);
+                rederive_pattern(&mut arm.pattern, scrutinee_vir_ty, table);
                 if let Some(guard) = &mut arm.guard {
                     rederive_ref(guard, table);
                 }
@@ -181,28 +191,15 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
         // Type operations — re-derive IsCheckResult
         VirExpr::IsCheck { value, result, .. } => {
             rederive_ref(value, table);
-            rederive_is_check(result, table);
+            rederive_is_check_from_expr(value, result, table);
         }
         VirExpr::AsCast { value, result, .. } => {
             rederive_ref(value, table);
-            rederive_is_check(result, table);
+            rederive_is_check_from_expr(value, result, table);
         }
 
-        // Reflection — VirMetaKind::TypeParam needs EntityRegistry (vol-b4d0)
-        VirExpr::MetaAccess { kind, .. } => {
-            match kind {
-                VirMetaKind::Static { object, .. } => {
-                    if let Some(obj) = object {
-                        rederive_ref(obj, table);
-                    }
-                }
-                VirMetaKind::Dynamic { value } => rederive_ref(value, table),
-                // TODO(vol-b4d0): TypeParam -> Static requires EntityRegistry
-                // to look up TypeDefId from the concrete type. For now, leave
-                // as TypeParam; codegen already handles this variant.
-                VirMetaKind::TypeParam { value, .. } => rederive_ref(value, table),
-            }
-        }
+        // Reflection — re-derive TypeParam meta-kind from concrete VIR types.
+        VirExpr::MetaAccess { kind, .. } => rederive_meta_kind(kind, table),
 
         // Variables
         VirExpr::LocalLoad { .. } => {}
@@ -277,27 +274,51 @@ fn rederive_assign_target(target: &mut crate::stmt::AssignTarget, table: &VirTyp
     }
 }
 
-fn rederive_pattern(pat: &mut VirPattern, table: &VirTypeTable) {
+fn rederive_pattern(
+    pat: &mut VirPattern,
+    scrutinee_vir_ty: Option<VirTypeId>,
+    table: &VirTypeTable,
+) {
     match pat {
         VirPattern::Wildcard | VirPattern::Binding { .. } | VirPattern::Val { .. } => {}
-        VirPattern::TypeCheck { result, .. } => rederive_is_check(result, table),
+        VirPattern::TypeCheck {
+            result,
+            tested_type,
+            vir_tested_type,
+            ..
+        } => {
+            if let Some(scrutinee_vir_ty) = scrutinee_vir_ty {
+                *result =
+                    derive_is_check_result(scrutinee_vir_ty, *tested_type, *vir_tested_type, table);
+            }
+        }
         VirPattern::Literal { value, .. } => rederive_ref(value, table),
-        VirPattern::Success { inner, .. } => {
+        VirPattern::Success {
+            inner,
+            vir_success_type,
+            ..
+        } => {
             if let Some(p) = inner {
-                rederive_pattern(p, table);
+                rederive_pattern(p, Some(*vir_success_type), table);
             }
         }
         VirPattern::Error { .. } => {}
         VirPattern::Tuple { bindings } => {
             for b in bindings {
-                rederive_pattern(&mut b.pattern, table);
+                rederive_pattern(&mut b.pattern, Some(b.vir_ty), table);
             }
         }
         VirPattern::Record {
-            type_check, fields, ..
+            type_check,
+            tested_type,
+            vir_tested_type,
+            fields,
+            ..
         } => {
-            if let Some(tc) = type_check {
-                rederive_is_check(tc, table);
+            if let (Some(tc), Some(tested_type), Some(vir_tested_type), Some(scrutinee_vir_ty)) =
+                (type_check, *tested_type, *vir_tested_type, scrutinee_vir_ty)
+            {
+                *tc = derive_is_check_result(scrutinee_vir_ty, tested_type, vir_tested_type, table);
             }
             // Field patterns are simple bindings — no decisions to re-derive.
             let _ = fields;
@@ -309,25 +330,65 @@ fn rederive_pattern(pat: &mut VirPattern, table: &VirTypeTable) {
 // Decision re-derivation logic
 // ---------------------------------------------------------------------------
 
-/// Re-derive an IsCheckResult from concrete types.
+/// Re-derive `CheckUnknown` for expression-level `is`/`as` checks.
 ///
-/// `CheckUnknown(ty, vir_ty)` is the generic placeholder.  After monomorphization
-/// both `ty` and `vir_ty` are concrete.  We look up the tested type's VirType to
-/// determine whether the check is always-true, always-false, or a union tag check.
-fn rederive_is_check(result: &mut IsCheckResult, _table: &VirTypeTable) {
-    let IsCheckResult::CheckUnknown(_, _tested_vir_ty) = *result else {
+/// Expression nodes do not carry `tested_type` separately from `IsCheckResult`,
+/// so we only refine the `CheckUnknown` case here.
+fn rederive_is_check_from_expr(value: &VirExpr, result: &mut IsCheckResult, table: &VirTypeTable) {
+    let IsCheckResult::CheckUnknown(tested_type, tested_vir_ty) = *result else {
         return;
     };
 
-    // Full re-derivation of IsCheckResult requires the scrutinee's VirTypeId
-    // (to determine if it's a union -> CheckTag, or if types match -> AlwaysTrue),
-    // but IsCheckResult only carries the *tested* type, not the scrutinee type.
-    //
-    // Scrutinee-aware re-derivation is deferred to vol-v5fy.
-    //
-    // This is intentionally conservative: CheckUnknown is always correct
-    // (codegen handles it with a runtime type check).  Re-derivation is an
-    // optimization, not a correctness requirement.
+    let Some(scrutinee_vir_ty) = extract_vir_ty(value) else {
+        return;
+    };
+    *result = derive_is_check_result(scrutinee_vir_ty, tested_type, tested_vir_ty, table);
+}
+
+/// Derive an IsCheckResult from concrete VIR types.
+fn derive_is_check_result(
+    scrutinee_vir_ty: VirTypeId,
+    tested_type: TypeId,
+    tested_vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> IsCheckResult {
+    // If either side is still unresolved, keep runtime check behavior.
+    if matches!(
+        table.get(scrutinee_vir_ty),
+        VirType::Param { .. } | VirType::Unknown
+    ) || matches!(
+        table.get(tested_vir_ty),
+        VirType::Param { .. } | VirType::Unknown
+    ) {
+        return IsCheckResult::CheckUnknown(tested_type, tested_vir_ty);
+    }
+
+    match table.get(scrutinee_vir_ty) {
+        VirType::Union { variants } => variants
+            .iter()
+            .position(|&variant| variant == tested_vir_ty)
+            .map(|idx| IsCheckResult::CheckTag(idx as u32))
+            .unwrap_or(IsCheckResult::AlwaysFalse),
+
+        // Optional lowers as a dedicated VIR type and does not preserve sema's
+        // union variant order, so we conservatively keep runtime checking when
+        // testing either possible optional variant.
+        VirType::Optional { inner } => {
+            if tested_vir_ty == *inner || tested_vir_ty == VirTypeId::NIL {
+                IsCheckResult::CheckUnknown(tested_type, tested_vir_ty)
+            } else {
+                IsCheckResult::AlwaysFalse
+            }
+        }
+
+        _ => {
+            if scrutinee_vir_ty == tested_vir_ty {
+                IsCheckResult::AlwaysTrue
+            } else {
+                IsCheckResult::AlwaysFalse
+            }
+        }
+    }
 }
 
 /// Re-derive StringConversion::Generic to a concrete conversion.
@@ -388,32 +449,161 @@ fn derive_string_conversion_from_vir_type(
 /// Array, String.  Complex cases (CustomIterator, CustomIterable,
 /// IteratorInterface) require EntityRegistry.
 fn rederive_iter_kind(kind: &mut VirIterKind, table: &VirTypeTable) {
-    let VirIterKind::Generic {
-        elem_type,
-        vir_elem_type,
-    } = *kind
-    else {
+    match kind {
+        VirIterKind::Array {
+            vir_elem_type,
+            union_storage,
+            ..
+        } => {
+            *union_storage = derive_union_storage_from_elem(*vir_elem_type, table);
+        }
+        VirIterKind::Generic { .. }
+        | VirIterKind::Range
+        | VirIterKind::String
+        | VirIterKind::IteratorInterface { .. }
+        | VirIterKind::CustomIterator { .. }
+        | VirIterKind::CustomIterable { .. } => {
+            // Re-deriving Generic -> concrete iteration strategy still needs
+            // iterable-type metadata not carried by VirIterKind::Generic.
+        }
+    }
+}
+
+fn rederive_union_storage_from_array_expr(
+    object_expr: &VirExpr,
+    union_storage: &mut Option<UnionStorageKind>,
+    table: &VirTypeTable,
+) {
+    let Some(object_vir_ty) = extract_vir_ty(object_expr) else {
         return;
     };
+    let derived = match table.get(object_vir_ty) {
+        VirType::Array { elem } | VirType::FixedArray { elem, .. } => {
+            Some(derive_union_storage_from_elem(*elem, table))
+        }
+        _ => None,
+    };
+    if let Some(kind) = derived {
+        *union_storage = kind;
+    }
+}
 
-    // The elem_type tells us what the loop variable is, but to determine the
-    // iteration *strategy* we need the iterable's type.  VirIterKind::Generic
-    // only stores the element type, not the iterable type.
-    //
-    // However, we can infer some cases from the element type alone:
-    // - If vir_elem_type is STRING, the iterable could be a string (iterating
-    //   chars produces strings).  But this is ambiguous — an Array<string>
-    //   also has string elements.
-    //
-    // Since we can't reliably distinguish Array from String from Iterator
-    // using only the element type, we leave Generic as-is for now.
-    // Full re-derivation requires the iterable expression's VirTypeId,
-    // which would need to be stored in VirIterKind::Generic or passed
-    // from the For loop's iterable field.
-    //
-    // This is safe: codegen handles VirIterKind::Generic by falling back
-    // to runtime dispatch.
-    let _ = (elem_type, vir_elem_type, table);
+fn derive_union_storage_from_elem(
+    elem_vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<UnionStorageKind> {
+    match table.get(elem_vir_ty) {
+        VirType::Union { variants } => {
+            Some(if union_array_prefers_inline_storage(variants, table) {
+                UnionStorageKind::Inline
+            } else {
+                UnionStorageKind::Heap
+            })
+        }
+        VirType::Optional { inner } => {
+            let variants = [*inner, VirTypeId::NIL];
+            Some(if union_array_prefers_inline_storage(&variants, table) {
+                UnionStorageKind::Inline
+            } else {
+                UnionStorageKind::Heap
+            })
+        }
+        _ => None,
+    }
+}
+
+fn union_array_prefers_inline_storage(variants: &[VirTypeId], table: &VirTypeTable) -> bool {
+    let mut seen_tags: FxHashSet<RuntimeTagCategory> = FxHashSet::default();
+
+    for &variant in variants {
+        if !supports_inline_union_array_variant(variant, table) {
+            return false;
+        }
+
+        let tag = runtime_tag_category(variant, table);
+        if tag == RuntimeTagCategory::I64
+            && !is_integer(variant, table)
+            && !is_sentinel(variant, table)
+        {
+            return false;
+        }
+
+        if !seen_tags.insert(tag) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn supports_inline_union_array_variant(variant: VirTypeId, table: &VirTypeTable) -> bool {
+    !matches!(
+        table.get(variant),
+        VirType::Union { .. }
+            | VirType::Optional { .. }
+            | VirType::Interface { .. }
+            | VirType::Class { .. }
+            | VirType::Struct { .. }
+            | VirType::Unknown
+            | VirType::Tuple { .. }
+            | VirType::Fallible { .. }
+            | VirType::Param { .. }
+    )
+}
+
+fn runtime_tag_category(ty: VirTypeId, table: &VirTypeTable) -> RuntimeTagCategory {
+    match table.get(ty) {
+        VirType::Primitive(VirPrimitiveKind::String) => RuntimeTagCategory::String,
+        VirType::Primitive(
+            VirPrimitiveKind::I8
+            | VirPrimitiveKind::I16
+            | VirPrimitiveKind::I32
+            | VirPrimitiveKind::I64
+            | VirPrimitiveKind::U8
+            | VirPrimitiveKind::U16
+            | VirPrimitiveKind::U32
+            | VirPrimitiveKind::U64,
+        ) => RuntimeTagCategory::I64,
+        VirType::Primitive(VirPrimitiveKind::F32 | VirPrimitiveKind::F64) => {
+            RuntimeTagCategory::F64
+        }
+        VirType::Primitive(VirPrimitiveKind::Bool) => RuntimeTagCategory::Bool,
+        VirType::Array { .. } | VirType::FixedArray { .. } => RuntimeTagCategory::Array,
+        VirType::Function { .. } => RuntimeTagCategory::Closure,
+        VirType::Class { .. } => RuntimeTagCategory::Instance,
+        _ => RuntimeTagCategory::I64,
+    }
+}
+
+fn is_integer(ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(
+        table.get(ty),
+        VirType::Primitive(
+            VirPrimitiveKind::I8
+                | VirPrimitiveKind::I16
+                | VirPrimitiveKind::I32
+                | VirPrimitiveKind::I64
+                | VirPrimitiveKind::U8
+                | VirPrimitiveKind::U16
+                | VirPrimitiveKind::U32
+                | VirPrimitiveKind::U64
+        )
+    )
+}
+
+fn is_sentinel(ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(table.get(ty), VirType::Nil | VirType::Done)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum RuntimeTagCategory {
+    String,
+    I64,
+    F64,
+    Bool,
+    Array,
+    Closure,
+    Instance,
 }
 
 fn rederive_string_parts(parts: &mut [VirStringPart], table: &VirTypeTable) {
@@ -426,6 +616,58 @@ fn rederive_string_parts(parts: &mut [VirStringPart], table: &VirTypeTable) {
                 rederive_string_conversion(conversion, vir_ty, table);
             }
         }
+    }
+}
+
+fn rederive_meta_kind(kind: &mut VirMetaKind, table: &VirTypeTable) {
+    match kind {
+        VirMetaKind::Static { object, type_def } => {
+            if let Some(obj) = object {
+                rederive_ref(obj, table);
+                if let Some(obj_vir_ty) = extract_vir_ty(obj)
+                    && let Some(concrete_type_def) =
+                        nominal_type_def_from_vir_type(obj_vir_ty, table)
+                {
+                    *type_def = concrete_type_def;
+                }
+            }
+        }
+        VirMetaKind::Dynamic { value } => rederive_ref(value, table),
+        VirMetaKind::TypeParam { value, .. } => {
+            rederive_ref(value, table);
+            let Some(value_vir_ty) = extract_vir_ty(value) else {
+                return;
+            };
+            match table.get(value_vir_ty) {
+                VirType::Class { def, .. } | VirType::Struct { def, .. } => {
+                    let value = value.clone();
+                    *kind = VirMetaKind::Static {
+                        type_def: *def,
+                        object: Some(value),
+                    };
+                }
+                VirType::Interface { .. } => {
+                    let value = value.clone();
+                    *kind = VirMetaKind::Dynamic { value };
+                }
+                _ => {
+                    // Non-nominal concrete types stay as TypeParam; codegen
+                    // reports unsupported `T.@meta` for those cases.
+                }
+            }
+        }
+    }
+}
+
+fn nominal_type_def_from_vir_type(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<vole_identity::TypeDefId> {
+    match table.get(vir_ty) {
+        VirType::Class { def, .. }
+        | VirType::Struct { def, .. }
+        | VirType::Interface { def, .. } => Some(*def),
+        _ => None,
     }
 }
 
@@ -496,7 +738,7 @@ mod tests {
     use super::*;
     use crate::func::VirBody;
     use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
-    use vole_identity::{FunctionId, NameId, Symbol, TypeId};
+    use vole_identity::{FunctionId, NameId, Symbol, TypeDefId, TypeId};
 
     /// Helper: create a NameId for testing.
     fn name(n: u32) -> NameId {
@@ -604,10 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn is_check_unknown_with_concrete_type_stays_conservative() {
-        // CheckUnknown with concrete tested type remains CheckUnknown
-        // because we don't have the scrutinee type in IsCheckResult.
-        // This is correct behavior — codegen handles CheckUnknown.
+    fn is_check_unknown_concrete_equal_becomes_always_true() {
         let table = VirTypeTable::new();
         let mut func = func_with_trailing(VirExpr::IsCheck {
             value: Box::new(VirExpr::LocalLoad {
@@ -625,10 +864,7 @@ mod tests {
         let trailing = func.body.trailing.as_ref().unwrap();
         match trailing.as_ref() {
             VirExpr::IsCheck { result, .. } => {
-                assert_eq!(
-                    *result,
-                    IsCheckResult::CheckUnknown(type_id(20), VirTypeId::I64)
-                );
+                assert_eq!(*result, IsCheckResult::AlwaysTrue);
             }
             other => panic!("expected IsCheck, got {other:?}"),
         }
@@ -658,6 +894,38 @@ mod tests {
         match trailing.as_ref() {
             VirExpr::IsCheck { result, .. } => {
                 assert_eq!(*result, IsCheckResult::CheckUnknown(type_id(20), param_id));
+            }
+            other => panic!("expected IsCheck, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn is_check_unknown_union_variant_becomes_check_tag() {
+        let mut table = VirTypeTable::new();
+        let union_ty = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::BOOL, VirTypeId::STRING],
+            },
+            None,
+        );
+
+        let mut func = func_with_trailing(VirExpr::IsCheck {
+            value: Box::new(VirExpr::LocalLoad {
+                name: sym(1),
+                ty: type_id(10),
+                vir_ty: union_ty,
+            }),
+            result: IsCheckResult::CheckUnknown(type_id(20), VirTypeId::STRING),
+            ty: type_id(30),
+            vir_ty: VirTypeId::BOOL,
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::IsCheck { result, .. } => {
+                assert_eq!(*result, IsCheckResult::CheckTag(1));
             }
             other => panic!("expected IsCheck, got {other:?}"),
         }
@@ -939,6 +1207,92 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // MetaAccess tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn meta_access_type_param_rederived_to_static_for_nominal() {
+        let mut table = VirTypeTable::new();
+        let class_def = TypeDefId::new(42);
+        let class_ty = table.intern(
+            VirType::Class {
+                def: class_def,
+                type_args: vec![],
+            },
+            None,
+        );
+
+        let mut func = func_with_trailing(VirExpr::MetaAccess {
+            kind: VirMetaKind::TypeParam {
+                name_id: name(100),
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: class_ty,
+                }),
+            },
+            ty: type_id(20),
+            vir_ty: VirTypeId::METATYPE,
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::MetaAccess { kind, .. } => match kind {
+                VirMetaKind::Static { type_def, object } => {
+                    assert_eq!(*type_def, class_def);
+                    match object.as_deref() {
+                        Some(VirExpr::LocalLoad { vir_ty, .. }) => assert_eq!(*vir_ty, class_ty),
+                        other => panic!("expected LocalLoad object, got {other:?}"),
+                    }
+                }
+                other => panic!("expected Static meta kind, got {other:?}"),
+            },
+            other => panic!("expected MetaAccess, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn meta_access_type_param_rederived_to_dynamic_for_interface() {
+        let mut table = VirTypeTable::new();
+        let interface_ty = table.intern(
+            VirType::Interface {
+                def: TypeDefId::new(7),
+                type_args: vec![],
+            },
+            None,
+        );
+
+        let mut func = func_with_trailing(VirExpr::MetaAccess {
+            kind: VirMetaKind::TypeParam {
+                name_id: name(200),
+                value: Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: interface_ty,
+                }),
+            },
+            ty: type_id(20),
+            vir_ty: VirTypeId::METATYPE,
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::MetaAccess { kind, .. } => match kind {
+                VirMetaKind::Dynamic { value } => match value.as_ref() {
+                    VirExpr::LocalLoad { vir_ty, .. } => assert_eq!(*vir_ty, interface_ty),
+                    other => panic!("expected LocalLoad value, got {other:?}"),
+                },
+                other => panic!("expected Dynamic meta kind, got {other:?}"),
+            },
+            other => panic!("expected MetaAccess, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // VirIterKind tests
     // -----------------------------------------------------------------------
 
@@ -1012,6 +1366,83 @@ mod tests {
         match &func.body.stmts[0] {
             VirStmt::For(vir_for) => assert!(matches!(vir_for.kind, VirIterKind::Range)),
             other => panic!("expected For, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn iter_array_union_storage_rederived_inline() {
+        let mut table = VirTypeTable::new();
+        let elem_union = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::STRING, VirTypeId::BOOL],
+            },
+            None,
+        );
+
+        let mut func = func_with_stmts(vec![VirStmt::For(crate::stmt::VirFor {
+            var_name: sym(1),
+            var_type: type_id(10),
+            vir_var_type: VirTypeId::STRING,
+            iterable: Box::new(VirExpr::NilLiteral),
+            body: VirBody {
+                stmts: vec![],
+                trailing: None,
+            },
+            kind: VirIterKind::Array {
+                elem_type: type_id(10),
+                vir_elem_type: elem_union,
+                union_storage: None,
+            },
+        })]);
+
+        rederive_decisions(&mut func, &table);
+
+        match &func.body.stmts[0] {
+            VirStmt::For(vir_for) => match vir_for.kind {
+                VirIterKind::Array { union_storage, .. } => {
+                    assert_eq!(union_storage, Some(UnionStorageKind::Inline));
+                }
+                _ => panic!("expected array iter kind"),
+            },
+            _ => panic!("expected for stmt"),
+        }
+    }
+
+    #[test]
+    fn index_union_storage_rederived_heap() {
+        let mut table = VirTypeTable::new();
+        let elem_union = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::I64, VirTypeId::NIL],
+            },
+            None,
+        );
+        let array_ty = table.intern(VirType::Array { elem: elem_union }, None);
+
+        let mut func = func_with_trailing(VirExpr::Index {
+            object: Box::new(VirExpr::LocalLoad {
+                name: sym(1),
+                ty: type_id(10),
+                vir_ty: array_ty,
+            }),
+            index: Box::new(VirExpr::IntLiteral {
+                value: 0,
+                ty: type_id(20),
+                vir_ty: VirTypeId::I64,
+            }),
+            ty: type_id(30),
+            vir_ty: elem_union,
+            union_storage: None,
+        });
+
+        rederive_decisions(&mut func, &table);
+
+        let trailing = func.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::Index { union_storage, .. } => {
+                assert_eq!(*union_storage, Some(UnionStorageKind::Heap));
+            }
+            other => panic!("expected Index, got {other:?}"),
         }
     }
 
@@ -1138,14 +1569,12 @@ mod tests {
 
         rederive_decisions(&mut result, &target);
 
-        // The IsCheckResult stays CheckUnknown (conservative) because
-        // full re-derivation needs scrutinee context (vol-v5fy).
+        // TypeCheck result is recomputed from concrete VIR types.
         let trailing = result.body.trailing.as_ref().unwrap();
         match trailing.as_ref() {
             VirExpr::Match { arms, .. } => match &arms[0].pattern {
                 VirPattern::TypeCheck { result, .. } => {
-                    // Stays CheckUnknown — correct conservative behavior
-                    assert!(matches!(result, IsCheckResult::CheckUnknown(_, _)));
+                    assert_eq!(*result, IsCheckResult::AlwaysTrue);
                 }
                 other => panic!("expected TypeCheck, got {other:?}"),
             },

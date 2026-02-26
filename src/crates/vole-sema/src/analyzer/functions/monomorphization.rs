@@ -3,23 +3,24 @@
 //! monomorph instances for generic functions and class/static methods.
 //!
 //! Free-function monomorphization is primarily handled by the VIR monomorph
-//! pass (see `vole_vir::monomorph`).  Functions whose VIR templates could not
-//! be produced (e.g. structural-constraint generics) fall back to sema body
-//! re-analysis in `analyze_monomorph_bodies_fallback`.  Class/static method
-//! propagation is not yet on the VIR path.
+//! pass (see `vole_vir::monomorph`).  Sema keeps only class/static method
+//! propagation and derivation logic here; generic body analysis for Pass 2a
+//! lives in `functions/generic_vir.rs`.
 
 use super::super::*;
 
 impl Analyzer {
-    /// Analyze a generic function body with type substitutions applied.
-    /// This discovers nested generic function calls and creates their MonomorphInstances.
+    /// Analyze a generic function body with concrete substitutions applied.
+    ///
+    /// This pass discovers nested generic calls and populates NodeMap entries
+    /// used by codegen fallback paths.
     pub(super) fn analyze_monomorph_body(
         &mut self,
         func: &FuncDecl,
         substitutions: &FxHashMap<NameId, ArenaTypeId>,
         interner: &Interner,
     ) {
-        // Get the generic function info to resolve parameter and return types
+        // Get the generic function info to resolve parameter and return types.
         let name_id =
             self.name_table_mut()
                 .intern(self.module.current_module, &[func.name], interner);
@@ -34,7 +35,7 @@ impl Analyzer {
             return;
         };
 
-        // Compute concrete parameter and return types
+        // Compute concrete parameter and return types.
         let (concrete_param_ids, concrete_return_id) = {
             let mut arena = self.type_arena_mut();
             let param_ids: Vec<_> = generic_info
@@ -46,48 +47,32 @@ impl Analyzer {
             (param_ids, return_id)
         };
 
-        // Set up function context with the concrete return type
+        // Set up function context with the concrete return type.
         let saved_ctx = self.enter_function_context(concrete_return_id);
 
-        // Create new scope with parameters (using concrete types)
+        // Create new scope with parameters (using concrete types).
         self.enter_param_scope(&func.params, &concrete_param_ids);
 
-        // Set up type parameter scope with the substitutions
-        // This maps type param names to their concrete types
+        // Keep type params in scope so generic resolution still works while
+        // concrete substitutions are applied through the type arena.
         let mut type_param_scope = TypeParamScope::new();
         for tp in &generic_info.type_params {
-            // Create TypeParamInfo with the substituted type
             type_param_scope.add(tp.clone());
         }
         self.env.type_param_stack.push_scope(type_param_scope);
 
-        // Store substitutions for use during type resolution
-        // We need to make type param lookups return the substituted concrete types
-        // This is handled via type_arena.substitute during check_call_expr
-
-        // Check the function body - this will discover nested generic calls
-        // and create MonomorphInstances for them
+        // Check function body to discover nested generic calls.
         let _ = self.check_func_body(&func.body, interner);
 
-        // Pop type parameter scope
         self.env.type_param_stack.pop();
-
-        // Restore scope
         self.pop_scope();
         self.exit_function_context(saved_ctx);
     }
 
-    /// Fallback body re-analysis for monomorph instances not fully handled
-    /// by VIR monomorph.
+    /// Compatibility body re-analysis for monomorph instances.
     ///
-    /// Functions with VIR templates (from Pass 2a) are monomorphized by the
-    /// VIR monomorph pass.  However, those VIR-handled functions may call
-    /// generic functions that lack VIR templates (e.g. structural-constraint
-    /// generics).  To discover such nested calls and populate the NodeMap for
-    /// the non-VIR instances, this fixpoint loop re-analyzes ALL bodies.
-    ///
-    /// When all generic functions can be lowered to VIR templates, this
-    /// entire fallback can be removed.
+    /// This pass preserves sema-era diagnostics and nested-call discovery
+    /// parity while the VIR-only path reaches full coverage.
     pub(in crate::analyzer) fn analyze_monomorph_bodies_fallback(
         &mut self,
         program: &Program,
@@ -95,7 +80,6 @@ impl Analyzer {
     ) {
         let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
         self.collect_generic_func_asts(&program.declarations, interner, &mut generic_func_asts);
-
         // Make test-scoped types visible during monomorph body analysis.
         let virtual_module_ids: Vec<ModuleId> = self
             .results
@@ -106,7 +90,7 @@ impl Analyzer {
         let num_virtual = virtual_module_ids.len();
         self.env.parent_modules.extend(virtual_module_ids);
 
-        let mut analyzed_keys: HashSet<MonomorphKey> = HashSet::new();
+        let mut analyzed_instances: HashSet<NameId> = HashSet::new();
 
         loop {
             let instances: Vec<_> = self
@@ -114,13 +98,7 @@ impl Analyzer {
                 .monomorph_cache
                 .collect_instances()
                 .into_iter()
-                .filter(|inst| {
-                    let key = MonomorphKey::new(
-                        inst.original_name,
-                        inst.substitutions.values().copied().collect(),
-                    );
-                    !analyzed_keys.contains(&key)
-                })
+                .filter(|inst| !analyzed_instances.contains(&inst.mangled_name))
                 .collect();
 
             if instances.is_empty() {
@@ -128,11 +106,7 @@ impl Analyzer {
             }
 
             for instance in instances {
-                let key = MonomorphKey::new(
-                    instance.original_name,
-                    instance.substitutions.values().copied().collect(),
-                );
-                analyzed_keys.insert(key);
+                analyzed_instances.insert(instance.mangled_name);
 
                 if let Some(func) = generic_func_asts.get(&instance.original_name) {
                     self.analyze_monomorph_body(func, &instance.substitutions, interner);
@@ -150,8 +124,8 @@ impl Analyzer {
     /// Analyze a module-originating monomorphized function body.
     ///
     /// Looks up the generic function AST in the module's program, temporarily
-    /// switches `current_module` to the module's ID, and calls
-    /// `analyze_monomorph_body` with the module's interner.
+    /// switches `current_module` to the module's ID, and analyzes the body with
+    /// the module's interner.
     fn analyze_module_monomorph_body(&mut self, instance: &MonomorphInstance) {
         let (module_id, module_path) = {
             let names = self.name_table();
@@ -183,7 +157,9 @@ impl Analyzer {
             }
         });
 
-        let Some(func) = func else { return };
+        let Some(func) = func else {
+            return;
+        };
 
         let saved_module = self.module.current_module;
         let saved_symbols = std::mem::take(&mut self.symbols);
@@ -200,10 +176,8 @@ impl Analyzer {
     /// Recursively collect generic function ASTs from declarations.
     ///
     /// Walks `Decl::Function` entries and recurses into `Decl::Tests` blocks
-    /// so that test-scoped generic functions are included in the map.
-    /// Test-scoped functions are registered under the program's module_id,
-    /// so the same `current_module` is used for name resolution.
-    pub(super) fn collect_generic_func_asts<'a>(
+    /// so test-scoped generic functions are included.
+    fn collect_generic_func_asts<'a>(
         &mut self,
         decls: &'a [Decl],
         interner: &Interner,

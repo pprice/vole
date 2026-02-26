@@ -2282,13 +2282,28 @@ fn run_early_vir_monomorphize(
     use vole_sema::vir_lower::type_translate::translate_type_id;
 
     let mut handled = HashSet::new();
+    let generic_functions_with_nested_calls: HashSet<FunctionId> = generic_vir_functions
+        .iter()
+        .filter_map(|func| {
+            format!("{:?}", func.body)
+                .contains("GenericCall")
+                .then_some(func.id)
+        })
+        .collect();
 
     // Build seeds from the sema monomorph cache.
     let mut seeds: Vec<vole_vir::MonomorphInstance> = Vec::new();
+    let mut seed_mangled_names: FxHashMap<vole_vir::MonomorphInstance, NameId> =
+        FxHashMap::default();
     for (_, sema_instance) in entities.monomorph_cache.instances() {
         let Some(func_id) = entities.function_by_name(sema_instance.original_name) else {
             continue;
         };
+        let is_unconstrained_generic = entities
+            .get_function(func_id)
+            .generic_info
+            .as_ref()
+            .is_some_and(|gi| gi.type_params.iter().all(|tp| tp.constraint.is_none()));
 
         // Find the generic VIR template to get the type param order.
         let template = generic_vir_functions.iter().find(|f| f.id == func_id);
@@ -2314,10 +2329,14 @@ fn run_early_vir_monomorphize(
             continue;
         }
 
-        seeds.push(vole_vir::MonomorphInstance {
+        let seed = vole_vir::MonomorphInstance {
             function_id: func_id,
             type_args,
-        });
+        };
+        if is_unconstrained_generic && generic_functions_with_nested_calls.contains(&func_id) {
+            seed_mangled_names.insert(seed.clone(), sema_instance.mangled_name);
+        }
+        seeds.push(seed);
     }
 
     if seeds.is_empty() {
@@ -2339,7 +2358,15 @@ fn run_early_vir_monomorphize(
         vir_monomorph_base: usize::MAX,
     };
 
-    let result = vole_vir::monomorphize_with_seeds(&mut temp_program, seeds);
+    let mut result = vole_vir::monomorphize_with_seeds(&mut temp_program, seeds);
+
+    for (instance, &rel_idx) in &result.instance_map {
+        if let Some(&mangled_name_id) = seed_mangled_names.get(instance)
+            && let Some(func) = result.functions.get_mut(rel_idx)
+        {
+            func.mangled_name_id = Some(mangled_name_id);
+        }
+    }
 
     if !result.functions.is_empty() {
         // Record which generic FunctionIds were handled.
@@ -2387,7 +2414,11 @@ fn run_vir_monomorphize(program: &mut VirProgram) {
 
     // Compute the base index where new functions will be appended.
     let base_index = program.functions.len();
-    program.vir_monomorph_base = base_index;
+    // Preserve the earliest VIR monomorph base if an earlier pass already
+    // appended VIR monomorphized functions (e.g. early seeded monomorphize).
+    if program.vir_monomorph_base == usize::MAX {
+        program.vir_monomorph_base = base_index;
+    }
 
     // Build the absolute instance index (base + relative offset).
     let abs_index: vole_vir::InstanceIndex = result

@@ -2,7 +2,7 @@ use super::super::methods::GenericContext;
 use super::super::methods::call_args::NamedArgContext;
 use super::super::*;
 use super::call::resolve_intrinsic_key_from_mappings;
-use crate::generic::{TypeParamInfo, merge_type_params};
+use crate::generic::{TypeConstraint, TypeParamInfo, merge_type_params};
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -105,6 +105,60 @@ impl Analyzer {
                 field_access.field_span,
             );
             return Ok(self.ty_invalid_traced_id("structural_field_not_found"));
+        }
+
+        // Handle TypeParam objects in generic analysis contexts.
+        //
+        // During Pass 2a (generic VIR template lowering), object types may be
+        // abstract TypeParams.  If a structural constraint is available, resolve
+        // the field type from that constraint.  Otherwise return UNKNOWN so the
+        // generic body can still be lowered and monomorphized later.
+        let (is_type_param_object, type_param_info) = {
+            let arena = self.type_arena();
+            if let Some(param_name_id) = arena.unwrap_type_param(object_type_id) {
+                (
+                    true,
+                    self.env
+                        .type_param_stack
+                        .get_by_name_id(param_name_id)
+                        .cloned(),
+                )
+            } else if let Some(type_param_id) = arena.unwrap_type_param_ref(object_type_id) {
+                (
+                    true,
+                    self.env
+                        .type_param_stack
+                        .get_by_type_param_id(type_param_id)
+                        .cloned(),
+                )
+            } else {
+                (false, None)
+            }
+        };
+        if is_type_param_object {
+            if let Some(type_param) = type_param_info
+                && let Some(TypeConstraint::Structural(structural)) = type_param.constraint.as_ref()
+            {
+                for (name_id, field_type_id) in &structural.fields {
+                    let name = self.name_table().last_segment_str(*name_id);
+                    if name.as_deref() == Some(field_name) {
+                        return Ok(*field_type_id);
+                    }
+                }
+                self.add_error(
+                    SemanticError::UnknownField {
+                        ty: self.type_display_id(object_type_id),
+                        field: field_name.to_string(),
+                        span: field_access.field_span.into(),
+                    },
+                    field_access.field_span,
+                );
+                return Ok(self.ty_invalid_traced_id("type_param_structural_field_not_found"));
+            }
+
+            if !self.env.type_param_stack.is_empty() {
+                return Ok(ArenaTypeId::UNKNOWN);
+            }
         }
 
         let struct_info = {

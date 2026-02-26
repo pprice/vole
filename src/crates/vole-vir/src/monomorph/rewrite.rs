@@ -12,8 +12,8 @@ use vole_identity::VirTypeId;
 
 use crate::calls::CallTarget;
 use crate::expr::{
-    IsCheckResult, VirCapture, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind, VirPattern,
-    VirRecordFieldBinding, VirStringPart, VirTupleBinding,
+    IsCheckResult, VirCapture, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind,
+    VirMethodDispatchMeta, VirPattern, VirRecordFieldBinding, VirStringPart, VirTupleBinding,
 };
 use crate::func::{VirBody, VirFunction};
 use crate::refs::VirRef;
@@ -274,6 +274,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             receiver,
             method,
             args,
+            dispatch,
             node_id,
             ty,
             vir_ty,
@@ -281,6 +282,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             receiver: rewrite_ref(receiver, ctx),
             method: *method,
             args: args.iter().map(|a| rewrite_ref(a, ctx)).collect(),
+            dispatch: rewrite_method_dispatch_meta(dispatch, ctx),
             node_id: *node_id,
             ty: *ty,
             vir_ty: ctx.remap(*vir_ty),
@@ -491,6 +493,7 @@ fn rewrite_expr_optional(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             object,
             method,
             method_args,
+            dispatch,
             call_node_id,
             inner_type,
             vir_inner_type,
@@ -500,6 +503,7 @@ fn rewrite_expr_optional(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             object: rewrite_ref(object, ctx),
             method: *method,
             method_args: method_args.iter().map(|a| rewrite_ref(a, ctx)).collect(),
+            dispatch: rewrite_method_dispatch_meta(dispatch, ctx),
             call_node_id: *call_node_id,
             inner_type: *inner_type,
             vir_inner_type: ctx.remap(*vir_inner_type),
@@ -737,6 +741,187 @@ fn rewrite_call_target(target: &CallTarget, ctx: &RewriteCtx) -> CallTarget {
             type_args: type_args.iter().map(|t| ctx.remap(*t)).collect(),
         },
         other => other.clone(),
+    }
+}
+
+/// Rewrite method dispatch metadata (remaps VirTypeId fields).
+fn rewrite_method_dispatch_meta(
+    meta: &VirMethodDispatchMeta,
+    ctx: &RewriteCtx,
+) -> VirMethodDispatchMeta {
+    VirMethodDispatchMeta {
+        dispatch_kind: meta.dispatch_kind,
+        receiver_coercion: meta.receiver_coercion.map(|coercion| match coercion {
+            crate::expr::VirMethodReceiverCoercion::IteratorWrap {
+                elem_type,
+                vir_elem_type,
+            } => crate::expr::VirMethodReceiverCoercion::IteratorWrap {
+                elem_type,
+                vir_elem_type: ctx.remap(vir_elem_type),
+            },
+        }),
+        resolved_method: meta
+            .resolved_method
+            .as_ref()
+            .map(|resolved| rewrite_resolved_method(resolved, ctx)),
+        generic_monomorph: meta
+            .generic_monomorph
+            .as_ref()
+            .map(|key| rewrite_function_monomorph_key(key, ctx)),
+        substituted_return_type: meta.substituted_return_type,
+        vir_substituted_return_type: meta
+            .vir_substituted_return_type
+            .map(|vir_ty| ctx.remap(vir_ty)),
+        resolved_call_args: meta.resolved_call_args.clone(),
+        class_method_generic: meta.class_method_generic.as_ref().map(|key| {
+            crate::expr::VirClassMethodMonomorphKey {
+                class_name: key.class_name,
+                method_name: key.method_name,
+                type_keys: key.type_keys.clone(),
+                vir_type_keys: key.vir_type_keys.iter().map(|t| ctx.remap(*t)).collect(),
+            }
+        }),
+        static_method_generic: meta
+            .static_method_generic
+            .as_ref()
+            .map(|key| rewrite_static_method_monomorph_key(key, ctx)),
+    }
+}
+
+fn rewrite_function_monomorph_key(
+    key: &crate::expr::VirFunctionMonomorphKey,
+    ctx: &RewriteCtx,
+) -> crate::expr::VirFunctionMonomorphKey {
+    crate::expr::VirFunctionMonomorphKey {
+        func_name: key.func_name,
+        type_keys: key.type_keys.clone(),
+        vir_type_keys: key.vir_type_keys.iter().map(|t| ctx.remap(*t)).collect(),
+    }
+}
+
+fn rewrite_static_method_monomorph_key(
+    key: &crate::expr::VirStaticMethodMonomorphKey,
+    ctx: &RewriteCtx,
+) -> crate::expr::VirStaticMethodMonomorphKey {
+    crate::expr::VirStaticMethodMonomorphKey {
+        class_name: key.class_name,
+        method_name: key.method_name,
+        class_type_keys: key.class_type_keys.clone(),
+        vir_class_type_keys: key
+            .vir_class_type_keys
+            .iter()
+            .map(|t| ctx.remap(*t))
+            .collect(),
+        method_type_keys: key.method_type_keys.clone(),
+        vir_method_type_keys: key
+            .vir_method_type_keys
+            .iter()
+            .map(|t| ctx.remap(*t))
+            .collect(),
+    }
+}
+
+fn rewrite_resolved_method(
+    resolved: &crate::expr::VirResolvedMethod,
+    ctx: &RewriteCtx,
+) -> crate::expr::VirResolvedMethod {
+    use crate::expr::VirResolvedMethod;
+
+    match resolved {
+        VirResolvedMethod::Direct {
+            type_def_id,
+            func_type_id,
+            vir_func_type_id,
+            return_type_id,
+            vir_return_type_id,
+            method_id,
+        } => VirResolvedMethod::Direct {
+            type_def_id: *type_def_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.remap(*vir_func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.remap(*vir_return_type_id),
+            method_id: *method_id,
+        },
+        VirResolvedMethod::Implemented {
+            type_def_id,
+            func_type_id,
+            vir_func_type_id,
+            return_type_id,
+            vir_return_type_id,
+            is_builtin,
+            external_info,
+            concrete_return_hint,
+            vir_concrete_return_hint,
+        } => VirResolvedMethod::Implemented {
+            type_def_id: *type_def_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.remap(*vir_func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.remap(*vir_return_type_id),
+            is_builtin: *is_builtin,
+            external_info: *external_info,
+            concrete_return_hint: *concrete_return_hint,
+            vir_concrete_return_hint: vir_concrete_return_hint.map(|t| ctx.remap(t)),
+        },
+        VirResolvedMethod::FunctionalInterface {
+            func_type_id,
+            vir_func_type_id,
+            return_type_id,
+            vir_return_type_id,
+        } => VirResolvedMethod::FunctionalInterface {
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.remap(*vir_func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.remap(*vir_return_type_id),
+        },
+        VirResolvedMethod::DefaultMethod {
+            type_def_id,
+            interface_type_def_id,
+            func_type_id,
+            vir_func_type_id,
+            return_type_id,
+            vir_return_type_id,
+            external_info,
+        } => VirResolvedMethod::DefaultMethod {
+            type_def_id: *type_def_id,
+            interface_type_def_id: *interface_type_def_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.remap(*vir_func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.remap(*vir_return_type_id),
+            external_info: *external_info,
+        },
+        VirResolvedMethod::InterfaceMethod {
+            interface_type_def_id,
+            func_type_id,
+            vir_func_type_id,
+            return_type_id,
+            vir_return_type_id,
+            method_index,
+        } => VirResolvedMethod::InterfaceMethod {
+            interface_type_def_id: *interface_type_def_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.remap(*vir_func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.remap(*vir_return_type_id),
+            method_index: *method_index,
+        },
+        VirResolvedMethod::Static {
+            type_def_id,
+            method_id,
+            func_type_id,
+            vir_func_type_id,
+            return_type_id,
+            vir_return_type_id,
+        } => VirResolvedMethod::Static {
+            type_def_id: *type_def_id,
+            method_id: *method_id,
+            func_type_id: *func_type_id,
+            vir_func_type_id: ctx.remap(*vir_func_type_id),
+            return_type_id: *return_type_id,
+            vir_return_type_id: ctx.remap(*vir_return_type_id),
+        },
     }
 }
 
@@ -995,11 +1180,12 @@ use vole_identity::Symbol;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expr::VirClassMethodMonomorphKey;
     use crate::func::VirBody;
     use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
     use crate::type_table::VirTypeTable;
     use crate::types::VirType;
-    use vole_identity::{FunctionId, NameId, TypeId, VirTypeId};
+    use vole_identity::{FunctionId, NameId, NodeId, TypeId, UnionStorageKind, VirTypeId};
 
     /// Helper: create a NameId for testing.
     fn name(n: u32) -> NameId {
@@ -1416,6 +1602,196 @@ mod tests {
     }
 
     #[test]
+    fn rewrite_for_loop_array_iter_kind_remaps_elem_type() {
+        let mut source = VirTypeTable::new();
+        let t_name = name(100);
+        let param_id = source.intern(VirType::Param { name: t_name }, None);
+
+        let mut target = VirTypeTable::new();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, VirTypeId::I64);
+        let mapping = substitute_types(&source, &mut target, &subs);
+
+        let func = VirFunction {
+            id: FunctionId::new(11),
+            name: "array_loop".to_string(),
+            params: vec![],
+            return_type: TypeId::VOID,
+            vir_return_type: VirTypeId::VOID,
+            body: VirBody {
+                stmts: vec![VirStmt::For(VirFor {
+                    var_name: sym(1),
+                    var_type: type_id(10),
+                    vir_var_type: param_id,
+                    iterable: Box::new(VirExpr::NilLiteral),
+                    body: VirBody {
+                        stmts: vec![],
+                        trailing: None,
+                    },
+                    kind: VirIterKind::Array {
+                        elem_type: type_id(10),
+                        vir_elem_type: param_id,
+                        union_storage: Some(UnionStorageKind::Inline),
+                    },
+                })],
+                trailing: None,
+            },
+            mangled_name_id: None,
+            method_id: None,
+            type_params: Vec::new(),
+        };
+
+        let ctx = RewriteCtx::new(mapping);
+        let result = rewrite_function(&func, &ctx);
+
+        match &result.body.stmts[0] {
+            VirStmt::For(vir_for) => match &vir_for.kind {
+                VirIterKind::Array {
+                    vir_elem_type,
+                    union_storage,
+                    ..
+                } => {
+                    assert_eq!(*vir_elem_type, VirTypeId::I64);
+                    assert_eq!(*union_storage, Some(UnionStorageKind::Inline));
+                }
+                other => panic!("expected Array iter kind, got {other:?}"),
+            },
+            other => panic!("expected For, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_optional_chain_remaps_optional_chain_info_types() {
+        let mut source = VirTypeTable::new();
+        let t_name = name(100);
+        let param_id = source.intern(VirType::Param { name: t_name }, None);
+
+        let mut target = VirTypeTable::new();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, VirTypeId::STRING);
+        let mapping = substitute_types(&source, &mut target, &subs);
+
+        let func = VirFunction {
+            id: FunctionId::new(12),
+            name: "optional_chain".to_string(),
+            params: vec![(sym(1), type_id(10), param_id)],
+            return_type: type_id(20),
+            vir_return_type: param_id,
+            body: VirBody {
+                stmts: vec![],
+                trailing: Some(Box::new(VirExpr::OptionalChain {
+                    object: Box::new(VirExpr::LocalLoad {
+                        name: sym(1),
+                        ty: type_id(10),
+                        vir_ty: param_id,
+                    }),
+                    field: sym(2),
+                    inner_type: type_id(20),
+                    vir_inner_type: param_id,
+                    ty: type_id(30),
+                    vir_ty: param_id,
+                })),
+            },
+            mangled_name_id: None,
+            method_id: None,
+            type_params: Vec::new(),
+        };
+
+        let ctx = RewriteCtx::new(mapping);
+        let result = rewrite_function(&func, &ctx);
+
+        let trailing = result.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::OptionalChain {
+                object,
+                vir_inner_type,
+                vir_ty,
+                ..
+            } => {
+                assert_eq!(*vir_inner_type, VirTypeId::STRING);
+                assert_eq!(*vir_ty, VirTypeId::STRING);
+                match object.as_ref() {
+                    VirExpr::LocalLoad { vir_ty, .. } => assert_eq!(*vir_ty, VirTypeId::STRING),
+                    other => panic!("expected LocalLoad object, got {other:?}"),
+                }
+            }
+            other => panic!("expected OptionalChain, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_optional_method_call_remaps_inner_and_substituted_return_types() {
+        let mut source = VirTypeTable::new();
+        let t_name = name(100);
+        let param_id = source.intern(VirType::Param { name: t_name }, None);
+
+        let mut target = VirTypeTable::new();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, VirTypeId::BOOL);
+        let mapping = substitute_types(&source, &mut target, &subs);
+
+        let func = VirFunction {
+            id: FunctionId::new(13),
+            name: "optional_method".to_string(),
+            params: vec![(sym(1), type_id(10), param_id)],
+            return_type: type_id(20),
+            vir_return_type: param_id,
+            body: VirBody {
+                stmts: vec![],
+                trailing: Some(Box::new(VirExpr::OptionalMethodCall {
+                    object: Box::new(VirExpr::LocalLoad {
+                        name: sym(1),
+                        ty: type_id(10),
+                        vir_ty: param_id,
+                    }),
+                    method: sym(3),
+                    method_args: vec![Box::new(VirExpr::LocalLoad {
+                        name: sym(1),
+                        ty: type_id(10),
+                        vir_ty: param_id,
+                    })],
+                    dispatch: VirMethodDispatchMeta::default(),
+                    call_node_id: NodeId::new_for_test(42),
+                    inner_type: type_id(20),
+                    vir_inner_type: param_id,
+                    ty: type_id(30),
+                    vir_ty: param_id,
+                })),
+            },
+            mangled_name_id: None,
+            method_id: None,
+            type_params: Vec::new(),
+        };
+
+        let ctx = RewriteCtx::new(mapping);
+        let result = rewrite_function(&func, &ctx);
+
+        let trailing = result.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::OptionalMethodCall {
+                method_args,
+                call_node_id,
+                vir_inner_type,
+                vir_ty,
+                ..
+            } => {
+                assert_eq!(*call_node_id, NodeId::new_for_test(42));
+                assert_eq!(*vir_inner_type, VirTypeId::BOOL);
+                assert_eq!(
+                    *vir_ty,
+                    VirTypeId::BOOL,
+                    "vir_ty carries substituted method return type and must remap"
+                );
+                match method_args[0].as_ref() {
+                    VirExpr::LocalLoad { vir_ty, .. } => assert_eq!(*vir_ty, VirTypeId::BOOL),
+                    other => panic!("expected LocalLoad arg, got {other:?}"),
+                }
+            }
+            other => panic!("expected OptionalMethodCall, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn rewrite_is_check_unknown_remaps_vir_ty() {
         let mut source = VirTypeTable::new();
         let t_name = name(100);
@@ -1609,6 +1985,137 @@ mod tests {
                 }
             }
             other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewrite_method_dispatch_metadata_remaps_vir_type_ids() {
+        let mut source = VirTypeTable::new();
+        let t_name = name(100);
+        let param_id = source.intern(VirType::Param { name: t_name }, None);
+
+        let mut target = VirTypeTable::new();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, VirTypeId::I64);
+        let mapping = substitute_types(&source, &mut target, &subs);
+
+        let func = VirFunction {
+            id: FunctionId::new(11),
+            name: "method_dispatch_meta".to_string(),
+            params: vec![(sym(1), type_id(10), param_id)],
+            return_type: type_id(20),
+            vir_return_type: param_id,
+            body: VirBody {
+                stmts: vec![],
+                trailing: Some(Box::new(VirExpr::MethodCall {
+                    receiver: Box::new(VirExpr::LocalLoad {
+                        name: sym(1),
+                        ty: type_id(10),
+                        vir_ty: param_id,
+                    }),
+                    method: sym(2),
+                    args: vec![],
+                    dispatch: VirMethodDispatchMeta {
+                        dispatch_kind: None,
+                        receiver_coercion: Some(
+                            crate::expr::VirMethodReceiverCoercion::IteratorWrap {
+                                elem_type: type_id(10),
+                                vir_elem_type: param_id,
+                            },
+                        ),
+                        resolved_method: Some(crate::expr::VirResolvedMethod::Implemented {
+                            type_def_id: Some(vole_identity::TypeDefId::new(7)),
+                            func_type_id: type_id(21),
+                            vir_func_type_id: param_id,
+                            return_type_id: type_id(22),
+                            vir_return_type_id: param_id,
+                            is_builtin: false,
+                            external_info: None,
+                            concrete_return_hint: Some(type_id(23)),
+                            vir_concrete_return_hint: Some(param_id),
+                        }),
+                        generic_monomorph: Some(crate::expr::VirFunctionMonomorphKey {
+                            func_name: name(30),
+                            type_keys: vec![type_id(10)],
+                            vir_type_keys: vec![param_id],
+                        }),
+                        substituted_return_type: Some(type_id(20)),
+                        vir_substituted_return_type: Some(param_id),
+                        resolved_call_args: Some(vec![Some(0)]),
+                        class_method_generic: Some(VirClassMethodMonomorphKey {
+                            class_name: name(10),
+                            method_name: name(20),
+                            type_keys: vec![type_id(10)],
+                            vir_type_keys: vec![param_id, VirTypeId::BOOL],
+                        }),
+                        static_method_generic: Some(crate::expr::VirStaticMethodMonomorphKey {
+                            class_name: name(40),
+                            method_name: name(41),
+                            class_type_keys: vec![type_id(10)],
+                            vir_class_type_keys: vec![param_id],
+                            method_type_keys: vec![type_id(11)],
+                            vir_method_type_keys: vec![param_id],
+                        }),
+                    },
+                    node_id: NodeId::new_for_test(7),
+                    ty: type_id(20),
+                    vir_ty: param_id,
+                })),
+            },
+            mangled_name_id: None,
+            method_id: None,
+            type_params: Vec::new(),
+        };
+
+        let ctx = RewriteCtx::new(mapping);
+        let result = rewrite_function(&func, &ctx);
+
+        let trailing = result.body.trailing.as_ref().unwrap();
+        match trailing.as_ref() {
+            VirExpr::MethodCall {
+                dispatch, vir_ty, ..
+            } => {
+                assert_eq!(*vir_ty, VirTypeId::I64);
+                assert!(matches!(
+                    dispatch.receiver_coercion,
+                    Some(crate::expr::VirMethodReceiverCoercion::IteratorWrap {
+                        vir_elem_type: VirTypeId::I64,
+                        ..
+                    })
+                ));
+                assert_eq!(dispatch.vir_substituted_return_type, Some(VirTypeId::I64));
+                let resolved = dispatch
+                    .resolved_method
+                    .as_ref()
+                    .expect("missing resolved method");
+                assert_eq!(resolved.func_type_id(), type_id(21));
+                assert_eq!(resolved.return_type_id(), type_id(22));
+                let resolved_hint = match resolved {
+                    crate::expr::VirResolvedMethod::Implemented {
+                        vir_concrete_return_hint,
+                        ..
+                    } => *vir_concrete_return_hint,
+                    other => panic!("expected Implemented resolved method, got {other:?}"),
+                };
+                assert_eq!(resolved_hint, Some(VirTypeId::I64));
+                let generic_key = dispatch
+                    .generic_monomorph
+                    .as_ref()
+                    .expect("missing function key");
+                assert_eq!(generic_key.vir_type_keys, vec![VirTypeId::I64]);
+                let key = dispatch
+                    .class_method_generic
+                    .as_ref()
+                    .expect("missing class key");
+                assert_eq!(key.vir_type_keys, vec![VirTypeId::I64, VirTypeId::BOOL]);
+                let static_key = dispatch
+                    .static_method_generic
+                    .as_ref()
+                    .expect("missing static key");
+                assert_eq!(static_key.vir_class_type_keys, vec![VirTypeId::I64]);
+                assert_eq!(static_key.vir_method_type_keys, vec![VirTypeId::I64]);
+            }
+            other => panic!("expected MethodCall, got {other:?}"),
         }
     }
 }

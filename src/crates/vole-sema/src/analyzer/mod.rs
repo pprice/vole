@@ -541,12 +541,12 @@ impl Analyzer {
         self.propagate_class_method_monomorphs();
         self.propagate_static_method_monomorphs();
 
-        // Pass 3: Fallback body re-analysis for monomorph instance discovery.
-        // VIR monomorph handles instances with VIR templates; this fallback
-        // re-analyzes bodies to discover nested generic calls transitively and
-        // populate NodeMap for instances that lack VIR templates (e.g.
-        // structural-constraint generics).  Can be removed when all generic
-        // functions produce VIR templates in Pass 2a.
+        // TODO(vol-kn9l): Temporary compatibility fallback.
+        //
+        // Keep Pass 3 body re-analysis for generic instances that still miss
+        // a VIR template (e.g. analysis/lowering gaps). Once all generic
+        // functions lower through Pass 2a + VIR monomorphization, remove this
+        // fallback pass.
         self.analyze_monomorph_bodies_fallback(program, interner);
 
         if self.diagnostics.errors.is_empty() {
@@ -609,6 +609,11 @@ impl Analyzer {
 
         // Check declaration bodies (including nested tests blocks)
         let _ = self.check_declaration_bodies(program, interner);
+
+        // Pass 2a for virtual modules: analyze generic function bodies in this
+        // tests-scoped program and lower them to generic VIR templates.
+        let (generic_vir_fns, generic_vir_tt) = self.lower_generic_bodies_to_vir(program, interner);
+        self.merge_generic_vir_results(generic_vir_fns, generic_vir_tt);
     }
 
     /// Pass 0: Collect type aliases (so they're available for function signatures)
