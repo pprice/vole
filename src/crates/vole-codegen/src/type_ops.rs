@@ -20,12 +20,6 @@ use super::types::{CompiledValue, type_id_size, type_id_to_cranelift, value_to_w
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Type context & substitution ==========
 
-    /// Get a TypeCtx view
-    #[inline]
-    pub fn type_ctx(&self) -> super::types::TypeCtx<'_> {
-        super::types::TypeCtx::new(self.env.analyzed.query(), self.codegen_ctx.ptr_type())
-    }
-
     /// Substitute type parameters using current substitutions
     ///
     /// Uses expect_substitute for read-only lookup since sema pre-computes all

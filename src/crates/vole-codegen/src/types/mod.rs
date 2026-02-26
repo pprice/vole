@@ -8,7 +8,6 @@ mod codegen_state;
 mod compile_env;
 mod conversions;
 mod function_ctx;
-mod type_ctx;
 pub(crate) mod vir_conversions;
 pub(crate) mod vir_struct_helpers;
 pub(crate) mod wide_ops;
@@ -19,7 +18,6 @@ pub(crate) use codegen_state::{
     CodegenState, ExpandedClassMethodInfo, MonomorphIndexEntry, TypeMetadataMap,
 };
 pub use compile_env::{CompileEnv, ModuleExportBinding};
-pub use type_ctx::TypeCtx;
 
 // Re-export conversion types and functions
 pub use conversions::{CompiledValue, RcLifecycle};
