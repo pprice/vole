@@ -1459,10 +1459,6 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.env.analyzed
     }
 
-    fn arena(&self) -> &vole_sema::type_arena::TypeArena {
-        self.env.analyzed.type_arena()
-    }
-
     fn interner(&self) -> &vole_frontend::Interner {
         self.env.interner
     }

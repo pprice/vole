@@ -11,7 +11,6 @@ use cranelift_jit::JITModule;
 use vole_frontend::Interner;
 use vole_identity::NameId;
 use vole_runtime::NativeRegistry;
-use vole_sema::type_arena::TypeArena;
 
 use crate::types::{CodegenCtx, CompileEnv, TypeMetadataMap};
 use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
@@ -23,9 +22,6 @@ use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
 pub trait VtableCtx {
     /// Get the analyzed program reference
     fn analyzed(&self) -> &AnalyzedProgram;
-
-    /// Get the type arena
-    fn arena(&self) -> &TypeArena;
 
     /// Get the interner
     fn interner(&self) -> &Interner;
@@ -77,10 +73,6 @@ impl<'a, 'ctx> VtableCtxView<'a, 'ctx> {
 impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
     fn analyzed(&self) -> &AnalyzedProgram {
         self.env.analyzed
-    }
-
-    fn arena(&self) -> &TypeArena {
-        self.env.analyzed.type_arena()
     }
 
     fn interner(&self) -> &Interner {
