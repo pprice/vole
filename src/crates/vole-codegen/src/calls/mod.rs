@@ -291,32 +291,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         arg_source: &ArgSource<'_>,
         call_expr_id: NodeId,
     ) -> CodegenResult<Option<CompiledValue>> {
-        // Try VIR path first (avoids AST bridge for global lambda initializers)
-        let has_vir = self.global_vir_init(callee_sym).is_some();
-        if !has_vir {
-            // No VIR init — check AST path
-            if self.global_init(callee_sym).is_none() {
-                return Ok(None);
+        let Some(vir_init) = self.global_vir_init(callee_sym).cloned() else {
+            if self.global_init(callee_sym).is_some() {
+                return Err(CodegenError::internal_with_context(
+                    "missing VIR global initializer",
+                    self.interner().resolve(callee_sym),
+                ));
             }
-        }
-
-        // Compile the global's initializer to get its value
-        let lambda_val = if has_vir {
-            // Safe to unwrap: we checked `is_some()` above and nothing
-            // mutates the analyzed program between the check and here.
-            let vir_init = self
-                .global_vir_init(callee_sym)
-                .expect("INTERNAL: VIR global init disappeared between check and use");
-            // Clone the VirExpr to avoid borrow conflict with &mut self
-            let vir_init = vir_init.clone();
-            self.compile_vir_expr(&vir_init)?
-        } else {
-            let init_expr = self
-                .global_init(callee_sym)
-                .cloned()
-                .expect("INTERNAL: AST global init disappeared between check and use");
-            self.expr(&init_expr)?
+            return Ok(None);
         };
+
+        // Compile the global's VIR-lowered initializer.
+        let lambda_val = self.compile_vir_expr(&vir_init)?;
 
         // Get declared type from GlobalDef (uses sema-resolved type, not TypeExpr)
         // Scope the name_table borrow to avoid conflicts with later mutable borrows
