@@ -7,6 +7,7 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::{Function, InstructionData};
 
 use crate::RuntimeKey;
+use crate::context::ExternalMethodRef;
 use vole_frontend::{BinaryExpr, BinaryOp, ExprKind};
 use vole_sema::type_arena::TypeId;
 use vole_vir::numeric_model::numeric_result_type;
@@ -412,7 +413,8 @@ impl Cg<'_, '_, '_> {
         if let Some(ref external_info) = method_impl.external_info {
             // Call the external function directly
             let string_type_id = self.arena().primitives.string;
-            let result = self.call_external_id(external_info, &[val.value], string_type_id)?;
+            let ext = ExternalMethodRef::from(*external_info);
+            let result = self.call_external_id(&ext, &[val.value], string_type_id)?;
             return Ok(result.value);
         }
 

@@ -20,7 +20,6 @@ use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId};
-use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::TypeId;
 
 use super::lambda::CaptureBinding;
@@ -28,6 +27,31 @@ use super::rc_cleanup::RcScopeStack;
 use super::types::{
     CodegenCtx, CompileEnv, CompiledValue, MonomorphIndexEntry, PendingMonomorph, TypeMetadataMap,
 };
+
+/// Codegen-local external/native method binding payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ExternalMethodRef {
+    pub module_path: NameId,
+    pub native_name: NameId,
+}
+
+impl From<vole_sema::implement_registry::ExternalMethodInfo> for ExternalMethodRef {
+    fn from(value: vole_sema::implement_registry::ExternalMethodInfo) -> Self {
+        Self {
+            module_path: value.module_path,
+            native_name: value.native_name,
+        }
+    }
+}
+
+impl From<vole_vir::expr::VirExternalMethodInfo> for ExternalMethodRef {
+    fn from(value: vole_vir::expr::VirExternalMethodInfo) -> Self {
+        Self {
+            module_path: value.module_path,
+            native_name: value.native_name,
+        }
+    }
+}
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -1512,10 +1536,10 @@ fn mask_imm_to_type(val: i64, ty: Type) -> i64 {
     val & mask
 }
 
-/// Resolve the module path and native function name strings from an ExternalMethodInfo.
+/// Resolve the module path and native function name strings from an external method reference.
 pub(crate) fn resolve_external_names(
     name_table: &vole_identity::NameTable,
-    external_info: &ExternalMethodInfo,
+    external_info: &ExternalMethodRef,
 ) -> CodegenResult<(String, String)> {
     let module_path = name_table
         .last_segment_str(external_info.module_path)

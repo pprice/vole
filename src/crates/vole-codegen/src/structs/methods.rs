@@ -9,6 +9,7 @@ use smallvec::{SmallVec, smallvec};
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
+use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::CompiledValue;
@@ -18,7 +19,6 @@ use vole_identity::NamerLookup;
 use vole_identity::NodeId;
 use vole_identity::{MethodId, NameId};
 use vole_sema::generic::ClassMethodMonomorphKey;
-use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirRef;
@@ -127,13 +127,10 @@ impl MethodResolutionRef<'_> {
         }
     }
 
-    fn external_info(self) -> Option<ExternalMethodInfo> {
+    fn external_info(self) -> Option<ExternalMethodRef> {
         match self {
-            MethodResolutionRef::Ast(r) => r.external_info().copied(),
-            MethodResolutionRef::Vir(r) => r.external_info().map(|info| ExternalMethodInfo {
-                module_path: info.module_path,
-                native_name: info.native_name,
-            }),
+            MethodResolutionRef::Ast(r) => r.external_info().copied().map(ExternalMethodRef::from),
+            MethodResolutionRef::Vir(r) => r.external_info().map(ExternalMethodRef::from),
         }
     }
 
@@ -1019,7 +1016,8 @@ impl Cg<'_, '_, '_> {
                 }
                 let return_type_id =
                     self.maybe_convert_iterator_return_type(binding.func_type.return_type_id);
-                let result = self.call_external_id(&external_info, &args, return_type_id)?;
+                let ext = ExternalMethodRef::from(external_info);
+                let result = self.call_external_id(&ext, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call
                 let mut obj = obj;
                 self.consume_method_receiver(&mut obj, receiver_is_global_init_rc_iface)?;

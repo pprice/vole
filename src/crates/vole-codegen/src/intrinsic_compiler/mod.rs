@@ -16,7 +16,6 @@ use cranelift::prelude::{AbiParam, InstBuilder, IntCC, MemFlags, Value, types};
 use cranelift_module::Module;
 
 use vole_runtime::native_registry::NativeType;
-use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
@@ -24,7 +23,7 @@ use crate::callable_registry::{CallableKey, ResolvedCallable, resolve_callable_w
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::convert_to_i64_for_storage;
 
-use super::context::{Cg, resolve_external_names};
+use super::context::{Cg, ExternalMethodRef, resolve_external_names};
 use super::types::{
     CompiledValue, array_element_tag_id, native_type_to_cranelift, type_id_to_cranelift,
 };
@@ -52,7 +51,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// compiler intrinsic (e.g., f64_nan emits a constant instead of an FFI call).
     pub fn call_external_id(
         &mut self,
-        external_info: &ExternalMethodInfo,
+        external_info: &ExternalMethodRef,
         args: &[Value],
         return_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {

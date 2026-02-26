@@ -8,6 +8,7 @@ use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
 use super::vtable_ctx::{VtableCtx, VtableCtxView};
 use crate::RuntimeKey;
 use crate::calls::string_ops::{declare_string_data, reference_string_data};
+use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use crate::types::{
@@ -18,7 +19,6 @@ use crate::union_layout;
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::EntityRegistry;
-use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::{SemaType, TypeId};
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
@@ -103,7 +103,7 @@ enum VtableMethodTarget {
     /// Direct method call on class (includes both direct methods and explicit implementations)
     Method(MethodInfo),
     /// External/native function binding
-    External(ExternalMethodInfo),
+    External(ExternalMethodRef),
     /// Closure or function pointer (no additional data needed)
     Function,
 }
@@ -1846,7 +1846,7 @@ fn compile_external_wrapper<C: VtableCtx>(
     data_word: Value,
     box_ptr: Value,
     params: &[Value],
-    external_info: &ExternalMethodInfo,
+    external_info: &ExternalMethodRef,
     iterator_info: IteratorVtableInfo,
     param_type_ids: &[TypeId],
     return_type_id: TypeId,
@@ -2274,7 +2274,7 @@ fn resolve_vtable_target<C: VtableCtx>(
                 param_type_ids,
                 return_type_id,
                 union_tag_remap,
-                target: VtableMethodTarget::External(external_info),
+                target: VtableMethodTarget::External(ExternalMethodRef::from(external_info)),
             });
         }
         // Look up via unified method_func_keys using type's NameId for stable lookup
@@ -2381,7 +2381,7 @@ fn resolve_vtable_target<C: VtableCtx>(
                 param_type_ids,
                 return_type_id,
                 union_tag_remap: None,
-                target: VtableMethodTarget::External(*external_info),
+                target: VtableMethodTarget::External(ExternalMethodRef::from(*external_info)),
             });
         }
         // Handle Vole-body default methods: look up the compiled function via

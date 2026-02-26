@@ -11,12 +11,12 @@ use crate::RuntimeKey;
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
+use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
 use vole_frontend::ExprKind;
 use vole_identity::NodeId;
 use vole_identity::TypeDefId;
-use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::TypeId;
 
 use super::methods::ArgSource;
@@ -33,7 +33,7 @@ impl Cg<'_, '_, '_> {
         expr_id: Option<NodeId>,
         fallback_elem_type: Option<TypeId>,
         return_type_hint: Option<TypeId>,
-    ) -> CodegenResult<(ExternalMethodInfo, TypeId)> {
+    ) -> CodegenResult<(ExternalMethodRef, TypeId)> {
         // Look up the Iterator interface via well-known type metadata
         let iter_type_id = self
             .name_table()
@@ -57,10 +57,12 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| CodegenError::not_found("Iterator method", method_name))?;
 
         // Get the external binding for this method
-        let external_info = *self
+        let external_info = self
             .analyzed()
             .query()
             .method_external_binding(*method_id)
+            .copied()
+            .map(ExternalMethodRef::from)
             .ok_or_else(|| CodegenError::not_found("external binding for Iterator", method_name))?;
 
         // In monomorphized module contexts, substituted_return_type can be absent.

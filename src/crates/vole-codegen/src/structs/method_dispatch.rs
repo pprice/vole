@@ -11,13 +11,13 @@ use crate::RuntimeKey;
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
+use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, module_name_id, type_id_to_cranelift};
 use vole_identity::NodeId;
 use vole_identity::TypeDefId;
 use vole_identity::{ModuleId, NameId};
 use vole_sema::generic::MonomorphKey;
-use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 use vole_vir::expr::{VirFunctionMonomorphKey, VirResolvedMethod};
@@ -49,10 +49,7 @@ impl Cg<'_, '_, '_> {
                     func_type_id,
                     ..
                 } => (
-                    external_info.map(|info| ExternalMethodInfo {
-                        module_path: info.module_path,
-                        native_name: info.native_name,
-                    }),
+                    external_info.map(ExternalMethodRef::from),
                     self.sema_type_from_vir(*func_type_id),
                 ),
                 _ => {
@@ -80,7 +77,7 @@ impl Cg<'_, '_, '_> {
                     format!("{}::{}", module_path, method_name_str),
                 ));
             };
-            (*external_info, *func_type_id)
+            (external_info.map(ExternalMethodRef::from), *func_type_id)
         };
 
         // Get return type from arena
