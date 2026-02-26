@@ -2,11 +2,11 @@
 //
 // VirTypeTable: interned table of VirType entries with optional layout metadata.
 //
-// Lives in vole-vir (no sema dependency). Translation from sema TypeId to
-// VirTypeId happens in vole-codegen::vir_lower::type_translate.
+// Lives in vole-vir (no sema dependency). It stores VIR-native type identities
+// only (`VirTypeId`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::{TypeId, VirTypeId};
+use vole_identity::VirTypeId;
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -16,8 +16,6 @@ use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 /// Pre-populated with reserved primitive slots matching [`VirTypeId`] constants
 /// so that codegen can match on well-known types without a table lookup.
 ///
-/// The `sema_map` caches `TypeId -> VirTypeId` translations so each sema type
-/// is translated at most once.
 #[derive(Clone)]
 pub struct VirTypeTable {
     /// Interned types, indexed by VirTypeId.
@@ -26,8 +24,6 @@ pub struct VirTypeTable {
     layouts: Vec<Option<VirTypeLayout>>,
     /// Deduplication: VirType -> VirTypeId.
     intern_map: FxHashMap<VirType, VirTypeId>,
-    /// Cache: sema TypeId -> VirTypeId (avoids re-translating the same type).
-    sema_map: FxHashMap<TypeId, VirTypeId>,
 }
 
 impl VirTypeTable {
@@ -41,7 +37,6 @@ impl VirTypeTable {
             types: Vec::new(),
             layouts: Vec::new(),
             intern_map: FxHashMap::default(),
-            sema_map: FxHashMap::default(),
         };
         table.populate_reserved();
         table
@@ -85,16 +80,6 @@ impl VirTypeTable {
     /// Panics if `id` is out of range.
     pub fn set_layout(&mut self, id: VirTypeId, layout: VirTypeLayout) {
         self.layouts[id.raw() as usize] = Some(layout);
-    }
-
-    /// Look up a cached sema `TypeId -> VirTypeId` mapping.
-    pub fn lookup_sema(&self, type_id: TypeId) -> Option<VirTypeId> {
-        self.sema_map.get(&type_id).copied()
-    }
-
-    /// Record a sema `TypeId -> VirTypeId` mapping in the cache.
-    pub fn insert_sema_mapping(&mut self, type_id: TypeId, vir_id: VirTypeId) {
-        self.sema_map.insert(type_id, vir_id);
     }
 
     /// Merge all non-reserved types from `other` into `self`.
@@ -570,24 +555,6 @@ mod tests {
         let id2 = table.intern(ty, Some(layout));
         assert_eq!(id1, id2);
         assert!(table.get_layout(id1).is_some());
-    }
-
-    #[test]
-    fn sema_mapping_round_trip() {
-        let mut table = VirTypeTable::new();
-        let sema_id = TypeId::from_raw(100);
-        assert!(table.lookup_sema(sema_id).is_none());
-
-        table.insert_sema_mapping(sema_id, VirTypeId::I64);
-        assert_eq!(table.lookup_sema(sema_id), Some(VirTypeId::I64));
-    }
-
-    #[test]
-    fn reserved_sema_primitives_not_auto_mapped() {
-        // The table does NOT auto-populate sema_map; that is the job of
-        // translate_type_id in vole-codegen.
-        let table = VirTypeTable::new();
-        assert!(table.lookup_sema(TypeId::I64).is_none());
     }
 
     #[test]

@@ -17,19 +17,13 @@ use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
 /// Translate a sema `TypeId` into a `VirTypeId`, interning the result.
 ///
-/// Checks the table's sema cache first. On cache miss, inspects the
-/// `SemaType` via the arena, recursively translates compound types,
-/// interns the resulting `VirType`, and caches the mapping.
+/// This is intentionally stateless with respect to sema `TypeId`s: `VirTypeId`
+/// deduplication is handled by `VirTypeTable::intern`.
 pub fn translate_type_id(
     table: &mut VirTypeTable,
     type_id: TypeId,
     arena: &TypeArena,
 ) -> VirTypeId {
-    // Fast path: already translated.
-    if let Some(vir_id) = table.lookup_sema(type_id) {
-        return vir_id;
-    }
-
     // Sentinel types (nil, Done, user-defined zero-field structs) are
     // special: they have reserved VirTypeId slots and zero-size layout.
     // Check before SemaType match since sentinels may be SemaType::Struct
@@ -40,14 +34,12 @@ pub fn translate_type_id(
 
     let vir_type = translate_sema_type(table, type_id, arena);
     let layout = translate_layout(type_id, arena);
-    let vir_id = table.intern(vir_type, layout);
-    table.insert_sema_mapping(type_id, vir_id);
-    vir_id
+    table.intern(vir_type, layout)
 }
 
 /// Translate sentinel types to their reserved VirTypeId.
 fn translate_sentinel(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeArena) -> VirTypeId {
-    let vir_id = if type_id == arena.nil() {
+    if type_id == arena.nil() {
         VirTypeId::NIL
     } else if type_id == arena.done() {
         VirTypeId::DONE
@@ -61,9 +53,7 @@ fn translate_sentinel(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeAre
             storage: StorageClass::Void,
         });
         table.intern(VirType::Nil, layout)
-    };
-    table.insert_sema_mapping(type_id, vir_id);
-    vir_id
+    }
 }
 
 /// Map a `SemaType` variant to the corresponding `VirType`.
@@ -735,7 +725,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Caching
+    // Deduplication
     // -----------------------------------------------------------------------
 
     #[test]
@@ -746,8 +736,6 @@ mod tests {
         let id1 = translate_type_id(&mut table, TypeId::I64, &arena);
         let id2 = translate_type_id(&mut table, TypeId::I64, &arena);
         assert_eq!(id1, id2);
-        // Should be cached now
-        assert!(table.lookup_sema(TypeId::I64).is_some());
     }
 
     #[test]

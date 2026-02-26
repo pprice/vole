@@ -354,19 +354,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.analyzed.vir_program.type_table
     }
 
-    /// Translate a sema `TypeId` to a `VirTypeId` via the VIR type table's
-    /// sema mapping cache.
+    /// Best-effort translation from sema `TypeId` to `VirTypeId`.
     ///
-    /// Returns `VirTypeId::UNKNOWN` if no mapping exists.  This can happen
-    /// for types created during monomorphization (type substitution creates
-    /// sema TypeIds that weren't present during VIR lowering).  Callers
-    /// that need to handle monomorphized types should use the `vir_query_*`
-    /// helpers below which fall back to the sema arena when needed.
+    /// Reserved primitive/special IDs are aligned between `TypeId` and
+    /// `VirTypeId`, so those can be mapped directly. Dynamic sema IDs are
+    /// resolved by `vir_query_*` helpers via arena fallback paths.
+    ///
+    /// Temporary bridge after removing `VirTypeTable`'s sema cache (N279-B).
+    /// Once N279-C migrates all VIR consumers to carry `VirTypeId` directly,
+    /// this lookup path should be deleted.
     #[inline]
     pub fn vir_lookup(&self, type_id: TypeId) -> vole_identity::VirTypeId {
-        self.vir_type_table()
-            .lookup_sema(type_id)
-            .unwrap_or(vole_identity::VirTypeId::UNKNOWN)
+        if type_id.raw() < vole_identity::VirTypeId::FIRST_DYNAMIC {
+            vole_identity::VirTypeId::from_raw(type_id.raw())
+        } else {
+            vole_identity::VirTypeId::UNKNOWN
+        }
     }
 
     /// Check if a sema `TypeId` is a struct type, using VirTypeTable with

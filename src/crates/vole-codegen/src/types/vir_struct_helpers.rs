@@ -13,7 +13,7 @@
 
 use cranelift::prelude::*;
 
-use vole_identity::VirTypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_sema::EntityRegistry;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{VirPrimitiveKind, VirType};
@@ -59,6 +59,18 @@ fn vir_is_sentinel_or_void(
     }
 }
 
+fn sema_to_vir_hint(sema_ty: TypeId) -> VirTypeId {
+    // Temporary bridge after removing VirTypeTable's sema TypeId cache.
+    // This helper intentionally maps only reserved IDs by index; dynamic
+    // IDs fall back to UNKNOWN until field metadata is VirTypeId-native
+    // in N279-C.
+    if sema_ty.raw() < VirTypeId::FIRST_DYNAMIC {
+        VirTypeId::from_raw(sema_ty.raw())
+    } else {
+        VirTypeId::UNKNOWN
+    }
+}
+
 // ============================================================================
 // Struct flat layout helpers
 //
@@ -101,7 +113,7 @@ pub(crate) fn vir_struct_flat_slot_count(
     let mut total = 0usize;
     for field_id in entities.fields_on_type(type_def_id) {
         let field = entities.get_field(field_id);
-        let field_vir = table.lookup_sema(field.ty).unwrap_or(VirTypeId::UNKNOWN);
+        let field_vir = sema_to_vir_hint(field.ty);
         total += vir_field_flat_slots_recursive(field_vir, table, entities);
     }
     Some(total)
@@ -127,7 +139,7 @@ pub(crate) fn vir_struct_field_byte_offset(
     let mut offset = 0i32;
     for &field_id in fields.iter().take(slot) {
         let field = entities.get_field(field_id);
-        let field_vir = table.lookup_sema(field.ty).unwrap_or(VirTypeId::UNKNOWN);
+        let field_vir = sema_to_vir_hint(field.ty);
         let slots = vir_field_flat_slots_recursive(field_vir, table, entities);
         offset += (slots as i32) * 8;
     }
@@ -178,7 +190,7 @@ pub(crate) fn vir_struct_flat_field_cranelift_types(
     let mut offset = 0i32;
     for field_id in entities.fields_on_type(type_def_id) {
         let field = entities.get_field(field_id);
-        let field_vir = table.lookup_sema(field.ty).unwrap_or(VirTypeId::UNKNOWN);
+        let field_vir = sema_to_vir_hint(field.ty);
         vir_collect_leaf_slots(field_vir, table, entities, &mut offset, &mut result);
     }
     Some(result)
@@ -199,7 +211,7 @@ fn vir_collect_leaf_slots(
     if let Some((nested_def, _nested_args)) = vir_unwrap_struct(vir_ty, table) {
         for field_id in entities.fields_on_type(nested_def) {
             let field = entities.get_field(field_id);
-            let field_vir = table.lookup_sema(field.ty).unwrap_or(VirTypeId::UNKNOWN);
+            let field_vir = sema_to_vir_hint(field.ty);
             vir_collect_leaf_slots(field_vir, table, entities, offset, out);
         }
         return;
@@ -328,9 +340,7 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Create a test EntityRegistry with a struct type and fields.
-    fn make_struct_registry(
-        field_type_ids: &[vole_identity::TypeId],
-    ) -> (EntityRegistry, TypeDefId) {
+    fn make_struct_registry(field_type_ids: &[TypeId]) -> (EntityRegistry, TypeDefId) {
         use vole_identity::NameTable;
         use vole_sema::entity_defs::TypeDefKind;
 
@@ -354,11 +364,10 @@ mod tests {
 
     #[test]
     fn struct_flat_slot_count_two_i64_fields() {
-        let sema_i64 = vole_identity::TypeId::I64;
+        let sema_i64 = TypeId::I64;
         let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i64]);
 
         let mut table = test_table();
-        table.insert_sema_mapping(sema_i64, VirTypeId::I64);
         let struct_ty = table.intern(
             VirType::Struct {
                 def: type_def_id,
@@ -375,13 +384,11 @@ mod tests {
 
     #[test]
     fn struct_flat_slot_count_with_wide_field() {
-        let sema_i64 = vole_identity::TypeId::I64;
-        let sema_i128 = vole_identity::TypeId::from_raw(100);
+        let sema_i64 = TypeId::I64;
+        let sema_i128 = TypeId::I128;
         let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i128]);
 
         let mut table = test_table();
-        table.insert_sema_mapping(sema_i64, VirTypeId::I64);
-        table.insert_sema_mapping(sema_i128, VirTypeId::I128);
         let struct_ty = table.intern(
             VirType::Struct {
                 def: type_def_id,
@@ -406,11 +413,10 @@ mod tests {
 
     #[test]
     fn struct_field_byte_offset_two_i64() {
-        let sema_i64 = vole_identity::TypeId::I64;
+        let sema_i64 = TypeId::I64;
         let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i64]);
 
         let mut table = test_table();
-        table.insert_sema_mapping(sema_i64, VirTypeId::I64);
         let struct_ty = table.intern(
             VirType::Struct {
                 def: type_def_id,
@@ -431,13 +437,11 @@ mod tests {
 
     #[test]
     fn struct_field_byte_offset_with_wide() {
-        let sema_i128 = vole_identity::TypeId::from_raw(100);
-        let sema_i64 = vole_identity::TypeId::I64;
+        let sema_i128 = TypeId::I128;
+        let sema_i64 = TypeId::I64;
         let (entities, type_def_id) = make_struct_registry(&[sema_i128, sema_i64]);
 
         let mut table = test_table();
-        table.insert_sema_mapping(sema_i128, VirTypeId::I128);
-        table.insert_sema_mapping(sema_i64, VirTypeId::I64);
         let struct_ty = table.intern(
             VirType::Struct {
                 def: type_def_id,
@@ -459,11 +463,10 @@ mod tests {
 
     #[test]
     fn struct_total_byte_size_two_i64() {
-        let sema_i64 = vole_identity::TypeId::I64;
+        let sema_i64 = TypeId::I64;
         let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i64]);
 
         let mut table = test_table();
-        table.insert_sema_mapping(sema_i64, VirTypeId::I64);
         let struct_ty = table.intern(
             VirType::Struct {
                 def: type_def_id,
@@ -480,11 +483,10 @@ mod tests {
 
     #[test]
     fn struct_flat_field_cranelift_types_two_i64() {
-        let sema_i64 = vole_identity::TypeId::I64;
+        let sema_i64 = TypeId::I64;
         let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_i64]);
 
         let mut table = test_table();
-        table.insert_sema_mapping(sema_i64, VirTypeId::I64);
         let struct_ty = table.intern(
             VirType::Struct {
                 def: type_def_id,
@@ -499,13 +501,11 @@ mod tests {
 
     #[test]
     fn struct_flat_field_cranelift_types_with_f64() {
-        let sema_i64 = vole_identity::TypeId::I64;
-        let sema_f64 = vole_identity::TypeId::from_raw(101);
+        let sema_i64 = TypeId::I64;
+        let sema_f64 = TypeId::F64;
         let (entities, type_def_id) = make_struct_registry(&[sema_i64, sema_f64]);
 
         let mut table = test_table();
-        table.insert_sema_mapping(sema_i64, VirTypeId::I64);
-        table.insert_sema_mapping(sema_f64, VirTypeId::F64);
         let struct_ty = table.intern(
             VirType::Struct {
                 def: type_def_id,
