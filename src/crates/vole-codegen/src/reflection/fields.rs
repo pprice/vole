@@ -13,7 +13,6 @@
 use cranelift::prelude::*;
 use vole_frontend::Expr;
 use vole_identity::{NameId, TypeDefId};
-use vole_sema::entity_defs::ValidatedAnnotation;
 use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
@@ -32,7 +31,14 @@ struct FieldInfo {
     type_name: String,
     slot: usize,
     type_id: TypeId,
-    annotations: Vec<ValidatedAnnotation>,
+    annotations: Vec<FieldAnnotation>,
+}
+
+/// Codegen-local annotation payload shape used by reflection metadata builders.
+#[derive(Debug, Clone)]
+struct FieldAnnotation {
+    type_def_id: TypeDefId,
+    args: Vec<(NameId, Expr)>,
 }
 
 /// Build a dynamic array of FieldMeta instances for all fields on the type.
@@ -96,7 +102,18 @@ fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
                 type_name,
                 slot: field.slot,
                 type_id: field.ty,
-                annotations: field.annotations.clone(),
+                annotations: field
+                    .annotations
+                    .iter()
+                    .map(|ann| FieldAnnotation {
+                        type_def_id: ann.type_def_id,
+                        args: ann
+                            .args
+                            .iter()
+                            .map(|(name_id, expr)| (*name_id, (**expr).clone()))
+                            .collect(),
+                    })
+                    .collect(),
             }
         })
         .collect()
@@ -121,7 +138,7 @@ fn build_single_field_meta(
     target_type_def_id: TypeDefId,
     field_slot: usize,
     field_type_id: TypeId,
-    annotations: &[ValidatedAnnotation],
+    annotations: &[FieldAnnotation],
 ) -> CodegenResult<Value> {
     // Compute the RuntimeTypeId tag for this field's type (used by getter boxing).
     let runtime_tag = crate::types::unknown_type_tag(field_type_id, cg.arena()) as i64;
@@ -149,7 +166,7 @@ fn build_single_field_meta(
         &type_name_cv,
     );
 
-    // annotations ([unknown] array, populated from sema ValidatedAnnotation data)
+    // annotations ([unknown] array, populated from sema-validated field annotation data)
     let annotations_cv = build_annotations_array(cg, annotations)?;
     store_field_value(
         cg,
@@ -185,7 +202,7 @@ fn build_single_field_meta(
 /// since annotation structs are allocated as class instances via `InstanceNew`.
 fn build_annotations_array(
     cg: &mut Cg,
-    annotations: &[ValidatedAnnotation],
+    annotations: &[FieldAnnotation],
 ) -> CodegenResult<CompiledValue> {
     let arr_ptr = cg.call_runtime(RuntimeKey::ArrayNew, &[])?;
 
@@ -250,7 +267,7 @@ fn build_annotations_array(
 /// 1. Ensures the annotation type is registered with the runtime type registry
 /// 2. Allocates a heap instance with the registered type_id
 /// 3. Compiles and stores each field value
-fn build_annotation_instance(cg: &mut Cg, ann: &ValidatedAnnotation) -> CodegenResult<Value> {
+fn build_annotation_instance(cg: &mut Cg, ann: &FieldAnnotation) -> CodegenResult<Value> {
     // Ensure the annotation type has a runtime type_id for proper field cleanup
     let (runtime_type_id, field_count) = ensure_annotation_type_registered(cg, ann.type_def_id)?;
 
@@ -264,12 +281,9 @@ fn build_annotation_instance(cg: &mut Cg, ann: &ValidatedAnnotation) -> CodegenR
     // Pre-collect field slot info to avoid borrow conflicts
     let field_slots = collect_annotation_field_slots(cg, ann.type_def_id, &ann.args);
 
-    // Clone expressions to avoid borrow conflict with cg.expr()
-    let exprs: Vec<Expr> = ann.args.iter().map(|(_, expr)| (**expr).clone()).collect();
-
     let set_func_ref = cg.runtime_func_ref(RuntimeKey::InstanceSetField)?;
 
-    for (slot, expr) in field_slots.into_iter().zip(exprs.iter()) {
+    for ((_, expr), slot) in ann.args.iter().zip(field_slots.into_iter()) {
         let compiled = cg.expr(expr)?;
         store_field_value(cg, set_func_ref, instance_ptr, slot, &compiled);
     }
@@ -367,7 +381,7 @@ fn allocate_annotation_instance(
 fn collect_annotation_field_slots(
     cg: &Cg,
     ann_type_def_id: TypeDefId,
-    args: &[(NameId, Box<Expr>)],
+    args: &[(NameId, Expr)],
 ) -> Vec<usize> {
     let name_table = cg.name_table();
     let type_meta = cg.type_metadata().get(&ann_type_def_id);
