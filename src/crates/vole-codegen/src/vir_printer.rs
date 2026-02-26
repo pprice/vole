@@ -8,9 +8,7 @@
 
 use std::fmt::Write;
 
-use vole_identity::{Interner, NameTable, Symbol, VirTypeId};
-use vole_sema::entity_registry::EntityRegistry;
-use vole_sema::type_arena::TypeArena;
+use vole_identity::{Symbol, VirTypeId};
 use vole_sema::type_display::display_type_id_short;
 
 use vole_vir::calls::{CallTarget, NativeAbi};
@@ -41,25 +39,12 @@ macro_rules! wln {
 
 /// Pretty-printer for VIR trees.
 pub struct VirPrinter<'a> {
-    interner: &'a Interner,
-    type_arena: &'a TypeArena,
-    entities: &'a EntityRegistry,
-    names: &'a NameTable,
+    analyzed: &'a crate::analyzed::AnalyzedProgram,
 }
 
 impl<'a> VirPrinter<'a> {
-    pub fn new(
-        interner: &'a Interner,
-        type_arena: &'a TypeArena,
-        entities: &'a EntityRegistry,
-        names: &'a NameTable,
-    ) -> Self {
-        Self {
-            interner,
-            type_arena,
-            entities,
-            names,
-        }
+    pub fn new(analyzed: &'a crate::analyzed::AnalyzedProgram) -> Self {
+        Self { analyzed }
     }
 
     /// Print a single VIR function to a String.
@@ -996,8 +981,9 @@ impl<'a> VirPrinter<'a> {
     fn sym(&self, s: Symbol) -> String {
         // Module functions may carry Symbols interned in a different interner.
         // Guard against out-of-bounds by falling back to a numeric label.
-        if (s.index() as usize) < self.interner.len() {
-            self.interner.resolve(s).to_string()
+        let interner = &self.analyzed.interner;
+        if (s.index() as usize) < interner.len() {
+            interner.resolve(s).to_string()
         } else {
             format!("$sym{}", s.index())
         }
@@ -1005,7 +991,12 @@ impl<'a> VirPrinter<'a> {
 
     fn ty(&self, id: VirTypeId) -> String {
         let sema_ty = crate::types::vir_conversions::vir_to_sema_type_id_lossy(id);
-        display_type_id_short(sema_ty, self.type_arena, self.names, self.entities)
+        display_type_id_short(
+            sema_ty,
+            self.analyzed.type_arena(),
+            self.analyzed.name_table(),
+            self.analyzed.entity_registry(),
+        )
     }
 }
 

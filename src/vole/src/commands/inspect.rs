@@ -273,12 +273,7 @@ fn inspect_vir(
         }
     };
 
-    let printer = VirPrinter::new(
-        &analyzed.interner,
-        analyzed.type_arena(),
-        analyzed.entity_registry(),
-        analyzed.name_table(),
-    );
+    let printer = VirPrinter::new(&analyzed);
 
     let include_tests = !no_tests;
     let main_module = analyzed.module_id;
