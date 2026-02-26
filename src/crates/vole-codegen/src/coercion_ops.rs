@@ -535,13 +535,55 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         expected_type_ids: &[TypeId],
         is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        let default_refs: Vec<Option<&'ctx Expr>> = {
-            let query = self.query();
-            (start_index..start_index + expected_type_ids.len())
-                .map(|idx| query.method_default_expr_by_id(method_id, idx))
-                .collect()
-        };
-        self.compile_defaults_from_refs(&default_refs, expected_type_ids, is_generic_class)
+        let mut args = Vec::new();
+        let mut rc_owned = Vec::new();
+
+        for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
+            let slot = start_index + offset;
+            let compiled =
+                if let Some(default_vir) = self.method_default_vir_init(method_id, slot).cloned() {
+                    self.compile_vir_expr(&default_vir)?
+                } else if let Some(default_expr) =
+                    self.query().method_default_expr_by_id(method_id, slot)
+                {
+                    // TEMP(vol-eenl): retain AST fallback until method default lowering
+                    // coverage is complete across all declaration forms.
+                    self.expr_with_expected_type(default_expr, param_type_id)?
+                } else {
+                    continue;
+                };
+
+            if compiled.is_owned() {
+                rc_owned.push(compiled);
+            }
+
+            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            let expected_ty = self.cranelift_type(param_type_id);
+            let compiled = if compiled.ty.is_int()
+                && expected_ty.is_int()
+                && expected_ty.bits() != compiled.ty.bits()
+            {
+                let new_value = if expected_ty.bits() < compiled.ty.bits() {
+                    self.builder.ins().ireduce(expected_ty, compiled.value)
+                } else if self.arena().is_unsigned(param_type_id) {
+                    uextend_const(self.builder, expected_ty, compiled.value)
+                } else {
+                    sextend_const(self.builder, expected_ty, compiled.value)
+                };
+                CompiledValue::new(new_value, expected_ty, param_type_id)
+            } else {
+                compiled
+            };
+
+            let arg_value = if is_generic_class && compiled.ty != types::I64 {
+                self.emit_word(&compiled, None)?
+            } else {
+                compiled.value
+            };
+            args.push(arg_value);
+        }
+
+        Ok((args, rc_owned))
     }
 
     /// Compile default expressions for omitted lambda parameters.

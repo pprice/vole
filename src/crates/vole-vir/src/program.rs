@@ -61,6 +61,11 @@ pub struct VirProgram {
     /// Keyed by semantic `FunctionId` and parameter slot index.
     pub function_default_inits: FxHashMap<(FunctionId, usize), VirRef>,
 
+    /// VIR-lowered default parameter expressions for methods.
+    ///
+    /// Keyed by semantic `MethodId` and parameter slot index.
+    pub method_default_inits: FxHashMap<(MethodId, usize), VirRef>,
+
     /// VIR-lowered default field initializer expressions.
     ///
     /// Keyed by semantic `FieldId`. These are used when struct/class literals
@@ -117,5 +122,10 @@ impl VirProgram {
     /// Look up a VIR default parameter expression by `FunctionId` and slot.
     pub fn get_function_default(&self, func_id: FunctionId, slot: usize) -> Option<&VirRef> {
         self.function_default_inits.get(&(func_id, slot))
+    }
+
+    /// Look up a VIR default parameter expression by `MethodId` and slot.
+    pub fn get_method_default(&self, method_id: MethodId, slot: usize) -> Option<&VirRef> {
+        self.method_default_inits.get(&(method_id, slot))
     }
 }
