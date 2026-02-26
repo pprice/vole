@@ -461,7 +461,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - `RcState::Union`: Union with some RC variants
     ///
     pub fn rc_state(&self, type_id: TypeId) -> RcState {
-        compute_rc_state(self.arena(), self.registry(), type_id)
+        compute_rc_state(self.arena(), self.analyzed().entity_registry(), type_id)
     }
 
     /// Get the field type tag for a type, determining how instance fields of this

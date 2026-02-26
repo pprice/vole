@@ -275,7 +275,8 @@ impl Cg<'_, '_, '_> {
         let interface_type_def_id = resolved.type_def_id()?;
         let slot = resolved.method_index()? as usize;
         let method_id = self
-            .registry()
+            .analyzed()
+            .entity_registry()
             .interface_methods_ordered(interface_type_def_id)
             .get(slot)
             .copied()?;
@@ -1170,7 +1171,8 @@ impl Cg<'_, '_, '_> {
 
                 // Look up the monomorphized instance
                 if let Some(instance) = self
-                    .registry()
+                    .analyzed()
+                    .entity_registry()
                     .class_method_monomorph_cache
                     .get(&effective_key)
                 {

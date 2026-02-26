@@ -309,12 +309,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.current_module
     }
 
-    /// Get entity registry reference
-    #[inline]
-    pub fn registry(&self) -> &'ctx vole_sema::entity_registry::EntityRegistry {
-        self.env.analyzed.entity_registry()
-    }
-
     /// Get the name table.
     /// Returns `&'ctx NameTable` so references obtained from it outlive `self` borrows.
     #[inline]
@@ -584,7 +578,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let (type_def_id, _) = self.arena().unwrap_struct(type_id)?;
 
         // Check sema's is_annotation flag (authoritative source)
-        if !self.registry().get_type(type_def_id).is_annotation {
+        if !self
+            .analyzed()
+            .entity_registry()
+            .get_type(type_def_id)
+            .is_annotation
+        {
             return None;
         }
 
@@ -1394,7 +1393,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         key: FunctionKey,
         entry: &MonomorphIndexEntry,
     ) -> Option<FuncId> {
-        let registry = self.registry();
+        let registry = self.analyzed().entity_registry();
         let arena = self.arena();
         let ptr_type = self.ptr_type();
 

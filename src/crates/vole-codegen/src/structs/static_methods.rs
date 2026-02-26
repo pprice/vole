@@ -117,8 +117,7 @@ impl Cg<'_, '_, '_> {
                         format!("({}, {})", tn, mn)
                     })
                     .collect();
-                let static_candidates: Vec<_> = self
-                    .registry()
+                let static_candidates: Vec<_> = self.analyzed().entity_registry()
                     .static_method_monomorph_cache
                     .instances()
                     .filter(|(k, _)| k.class_name == type_name_id && k.method_name == method_name_id)
@@ -331,7 +330,8 @@ impl Cg<'_, '_, '_> {
 
             // Look up the monomorphized instance
             if let Some(instance) = self
-                .registry()
+                .analyzed()
+                .entity_registry()
                 .static_method_monomorph_cache
                 .get(&effective_key)
             {
@@ -346,7 +346,8 @@ impl Cg<'_, '_, '_> {
         let type_name_id = self.analyzed().query().get_type(type_def_id).name_id;
         let subs = self.substitutions;
         let arena = self.arena();
-        self.registry()
+        self.analyzed()
+            .entity_registry()
             .static_method_monomorph_cache
             .instances()
             .filter_map(|(key, instance)| {

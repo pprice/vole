@@ -415,7 +415,7 @@ pub(crate) struct ReflectionTypeInfo {
 
 /// Resolve TypeMeta and FieldMeta TypeDefIds from the entity registry.
 pub(crate) fn resolve_reflection_types(cg: &Cg) -> CodegenResult<ReflectionTypeInfo> {
-    let registry = cg.registry();
+    let registry = cg.analyzed().entity_registry();
     let name_table = cg.name_table();
 
     let type_meta_def_id = registry
