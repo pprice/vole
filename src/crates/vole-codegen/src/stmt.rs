@@ -8,7 +8,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use vole_frontend::ast::{RaiseStmt, ReturnStmt};
 use vole_frontend::{self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, Stmt, Symbol};
-use vole_identity::VirTypeId;
+use vole_identity::{NameId, VirTypeId};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirStmt;
@@ -22,6 +22,12 @@ use super::types::{
     CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, is_wide_fallible, type_id_to_cranelift,
 };
 use crate::ops::sextend_const;
+
+#[derive(Clone, Copy)]
+struct RaiseFieldLayout {
+    name_id: NameId,
+    ty: TypeId,
+}
 
 impl Cg<'_, '_, '_> {
     /// Pre-register a recursive lambda binding before compilation.
@@ -975,11 +981,16 @@ impl Cg<'_, '_, '_> {
         let error_type_def_id =
             self.resolve_raise_error_type_def(error_type_id, raise_stmt.error_name)?;
 
-        let error_fields: Vec<_> = self
-            .analyzed()
-            .query()
+        let query = self.analyzed().query();
+        let error_fields: Vec<_> = query
             .fields_on_type(error_type_def_id)
-            .map(|field_id| self.analyzed().query().get_field(field_id).clone())
+            .map(|field_id| {
+                let field = query.get_field(field_id);
+                RaiseFieldLayout {
+                    name_id: field.name_id,
+                    ty: field.ty,
+                }
+            })
             .collect();
 
         // Create the tag value
@@ -1055,7 +1066,7 @@ impl Cg<'_, '_, '_> {
     /// - 2+ fields: payload is a pointer to field data (i128 fields use 16 bytes)
     fn build_raise_payload(
         &mut self,
-        error_fields: &[vole_sema::entity_defs::FieldDef],
+        error_fields: &[RaiseFieldLayout],
         raise_fields: &[vole_frontend::ast::StructFieldInit],
     ) -> CodegenResult<Value> {
         if error_fields.is_empty() {
@@ -1521,11 +1532,16 @@ impl Cg<'_, '_, '_> {
 
         let error_type_def_id = self.resolve_raise_error_type_def(error_type_id, error_name)?;
 
-        let error_fields: Vec<_> = self
-            .analyzed()
-            .query()
+        let query = self.analyzed().query();
+        let error_fields: Vec<_> = query
             .fields_on_type(error_type_def_id)
-            .map(|field_id| self.analyzed().query().get_field(field_id).clone())
+            .map(|field_id| {
+                let field = query.get_field(field_id);
+                RaiseFieldLayout {
+                    name_id: field.name_id,
+                    ty: field.ty,
+                }
+            })
             .collect();
 
         let tag_val = self.iconst_cached(types::I64, error_tag);
@@ -1556,7 +1572,7 @@ impl Cg<'_, '_, '_> {
     /// expressions instead of AST expressions.
     fn build_vir_raise_payload(
         &mut self,
-        error_fields: &[vole_sema::entity_defs::FieldDef],
+        error_fields: &[RaiseFieldLayout],
         raise_fields: &[(Symbol, vole_vir::refs::VirRef)],
     ) -> CodegenResult<Value> {
         if error_fields.is_empty() {
