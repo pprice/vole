@@ -157,7 +157,7 @@ impl InterfaceVtableRegistry {
 
         // Get interface metadata from the passed TypeDefId (don't re-resolve by name
         // since interface_by_short_name could return a different interface with the same name)
-        let interface_def = ctx.query().get_type(interface_type_def_id);
+        let interface_def = ctx.analyzed().query().get_type(interface_type_def_id);
         let interface_name_id = interface_def.name_id;
 
         // Build substitution map from type param names to concrete type args (already TypeIds)
@@ -178,7 +178,7 @@ impl InterfaceVtableRegistry {
             .unwrap_nominal(concrete_type_id)
             .map(|(id, args, _)| (id, args.to_vec()));
         if let Some((class_def_id, class_type_args)) = class_info {
-            let class_def = ctx.query().get_type(class_def_id);
+            let class_def = ctx.analyzed().query().get_type(class_def_id);
             for (param_name, arg_id) in class_def.type_params.iter().zip(class_type_args.iter()) {
                 substitutions.insert(*param_name, *arg_id);
             }
@@ -317,7 +317,7 @@ impl InterfaceVtableRegistry {
             };
 
         for (index, &method_id) in state.method_ids.iter().enumerate() {
-            let method = ctx.query().get_method(method_id);
+            let method = ctx.analyzed().query().get_method(method_id);
             let method_name_str = ctx.analyzed().name_table().display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
@@ -961,8 +961,9 @@ fn resolve_concrete_type_name<C: VtableCtx>(
                 format!("{:?}", concrete_type_id),
             )
         })?;
-    let type_def = ctx.query().get_type(type_def_id);
+    let type_def = ctx.analyzed().query().get_type(type_def_id);
     let type_name = ctx
+        .analyzed()
         .query()
         .last_segment(type_def.name_id)
         .unwrap_or_else(|| "?".to_string());
@@ -1017,7 +1018,7 @@ fn collect_concrete_field_info<C: VtableCtx>(
     ctx: &C,
     type_def_id: TypeDefId,
 ) -> Vec<ConcreteFieldInfo> {
-    let query = ctx.query();
+    let query = ctx.analyzed().query();
     let arena = ctx.arena();
     let name_table = ctx.analyzed().name_table();
     query
@@ -2155,7 +2156,7 @@ fn resolve_vtable_target<C: VtableCtx>(
     substitutions: &FxHashMap<NameId, TypeId>,
 ) -> CodegenResult<VtableMethod> {
     // Get method info from EntityRegistry
-    let interface_method = ctx.query().get_method(interface_method_id);
+    let interface_method = ctx.analyzed().query().get_method(interface_method_id);
     let method_name_str = ctx
         .analyzed()
         .name_table()
@@ -2276,16 +2277,17 @@ fn resolve_vtable_target<C: VtableCtx>(
         let arena = ctx.arena();
         let type_def_id = arena.unwrap_class(concrete_type_id).map(|(id, _)| id)?;
 
-        let type_name_id = ctx.query().get_type(type_def_id).name_id;
+        let type_name_id = ctx.analyzed().query().get_type(type_def_id).name_id;
         let meta = type_metadata_by_name_id(ctx.type_metadata(), type_name_id)?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
         // Look up method signature via ProgramQuery - require TypeId fields
         let sig_from_entity = ctx
+            .analyzed()
             .query()
             .find_method(type_def_id, method_name_id)
             .and_then(|m_id| {
-                let method = ctx.query().get_method(m_id);
+                let method = ctx.analyzed().query().get_method(m_id);
                 let arena = ctx.arena();
                 let (params, ret, _) = arena.unwrap_function(method.signature_id)?;
                 Some((params.to_vec(), ret))
@@ -2320,12 +2322,17 @@ fn resolve_vtable_target<C: VtableCtx>(
     // Fall back to interface default if method has one
     if interface_method.has_default {
         // Check for default external binding via EntityRegistry
-        if let Some(interface_type_def_id) = ctx.query().try_type_def_id(interface_name_id)
+        if let Some(interface_type_def_id) =
+            ctx.analyzed().query().try_type_def_id(interface_name_id)
             && let Some(method_name_id) = method_name_id
             && let Some(found_method_id) = ctx
+                .analyzed()
                 .query()
                 .find_method(interface_type_def_id, method_name_id)
-            && let Some(external_info) = ctx.query().method_external_binding(found_method_id)
+            && let Some(external_info) = ctx
+                .analyzed()
+                .query()
+                .method_external_binding(found_method_id)
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.

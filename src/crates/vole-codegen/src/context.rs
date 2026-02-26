@@ -1480,10 +1480,6 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.env.interner
     }
 
-    fn query(&self) -> vole_sema::ProgramQuery<'_> {
-        self.env.analyzed.query()
-    }
-
     fn ptr_type(&self) -> Type {
         self.codegen_ctx.ptr_type()
     }

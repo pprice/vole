@@ -11,8 +11,8 @@ use cranelift_jit::JITModule;
 use vole_frontend::Interner;
 use vole_identity::NameId;
 use vole_runtime::NativeRegistry;
+use vole_sema::EntityRegistry;
 use vole_sema::type_arena::TypeArena;
-use vole_sema::{EntityRegistry, ProgramQuery};
 
 use crate::types::{CodegenCtx, CompileEnv, TypeMetadataMap};
 use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
@@ -33,9 +33,6 @@ pub trait VtableCtx {
 
     /// Get the interner
     fn interner(&self) -> &Interner;
-
-    /// Get query interface
-    fn query(&self) -> ProgramQuery<'_>;
 
     /// Get the pointer type
     fn ptr_type(&self) -> Type;
@@ -96,10 +93,6 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
 
     fn interner(&self) -> &Interner {
         self.env.interner
-    }
-
-    fn query(&self) -> ProgramQuery<'_> {
-        self.env.analyzed.query()
     }
 
     fn ptr_type(&self) -> Type {
