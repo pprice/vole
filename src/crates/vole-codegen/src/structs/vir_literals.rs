@@ -23,8 +23,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Compile a VIR struct literal (stack-allocated value type).
     ///
     /// Mirrors `struct_value_literal()` but compiles field values from VIR
-    /// expressions instead of AST nodes.  Default fields (omitted in the
-    /// literal) are still compiled from AST via `collect_field_default_refs`.
+    /// expressions instead of AST nodes. Omitted default fields are compiled
+    /// from pre-lowered VIR defaults keyed by semantic `FieldId`.
     pub(crate) fn compile_vir_struct_literal(
         &mut self,
         type_def_id: vole_identity::TypeDefId,
@@ -236,23 +236,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .iter()
             .map(|(name, _)| self.interner().resolve(*name).to_string())
             .collect();
-
-        let type_name = self.resolve_type_name_symbol(type_def_id);
-        let defaults = if let Some(type_name) = type_name {
-            self.collect_field_default_refs(type_name, &provided_fields, type_def_id)
-        } else {
-            Vec::new()
-        };
-
-        for (field_name, default_expr) in defaults {
+        let field_ids: Vec<_> = self.query().fields_on_type(type_def_id).collect();
+        for field_id in field_ids {
+            let field = self.query().get_field(field_id);
+            let Some(field_name) = self.name_table().last_segment_str(field.name_id) else {
+                continue;
+            };
+            if provided_fields.contains(&field_name) {
+                continue;
+            }
+            let Some(default_expr) = self.field_default_vir_init(field_id).cloned() else {
+                continue;
+            };
             let field_slot = *field_slots.get(&field_name).ok_or_else(|| {
                 CodegenError::not_found("field", format!("{field_name} in struct"))
             })?;
             let offset = self.struct_field_byte_offset(result_type_id, field_slot);
             let mut value = if let Some(&field_type_id) = field_types.get(&field_name) {
-                self.expr_with_expected_type(default_expr, field_type_id)?
+                self.compile_vir_expr_with_expected_type(&default_expr, field_type_id)?
             } else {
-                self.expr(default_expr)?
+                self.compile_vir_expr(&default_expr)?
             };
             // Coerce concrete defaults to unknown.
             if let Some(&field_type_id) = field_types.get(&field_name)
@@ -271,17 +274,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.store_struct_field(value, slot, offset)?;
         }
         Ok(())
-    }
-
-    /// Resolve the type name Symbol for a type definition.
-    ///
-    /// Looks up the NameId from the entity registry, extracts the last
-    /// segment as a string, and looks up its Symbol in the interner.
-    /// Returns `None` if the name cannot be resolved or hasn't been interned.
-    fn resolve_type_name_symbol(&self, type_def_id: vole_identity::TypeDefId) -> Option<Symbol> {
-        let type_def = self.query().get_type(type_def_id);
-        let name_str = self.name_table().last_segment_str(type_def.name_id)?;
-        self.interner().lookup(&name_str)
     }
 
     /// Resolve the monomorphized type_id for a class instance.
@@ -385,23 +377,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .iter()
             .map(|(name, _)| self.interner().resolve(*name).to_string())
             .collect();
-
-        let type_name = self.resolve_type_name_symbol(type_def_id);
-        let defaults = if let Some(type_name) = type_name {
-            self.collect_field_default_refs(type_name, &provided_fields, type_def_id)
-        } else {
-            Vec::new()
-        };
-
-        for (field_name, default_expr) in defaults {
+        let field_ids: Vec<_> = self.query().fields_on_type(type_def_id).collect();
+        for field_id in field_ids {
+            let field = self.query().get_field(field_id);
+            let Some(field_name) = self.name_table().last_segment_str(field.name_id) else {
+                continue;
+            };
+            if provided_fields.contains(&field_name) {
+                continue;
+            }
+            let Some(default_expr) = self.field_default_vir_init(field_id).cloned() else {
+                continue;
+            };
             let slot = *field_slots.get(&field_name).ok_or_else(|| {
                 CodegenError::not_found("field", format!("{field_name} in class"))
             })?;
             let field_type_id = field_types.get(&field_name).copied();
             let value = if let Some(field_type_id) = field_type_id {
-                self.expr_with_expected_type(default_expr, field_type_id)?
+                self.compile_vir_expr_with_expected_type(&default_expr, field_type_id)?
             } else {
-                self.expr(default_expr)?
+                self.compile_vir_expr(&default_expr)?
             };
             let final_value = if let Some(field_type_id) = field_type_id {
                 self.coerce_field_value(value, field_type_id)?

@@ -19,7 +19,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
-use vole_identity::{ModuleId, NameId};
+use vole_identity::{FieldId, ModuleId, NameId};
 use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::TypeId;
 
@@ -781,6 +781,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .vir_program
             .global_inits
             .get(&name)
+            .map(|r| r.as_ref())
+    }
+
+    /// Get VIR-lowered default field initializer by semantic `FieldId`.
+    #[inline]
+    pub fn field_default_vir_init(&self, field_id: FieldId) -> Option<&vole_vir::VirExpr> {
+        self.analyzed()
+            .vir_program
+            .get_field_default(field_id)
             .map(|r| r.as_ref())
     }
 

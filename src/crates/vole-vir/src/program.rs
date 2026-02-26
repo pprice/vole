@@ -4,7 +4,7 @@
 // This is the clean boundary between VIR lowering and code generation.
 
 use rustc_hash::FxHashMap;
-use vole_identity::{FunctionId, MethodId, NameId, Span, Symbol};
+use vole_identity::{FieldId, FunctionId, MethodId, NameId, Span, Symbol};
 
 use crate::func::{VirBody, VirFunction, VirTest};
 use crate::refs::VirRef;
@@ -56,6 +56,12 @@ pub struct VirProgram {
     /// Keyed by module path, then by the `let` binding's `Symbol`.
     pub module_global_inits: FxHashMap<String, FxHashMap<Symbol, VirRef>>,
 
+    /// VIR-lowered default field initializer expressions.
+    ///
+    /// Keyed by semantic `FieldId`. These are used when struct/class literals
+    /// omit fields that have defaults.
+    pub field_default_inits: FxHashMap<FieldId, VirRef>,
+
     /// Base index of VIR-monomorphized functions within `functions`.
     ///
     /// Functions at indices `>= vir_monomorph_base` were produced by the VIR
@@ -96,5 +102,10 @@ impl VirProgram {
     /// Look up a VIR test body by the test case's span.
     pub fn get_test(&self, span: Span) -> Option<&VirBody> {
         self.tests.iter().find(|t| t.span == span).map(|t| &t.body)
+    }
+
+    /// Look up a VIR default initializer expression by semantic `FieldId`.
+    pub fn get_field_default(&self, field_id: FieldId) -> Option<&VirRef> {
+        self.field_default_inits.get(&field_id)
     }
 }

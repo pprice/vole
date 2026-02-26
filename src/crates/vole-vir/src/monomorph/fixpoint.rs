@@ -599,6 +599,7 @@ mod tests {
             tests: Vec::new(),
             global_inits: FxHashMap::default(),
             module_global_inits: FxHashMap::default(),
+            field_default_inits: FxHashMap::default(),
             vir_monomorph_base: usize::MAX,
         }
     }

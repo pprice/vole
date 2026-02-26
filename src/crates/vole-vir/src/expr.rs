@@ -106,8 +106,8 @@ pub enum VirExpr {
     ///
     /// `type_def` is the resolved `TypeDefId` from the entity registry.
     /// `ty` is the sema-inferred result type (may include generic args).
-    /// `fields` are the explicitly provided field initializers; default
-    /// fields are still compiled from AST by codegen.
+    /// `fields` are the explicitly provided field initializers; omitted default
+    /// fields are compiled via `VirProgram::field_default_inits`.
     StructLiteral {
         type_def: TypeDefId,
         fields: Vec<(Symbol, VirRef)>,
@@ -119,8 +119,8 @@ pub enum VirExpr {
     ///
     /// `type_def` is the resolved `TypeDefId` from the entity registry.
     /// `ty` is the sema-inferred result type (may include generic args).
-    /// `fields` are the explicitly provided field initializers; default
-    /// fields are still compiled from AST by codegen.
+    /// `fields` are the explicitly provided field initializers; omitted default
+    /// fields are compiled via `VirProgram::field_default_inits`.
     ClassInstance {
         type_def: TypeDefId,
         fields: Vec<(Symbol, VirRef)>,
