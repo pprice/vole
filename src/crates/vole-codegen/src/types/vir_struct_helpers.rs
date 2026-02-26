@@ -44,6 +44,7 @@ impl VirStructEntityLookup for crate::analyzed::AnalyzedProgram {
     }
 }
 
+#[cfg(test)]
 impl VirStructEntityLookup for vole_sema::entity_registry::EntityRegistry {
     fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
         self.get_type(type_def_id).kind.is_sentinel()
