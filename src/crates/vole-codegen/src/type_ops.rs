@@ -197,11 +197,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<TypeDefId> {
         let arena = self.arena();
         let name_table = self.name_table();
-        let registry = self.analyzed().entity_registry();
+        let analyzed = self.analyzed();
 
         let check_variant = |type_def_id: TypeDefId| -> bool {
             name_table
-                .last_segment_str(registry.name_id(type_def_id))
+                .last_segment_str(analyzed.entity_type_name_id(type_def_id))
                 .is_some_and(|seg| seg == name)
         };
 

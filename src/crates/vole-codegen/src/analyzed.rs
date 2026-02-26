@@ -395,6 +395,22 @@ impl AnalyzedProgram {
         &self.entities
     }
 
+    /// Resolve the EntityRegistry NameId used for all array implement dispatch.
+    pub fn array_type_name_id(&self) -> Option<NameId> {
+        self.entity_registry().array_name_id()
+    }
+
+    /// Resolve a type's canonical entity NameId from its TypeDefId.
+    pub fn entity_type_name_id(&self, type_def_id: TypeDefId) -> NameId {
+        self.entity_registry().name_id(type_def_id)
+    }
+
+    /// Find a type by its short (last-segment) name in the entity registry.
+    pub fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
+        self.entity_registry()
+            .type_by_short_name(short_name, self.name_table())
+    }
+
     /// Get read-only access to implement registry
     pub fn implement_registry(&self) -> &ImplementRegistry {
         &self.implements

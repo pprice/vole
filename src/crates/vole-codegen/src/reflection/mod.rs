@@ -415,15 +415,14 @@ pub(crate) struct ReflectionTypeInfo {
 
 /// Resolve TypeMeta and FieldMeta TypeDefIds from the entity registry.
 pub(crate) fn resolve_reflection_types(cg: &Cg) -> CodegenResult<ReflectionTypeInfo> {
-    let registry = cg.analyzed().entity_registry();
-    let name_table = cg.name_table();
-
-    let type_meta_def_id = registry
-        .type_by_short_name("TypeMeta", name_table)
+    let type_meta_def_id = cg
+        .analyzed()
+        .type_by_short_name("TypeMeta")
         .ok_or_else(|| CodegenError::not_found("TypeMeta class", "entity registry"))?;
 
-    let field_meta_def_id = registry
-        .type_by_short_name("FieldMeta", name_table)
+    let field_meta_def_id = cg
+        .analyzed()
+        .type_by_short_name("FieldMeta")
         .ok_or_else(|| CodegenError::not_found("FieldMeta class", "entity registry"))?;
 
     // Look up the type_ids and field_slots from type_metadata.

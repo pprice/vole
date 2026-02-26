@@ -985,14 +985,13 @@ fn resolve_concrete_type_name<C: VtableCtx>(
 
 /// Resolve TypeMeta and FieldMeta class metadata from type_metadata.
 fn resolve_reflection_meta<C: VtableCtx>(ctx: &C) -> CodegenResult<ReflectionMetaInfo> {
-    let registry = ctx.analyzed().entity_registry();
-    let name_table = ctx.analyzed().name_table();
-
-    let type_meta_def_id = registry
-        .type_by_short_name("TypeMeta", name_table)
+    let type_meta_def_id = ctx
+        .analyzed()
+        .type_by_short_name("TypeMeta")
         .ok_or_else(|| CodegenError::not_found("TypeMeta class", "entity registry"))?;
-    let field_meta_def_id = registry
-        .type_by_short_name("FieldMeta", name_table)
+    let field_meta_def_id = ctx
+        .analyzed()
+        .type_by_short_name("FieldMeta")
         .ok_or_else(|| CodegenError::not_found("FieldMeta class", "entity registry"))?;
 
     let tm_meta = ctx
