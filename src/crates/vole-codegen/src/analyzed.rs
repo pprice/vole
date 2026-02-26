@@ -9,7 +9,6 @@ use vole_frontend::{Decl, Interner, LetInit, Program, Symbol};
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
 };
-use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::{
     AnalysisOutput, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
@@ -406,8 +405,7 @@ impl AnalyzedProgram {
         &self,
         type_id: vole_sema::type_arena::TypeId,
     ) -> Option<NameId> {
-        ImplTypeId::from_type_id(type_id, self.type_arena(), self.entity_registry())
-            .map(ImplTypeId::name_id)
+        ImplementRegistry::type_name_id_for_type(type_id, self.type_arena(), self.entity_registry())
     }
 
     /// Look up an implement-registry method by concrete type-name key.
@@ -417,7 +415,7 @@ impl AnalyzedProgram {
         method_name_id: NameId,
     ) -> Option<&vole_sema::implement_registry::MethodImpl> {
         self.implement_registry()
-            .get_method(&ImplTypeId::from_name_id(type_name_id), method_name_id)
+            .get_method_by_name(type_name_id, method_name_id)
     }
 
     /// Resolve and look up an implement-registry method from a sema TypeId.

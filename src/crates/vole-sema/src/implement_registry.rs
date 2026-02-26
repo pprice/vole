@@ -309,6 +309,24 @@ impl ImplementRegistry {
         self.methods.get(&key)
     }
 
+    /// Look up a method by implement type-name key.
+    pub fn get_method_by_name(
+        &self,
+        type_name_id: NameId,
+        method_name: NameId,
+    ) -> Option<&MethodImpl> {
+        self.get_method(&ImplTypeId::from_name_id(type_name_id), method_name)
+    }
+
+    /// Resolve the implement type-name key from a concrete type.
+    pub fn type_name_id_for_type(
+        ty: TypeId,
+        arena: &TypeArena,
+        entity_registry: &crate::entity_registry::EntityRegistry,
+    ) -> Option<NameId> {
+        ImplTypeId::from_type_id(ty, arena, entity_registry).map(ImplTypeId::name_id)
+    }
+
     /// Get all methods for a type
     pub fn get_methods_for_type(&self, type_id: &ImplTypeId) -> Vec<(NameId, &MethodImpl)> {
         self.methods
