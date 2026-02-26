@@ -89,11 +89,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Temporary bridge from `VirTypeId` to sema `TypeId` for legacy code paths.
     #[inline]
     pub fn sema_type_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
-        super::types::vir_conversions::vir_to_sema_type_id(
+        let sema_ty = super::types::vir_conversions::vir_to_sema_type_id(
             vir_ty,
             self.vir_type_table(),
             self.arena(),
-        )
+        );
+        self.try_substitute_type(sema_ty)
     }
 
     /// Convert a slice of TypeIds to Cranelift types

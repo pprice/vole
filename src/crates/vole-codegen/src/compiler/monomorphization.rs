@@ -3,9 +3,7 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext};
 
 use super::Compiler;
-use super::common::{
-    FunctionCompileConfig, compile_function_inner_with_params, compile_function_inner_with_vir,
-};
+use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::generic_collection::GenericTypeMethodsAst;
 
 use crate::errors::{CodegenError, CodegenResult};
@@ -26,6 +24,7 @@ use crate::types::function_name_id_with_interner;
 struct ExpandedMethodData {
     concrete_key: vole_sema::generic::ClassMethodMonomorphKey,
     mangled_name_str: String,
+    template_mangled_name: NameId,
     func_type: vole_sema::types::FunctionType,
     substitutions: FxHashMap<NameId, TypeId>,
     class_name: NameId,
@@ -731,31 +730,24 @@ impl Compiler<'_> {
                     self_binding,
                     Some(return_type_id),
                 );
-                // VIR path preferred; AST fallback remains temporarily until all
-                // class method monomorph bodies are VIR-lowered.
-                if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir_func.body,
-                        cg_module_id,
-                        Some(&instance.substitutions),
-                    )?;
-                } else {
-                    // TEMP(vol-619h): keep AST fallback until class method
-                    // monomorph VIR coverage is complete (missing VIR bodies
-                    // currently fail in many unit tests).
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        cg_module_id,
-                        Some(&instance.substitutions),
-                    )?;
-                }
+                let vir_func = self
+                    .analyzed
+                    .get_vir_monomorph(instance.mangled_name)
+                    .ok_or_else(|| {
+                        CodegenError::not_found(
+                            "VIR class method monomorph",
+                            format!("{mangled_name} ({:?})", instance.mangled_name),
+                        )
+                    })?;
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir_func.body,
+                    cg_module_id,
+                    Some(&instance.substitutions),
+                )?;
             }
 
             // Define the function
@@ -967,31 +959,24 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
-                // VIR path preferred; AST fallback remains temporarily until all
-                // static method monomorph bodies are VIR-lowered.
-                if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
-                    compile_function_inner_with_vir(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        &vir_func.body,
-                        cg_module_id,
-                        Some(&instance.substitutions),
-                    )?;
-                } else {
-                    // TEMP(vol-619h): keep AST fallback until static method
-                    // monomorph VIR coverage is complete (missing VIR bodies
-                    // currently fail in many unit tests).
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        cg_module_id,
-                        Some(&instance.substitutions),
-                    )?;
-                }
+                let vir_func = self
+                    .analyzed
+                    .get_vir_monomorph(instance.mangled_name)
+                    .ok_or_else(|| {
+                        CodegenError::not_found(
+                            "VIR static method monomorph",
+                            format!("{mangled_name} ({:?})", instance.mangled_name),
+                        )
+                    })?;
+                compile_function_inner_with_vir(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    &vir_func.body,
+                    cg_module_id,
+                    Some(&instance.substitutions),
+                )?;
             }
 
             // Define the function
@@ -1338,6 +1323,7 @@ impl Compiler<'_> {
                 expanded.push(ExpandedMethodData {
                     concrete_key,
                     mangled_name_str,
+                    template_mangled_name: tmpl.mangled_name,
                     func_type: concrete_func_type,
                     substitutions: concrete_class_subs,
                     class_name: tmpl.class_name,
@@ -1471,6 +1457,16 @@ impl Compiler<'_> {
                 let self_type_id = data.self_type;
                 let self_sym = self.self_symbol();
                 let self_binding = (self_sym, self_type_id, self.pointer_type);
+                let vir_body = self
+                    .analyzed
+                    .get_vir_monomorph(data.template_mangled_name)
+                    .map(|vf| vf.body.clone())
+                    .ok_or_else(|| {
+                        CodegenError::not_found(
+                            "VIR expanded class method monomorph template",
+                            format!("{:?}", data.template_mangled_name),
+                        )
+                    })?;
 
                 let source_file_ptr = self.source_file_ptr();
                 let empty_inits = FxHashMap::default();
@@ -1497,36 +1493,15 @@ impl Compiler<'_> {
                         self_binding,
                         Some(return_type_id),
                     );
-                    let vir_body = self
-                        .analyzed
-                        .vir_program
-                        .functions
-                        .iter()
-                        .find(|vf| vf.name == data.mangled_name_str)
-                        .map(|vf| vf.body.clone());
-                    if let Some(vir_body) = vir_body {
-                        compile_function_inner_with_vir(
-                            builder,
-                            &mut codegen_ctx,
-                            &env,
-                            config,
-                            &vir_body,
-                            cg_module_id,
-                            Some(&data.substitutions),
-                        )?;
-                    } else {
-                        // TEMP(vol-619h): keep AST fallback until expanded
-                        // abstract class method monomorph VIR coverage is
-                        // complete.
-                        compile_function_inner_with_params(
-                            builder,
-                            &mut codegen_ctx,
-                            &env,
-                            config,
-                            cg_module_id,
-                            Some(&data.substitutions),
-                        )?;
-                    }
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir_body,
+                        cg_module_id,
+                        Some(&data.substitutions),
+                    )?;
                 }
 
                 self.finalize_function(func_id)?;

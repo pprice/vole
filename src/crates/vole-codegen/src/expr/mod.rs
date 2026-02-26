@@ -1676,6 +1676,21 @@ impl Cg<'_, '_, '_> {
             IsCheckResult::CheckUnknown(tested_type_id, tested_vir_type_id) => {
                 let compiled = self.compile_vir_expr(value)?;
                 let tested_type_id = self.sema_type_from_vir(tested_type_id);
+
+                // Generic union checks are lowered as CheckUnknown so we can
+                // re-derive the concrete union tag after substitutions.
+                if tested_type_id != TypeId::UNKNOWN {
+                    let concrete_value_ty = self.try_substitute_type(compiled.type_id);
+                    let concrete_tested_ty = self.try_substitute_type(tested_type_id);
+                    if let Some(variants) = self.arena().unwrap_union(concrete_value_ty)
+                        && let Some(tag_index) =
+                            variants.iter().position(|&ty| ty == concrete_tested_ty)
+                    {
+                        let cmp = self.tag_eq(compiled.value, tag_index as i64);
+                        return Ok(self.bool_value(cmp));
+                    }
+                }
+
                 let cmp = if tested_type_id != TypeId::UNKNOWN {
                     self.compile_unknown_is_check(compiled.value, tested_type_id)
                 } else {

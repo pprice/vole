@@ -588,7 +588,18 @@ fn lower_is_check(
 ) -> VirRef {
     let sema_result = ctx.require_is_check_result(expr.id, expr.span.line);
     let value = lower_expr(&is_expr.value, ctx);
-    let vir_result = convert_is_check_result(sema_result, ctx);
+    let mut vir_result = convert_is_check_result(sema_result, ctx);
+    // For generic unions, sema may record a tag index from an abstract or
+    // differently-instantiated union ordering. Carry the tested type instead of
+    // the raw tag so codegen can re-derive the concrete tag with substitutions.
+    if matches!(vir_result, IsCheckResult::CheckTag(_)) {
+        let scrutinee_ty = ctx
+            .node_map
+            .get_type(is_expr.value.id)
+            .unwrap_or(TypeId::UNKNOWN);
+        let tested_ty = recover_tested_type(&vir_result, scrutinee_ty, ctx);
+        vir_result = IsCheckResult::CheckUnknown(tested_ty, tested_ty);
+    }
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::IsCheck {
