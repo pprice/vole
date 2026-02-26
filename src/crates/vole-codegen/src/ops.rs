@@ -8,8 +8,8 @@ use cranelift_codegen::ir::{Function, InstructionData};
 
 use crate::RuntimeKey;
 use vole_frontend::{BinaryExpr, BinaryOp, ExprKind};
-use vole_sema::numeric_model::numeric_result_type;
 use vole_sema::type_arena::TypeId;
+use vole_vir::numeric_model::numeric_result_type;
 
 use super::context::Cg;
 use super::types::{CompiledValue, convert_to_type};

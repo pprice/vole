@@ -18,6 +18,7 @@ pub mod expr;
 pub mod func;
 pub mod intrinsics;
 pub mod monomorph;
+pub mod numeric_model;
 pub mod program;
 pub mod refs;
 pub mod stmt;
@@ -44,6 +45,9 @@ pub use monomorph::{
     InstanceIndex, MonomorphInstance, MonomorphResult, RewriteCtx, TypeSubstitution, monomorphize,
     monomorphize_with_seeds, rederive_decisions, resolve_generic_calls, rewrite_function,
     substitute_types,
+};
+pub use numeric_model::{
+    NumericCoercion, integer_result_type, numeric_coercion, numeric_result_type,
 };
 pub use program::VirProgram;
 pub use refs::VirRef;
