@@ -11,7 +11,7 @@ use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use vole_frontend::ast::{TestCase, TestsDecl};
-use vole_frontend::{Block, Decl, ExprKind, LetInit, Program, Span, Stmt};
+use vole_frontend::{Decl, ExprKind, LetInit, Program};
 
 impl Compiler<'_> {
     /// Compile all tests in a tests block
@@ -24,20 +24,9 @@ impl Compiler<'_> {
         // Phase 1: Compile scoped function/class bodies (and nested tests)
         self.compile_tests_scoped_bodies(tests_decl, program, test_count)?;
 
-        // Collect scoped let declarations (Let and LetTuple) for compiling in each test
-        let scoped_let_stmts: Vec<Stmt> = tests_decl
-            .decls
-            .iter()
-            .filter_map(|d| match d {
-                Decl::Let(let_stmt) => Some(Stmt::Let(let_stmt.clone())),
-                Decl::LetTuple(let_tuple) => Some(Stmt::LetTuple(let_tuple.clone())),
-                _ => None,
-            })
-            .collect();
-
         // Phase 2: Compile each test
         for test in &tests_decl.tests {
-            self.compile_single_test(test, &scoped_let_stmts, test_count)?;
+            self.compile_single_test(test, test_count)?;
         }
 
         Ok(())
@@ -47,7 +36,6 @@ impl Compiler<'_> {
     fn compile_single_test(
         &mut self,
         test: &TestCase,
-        scoped_let_stmts: &[Stmt],
         test_count: &mut usize,
     ) -> CodegenResult<()> {
         let func_key = self.test_function_key(*test_count);
@@ -80,21 +68,12 @@ impl Compiler<'_> {
                 &mut self.pending_monomorphs,
             );
 
-            // Compile scoped let declarations and test body
+            // Compile test body from VIR.
             let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env)
                 .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline);
 
             // Push function-level RC scope for test body
             cg.push_rc_scope();
-
-            if !scoped_let_stmts.is_empty() {
-                // Create a synthetic block with the let statements
-                let let_block = Block {
-                    stmts: scoped_let_stmts.to_vec(),
-                    span: Span::default(),
-                };
-                cg.block(&let_block)?;
-            }
 
             // Compile test body via VIR.
             // Note: For FuncBody::Expr, terminated=true but the block isn't actually

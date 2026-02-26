@@ -17,7 +17,7 @@ use vole_vir::{VirBody, VirFunction, VirProgram, VirRef, VirTest};
 
 use vole_sema::vir_lower::{
     lower_function, lower_interface_method, lower_method, lower_monomorphized_function,
-    lower_test_body,
+    lower_stmts, lower_test_body,
 };
 
 /// Result of parsing and analyzing a source file.
@@ -477,7 +477,6 @@ fn lower_module_global_inits(
     modules_with_errors: &HashSet<String>,
     type_table: &mut VirTypeTable,
 ) -> FxHashMap<String, FxHashMap<Symbol, VirRef>> {
-    use vole_sema::vir_lower::LoweringCtx;
     use vole_sema::vir_lower::expr::lower_expr;
 
     let mut result = FxHashMap::default();
@@ -486,7 +485,7 @@ fn lower_module_global_inits(
             continue;
         }
         let interner = Rc::make_mut(module_interner);
-        let mut ctx = LoweringCtx {
+        let mut ctx = vole_sema::vir_lower::LoweringCtx {
             node_map,
             interner,
             type_arena,
@@ -1254,8 +1253,6 @@ fn lower_module_field_default_inits(
     modules_with_errors: &HashSet<String>,
     type_table: &mut VirTypeTable,
 ) -> FxHashMap<FieldId, VirRef> {
-    use vole_sema::vir_lower::LoweringCtx;
-
     let mut map = FxHashMap::default();
     for (module_path, (program, module_interner)) in module_programs.iter_mut() {
         if modules_with_errors.contains(module_path.as_str()) {
@@ -1265,7 +1262,7 @@ fn lower_module_field_default_inits(
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
-        let mut ctx = LoweringCtx {
+        let mut ctx = vole_sema::vir_lower::LoweringCtx {
             node_map,
             interner,
             type_arena,
@@ -3065,10 +3062,39 @@ fn lower_tests_decl_bodies(
     tests: &mut Vec<VirTest>,
     type_table: &mut VirTypeTable,
 ) {
+    let scoped_let_stmts: Vec<vole_frontend::Stmt> = tests_decl
+        .decls
+        .iter()
+        .filter_map(|decl| match decl {
+            Decl::Let(let_stmt) => Some(vole_frontend::Stmt::Let(let_stmt.clone())),
+            Decl::LetTuple(let_tuple) => Some(vole_frontend::Stmt::LetTuple(let_tuple.clone())),
+            _ => None,
+        })
+        .collect();
+    let scoped_let_vir_stmts = if scoped_let_stmts.is_empty() {
+        Vec::new()
+    } else {
+        let mut ctx = vole_sema::vir_lower::LoweringCtx {
+            node_map,
+            interner,
+            type_arena,
+            entities,
+            name_table: names,
+            type_table,
+            generic: false,
+        };
+        lower_stmts(&scoped_let_stmts, &mut ctx).stmts
+    };
+
     for test in &tests_decl.tests {
-        let vir_body = lower_test_body(
+        let mut vir_body = lower_test_body(
             &test.body, node_map, interner, type_arena, entities, names, type_table,
         );
+        if !scoped_let_vir_stmts.is_empty() {
+            vir_body
+                .stmts
+                .splice(0..0, scoped_let_vir_stmts.iter().cloned());
+        }
         tests.push(VirTest {
             name: test.name.clone(),
             body: vir_body,
