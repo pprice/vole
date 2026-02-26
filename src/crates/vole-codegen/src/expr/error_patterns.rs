@@ -291,7 +291,7 @@ impl Cg<'_, '_, '_> {
     /// Look up the numeric error tag for a named error type within a fallible error union.
     ///
     /// Thin wrapper around `fallible_error_tag_by_id` that pulls all context
-    /// arguments from `self`, keeping call sites free of `self.analyzed().entity_registry()` passes.
+    /// arguments from `self`.
     pub(crate) fn error_tag_for(&self, error_type_id: TypeId, error_name: Symbol) -> Option<i64> {
         fallible_error_tag_by_id(
             error_type_id,
@@ -299,7 +299,7 @@ impl Cg<'_, '_, '_> {
             self.arena(),
             self.interner(),
             self.name_table(),
-            self.analyzed().entity_registry(),
+            self.analyzed(),
         )
     }
 

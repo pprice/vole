@@ -552,11 +552,10 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
 
     // Auto-detect sret convention.
     let skip_block_params = if return_type_id.is_some() {
-        let entities = env.analyzed.entity_registry();
         if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             vir_func.return_type,
             &env.analyzed.vir_program.type_table,
-            entities,
+            env.analyzed,
         ) {
             if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
                 1

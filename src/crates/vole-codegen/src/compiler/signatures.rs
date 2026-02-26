@@ -129,8 +129,7 @@ impl Compiler<'_> {
     /// Returns None if the type is not a struct.
     pub fn struct_field_count(&self, type_id: TypeId) -> Option<usize> {
         let arena = self.arena();
-        let entities = self.analyzed.entity_registry();
-        crate::structs::struct_flat_slot_count(type_id, arena, entities)
+        crate::structs::struct_flat_slot_count(type_id, arena, self.analyzed)
     }
 
     /// Build a Cranelift signature directly from a FunctionId.
@@ -217,7 +216,7 @@ impl Compiler<'_> {
             && let Some(field_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
                 return_vir_type,
                 table,
-                self.analyzed.entity_registry(),
+                self.analyzed,
             )
         {
             return self.build_struct_return_sig(&cranelift_params, field_count);
