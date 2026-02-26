@@ -27,7 +27,7 @@ impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> CodegenResult<(FunctionKey, String)> {
         // Collect info using query (immutable borrow)
         let (name_id, display_name) = {
-            let query = self.query();
+            let query = self.analyzed.query();
             let module_id = self.program_module();
             (
                 query.try_function_name_id(module_id, sym),
@@ -225,8 +225,10 @@ impl Compiler<'_> {
                     // generator itself use the correct (non-interface) type.
                     if let Some(func_key) = func_key {
                         let module_id = self.program_module();
-                        if let Some(name_id) =
-                            self.query().try_function_name_id(module_id, func.name)
+                        if let Some(name_id) = self
+                            .analyzed
+                            .query()
+                            .try_function_name_id(module_id, func.name)
                         {
                             self.override_generator_return_type(name_id, func_key);
                         }
@@ -296,7 +298,7 @@ impl Compiler<'_> {
     /// this generator sees the correct (non-interface) return type.
     fn override_generator_return_type(&mut self, name_id: NameId, func_key: FunctionKey) {
         let elem_type_id = {
-            let query = self.query();
+            let query = self.analyzed.query();
             let func_id = match query.function_id_by_name_id(name_id) {
                 Some(id) => id,
                 None => return,
@@ -330,13 +332,20 @@ impl Compiler<'_> {
                     }
 
                     // Check for implicit generics (structural type params)
-                    let query = self.query();
+                    let query = self.analyzed.query();
                     let program_module = self.program_module();
                     let name_id = query.function_name_id(program_module, func.name);
                     let has_implicit_generic_info = self
+                        .analyzed
                         .query()
                         .function_id_by_name_id(name_id)
-                        .map(|func_id| self.query().get_function(func_id).generic_info.is_some())
+                        .map(|func_id| {
+                            self.analyzed
+                                .query()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
                         .unwrap_or(false);
                     if has_implicit_generic_info {
                         continue;
@@ -460,7 +469,7 @@ impl Compiler<'_> {
                     if !func.type_params.is_empty() {
                         continue;
                     }
-                    let module_id = self.query().module_id_or_main(module_path);
+                    let module_id = self.analyzed.query().module_id_or_main(module_path);
                     let name_id = function_name_id_with_interner(
                         self.analyzed,
                         module_interner,
@@ -476,12 +485,12 @@ impl Compiler<'_> {
                         continue;
                     }
 
-                    let display_name = self.query().display_name(name_id);
+                    let display_name = self.analyzed.query().display_name(name_id);
                     self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Declare);
                 }
             }
 
-            let module_id = self.query().module_id_or_main(module_path);
+            let module_id = self.analyzed.query().module_id_or_main(module_path);
 
             // Finalize module classes (register type metadata, declare methods)
             // MUST happen before implement block registration, which needs type_metadata
@@ -523,7 +532,12 @@ impl Compiler<'_> {
 
     pub(super) fn compile_module_functions(&mut self) -> CodegenResult<()> {
         // Collect module paths first to avoid borrow issues
-        let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
+        let module_paths: Vec<_> = self
+            .analyzed
+            .query()
+            .module_paths()
+            .map(String::from)
+            .collect();
         tracing::debug!(
             ?module_paths,
             "compile_module_functions: processing module paths"
@@ -610,7 +624,7 @@ impl Compiler<'_> {
                 if !func.type_params.is_empty() {
                     continue;
                 }
-                let module_id = self.query().module_id_or_main(module_path);
+                let module_id = self.analyzed.query().module_id_or_main(module_path);
                 let name_id = function_name_id_with_interner(
                     self.analyzed,
                     module_interner,
@@ -621,9 +635,16 @@ impl Compiler<'_> {
 
                 // Check for implicit generics (structural type params)
                 let has_implicit_generic_info = self
+                    .analyzed
                     .query()
                     .function_id_by_name_id(name_id)
-                    .map(|func_id| self.query().get_function(func_id).generic_info.is_some())
+                    .map(|func_id| {
+                        self.analyzed
+                            .query()
+                            .get_function(func_id)
+                            .generic_info
+                            .is_some()
+                    })
                     .unwrap_or(false);
                 if has_implicit_generic_info {
                     continue;
@@ -640,7 +661,7 @@ impl Compiler<'_> {
         }
 
         // Compile implement block methods (both instance and static)
-        let module_id = self.query().module_id_or_main(module_path);
+        let module_id = self.analyzed.query().module_id_or_main(module_path);
         for decl in &program.declarations {
             if let Decl::Implement(impl_block) = decl {
                 self.compile_module_implement_block(impl_block, module_interner, module_id)?;
@@ -688,7 +709,12 @@ impl Compiler<'_> {
     /// This declares the functions so they can be called, but doesn't compile them.
     /// Used when modules are already compiled in a shared CompiledModules cache.
     fn import_module_functions(&mut self) -> CodegenResult<()> {
-        let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
+        let module_paths: Vec<_> = self
+            .analyzed
+            .query()
+            .module_paths()
+            .map(String::from)
+            .collect();
 
         for module_path in &module_paths {
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
@@ -696,7 +722,7 @@ impl Compiler<'_> {
             // Import pure Vole functions (they're already compiled, just need declarations)
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
-                    let module_id = self.query().module_id_or_main(module_path);
+                    let module_id = self.analyzed.query().module_id_or_main(module_path);
                     let name_id = function_name_id_with_interner(
                         self.analyzed,
                         module_interner,
@@ -707,7 +733,7 @@ impl Compiler<'_> {
                         CodegenError::internal("module function: name_id not registered")
                     })?;
 
-                    let display_name = self.query().display_name(name_id);
+                    let display_name = self.analyzed.query().display_name(name_id);
                     let func_key = self.declare_function_by_name_id(
                         name_id,
                         &display_name,
@@ -722,7 +748,7 @@ impl Compiler<'_> {
 
             // Finalize module classes (register type metadata, import methods)
             // MUST happen before implement block import, which needs type_metadata
-            let module_id = self.query().module_id_or_main(module_path);
+            let module_id = self.analyzed.query().module_id_or_main(module_path);
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
                     self.import_module_class(class, module_interner, module_id)?;
@@ -792,19 +818,20 @@ impl Compiler<'_> {
         module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
     ) -> CodegenResult<()> {
         let func_key = self.func_registry.intern_name_id(name_id);
-        let display_name = self.query().display_name(name_id);
+        let display_name = self.analyzed.query().display_name(name_id);
         let jit_func_id = self
             .func_registry
             .func_id(func_key)
             .ok_or_else(|| CodegenError::not_found("module function", &display_name))?;
-        let module_id = self.query().module_id_or_main(module_path);
+        let module_id = self.analyzed.query().module_id_or_main(module_path);
 
         // Get FunctionId and extract pre-resolved signature data
         let semantic_func_id = self
+            .analyzed
             .query()
             .function_id_by_name_id(name_id)
             .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
-        let func_def = self.query().get_function(semantic_func_id);
+        let func_def = self.analyzed.query().get_function(semantic_func_id);
         let (param_type_ids, return_type_id) = (
             func_def.signature.params_id.clone(),
             func_def.signature.return_type_id,
@@ -906,10 +933,11 @@ impl Compiler<'_> {
 
         // Get FunctionId and extract pre-resolved signature data
         let semantic_func_id = self
+            .analyzed
             .query()
             .function_id(program_module, func.name)
             .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
-        let func_def = self.query().get_function(semantic_func_id);
+        let func_def = self.analyzed.query().get_function(semantic_func_id);
         let (param_type_ids, return_type_id) = (
             func_def.signature.params_id.clone(),
             func_def.signature.return_type_id,

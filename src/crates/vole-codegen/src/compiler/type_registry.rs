@@ -50,7 +50,7 @@ impl Compiler<'_> {
         method_name_id: NameId,
         func_key: FunctionKey,
     ) {
-        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let type_name_id = self.analyzed.query().get_type(type_def_id).name_id;
         self.state
             .method_func_keys
             .insert((type_name_id, method_name_id), func_key);
@@ -61,17 +61,22 @@ impl Compiler<'_> {
     pub(super) fn pre_register_class(&mut self, class: &ClassDecl) -> CodegenResult<()> {
         let type_id = alloc_type_id();
 
-        let query = self.query();
+        let query = self.analyzed.query();
         let module_id = self.program_module();
         let name_id = query.name_id(module_id, &[class.name]);
 
         // Look up the TypeDefId from EntityRegistry
-        let type_def_id = self.query().try_type_def_id(name_id).ok_or_else(|| {
-            CodegenError::internal("pre_register_class: class not in entity registry")
-        })?;
+        let type_def_id = self
+            .analyzed
+            .query()
+            .try_type_def_id(name_id)
+            .ok_or_else(|| {
+                CodegenError::internal("pre_register_class: class not in entity registry")
+            })?;
 
         // Use pre-computed base_type_id from sema (no mutable arena access needed)
         let vole_type_id = self
+            .analyzed
             .query()
             .get_type(type_def_id)
             .base_type_id
@@ -118,9 +123,10 @@ impl Compiler<'_> {
 
         // Look up TypeDefId first (needed as key for type_metadata)
         let type_def_id = self
+            .analyzed
             .query()
             .try_name_id(module_id, &[type_decl.name()])
-            .and_then(|name_id| self.query().try_type_def_id(name_id))
+            .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id))
             .ok_or_else(|| {
                 CodegenError::internal_with_context(
                     "finalize_type: type not in entity registry",
@@ -185,7 +191,7 @@ impl Compiler<'_> {
                 )
             })?
             .vole_type;
-        let name_id = self.query().get_type(type_def_id).name_id;
+        let name_id = self.analyzed.query().get_type(type_def_id).name_id;
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,
@@ -216,14 +222,14 @@ impl Compiler<'_> {
         let mut field_slots = FxHashMap::default();
         let mut field_type_tags = Vec::new();
 
-        let field_ids: Vec<_> = self.query().fields_on_type(type_def_id).collect();
+        let field_ids: Vec<_> = self.analyzed.query().fields_on_type(type_def_id).collect();
 
         // Remap sema slots to physical slots: i128 fields need 2 u64 slots.
         // Sort by sema slot to ensure deterministic physical slot assignment.
         let mut fields_by_slot: Vec<_> = field_ids
             .iter()
             .map(|&fid| {
-                let fd = self.query().get_field(fid);
+                let fd = self.analyzed.query().get_field(fid);
                 (fd.slot, fid)
             })
             .collect();
@@ -232,8 +238,9 @@ impl Compiler<'_> {
         let arena = self.arena();
         let mut physical_slot = 0usize;
         for (ordinal, (_, field_id)) in fields_by_slot.iter().enumerate() {
-            let field_def = self.query().get_field(*field_id);
+            let field_def = self.analyzed.query().get_field(*field_id);
             let field_name = self
+                .analyzed
                 .query()
                 .last_segment(field_def.name_id)
                 .ok_or_else(|| CodegenError::internal("field lookup: field has no name"))?;
@@ -266,6 +273,7 @@ impl Compiler<'_> {
         for method in type_decl.methods() {
             let method_name_id = self.method_name_id(method.name)?;
             let method_id = self
+                .analyzed
                 .query()
                 .find_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
@@ -275,7 +283,7 @@ impl Compiler<'_> {
                     )
                 })?;
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
-            let full_name_id = self.query().get_method(method_id).full_name_id;
+            let full_name_id = self.analyzed.query().get_method(method_id).full_name_id;
             let func_key = self.func_registry.intern_name_id(full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -313,7 +321,7 @@ impl Compiler<'_> {
         // the entity registry is populated by sema regardless of which program the
         // interface was defined in.
         let default_method_ids: Vec<(TypeDefId, vole_identity::MethodId, NameId)> = {
-            let query = self.query();
+            let query = self.analyzed.query();
             let lookup_tdef_id = query
                 .try_name_id(module_id, &[type_decl.name()])
                 .and_then(|name_id| query.try_type_def_id(name_id))
@@ -358,7 +366,7 @@ impl Compiler<'_> {
         // Register each default method in the JIT function registry
         for (_interface_tdef_id, semantic_method_id, method_name_id) in default_method_ids {
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-            let method_def = self.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -372,15 +380,20 @@ impl Compiler<'_> {
     /// Pre-register a struct type (just the name and type_id)
     /// Structs are stack-allocated value types, so no runtime type registration is needed.
     pub(super) fn pre_register_struct(&mut self, struct_decl: &StructDecl) -> CodegenResult<()> {
-        let query = self.query();
+        let query = self.analyzed.query();
         let module_id = self.program_module();
         let name_id = query.name_id(module_id, &[struct_decl.name]);
 
-        let type_def_id = self.query().try_type_def_id(name_id).ok_or_else(|| {
-            CodegenError::internal("pre_register_struct: struct not in entity registry")
-        })?;
+        let type_def_id = self
+            .analyzed
+            .query()
+            .try_type_def_id(name_id)
+            .ok_or_else(|| {
+                CodegenError::internal("pre_register_struct: struct not in entity registry")
+            })?;
 
         let vole_type_id = self
+            .analyzed
             .query()
             .get_type(type_def_id)
             .base_type_id
@@ -413,15 +426,20 @@ impl Compiler<'_> {
         &mut self,
         sentinel_decl: &SentinelDecl,
     ) -> CodegenResult<()> {
-        let query = self.query();
+        let query = self.analyzed.query();
         let module_id = self.program_module();
         let name_id = query.name_id(module_id, &[sentinel_decl.name]);
 
-        let type_def_id = self.query().try_type_def_id(name_id).ok_or_else(|| {
-            CodegenError::internal("pre_register_sentinel: sentinel not in entity registry")
-        })?;
+        let type_def_id = self
+            .analyzed
+            .query()
+            .try_type_def_id(name_id)
+            .ok_or_else(|| {
+                CodegenError::internal("pre_register_sentinel: sentinel not in entity registry")
+            })?;
 
         let vole_type_id = self
+            .analyzed
             .query()
             .get_type(type_def_id)
             .base_type_id
@@ -459,7 +477,7 @@ impl Compiler<'_> {
         tracing::debug!(type_name = %type_name_str, "finalize_module_sentinel called");
 
         // Look up the TypeDefId using the sentinel name via full resolution chain
-        let query = self.query();
+        let query = self.analyzed.query();
         let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
             tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module sentinel");
             return Ok(());
@@ -472,6 +490,7 @@ impl Compiler<'_> {
         }
 
         let vole_type_id = self
+            .analyzed
             .query()
             .get_type(type_def_id)
             .base_type_id
@@ -480,7 +499,7 @@ impl Compiler<'_> {
             })?;
 
         // Sentinels are zero-field structs, use type_id 0 as a placeholder.
-        let name_id = self.query().get_type(type_def_id).name_id;
+        let name_id = self.analyzed.query().get_type(type_def_id).name_id;
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,
@@ -510,7 +529,7 @@ impl Compiler<'_> {
         type_name: Symbol,
     ) -> CodegenResult<()> {
         // Get the TypeDefId for this type from entity_registry
-        let query = self.query();
+        let query = self.analyzed.query();
         let module_id = self.program_module();
         let type_name_id = query.name_id(module_id, &[type_name]);
         let type_def_id = query.try_type_def_id(type_name_id).ok_or_else(|| {
@@ -527,6 +546,7 @@ impl Compiler<'_> {
 
             // Get MethodId and build signature from pre-resolved types
             let method_id = self
+                .analyzed
                 .query()
                 .find_static_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
@@ -539,7 +559,7 @@ impl Compiler<'_> {
             // Function key from method full name
             let func_key = self
                 .func_registry
-                .intern_name_id(self.query().method_full_name(method_id));
+                .intern_name_id(self.analyzed.query().method_full_name(method_id));
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
@@ -586,7 +606,7 @@ impl Compiler<'_> {
         tracing::debug!(type_name = %type_name_str, type_kind, "finalize_module_type called");
 
         // Look up the TypeDefId via full resolution chain
-        let query = self.query();
+        let query = self.analyzed.query();
         let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
             tracing::warn!(type_name = %type_name_str, type_kind, "Could not find TypeDefId for module type");
             return Ok(());
@@ -627,6 +647,7 @@ impl Compiler<'_> {
 
         // Register type metadata
         let vole_type_id = self
+            .analyzed
             .query()
             .get_type(type_def_id)
             .base_type_id
@@ -636,7 +657,7 @@ impl Compiler<'_> {
                     type_kind.to_string(),
                 )
             })?;
-        let name_id = self.query().get_type(type_def_id).name_id;
+        let name_id = self.analyzed.query().get_type(type_def_id).name_id;
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,
@@ -700,6 +721,7 @@ impl Compiler<'_> {
                     })?;
 
             let semantic_method_id = self
+                .analyzed
                 .query()
                 .find_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
@@ -713,7 +735,7 @@ impl Compiler<'_> {
                 })?;
 
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-            let method_def = self.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -763,6 +785,7 @@ impl Compiler<'_> {
                     })?;
 
             let semantic_method_id = self
+                .analyzed
                 .query()
                 .find_static_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
@@ -776,7 +799,7 @@ impl Compiler<'_> {
                 })?;
 
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
-            let method_def = self.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);

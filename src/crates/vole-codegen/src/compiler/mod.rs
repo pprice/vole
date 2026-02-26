@@ -68,7 +68,7 @@ use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId};
 use vole_runtime::NativeRegistry;
-use vole_sema::{ImplTypeId, ProgramQuery, type_arena::TypeId};
+use vole_sema::{ImplTypeId, type_arena::TypeId};
 
 pub use state::TestInfo;
 
@@ -141,11 +141,6 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Get a query interface for the analyzed program
-    fn query(&self) -> ProgramQuery<'_> {
-        self.analyzed.query()
-    }
-
     /// Get the entity registry directly
     #[inline]
     fn registry(&self) -> &vole_sema::EntityRegistry {
@@ -185,7 +180,8 @@ impl<'a> Compiler<'a> {
 
     /// Look up a method NameId by Symbol
     fn method_name_id(&self, name: Symbol) -> CodegenResult<NameId> {
-        self.query()
+        self.analyzed
+            .query()
             .try_method_name_id(name)
             .ok_or_else(|| CodegenError::not_found("method name_id", self.resolve_symbol(name)))
     }
@@ -200,9 +196,16 @@ impl<'a> Compiler<'a> {
     /// Functions with implicit generics are templates and should be skipped during
     /// normal compilation - they're compiled via monomorphized instances instead.
     fn has_implicit_generic_info(&self, name_id: NameId) -> bool {
-        self.query()
+        self.analyzed
+            .query()
             .function_id_by_name_id(name_id)
-            .map(|func_id| self.query().get_function(func_id).generic_info.is_some())
+            .map(|func_id| {
+                self.analyzed
+                    .query()
+                    .get_function(func_id)
+                    .generic_info
+                    .is_some()
+            })
             .unwrap_or(false)
     }
 
@@ -298,7 +301,7 @@ impl<'a> Compiler<'a> {
         mode: DeclareMode,
     ) -> Option<FunctionKey> {
         // Look up semantic FunctionId from NameId
-        let semantic_func_id = self.query().function_id_by_name_id(name_id)?;
+        let semantic_func_id = self.analyzed.query().function_id_by_name_id(name_id)?;
 
         // Build signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);
@@ -315,6 +318,7 @@ impl<'a> Compiler<'a> {
 
         // Record return type from pre-resolved signature
         let return_type_id = self
+            .analyzed
             .query()
             .get_function(semantic_func_id)
             .signature
@@ -334,7 +338,7 @@ impl<'a> Compiler<'a> {
     fn declare_main_function(&mut self, name: Symbol) -> Option<FunctionKey> {
         // Get name_id and display_name
         let (name_id, display_name) = {
-            let query = self.query();
+            let query = self.analyzed.query();
             let module_id = self.program_module();
             let name_id = query.try_function_name_id(module_id, name)?;
             let display_name = query.resolve_symbol(name).to_string();

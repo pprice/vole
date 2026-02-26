@@ -38,7 +38,7 @@ impl Compiler<'_> {
         for decl in decls {
             match decl {
                 Decl::Class(class) if !class.type_params.is_empty() => {
-                    let query = self.query();
+                    let query = self.analyzed.query();
                     if let Some(name_id) = query.try_name_id(module_id, &[class.name]) {
                         result.insert(
                             name_id,
@@ -50,7 +50,7 @@ impl Compiler<'_> {
                     }
                 }
                 Decl::Struct(s) if !s.type_params.is_empty() => {
-                    let query = self.query();
+                    let query = self.analyzed.query();
                     if let Some(name_id) = query.try_name_id(module_id, &[s.name]) {
                         result.insert(
                             name_id,
@@ -64,6 +64,7 @@ impl Compiler<'_> {
                 Decl::Tests(tests_decl) => {
                     // Use the virtual module for tests-block-scoped types
                     let vm_id = self
+                        .analyzed
                         .query()
                         .tests_virtual_module(tests_decl.span)
                         .unwrap_or(module_id);
@@ -95,16 +96,14 @@ impl Compiler<'_> {
                         _ => None,
                     };
                     if let Some(sym) = target_sym {
-                        let query = self.query();
+                        let query = self.analyzed.query();
                         if let Some(name_id) = query.try_name_id(module_id, &[sym])
                             && name_id == class_name_id
                         {
                             // Found matching implement block - search its methods
-                            if let Some(method) = impl_block
-                                .methods
-                                .iter()
-                                .find(|m| self.query().resolve_symbol(m.name) == method_name_str)
-                            {
+                            if let Some(method) = impl_block.methods.iter().find(|m| {
+                                self.analyzed.query().resolve_symbol(m.name) == method_name_str
+                            }) {
                                 return Some(method);
                             }
                         }
@@ -112,6 +111,7 @@ impl Compiler<'_> {
                 }
                 Decl::Tests(tests_decl) => {
                     let vm_id = self
+                        .analyzed
                         .query()
                         .tests_virtual_module(tests_decl.span)
                         .unwrap_or(module_id);
@@ -166,7 +166,7 @@ impl Compiler<'_> {
         for decl in &module_program.declarations {
             match decl {
                 Decl::Class(class) if !class.type_params.is_empty() => {
-                    let query = self.query();
+                    let query = self.analyzed.query();
                     if let Some(name_id) =
                         query.try_name_id_with_interner(module_id, &[class.name], module_interner)
                         && name_id == class_name_id
@@ -178,7 +178,7 @@ impl Compiler<'_> {
                     }
                 }
                 Decl::Struct(s) if !s.type_params.is_empty() => {
-                    let query = self.query();
+                    let query = self.analyzed.query();
                     if let Some(name_id) =
                         query.try_name_id_with_interner(module_id, &[s.name], module_interner)
                         && name_id == class_name_id
@@ -215,7 +215,7 @@ impl Compiler<'_> {
         for decl in &module_program.declarations {
             match decl {
                 Decl::Class(class) if !class.type_params.is_empty() => {
-                    if let Some(name_id) = self.query().try_name_id_with_interner(
+                    if let Some(name_id) = self.analyzed.query().try_name_id_with_interner(
                         module_id,
                         &[class.name],
                         module_interner,
@@ -229,7 +229,7 @@ impl Compiler<'_> {
                     }
                 }
                 Decl::Struct(s) if !s.type_params.is_empty() => {
-                    if let Some(name_id) = self.query().try_name_id_with_interner(
+                    if let Some(name_id) = self.analyzed.query().try_name_id_with_interner(
                         module_id,
                         &[s.name],
                         module_interner,
@@ -260,15 +260,22 @@ impl Compiler<'_> {
         for decl in decls {
             match decl {
                 Decl::Function(func) => {
-                    let query = self.query();
+                    let query = self.analyzed.query();
                     let name_id = query.function_name_id(module_id, func.name);
 
                     // Check if function has explicit type params OR implicit generic_info
                     let has_explicit_type_params = !func.type_params.is_empty();
                     let has_implicit_generic_info = self
+                        .analyzed
                         .query()
                         .function_id_by_name_id(name_id)
-                        .map(|func_id| self.query().get_function(func_id).generic_info.is_some())
+                        .map(|func_id| {
+                            self.analyzed
+                                .query()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
                         .unwrap_or(false);
 
                     if has_explicit_type_params || has_implicit_generic_info {

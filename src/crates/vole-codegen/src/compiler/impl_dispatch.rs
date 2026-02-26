@@ -36,7 +36,7 @@ impl Compiler<'_> {
         sig: &cranelift::prelude::Signature,
         mode: DeclareMode,
     ) -> crate::function_registry::FunctionKey {
-        let full_name_id = self.query().method_full_name(method_id);
+        let full_name_id = self.analyzed.query().method_full_name(method_id);
         let func_key = self.func_registry.intern_name_id(full_name_id);
         if self.func_registry.func_id(func_key).is_none() {
             let display_name = self.func_registry.display(func_key);
@@ -56,7 +56,7 @@ impl Compiler<'_> {
             TypeExprKind::Primitive(p) => Some(primitive_type_name(*p).to_string()),
             TypeExprKind::Handle => Some("handle".to_string()),
             TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
-                Some(self.query().resolve_symbol(*sym).to_string())
+                Some(self.analyzed.query().resolve_symbol(*sym).to_string())
             }
             // `extend [T] with Iterable<T>` has an Array target type.
             TypeExprKind::Array(_) => Some("array".to_string()),
@@ -129,7 +129,7 @@ impl Compiler<'_> {
         module_id: ModuleId,
     ) -> CodegenResult<()> {
         // Look up TypeDefId from name (needed as key for type_metadata)
-        let query = self.query();
+        let query = self.analyzed.query();
         let type_def_id = query
             .try_name_id(module_id, &[data.name])
             .and_then(|name_id| query.try_type_def_id(name_id))
@@ -139,7 +139,7 @@ impl Compiler<'_> {
                     format!(
                         "{} {}",
                         data.type_kind,
-                        self.query().resolve_symbol(data.name)
+                        self.analyzed.query().resolve_symbol(data.name)
                     ),
                 )
             })?;
@@ -155,7 +155,7 @@ impl Compiler<'_> {
                     format!(
                         "{} {}",
                         data.type_kind,
-                        self.query().resolve_symbol(data.name)
+                        self.analyzed.query().resolve_symbol(data.name)
                     ),
                 )
             })?;
@@ -174,7 +174,7 @@ impl Compiler<'_> {
 
         // Collect interface name strings using query (avoids borrow conflicts with compile calls).
         let interface_name_strs: Vec<String> = {
-            let query = self.query();
+            let query = self.analyzed.query();
             query
                 .try_name_id(module_id, &[data.name])
                 .and_then(|type_name_id| query.try_type_def_id(type_name_id))
@@ -263,7 +263,7 @@ impl Compiler<'_> {
         for info in default_methods_to_compile {
             if info.from_module {
                 let module_path = info.module_path.as_deref().unwrap_or("");
-                let module_id = self.query().module_id_or_main(module_path);
+                let module_id = self.analyzed.query().module_id_or_main(module_path);
                 let module_interner = self.analyzed.module_programs[module_path].1.clone();
                 self.compile_default_method_with_interner(
                     &info.method,
@@ -292,8 +292,12 @@ impl Compiler<'_> {
         type_name: Symbol,
         metadata: &TypeMetadata,
     ) -> CodegenResult<()> {
-        let type_name_str = self.query().resolve_symbol(type_name).to_string();
-        let method_name_str = self.query().resolve_symbol(method.name).to_string();
+        let type_name_str = self.analyzed.query().resolve_symbol(type_name).to_string();
+        let method_name_str = self
+            .analyzed
+            .query()
+            .resolve_symbol(method.name)
+            .to_string();
 
         let method_name_id = self.method_name_id(method.name)?;
         let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
@@ -306,6 +310,7 @@ impl Compiler<'_> {
 
         // Look up MethodId from entity_registry for pre-computed signature
         let semantic_method_id = self
+            .analyzed
             .query()
             .find_method(metadata.type_def_id, method_name_id)
             .ok_or_else(|| {
@@ -330,7 +335,7 @@ impl Compiler<'_> {
         let self_type_id = metadata.vole_type;
 
         // Get param and return types from sema (pre-resolved signature)
-        let method_def = self.query().get_method(semantic_method_id);
+        let method_def = self.analyzed.query().get_method(semantic_method_id);
         let (param_type_ids, method_return_type_id) = {
             let arena = self.arena();
             let (params, ret, _) =
@@ -410,8 +415,12 @@ impl Compiler<'_> {
         type_name: Symbol,
         metadata: &TypeMetadata,
     ) -> CodegenResult<()> {
-        let type_name_str = self.query().resolve_symbol(type_name).to_string();
-        let method_name_str = self.query().resolve_symbol(method.name).to_string();
+        let type_name_str = self.analyzed.query().resolve_symbol(type_name).to_string();
+        let method_name_str = self
+            .analyzed
+            .query()
+            .resolve_symbol(method.name)
+            .to_string();
 
         let method_name_id = self.method_name_id(method.name)?;
         let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
@@ -424,6 +433,7 @@ impl Compiler<'_> {
 
         // Look up MethodId - interface default methods are now registered on implementing types
         let semantic_method_id = self
+            .analyzed
             .query()
             .find_method(metadata.type_def_id, method_name_id)
             .ok_or_else(|| {
@@ -445,7 +455,7 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Get param and return types from sema (pre-resolved signature)
-        let method_def = self.query().get_method(semantic_method_id);
+        let method_def = self.analyzed.query().get_method(semantic_method_id);
         let (param_type_ids, return_type_id) = {
             let arena = self.arena();
             let (params, ret, _) =
@@ -522,7 +532,7 @@ impl Compiler<'_> {
         interner: &Interner,
         module_id: Option<ModuleId>,
     ) -> CodegenResult<()> {
-        let type_name_str = self.query().resolve_symbol(type_name).to_string();
+        let type_name_str = self.analyzed.query().resolve_symbol(type_name).to_string();
         let method_name_str = interner.resolve(method.name).to_string();
 
         // Look up method NameId using the module interner (cross-interner safe)
@@ -538,6 +548,7 @@ impl Compiler<'_> {
         let func_key = method_info.func_key;
 
         let semantic_method_id = self
+            .analyzed
             .query()
             .find_method(metadata.type_def_id, method_name_id)
             .ok_or_else(|| {
@@ -559,7 +570,7 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Get param and return types from sema (pre-resolved signature)
-        let method_def = self.query().get_method(semantic_method_id);
+        let method_def = self.analyzed.query().get_method(semantic_method_id);
         let (param_type_ids, return_type_id) = {
             let arena = self.arena();
             let (params, ret, _) =
@@ -636,14 +647,18 @@ impl Compiler<'_> {
         module_id: ModuleId,
     ) -> CodegenResult<()> {
         // Get the TypeDefId for looking up method info
-        let type_name_id = self.query().name_id(module_id, &[type_name]);
-        let type_def_id = self.query().try_type_def_id(type_name_id).ok_or_else(|| {
-            let type_name_str = self.resolve_symbol(type_name);
-            CodegenError::internal_with_context(
-                "static method type not registered in entity_registry",
-                format!("{} (type_name_id={:?})", type_name_str, type_name_id),
-            )
-        })?;
+        let type_name_id = self.analyzed.query().name_id(module_id, &[type_name]);
+        let type_def_id = self
+            .analyzed
+            .query()
+            .try_type_def_id(type_name_id)
+            .ok_or_else(|| {
+                let type_name_str = self.resolve_symbol(type_name);
+                CodegenError::internal_with_context(
+                    "static method type not registered in entity_registry",
+                    format!("{} (type_name_id={:?})", type_name_str, type_name_id),
+                )
+            })?;
 
         for method in &statics.methods {
             // Only compile methods with bodies
@@ -655,6 +670,7 @@ impl Compiler<'_> {
             // Look up MethodId from entity_registry for pre-computed signature
             let method_name_id = self.method_name_id(method.name)?;
             let semantic_method_id = self
+                .analyzed
                 .query()
                 .find_static_method(type_def_id, method_name_id)
                 .ok_or_else(|| {
@@ -677,8 +693,8 @@ impl Compiler<'_> {
                     "static method",
                     format!(
                         "{}::{}",
-                        self.query().resolve_symbol(type_name),
-                        self.query().resolve_symbol(method.name),
+                        self.analyzed.query().resolve_symbol(type_name),
+                        self.analyzed.query().resolve_symbol(method.name),
                     ),
                 )
             })?;
@@ -785,7 +801,7 @@ impl Compiler<'_> {
                     arena.unwrap_struct(meta.vole_type).map(|(id, _)| id)
                 };
                 type_def_id.is_some_and(|id| {
-                    let name_id = self.query().get_type(id).name_id;
+                    let name_id = self.analyzed.query().get_type(id).name_id;
                     self.analyzed
                         .name_table()
                         .last_segment_str(name_id)
@@ -852,6 +868,7 @@ impl Compiler<'_> {
                     })?;
 
             let semantic_method_id = self
+                .analyzed
                 .query()
                 .find_method(metadata.type_def_id, method_name_id)
                 .ok_or_else(|| {
@@ -868,7 +885,7 @@ impl Compiler<'_> {
                     )
                 })?;
 
-            let method_def = self.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found("method", format!("{}::{}", type_name_str, method_name_str))
@@ -879,7 +896,7 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Get param and return types from sema
-            let method_def = self.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.query().get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
                 let arena = self.arena();
                 let (params, ret, _) =
@@ -981,6 +998,7 @@ impl Compiler<'_> {
                     })?;
 
             let semantic_method_id = self
+                .analyzed
                 .query()
                 .find_static_method(metadata.type_def_id, method_name_id)
                 .ok_or_else(|| {
@@ -997,7 +1015,7 @@ impl Compiler<'_> {
                     )
                 })?;
 
-            let method_def = self.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.query().get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found(
@@ -1011,7 +1029,7 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Get param and return types from sema
-            let method_def = self.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.query().get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
                 let arena = self.arena();
                 let (params, ret, _) =

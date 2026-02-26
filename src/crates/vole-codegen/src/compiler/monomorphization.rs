@@ -45,7 +45,7 @@ impl Compiler<'_> {
     ) {
         use super::signatures::SelfParam;
 
-        let mangled_name = self.query().display_name(instance.mangled_name());
+        let mangled_name = self.analyzed.query().display_name(instance.mangled_name());
         let func_type = instance.func_type();
 
         // Get TypeId versions of params and return type
@@ -140,7 +140,7 @@ impl Compiler<'_> {
             if !found && program.is_some() {
                 // Only error when the main program is available — during the module-only
                 // phase, missing ASTs are expected for program-originating monomorphs.
-                let func_name = self.query().display_name(instance.original_name);
+                let func_name = self.analyzed.query().display_name(instance.original_name);
                 return Err(CodegenError::internal_with_context(
                     "generic function AST not found",
                     func_name,
@@ -202,7 +202,7 @@ impl Compiler<'_> {
         module_interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<bool> {
-        let mangled_name = self.query().display_name(instance.mangled_name);
+        let mangled_name = self.analyzed.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
             .func_registry
@@ -283,7 +283,7 @@ impl Compiler<'_> {
         func: &FuncDecl,
         instance: &MonomorphInstance,
     ) -> CodegenResult<()> {
-        let mangled_name = self.query().display_name(instance.mangled_name);
+        let mangled_name = self.analyzed.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
             .func_registry
@@ -391,7 +391,7 @@ impl Compiler<'_> {
         let arena = self.analyzed.type_arena();
 
         let nominal_is_program_owned = |type_def_id| {
-            let name_id = self.query().get_type(type_def_id).name_id;
+            let name_id = self.analyzed.query().get_type(type_def_id).name_id;
             let module_id = self.analyzed.name_table().module_of(name_id);
             let module_path = self
                 .analyzed
@@ -551,7 +551,7 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let class_name_str = self.query().display_name(instance.class_name);
+            let class_name_str = self.analyzed.query().display_name(instance.class_name);
             tracing::debug!(
                 class_name = %class_name_str,
                 class_name_id = ?instance.class_name,
@@ -560,12 +560,12 @@ impl Compiler<'_> {
             );
 
             // Try to find the method in a class
-            let method_name_str = self.query().display_name(instance.method_name);
+            let method_name_str = self.analyzed.query().display_name(instance.method_name);
             if let Some(class) = class_asts.get(&instance.class_name) {
                 let method = class
                     .methods
                     .iter()
-                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+                    .find(|m| self.analyzed.query().resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
                     self.compile_monomorphized_class_method(method, &instance, None)?;
                     continue;
@@ -639,7 +639,7 @@ impl Compiler<'_> {
             if program.is_some() {
                 // Only error when the main program is available — during the module-only
                 // phase, missing ASTs are expected for program-originating monomorphs.
-                let class_name = self.query().display_name(instance.class_name);
+                let class_name = self.analyzed.query().display_name(instance.class_name);
                 return Err(CodegenError::not_found(
                     "method",
                     format!("{} in class {}", method_name_str, class_name),
@@ -659,7 +659,7 @@ impl Compiler<'_> {
         instance: &ClassMethodMonomorphInstance,
         module_path: Option<&str>,
     ) -> CodegenResult<()> {
-        let mangled_name = self.query().display_name(instance.mangled_name);
+        let mangled_name = self.analyzed.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
             .func_registry
@@ -824,7 +824,7 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let class_name_str = self.query().display_name(instance.class_name);
+            let class_name_str = self.analyzed.query().display_name(instance.class_name);
             tracing::debug!(
                 class_name = %class_name_str,
                 class_name_id = ?instance.class_name,
@@ -832,7 +832,7 @@ impl Compiler<'_> {
                 "looking for static method to compile"
             );
 
-            let method_name_str = self.query().display_name(instance.method_name);
+            let method_name_str = self.analyzed.query().display_name(instance.method_name);
 
             // Try to find the static method in a class from the main program
             if let Some(class) = class_asts.get(&instance.class_name)
@@ -841,7 +841,7 @@ impl Compiler<'_> {
                 let method = statics
                     .methods
                     .iter()
-                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+                    .find(|m| self.analyzed.query().resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
                     self.compile_monomorphized_static_method(method, &instance, None)?;
                     continue;
@@ -872,8 +872,8 @@ impl Compiler<'_> {
             if program.is_some() {
                 // Only error when the main program is available — during the module-only
                 // phase, missing ASTs are expected for program-originating monomorphs.
-                let class_name = self.query().display_name(instance.class_name);
-                let method_name = self.query().display_name(instance.method_name);
+                let class_name = self.analyzed.query().display_name(instance.class_name);
+                let method_name = self.analyzed.query().display_name(instance.method_name);
                 return Err(CodegenError::not_found(
                     "static method",
                     format!("{} in class {}", method_name, class_name),
@@ -893,7 +893,7 @@ impl Compiler<'_> {
         instance: &StaticMethodMonomorphInstance,
         module_path: Option<&str>,
     ) -> CodegenResult<()> {
-        let mangled_name = self.query().display_name(instance.mangled_name);
+        let mangled_name = self.analyzed.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
             .func_registry
@@ -1152,7 +1152,7 @@ impl Compiler<'_> {
 
         if tracing::enabled!(tracing::Level::DEBUG) {
             for (class_name, type_arg_vecs) in &class_concrete_type_args {
-                let class_name_str = self.query().display_name(*class_name);
+                let class_name_str = self.analyzed.query().display_name(*class_name);
                 tracing::debug!(
                     class = %class_name_str,
                     type_arg_count = type_arg_vecs.len(),
@@ -1298,8 +1298,8 @@ impl Compiler<'_> {
                 }
 
                 // Generate mangled name string (no NameId needed)
-                let class_name_str = self.query().display_name(tmpl.class_name);
-                let method_name_str = self.query().display_name(tmpl.method_name);
+                let class_name_str = self.analyzed.query().display_name(tmpl.class_name);
+                let method_name_str = self.analyzed.query().display_name(tmpl.method_name);
                 let type_keys_str: Vec<String> = concrete_key
                     .type_keys
                     .iter()
@@ -1377,7 +1377,7 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let method_name_str = self.query().display_name(data.method_name);
+            let method_name_str = self.analyzed.query().display_name(data.method_name);
             let func_key = data.func_key.expect("func_key should be set in step 4");
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found("expanded class method", &data.mangled_name_str)
@@ -1411,14 +1411,14 @@ impl Compiler<'_> {
                     )
                     .cloned()
                     .ok_or_else(|| {
-                        let class_name = self.query().display_name(data.class_name);
+                        let class_name = self.analyzed.query().display_name(data.class_name);
                         CodegenError::not_found(
                             "expanded class method",
                             format!("{} in class {}", method_name_str, class_name),
                         )
                     })?
                 } else {
-                    let class_name = self.query().display_name(data.class_name);
+                    let class_name = self.analyzed.query().display_name(data.class_name);
                     return Err(CodegenError::not_found(
                         "expanded class method",
                         format!("{} in class {}", method_name_str, class_name),
@@ -1650,21 +1650,21 @@ impl Compiler<'_> {
         use crate::types::PendingMonomorph;
         match pending {
             PendingMonomorph::Function(inst) => {
-                let name = self.query().display_name(inst.original_name);
+                let name = self.analyzed.query().display_name(inst.original_name);
                 let subs = self.format_substitutions(&inst.substitutions);
                 let module = self.module_of_name(inst.original_name);
                 format!("fn {name}<{subs}> (module: {module})")
             }
             PendingMonomorph::ClassMethod(inst) => {
-                let class = self.query().display_name(inst.class_name);
-                let method = self.query().display_name(inst.method_name);
+                let class = self.analyzed.query().display_name(inst.class_name);
+                let method = self.analyzed.query().display_name(inst.method_name);
                 let subs = self.format_substitutions(&inst.substitutions);
                 let module = self.module_of_name(inst.class_name);
                 format!("{class}.{method}<{subs}> (module: {module})")
             }
             PendingMonomorph::StaticMethod(inst) => {
-                let class = self.query().display_name(inst.class_name);
-                let method = self.query().display_name(inst.method_name);
+                let class = self.analyzed.query().display_name(inst.class_name);
+                let method = self.analyzed.query().display_name(inst.method_name);
                 let subs = self.format_substitutions(&inst.substitutions);
                 let module = self.module_of_name(inst.class_name);
                 format!("{class}::{method}<{subs}> (module: {module})")
@@ -1677,7 +1677,7 @@ impl Compiler<'_> {
         let mut parts: Vec<String> = subs
             .iter()
             .map(|(&name_id, &type_id)| {
-                let name = self.query().display_name(name_id);
+                let name = self.analyzed.query().display_name(name_id);
                 format!("{name}={type_id:?}")
             })
             .collect();
@@ -1736,7 +1736,7 @@ impl Compiler<'_> {
         // Fallback: search module programs
         let found = self.compile_monomorphized_module_function(instance)?;
         if !found {
-            let func_name = self.query().display_name(instance.original_name);
+            let func_name = self.analyzed.query().display_name(instance.original_name);
             return Err(CodegenError::internal_with_context(
                 "pending monomorph: generic function AST not found",
                 func_name,
@@ -1760,14 +1760,14 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let method_name_str = self.query().display_name(instance.method_name);
+        let method_name_str = self.analyzed.query().display_name(instance.method_name);
 
         // Try main program class ASTs (using pre-built map)
         if let Some(class) = class_asts.get(&instance.class_name) {
             let method = class
                 .methods
                 .iter()
-                .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+                .find(|m| self.analyzed.query().resolve_symbol(m.name) == method_name_str);
             if let Some(method) = method {
                 self.compile_monomorphized_class_method(method, instance, None)?;
                 return Ok(());
@@ -1824,7 +1824,7 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let class_name = self.query().display_name(instance.class_name);
+        let class_name = self.analyzed.query().display_name(instance.class_name);
         Err(CodegenError::not_found(
             "pending monomorph: class method",
             format!("{} in class {}", method_name_str, class_name),
@@ -1841,7 +1841,7 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let method_name_str = self.query().display_name(instance.method_name);
+        let method_name_str = self.analyzed.query().display_name(instance.method_name);
 
         // Try main program class ASTs (using pre-built map)
         if let Some(class) = class_asts.get(&instance.class_name)
@@ -1850,7 +1850,7 @@ impl Compiler<'_> {
             let method = statics
                 .methods
                 .iter()
-                .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
+                .find(|m| self.analyzed.query().resolve_symbol(m.name) == method_name_str);
             if let Some(method) = method {
                 self.compile_monomorphized_static_method(method, instance, None)?;
                 return Ok(());
@@ -1872,7 +1872,7 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let class_name = self.query().display_name(instance.class_name);
+        let class_name = self.analyzed.query().display_name(instance.class_name);
         Err(CodegenError::not_found(
             "pending monomorph: static method",
             format!("{} in class {}", method_name_str, class_name),
