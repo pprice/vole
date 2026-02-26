@@ -601,6 +601,7 @@ mod tests {
             module_global_inits: FxHashMap::default(),
             function_default_inits: FxHashMap::default(),
             method_default_inits: FxHashMap::default(),
+            lambda_default_inits: FxHashMap::default(),
             field_default_inits: FxHashMap::default(),
             vir_monomorph_base: usize::MAX,
         }

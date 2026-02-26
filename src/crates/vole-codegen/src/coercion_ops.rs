@@ -10,7 +10,7 @@
 use cranelift::prelude::{InstBuilder, MemFlags, Type, Value, types};
 
 use smallvec::SmallVec;
-use vole_frontend::Expr;
+use vole_frontend::NodeId;
 use vole_identity::{FunctionId, MethodId};
 use vole_sema::numeric_model::{NumericCoercion, numeric_coercion};
 use vole_sema::type_arena::TypeId;
@@ -588,51 +588,36 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok((args, rc_owned))
     }
 
-    /// Compile default expressions for omitted lambda parameters.
-    ///
-    /// `default_refs` is a slice of `Option<&Expr>` for the omitted parameters
-    /// (one entry per expected param, in order). Uses shared coercion logic.
+    /// Compile default expressions for omitted lambda parameters from VIR.
     pub fn compile_lambda_defaults(
         &mut self,
-        default_refs: &[Option<&'ctx Expr>],
+        lambda_node_id: NodeId,
+        start_index: usize,
         expected_type_ids: &[TypeId],
-    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        self.compile_defaults_from_refs(default_refs, expected_type_ids, false)
-    }
-
-    /// Unified default-expression compilation kernel.
-    ///
-    /// Takes a slice of optional `&'ctx Expr` references (already resolved from the
-    /// stable owning store) and compiles each present entry with coercion.
-    ///
-    /// # Arguments
-    /// - `default_refs`: One entry per omitted parameter; `None` means no default available
-    /// - `expected_type_ids`: TypeIds for each entry in `default_refs` (same length)
-    /// - `is_generic_class`: Whether generic-class word-packing is needed
-    fn compile_defaults_from_refs(
-        &mut self,
-        default_refs: &[Option<&'ctx Expr>],
-        expected_type_ids: &[TypeId],
-        is_generic_class: bool,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let mut args = Vec::new();
         let mut rc_owned = Vec::new();
 
-        for (default_ref, &param_type_id) in default_refs.iter().zip(expected_type_ids.iter()) {
-            let Some(default_expr) = default_ref else {
-                continue;
+        for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
+            let slot = start_index + offset;
+            let Some(default_vir) = self.lambda_default_vir_init(lambda_node_id, slot).cloned()
+            else {
+                return Err(CodegenError::internal_with_context(
+                    "missing VIR lambda default expression",
+                    format!("lambda={lambda_node_id:?} param {slot}"),
+                ));
             };
-            let compiled = self.expr_with_expected_type(default_expr, param_type_id)?;
+            let compiled = self.compile_vir_expr(&default_vir)?;
 
-            // Track owned RC values for cleanup after the call
+            // Track owned RC values for cleanup after the call.
             if compiled.is_owned() {
                 rc_owned.push(compiled);
             }
 
-            // Coerce to the expected param type (handles interface boxing, union construction)
+            // Coerce to the expected param type (handles interface boxing, union construction).
             let compiled = self.coerce_to_type(compiled, param_type_id)?;
 
-            // Handle integer narrowing/widening if needed
+            // Handle integer narrowing/widening if needed.
             let expected_ty = self.cranelift_type(param_type_id);
             let compiled = if compiled.ty.is_int()
                 && expected_ty.is_int()
@@ -640,6 +625,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             {
                 let new_value = if expected_ty.bits() < compiled.ty.bits() {
                     self.builder.ins().ireduce(expected_ty, compiled.value)
+                } else if self.arena().is_unsigned(param_type_id) {
+                    uextend_const(self.builder, expected_ty, compiled.value)
                 } else {
                     sextend_const(self.builder, expected_ty, compiled.value)
                 };
@@ -647,14 +634,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             } else {
                 compiled
             };
-
-            // Generic class methods expect i64 for TypeParam, convert if needed
-            let arg_value = if is_generic_class && compiled.ty != types::I64 {
-                self.emit_word(&compiled, None)?
-            } else {
-                compiled.value
-            };
-            args.push(arg_value);
+            args.push(compiled.value);
         }
 
         Ok((args, rc_owned))

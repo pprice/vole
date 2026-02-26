@@ -814,6 +814,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|r| r.as_ref())
     }
 
+    /// Get VIR-lowered default parameter expression by lambda `NodeId`.
+    pub fn lambda_default_vir_init(
+        &self,
+        lambda_node_id: vole_frontend::NodeId,
+        slot: usize,
+    ) -> Option<&vole_vir::VirExpr> {
+        self.analyzed()
+            .vir_program
+            .get_lambda_default(lambda_node_id, slot)
+            .map(|r| r.as_ref())
+    }
+
     /// Get VIR-lowered default field initializer by semantic `FieldId`.
     #[inline]
     pub fn field_default_vir_init(&self, field_id: FieldId) -> Option<&vole_vir::VirExpr> {

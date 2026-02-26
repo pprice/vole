@@ -225,22 +225,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         rc_temp_args: &mut Vec<CompiledValue>,
     ) -> CodegenResult<()> {
         // Named arg reordering: compile each slot in parameter order using the mapping.
-        // For None slots, look up the lambda's default expression for that parameter.
+        // For None slots, compile the lambda's default expression from VIR.
         let lambda_node_id = lambda_defaults.as_ref().map(|d| d.lambda_node_id);
-        let analyzed = self.analyzed();
-        // Collect all default refs up front (indexed by param slot) to avoid borrow issues
-        let all_default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = if let Some(node_id) =
-            lambda_node_id
-            && let Some(lambda) = super::lambda_search::find_lambda_in_analyzed(analyzed, node_id)
-        {
-            lambda
-                .params
-                .iter()
-                .map(|p| p.default_value.as_deref())
-                .collect()
-        } else {
-            vec![None; params.len()]
-        };
 
         for (slot, opt_call_idx) in mapping.iter().enumerate() {
             let param_type_id = params[slot];
@@ -252,9 +238,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 }
                 let compiled = self.coerce_to_type(compiled, param_type_id)?;
                 compiled.value
-            } else if let Some(Some(default_expr)) = all_default_refs.get(slot) {
+            } else if let Some(lambda_node_id) = lambda_node_id {
                 let (default_vals, rc_owned) =
-                    self.compile_lambda_defaults(&[Some(default_expr)], &[param_type_id])?;
+                    self.compile_lambda_defaults(lambda_node_id, slot, &[param_type_id])?;
                 rc_temp_args.extend(rc_owned);
                 if let Some(&val) = default_vals.first() {
                     val
@@ -293,32 +279,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some(defaults_info) = lambda_defaults
             && arg_count < params.len()
         {
-            // Find the lambda expression by NodeId to get its default expressions.
-            // analyzed() returns &'ctx AnalyzedProgram, so the returned &'ctx LambdaExpr
-            // and its &'ctx Expr defaults are independent of &mut self.
             let lambda_node_id = defaults_info.lambda_node_id;
-            let analyzed = self.analyzed();
-            let Some(lambda) =
-                super::lambda_search::find_lambda_in_analyzed(analyzed, lambda_node_id)
-            else {
-                return Err(CodegenError::internal_with_context(
-                    "lambda expression not found",
-                    format!("NodeId {:?}", lambda_node_id),
-                ));
-            };
-
-            // Collect &'ctx Expr references for the omitted params before &mut self borrows.
             let skip = arg_count;
-            let omitted_type_ids: Vec<TypeId> = params[skip..].to_vec();
-            let default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = lambda
-                .params
-                .iter()
-                .skip(skip)
-                .map(|p| p.default_value.as_deref())
-                .collect();
-
             let (default_vals, rc_owned) =
-                self.compile_lambda_defaults(&default_refs, &omitted_type_ids)?;
+                self.compile_lambda_defaults(lambda_node_id, skip, &params[skip..])?;
             rc_temp_args.extend(rc_owned);
             args.extend(default_vals);
         }

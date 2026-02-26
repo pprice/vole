@@ -14,7 +14,7 @@
 //! `OptionalChainKind`, `OptionalChainInfo`, `LambdaAnalysis`, `LambdaDefaults`,
 //! and `ItLambdaInfo`.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis_cache::IsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
@@ -472,6 +472,20 @@ impl NodeMap {
     /// Set lambda defaults for a call site.
     pub fn set_lambda_defaults(&mut self, node: NodeId, defaults: LambdaDefaults) {
         self.get_mut_or_insert(node).lambda_defaults = Some(defaults);
+    }
+
+    /// Collect unique lambda expression `NodeId`s referenced by call-site
+    /// default-argument metadata.
+    pub fn collect_lambda_default_nodes(&self) -> Vec<NodeId> {
+        let mut out = FxHashSet::default();
+        for nodes in self.modules.values() {
+            for data in nodes {
+                if let Some(defaults) = data.lambda_defaults.as_ref() {
+                    let _ = out.insert(defaults.lambda_node_id);
+                }
+            }
+        }
+        out.into_iter().collect()
     }
 
     // -- is_check_result ---------------------------------------------------

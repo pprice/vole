@@ -4,20 +4,8 @@
 
 use vole_frontend::{Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt};
 
-/// Find a lambda expression by NodeId in an `AnalyzedProgram`.
-///
-/// Searches the main program's AST. Returns a reference with the same
-/// lifetime as the `AnalyzedProgram`, so the caller may hold it while
-/// taking a separate `&mut Cg` borrow.
-pub(crate) fn find_lambda_in_analyzed(
-    analyzed: &crate::AnalyzedProgram,
-    node_id: NodeId,
-) -> Option<&LambdaExpr> {
-    find_lambda_in_program(&analyzed.program, node_id)
-}
-
 /// Find a lambda expression by NodeId in a program.
-fn find_lambda_in_program(program: &Program, node_id: NodeId) -> Option<&LambdaExpr> {
+pub(crate) fn find_lambda_in_program(program: &Program, node_id: NodeId) -> Option<&LambdaExpr> {
     // Search expressions in declarations and statements
     for decl in &program.declarations {
         if let Some(lambda) = find_lambda_in_decl(decl, node_id) {

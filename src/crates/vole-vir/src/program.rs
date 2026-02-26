@@ -4,7 +4,7 @@
 // This is the clean boundary between VIR lowering and code generation.
 
 use rustc_hash::FxHashMap;
-use vole_identity::{FieldId, FunctionId, MethodId, NameId, Span, Symbol};
+use vole_identity::{FieldId, FunctionId, MethodId, NameId, NodeId, Span, Symbol};
 
 use crate::func::{VirBody, VirFunction, VirTest};
 use crate::refs::VirRef;
@@ -65,6 +65,11 @@ pub struct VirProgram {
     ///
     /// Keyed by semantic `MethodId` and parameter slot index.
     pub method_default_inits: FxHashMap<(MethodId, usize), VirRef>,
+
+    /// VIR-lowered default parameter expressions for lambda parameters.
+    ///
+    /// Keyed by lambda `NodeId` and parameter slot index.
+    pub lambda_default_inits: FxHashMap<(NodeId, usize), VirRef>,
 
     /// VIR-lowered default field initializer expressions.
     ///
@@ -127,5 +132,10 @@ impl VirProgram {
     /// Look up a VIR default parameter expression by `MethodId` and slot.
     pub fn get_method_default(&self, method_id: MethodId, slot: usize) -> Option<&VirRef> {
         self.method_default_inits.get(&(method_id, slot))
+    }
+
+    /// Look up a VIR default parameter expression by lambda `NodeId` and slot.
+    pub fn get_lambda_default(&self, lambda_node_id: NodeId, slot: usize) -> Option<&VirRef> {
+        self.lambda_default_inits.get(&(lambda_node_id, slot))
     }
 }
