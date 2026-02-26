@@ -540,18 +540,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
             let slot = start_index + offset;
-            let compiled =
-                if let Some(default_vir) = self.method_default_vir_init(method_id, slot).cloned() {
-                    self.compile_vir_expr(&default_vir)?
-                } else if let Some(default_expr) =
-                    self.query().method_default_expr_by_id(method_id, slot)
+            let Some(default_vir) = self.method_default_vir_init(method_id, slot).cloned() else {
+                if self
+                    .query()
+                    .method_default_expr_by_id(method_id, slot)
+                    .is_some()
                 {
-                    // TEMP(vol-eenl): retain AST fallback until method default lowering
-                    // coverage is complete across all declaration forms.
-                    self.expr_with_expected_type(default_expr, param_type_id)?
-                } else {
-                    continue;
-                };
+                    return Err(CodegenError::internal_with_context(
+                        "missing VIR method default expression",
+                        format!("{method_id:?} param {slot}"),
+                    ));
+                }
+                continue;
+            };
+            let compiled = self.compile_vir_expr(&default_vir)?;
 
             if compiled.is_owned() {
                 rc_owned.push(compiled);

@@ -1078,9 +1078,6 @@ fn lower_method_default_params(
         let Some(default_expr) = param.default_value.as_ref() else {
             continue;
         };
-        if ctx.node_map.get_type(default_expr.id).is_none() {
-            continue;
-        }
         let vir = lower_expr(default_expr, ctx);
         map.insert((method_id, slot), vir);
     }
