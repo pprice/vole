@@ -2,7 +2,7 @@
 //
 // VIR statement nodes.
 
-use vole_identity::{ModuleId, Symbol, TypeId, UnionStorageKind, VirTypeId};
+use vole_identity::{ModuleId, Symbol, UnionStorageKind, VirTypeId};
 
 use crate::expr::FieldStorage;
 use crate::func::VirBody;
@@ -26,7 +26,7 @@ pub enum VirStmt {
         name: Symbol,
         value: VirRef,
         mutable: bool,
-        ty: TypeId,
+        ty: VirTypeId,
         vir_ty: VirTypeId,
     },
 
@@ -38,7 +38,7 @@ pub enum VirStmt {
     LetTuple {
         pattern: VirDestructurePattern,
         value: VirRef,
-        init_ty: TypeId,
+        init_ty: VirTypeId,
         vir_init_ty: VirTypeId,
     },
 
@@ -123,7 +123,7 @@ pub struct VirFor {
     /// The loop variable name.
     pub var_name: Symbol,
     /// The type of the loop variable.
-    pub var_type: TypeId,
+    pub var_type: VirTypeId,
     /// VIR type of the loop variable (migration: `VirTypeId::INVALID`).
     pub vir_var_type: VirTypeId,
     /// The iterable expression.
@@ -148,7 +148,7 @@ pub enum VirIterKind {
 
     /// Iterate over an array with the given element type.
     Array {
-        elem_type: TypeId,
+        elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
         /// Union storage annotation for arrays of union-typed elements.
         /// Codegen needs this to decode element values correctly.
@@ -164,7 +164,7 @@ pub enum VirIterKind {
     /// or an `Iterator<T>` interface (needs `InterfaceIter` wrapping).
     /// Codegen inspects the compiled value's type to choose the path.
     IteratorInterface {
-        elem_type: TypeId,
+        elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
     },
 
@@ -172,7 +172,7 @@ pub enum VirIterKind {
     ///
     /// Codegen boxes to `Iterator<T>` interface, then wraps via `InterfaceIter`.
     CustomIterator {
-        elem_type: TypeId,
+        elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
     },
 
@@ -181,7 +181,7 @@ pub enum VirIterKind {
     /// Codegen calls `.iter()` to get `Iterator<T>`, then wraps via
     /// `InterfaceIter`.
     CustomIterable {
-        elem_type: TypeId,
+        elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
     },
 
@@ -191,7 +191,7 @@ pub enum VirIterKind {
     /// sema cannot determine the iteration strategy.  Resolved to a concrete
     /// variant during VIR monomorphization.
     Generic {
-        elem_type: TypeId,
+        elem_type: VirTypeId,
         vir_elem_type: VirTypeId,
     },
 }
@@ -213,7 +213,7 @@ pub enum VirDestructurePattern {
     /// Bind a variable: `a`.
     Bind {
         name: Symbol,
-        ty: TypeId,
+        ty: VirTypeId,
         vir_ty: VirTypeId,
     },
 
@@ -235,7 +235,7 @@ pub enum VirDestructurePattern {
     /// `is_struct` distinguishes flat struct layout from heap class layout.
     Record {
         fields: Vec<VirDestructureField>,
-        source_ty: TypeId,
+        source_ty: VirTypeId,
         vir_source_ty: VirTypeId,
         is_struct: bool,
     },
@@ -257,7 +257,7 @@ pub enum DestructureTupleKind {
     Tuple,
     /// Fixed-size array: all elements share the same type.
     FixedArray {
-        elem_ty: TypeId,
+        elem_ty: VirTypeId,
         vir_elem_ty: VirTypeId,
     },
 }
@@ -268,7 +268,7 @@ pub struct VirDestructureElement {
     /// The nested pattern for this element.
     pub pattern: VirDestructurePattern,
     /// Pre-resolved element type.
-    pub ty: TypeId,
+    pub ty: VirTypeId,
     /// VIR type of the element (migration: `VirTypeId::INVALID`).
     pub vir_ty: VirTypeId,
 }
@@ -283,7 +283,7 @@ pub struct VirDestructureField {
     /// Pre-resolved field slot index from `EntityRegistry`.
     pub slot: u32,
     /// Pre-resolved field type from `EntityRegistry`.
-    pub ty: TypeId,
+    pub ty: VirTypeId,
     /// VIR type of the field (migration: `VirTypeId::INVALID`).
     pub vir_ty: VirTypeId,
 }
@@ -296,7 +296,7 @@ pub struct VirModuleBinding {
     /// The local binding name (may differ from export name).
     pub binding: Symbol,
     /// The export's type.
-    pub export_ty: TypeId,
+    pub export_ty: VirTypeId,
     /// VIR type of the export (migration: `VirTypeId::INVALID`).
     pub vir_export_ty: VirTypeId,
 }

@@ -58,7 +58,7 @@ fn lower_expr_int_literal_no_type() {
     // No type in NodeMap -> TypeId::UNKNOWN
     match vir_ref.as_ref() {
         VirExpr::IntLiteral { value: 42, ty, .. } => {
-            assert_eq!(*ty, TypeId::UNKNOWN);
+            assert_eq!(*ty, vir_type_id(TypeId::UNKNOWN));
         }
         other => panic!("expected IntLiteral, got {other:?}"),
     }
@@ -91,7 +91,7 @@ fn lower_expr_int_literal_with_type() {
 
     match vir_ref.as_ref() {
         VirExpr::IntLiteral { value: 99, ty, .. } => {
-            assert_eq!(*ty, TypeId::I32);
+            assert_eq!(*ty, vir_type_id(TypeId::I32));
         }
         other => panic!("expected IntLiteral with I32, got {other:?}"),
     }
@@ -126,7 +126,7 @@ fn lower_expr_int_literal_i128_becomes_wide() {
         VirExpr::WideLiteral { low, high, ty, .. } => {
             assert_eq!(*low, 42);
             assert_eq!(*high, 0);
-            assert_eq!(*ty, TypeId::I128);
+            assert_eq!(*ty, vir_type_id(TypeId::I128));
         }
         other => panic!("expected WideLiteral for i128, got {other:?}"),
     }
@@ -162,7 +162,7 @@ fn lower_expr_negative_int_i128_sign_extends() {
             // -1 as i128 = all 1-bits -> low = u64::MAX, high = u64::MAX
             assert_eq!(*low, u64::MAX);
             assert_eq!(*high, u64::MAX);
-            assert_eq!(*ty, TypeId::I128);
+            assert_eq!(*ty, vir_type_id(TypeId::I128));
         }
         other => panic!("expected WideLiteral for negative i128, got {other:?}"),
     }
@@ -196,7 +196,7 @@ fn lower_expr_float_literal() {
     match vir_ref.as_ref() {
         VirExpr::FloatLiteral { value, ty, .. } => {
             assert!((*value - 3.14).abs() < f64::EPSILON);
-            assert_eq!(*ty, TypeId::F64);
+            assert_eq!(*ty, vir_type_id(TypeId::F64));
         }
         other => panic!("expected FloatLiteral, got {other:?}"),
     }
@@ -262,7 +262,7 @@ fn lower_expr_identifier_becomes_local_load() {
     match vir_ref.as_ref() {
         VirExpr::LocalLoad { name, ty, .. } => {
             assert_eq!(*name, Symbol::UNKNOWN);
-            assert_eq!(*ty, TypeId::UNKNOWN);
+            assert_eq!(*ty, vir_type_id(TypeId::UNKNOWN));
         }
         other => panic!("expected LocalLoad, got {other:?}"),
     }

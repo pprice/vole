@@ -24,6 +24,7 @@ use vole_vir::VirRef;
 use vole_vir::expr::{
     VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirResolvedMethod,
 };
+use vole_vir::types::VirType;
 
 use super::static_methods::StaticMethodCallArgs;
 
@@ -97,20 +98,6 @@ enum MethodResolutionRef<'a> {
 }
 
 impl MethodResolutionRef<'_> {
-    fn func_type_id(self) -> TypeId {
-        match self {
-            MethodResolutionRef::Ast(r) => r.func_type_id(),
-            MethodResolutionRef::Vir(r) => r.func_type_id(),
-        }
-    }
-
-    fn return_type_id(self) -> TypeId {
-        match self {
-            MethodResolutionRef::Ast(r) => r.return_type_id(),
-            MethodResolutionRef::Vir(r) => r.return_type_id(),
-        }
-    }
-
     fn method_id(self) -> Option<MethodId> {
         match self {
             MethodResolutionRef::Ast(r) => r.method_id(),
@@ -122,13 +109,6 @@ impl MethodResolutionRef<'_> {
         match self {
             MethodResolutionRef::Ast(r) => r.type_def_id(),
             MethodResolutionRef::Vir(r) => r.type_def_id(),
-        }
-    }
-
-    fn concrete_return_hint(self) -> Option<TypeId> {
-        match self {
-            MethodResolutionRef::Ast(r) => r.concrete_return_hint(),
-            MethodResolutionRef::Vir(r) => r.concrete_return_hint(),
         }
     }
 
@@ -245,6 +225,183 @@ impl Cg<'_, '_, '_> {
         Ok((values, rc_temps))
     }
 
+    fn resolved_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
+        match resolved {
+            MethodResolutionRef::Ast(r) => r.func_type_id(),
+            MethodResolutionRef::Vir(r) => self.sema_type_from_vir(r.func_type_id()),
+        }
+    }
+
+    fn resolved_return_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
+        match resolved {
+            MethodResolutionRef::Ast(r) => r.return_type_id(),
+            MethodResolutionRef::Vir(r) => self.sema_type_from_vir(r.return_type_id()),
+        }
+    }
+
+    fn resolved_dispatch_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
+        if let Some(method_id) = resolved.method_id() {
+            return self.query().get_method(method_id).signature_id;
+        }
+
+        let resolved_signature_id = self.resolved_func_type_id(resolved);
+        if self.signature_has_self_placeholder_param(resolved_signature_id)
+            && let Some(signature_id) = self.resolved_interface_signature_id(resolved)
+        {
+            return signature_id;
+        }
+        resolved_signature_id
+    }
+
+    fn resolved_concrete_return_hint(&self, resolved: MethodResolutionRef<'_>) -> Option<TypeId> {
+        match resolved {
+            MethodResolutionRef::Ast(r) => r.concrete_return_hint(),
+            MethodResolutionRef::Vir(r) => r
+                .concrete_return_hint()
+                .map(|ty| self.sema_type_from_vir(ty)),
+        }
+    }
+
+    /// Resolve canonical interface method signature from `(interface, slot)`.
+    ///
+    /// Some VIR-carried interface func_type_ids still reference placeholder-
+    /// based signatures; this recovers the canonical signature from the
+    /// EntityRegistry method table.
+    fn resolved_interface_signature_id(&self, resolved: MethodResolutionRef<'_>) -> Option<TypeId> {
+        if !resolved.is_interface_method() {
+            return None;
+        }
+        let interface_type_def_id = resolved.type_def_id()?;
+        let slot = resolved.method_index()? as usize;
+        let method_id = self
+            .registry()
+            .interface_methods_ordered(interface_type_def_id)
+            .get(slot)
+            .copied()?;
+        Some(self.query().get_method(method_id).signature_id)
+    }
+
+    fn signature_has_self_placeholder_param(&self, signature_id: TypeId) -> bool {
+        self.arena()
+            .unwrap_function(signature_id)
+            .is_some_and(|(params, _, _)| params.iter().any(|&p| self.arena().is_self_type(p)))
+    }
+
+    /// Resolve method parameter types for argument coercion.
+    ///
+    /// Primary source is the resolved function type. If unavailable, fall back
+    /// to canonical method signatures from the entity registry.
+    fn resolved_method_param_type_ids(
+        &self,
+        resolved: MethodResolutionRef<'_>,
+    ) -> Option<Vec<TypeId>> {
+        if let Some(method_id) = resolved.method_id() {
+            let signature_id = self.query().get_method(method_id).signature_id;
+            if let Some((params, _, _)) = self.arena().unwrap_function(signature_id) {
+                return Some(params.to_vec());
+            }
+        }
+
+        let resolved_signature_id = self.resolved_func_type_id(resolved);
+        if self.signature_has_self_placeholder_param(resolved_signature_id)
+            && let Some(signature_id) = self.resolved_interface_signature_id(resolved)
+            && let Some((params, _, _)) = self.arena().unwrap_function(signature_id)
+        {
+            return Some(params.to_vec());
+        }
+
+        if let Some((params, _, _)) = self.arena().unwrap_function(resolved_signature_id) {
+            return Some(params.to_vec());
+        }
+        if let MethodResolutionRef::Vir(r) = resolved
+            && let VirType::Function { params, .. } = self.vir_type_table().get(r.func_type_id())
+        {
+            return Some(
+                params
+                    .iter()
+                    .map(|&ty| self.sema_type_from_vir(ty))
+                    .collect(),
+            );
+        }
+        None
+    }
+
+    /// TEMP(N279-C): some VIR-resolved method signatures still include an
+    /// implicit receiver (`self`) parameter. Call sites pass the receiver
+    /// separately, so drop that leading slot only when the call shape shows an
+    /// extra parameter beyond provided args.
+    fn normalize_method_param_type_ids_for_call(
+        &self,
+        param_type_ids: &[TypeId],
+        provided_arg_count: usize,
+    ) -> Vec<TypeId> {
+        let has_self_placeholder = param_type_ids
+            .first()
+            .is_some_and(|&first| self.arena().is_self_type(first));
+        if has_self_placeholder && param_type_ids.len() >= provided_arg_count.saturating_add(1) {
+            param_type_ids[1..].to_vec()
+        } else {
+            param_type_ids.to_vec()
+        }
+    }
+
+    /// Resolve method parameter TypeIds to concrete call-site types.
+    ///
+    /// Applies both function-level substitutions and receiver-generic
+    /// substitutions (e.g. `Channel<T>.send(value: T)` with receiver
+    /// `Channel<i64|string>`), so argument coercion sees concrete parameter
+    /// types instead of raw `TypeParam` placeholders.
+    fn concretize_method_param_type_ids_for_receiver(
+        &self,
+        receiver_type_id: TypeId,
+        param_type_ids: &[TypeId],
+    ) -> Vec<TypeId> {
+        let mut resolved: Vec<TypeId> = param_type_ids
+            .iter()
+            .map(|&ty| self.try_substitute_type(ty))
+            .collect();
+
+        let resolved_receiver = self.try_substitute_type(receiver_type_id);
+        let receiver_generic = self
+            .arena()
+            .unwrap_class(resolved_receiver)
+            .map(|(type_def_id, type_args)| (type_def_id, type_args.to_vec()))
+            .or_else(|| {
+                self.arena()
+                    .unwrap_interface(resolved_receiver)
+                    .map(|(type_def_id, type_args)| (type_def_id, type_args.to_vec()))
+            });
+
+        let Some((type_def_id, type_args)) = receiver_generic else {
+            return resolved;
+        };
+        if type_args.is_empty() {
+            return resolved;
+        }
+
+        let type_params = self.query().get_type(type_def_id).type_params.clone();
+        if type_params.len() != type_args.len() {
+            return resolved;
+        }
+
+        let mut subs: rustc_hash::FxHashMap<NameId, TypeId> = type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(&param, &arg)| (param, arg))
+            .collect();
+        if let Some(func_subs) = self.substitutions {
+            for (&k, &v) in func_subs {
+                subs.insert(k, v);
+            }
+        }
+
+        resolved = resolved
+            .into_iter()
+            .map(|ty| self.arena().lookup_substitute(ty, &subs).unwrap_or(ty))
+            .collect();
+        resolved
+    }
+
     fn consume_method_receiver(
         &mut self,
         receiver: &mut CompiledValue,
@@ -291,7 +448,7 @@ impl Cg<'_, '_, '_> {
                 return self.static_method_call(StaticMethodCallArgs {
                     type_def_id: *type_def_id,
                     method_id: *method_id,
-                    func_type_id: *func_type_id,
+                    func_type_id: self.sema_type_from_vir(*func_type_id),
                     arg_source: &mc.arg_source(),
                     method_sym: mc_method,
                     expr_id,
@@ -334,7 +491,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Extract concrete_return_hint for builtin iterator methods (array.iter, string.iter, range.iter)
-        let concrete_return_hint = resolution.and_then(|r| r.concrete_return_hint());
+        let concrete_return_hint = resolution.and_then(|r| self.resolved_concrete_return_hint(r));
 
         // Handle range.iter() specially since range expressions can't be compiled to values directly.
         // Unwrap Grouping nodes (parenthesization) so `(0..n).iter()` is handled here
@@ -452,8 +609,11 @@ impl Cg<'_, '_, '_> {
         // conversion happens in codegen only.
         if let Some(elem_type_id) = self.arena().unwrap_runtime_iterator(obj.type_id) {
             let return_type_hint = vir_dispatch
-                .and_then(|d| d.substituted_return_type)
-                .or_else(|| resolution.map(|r| r.return_type_id()));
+                .and_then(|d| {
+                    d.substituted_return_type
+                        .map(|ty| self.sema_type_from_vir(ty))
+                })
+                .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &obj,
                 &mc.arg_source(),
@@ -473,7 +633,9 @@ impl Cg<'_, '_, '_> {
         // Driven by sema's CoercionKind annotation — no type re-detection needed.
         let iterator_wrap_elem_type = if let Some(dispatch) = vir_dispatch {
             dispatch.receiver_coercion.map(|coercion| match coercion {
-                VirMethodReceiverCoercion::IteratorWrap { elem_type, .. } => elem_type,
+                VirMethodReceiverCoercion::IteratorWrap { elem_type, .. } => {
+                    self.sema_type_from_vir(elem_type)
+                }
             })
         } else {
             self.get_coercion_kind(expr_id).map(|kind| match kind {
@@ -483,8 +645,11 @@ impl Cg<'_, '_, '_> {
         if let Some(elem_type) = iterator_wrap_elem_type {
             let runtime_iter = self.box_custom_iterator_to_runtime(&obj, elem_type)?;
             let return_type_hint = vir_dispatch
-                .and_then(|d| d.substituted_return_type)
-                .or_else(|| resolution.map(|r| r.return_type_id()));
+                .and_then(|d| {
+                    d.substituted_return_type
+                        .map(|ty| self.sema_type_from_vir(ty))
+                })
+                .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &runtime_iter,
                 &mc.arg_source(),
@@ -508,7 +673,6 @@ impl Cg<'_, '_, '_> {
             resolution = ?resolution,
             "method call"
         );
-
         // If sema recorded InterfaceMethod dispatch but the receiver is a concrete (non-interface)
         // type, the resolution came from analyzing the interface default method body with `self:
         // Self`. When compiling that body for a concrete implementing type (e.g. string, [T],
@@ -528,7 +692,7 @@ impl Cg<'_, '_, '_> {
                     &obj,
                     &mc.arg_source(),
                     method_index,
-                    resolved.func_type_id(),
+                    self.resolved_dispatch_func_type_id(resolved),
                 )?;
                 // Consume the owned RC receiver after the call. For temporaries
                 // (e.g. make_nums().collect()), this rc_dec's the interface's
@@ -556,7 +720,7 @@ impl Cg<'_, '_, '_> {
                     &mc.arg_source(),
                     interface_type_id,
                     method_name_id,
-                    resolved.func_type_id(),
+                    self.resolved_dispatch_func_type_id(resolved),
                 )?;
                 // Consume the owned RC receiver after the call (same as above).
                 let mut obj = obj;
@@ -573,7 +737,7 @@ impl Cg<'_, '_, '_> {
                 MethodResolutionRef::Vir(VirResolvedMethod::FunctionalInterface {
                     func_type_id,
                     ..
-                }) => Some(*func_type_id),
+                }) => Some(self.sema_type_from_vir(*func_type_id)),
                 MethodResolutionRef::Ast(_) | MethodResolutionRef::Vir(_) => None,
             };
             if let Some(func_type_id) = functional_func_type_id {
@@ -620,14 +784,13 @@ impl Cg<'_, '_, '_> {
 
             // External method calls
             if let Some(external_info) = resolved.external_info() {
-                let param_type_ids = self
-                    .arena()
-                    .unwrap_function(resolved.func_type_id())
-                    .map(|(params, _, _)| params.clone());
                 let mut args: ArgVec = smallvec![obj.value];
                 let mut rc_temps: Vec<CompiledValue> = Vec::new();
                 let arg_source = mc.arg_source();
                 let arg_count = mc.arg_count();
+                let param_type_ids = self
+                    .resolved_method_param_type_ids(resolved)
+                    .map(|ids| self.normalize_method_param_type_ids_for_call(&ids, arg_count));
                 if let Some(param_type_ids) = &param_type_ids {
                     for (i, &param_type_id) in param_type_ids.iter().enumerate().take(arg_count) {
                         let compiled =
@@ -649,9 +812,13 @@ impl Cg<'_, '_, '_> {
                 }
                 // Use concrete_return_hint if available (for iter() methods),
                 // otherwise fall back to maybe_convert_iterator_return_type for other methods
-                let return_type_id = resolved.concrete_return_hint().unwrap_or_else(|| {
-                    self.maybe_convert_iterator_return_type(resolved.return_type_id())
-                });
+                let return_type_id =
+                    self.resolved_concrete_return_hint(resolved)
+                        .unwrap_or_else(|| {
+                            self.maybe_convert_iterator_return_type(
+                                self.resolved_return_type_id(resolved),
+                            )
+                        });
 
                 // Generic external methods with where-mappings are dispatched through
                 // the generic intrinsic resolver (exact arm first, default arm fallback).
@@ -762,7 +929,7 @@ impl Cg<'_, '_, '_> {
                     }
                     key
                 });
-            (func_key, resolved.return_type_id(), None)
+            (func_key, self.resolved_return_type_id(resolved), None)
         } else {
             // Fallback path for monomorphized context: derive type_def_id from object type.
             // When inside a monomorphized method body, the object type may still be a type
@@ -809,7 +976,12 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let type_def_id =
                 get_type_def_id_from_type_id(resolved_obj_type_id, arena, self.analyzed())
-                    .ok_or_else(|| CodegenError::not_found("TypeDefId", method_name_str))?;
+                    .ok_or_else(|| {
+                        CodegenError::not_found(
+                            "TypeDefId",
+                            format!("{method_name_str} (receiver_type={resolved_obj_type_id:?})"),
+                        )
+                    })?;
 
             // Check for external method binding first (interface methods on primitives)
             if let Some(binding) = self.query().method_binding(type_def_id, method_name_id)
@@ -898,7 +1070,10 @@ impl Cg<'_, '_, '_> {
         let mut return_type_id = if self.substitutions.is_some() {
             return_type_id
         } else if let Some(dispatch) = vir_dispatch {
-            dispatch.substituted_return_type.unwrap_or(return_type_id)
+            dispatch
+                .substituted_return_type
+                .map(|ty| self.sema_type_from_vir(ty))
+                .unwrap_or(return_type_id)
         } else {
             self.get_substituted_return_type(&expr_id)
                 .unwrap_or(return_type_id)
@@ -922,7 +1097,10 @@ impl Cg<'_, '_, '_> {
                     ClassMethodMonomorphKey::new(
                         key.class_name,
                         key.method_name,
-                        key.type_keys.clone(),
+                        key.type_keys
+                            .iter()
+                            .map(|&ty| self.sema_type_from_vir(ty))
+                            .collect(),
                     )
                 })
             })
@@ -1021,16 +1199,38 @@ impl Cg<'_, '_, '_> {
         // Use TypeId-based params for argument coercion (e.g. concrete -> union, concrete -> interface).
         // Try resolution first, fall back to entity registry params from monomorphized context.
         let param_type_ids = resolution
-            .and_then(|resolved| {
-                self.arena()
-                    .unwrap_function(resolved.func_type_id())
-                    .map(|(params, _, _)| params.clone())
-            })
-            .or(fallback_param_type_ids);
+            .and_then(|resolved| self.resolved_method_param_type_ids(resolved))
+            .or_else(|| fallback_param_type_ids.map(|ids| ids.to_vec()));
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         let final_arg_source = mc.arg_source();
         let final_arg_count = mc.arg_count();
+        let param_type_ids = param_type_ids
+            .map(|ids| self.normalize_method_param_type_ids_for_call(&ids, final_arg_count))
+            .map(|ids| self.concretize_method_param_type_ids_for_receiver(obj.type_id, &ids));
+        let mapping_is_valid = |mapping: &[Option<usize>]| {
+            let mut method_param_offset = 0usize;
+            if let Some(param_type_ids) = &param_type_ids {
+                let len = param_type_ids.len();
+                method_param_offset = usize::from(mapping.len() == len.saturating_add(1));
+                if mapping.len() != len && method_param_offset == 0 {
+                    return false;
+                }
+                if method_param_offset == 1 && mapping.first().and_then(|entry| *entry).is_some() {
+                    return false;
+                }
+            }
+            let mut seen = vec![false; final_arg_count];
+            let mut mapped_count = 0usize;
+            for call_idx in mapping.iter().skip(method_param_offset).flatten().copied() {
+                if call_idx >= final_arg_count || seen[call_idx] {
+                    return false;
+                }
+                seen[call_idx] = true;
+                mapped_count += 1;
+            }
+            mapped_count == final_arg_count
+        };
         // When named args were used, sema stored a resolved_call_args mapping that tells
         // us which call.args[j] fills each parameter slot i (and None means use the default).
         let named_mapping = vir_dispatch
@@ -1044,12 +1244,21 @@ impl Cg<'_, '_, '_> {
                         .get_resolved_call_args(expr_id)
                         .map(|s| s.to_vec())
                 }
-            });
+            })
+            .filter(|mapping| mapping_is_valid(mapping));
         if let Some(ref mapping) = named_mapping {
             let method_id_for_defaults = resolution.and_then(|r| r.method_id());
             if let Some(param_type_ids) = &param_type_ids {
+                let method_param_offset =
+                    usize::from(mapping.len() == param_type_ids.len().saturating_add(1));
                 for (slot, opt_call_idx) in mapping.iter().enumerate() {
-                    let param_type_id = param_type_ids[slot];
+                    if slot < method_param_offset {
+                        continue;
+                    }
+                    let param_index = slot - method_param_offset;
+                    let Some(&param_type_id) = param_type_ids.get(param_index) else {
+                        continue;
+                    };
                     let compiled = if let Some(&Some(call_arg_idx)) = Some(opt_call_idx) {
                         let compiled = self.compile_arg_with_expected_type(
                             &final_arg_source,
@@ -1070,7 +1279,7 @@ impl Cg<'_, '_, '_> {
                         // slot uses its default value
                         let (default_vals, rc_owned) = self.compile_method_default_args(
                             method_id,
-                            slot,
+                            param_index,
                             &[param_type_id],
                             is_generic_class,
                         )?;

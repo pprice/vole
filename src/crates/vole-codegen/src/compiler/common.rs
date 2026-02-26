@@ -758,15 +758,21 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
     env: &CompileEnv<'ctx>,
     vir_func: &vole_vir::func::VirFunction,
 ) -> CodegenResult<()> {
-    let return_type_id = Some(vir_func.return_type).filter(|id| !id.is_void());
+    let return_type_id = Some(crate::types::vir_conversions::vir_to_sema_type_id(
+        vir_func.return_type,
+        &env.analyzed.vir_program.type_table,
+        env.analyzed.type_arena(),
+    ))
+    .filter(|id| !id.is_void());
 
     // Auto-detect sret convention.
-    let skip_block_params = if let Some(ret_type_id) = return_type_id {
-        let arena = env.analyzed.type_arena();
+    let skip_block_params = if return_type_id.is_some() {
         let entities = env.analyzed.entity_registry();
-        if let Some(flat_count) =
-            crate::structs::struct_flat_slot_count(ret_type_id, arena, entities)
-        {
+        if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+            vir_func.return_type,
+            &env.analyzed.vir_program.type_table,
+            entities,
+        ) {
             if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
                 1
             } else {
@@ -786,14 +792,24 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
 
     let block_params = builder.block_params(entry_block).to_vec();
     let mut variables: FxHashMap<Symbol, (Variable, TypeId)> = FxHashMap::default();
-    let arena = env.analyzed.type_arena();
     let ptr = codegen_ctx.ptr_type();
+    let vir_table = &env.analyzed.vir_program.type_table;
 
     for (i, (name, type_id, _vir_ty)) in vir_func.params.iter().enumerate() {
-        let cl_ty = crate::types::type_id_to_cranelift(*type_id, arena, ptr);
+        let cl_ty = crate::types::vir_conversions::vir_type_to_cranelift(*type_id, vir_table, ptr);
         let var = builder.declare_var(cl_ty);
         builder.def_var(var, block_params[skip_block_params + i]);
-        variables.insert(*name, (var, *type_id));
+        variables.insert(
+            *name,
+            (
+                var,
+                crate::types::vir_conversions::vir_to_sema_type_id(
+                    *type_id,
+                    vir_table,
+                    env.analyzed.type_arena(),
+                ),
+            ),
+        );
     }
 
     let mut cg = Cg::new(&mut builder, codegen_ctx, env)

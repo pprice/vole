@@ -2,7 +2,7 @@
 //
 // VIR type representations, memory layout descriptors, and reflection metadata.
 
-use vole_identity::{NameId, Symbol, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{NameId, Symbol, TypeDefId, VirTypeId};
 
 use crate::expr::FieldStorage;
 
@@ -166,7 +166,7 @@ pub struct VirFieldInfo {
     /// Interned field name.
     pub name: Symbol,
     /// Concrete type of the field.
-    pub ty: TypeId,
+    pub ty: VirTypeId,
     /// VIR type of the field (migration: `VirTypeId::INVALID`).
     pub vir_ty: VirTypeId,
     /// How the field is stored in memory (inline vs. heap-indirect).
@@ -177,7 +177,7 @@ pub struct VirFieldInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VirUnionLayout {
     /// The concrete variant types (order matches the tag values).
-    pub variants: Vec<TypeId>,
+    pub variants: Vec<VirTypeId>,
     /// VIR variant types (migration: all `VirTypeId::INVALID`).
     pub vir_variants: Vec<VirTypeId>,
     /// Whether all variants fit inline (16-byte buffer) or require heap
@@ -225,7 +225,7 @@ pub struct VirFieldMeta {
     /// Interned field name.
     pub name: Symbol,
     /// Concrete field type.
-    pub ty: TypeId,
+    pub ty: VirTypeId,
     /// VIR type of the field (migration: `VirTypeId::INVALID`).
     pub vir_ty: VirTypeId,
     /// Annotations attached to this field.

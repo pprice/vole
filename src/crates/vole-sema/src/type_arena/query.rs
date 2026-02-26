@@ -424,6 +424,98 @@ impl TypeArena {
         self.intern_map.get(&ty).copied()
     }
 
+    /// Look up an existing FixedArray type by element type and size (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_fixed_array(&self, element: TypeId, size: usize) -> Option<TypeId> {
+        let ty = SemaType::FixedArray { element, size };
+        self.intern_map.get(&ty).copied()
+    }
+
+    /// Look up an existing Tuple type by element list (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_tuple(&self, elements: TypeIdVec) -> Option<TypeId> {
+        let ty = SemaType::Tuple(elements);
+        self.intern_map.get(&ty).copied()
+    }
+
+    /// Look up an existing Union type by variants (read-only).
+    ///
+    /// The lookup canonicalizes order and deduplicates variants to match the
+    /// arena's interned union representation.
+    pub fn lookup_union(&self, mut variants: TypeIdVec) -> Option<TypeId> {
+        if variants.iter().any(|&v| v.is_unknown()) {
+            return Some(TypeId::UNKNOWN);
+        }
+        let mut canonical = variants.clone();
+        canonical.sort_unstable_by_key(|id| id.raw());
+        canonical.dedup();
+        let canonical_ty = SemaType::Union(canonical.clone());
+        if let Some(id) = self.intern_map.get(&canonical_ty).copied() {
+            return Some(id);
+        }
+
+        // Backward-compat fallback: some pre-existing unions were interned
+        // in source order rather than canonical sorted order.
+        variants.dedup();
+        let source_order_ty = SemaType::Union(variants.clone());
+        if let Some(id) = self.intern_map.get(&source_order_ty).copied() {
+            return Some(id);
+        }
+
+        // Last resort: set-equality lookup ignoring variant order.
+        self.intern_map.iter().find_map(|(ty, &id)| {
+            let SemaType::Union(existing) = ty else {
+                return None;
+            };
+            (existing.len() == canonical.len()
+                && canonical.iter().all(|variant| existing.contains(variant)))
+            .then_some(id)
+        })
+    }
+
+    /// Look up an existing Function type (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_function(
+        &self,
+        params: TypeIdVec,
+        ret: TypeId,
+        is_closure: bool,
+    ) -> Option<TypeId> {
+        let ty = SemaType::Function {
+            params,
+            ret,
+            is_closure,
+        };
+        self.intern_map.get(&ty).copied()
+    }
+
+    /// Look up an existing Fallible type (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_fallible(&self, success: TypeId, error: TypeId) -> Option<TypeId> {
+        let ty = SemaType::Fallible { success, error };
+        self.intern_map.get(&ty).copied()
+    }
+
+    /// Look up an existing Class type by type_def_id and type_args (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_class(&self, type_def_id: TypeDefId, type_args: TypeIdVec) -> Option<TypeId> {
+        let ty = SemaType::Class {
+            type_def_id,
+            type_args,
+        };
+        self.intern_map.get(&ty).copied()
+    }
+
+    /// Look up an existing Struct type by type_def_id and type_args (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_struct(&self, type_def_id: TypeDefId, type_args: TypeIdVec) -> Option<TypeId> {
+        let ty = SemaType::Struct {
+            type_def_id,
+            type_args,
+        };
+        self.intern_map.get(&ty).copied()
+    }
+
     /// Look up an existing Interface type by type_def_id and type_args (read-only).
     /// Returns None if the type doesn't exist in the arena.
     pub fn lookup_interface(&self, type_def_id: TypeDefId, type_args: TypeIdVec) -> Option<TypeId> {
@@ -431,6 +523,13 @@ impl TypeArena {
             type_def_id,
             type_args,
         };
+        self.intern_map.get(&ty).copied()
+    }
+
+    /// Look up an existing Error type by type_def_id (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_error(&self, type_def_id: TypeDefId) -> Option<TypeId> {
+        let ty = SemaType::Error { type_def_id };
         self.intern_map.get(&ty).copied()
     }
 

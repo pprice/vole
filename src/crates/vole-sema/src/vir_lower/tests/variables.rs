@@ -37,7 +37,7 @@ fn lower_identifier_becomes_local_load() {
     match vir_ref.as_ref() {
         VirExpr::LocalLoad { name, ty, .. } => {
             assert_eq!(*name, sym);
-            assert_eq!(*ty, TypeId::UNKNOWN);
+            assert_eq!(*ty, vir_type_id(TypeId::UNKNOWN));
         }
         other => panic!("expected LocalLoad, got {other:?}"),
     }
@@ -72,7 +72,7 @@ fn lower_identifier_preserves_sema_type() {
     match vir_ref.as_ref() {
         VirExpr::LocalLoad { name, ty, .. } => {
             assert_eq!(*name, sym);
-            assert_eq!(*ty, TypeId::I64);
+            assert_eq!(*ty, vir_type_id(TypeId::I64));
         }
         other => panic!("expected LocalLoad with I64 type, got {other:?}"),
     }
@@ -107,7 +107,7 @@ fn lower_identifier_bool_type() {
     match vir_ref.as_ref() {
         VirExpr::LocalLoad { name, ty, .. } => {
             assert_eq!(*name, sym);
-            assert_eq!(*ty, TypeId::BOOL);
+            assert_eq!(*ty, vir_type_id(TypeId::BOOL));
         }
         other => panic!("expected LocalLoad with BOOL type, got {other:?}"),
     }

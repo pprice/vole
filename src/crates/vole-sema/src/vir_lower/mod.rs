@@ -61,6 +61,21 @@ impl LoweringCtx<'_> {
         translate_type_id(self.type_table, type_id, self.type_arena)
     }
 
+    /// Compatibility `VirTypeId` for mixed migration fields.
+    ///
+    /// Prefer a true translated VIR ID when available; when translation yields
+    /// `UNKNOWN` for a non-unknown sema type (for types not represented in
+    /// `VirTypeTable` yet), preserve the raw sema ID so legacy bridges can
+    /// still recover the original `TypeId`.
+    pub fn compat_ty(&mut self, type_id: TypeId) -> VirTypeId {
+        let vir_ty = self.translate(type_id);
+        if vir_ty == VirTypeId::UNKNOWN && type_id != TypeId::UNKNOWN {
+            VirTypeId::from_raw(type_id.raw())
+        } else {
+            vir_ty
+        }
+    }
+
     // -- Tolerant NodeMap query helpers -------------------------------------
     //
     // In generic mode (`self.generic == true`), these helpers return a
@@ -187,7 +202,10 @@ pub fn lower_function(
     };
     let params = param_types
         .iter()
-        .map(|(s, t)| (*s, *t, ctx.translate(*t)))
+        .map(|(s, t)| {
+            let vir_ty = ctx.translate(*t);
+            (*s, vir_ty, vir_ty)
+        })
         .collect();
     let vir_return_type = ctx.translate(return_type);
     let body = lower_func_body(&func.body, &mut ctx);
@@ -195,7 +213,7 @@ pub fn lower_function(
         id: func_id,
         name,
         params,
-        return_type,
+        return_type: vir_return_type,
         vir_return_type,
         body,
         mangled_name_id: None,
@@ -278,7 +296,10 @@ pub fn lower_method(
     };
     let params = param_types
         .iter()
-        .map(|(s, t)| (*s, *t, ctx.translate(*t)))
+        .map(|(s, t)| {
+            let vir_ty = ctx.translate(*t);
+            (*s, vir_ty, vir_ty)
+        })
         .collect();
     let vir_return_type = ctx.translate(return_type);
     let body = lower_func_body(&func.body, &mut ctx);
@@ -286,7 +307,7 @@ pub fn lower_method(
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
         params,
-        return_type,
+        return_type: vir_return_type,
         vir_return_type,
         body,
         mangled_name_id: None,
@@ -325,7 +346,10 @@ pub fn lower_interface_method(
     };
     let params = param_types
         .iter()
-        .map(|(s, t)| (*s, *t, ctx.translate(*t)))
+        .map(|(s, t)| {
+            let vir_ty = ctx.translate(*t);
+            (*s, vir_ty, vir_ty)
+        })
         .collect();
     let vir_return_type = ctx.translate(return_type);
     let body = lower_func_body(body_ast, &mut ctx);
@@ -333,7 +357,7 @@ pub fn lower_interface_method(
         id: FunctionId::new(0), // dummy — methods use method_id for lookup
         name,
         params,
-        return_type,
+        return_type: vir_return_type,
         vir_return_type,
         body,
         mangled_name_id: None,
@@ -378,7 +402,10 @@ pub fn lower_generic_function(
     };
     let params = param_types
         .iter()
-        .map(|(s, t)| (*s, *t, ctx.translate(*t)))
+        .map(|(s, t)| {
+            let vir_ty = ctx.translate(*t);
+            (*s, vir_ty, vir_ty)
+        })
         .collect();
     let vir_return_type = ctx.translate(return_type);
     let body = lower_func_body(&func.body, &mut ctx);
@@ -386,7 +413,7 @@ pub fn lower_generic_function(
         id: func_id,
         name,
         params,
-        return_type,
+        return_type: vir_return_type,
         vir_return_type,
         body,
         mangled_name_id: None,

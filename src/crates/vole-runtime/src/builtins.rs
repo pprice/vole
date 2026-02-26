@@ -23,7 +23,10 @@
 
 use crate::RcString;
 use crate::array::RcArray;
-use crate::value::{RcHeader, RuntimeTypeId, TaggedValue, union_heap_cleanup};
+use crate::value::{
+    RcHeader, RuntimeTypeId, TaggedValue, union_heap_cleanup, unknown_heap_cleanup,
+    vole_tagged_value_clone,
+};
 use std::alloc::{Layout, alloc, dealloc};
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
@@ -712,6 +715,22 @@ pub extern "C" fn vole_array_filled(count: i64, tag: u64, value: u64) -> *mut Rc
             }
             // The source union heap buffer is no longer needed after cloning.
             union_heap_cleanup(value as *mut u8);
+        } else if tag == RuntimeTypeId::UnknownHeap as u64 && value != 0 {
+            // Unknown heap values are 16-byte TaggedValue buffers without RcHeader.
+            // Sharing a single pointer across slots causes double-free when array
+            // cleanup runs unknown_heap_cleanup per element, so clone per slot.
+            for i in 0..n {
+                let cloned_ptr = vole_tagged_value_clone(value as *mut u8);
+                std::ptr::write(
+                    (*arr).data.add(i),
+                    TaggedValue {
+                        tag,
+                        value: cloned_ptr as u64,
+                    },
+                );
+            }
+            // The source unknown buffer is consumed by this call.
+            unknown_heap_cleanup(value as *mut u8);
         } else {
             for i in 0..n {
                 tv.rc_inc_if_needed();

@@ -14,7 +14,6 @@ use crate::types::{
 use crate::union_layout;
 
 use vole_frontend::{Expr, ExprKind, NodeId};
-use vole_identity::VirTypeId;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirExpr;
 use vole_vir::expr::VirMethodDispatchMeta;
@@ -797,10 +796,11 @@ impl Cg<'_, '_, '_> {
         let saved_entry = self.vars.insert(oc_sym, (inner_var, inner.type_id));
 
         // Build a VIR-native MethodCallSource with $oc as the receiver.
+        let inner_vir_ty = self.vir_lookup(inner.type_id);
         let receiver_vir = VirExpr::LocalLoad {
             name: oc_sym,
-            ty: inner.type_id,
-            vir_ty: VirTypeId::INVALID,
+            ty: inner_vir_ty,
+            vir_ty: inner_vir_ty,
         };
         use crate::structs::methods::MethodCallSource;
         let src = MethodCallSource::Vir {

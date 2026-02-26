@@ -8,6 +8,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use vole_frontend::ast::{RaiseStmt, ReturnStmt};
 use vole_frontend::{self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, Stmt, Symbol};
+use vole_identity::VirTypeId;
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirStmt;
@@ -276,8 +277,9 @@ impl Cg<'_, '_, '_> {
             init
         };
 
+        let sentinel_hint_type_id = self.sentinel_hint_type_id_from_expr(init_expr);
         let (final_value, final_type_id, is_stack_union) =
-            self.coerce_let_init(&init, declared_type_id_opt)?;
+            self.coerce_let_init(&init, declared_type_id_opt, sentinel_hint_type_id)?;
 
         // Use preregistered var for recursive lambdas, otherwise declare new
         let var = if let Some(var) = preregistered_var {
@@ -405,6 +407,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         init: &CompiledValue,
         declared_type_id_opt: Option<TypeId>,
+        sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<(Value, TypeId, bool)> {
         let mut is_stack_union = false;
 
@@ -421,7 +424,11 @@ impl Cg<'_, '_, '_> {
                     let boxed = self.box_to_unknown(*init)?;
                     (boxed.value, boxed.type_id)
                 } else if is_declared_union && !self.arena().is_union(init.type_id) {
-                    let wrapped = self.construct_union_id(*init, declared_type_id)?;
+                    let wrapped = self.construct_union_id_with_hint(
+                        *init,
+                        declared_type_id,
+                        sentinel_hint_type_id,
+                    )?;
                     is_stack_union = true;
                     (wrapped.value, wrapped.type_id)
                 } else if is_declared_numeric && init.type_id.is_numeric() {
@@ -589,11 +596,30 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
         variants: &[TypeId],
     ) -> CodegenResult<(usize, Value, TypeId)> {
+        self.find_union_variant_tag_with_hint(value, union_type_id, variants, None)
+    }
+
+    fn find_union_variant_tag_with_hint(
+        &mut self,
+        value: &CompiledValue,
+        union_type_id: TypeId,
+        variants: &[TypeId],
+        sentinel_hint_type_id: Option<TypeId>,
+    ) -> CodegenResult<(usize, Value, TypeId)> {
         let resolved_value_type_id = self.try_substitute_type(value.type_id);
 
         // Direct type match
         if let Some(pos) = variants.iter().position(|&v| v == resolved_value_type_id) {
             return Ok((pos, value.value, resolved_value_type_id));
+        }
+
+        // Sentinel hint match (used when multiple sentinel variants share the same
+        // lowered value shape, e.g. Empty/Deleted).
+        if let Some(hint_type_id) = sentinel_hint_type_id
+            && self.arena().is_sentinel(resolved_value_type_id)
+            && let Some(pos) = variants.iter().position(|&v| v == hint_type_id)
+        {
+            return Ok((pos, value.value, hint_type_id));
         }
 
         // Try to find a compatible integer type for widening/narrowing
@@ -621,6 +647,48 @@ impl Cg<'_, '_, '_> {
                     value.value
                 };
                 Ok((pos, actual, variant_type_id))
+            }
+            None if self.arena().is_sentinel(resolved_value_type_id) => {
+                let sentinel_variants: Vec<(usize, TypeId)> = variants
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, &ty)| self.arena().is_sentinel(ty).then_some((idx, ty)))
+                    .collect();
+                if sentinel_variants.len() == 1 {
+                    let (pos, ty) = sentinel_variants[0];
+                    Ok((pos, value.value, ty))
+                } else {
+                    let expected = variants
+                        .iter()
+                        .map(|&variant| self.arena().display_basic(variant))
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    let found = self.arena().display_basic(resolved_value_type_id);
+                    let subs = self
+                        .substitutions
+                        .map(|m| {
+                            m.iter()
+                                .map(|(k, v)| {
+                                    format!(
+                                        "{} ({:?}) -> {}",
+                                        self.name_table().display(*k),
+                                        k,
+                                        self.arena().display_basic(*v)
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_else(|| "<none>".to_string());
+                    Err(CodegenError::type_mismatch(
+                        "union sentinel variant",
+                        format!("compatible sentinel type ({expected})"),
+                        format!(
+                            "{found} (union={}, substitutions={subs})",
+                            self.arena().display_basic(union_type_id)
+                        ),
+                    ))
+                }
             }
             None => {
                 let expected = variants
@@ -667,6 +735,15 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
+        self.construct_union_id_with_hint(value, union_type_id, None)
+    }
+
+    pub fn construct_union_id_with_hint(
+        &mut self,
+        value: CompiledValue,
+        union_type_id: TypeId,
+        sentinel_hint_type_id: Option<TypeId>,
+    ) -> CodegenResult<CompiledValue> {
         let arena = self.arena();
         let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union")
@@ -690,8 +767,12 @@ impl Cg<'_, '_, '_> {
         };
 
         // Find the position of value's type in variants
-        let (tag, actual_value, actual_type_id) =
-            self.find_union_variant_tag(&value, union_type_id, &variants)?;
+        let (tag, actual_value, actual_type_id) = self.find_union_variant_tag_with_hint(
+            &value,
+            union_type_id,
+            &variants,
+            sentinel_hint_type_id,
+        )?;
 
         let union_size = self.type_size(union_type_id);
         let slot = self.alloc_stack(union_size);
@@ -1133,8 +1214,15 @@ impl Cg<'_, '_, '_> {
                 value,
                 mutable: _,
                 ty,
-                ..
-            } => self.compile_vir_let(*name, value, *ty),
+                vir_ty,
+            } => {
+                let binding_ty = if *vir_ty != VirTypeId::UNKNOWN {
+                    self.sema_type_from_vir(*vir_ty)
+                } else {
+                    self.sema_type_from_vir(*ty)
+                };
+                self.compile_vir_let(*name, value, binding_ty)
+            }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
             VirStmt::For(vir_for) => self.compile_vir_for(vir_for),
@@ -1153,8 +1241,29 @@ impl Cg<'_, '_, '_> {
     fn compile_vir_return(&mut self, value: Option<&vole_vir::VirExpr>) -> CodegenResult<bool> {
         let return_type_id = self.return_type;
         if let Some(value_expr) = value {
-            let mut compiled = self.compile_vir_expr(value_expr)?;
+            let mut compiled = if let Some(ret_type_id) = return_type_id
+                && self.vir_query_is_union(ret_type_id)
+                && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
+                && let Some(expected_variant) = self.preferred_array_like_union_variant(ret_type_id)
+            {
+                self.compile_vir_expr_with_expected_type(value_expr, expected_variant)?
+            } else {
+                self.compile_vir_expr(value_expr)?
+            };
             compiled.type_id = self.try_substitute_type(compiled.type_id);
+            if let Some(ret_type_id) = return_type_id
+                && self.arena().is_union(ret_type_id)
+                && self.arena().is_function(compiled.type_id)
+                && let vole_vir::VirExpr::Match {
+                    scrutinee, arms, ..
+                } = value_expr
+            {
+                // Match-expression type metadata can degrade in generic module
+                // bodies. Recompile with the declared return union as the
+                // expected result type.
+                compiled = self.compile_vir_match(scrutinee, arms, ret_type_id)?;
+                compiled.type_id = self.try_substitute_type(compiled.type_id);
+            }
 
             // RC bookkeeping: detect RC skip-var from VIR LocalLoad.
             let skip_var = self.extract_vir_return_skip_var(value_expr);
@@ -1193,6 +1302,28 @@ impl Cg<'_, '_, '_> {
             return Some(*var);
         }
         None
+    }
+
+    /// Pick a unique array-like variant from a union return type.
+    ///
+    /// Used to compile array literals in `return` statements with an expected
+    /// target type when VIR expression metadata is degraded.
+    pub(crate) fn preferred_array_like_union_variant(
+        &self,
+        union_type_id: TypeId,
+    ) -> Option<TypeId> {
+        let variants = self.arena().unwrap_union(union_type_id)?;
+        let mut it = variants.iter().copied().filter(|&variant| {
+            self.arena().is_array(variant)
+                || self.arena().unwrap_tuple(variant).is_some()
+                || self.arena().unwrap_fixed_array(variant).is_some()
+        });
+        let first = it.next()?;
+        if it.next().is_some() {
+            None
+        } else {
+            Some(first)
+        }
     }
 
     /// Emit the actual return instruction, handling all return conventions.
@@ -1274,6 +1405,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.env.analyzed.type_arena();
             let ptr_type = self.ptr_type();
             let target_ty = type_id_to_cranelift(ret_type_id, arena, ptr_type);
+
             convert_to_type(self.builder, compiled, target_ty, arena)
         } else {
             compiled.value
@@ -1498,7 +1630,11 @@ impl Cg<'_, '_, '_> {
 
         let declared_type_id_opt = self.vir_let_declared_type(value_expr, binding_ty);
 
-        let init = self.compile_vir_expr(value_expr)?;
+        let init = if let Some(declared_type_id) = declared_type_id_opt {
+            self.compile_vir_let_init_with_declared_type(value_expr, declared_type_id)?
+        } else {
+            self.compile_vir_expr(value_expr)?
+        };
         self.self_capture = None;
 
         // Struct copy: when binding a struct value, copy to a new stack slot
@@ -1509,8 +1645,9 @@ impl Cg<'_, '_, '_> {
             init
         };
 
+        let sentinel_hint_type_id = self.sentinel_hint_type_id_from_vir_expr(value_expr);
         let (final_value, final_type_id, is_stack_union) =
-            self.coerce_let_init(&init, declared_type_id_opt)?;
+            self.coerce_let_init(&init, declared_type_id_opt, sentinel_hint_type_id)?;
 
         // Use preregistered var for recursive lambdas, otherwise declare new.
         let var = if let Some(var) = preregistered_var {
@@ -1518,6 +1655,17 @@ impl Cg<'_, '_, '_> {
             var
         } else {
             let cranelift_ty = self.cranelift_type(final_type_id);
+            let actual_ty = self.builder.func.dfg.value_type(final_value);
+            if cranelift_ty != actual_ty {
+                return Err(CodegenError::internal_with_context(
+                    "VIR let type mismatch",
+                    format!(
+                        "name={} binding_ty={binding_ty:?} init_ty={:?} final_type={final_type_id:?} declared={declared_type_id_opt:?} cranelift={cranelift_ty:?} actual={actual_ty:?} expr={value_expr:?}",
+                        self.interner().resolve(name),
+                        init.type_id,
+                    ),
+                ));
+            }
             let var = self.builder.declare_var(cranelift_ty);
             self.builder.def_var(var, final_value);
             self.vars.insert(name, (var, final_type_id));
@@ -1537,6 +1685,19 @@ impl Cg<'_, '_, '_> {
         init.mark_consumed();
         init.debug_assert_rc_handled("VirStmt::Let");
         Ok(false)
+    }
+
+    /// Compile a VIR let initializer with a declared binding type hint.
+    ///
+    /// TEMP(N279-C): when VIR expression type IDs degrade to `unknown`, use the
+    /// declared let-binding type to keep array/repeat literal element lowering
+    /// coherent with the binding's concrete type.
+    fn compile_vir_let_init_with_declared_type(
+        &mut self,
+        value_expr: &vole_vir::VirExpr,
+        declared_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        self.compile_vir_expr_with_expected_type(value_expr, declared_type_id)
     }
 
     /// Compile a VIR let-tuple destructuring statement.
@@ -1590,7 +1751,7 @@ impl Cg<'_, '_, '_> {
         use vole_vir::VirDestructurePattern;
         match pattern {
             VirDestructurePattern::Bind { name, ty, .. } => {
-                self.compile_vir_destructure_bind(*name, *ty, value)?;
+                self.compile_vir_destructure_bind(*name, self.sema_type_from_vir(*ty), value)?;
             }
             VirDestructurePattern::Wildcard => {}
             VirDestructurePattern::Tuple { elements, kind } => {
@@ -1602,7 +1763,12 @@ impl Cg<'_, '_, '_> {
                 is_struct,
                 ..
             } => {
-                self.compile_vir_destructure_record(fields, value, *source_ty, *is_struct)?;
+                self.compile_vir_destructure_record(
+                    fields,
+                    value,
+                    self.sema_type_from_vir(*source_ty),
+                    *is_struct,
+                )?;
             }
             VirDestructurePattern::Module {
                 bindings,
@@ -1651,11 +1817,15 @@ impl Cg<'_, '_, '_> {
         match kind {
             vole_vir::DestructureTupleKind::Tuple => {
                 // True tuple: compute layout from element types.
-                let elem_type_ids: Vec<TypeId> = elements.iter().map(|e| e.ty).collect();
+                let elem_type_ids: Vec<TypeId> = elements
+                    .iter()
+                    .map(|e| self.sema_type_from_vir(e.ty))
+                    .collect();
                 let (_, offsets) = self.tuple_layout(&elem_type_ids);
                 for (i, elem) in elements.iter().enumerate() {
                     let offset = offsets[i];
-                    let elem_cr_type = self.cranelift_type(elem.ty);
+                    let elem_ty = self.sema_type_from_vir(elem.ty);
+                    let elem_cr_type = self.cranelift_type(elem_ty);
                     let elem_value =
                         self.builder
                             .ins()
@@ -1665,6 +1835,7 @@ impl Cg<'_, '_, '_> {
             }
             vole_vir::DestructureTupleKind::FixedArray { elem_ty, .. } => {
                 // Fixed array: all elements have the same type and size.
+                let elem_ty = self.sema_type_from_vir(elem_ty);
                 let elem_cr_type = self.cranelift_type(elem_ty);
                 let elem_size = self.type_size(elem_ty).div_ceil(8) * 8;
                 for (i, elem) in elements.iter().enumerate() {
@@ -1691,17 +1862,18 @@ impl Cg<'_, '_, '_> {
         is_struct: bool,
     ) -> CodegenResult<()> {
         for field in fields {
+            let field_ty = self.sema_type_from_vir(field.ty);
             let converted = if is_struct {
                 // Structs are stack-allocated: load field directly from pointer + offset
-                self.struct_field_load(value, field.slot as usize, field.ty, source_ty)?
+                self.struct_field_load(value, field.slot as usize, field_ty, source_ty)?
             } else {
                 // Classes are heap-allocated: use runtime field access
-                self.get_instance_field(value, field.slot as usize, field.ty)?
+                self.get_instance_field(value, field.slot as usize, field_ty)?
             };
 
             let var = self.builder.declare_var(converted.ty);
             self.builder.def_var(var, converted.value);
-            self.vars.insert(field.binding, (var, field.ty));
+            self.vars.insert(field.binding, (var, field_ty));
         }
         Ok(())
     }
@@ -1719,7 +1891,11 @@ impl Cg<'_, '_, '_> {
         for binding in bindings {
             self.local_module_bindings.insert(
                 binding.binding,
-                (module_id, binding.export_name, binding.export_ty),
+                (
+                    module_id,
+                    binding.export_name,
+                    self.sema_type_from_vir(binding.export_ty),
+                ),
             );
         }
         Ok(())
@@ -1741,9 +1917,10 @@ impl Cg<'_, '_, '_> {
             if !has_self_capture {
                 return None;
             }
-            let cranelift_ty = self.cranelift_type(*ty);
+            let sema_ty = self.sema_type_from_vir(*ty);
+            let cranelift_ty = self.cranelift_type(sema_ty);
             let var = self.builder.declare_var(cranelift_ty);
-            self.vars.insert(name, (var, *ty));
+            self.vars.insert(name, (var, sema_ty));
             return Some(var);
         }
         None
@@ -1776,6 +1953,30 @@ impl Cg<'_, '_, '_> {
         Some(binding_ty)
     }
 
+    /// Extract sentinel type hint from an AST let initializer, if present.
+    fn sentinel_hint_type_id_from_expr(&self, expr: &vole_frontend::Expr) -> Option<TypeId> {
+        match &expr.kind {
+            ExprKind::Identifier(sym) => self.sentinel_type_id_for_symbol(*sym),
+            _ => None,
+        }
+    }
+
+    /// Extract sentinel type hint from a VIR let initializer, if present.
+    fn sentinel_hint_type_id_from_vir_expr(&self, expr: &vole_vir::VirExpr) -> Option<TypeId> {
+        match expr {
+            vole_vir::VirExpr::LocalLoad { name, .. } => self.sentinel_type_id_for_symbol(*name),
+            _ => None,
+        }
+    }
+
+    /// Resolve a symbol to a sentinel base `TypeId` in the current module context.
+    fn sentinel_type_id_for_symbol(&self, sym: Symbol) -> Option<TypeId> {
+        let name = self.interner().resolve(sym);
+        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+        let type_def_id = self.query().resolve_type_def_by_str(module_id, name)?;
+        self.query().sentinel_base_type(type_def_id)
+    }
+
     /// Register RC tracking for a newly compiled VIR let binding.
     ///
     /// Handles: unknown boxing detection, direct RC inc for borrows,
@@ -1798,6 +1999,17 @@ impl Cg<'_, '_, '_> {
 
         if self.rc_scopes.has_active_scope() && created_tagged_value {
             let drop_flag = self.register_rc_local(var, final_type_id);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        } else if self.rc_scopes.has_active_scope()
+            && final_type_id == TypeId::UNKNOWN
+            && init.type_id == TypeId::UNKNOWN
+            && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
+        {
+            // TEMP(N279-C): mixed VIR/sema metadata can degrade array-literal
+            // let bindings to UNKNOWN while still carrying raw array pointers
+            // (not boxed TaggedValue unknown). Register generic RC cleanup so
+            // scope-exit emits rc_dec and array element closures are released.
+            let drop_flag = self.register_rc_local(var, TypeId::HANDLE);
             crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
         } else if self.rc_scopes.has_active_scope() && self.rc_state(final_type_id).needs_cleanup()
         {

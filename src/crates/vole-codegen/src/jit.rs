@@ -405,9 +405,23 @@ impl JitContext {
             self.ctx.set_disasm(true);
         }
 
+        let func_name = self
+            .func_ids
+            .iter()
+            .find(|(_, id)| **id == func_id)
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| format!("func_{:?}", func_id));
+
         self.module
             .define_function(func_id, &mut self.ctx)
-            .map_err(CodegenError::cranelift)?;
+            .map_err(|e| {
+                let mut details = format!("function={func_name}, error={e:?}");
+                if std::env::var_os("VOLE_DEBUG_CLIF_ON_ERROR").is_some() {
+                    details.push_str("\nCLIF:\n");
+                    details.push_str(&format!("{}", self.ctx.func.display()));
+                }
+                CodegenError::internal_with_context("cranelift define_function failed", details)
+            })?;
         self.defined_func_ids.insert(func_id);
 
         // Capture disassembly if enabled
@@ -416,12 +430,6 @@ impl JitContext {
             && let Some(vcode) = &compiled.vcode
         {
             // Get function name from func_ids (reverse lookup)
-            let func_name = self
-                .func_ids
-                .iter()
-                .find(|(_, id)| **id == func_id)
-                .map(|(name, _)| name.clone())
-                .unwrap_or_else(|| format!("func_{:?}", func_id));
             self.disasm_output.push((func_name, vcode.clone()));
         }
 

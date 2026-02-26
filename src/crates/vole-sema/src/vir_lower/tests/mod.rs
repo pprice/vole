@@ -14,7 +14,7 @@ use crate::node_map::NodeMap;
 use crate::{EntityRegistry, TypeArena};
 use vole_frontend::ast::{Block, Expr, ExprKind, FuncBody, FuncDecl, Stmt};
 use vole_identity::{
-    FunctionId, Interner, ModuleId, NameId, NameTable, NodeId, Span, Symbol, TypeId,
+    FunctionId, Interner, ModuleId, NameId, NameTable, NodeId, Span, Symbol, TypeId, VirTypeId,
 };
 use vole_vir::type_table::VirTypeTable;
 
@@ -34,6 +34,10 @@ fn dummy_func_id() -> FunctionId {
 
 fn dummy_type_id() -> TypeId {
     TypeId::VOID
+}
+
+fn vir_type_id(id: TypeId) -> VirTypeId {
+    VirTypeId::from_raw(id.raw())
 }
 
 fn dummy_name_id() -> NameId {

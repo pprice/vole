@@ -2,7 +2,7 @@
 //
 // VirBuilder: incremental construction of VIR trees.
 
-use vole_identity::{FunctionId, Symbol, TypeId, VirTypeId};
+use vole_identity::{FunctionId, Symbol, VirTypeId};
 
 use crate::calls::CallTarget;
 use crate::expr::{CoerceKind, FieldStorage, VirBinOp, VirExpr, VirUnOp};
@@ -60,7 +60,7 @@ impl VirBuilder {
     // -- Expression builders --------------------------------------------------
 
     /// Integer literal that fits in 64 bits.
-    pub fn build_int_literal(&mut self, value: i64, ty: TypeId) -> VirRef {
+    pub fn build_int_literal(&mut self, value: i64, ty: VirTypeId) -> VirRef {
         Box::new(VirExpr::IntLiteral {
             value,
             ty,
@@ -69,7 +69,7 @@ impl VirBuilder {
     }
 
     /// Wide integer literal (i128) stored as two 64-bit halves.
-    pub fn build_wide_literal(&mut self, low: u64, high: u64, ty: TypeId) -> VirRef {
+    pub fn build_wide_literal(&mut self, low: u64, high: u64, ty: VirTypeId) -> VirRef {
         Box::new(VirExpr::WideLiteral {
             low,
             high,
@@ -79,7 +79,7 @@ impl VirBuilder {
     }
 
     /// Floating-point literal.
-    pub fn build_float_literal(&mut self, value: f64, ty: TypeId) -> VirRef {
+    pub fn build_float_literal(&mut self, value: f64, ty: VirTypeId) -> VirRef {
         Box::new(VirExpr::FloatLiteral {
             value,
             ty,
@@ -108,7 +108,7 @@ impl VirBuilder {
         op: VirBinOp,
         lhs: VirRef,
         rhs: VirRef,
-        ty: TypeId,
+        ty: VirTypeId,
         line: u32,
     ) -> VirRef {
         Box::new(VirExpr::BinaryOp {
@@ -122,7 +122,7 @@ impl VirBuilder {
     }
 
     /// Unary operation (negation, logical/bitwise not).
-    pub fn build_unary_op(&mut self, op: VirUnOp, operand: VirRef, ty: TypeId) -> VirRef {
+    pub fn build_unary_op(&mut self, op: VirUnOp, operand: VirRef, ty: VirTypeId) -> VirRef {
         Box::new(VirExpr::UnaryOp {
             op,
             operand,
@@ -132,7 +132,7 @@ impl VirBuilder {
     }
 
     /// Function or method call.
-    pub fn build_call(&mut self, target: CallTarget, args: Vec<VirRef>, ty: TypeId) -> VirRef {
+    pub fn build_call(&mut self, target: CallTarget, args: Vec<VirRef>, ty: VirTypeId) -> VirRef {
         Box::new(VirExpr::Call {
             target,
             args,
@@ -145,8 +145,8 @@ impl VirBuilder {
     pub fn build_coerce(
         &mut self,
         value: VirRef,
-        from: TypeId,
-        to: TypeId,
+        from: VirTypeId,
+        to: VirTypeId,
         kind: CoerceKind,
     ) -> VirRef {
         Box::new(VirExpr::Coerce {
@@ -183,7 +183,7 @@ impl VirBuilder {
         object: VirRef,
         field: Symbol,
         storage: FieldStorage,
-        ty: TypeId,
+        ty: VirTypeId,
     ) -> VirRef {
         Box::new(VirExpr::FieldLoad {
             object,
@@ -195,7 +195,7 @@ impl VirBuilder {
     }
 
     /// Load a local variable.
-    pub fn build_local_load(&mut self, name: Symbol, ty: TypeId) -> VirRef {
+    pub fn build_local_load(&mut self, name: Symbol, ty: VirTypeId) -> VirRef {
         Box::new(VirExpr::LocalLoad {
             name,
             ty,
@@ -209,7 +209,7 @@ impl VirBuilder {
         cond: VirRef,
         then_body: VirBody,
         else_body: Option<VirBody>,
-        ty: TypeId,
+        ty: VirTypeId,
     ) -> VirRef {
         Box::new(VirExpr::If {
             cond,
@@ -223,7 +223,13 @@ impl VirBuilder {
     // -- Statement builders ---------------------------------------------------
 
     /// Local variable binding (`let x = ...`).
-    pub fn build_let(&mut self, name: Symbol, value: VirRef, mutable: bool, ty: TypeId) -> VirStmt {
+    pub fn build_let(
+        &mut self,
+        name: Symbol,
+        value: VirRef,
+        mutable: bool,
+        ty: VirTypeId,
+    ) -> VirStmt {
         VirStmt::Let {
             name,
             value,
@@ -269,8 +275,8 @@ impl VirBuilder {
         self,
         id: FunctionId,
         name: String,
-        params: Vec<(Symbol, TypeId, VirTypeId)>,
-        return_ty: TypeId,
+        params: Vec<(Symbol, VirTypeId, VirTypeId)>,
+        return_ty: VirTypeId,
         body: VirBody,
     ) -> VirFunction {
         VirFunction {
@@ -302,8 +308,8 @@ mod tests {
     use super::*;
     use crate::expr::{FieldStorage, VirBinOp, VirExpr};
 
-    fn dummy_type_id() -> TypeId {
-        TypeId::from_raw(0)
+    fn dummy_type_id() -> VirTypeId {
+        VirTypeId::from_raw(0)
     }
 
     fn dummy_function_id() -> FunctionId {

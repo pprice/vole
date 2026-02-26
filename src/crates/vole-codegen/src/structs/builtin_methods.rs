@@ -4,12 +4,11 @@
 
 use cranelift::prelude::*;
 
-use super::helpers::convert_to_i64_for_storage;
 use super::methods::ArgSource;
 use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, array_element_tag_id};
+use crate::types::CompiledValue;
 use vole_sema::type_arena::TypeId;
 
 impl Cg<'_, '_, '_> {
@@ -221,18 +220,7 @@ impl Cg<'_, '_, '_> {
         let (tag_val, value_bits, _value) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(value, elem_id)?
         } else {
-            let value = if self.arena().is_struct(value.type_id) {
-                self.copy_struct_to_heap(value)?
-            } else {
-                value
-            };
-            let tag = {
-                let arena = self.arena();
-                array_element_tag_id(value.type_id, arena)
-            };
-            let tag_val = self.iconst_cached(types::I64, tag);
-            let value_bits = convert_to_i64_for_storage(self.builder, &value);
-            (tag_val, value_bits, value)
+            self.prepare_dynamic_array_store_untyped(value)?
         };
 
         // Get the runtime function reference

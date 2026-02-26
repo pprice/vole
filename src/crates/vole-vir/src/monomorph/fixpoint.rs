@@ -502,14 +502,14 @@ mod tests {
     use crate::func::VirBody;
     use crate::type_table::VirTypeTable;
     use crate::types::VirType;
-    use vole_identity::{FunctionId, NameId, Symbol, TypeId, VirTypeId};
+    use vole_identity::{FunctionId, NameId, Symbol, VirTypeId};
 
     fn name(n: u32) -> NameId {
         NameId::new_for_test(n)
     }
 
-    fn type_id(n: u32) -> TypeId {
-        TypeId::from_raw(n)
+    fn type_id(n: u32) -> VirTypeId {
+        VirTypeId::from_raw(n)
     }
 
     fn sym(n: u32) -> Symbol {

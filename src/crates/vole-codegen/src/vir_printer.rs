@@ -8,7 +8,7 @@
 
 use std::fmt::Write;
 
-use vole_identity::{Interner, NameTable, Symbol, TypeId};
+use vole_identity::{Interner, NameTable, Symbol, VirTypeId};
 use vole_sema::entity_registry::EntityRegistry;
 use vole_sema::type_arena::TypeArena;
 use vole_sema::type_display::display_type_id_short;
@@ -544,7 +544,7 @@ impl<'a> VirPrinter<'a> {
         &self,
         target: &CallTarget,
         args: &[VirRef],
-        ty: TypeId,
+        ty: VirTypeId,
         out: &mut String,
         ind: usize,
     ) {
@@ -614,7 +614,7 @@ impl<'a> VirPrinter<'a> {
         cond: &VirRef,
         then_body: &VirBody,
         else_body: Option<&VirBody>,
-        ty: TypeId,
+        ty: VirTypeId,
         out: &mut String,
         ind: usize,
     ) {
@@ -635,7 +635,7 @@ impl<'a> VirPrinter<'a> {
         &self,
         scrutinee: &VirRef,
         arms: &[vole_vir::expr::VirMatchArm],
-        ty: TypeId,
+        ty: VirTypeId,
         out: &mut String,
         ind: usize,
     ) {
@@ -662,7 +662,7 @@ impl<'a> VirPrinter<'a> {
         &self,
         stmts: &[VirStmt],
         trailing: Option<&VirRef>,
-        ty: TypeId,
+        ty: VirTypeId,
         out: &mut String,
         ind: usize,
     ) {
@@ -684,7 +684,7 @@ impl<'a> VirPrinter<'a> {
         params: &[Symbol],
         body: &VirBody,
         captures: &[vole_vir::expr::VirCapture],
-        ty: TypeId,
+        ty: VirTypeId,
         out: &mut String,
         ind: usize,
     ) {
@@ -711,7 +711,7 @@ impl<'a> VirPrinter<'a> {
         w!(out, "}}: {}", self.ty(ty));
     }
 
-    fn fmt_meta_access(&self, kind: &VirMetaKind, ty: TypeId, out: &mut String, ind: usize) {
+    fn fmt_meta_access(&self, kind: &VirMetaKind, ty: VirTypeId, out: &mut String, ind: usize) {
         match kind {
             VirMetaKind::Static { type_def, object } => {
                 if let Some(obj) = object {
@@ -755,7 +755,7 @@ impl<'a> VirPrinter<'a> {
         kind: &str,
         type_def: vole_identity::TypeDefId,
         fields: &[(Symbol, VirRef)],
-        ty: TypeId,
+        ty: VirTypeId,
         out: &mut String,
         ind: usize,
     ) {
@@ -1003,8 +1003,9 @@ impl<'a> VirPrinter<'a> {
         }
     }
 
-    fn ty(&self, id: TypeId) -> String {
-        display_type_id_short(id, self.type_arena, self.names, self.entities)
+    fn ty(&self, id: VirTypeId) -> String {
+        let sema_ty = crate::types::vir_conversions::vir_to_sema_type_id_lossy(id);
+        display_type_id_short(sema_ty, self.type_arena, self.names, self.entities)
     }
 }
 

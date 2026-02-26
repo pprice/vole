@@ -35,7 +35,7 @@ fn lower_empty_block_function() {
     );
 
     assert_eq!(vir.id, dummy_func_id());
-    assert_eq!(vir.return_type, ret_ty);
+    assert_eq!(vir.return_type, vir_type_id(ret_ty));
     assert!(vir.params.is_empty());
     assert!(vir.body.stmts.is_empty());
     assert!(vir.body.trailing.is_none());
@@ -143,9 +143,9 @@ fn lower_preserves_params_and_return_type() {
     );
 
     assert_eq!(vir.params.len(), 2);
-    assert_eq!(vir.params[0].1, param_a);
-    assert_eq!(vir.params[1].1, param_b);
-    assert_eq!(vir.return_type, ret_ty);
+    assert_eq!(vir.params[0].1, vir_type_id(param_a));
+    assert_eq!(vir.params[1].1, vir_type_id(param_b));
+    assert_eq!(vir.return_type, vir_type_id(ret_ty));
 }
 
 #[test]
@@ -219,8 +219,8 @@ fn lower_monomorphized_with_concrete_types() {
 
     assert_eq!(vir.name, "identity__mono_0");
     assert_eq!(vir.params.len(), 1);
-    assert_eq!(vir.params[0].1, i64_ty);
-    assert_eq!(vir.return_type, string_ty);
+    assert_eq!(vir.params[0].1, vir_type_id(i64_ty));
+    assert_eq!(vir.return_type, vir_type_id(string_ty));
     assert_eq!(vir.body.stmts.len(), 1);
 }
 
@@ -253,7 +253,7 @@ fn lower_monomorphized_expr_body() {
     assert_eq!(vir.name, "to_bool__mono_0");
     assert!(vir.body.stmts.is_empty());
     assert!(vir.body.trailing.is_some());
-    assert_eq!(vir.return_type, bool_ty);
+    assert_eq!(vir.return_type, vir_type_id(bool_ty));
 }
 
 #[test]

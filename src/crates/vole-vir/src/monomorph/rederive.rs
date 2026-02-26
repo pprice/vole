@@ -9,7 +9,7 @@
 // now-concrete types.
 
 use rustc_hash::FxHashSet;
-use vole_identity::{StringConversion, TypeId, UnionStorageKind, VirTypeId};
+use vole_identity::{StringConversion, UnionStorageKind, VirTypeId};
 
 use crate::expr::{IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use crate::func::{VirBody, VirFunction};
@@ -348,7 +348,7 @@ fn rederive_is_check_from_expr(value: &VirExpr, result: &mut IsCheckResult, tabl
 /// Derive an IsCheckResult from concrete VIR types.
 fn derive_is_check_result(
     scrutinee_vir_ty: VirTypeId,
-    tested_type: TypeId,
+    tested_type: VirTypeId,
     tested_vir_ty: VirTypeId,
     table: &VirTypeTable,
 ) -> IsCheckResult {
@@ -745,8 +745,13 @@ mod tests {
         NameId::new_for_test(n)
     }
 
-    /// Helper: create a TypeId for testing.
-    fn type_id(n: u32) -> TypeId {
+    /// Helper: create a VirTypeId for testing.
+    fn type_id(n: u32) -> VirTypeId {
+        VirTypeId::from_raw(n)
+    }
+
+    /// Helper: create a sema TypeId for StringConversion tests.
+    fn sema_type_id(n: u32) -> TypeId {
         TypeId::from_raw(n)
     }
 
@@ -761,7 +766,7 @@ mod tests {
             id: FunctionId::new(1),
             name: "test_fn".to_string(),
             params: vec![],
-            return_type: TypeId::VOID,
+            return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::VOID,
             body: VirBody {
                 stmts: vec![],
@@ -779,7 +784,7 @@ mod tests {
             id: FunctionId::new(1),
             name: "test_fn".to_string(),
             params: vec![],
-            return_type: TypeId::VOID,
+            return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::VOID,
             body: VirBody {
                 stmts,
@@ -946,7 +951,7 @@ mod tests {
                     vir_ty: VirTypeId::I64,
                 }),
                 conversion: StringConversion::Generic {
-                    type_id: type_id(10),
+                    type_id: sema_type_id(10),
                 },
             }],
         });
@@ -976,7 +981,7 @@ mod tests {
                     vir_ty: VirTypeId::F64,
                 }),
                 conversion: StringConversion::Generic {
-                    type_id: type_id(10),
+                    type_id: sema_type_id(10),
                 },
             }],
         });
@@ -1006,7 +1011,7 @@ mod tests {
                     vir_ty: VirTypeId::BOOL,
                 }),
                 conversion: StringConversion::Generic {
-                    type_id: type_id(10),
+                    type_id: sema_type_id(10),
                 },
             }],
         });
@@ -1036,7 +1041,7 @@ mod tests {
                     vir_ty: VirTypeId::STRING,
                 }),
                 conversion: StringConversion::Generic {
-                    type_id: type_id(10),
+                    type_id: sema_type_id(10),
                 },
             }],
         });
@@ -1066,7 +1071,7 @@ mod tests {
                     vir_ty: VirTypeId::I128,
                 }),
                 conversion: StringConversion::Generic {
-                    type_id: type_id(10),
+                    type_id: sema_type_id(10),
                 },
             }],
         });
@@ -1092,7 +1097,7 @@ mod tests {
             parts: vec![VirStringPart::Expr {
                 value: Box::new(VirExpr::NilLiteral),
                 conversion: StringConversion::Generic {
-                    type_id: type_id(10),
+                    type_id: sema_type_id(10),
                 },
             }],
         });
@@ -1129,7 +1134,7 @@ mod tests {
                     vir_ty: arr_ty,
                 }),
                 conversion: StringConversion::Generic {
-                    type_id: type_id(10),
+                    type_id: sema_type_id(10),
                 },
             }],
         });
@@ -1187,7 +1192,7 @@ mod tests {
                     vir_ty: VirTypeId::F32,
                 }),
                 conversion: StringConversion::Generic {
-                    type_id: type_id(10),
+                    type_id: sema_type_id(10),
                 },
             }],
         });
@@ -1475,7 +1480,7 @@ mod tests {
                             vir_ty: param_id,
                         }),
                         conversion: StringConversion::Generic {
-                            type_id: type_id(10),
+                            type_id: sema_type_id(10),
                         },
                     }],
                 })),

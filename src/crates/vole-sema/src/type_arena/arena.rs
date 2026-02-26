@@ -212,6 +212,12 @@ impl TypeArena {
         )
     }
 
+    /// Look up an interned type parameter by its `NameId`.
+    #[inline]
+    pub fn lookup_type_param(&self, name_id: NameId) -> Option<TypeId> {
+        self.intern_map.get(&SemaType::TypeParam(name_id)).copied()
+    }
+
     // ========================================================================
     // Special type accessors (not covered by the define_primitive_types macro)
     // ========================================================================

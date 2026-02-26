@@ -177,7 +177,6 @@ impl Compiler<'_> {
         &self,
         param_vir_types: &[VirTypeId],
         return_vir_type: VirTypeId,
-        return_type_id: TypeId,
         self_param: VirSelfParam,
     ) -> Signature {
         let table = self.vir_type_table();
@@ -213,9 +212,13 @@ impl Compiler<'_> {
         }
 
         // Struct return: still uses sema TypeId for flat-slot counting
-        // (EntityRegistry field types are not yet in VIR).
+        // (EntityRegistry lookups come from TypeDefId in VirTypeTable).
         if matches!(table.get(return_vir_type), VirType::Struct { .. })
-            && let Some(field_count) = self.struct_field_count(return_type_id)
+            && let Some(field_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
+                return_vir_type,
+                table,
+                self.registry(),
+            )
         {
             return self.build_struct_return_sig(&cranelift_params, field_count);
         }
@@ -245,7 +248,6 @@ impl Compiler<'_> {
         self.build_signature_from_vir_types(
             &param_vir_types,
             vir_func.vir_return_type,
-            vir_func.return_type,
             VirSelfParam::None,
         )
     }
@@ -268,7 +270,6 @@ impl Compiler<'_> {
         self.build_signature_from_vir_types(
             &param_vir_types,
             vir_func.vir_return_type,
-            vir_func.return_type,
             VirSelfParam::None,
         )
     }

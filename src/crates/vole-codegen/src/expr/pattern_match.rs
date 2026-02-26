@@ -14,6 +14,7 @@ use crate::types::{
 
 use vole_frontend::ast::{MatchExpr, RecordFieldPattern};
 use vole_frontend::{ExprKind, NodeId, Pattern, PatternKind, Symbol, TypeExpr, TypeExprKind};
+use vole_identity::VirTypeId;
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 
@@ -314,6 +315,27 @@ impl Cg<'_, '_, '_> {
             let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
             self.builder.ins().icmp(IntCC::Equal, tag, expected_val)
         }
+    }
+
+    /// Compile an `is` check against an unknown value using VIR type metadata.
+    ///
+    /// TEMP(N279-C): bridge for VIR-native type checks where sema `TypeId`
+    /// cannot be recovered losslessly.
+    pub(super) fn compile_unknown_is_check_vir(
+        &mut self,
+        tagged_value_ptr: Value,
+        tested_vir_type_id: VirTypeId,
+    ) -> Value {
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), tagged_value_ptr, 0);
+        let expected_tag = crate::types::vir_conversions::vir_unknown_type_tag(
+            tested_vir_type_id,
+            self.vir_type_table(),
+        );
+        let expected_val = self.iconst_cached(types::I64, expected_tag as i64);
+        self.builder.ins().icmp(IntCC::Equal, tag, expected_val)
     }
 
     // =========================================================================
@@ -883,7 +905,7 @@ impl Cg<'_, '_, '_> {
     /// `VirBody` bodies.  Pattern compilation dispatches on concrete VIR
     /// pattern variants (Wildcard, Binding, TypeCheck, Literal, Val, Success,
     /// Error, Tuple, Record).
-    pub(super) fn compile_vir_match(
+    pub(crate) fn compile_vir_match(
         &mut self,
         scrutinee_expr: &vole_vir::VirExpr,
         arms: &[vole_vir::VirMatchArm],
@@ -894,10 +916,36 @@ impl Cg<'_, '_, '_> {
 
         let mut effective_result_type = self.try_substitute_type(result_type_id);
 
+        // Repair degraded match result metadata by inferring from arm result
+        // types when they provide a consistent concrete shape.
+        let mut arm_types: Vec<TypeId> = Vec::new();
+        for arm in arms {
+            let arm_ty = self.try_substitute_type(self.sema_type_from_vir(arm.ty));
+            if arm_ty != TypeId::UNKNOWN && !arm_types.contains(&arm_ty) {
+                arm_types.push(arm_ty);
+            }
+        }
+        if arm_types.len() > 1
+            && let Some(inferred_union) = self.arena().lookup_union(arm_types.clone().into())
+            && (!self.arena().is_union(effective_result_type)
+                || self.arena().is_unknown(effective_result_type)
+                || self.arena().is_function(effective_result_type))
+        {
+            effective_result_type = inferred_union;
+        } else if let [single] = arm_types.as_slice()
+            && (self.arena().is_unknown(effective_result_type)
+                || self.arena().is_function(effective_result_type))
+        {
+            effective_result_type = *single;
+        }
+
         // Replicate the nil-arm union return type adjustment from match_expr.
         if !self.arena().is_union(effective_result_type) {
             let has_nil_arm = arms.iter().any(|arm| {
-                arm.ty != TypeId::UNKNOWN && self.arena().is_nil(self.try_substitute_type(arm.ty))
+                arm.ty != VirTypeId::UNKNOWN
+                    && self
+                        .arena()
+                        .is_nil(self.try_substitute_type(self.sema_type_from_vir(arm.ty)))
             });
             if has_nil_arm && let Some(ret_type_id) = self.return_type {
                 let ret_type_id = self.try_substitute_type(ret_type_id);
@@ -1084,7 +1132,8 @@ impl Cg<'_, '_, '_> {
                 // For monomorphized generics, recompute the IsCheckResult
                 // using substituted types.
                 let effective_result = if self.substitutions.is_some() {
-                    let sub_tested = self.try_substitute_type(*tested_type);
+                    let sub_tested =
+                        self.try_substitute_type(self.sema_type_from_vir(*tested_type));
                     let sub_scrutinee = self.try_substitute_type(scrutinee.type_id);
                     self.compute_is_check_result(sub_scrutinee, sub_tested)
                 } else {
@@ -1097,7 +1146,7 @@ impl Cg<'_, '_, '_> {
                 if let Some((name, bind_ty, _)) = binding {
                     let var = self.builder.declare_var(scrutinee.ty);
                     self.builder.def_var(var, scrutinee.value);
-                    arm_variables.insert(*name, (var, *bind_ty));
+                    arm_variables.insert(*name, (var, self.sema_type_from_vir(*bind_ty)));
                 }
 
                 Ok(cond)
@@ -1115,8 +1164,11 @@ impl Cg<'_, '_, '_> {
                 *arm_variables = std::mem::replace(&mut self.vars, saved_vars);
 
                 let coerced_lit = self.convert_for_select(lit_val.value, scrutinee.ty);
-                let cmp =
-                    self.compile_equality_check(*scrutinee_ty, scrutinee.value, coerced_lit)?;
+                let cmp = self.compile_equality_check(
+                    self.sema_type_from_vir(*scrutinee_ty),
+                    scrutinee.value,
+                    coerced_lit,
+                )?;
                 Ok(Some(cmp))
             }
 
@@ -1139,7 +1191,12 @@ impl Cg<'_, '_, '_> {
                 inner,
                 success_type,
                 ..
-            } => self.compile_vir_success_pattern(inner, scrutinee, *success_type, arm_variables),
+            } => self.compile_vir_success_pattern(
+                inner,
+                scrutinee,
+                self.sema_type_from_vir(*success_type),
+                arm_variables,
+            ),
 
             vole_vir::VirPattern::Error { kind } => {
                 let tag = load_fallible_tag(self.builder, scrutinee.value);
@@ -1230,7 +1287,7 @@ impl Cg<'_, '_, '_> {
                     self.builder
                         .ins()
                         .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
-                let error_type_id = self.try_substitute_type(*error_ty);
+                let error_type_id = self.try_substitute_type(self.sema_type_from_vir(*error_ty));
                 let ptr_type = self.ptr_type();
                 let payload_ty = {
                     let arena = self.arena();
@@ -1328,9 +1385,9 @@ impl Cg<'_, '_, '_> {
     fn compile_vir_record_pattern(
         &mut self,
         type_check: &Option<vole_vir::expr::IsCheckResult>,
-        tested_type: &Option<TypeId>,
+        tested_type: &Option<VirTypeId>,
         fields: &[vole_vir::VirRecordFieldBinding],
-        source_ty: TypeId,
+        source_ty: VirTypeId,
         is_union_payload: bool,
         _is_struct: bool,
         scrutinee: &CompiledValue,
@@ -1343,7 +1400,7 @@ impl Cg<'_, '_, '_> {
         let pattern_check = if let Some(vir_result) = type_check {
             let effective_result = if self.substitutions.is_some() {
                 if let Some(tested) = tested_type {
-                    let sub_tested = self.try_substitute_type(*tested);
+                    let sub_tested = self.try_substitute_type(self.sema_type_from_vir(*tested));
                     let sub_scrutinee = self.try_substitute_type(scrutinee.type_id);
                     self.compute_is_check_result(sub_scrutinee, sub_tested)
                 } else {
@@ -1358,7 +1415,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Resolve source type with substitutions for monomorphized generics
-        let resolved_source_ty = self.try_substitute_type(source_ty);
+        let resolved_source_ty = self.try_substitute_type(self.sema_type_from_vir(source_ty));
 
         // Conditional extraction: when scrutinee is a union, branch on the type
         // check before extracting fields in a new block.
@@ -1456,8 +1513,29 @@ impl Cg<'_, '_, '_> {
         body: &vole_vir::VirBody,
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let (_, body_val) = self.compile_vir_body(body)?;
-        let body_result = body_val.unwrap_or_else(|| self.void_value());
+        let body_result = if let Some(trailing) = &body.trailing {
+            let mut terminated = false;
+            for vir_stmt in &body.stmts {
+                if terminated {
+                    break;
+                }
+                terminated = self.compile_vir_stmt(vir_stmt)?;
+            }
+            if terminated {
+                self.void_value()
+            } else if self.arena().is_union(result_type_id)
+                && matches!(trailing.as_ref(), vole_vir::VirExpr::ArrayLiteral { .. })
+                && let Some(expected_variant) =
+                    self.preferred_array_like_union_variant(result_type_id)
+            {
+                self.compile_vir_expr_with_expected_type(trailing, expected_variant)?
+            } else {
+                self.compile_vir_expr(trailing)?
+            }
+        } else {
+            let (_, body_val) = self.compile_vir_body(body)?;
+            body_val.unwrap_or_else(|| self.void_value())
+        };
         if body_result.type_id == TypeId::NEVER {
             return Ok(body_result);
         }
@@ -1557,6 +1635,8 @@ fn convert_vir_is_check(vir: &vole_vir::expr::IsCheckResult) -> IsCheckResult {
         vole_vir::expr::IsCheckResult::AlwaysTrue => IsCheckResult::AlwaysTrue,
         vole_vir::expr::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
         vole_vir::expr::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(*tag),
-        vole_vir::expr::IsCheckResult::CheckUnknown(ty, _) => IsCheckResult::CheckUnknown(*ty),
+        vole_vir::expr::IsCheckResult::CheckUnknown(ty, _) => IsCheckResult::CheckUnknown(
+            crate::types::vir_conversions::vir_to_sema_type_id_lossy(*ty),
+        ),
     }
 }

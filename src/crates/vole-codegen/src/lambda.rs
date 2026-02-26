@@ -292,7 +292,11 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Vec<TypeId>, TypeId)> {
         let arena = self.arena();
         let (sema_params, ret_id, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("VIR lambda", "function type", format!("{func_type_id:?}"))
+            CodegenError::type_mismatch(
+                "VIR lambda",
+                "function type",
+                format!("{func_type_id:?} ({})", arena.display_basic(func_type_id)),
+            )
         })?;
         let param_ids: Vec<TypeId> = sema_params
             .iter()

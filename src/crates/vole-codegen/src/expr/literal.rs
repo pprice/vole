@@ -6,14 +6,14 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::CodegenResult;
-use crate::types::{CompiledValue, array_element_tag_id, field_byte_size};
+use crate::types::{CompiledValue, field_byte_size};
 
 use vole_frontend::ast::RangeExpr;
 use vole_frontend::{Expr, ExprKind};
 use vole_sema::type_arena::TypeId;
 
 use super::super::context::Cg;
-use super::super::structs::{convert_to_i64_for_storage, split_i128_for_storage};
+use super::super::structs::split_i128_for_storage;
 
 impl Cg<'_, '_, '_> {
     /// Compile an array or tuple literal
@@ -96,18 +96,7 @@ impl Cg<'_, '_, '_> {
                     union_storage_hint,
                 )?
             } else {
-                let compiled = if self.arena().is_struct(compiled.type_id) {
-                    self.copy_struct_to_heap(compiled)?
-                } else {
-                    compiled
-                };
-                let tag = {
-                    let arena = self.arena();
-                    array_element_tag_id(compiled.type_id, arena)
-                };
-                let tag_val = self.iconst_cached(types::I64, tag);
-                let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
-                (tag_val, value_bits, compiled)
+                self.prepare_dynamic_array_store_untyped(compiled)?
             };
 
             // RC: inc borrowed RC elements so the array gets its own reference.
@@ -302,7 +291,7 @@ impl Cg<'_, '_, '_> {
     /// Dispatches between tuple (stack) and dynamic array (heap) construction
     /// based on the sema-inferred type.  Mirrors the AST `array_literal_with_union_hint`
     /// but reads element VIR expressions instead of AST nodes.
-    pub(super) fn compile_vir_array_literal(
+    pub(crate) fn compile_vir_array_literal(
         &mut self,
         elements: &[vole_vir::VirRef],
         array_type_id: TypeId,
@@ -316,25 +305,43 @@ impl Cg<'_, '_, '_> {
         // Dynamic array path.
         let arr_ptr = self.call_runtime(RuntimeKey::ArrayNew, &[])?;
         let array_push_ref = self.runtime_func_ref(RuntimeKey::ArrayPush)?;
-        let elem_type = self.arena().unwrap_array(array_type_id);
+        let mut elem_type = self.arena().unwrap_array(array_type_id);
+        let mut result_array_type = array_type_id;
+        let mut first_compiled: Option<CompiledValue> = None;
 
-        for elem_expr in elements {
-            let compiled = self.compile_vir_expr(elem_expr)?;
+        if elem_type.is_none() && !elements.is_empty() {
+            let first = self.compile_vir_expr(&elements[0])?;
+            let inferred_elem = self.try_substitute_type(first.type_id);
+            if inferred_elem != TypeId::UNKNOWN
+                && let Some(inferred_array_type) = self.arena().lookup_array(inferred_elem)
+            {
+                // TEMP(N279-C): mixed VIR/sema metadata can degrade array literal
+                // type IDs to unknown. Infer from the first concrete element so
+                // let-binding coercion/RC bookkeeping remains correct.
+                elem_type = Some(inferred_elem);
+                result_array_type = inferred_array_type;
+            }
+            first_compiled = Some(first);
+        }
+
+        for (i, elem_expr) in elements.iter().enumerate() {
+            let compiled = if i == 0 {
+                if let Some(first) = first_compiled.take() {
+                    first
+                } else if let Some(elem_type_id) = elem_type {
+                    self.compile_vir_expr_with_expected_type(elem_expr, elem_type_id)?
+                } else {
+                    self.compile_vir_expr(elem_expr)?
+                }
+            } else if let Some(elem_type_id) = elem_type {
+                self.compile_vir_expr_with_expected_type(elem_expr, elem_type_id)?
+            } else {
+                self.compile_vir_expr(elem_expr)?
+            };
             let (tag_val, value_bits, mut compiled) = if let Some(elem_type_id) = elem_type {
                 self.prepare_dynamic_array_store_with_hint(compiled, elem_type_id, None)?
             } else {
-                let compiled = if self.arena().is_struct(compiled.type_id) {
-                    self.copy_struct_to_heap(compiled)?
-                } else {
-                    compiled
-                };
-                let tag = {
-                    let arena = self.arena();
-                    array_element_tag_id(compiled.type_id, arena)
-                };
-                let tag_val = self.iconst_cached(types::I64, tag);
-                let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
-                (tag_val, value_bits, compiled)
+                self.prepare_dynamic_array_store_untyped(compiled)?
             };
 
             // RC: inc borrowed RC elements so the array gets its own reference.
@@ -346,24 +353,39 @@ impl Cg<'_, '_, '_> {
             compiled.mark_consumed();
         }
 
-        Ok(CompiledValue::new(arr_ptr, self.ptr_type(), array_type_id))
+        Ok(CompiledValue::new(
+            arr_ptr,
+            self.ptr_type(),
+            result_array_type,
+        ))
     }
 
     /// Compile a VIR repeat literal `[value; count]` to a fixed-size array.
     ///
     /// Mirrors [`repeat_literal()`] but compiles the element from a VIR
     /// expression instead of an AST node.
-    pub(super) fn compile_vir_repeat_literal(
+    pub(crate) fn compile_vir_repeat_literal(
         &mut self,
         element: &vole_vir::VirExpr,
         count: usize,
         type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let (elem_type_id, _) = self.arena().unwrap_fixed_array(type_id).unwrap_or_else(|| {
-            unreachable!("VIR repeat literal is missing fixed array type info (TypeId={type_id:?})")
-        });
-
         let mut elem_value = self.compile_vir_expr(element)?;
+        let (elem_type_id, result_type_id) =
+            if let Some((elem_type_id, _)) = self.arena().unwrap_fixed_array(type_id) {
+                (elem_type_id, type_id)
+            } else {
+                // TEMP(N279-C): During mixed VIR/sema migration, some repeat literals
+                // arrive with degraded compat type IDs (e.g. f128 paths mapping through
+                // vir F64) even though element VIR is concrete. Keep codegen robust by
+                // deriving element layout from the compiled element value.
+                let fallback_elem_type_id = self.try_substitute_type(elem_value.type_id);
+                let fallback_result_type_id = self
+                    .arena()
+                    .lookup_fixed_array(fallback_elem_type_id, count)
+                    .unwrap_or(type_id);
+                (fallback_elem_type_id, fallback_result_type_id)
+            };
 
         let elem_size = field_byte_size(elem_type_id, self.arena());
         let total_size = elem_size * (count as u32);
@@ -396,7 +418,7 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue::new(ptr, ptr_type, type_id))
+        Ok(CompiledValue::new(ptr, ptr_type, result_type_id))
     }
 
     /// Compile a VIR tuple literal to stack-allocated memory.

@@ -24,6 +24,13 @@ pub fn translate_type_id(
     type_id: TypeId,
     arena: &TypeArena,
 ) -> VirTypeId {
+    // Keep f128 on its reserved VIR slot (VirTypeId::F128). Mapping it through
+    // `VirPrimitiveKind::F64` loses identity for composite/container lookups in
+    // mixed sema/VIR bridge paths.
+    if type_id == TypeId::F128 {
+        return VirTypeId::F128;
+    }
+
     // Sentinel types (nil, Done, user-defined zero-field structs) are
     // special: they have reserved VirTypeId slots and zero-size layout.
     // Check before SemaType match since sentinels may be SemaType::Struct
@@ -43,8 +50,25 @@ fn translate_sentinel(table: &mut VirTypeTable, type_id: TypeId, arena: &TypeAre
         VirTypeId::NIL
     } else if type_id == arena.done() {
         VirTypeId::DONE
+    } else if let SemaType::Struct { type_def_id, .. } = arena.get(type_id) {
+        // User-defined sentinels must remain distinct in VIR (e.g. Empty | Deleted),
+        // so preserve nominal identity via Struct(def, []) while keeping zero-size layout.
+        let layout = Some(VirTypeLayout {
+            is_rc: false,
+            is_heap: false,
+            is_wide: false,
+            slot_count: 0,
+            storage: StorageClass::Void,
+        });
+        table.intern(
+            VirType::Struct {
+                def: *type_def_id,
+                type_args: vec![],
+            },
+            layout,
+        )
     } else {
-        // User-defined sentinel: intern as Nil-like zero-sized type.
+        // Fallback: preserve previous Nil-like zero-sized behavior.
         let layout = Some(VirTypeLayout {
             is_rc: false,
             is_heap: false,
@@ -238,7 +262,7 @@ fn translate_primitive(prim: PrimitiveType) -> VirPrimitiveKind {
         PrimitiveType::U64 => VirPrimitiveKind::U64,
         PrimitiveType::F32 => VirPrimitiveKind::F32,
         PrimitiveType::F64 => VirPrimitiveKind::F64,
-        PrimitiveType::F128 => VirPrimitiveKind::F64, // F128 maps to F64 (software emulation)
+        PrimitiveType::F128 => VirPrimitiveKind::F64, // Defensive fallback; direct F128 is handled in translate_type_id.
         PrimitiveType::Bool => VirPrimitiveKind::Bool,
         PrimitiveType::String => VirPrimitiveKind::String,
     }

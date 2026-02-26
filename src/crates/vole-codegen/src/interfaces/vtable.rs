@@ -1712,13 +1712,14 @@ fn compile_function_wrapper<C: VtableCtx>(
     param_type_ids: &[TypeId],
 ) -> CodegenResult<Vec<Value>> {
     // For function wrappers, concrete_type_id is the function type itself.
-    // Try to extract is_closure and ret_type from it, falling back to defaults.
-    let (ret_type_id, is_closure) = {
+    // Callables are represented as Closure objects in codegen paths, so
+    // functional-interface wrappers should always go through ClosureGetFunc.
+    let ret_type_id = {
         let arena = ctx.arena();
         arena
             .unwrap_function(concrete_type_id)
-            .map(|(_, ret, is_closure)| (ret, is_closure))
-            .unwrap_or_else(|| (arena.void(), false))
+            .map(|(_, ret, _is_closure)| ret)
+            .unwrap_or_else(|| arena.void())
     };
 
     let self_val = word_to_value_ctx(builder, data_word, concrete_type_id, ctx);
@@ -1727,66 +1728,45 @@ fn compile_function_wrapper<C: VtableCtx>(
         args.push(word_to_value_ctx(builder, *param_word, param_ty_id, ctx));
     }
 
-    let (func_ptr, call_args, sig) = if is_closure {
-        let closure_get_key = ctx
-            .funcs()
-            .runtime_key(RuntimeKey::ClosureGetFunc)
-            .ok_or_else(|| CodegenError::missing_resource("ClosureGetFunc runtime function"))?;
-        let closure_get_id = ctx
-            .funcs()
-            .func_id(closure_get_key)
-            .ok_or_else(|| CodegenError::not_found("function id", "ClosureGetFunc"))?;
-        let closure_get_ref = ctx
-            .jit_module()
-            .declare_func_in_func(closure_get_id, builder.func);
-        let closure_call = builder.ins().call(closure_get_ref, &[self_val]);
-        let func_ptr = builder.inst_results(closure_call)[0];
+    let closure_get_key = ctx
+        .funcs()
+        .runtime_key(RuntimeKey::ClosureGetFunc)
+        .ok_or_else(|| CodegenError::missing_resource("ClosureGetFunc runtime function"))?;
+    let closure_get_id = ctx
+        .funcs()
+        .func_id(closure_get_key)
+        .ok_or_else(|| CodegenError::not_found("function id", "ClosureGetFunc"))?;
+    let closure_get_ref = ctx
+        .jit_module()
+        .declare_func_in_func(closure_get_id, builder.func);
+    let closure_call = builder.ins().call(closure_get_ref, &[self_val]);
+    let func_ptr = builder.inst_results(closure_call)[0];
 
-        let mut sig = ctx.jit_module().make_signature();
-        let arena = ctx.arena();
+    let mut sig = ctx.jit_module().make_signature();
+    let arena = ctx.arena();
+    sig.params.push(AbiParam::new(type_id_to_cranelift(
+        concrete_type_id,
+        arena,
+        ctx.ptr_type(),
+    )));
+    for &param_type_id in param_type_ids {
         sig.params.push(AbiParam::new(type_id_to_cranelift(
-            concrete_type_id,
+            param_type_id,
             arena,
             ctx.ptr_type(),
         )));
-        for &param_type_id in param_type_ids {
-            sig.params.push(AbiParam::new(type_id_to_cranelift(
-                param_type_id,
-                arena,
-                ctx.ptr_type(),
-            )));
-        }
-        if !ctx.arena().is_void(ret_type_id) {
-            sig.returns.push(AbiParam::new(type_id_to_cranelift(
-                ret_type_id,
-                arena,
-                ctx.ptr_type(),
-            )));
-        }
+    }
+    if !ctx.arena().is_void(ret_type_id) {
+        sig.returns.push(AbiParam::new(type_id_to_cranelift(
+            ret_type_id,
+            arena,
+            ctx.ptr_type(),
+        )));
+    }
 
-        let mut call_args = Vec::with_capacity(args.len() + 1);
-        call_args.push(self_val);
-        call_args.extend(args);
-        (func_ptr, call_args, sig)
-    } else {
-        let mut sig = ctx.jit_module().make_signature();
-        let arena = ctx.arena();
-        for &param_type_id in param_type_ids {
-            sig.params.push(AbiParam::new(type_id_to_cranelift(
-                param_type_id,
-                arena,
-                ctx.ptr_type(),
-            )));
-        }
-        if !ctx.arena().is_void(ret_type_id) {
-            sig.returns.push(AbiParam::new(type_id_to_cranelift(
-                ret_type_id,
-                arena,
-                ctx.ptr_type(),
-            )));
-        }
-        (self_val, args, sig)
-    };
+    let mut call_args = Vec::with_capacity(args.len() + 1);
+    call_args.push(self_val);
+    call_args.extend(args);
 
     let sig_ref = builder.import_signature(sig);
     let call = builder.ins().call_indirect(sig_ref, func_ptr, &call_args);

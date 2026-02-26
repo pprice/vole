@@ -477,23 +477,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let ch_handle = typed_args[0].value;
         let payload = typed_args[1];
-        let tag = {
-            let arena = self.arena();
-            array_element_tag_id(payload.type_id, arena)
-        };
-        let tag_val = self.iconst_cached(types::I64, tag);
-        // Function-call semantics may clean up temporary RC args after return;
-        // hand channel_send its own retained reference up front.
-        //
-        // Some fallback intrinsic call paths may not carry concrete TypeIds
-        // (void/type-param placeholders). Only emit rc_inc when the type is
-        // concrete enough for RC classification.
+        // Function-call semantics may clean up temporary RC args after return.
+        // Keep an extra retained reference for values that are sent by inline
+        // tag/payload representation.
         let can_classify_rc = payload.type_id != TypeId::VOID
             && self.arena().unwrap_type_param(payload.type_id).is_none();
-        if can_classify_rc && self.rc_state(payload.type_id).needs_cleanup() {
-            self.emit_rc_inc_for_type(payload.value, payload.type_id)?;
-        }
-        let payload_bits = convert_to_i64_for_storage(self.builder, &payload);
+        let payload_is_union = self.arena().is_union(payload.type_id);
+
+        let (tag_val, payload_bits) = if payload_is_union {
+            // Reuse array tagged-value lowering for union payloads so channel
+            // send/recv use the same runtime representation policy (inline tags
+            // when unambiguous, heap-boxed union when needed).
+            let prefers_inline =
+                self.union_array_prefers_inline_storage(self.try_substitute_type(payload.type_id));
+            if can_classify_rc && prefers_inline && self.rc_state(payload.type_id).needs_cleanup() {
+                self.emit_rc_inc_for_type(payload.value, payload.type_id)?;
+            }
+            let (tag_val, payload_bits, _) =
+                self.prepare_dynamic_array_store(payload, payload.type_id)?;
+            (tag_val, payload_bits)
+        } else {
+            let tag = {
+                let arena = self.arena();
+                array_element_tag_id(payload.type_id, arena)
+            };
+            let tag_val = self.iconst_cached(types::I64, tag);
+            if can_classify_rc && self.rc_state(payload.type_id).needs_cleanup() {
+                self.emit_rc_inc_for_type(payload.value, payload.type_id)?;
+            }
+            let payload_bits = convert_to_i64_for_storage(self.builder, &payload);
+            (tag_val, payload_bits)
+        };
 
         let native_func = self
             .native_registry()
@@ -513,9 +527,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if typed_args.is_empty() {
             return Err(CodegenError::arg_count("task_channel_recv", 1, 0));
         }
-        let (_tag, raw_value) =
+        let (tag, raw_value) =
             self.call_std_task_tagged_native("channel_recv", typed_args[0].value)?;
-        Ok(self.convert_field_value(raw_value, return_type_id))
+        if self.arena().is_union(return_type_id) {
+            Ok(self.decode_dynamic_array_union_element(tag, raw_value, return_type_id))
+        } else {
+            Ok(self.convert_field_value(raw_value, return_type_id))
+        }
     }
 
     fn emit_task_channel_try_recv_intrinsic(
@@ -563,7 +581,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.seal_block(done_block);
 
         self.switch_to_block(value_block);
-        let typed_value = self.convert_field_value(raw_value, elem_type_id);
+        let typed_value = if self.arena().is_union(elem_type_id) {
+            self.decode_dynamic_array_union_element(tag, raw_value, elem_type_id)
+        } else {
+            self.convert_field_value(raw_value, elem_type_id)
+        };
         let value_union = self.construct_union_id(typed_value, return_type_id)?;
         self.builder
             .ins()
@@ -588,9 +610,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if typed_args.is_empty() {
             return Err(CodegenError::arg_count("task_join", 1, 0));
         }
-        let (_tag, raw_value) =
+        let (tag, raw_value) =
             self.call_std_task_tagged_native("task_join", typed_args[0].value)?;
-        Ok(self.convert_field_value(raw_value, return_type_id))
+        if self.arena().is_union(return_type_id) {
+            Ok(self.decode_dynamic_array_union_element(tag, raw_value, return_type_id))
+        } else {
+            Ok(self.convert_field_value(raw_value, return_type_id))
+        }
     }
 
     fn emit_task_run_intrinsic(

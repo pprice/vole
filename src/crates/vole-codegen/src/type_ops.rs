@@ -10,7 +10,7 @@ use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
 use cranelift_codegen::ir::FuncRef;
 
 use vole_frontend::Symbol;
-use vole_identity::TypeDefId;
+use vole_identity::{TypeDefId, VirTypeId};
 use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 
@@ -78,11 +78,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a `VirTypeId` to a Cranelift type via the VIR type table.
     #[allow(dead_code)] // Convenience for downstream VIR migration tickets.
-    pub fn vir_cranelift_type(&self, vir_ty: vole_identity::VirTypeId) -> Type {
+    pub fn vir_cranelift_type(&self, vir_ty: VirTypeId) -> Type {
         super::types::vir_conversions::vir_type_to_cranelift(
             vir_ty,
             self.vir_type_table(),
             self.ptr_type(),
+        )
+    }
+
+    /// Temporary bridge from `VirTypeId` to sema `TypeId` for legacy code paths.
+    #[inline]
+    pub fn sema_type_from_vir(&self, vir_ty: VirTypeId) -> TypeId {
+        super::types::vir_conversions::vir_to_sema_type_id(
+            vir_ty,
+            self.vir_type_table(),
+            self.arena(),
         )
     }
 

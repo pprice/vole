@@ -66,7 +66,10 @@ fn generic_mode_is_check_missing_uses_check_unknown() {
         VirExpr::IsCheck { result, .. } => {
             assert_eq!(
                 *result,
-                IsCheckResult::CheckUnknown(TypeId::UNKNOWN, vole_identity::VirTypeId::UNKNOWN)
+                IsCheckResult::CheckUnknown(
+                    vir_type_id(TypeId::UNKNOWN),
+                    vole_identity::VirTypeId::UNKNOWN
+                )
             );
         }
         other => panic!("expected IsCheck, got {other:?}"),
@@ -198,7 +201,10 @@ fn generic_mode_as_cast_missing_uses_check_unknown() {
         VirExpr::AsCast { result, .. } => {
             assert_eq!(
                 *result,
-                IsCheckResult::CheckUnknown(TypeId::UNKNOWN, vole_identity::VirTypeId::UNKNOWN)
+                IsCheckResult::CheckUnknown(
+                    vir_type_id(TypeId::UNKNOWN),
+                    vole_identity::VirTypeId::UNKNOWN
+                )
             );
         }
         other => panic!("expected AsCast, got {other:?}"),
@@ -703,7 +709,7 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
             assert!(matches!(
                 dispatch.receiver_coercion,
                 Some(vole_vir::expr::VirMethodReceiverCoercion::IteratorWrap {
-                    elem_type: TypeId::I64,
+                    elem_type: vole_identity::VirTypeId::I64,
                     ..
                 })
             ));
@@ -715,18 +721,21 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
                 resolved.type_def_id(),
                 Some(vole_identity::TypeDefId::new(42))
             );
-            assert_eq!(resolved.return_type_id(), TypeId::STRING);
+            assert_eq!(resolved.return_type_id(), vir_type_id(TypeId::STRING));
             let generic_key = dispatch
                 .generic_monomorph
                 .as_ref()
                 .expect("expected generic_monomorph");
             assert_eq!(generic_key.func_name, NameId::new_for_test(400));
-            assert_eq!(generic_key.type_keys, vec![TypeId::I64]);
+            assert_eq!(generic_key.type_keys, vec![vir_type_id(TypeId::I64)]);
             assert_eq!(
                 generic_key.vir_type_keys,
                 vec![vole_identity::VirTypeId::I64]
             );
-            assert_eq!(dispatch.substituted_return_type, Some(TypeId::STRING));
+            assert_eq!(
+                dispatch.substituted_return_type,
+                Some(vir_type_id(TypeId::STRING))
+            );
             assert_eq!(
                 dispatch.vir_substituted_return_type,
                 Some(vole_identity::VirTypeId::STRING)
@@ -738,7 +747,10 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
                 .expect("expected class_method_generic");
             assert_eq!(class_key.class_name, NameId::new_for_test(300));
             assert_eq!(class_key.method_name, NameId::new_for_test(301));
-            assert_eq!(class_key.type_keys, vec![TypeId::I64, TypeId::BOOL]);
+            assert_eq!(
+                class_key.type_keys,
+                vec![vir_type_id(TypeId::I64), vir_type_id(TypeId::BOOL)]
+            );
             assert_eq!(
                 class_key.vir_type_keys,
                 vec![
@@ -752,8 +764,8 @@ fn concrete_mode_method_call_lowers_dispatch_metadata() {
                 .expect("expected static_method_generic");
             assert_eq!(static_key.class_name, NameId::new_for_test(500));
             assert_eq!(static_key.method_name, NameId::new_for_test(501));
-            assert_eq!(static_key.class_type_keys, vec![TypeId::I64]);
-            assert_eq!(static_key.method_type_keys, vec![TypeId::BOOL]);
+            assert_eq!(static_key.class_type_keys, vec![vir_type_id(TypeId::I64)]);
+            assert_eq!(static_key.method_type_keys, vec![vir_type_id(TypeId::BOOL)]);
             assert_eq!(
                 static_key.vir_class_type_keys,
                 vec![vole_identity::VirTypeId::I64]

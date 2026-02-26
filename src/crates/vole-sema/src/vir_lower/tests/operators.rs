@@ -53,7 +53,7 @@ fn lower_binary_add_produces_binary_op() {
             op, lhs, rhs, ty, ..
         } => {
             assert_eq!(*op, VirBinOp::Add);
-            assert_eq!(*ty, TypeId::I64);
+            assert_eq!(*ty, vir_type_id(TypeId::I64));
             match lhs.as_ref() {
                 VirExpr::IntLiteral { value: 1, .. } => {}
                 other => panic!("expected IntLiteral(1) lhs, got {other:?}"),
@@ -116,7 +116,7 @@ fn lower_binary_comparison_produces_binary_op() {
     match vir_ref.as_ref() {
         VirExpr::BinaryOp { op, ty, .. } => {
             assert_eq!(*op, VirBinOp::Lt);
-            assert_eq!(*ty, TypeId::BOOL);
+            assert_eq!(*ty, vir_type_id(TypeId::BOOL));
         }
         other => panic!("expected BinaryOp(Lt), got {other:?}"),
     }
@@ -389,7 +389,7 @@ fn lower_unary_neg_produces_unary_op() {
             op, operand, ty, ..
         } => {
             assert_eq!(*op, VirUnOp::Neg);
-            assert_eq!(*ty, TypeId::I64);
+            assert_eq!(*ty, vir_type_id(TypeId::I64));
             match operand.as_ref() {
                 VirExpr::IntLiteral { value: 42, .. } => {}
                 other => panic!("expected IntLiteral(42) operand, got {other:?}"),

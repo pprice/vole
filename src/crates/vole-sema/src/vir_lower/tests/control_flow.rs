@@ -124,7 +124,7 @@ fn lower_if_expr_preserves_type() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::If { ty, .. } => assert_eq!(*ty, TypeId::I64),
+        VirExpr::If { ty, .. } => assert_eq!(*ty, vir_type_id(TypeId::I64)),
         other => panic!("expected VirExpr::If, got {other:?}"),
     }
 }
@@ -328,7 +328,7 @@ fn lower_block_expr_preserves_type() {
     let vir_ref = lower_expr(&expr, &mut ctx);
 
     match vir_ref.as_ref() {
-        VirExpr::Block { ty, .. } => assert_eq!(*ty, TypeId::I64),
+        VirExpr::Block { ty, .. } => assert_eq!(*ty, vir_type_id(TypeId::I64)),
         other => panic!("expected VirExpr::Block, got {other:?}"),
     }
 }
@@ -695,7 +695,7 @@ fn lower_if_stmt_no_else() {
                 }
                 assert!(then_body.trailing.is_none());
                 assert!(else_body.is_none());
-                assert_eq!(*ty, TypeId::VOID);
+                assert_eq!(*ty, vir_type_id(TypeId::VOID));
             }
             other => panic!("expected VirExpr::If, got {other:?}"),
         },
@@ -746,7 +746,7 @@ fn lower_if_stmt_with_else() {
                     other => panic!("expected VirStmt::Continue in else, got {other:?}"),
                 }
                 assert!(else_body.trailing.is_none());
-                assert_eq!(*ty, TypeId::VOID);
+                assert_eq!(*ty, vir_type_id(TypeId::VOID));
             }
             other => panic!("expected VirExpr::If, got {other:?}"),
         },
@@ -775,7 +775,7 @@ fn lower_if_stmt_is_void_typed() {
 
     match &vir {
         VirStmt::Expr { value } => match value.as_ref() {
-            VirExpr::If { ty, .. } => assert_eq!(*ty, TypeId::VOID),
+            VirExpr::If { ty, .. } => assert_eq!(*ty, vir_type_id(TypeId::VOID)),
             other => panic!("expected VirExpr::If, got {other:?}"),
         },
         other => panic!("expected VirStmt::Expr, got {other:?}"),
@@ -1054,21 +1054,21 @@ fn lower_tuple_pattern_with_bindings() {
                     assert_eq!(bindings.len(), 2);
 
                     assert_eq!(bindings[0].element_index, 0);
-                    assert_eq!(bindings[0].ty, TypeId::I64);
+                    assert_eq!(bindings[0].ty, vir_type_id(TypeId::I64));
                     match &bindings[0].pattern {
                         VirPattern::Binding { name, ty, .. } => {
                             assert_eq!(*name, x_sym);
-                            assert_eq!(*ty, TypeId::I64);
+                            assert_eq!(*ty, vir_type_id(TypeId::I64));
                         }
                         other => panic!("expected Binding for x, got {other:?}"),
                     }
 
                     assert_eq!(bindings[1].element_index, 1);
-                    assert_eq!(bindings[1].ty, TypeId::BOOL);
+                    assert_eq!(bindings[1].ty, vir_type_id(TypeId::BOOL));
                     match &bindings[1].pattern {
                         VirPattern::Binding { name, ty, .. } => {
                             assert_eq!(*name, y_sym);
-                            assert_eq!(*ty, TypeId::BOOL);
+                            assert_eq!(*ty, vir_type_id(TypeId::BOOL));
                         }
                         other => panic!("expected Binding for y, got {other:?}"),
                     }
@@ -1137,12 +1137,12 @@ fn lower_tuple_pattern_with_wildcard() {
 
                     // First element: Binding
                     assert_eq!(bindings[0].element_index, 0);
-                    assert_eq!(bindings[0].ty, TypeId::I64);
+                    assert_eq!(bindings[0].ty, vir_type_id(TypeId::I64));
                     assert!(matches!(&bindings[0].pattern, VirPattern::Binding { .. }));
 
                     // Second element: Wildcard
                     assert_eq!(bindings[1].element_index, 1);
-                    assert_eq!(bindings[1].ty, TypeId::STRING);
+                    assert_eq!(bindings[1].ty, vir_type_id(TypeId::STRING));
                     assert!(matches!(&bindings[1].pattern, VirPattern::Wildcard));
                 }
                 other => panic!("expected VirPattern::Tuple, got {other:?}"),
@@ -1201,10 +1201,10 @@ fn lower_tuple_pattern_unknown_scrutinee_type() {
                 VirPattern::Tuple { bindings } => {
                     assert_eq!(bindings.len(), 1);
                     assert_eq!(bindings[0].element_index, 0);
-                    assert_eq!(bindings[0].ty, TypeId::UNKNOWN);
+                    assert_eq!(bindings[0].ty, vir_type_id(TypeId::UNKNOWN));
                     match &bindings[0].pattern {
                         VirPattern::Binding { ty, .. } => {
-                            assert_eq!(*ty, TypeId::UNKNOWN);
+                            assert_eq!(*ty, vir_type_id(TypeId::UNKNOWN));
                         }
                         other => panic!("expected Binding, got {other:?}"),
                     }

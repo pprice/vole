@@ -40,10 +40,11 @@ pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
     match &expr.kind {
         ExprKind::IntLiteral(value, _suffix) => lower_int_literal(*value, ty, ctx),
         ExprKind::FloatLiteral(value, _suffix) => {
+            let compat_ty = ctx.compat_ty(ty);
             let vir_ty = ctx.translate(ty);
             Box::new(VirExpr::FloatLiteral {
                 value: *value,
-                ty,
+                ty: compat_ty,
                 vir_ty,
             })
         }
@@ -62,16 +63,21 @@ pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
             line: expr.span.line,
         }),
         ExprKind::Import(_) => {
+            let compat_ty = ctx.compat_ty(ty);
             let vir_ty = ctx.translate(ty);
-            Box::new(VirExpr::Import { ty, vir_ty })
+            Box::new(VirExpr::Import {
+                ty: compat_ty,
+                vir_ty,
+            })
         }
         ExprKind::TypeLiteral(_) => Box::new(VirExpr::TypeLiteral),
         ExprKind::Range(range_expr) => lower_range(range_expr, ctx),
         ExprKind::Identifier(sym) => {
+            let compat_ty = ctx.compat_ty(ty);
             let vir_ty = ctx.translate(ty);
             Box::new(VirExpr::LocalLoad {
                 name: *sym,
-                ty,
+                ty: compat_ty,
                 vir_ty,
             })
         }
@@ -102,24 +108,36 @@ pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                 .iter()
                 .map(|a| lower_call_arg(a.expr(), ctx))
                 .collect();
-            let vir_ty = ctx.translate(ty);
+            let dispatch = lower_method_dispatch_meta(expr.id, ctx);
+            let dispatch_ty = dispatch
+                .substituted_return_type
+                .or_else(|| {
+                    dispatch
+                        .resolved_method
+                        .as_ref()
+                        .map(|r| r.return_type_id())
+                })
+                .filter(|&t| t != VirTypeId::UNKNOWN);
+            let compat_ty = dispatch_ty.unwrap_or_else(|| ctx.compat_ty(ty));
+            let vir_ty = dispatch_ty.unwrap_or_else(|| ctx.translate(ty));
             Box::new(VirExpr::MethodCall {
                 receiver,
                 method: mc.method,
                 args,
-                dispatch: lower_method_dispatch_meta(expr.id, ctx),
+                dispatch,
                 node_id: expr.id,
-                ty,
+                ty: compat_ty,
                 vir_ty,
             })
         }
         ExprKind::RepeatLiteral { element, count } => {
             let elem = lower_expr(element, ctx);
+            let compat_ty = ctx.compat_ty(ty);
             let vir_ty = ctx.translate(ty);
             Box::new(VirExpr::RepeatLiteral {
                 element: elem,
                 count: *count,
-                ty,
+                ty: compat_ty,
                 vir_ty,
             })
         }
@@ -128,6 +146,7 @@ pub fn lower_expr(expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
 
 /// Lower an integer literal, splitting into `WideLiteral` for i128/f128.
 fn lower_int_literal(value: i64, ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRef {
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     if ty == TypeId::F128 {
         // Integer promoted to f128: convert to f64 first to get a float
@@ -139,7 +158,7 @@ fn lower_int_literal(value: i64, ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRe
         Box::new(VirExpr::WideLiteral {
             low: f64_bits,
             high: 0,
-            ty,
+            ty: compat_ty,
             vir_ty,
         })
     } else if ty == TypeId::I128 {
@@ -148,11 +167,15 @@ fn lower_int_literal(value: i64, ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRe
         Box::new(VirExpr::WideLiteral {
             low: wide as u64,
             high: (wide >> 64) as u64,
-            ty,
+            ty: compat_ty,
             vir_ty,
         })
     } else {
-        Box::new(VirExpr::IntLiteral { value, ty, vir_ty })
+        Box::new(VirExpr::IntLiteral {
+            value,
+            ty: compat_ty,
+            vir_ty,
+        })
     }
 }
 
@@ -190,12 +213,13 @@ fn lower_binary(
     }
 
     let vir_op = map_binary_op(bin_expr.op);
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::BinaryOp {
         op: vir_op,
         lhs,
         rhs,
-        ty,
+        ty: compat_ty,
         vir_ty,
         line: expr.span.line,
     })
@@ -209,6 +233,7 @@ fn lower_and(
 ) -> VirRef {
     let cond = lower_expr(&bin_expr.left, ctx);
     let then_val = lower_expr(&bin_expr.right, ctx);
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::If {
         cond,
@@ -220,7 +245,7 @@ fn lower_and(
             stmts: Vec::new(),
             trailing: Some(Box::new(VirExpr::BoolLiteral(false))),
         }),
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -233,6 +258,7 @@ fn lower_or(
 ) -> VirRef {
     let cond = lower_expr(&bin_expr.left, ctx);
     let else_val = lower_expr(&bin_expr.right, ctx);
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::If {
         cond,
@@ -244,7 +270,7 @@ fn lower_or(
             stmts: Vec::new(),
             trailing: Some(else_val),
         }),
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -257,11 +283,12 @@ fn lower_unary(
 ) -> VirRef {
     let operand = lower_expr(&un_expr.operand, ctx);
     let vir_op = map_unary_op(un_expr.op);
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::UnaryOp {
         op: vir_op,
         operand,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -288,12 +315,13 @@ fn lower_if_expr(
             trailing: Some(else_val),
         }
     });
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::If {
         cond,
         then_body,
         else_body,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -316,11 +344,12 @@ fn lower_block_expr(
         .trailing_expr
         .as_ref()
         .map(|e| lower_expr(e, ctx));
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::Block {
         stmts,
         trailing,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -441,20 +470,21 @@ fn lower_compound_assign(
     let rhs = lower_expr(&compound.value, ctx);
     let binary_op = map_binary_op(compound.op.to_binary_op());
 
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
 
     match &compound.target {
         vole_frontend::AssignTarget::Variable(sym) => {
             let load = Box::new(VirExpr::LocalLoad {
                 name: *sym,
-                ty,
+                ty: compat_ty,
                 vir_ty,
             });
             let binop_result = Box::new(VirExpr::BinaryOp {
                 op: binary_op,
                 lhs: load,
                 rhs,
-                ty,
+                ty: compat_ty,
                 vir_ty,
                 line: expr.span.line,
             });
@@ -470,14 +500,14 @@ fn lower_compound_assign(
                 object: obj_for_load,
                 field: *field,
                 storage: FieldStorage::ByName,
-                ty,
+                ty: compat_ty,
                 vir_ty,
             });
             let binop_result = Box::new(VirExpr::BinaryOp {
                 op: binary_op,
                 lhs: load,
                 rhs,
-                ty,
+                ty: compat_ty,
                 vir_ty,
                 line: expr.span.line,
             });
@@ -497,7 +527,7 @@ fn lower_compound_assign(
             let load = Box::new(VirExpr::Index {
                 object: obj_for_load,
                 index: idx_for_load,
-                ty,
+                ty: compat_ty,
                 vir_ty,
                 union_storage,
             });
@@ -505,7 +535,7 @@ fn lower_compound_assign(
                 op: binary_op,
                 lhs: load,
                 rhs,
-                ty,
+                ty: compat_ty,
                 vir_ty,
                 line: expr.span.line,
             });
@@ -534,12 +564,13 @@ fn lower_field_access(
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     let object = lower_expr(&fa.object, ctx);
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::FieldLoad {
         object,
         field: fa.field,
         storage: FieldStorage::ByName,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -558,11 +589,12 @@ fn lower_is_check(
     let sema_result = ctx.require_is_check_result(expr.id, expr.span.line);
     let value = lower_expr(&is_expr.value, ctx);
     let vir_result = convert_is_check_result(sema_result, ctx);
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::IsCheck {
         value,
         result: vir_result,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -588,7 +620,7 @@ fn lower_as_cast(
     let vir_target_ty = ctx.translate(ty);
     Box::new(VirExpr::AsCast {
         value,
-        target_ty: ty,
+        target_ty: vir_target_ty,
         vir_target_ty,
         kind,
         result: vir_result,
@@ -605,8 +637,9 @@ fn convert_is_check_result(sema: crate::IsCheckResult, ctx: &mut LoweringCtx<'_>
         crate::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
         crate::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(tag),
         crate::IsCheckResult::CheckUnknown(ty) => {
+            let compat_ty = ctx.compat_ty(ty);
             let vir_ty = ctx.translate(ty);
-            IsCheckResult::CheckUnknown(ty, vir_ty)
+            IsCheckResult::CheckUnknown(compat_ty, vir_ty)
         }
     }
 }
@@ -656,11 +689,12 @@ fn lower_index(
     let object = lower_expr(&idx.object, ctx);
     let index = lower_expr(&idx.index, ctx);
     let union_storage = ctx.node_map.get_union_storage_kind(expr.id);
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::Index {
         object,
         index,
-        ty,
+        ty: compat_ty,
         vir_ty,
         union_storage,
     })
@@ -716,8 +750,13 @@ fn lower_meta_access(
         }
     };
 
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
-    Box::new(VirExpr::MetaAccess { kind, ty, vir_ty })
+    Box::new(VirExpr::MetaAccess {
+        kind,
+        ty: compat_ty,
+        vir_ty,
+    })
 }
 
 /// Lower a lambda expression to `VirExpr::Lambda`.
@@ -747,7 +786,7 @@ fn lower_lambda(
                 .iter()
                 .map(|c| VirCapture {
                     name: c.name,
-                    ty: TypeId::UNKNOWN,
+                    ty: VirTypeId::UNKNOWN,
                     vir_ty: VirTypeId::UNKNOWN,
                     by_ref: false,
                 })
@@ -755,12 +794,13 @@ fn lower_lambda(
         })
         .unwrap_or_default();
 
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::Lambda {
         params,
         body,
         captures,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -784,9 +824,9 @@ fn lower_null_coalesce(
     Box::new(VirExpr::NullCoalesce {
         value,
         default,
-        inner_type,
+        inner_type: vir_inner_type,
         vir_inner_type,
-        ty: inner_type,
+        ty: vir_inner_type,
         vir_ty: vir_inner_type,
     })
 }
@@ -804,13 +844,14 @@ fn lower_optional_chain(
     let info = ctx.require_optional_chain(expr.id, expr.span.line);
     let object = lower_expr(&oc.object, ctx);
     let vir_inner_type = ctx.translate(info.inner_type);
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::OptionalChain {
         object,
         field: oc.field,
-        inner_type: info.inner_type,
+        inner_type: vir_inner_type,
         vir_inner_type,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -835,16 +876,21 @@ fn lower_optional_method_call(
         .map(|a| lower_call_arg(a.expr(), ctx))
         .collect();
     let vir_inner_type = ctx.translate(info.inner_type);
+    let dispatch = lower_method_dispatch_meta(expr.id, ctx);
+    // Optional method calls produce an optional result (`Inner?`), not the raw
+    // method return type. Keep the expression type from sema (`ty`) and carry
+    // method dispatch return info only inside `dispatch`.
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::OptionalMethodCall {
         object,
         method: omc.method,
         method_args,
-        dispatch: lower_method_dispatch_meta(expr.id, ctx),
+        dispatch,
         call_node_id: expr.id,
-        inner_type: info.inner_type,
+        inner_type: vir_inner_type,
         vir_inner_type,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -874,9 +920,10 @@ fn lower_method_dispatch_meta(
         .get_coercion_kind(expr_id)
         .map(|kind| match kind {
             crate::node_map::CoercionKind::IteratorWrap { elem_type } => {
+                let vir_elem_type = ctx.translate(elem_type);
                 VirMethodReceiverCoercion::IteratorWrap {
-                    elem_type,
-                    vir_elem_type: ctx.translate(elem_type),
+                    elem_type: vir_elem_type,
+                    vir_elem_type,
                 }
             }
         });
@@ -891,12 +938,15 @@ fn lower_method_dispatch_meta(
         .get_generic(expr_id)
         .map(|key| VirFunctionMonomorphKey {
             func_name: key.func_name,
-            type_keys: key.type_keys.clone(),
+            type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
             vir_type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
         });
 
-    let substituted_return_type = ctx.node_map.get_substituted_return_type(expr_id);
-    let vir_substituted_return_type = substituted_return_type.map(|ty| ctx.translate(ty));
+    let substituted_return_type = ctx
+        .node_map
+        .get_substituted_return_type(expr_id)
+        .map(|ty| ctx.translate(ty));
+    let vir_substituted_return_type = substituted_return_type;
     let resolved_call_args = ctx
         .node_map
         .get_resolved_call_args(expr_id)
@@ -907,7 +957,7 @@ fn lower_method_dispatch_meta(
             .map(|key| VirClassMethodMonomorphKey {
                 class_name: key.class_name,
                 method_name: key.method_name,
-                type_keys: key.type_keys.clone(),
+                type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
                 vir_type_keys: key.type_keys.iter().map(|&ty| ctx.translate(ty)).collect(),
             });
     let static_method_generic =
@@ -916,13 +966,21 @@ fn lower_method_dispatch_meta(
             .map(|key| VirStaticMethodMonomorphKey {
                 class_name: key.class_name,
                 method_name: key.method_name,
-                class_type_keys: key.class_type_keys.clone(),
+                class_type_keys: key
+                    .class_type_keys
+                    .iter()
+                    .map(|&ty| ctx.translate(ty))
+                    .collect(),
                 vir_class_type_keys: key
                     .class_type_keys
                     .iter()
                     .map(|&ty| ctx.translate(ty))
                     .collect(),
-                method_type_keys: key.method_type_keys.clone(),
+                method_type_keys: key
+                    .method_type_keys
+                    .iter()
+                    .map(|&ty| ctx.translate(ty))
+                    .collect(),
                 vir_method_type_keys: key
                     .method_type_keys
                     .iter()
@@ -956,9 +1014,9 @@ fn lower_resolved_method(
             ..
         } => VirResolvedMethod::Direct {
             type_def_id: *type_def_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.translate(*func_type_id),
             vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.translate(*return_type_id),
             vir_return_type_id: ctx.translate(*return_type_id),
             method_id: *method_id,
         },
@@ -972,16 +1030,16 @@ fn lower_resolved_method(
             ..
         } => VirResolvedMethod::Implemented {
             type_def_id: *type_def_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.translate(*func_type_id),
             vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.translate(*return_type_id),
             vir_return_type_id: ctx.translate(*return_type_id),
             is_builtin: *is_builtin,
             external_info: external_info.map(|info| VirExternalMethodInfo {
                 module_path: info.module_path,
                 native_name: info.native_name,
             }),
-            concrete_return_hint: *concrete_return_hint,
+            concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
             vir_concrete_return_hint: concrete_return_hint.map(|ty| ctx.translate(ty)),
         },
         crate::resolution::ResolvedMethod::FunctionalInterface {
@@ -989,9 +1047,9 @@ fn lower_resolved_method(
             return_type_id,
             ..
         } => VirResolvedMethod::FunctionalInterface {
-            func_type_id: *func_type_id,
+            func_type_id: ctx.translate(*func_type_id),
             vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.translate(*return_type_id),
             vir_return_type_id: ctx.translate(*return_type_id),
         },
         crate::resolution::ResolvedMethod::DefaultMethod {
@@ -1004,9 +1062,9 @@ fn lower_resolved_method(
         } => VirResolvedMethod::DefaultMethod {
             type_def_id: *type_def_id,
             interface_type_def_id: *interface_type_def_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.translate(*func_type_id),
             vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.translate(*return_type_id),
             vir_return_type_id: ctx.translate(*return_type_id),
             external_info: external_info.map(|info| VirExternalMethodInfo {
                 module_path: info.module_path,
@@ -1021,9 +1079,9 @@ fn lower_resolved_method(
             ..
         } => VirResolvedMethod::InterfaceMethod {
             interface_type_def_id: *interface_type_def_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.translate(*func_type_id),
             vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.translate(*return_type_id),
             vir_return_type_id: ctx.translate(*return_type_id),
             method_index: *method_index,
         },
@@ -1036,9 +1094,9 @@ fn lower_resolved_method(
         } => VirResolvedMethod::Static {
             type_def_id: *type_def_id,
             method_id: *method_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.translate(*func_type_id),
             vir_func_type_id: ctx.translate(*func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.translate(*return_type_id),
             vir_return_type_id: ctx.translate(*return_type_id),
         },
     }
@@ -1054,7 +1112,7 @@ fn lower_try(inner: &Expr, ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRef {
     let vir_success_type = ctx.translate(ty);
     Box::new(VirExpr::Try {
         value,
-        success_type: ty,
+        success_type: vir_success_type,
         vir_success_type,
     })
 }
@@ -1066,10 +1124,11 @@ fn lower_try(inner: &Expr, ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRef {
 /// dispatch between dynamic-array (heap) and tuple (stack) construction.
 fn lower_array_literal(elements: &[Expr], ty: TypeId, ctx: &mut LoweringCtx<'_>) -> VirRef {
     let lowered: Vec<VirRef> = elements.iter().map(|e| lower_expr(e, ctx)).collect();
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::ArrayLiteral {
         elements: lowered,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -1094,19 +1153,20 @@ fn lower_struct_literal(
         .map(|f| (f.name, lower_expr(&f.value, ctx)))
         .collect();
 
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     if info.is_class {
         Box::new(VirExpr::ClassInstance {
             type_def: info.type_def_id,
             fields,
-            ty,
+            ty: compat_ty,
             vir_ty,
         })
     } else {
         Box::new(VirExpr::StructLiteral {
             type_def: info.type_def_id,
             fields,
-            ty,
+            ty: compat_ty,
             vir_ty,
         })
     }
@@ -1149,11 +1209,12 @@ fn lower_call(
         for arg in &call_expr.args {
             args.push(lower_call_arg(arg.expr(), ctx));
         }
+        let compat_ty = ctx.compat_ty(ty);
         let vir_ty = ctx.translate(ty);
         return Box::new(VirExpr::Call {
             target: CallTarget::Lambda,
             args,
-            ty,
+            ty: compat_ty,
             vir_ty,
         });
     }
@@ -1188,11 +1249,12 @@ fn lower_call(
         }
     };
 
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::Call {
         target,
         args,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -1269,6 +1331,7 @@ fn lower_when_expr(
             trailing: Some(then_val),
         };
 
+        let compat_ty = ctx.compat_ty(ty);
         let vir_ty = ctx.translate(ty);
         result_else = Some(VirBody {
             stmts: Vec::new(),
@@ -1276,7 +1339,7 @@ fn lower_when_expr(
                 cond,
                 then_body,
                 else_body: result_else,
-                ty,
+                ty: compat_ty,
                 vir_ty,
             })),
         });
@@ -1321,6 +1384,7 @@ fn lower_match_expr(
                 .node_map
                 .get_type(arm.body.id)
                 .unwrap_or(TypeId::UNKNOWN);
+            let compat_ty = ctx.compat_ty(arm_ty);
             let vir_ty = ctx.translate(arm_ty);
             VirMatchArm {
                 pattern,
@@ -1329,17 +1393,18 @@ fn lower_match_expr(
                     stmts: Vec::new(),
                     trailing: Some(body_ref),
                 },
-                ty: arm_ty,
+                ty: compat_ty,
                 vir_ty,
             }
         })
         .collect();
 
+    let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::Match {
         scrutinee,
         arms,
-        ty,
+        ty: compat_ty,
         vir_ty,
     })
 }
@@ -1373,8 +1438,8 @@ fn lower_pattern(
             // plain variable binding.
             if let Some(sema_result) = ctx.node_map.get_is_check_result(pattern.id) {
                 let result = convert_is_check_result(sema_result, ctx);
-                let tested_type = recover_tested_type(&result, scrutinee_ty, ctx.type_arena);
-                let vir_tested_type = ctx.translate(tested_type);
+                let tested_type = recover_tested_type(&result, scrutinee_ty, ctx);
+                let vir_tested_type = tested_type;
                 VirPattern::TypeCheck {
                     result,
                     tested_type,
@@ -1382,10 +1447,11 @@ fn lower_pattern(
                     binding: None,
                 }
             } else {
+                let compat_ty = ctx.compat_ty(scrutinee_ty);
                 let vir_ty = ctx.translate(scrutinee_ty);
                 VirPattern::Binding {
                     name: *name,
-                    ty: scrutinee_ty,
+                    ty: compat_ty,
                     vir_ty,
                 }
             }
@@ -1394,8 +1460,8 @@ fn lower_pattern(
         PatternKind::Type { .. } => {
             let sema_result = ctx.require_is_check_result(pattern.id, 0);
             let result = convert_is_check_result(sema_result, ctx);
-            let tested_type = recover_tested_type(&result, scrutinee_ty, ctx.type_arena);
-            let vir_tested_type = ctx.translate(tested_type);
+            let tested_type = recover_tested_type(&result, scrutinee_ty, ctx);
+            let vir_tested_type = tested_type;
             VirPattern::TypeCheck {
                 result,
                 tested_type,
@@ -1409,7 +1475,7 @@ fn lower_pattern(
             let vir_scrutinee_ty = ctx.translate(scrutinee_ty);
             VirPattern::Literal {
                 value,
-                scrutinee_ty,
+                scrutinee_ty: vir_scrutinee_ty,
                 vir_scrutinee_ty,
             }
         }
@@ -1449,7 +1515,7 @@ fn lower_success_pattern(
     let vir_success_type = ctx.translate(success_type);
     VirPattern::Success {
         inner: inner_pat,
-        success_type,
+        success_type: vir_success_type,
         vir_success_type,
     }
 }
@@ -1512,11 +1578,12 @@ fn lower_tuple_pattern(
                 .and_then(|types| types.get(i).copied())
                 .unwrap_or(TypeId::UNKNOWN);
             let inner = lower_pattern(pat, elem_ty, ctx);
+            let compat_ty = ctx.compat_ty(elem_ty);
             let vir_ty = ctx.translate(elem_ty);
             VirTupleBinding {
                 pattern: inner,
                 element_index: i,
-                ty: elem_ty,
+                ty: compat_ty,
                 vir_ty,
             }
         })
@@ -1550,7 +1617,7 @@ fn lower_error_identifier_pattern(
         VirPattern::Error {
             kind: VirErrorPatternKind::CatchAll {
                 name,
-                error_ty,
+                error_ty: vir_error_ty,
                 vir_error_ty,
             },
         }
@@ -1710,7 +1777,7 @@ fn lower_record_pattern(
         let (check, tested) = match sema_result {
             Some(sr) => {
                 let check = convert_is_check_result(sr, ctx);
-                let tested = recover_tested_type(&check, scrutinee_ty, ctx.type_arena);
+                let tested = recover_tested_type(&check, scrutinee_ty, ctx);
                 (Some(check), Some(tested))
             }
             None => (None, None),
@@ -1730,7 +1797,7 @@ fn lower_record_pattern(
     // Resolve field bindings from EntityRegistry
     let vir_fields = resolve_record_field_bindings(fields, source_ty, ctx);
 
-    let vir_tested_type = tested_type.map(|t| ctx.translate(t));
+    let vir_tested_type = tested_type;
     let vir_source_ty = ctx.translate(source_ty);
 
     VirPattern::Record {
@@ -1738,7 +1805,7 @@ fn lower_record_pattern(
         tested_type,
         vir_tested_type,
         fields: vir_fields,
-        source_ty,
+        source_ty: vir_source_ty,
         vir_source_ty,
         is_union_payload,
         is_struct,
@@ -1803,12 +1870,13 @@ fn resolve_record_field_bindings(
             let (slot, ty) = type_def_id
                 .and_then(|def_id| find_field_slot(def_id, f.field_name, ctx))
                 .unwrap_or((0, TypeId::UNKNOWN));
+            let compat_ty = ctx.compat_ty(ty);
             let vir_ty = ctx.translate(ty);
             VirRecordFieldBinding {
                 field_name: f.field_name,
                 binding_name: f.binding,
                 field_slot: slot as u32,
-                ty,
+                ty: compat_ty,
                 vir_ty,
             }
         })
@@ -1840,20 +1908,94 @@ fn find_field_slot(
 /// - `CheckTag(tag)`: the type at union variant index `tag`
 /// - `CheckUnknown(ty)`: the type is directly embedded
 /// - `AlwaysTrue`: the tested type equals the scrutinee type
-/// - `AlwaysFalse`: unrecoverable; uses `TypeId::UNKNOWN` as placeholder
+/// - `AlwaysFalse`: unrecoverable; uses `VirTypeId::UNKNOWN` as placeholder
 fn recover_tested_type(
     result: &IsCheckResult,
     scrutinee_ty: TypeId,
-    type_arena: &TypeArena,
-) -> TypeId {
+    ctx: &mut LoweringCtx<'_>,
+) -> VirTypeId {
     match result {
-        IsCheckResult::CheckTag(tag) => type_arena
+        IsCheckResult::CheckTag(tag) => ctx
+            .type_arena
             .unwrap_union(scrutinee_ty)
             .and_then(|variants| variants.get(*tag as usize).copied())
-            .unwrap_or(TypeId::UNKNOWN),
+            .map(|ty| ctx.translate(ty))
+            .unwrap_or(VirTypeId::UNKNOWN),
         IsCheckResult::CheckUnknown(ty, _) => *ty,
-        IsCheckResult::AlwaysTrue => scrutinee_ty,
-        IsCheckResult::AlwaysFalse => TypeId::UNKNOWN,
+        IsCheckResult::AlwaysTrue => ctx.translate(scrutinee_ty),
+        IsCheckResult::AlwaysFalse => VirTypeId::UNKNOWN,
+    }
+}
+
+/// Conservative `it`-usage check for lowering-time reconstruction.
+///
+/// Guarding on this avoids reconstructing a synthetic `it` lambda from stale
+/// `ItLambdaInfo` data that does not actually belong to `arg_expr`.
+fn expr_contains_it_for_lower(expr: &Expr, it_sym: vole_identity::Symbol) -> bool {
+    match &expr.kind {
+        ExprKind::Identifier(sym) => *sym == it_sym,
+        ExprKind::Binary(bin) => {
+            expr_contains_it_for_lower(&bin.left, it_sym)
+                || expr_contains_it_for_lower(&bin.right, it_sym)
+        }
+        ExprKind::Unary(un) => expr_contains_it_for_lower(&un.operand, it_sym),
+        ExprKind::Call(call) => {
+            expr_contains_it_for_lower(&call.callee, it_sym)
+                || call
+                    .args
+                    .iter()
+                    .any(|a| expr_contains_it_for_lower(a.expr(), it_sym))
+        }
+        ExprKind::Grouping(inner) => expr_contains_it_for_lower(inner, it_sym),
+        ExprKind::Index(idx) => {
+            expr_contains_it_for_lower(&idx.object, it_sym)
+                || expr_contains_it_for_lower(&idx.index, it_sym)
+        }
+        ExprKind::ArrayLiteral(elems) => {
+            elems.iter().any(|e| expr_contains_it_for_lower(e, it_sym))
+        }
+        ExprKind::NullCoalesce(nc) => {
+            expr_contains_it_for_lower(&nc.value, it_sym)
+                || expr_contains_it_for_lower(&nc.default, it_sym)
+        }
+        ExprKind::Is(is_expr) => expr_contains_it_for_lower(&is_expr.value, it_sym),
+        ExprKind::AsCast(as_cast) => expr_contains_it_for_lower(&as_cast.value, it_sym),
+        ExprKind::StructLiteral(sl) => sl
+            .fields
+            .iter()
+            .any(|f| expr_contains_it_for_lower(&f.value, it_sym)),
+        ExprKind::InterpolatedString(parts) => parts.iter().any(|p| {
+            if let StringPart::Expr(e) = p {
+                expr_contains_it_for_lower(e, it_sym)
+            } else {
+                false
+            }
+        }),
+        ExprKind::MethodCall(mc) => {
+            expr_contains_it_for_lower(&mc.object, it_sym)
+                || mc
+                    .args
+                    .iter()
+                    .any(|a| expr_contains_it_for_lower(a.expr(), it_sym))
+        }
+        ExprKind::FieldAccess(fa) => expr_contains_it_for_lower(&fa.object, it_sym),
+        ExprKind::OptionalChain(oc) => expr_contains_it_for_lower(&oc.object, it_sym),
+        ExprKind::OptionalMethodCall(omc) => {
+            expr_contains_it_for_lower(&omc.object, it_sym)
+                || omc
+                    .args
+                    .iter()
+                    .any(|a| expr_contains_it_for_lower(a.expr(), it_sym))
+        }
+        ExprKind::Range(r) => {
+            expr_contains_it_for_lower(&r.start, it_sym)
+                || expr_contains_it_for_lower(&r.end, it_sym)
+        }
+        ExprKind::Try(inner) => expr_contains_it_for_lower(inner, it_sym),
+        ExprKind::Assign(assign) => expr_contains_it_for_lower(&assign.value, it_sym),
+        ExprKind::CompoundAssign(ca) => expr_contains_it_for_lower(&ca.value, it_sym),
+        ExprKind::Lambda(_) => false,
+        _ => false,
     }
 }
 
@@ -1869,16 +2011,24 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
     let it_info = ctx.node_map.get_it_lambda_info(arg_expr.id).copied();
     if let Some(info) = it_info {
         // Resolve the `it` symbol (must exist -- sema already verified it).
-        let it_sym = ctx
-            .interner
-            .lookup("it")
-            .expect("VIR lower: `it` symbol must be interned for it-lambda");
+        let Some(it_sym) = ctx.interner.lookup("it") else {
+            return lower_expr(arg_expr, ctx);
+        };
+        if !expr_contains_it_for_lower(arg_expr, it_sym) {
+            return lower_expr(arg_expr, ctx);
+        }
 
-        // The function type for the synthesized lambda is the type sema assigned
-        // to this expression node (e.g. `(i64) -> i64`).
+        // Reconstruct the synthesized lambda function type from the `it` param
+        // and return types sema recorded for this argument.
+        let param_types: crate::type_arena::TypeIdVec = [info.param_type].into_iter().collect();
         let func_ty = ctx
-            .node_map
-            .get_type(arg_expr.id)
+            .type_arena
+            .lookup_function(param_types.clone(), info.return_type, false)
+            .or_else(|| {
+                ctx.type_arena
+                    .lookup_function(param_types, info.return_type, true)
+            })
+            .or_else(|| ctx.node_map.get_type(arg_expr.id))
             .unwrap_or(TypeId::UNKNOWN);
 
         // Lower the body expression (the original `it * 2`, `it > 0`, etc.).
@@ -1909,7 +2059,7 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
                     .iter()
                     .map(|c| VirCapture {
                         name: c.name,
-                        ty: TypeId::UNKNOWN,
+                        ty: VirTypeId::UNKNOWN,
                         vir_ty: VirTypeId::UNKNOWN,
                         by_ref: false,
                     })
@@ -1917,12 +2067,13 @@ fn lower_call_arg(arg_expr: &Expr, ctx: &mut LoweringCtx<'_>) -> VirRef {
             })
             .unwrap_or_default();
 
+        let compat_ty = ctx.compat_ty(func_ty);
         let vir_ty = ctx.translate(func_ty);
         return Box::new(VirExpr::Lambda {
             params: vec![it_sym],
             body,
             captures,
-            ty: func_ty,
+            ty: compat_ty,
             vir_ty,
         });
     }

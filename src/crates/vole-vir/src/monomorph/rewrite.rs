@@ -24,7 +24,7 @@ use crate::stmt::{
 
 /// Remap context carrying old->new VirTypeId mapping.
 ///
-/// TypeId fields are left as-is during rewrite (they will be removed in Phase E).
+/// All VirTypeId fields are remapped during rewrite.
 pub struct RewriteCtx {
     vir_type_map: FxHashMap<VirTypeId, VirTypeId>,
 }
@@ -46,14 +46,14 @@ pub fn rewrite_function(func: &VirFunction, ctx: &RewriteCtx) -> VirFunction {
     let params = func
         .params
         .iter()
-        .map(|(sym, ty, vir_ty)| (*sym, *ty, ctx.remap(*vir_ty)))
+        .map(|(sym, ty, vir_ty)| (*sym, ctx.remap(*ty), ctx.remap(*vir_ty)))
         .collect();
 
     VirFunction {
         id: func.id,
         name: func.name.clone(),
         params,
-        return_type: func.return_type,
+        return_type: ctx.remap(func.return_type),
         vir_return_type: ctx.remap(func.vir_return_type),
         body: rewrite_body(&func.body, ctx),
         mangled_name_id: func.mangled_name_id,
@@ -141,7 +141,7 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
     match expr {
         VirExpr::IntLiteral { value, ty, vir_ty } => VirExpr::IntLiteral {
             value: *value,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::WideLiteral {
@@ -152,12 +152,12 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::WideLiteral {
             low: *low,
             high: *high,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::FloatLiteral { value, ty, vir_ty } => VirExpr::FloatLiteral {
             value: *value,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::BoolLiteral(v) => VirExpr::BoolLiteral(*v),
@@ -165,7 +165,7 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         VirExpr::NilLiteral => VirExpr::NilLiteral,
         VirExpr::Unreachable { line } => VirExpr::Unreachable { line: *line },
         VirExpr::Import { ty, vir_ty } => VirExpr::Import {
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::TypeLiteral => VirExpr::TypeLiteral,
@@ -184,7 +184,7 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             vir_ty,
         } => VirExpr::ArrayLiteral {
             elements: elements.iter().map(|e| rewrite_ref(e, ctx)).collect(),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::RepeatLiteral {
@@ -195,7 +195,7 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::RepeatLiteral {
             element: rewrite_ref(element, ctx),
             count: *count,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::StructLiteral {
@@ -206,7 +206,7 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::StructLiteral {
             type_def: *type_def,
             fields: rewrite_named_refs(fields, ctx),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::ClassInstance {
@@ -217,7 +217,7 @@ fn rewrite_expr_literal(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::ClassInstance {
             type_def: *type_def,
             fields: rewrite_named_refs(fields, ctx),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         _ => unreachable!("rewrite_expr_literal called with non-literal"),
@@ -238,7 +238,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             op: *op,
             lhs: rewrite_ref(lhs, ctx),
             rhs: rewrite_ref(rhs, ctx),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
             line: *line,
         },
@@ -250,7 +250,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::UnaryOp {
             op: *op,
             operand: rewrite_ref(operand, ctx),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::StringConcat { parts } => VirExpr::StringConcat {
@@ -267,7 +267,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::Call {
             target: rewrite_call_target(target, ctx),
             args: args.iter().map(|a| rewrite_ref(a, ctx)).collect(),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::MethodCall {
@@ -284,7 +284,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             args: args.iter().map(|a| rewrite_ref(a, ctx)).collect(),
             dispatch: rewrite_method_dispatch_meta(dispatch, ctx),
             node_id: *node_id,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::FieldLoad {
@@ -297,7 +297,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             object: rewrite_ref(object, ctx),
             field: *field,
             storage: *storage,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::FieldStore {
@@ -320,7 +320,7 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::Index {
             object: rewrite_ref(object, ctx),
             index: rewrite_ref(index, ctx),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
             union_storage: *union_storage,
         },
@@ -353,8 +353,8 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             kind,
         } => VirExpr::Coerce {
             value: rewrite_ref(value, ctx),
-            from: *from,
-            to: *to,
+            from: ctx.remap(*from),
+            to: ctx.remap(*to),
             vir_from: ctx.remap(*vir_from),
             vir_to: ctx.remap(*vir_to),
             kind: *kind,
@@ -376,7 +376,7 @@ fn rewrite_expr_control(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             cond: rewrite_ref(cond, ctx),
             then_body: rewrite_body(then_body, ctx),
             else_body: else_body.as_ref().map(|b| rewrite_body(b, ctx)),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::Match {
@@ -387,7 +387,7 @@ fn rewrite_expr_control(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::Match {
             scrutinee: rewrite_ref(scrutinee, ctx),
             arms: arms.iter().map(|a| rewrite_match_arm(a, ctx)).collect(),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::Block {
@@ -398,7 +398,7 @@ fn rewrite_expr_control(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::Block {
             stmts: stmts.iter().map(|s| rewrite_stmt(s, ctx)).collect(),
             trailing: trailing.as_ref().map(|r| rewrite_ref(r, ctx)),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::IsCheck {
@@ -409,7 +409,7 @@ fn rewrite_expr_control(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::IsCheck {
             value: rewrite_ref(value, ctx),
             result: rewrite_is_check_result(result, ctx),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::AsCast {
@@ -420,19 +420,19 @@ fn rewrite_expr_control(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             result,
         } => VirExpr::AsCast {
             value: rewrite_ref(value, ctx),
-            target_ty: *target_ty,
+            target_ty: ctx.remap(*target_ty),
             vir_target_ty: ctx.remap(*vir_target_ty),
             kind: *kind,
             result: rewrite_is_check_result(result, ctx),
         },
         VirExpr::MetaAccess { kind, ty, vir_ty } => VirExpr::MetaAccess {
             kind: rewrite_meta_kind(kind, ctx),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::LocalLoad { name, ty, vir_ty } => VirExpr::LocalLoad {
             name: *name,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::LocalStore { name, value } => VirExpr::LocalStore {
@@ -449,7 +449,7 @@ fn rewrite_expr_control(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             params: params.clone(),
             body: rewrite_body(body, ctx),
             captures: captures.iter().map(|c| rewrite_capture(c, ctx)).collect(),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         _ => unreachable!("rewrite_expr_control called with non-control"),
@@ -469,9 +469,9 @@ fn rewrite_expr_optional(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::NullCoalesce {
             value: rewrite_ref(value, ctx),
             default: rewrite_ref(default, ctx),
-            inner_type: *inner_type,
+            inner_type: ctx.remap(*inner_type),
             vir_inner_type: ctx.remap(*vir_inner_type),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::OptionalChain {
@@ -484,9 +484,9 @@ fn rewrite_expr_optional(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
         } => VirExpr::OptionalChain {
             object: rewrite_ref(object, ctx),
             field: *field,
-            inner_type: *inner_type,
+            inner_type: ctx.remap(*inner_type),
             vir_inner_type: ctx.remap(*vir_inner_type),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::OptionalMethodCall {
@@ -505,9 +505,9 @@ fn rewrite_expr_optional(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             method_args: method_args.iter().map(|a| rewrite_ref(a, ctx)).collect(),
             dispatch: rewrite_method_dispatch_meta(dispatch, ctx),
             call_node_id: *call_node_id,
-            inner_type: *inner_type,
+            inner_type: ctx.remap(*inner_type),
             vir_inner_type: ctx.remap(*vir_inner_type),
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirExpr::Try {
@@ -516,7 +516,7 @@ fn rewrite_expr_optional(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             vir_success_type,
         } => VirExpr::Try {
             value: rewrite_ref(value, ctx),
-            success_type: *success_type,
+            success_type: ctx.remap(*success_type),
             vir_success_type: ctx.remap(*vir_success_type),
         },
         VirExpr::Yield { value } => VirExpr::Yield {
@@ -543,7 +543,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             name: *name,
             value: rewrite_ref(value, ctx),
             mutable: *mutable,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirStmt::LetTuple {
@@ -554,7 +554,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
         } => VirStmt::LetTuple {
             pattern: rewrite_destructure_pattern(pattern, ctx),
             value: rewrite_ref(value, ctx),
-            init_ty: *init_ty,
+            init_ty: ctx.remap(*init_ty),
             vir_init_ty: ctx.remap(*vir_init_ty),
         },
         VirStmt::Assign { target, value } => VirStmt::Assign {
@@ -598,7 +598,7 @@ fn rewrite_pattern(pat: &VirPattern, ctx: &RewriteCtx) -> VirPattern {
         VirPattern::Wildcard => VirPattern::Wildcard,
         VirPattern::Binding { name, ty, vir_ty } => VirPattern::Binding {
             name: *name,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirPattern::TypeCheck {
@@ -608,11 +608,11 @@ fn rewrite_pattern(pat: &VirPattern, ctx: &RewriteCtx) -> VirPattern {
             binding,
         } => VirPattern::TypeCheck {
             result: rewrite_is_check_result(result, ctx),
-            tested_type: *tested_type,
+            tested_type: ctx.remap(*tested_type),
             vir_tested_type: ctx.remap(*vir_tested_type),
             binding: binding
                 .as_ref()
-                .map(|(sym, ty, vir_ty)| (*sym, *ty, ctx.remap(*vir_ty))),
+                .map(|(sym, ty, vir_ty)| (*sym, ctx.remap(*ty), ctx.remap(*vir_ty))),
         },
         VirPattern::Literal {
             value,
@@ -620,7 +620,7 @@ fn rewrite_pattern(pat: &VirPattern, ctx: &RewriteCtx) -> VirPattern {
             vir_scrutinee_ty,
         } => VirPattern::Literal {
             value: rewrite_ref(value, ctx),
-            scrutinee_ty: *scrutinee_ty,
+            scrutinee_ty: ctx.remap(*scrutinee_ty),
             vir_scrutinee_ty: ctx.remap(*vir_scrutinee_ty),
         },
         VirPattern::Val { name } => VirPattern::Val { name: *name },
@@ -630,7 +630,7 @@ fn rewrite_pattern(pat: &VirPattern, ctx: &RewriteCtx) -> VirPattern {
             vir_success_type,
         } => VirPattern::Success {
             inner: inner.as_ref().map(|p| Box::new(rewrite_pattern(p, ctx))),
-            success_type: *success_type,
+            success_type: ctx.remap(*success_type),
             vir_success_type: ctx.remap(*vir_success_type),
         },
         VirPattern::Error { kind } => VirPattern::Error {
@@ -653,13 +653,13 @@ fn rewrite_pattern(pat: &VirPattern, ctx: &RewriteCtx) -> VirPattern {
             is_struct,
         } => VirPattern::Record {
             type_check: type_check.as_ref().map(|r| rewrite_is_check_result(r, ctx)),
-            tested_type: *tested_type,
+            tested_type: tested_type.map(|ty| ctx.remap(ty)),
             vir_tested_type: vir_tested_type.map(|v| ctx.remap(v)),
             fields: fields
                 .iter()
                 .map(|f| rewrite_record_field_binding(f, ctx))
                 .collect(),
-            source_ty: *source_ty,
+            source_ty: ctx.remap(*source_ty),
             vir_source_ty: ctx.remap(*vir_source_ty),
             is_union_payload: *is_union_payload,
             is_struct: *is_struct,
@@ -677,7 +677,7 @@ fn rewrite_match_arm(arm: &VirMatchArm, ctx: &RewriteCtx) -> VirMatchArm {
         pattern: rewrite_pattern(&arm.pattern, ctx),
         guard: arm.guard.as_ref().map(|g| rewrite_ref(g, ctx)),
         body: rewrite_body(&arm.body, ctx),
-        ty: arm.ty,
+        ty: ctx.remap(arm.ty),
         vir_ty: ctx.remap(arm.vir_ty),
     }
 }
@@ -686,7 +686,7 @@ fn rewrite_match_arm(arm: &VirMatchArm, ctx: &RewriteCtx) -> VirMatchArm {
 fn rewrite_is_check_result(result: &IsCheckResult, ctx: &RewriteCtx) -> IsCheckResult {
     match result {
         IsCheckResult::CheckUnknown(ty, vir_ty) => {
-            IsCheckResult::CheckUnknown(*ty, ctx.remap(*vir_ty))
+            IsCheckResult::CheckUnknown(ctx.remap(*ty), ctx.remap(*vir_ty))
         }
         other => *other,
     }
@@ -696,7 +696,7 @@ fn rewrite_is_check_result(result: &IsCheckResult, ctx: &RewriteCtx) -> IsCheckR
 fn rewrite_capture(cap: &VirCapture, ctx: &RewriteCtx) -> VirCapture {
     VirCapture {
         name: cap.name,
-        ty: cap.ty,
+        ty: ctx.remap(cap.ty),
         vir_ty: ctx.remap(cap.vir_ty),
         by_ref: cap.by_ref,
     }
@@ -756,7 +756,7 @@ fn rewrite_method_dispatch_meta(
                 elem_type,
                 vir_elem_type,
             } => crate::expr::VirMethodReceiverCoercion::IteratorWrap {
-                elem_type,
+                elem_type: ctx.remap(elem_type),
                 vir_elem_type: ctx.remap(vir_elem_type),
             },
         }),
@@ -768,7 +768,7 @@ fn rewrite_method_dispatch_meta(
             .generic_monomorph
             .as_ref()
             .map(|key| rewrite_function_monomorph_key(key, ctx)),
-        substituted_return_type: meta.substituted_return_type,
+        substituted_return_type: meta.substituted_return_type.map(|ty| ctx.remap(ty)),
         vir_substituted_return_type: meta
             .vir_substituted_return_type
             .map(|vir_ty| ctx.remap(vir_ty)),
@@ -777,7 +777,7 @@ fn rewrite_method_dispatch_meta(
             crate::expr::VirClassMethodMonomorphKey {
                 class_name: key.class_name,
                 method_name: key.method_name,
-                type_keys: key.type_keys.clone(),
+                type_keys: key.type_keys.iter().map(|t| ctx.remap(*t)).collect(),
                 vir_type_keys: key.vir_type_keys.iter().map(|t| ctx.remap(*t)).collect(),
             }
         }),
@@ -794,7 +794,7 @@ fn rewrite_function_monomorph_key(
 ) -> crate::expr::VirFunctionMonomorphKey {
     crate::expr::VirFunctionMonomorphKey {
         func_name: key.func_name,
-        type_keys: key.type_keys.clone(),
+        type_keys: key.type_keys.iter().map(|t| ctx.remap(*t)).collect(),
         vir_type_keys: key.vir_type_keys.iter().map(|t| ctx.remap(*t)).collect(),
     }
 }
@@ -806,13 +806,13 @@ fn rewrite_static_method_monomorph_key(
     crate::expr::VirStaticMethodMonomorphKey {
         class_name: key.class_name,
         method_name: key.method_name,
-        class_type_keys: key.class_type_keys.clone(),
+        class_type_keys: key.class_type_keys.iter().map(|t| ctx.remap(*t)).collect(),
         vir_class_type_keys: key
             .vir_class_type_keys
             .iter()
             .map(|t| ctx.remap(*t))
             .collect(),
-        method_type_keys: key.method_type_keys.clone(),
+        method_type_keys: key.method_type_keys.iter().map(|t| ctx.remap(*t)).collect(),
         vir_method_type_keys: key
             .vir_method_type_keys
             .iter()
@@ -837,9 +837,9 @@ fn rewrite_resolved_method(
             method_id,
         } => VirResolvedMethod::Direct {
             type_def_id: *type_def_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.remap(*func_type_id),
             vir_func_type_id: ctx.remap(*vir_func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.remap(*return_type_id),
             vir_return_type_id: ctx.remap(*vir_return_type_id),
             method_id: *method_id,
         },
@@ -855,13 +855,13 @@ fn rewrite_resolved_method(
             vir_concrete_return_hint,
         } => VirResolvedMethod::Implemented {
             type_def_id: *type_def_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.remap(*func_type_id),
             vir_func_type_id: ctx.remap(*vir_func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.remap(*return_type_id),
             vir_return_type_id: ctx.remap(*vir_return_type_id),
             is_builtin: *is_builtin,
             external_info: *external_info,
-            concrete_return_hint: *concrete_return_hint,
+            concrete_return_hint: concrete_return_hint.map(|ty| ctx.remap(ty)),
             vir_concrete_return_hint: vir_concrete_return_hint.map(|t| ctx.remap(t)),
         },
         VirResolvedMethod::FunctionalInterface {
@@ -870,9 +870,9 @@ fn rewrite_resolved_method(
             return_type_id,
             vir_return_type_id,
         } => VirResolvedMethod::FunctionalInterface {
-            func_type_id: *func_type_id,
+            func_type_id: ctx.remap(*func_type_id),
             vir_func_type_id: ctx.remap(*vir_func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.remap(*return_type_id),
             vir_return_type_id: ctx.remap(*vir_return_type_id),
         },
         VirResolvedMethod::DefaultMethod {
@@ -886,9 +886,9 @@ fn rewrite_resolved_method(
         } => VirResolvedMethod::DefaultMethod {
             type_def_id: *type_def_id,
             interface_type_def_id: *interface_type_def_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.remap(*func_type_id),
             vir_func_type_id: ctx.remap(*vir_func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.remap(*return_type_id),
             vir_return_type_id: ctx.remap(*vir_return_type_id),
             external_info: *external_info,
         },
@@ -901,9 +901,9 @@ fn rewrite_resolved_method(
             method_index,
         } => VirResolvedMethod::InterfaceMethod {
             interface_type_def_id: *interface_type_def_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.remap(*func_type_id),
             vir_func_type_id: ctx.remap(*vir_func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.remap(*return_type_id),
             vir_return_type_id: ctx.remap(*vir_return_type_id),
             method_index: *method_index,
         },
@@ -917,9 +917,9 @@ fn rewrite_resolved_method(
         } => VirResolvedMethod::Static {
             type_def_id: *type_def_id,
             method_id: *method_id,
-            func_type_id: *func_type_id,
+            func_type_id: ctx.remap(*func_type_id),
             vir_func_type_id: ctx.remap(*vir_func_type_id),
-            return_type_id: *return_type_id,
+            return_type_id: ctx.remap(*return_type_id),
             vir_return_type_id: ctx.remap(*vir_return_type_id),
         },
     }
@@ -930,7 +930,7 @@ fn rewrite_tuple_binding(binding: &VirTupleBinding, ctx: &RewriteCtx) -> VirTupl
     VirTupleBinding {
         pattern: rewrite_pattern(&binding.pattern, ctx),
         element_index: binding.element_index,
-        ty: binding.ty,
+        ty: ctx.remap(binding.ty),
         vir_ty: ctx.remap(binding.vir_ty),
     }
 }
@@ -944,7 +944,7 @@ fn rewrite_record_field_binding(
         field_name: binding.field_name,
         binding_name: binding.binding_name,
         field_slot: binding.field_slot,
-        ty: binding.ty,
+        ty: ctx.remap(binding.ty),
         vir_ty: ctx.remap(binding.vir_ty),
     }
 }
@@ -959,7 +959,7 @@ fn rewrite_error_pattern_kind(kind: &VirErrorPatternKind, ctx: &RewriteCtx) -> V
             vir_error_ty,
         } => VirErrorPatternKind::CatchAll {
             name: *name,
-            error_ty: *error_ty,
+            error_ty: ctx.remap(*error_ty),
             vir_error_ty: ctx.remap(*vir_error_ty),
         },
         VirErrorPatternKind::Specific { error_tag } => VirErrorPatternKind::Specific {
@@ -981,7 +981,7 @@ fn rewrite_error_pattern_kind(kind: &VirErrorPatternKind, ctx: &RewriteCtx) -> V
 fn rewrite_for(vir_for: &VirFor, ctx: &RewriteCtx) -> VirFor {
     VirFor {
         var_name: vir_for.var_name,
-        var_type: vir_for.var_type,
+        var_type: ctx.remap(vir_for.var_type),
         vir_var_type: ctx.remap(vir_for.vir_var_type),
         iterable: rewrite_ref(&vir_for.iterable, ctx),
         body: rewrite_body(&vir_for.body, ctx),
@@ -998,7 +998,7 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
             vir_elem_type,
             union_storage,
         } => VirIterKind::Array {
-            elem_type: *elem_type,
+            elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
             union_storage: *union_storage,
         },
@@ -1007,28 +1007,28 @@ fn rewrite_iter_kind(kind: &VirIterKind, ctx: &RewriteCtx) -> VirIterKind {
             elem_type,
             vir_elem_type,
         } => VirIterKind::IteratorInterface {
-            elem_type: *elem_type,
+            elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
         },
         VirIterKind::CustomIterator {
             elem_type,
             vir_elem_type,
         } => VirIterKind::CustomIterator {
-            elem_type: *elem_type,
+            elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
         },
         VirIterKind::CustomIterable {
             elem_type,
             vir_elem_type,
         } => VirIterKind::CustomIterable {
-            elem_type: *elem_type,
+            elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
         },
         VirIterKind::Generic {
             elem_type,
             vir_elem_type,
         } => VirIterKind::Generic {
-            elem_type: *elem_type,
+            elem_type: ctx.remap(*elem_type),
             vir_elem_type: ctx.remap(*vir_elem_type),
         },
     }
@@ -1070,7 +1070,7 @@ fn rewrite_destructure_pattern(
     match pat {
         VirDestructurePattern::Bind { name, ty, vir_ty } => VirDestructurePattern::Bind {
             name: *name,
-            ty: *ty,
+            ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
         },
         VirDestructurePattern::Wildcard => VirDestructurePattern::Wildcard,
@@ -1091,7 +1091,7 @@ fn rewrite_destructure_pattern(
                 .iter()
                 .map(|f| rewrite_destructure_field(f, ctx))
                 .collect(),
-            source_ty: *source_ty,
+            source_ty: ctx.remap(*source_ty),
             vir_source_ty: ctx.remap(*vir_source_ty),
             is_struct: *is_struct,
         },
@@ -1119,7 +1119,7 @@ fn rewrite_destructure_tuple_kind(
             elem_ty,
             vir_elem_ty,
         } => DestructureTupleKind::FixedArray {
-            elem_ty: *elem_ty,
+            elem_ty: ctx.remap(*elem_ty),
             vir_elem_ty: ctx.remap(*vir_elem_ty),
         },
     }
@@ -1132,7 +1132,7 @@ fn rewrite_destructure_element(
 ) -> VirDestructureElement {
     VirDestructureElement {
         pattern: rewrite_destructure_pattern(&elem.pattern, ctx),
-        ty: elem.ty,
+        ty: ctx.remap(elem.ty),
         vir_ty: ctx.remap(elem.vir_ty),
     }
 }
@@ -1143,7 +1143,7 @@ fn rewrite_destructure_field(field: &VirDestructureField, ctx: &RewriteCtx) -> V
         field_name: field.field_name,
         binding: field.binding,
         slot: field.slot,
-        ty: field.ty,
+        ty: ctx.remap(field.ty),
         vir_ty: ctx.remap(field.vir_ty),
     }
 }
@@ -1153,7 +1153,7 @@ fn rewrite_module_binding(binding: &VirModuleBinding, ctx: &RewriteCtx) -> VirMo
     VirModuleBinding {
         export_name: binding.export_name,
         binding: binding.binding,
-        export_ty: binding.export_ty,
+        export_ty: ctx.remap(binding.export_ty),
         vir_export_ty: ctx.remap(binding.vir_export_ty),
     }
 }
@@ -1185,16 +1185,16 @@ mod tests {
     use crate::monomorph::substitute::{TypeSubstitution, substitute_types};
     use crate::type_table::VirTypeTable;
     use crate::types::VirType;
-    use vole_identity::{FunctionId, NameId, NodeId, TypeId, UnionStorageKind, VirTypeId};
+    use vole_identity::{FunctionId, NameId, NodeId, UnionStorageKind, VirTypeId};
 
     /// Helper: create a NameId for testing.
     fn name(n: u32) -> NameId {
         NameId::new_for_test(n)
     }
 
-    /// Helper: create a TypeId for testing.
-    fn type_id(n: u32) -> TypeId {
-        TypeId::from_raw(n)
+    /// Helper: create a VirTypeId for testing.
+    fn type_id(n: u32) -> VirTypeId {
+        VirTypeId::from_raw(n)
     }
 
     /// Helper: create a Symbol for testing.
@@ -1560,7 +1560,7 @@ mod tests {
             id: FunctionId::new(6),
             name: "loop_over".to_string(),
             params: vec![],
-            return_type: TypeId::VOID,
+            return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::VOID,
             body: VirBody {
                 stmts: vec![VirStmt::For(VirFor {
@@ -1616,7 +1616,7 @@ mod tests {
             id: FunctionId::new(11),
             name: "array_loop".to_string(),
             params: vec![],
-            return_type: TypeId::VOID,
+            return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::VOID,
             body: VirBody {
                 stmts: vec![VirStmt::For(VirFor {
@@ -1806,7 +1806,7 @@ mod tests {
             id: FunctionId::new(7),
             name: "check".to_string(),
             params: vec![(sym(1), type_id(10), param_id)],
-            return_type: TypeId::VOID,
+            return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::BOOL,
             body: VirBody {
                 stmts: vec![],
@@ -1891,7 +1891,7 @@ mod tests {
             id: FunctionId::new(9),
             name: "with_lambda".to_string(),
             params: vec![],
-            return_type: TypeId::VOID,
+            return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::VOID,
             body: VirBody {
                 stmts: vec![],
@@ -1950,7 +1950,7 @@ mod tests {
             id: FunctionId::new(10),
             name: "call_generic".to_string(),
             params: vec![],
-            return_type: TypeId::VOID,
+            return_type: VirTypeId::VOID,
             vir_return_type: VirTypeId::VOID,
             body: VirBody {
                 stmts: vec![],

@@ -506,11 +506,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // tells us which arg_source[j] fills each parameter slot i.
         // `mapping[i] = Some(j)` means arg_source[j] fills slot i.
         // `mapping[i] = None` means slot i uses its default value.
+        let arg_count = arg_source.len();
+        let expected_user_params = expected_types.len().saturating_sub(user_param_offset);
+        let mapping_is_valid = |mapping: &[Option<usize>]| {
+            if mapping.len() != expected_user_params {
+                return false;
+            }
+            let mut seen = vec![false; arg_count];
+            let mut mapped_count = 0usize;
+            for call_idx in mapping.iter().flatten().copied() {
+                if call_idx >= arg_count || seen[call_idx] {
+                    return false;
+                }
+                seen[call_idx] = true;
+                mapped_count += 1;
+            }
+            mapped_count == arg_count
+        };
         let named_arg_mapping = self
             .analyzed()
             .node_map
             .get_resolved_call_args(call_expr_id)
-            .map(|s| s.to_vec());
+            .map(|s| s.to_vec())
+            .filter(|mapping| mapping_is_valid(mapping));
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
         if let Some(ref mapping) = named_arg_mapping {

@@ -10,7 +10,7 @@ use vole_frontend::{NodeId, Symbol};
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::generic::{StaticMethodMonomorphInstance, StaticMethodMonomorphKey};
 use vole_sema::type_arena::TypeId;
-use vole_vir::expr::{VirMethodDispatchMeta, VirResolvedMethod, VirStaticMethodMonomorphKey};
+use vole_vir::expr::{VirMethodDispatchMeta, VirStaticMethodMonomorphKey};
 
 use super::methods::ArgSource;
 
@@ -55,23 +55,25 @@ impl Cg<'_, '_, '_> {
         }
 
         let return_type_hint = vir_dispatch
-            .and_then(|dispatch| dispatch.substituted_return_type)
-            .or_else(|| {
-                vir_dispatch
-                    .and_then(|dispatch| dispatch.resolved_method.as_ref())
-                    .map(VirResolvedMethod::return_type_id)
-            });
+            .and_then(|dispatch| {
+                dispatch
+                    .substituted_return_type
+                    .map(|ty| self.sema_type_from_vir(ty))
+                    .or_else(|| {
+                        dispatch
+                            .resolved_method
+                            .as_ref()
+                            .map(|resolved| self.sema_type_from_vir(resolved.return_type_id()))
+                    })
+            })
+            .or_else(|| self.get_expr_type_substituted(&expr_id));
 
         // Check for Array.filled<T> intrinsic (compiled as ArrayFilled runtime call)
         if let Some(result) = self.try_array_filled_intrinsic(
             type_def_id,
             arg_source,
             method_sym,
-            if vir_dispatch.is_some() {
-                None
-            } else {
-                Some(expr_id)
-            },
+            Some(expr_id),
             return_type_hint,
         )? {
             return Ok(result);
@@ -147,6 +149,21 @@ impl Cg<'_, '_, '_> {
         // us which call.args[j] fills each parameter slot i (and None means use the default).
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
+        let mapping_is_valid = |mapping: &[Option<usize>]| {
+            if mapping.len() != param_ids.len() {
+                return false;
+            }
+            let mut seen = vec![false; arg_count];
+            let mut mapped_count = 0usize;
+            for call_idx in mapping.iter().flatten().copied() {
+                if call_idx >= arg_count || seen[call_idx] {
+                    return false;
+                }
+                seen[call_idx] = true;
+                mapped_count += 1;
+            }
+            mapped_count == arg_count
+        };
         let named_mapping = vir_dispatch
             .and_then(|dispatch| dispatch.resolved_call_args.clone())
             .or_else(|| {
@@ -158,7 +175,8 @@ impl Cg<'_, '_, '_> {
                         .get_resolved_call_args(expr_id)
                         .map(|s| s.to_vec())
                 }
-            });
+            })
+            .filter(|mapping| mapping_is_valid(mapping));
         if let Some(ref mapping) = named_mapping {
             // Named arg reordering: compile each slot in parameter order using the mapping.
             for (slot, opt_call_idx) in mapping.iter().enumerate() {
@@ -254,8 +272,14 @@ impl Cg<'_, '_, '_> {
                 StaticMethodMonomorphKey::new(
                     key.class_name,
                     key.method_name,
-                    key.class_type_keys.clone(),
-                    key.method_type_keys.clone(),
+                    key.class_type_keys
+                        .iter()
+                        .map(|&ty| self.sema_type_from_vir(ty))
+                        .collect(),
+                    key.method_type_keys
+                        .iter()
+                        .map(|&ty| self.sema_type_from_vir(ty))
+                        .collect(),
                 )
             })
             .or_else(|| expr_id.and_then(|id| self.query().static_method_generic_at(id).cloned()));
@@ -516,17 +540,25 @@ impl Cg<'_, '_, '_> {
             return Err(CodegenError::arg_count("Array.filled", 2, filled_arg_count));
         }
 
-        // Get the return type [T] from sema to determine element type T
-        let return_type_id = return_type_hint
-            .or_else(|| expr_id.and_then(|id| self.get_expr_type_substituted(&id)))
-            .ok_or_else(|| {
-                CodegenError::missing_resource(
-                    "Array.filled return type from sema/VIR dispatch metadata",
-                )
+        // Get the return type [T] from sema to determine element type T.
+        // VIR-return metadata may still be an unresolved placeholder; if so,
+        // fall back to expression type metadata before failing.
+        let hint_array_elem = return_type_hint.and_then(|ret_ty| {
+            self.arena()
+                .unwrap_array(ret_ty)
+                .map(|elem_ty| (ret_ty, elem_ty))
+        });
+        let expr_array_elem = expr_id
+            .and_then(|id| self.get_expr_type_substituted(&id))
+            .and_then(|ret_ty| {
+                self.arena()
+                    .unwrap_array(ret_ty)
+                    .map(|elem_ty| (ret_ty, elem_ty))
+            });
+        let (return_type_id, elem_type_id) =
+            hint_array_elem.or(expr_array_elem).ok_or_else(|| {
+                CodegenError::type_mismatch("Array.filled", "array type", "non-array")
             })?;
-        let elem_type_id = self.arena().unwrap_array(return_type_id).ok_or_else(|| {
-            CodegenError::type_mismatch("Array.filled", "array type", "non-array")
-        })?;
         let is_wide_elem = {
             let arena = self.arena();
             elem_type_id == arena.i128() || elem_type_id == arena.f128()

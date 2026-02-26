@@ -10,17 +10,42 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, array_element_tag_id, field_byte_size, type_id_to_cranelift};
+use crate::types::{CompiledValue, field_byte_size, type_id_to_cranelift};
 
 use vole_frontend::{Expr, ExprKind};
 use vole_sema::UnionStorageKind;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirExpr;
+use vole_vir::types::VirType;
 
 use super::super::context::Cg;
-use super::super::structs::{convert_to_i64_for_storage, reconstruct_i128, split_i128_for_storage};
+use super::super::structs::{reconstruct_i128, split_i128_for_storage};
+
+type VirIndexDispatch = (Option<Vec<TypeId>>, Option<(TypeId, usize)>, Option<TypeId>);
 
 impl Cg<'_, '_, '_> {
+    /// Recover index dispatch information from VIR type metadata.
+    ///
+    /// TEMP(N279-C): bridge for cases where sema `TypeId` degrades to
+    /// `TypeId::UNKNOWN` during migration.
+    fn vir_index_dispatch(&self, object: &VirExpr) -> Option<VirIndexDispatch> {
+        let vir_ty = Self::vir_expr_type_id(object)?;
+        match self.vir_type_table().get(vir_ty) {
+            VirType::Tuple { elems } => Some((
+                Some(elems.iter().map(|&t| self.sema_type_from_vir(t)).collect()),
+                None,
+                None,
+            )),
+            VirType::FixedArray { elem, len } => Some((
+                None,
+                Some((self.sema_type_from_vir(*elem), *len as usize)),
+                None,
+            )),
+            VirType::Array { elem } => Some((None, None, Some(self.sema_type_from_vir(*elem)))),
+            _ => None,
+        }
+    }
+
     /// Compile an index expression
     pub(super) fn index(
         &mut self,
@@ -325,7 +350,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         object: &VirExpr,
         index: &VirExpr,
-        _ty: TypeId,
+        ty: TypeId,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
         let obj = self.compile_vir_expr(object)?;
@@ -338,7 +363,18 @@ impl Cg<'_, '_, '_> {
             return self.vir_index_fixed_array(obj, index, element_id, size);
         }
         if let Some(element_id) = arena.unwrap_array(obj.type_id) {
-            return self.vir_index_dynamic_array(obj, index, element_id, union_storage);
+            return self.vir_index_dynamic_array(obj, index, element_id, ty, union_storage);
+        }
+        if let Some((tuple_elems, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
+            if let Some(elem_type_ids) = tuple_elems {
+                return self.vir_index_tuple(obj, index, &elem_type_ids);
+            }
+            if let Some((element_id, size)) = fixed_array {
+                return self.vir_index_fixed_array(obj, index, element_id, size);
+            }
+            if let Some(element_id) = dyn_array {
+                return self.vir_index_dynamic_array(obj, index, element_id, ty, union_storage);
+            }
         }
 
         // Codegen should not reach this — sema validates indexable types.
@@ -370,6 +406,20 @@ impl Cg<'_, '_, '_> {
         } else if is_dynamic_array {
             let idx = self.compile_vir_expr(index)?;
             self.index_assign_dynamic_array_inner(arr, idx, val)
+        } else if let Some((_, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
+            if let Some((elem_type_id, size)) = fixed_array {
+                self.vir_index_assign_fixed_array(arr.value, index, val, elem_type_id, size)
+            } else if dyn_array.is_some() {
+                let idx = self.compile_vir_expr(index)?;
+                self.index_assign_dynamic_array_inner(arr, idx, val)
+            } else {
+                let type_name = self.arena().display_basic(arr.type_id);
+                Err(CodegenError::type_mismatch(
+                    "index assignment",
+                    "array",
+                    type_name,
+                ))
+            }
         } else {
             let type_name = self.arena().display_basic(arr.type_id);
             Err(CodegenError::type_mismatch(
@@ -472,11 +522,19 @@ impl Cg<'_, '_, '_> {
         obj: CompiledValue,
         index: &VirExpr,
         element_id: TypeId,
+        expected_element_id: TypeId,
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
         let idx = self.compile_vir_expr(index)?;
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[obj.value, idx.value])?;
-        let resolved_element_id = self.try_substitute_type(element_id);
+        let expected_element_id = self.try_substitute_type(expected_element_id);
+        let mut resolved_element_id = self.try_substitute_type(element_id);
+        let resolved_is_abstract = resolved_element_id == TypeId::UNKNOWN
+            || self.arena().contains_type_param(resolved_element_id)
+            || self.arena().is_self_type(resolved_element_id);
+        if resolved_is_abstract && expected_element_id != TypeId::UNKNOWN {
+            resolved_element_id = expected_element_id;
+        }
 
         if let Some(storage) = union_storage {
             let cv = match storage {
@@ -584,18 +642,7 @@ impl Cg<'_, '_, '_> {
         let (tag_val, value_bits, val) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(val, elem_id)?
         } else {
-            let val = if self.arena().is_struct(val.type_id) {
-                self.copy_struct_to_heap(val)?
-            } else {
-                val
-            };
-            let tag = {
-                let arena = self.arena();
-                array_element_tag_id(val.type_id, arena)
-            };
-            let tag_val = self.iconst_cached(types::I64, tag);
-            let value_bits = convert_to_i64_for_storage(self.builder, &val);
-            (tag_val, value_bits, val)
+            self.prepare_dynamic_array_store_untyped(val)?
         };
 
         self.rc_inc_borrowed_for_container(&val)?;

@@ -938,6 +938,11 @@ impl Analyzer {
                 .as_ref()
                 .map(|info| info.type_params.clone())
                 .unwrap_or_default();
+            let class_type_param_names: Vec<NameId> = if class_type_params.is_empty() {
+                self.entity_registry().type_params(type_def_id)
+            } else {
+                class_type_params.iter().map(|tp| tp.name_id).collect()
+            };
 
             // Combine class and method type params for inference
             let all_type_params = merge_type_params(&class_type_params, &method_type_params);
@@ -949,10 +954,10 @@ impl Analyzer {
                 let inferred: FxHashMap<NameId, ArenaTypeId> = if !method_call.type_args.is_empty()
                 {
                     // Resolve explicit type args and map to class type params
-                    if method_call.type_args.len() != class_type_params.len() {
+                    if method_call.type_args.len() != class_type_param_names.len() {
                         self.add_error(
                             SemanticError::WrongArgumentCount {
-                                expected: class_type_params.len(),
+                                expected: class_type_param_names.len(),
                                 found: method_call.type_args.len(),
                                 span: method_call.method_span.into(),
                             },
@@ -960,11 +965,12 @@ impl Analyzer {
                         );
                     }
                     let mut explicit_map = FxHashMap::default();
-                    for (param, type_expr) in
-                        class_type_params.iter().zip(method_call.type_args.iter())
+                    for (&param_name_id, type_expr) in class_type_param_names
+                        .iter()
+                        .zip(method_call.type_args.iter())
                     {
                         let resolved_id = self.resolve_type_id(type_expr, interner);
-                        explicit_map.insert(param.name_id, resolved_id);
+                        explicit_map.insert(param_name_id, resolved_id);
                     }
                     explicit_map
                 } else {
@@ -1055,13 +1061,14 @@ impl Analyzer {
                 params_id: final_param_ids.into(),
                 return_type_id: final_return_id,
             };
+            let func_type_id = func_type.intern(&mut self.type_arena_mut());
             self.results.node_map.set_method(
                 expr.id,
                 ResolvedMethod::Static {
                     method_name_id,
                     type_def_id,
                     method_id,
-                    func_type_id: signature_id,
+                    func_type_id,
                     return_type_id: final_return_id,
                 },
             );

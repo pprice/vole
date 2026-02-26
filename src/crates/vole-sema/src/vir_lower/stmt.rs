@@ -4,7 +4,7 @@
 
 use crate::IterableKind;
 use vole_frontend::PatternKind;
-use vole_frontend::ast::{LetInit, LetStmt, Stmt};
+use vole_frontend::ast::{ExprKind, LetInit, LetStmt, Stmt};
 use vole_identity::TypeId;
 
 use vole_vir::expr::VirExpr;
@@ -51,7 +51,7 @@ pub fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
             VirStmt::LetTuple {
                 pattern,
                 value,
-                init_ty,
+                init_ty: vir_init_ty,
                 vir_init_ty,
             }
         }
@@ -107,18 +107,25 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     // Determine the binding type: use declared type if annotated, else the
     // init expression's inferred type.
     let declared_ty = ctx.node_map.get_declared_var_type(init_expr.id);
-    let expr_ty = ctx
-        .node_map
-        .get_type(init_expr.id)
-        .unwrap_or(TypeId::UNKNOWN);
+    let expr_ty = if matches!(&init_expr.kind, ExprKind::MethodCall(_) | ExprKind::Call(_)) {
+        ctx.node_map
+            .get_substituted_return_type(init_expr.id)
+            .or_else(|| ctx.node_map.get_type(init_expr.id))
+            .unwrap_or(TypeId::UNKNOWN)
+    } else {
+        ctx.node_map
+            .get_type(init_expr.id)
+            .unwrap_or(TypeId::UNKNOWN)
+    };
     let ty = declared_ty.unwrap_or(expr_ty);
 
     let vir_ty = ctx.translate(ty);
+    let sema_ty = ctx.compat_ty(ty);
     VirStmt::Let {
         name: let_stmt.name,
         value,
         mutable: let_stmt.mutable,
-        ty,
+        ty: sema_ty,
         vir_ty,
     }
 }
@@ -139,26 +146,26 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
         Some(IterableKind::Array { elem_type }) => {
             let union_storage = ctx.node_map.get_union_storage_kind(for_stmt.iterable.id);
             VirIterKind::Array {
-                elem_type,
+                elem_type: ctx.translate(elem_type),
                 vir_elem_type: ctx.translate(elem_type),
                 union_storage,
             }
         }
         Some(IterableKind::String) => VirIterKind::String,
         Some(IterableKind::IteratorInterface { elem_type }) => VirIterKind::IteratorInterface {
-            elem_type,
+            elem_type: ctx.translate(elem_type),
             vir_elem_type: ctx.translate(elem_type),
         },
         Some(IterableKind::CustomIterator { elem_type }) => VirIterKind::CustomIterator {
-            elem_type,
+            elem_type: ctx.translate(elem_type),
             vir_elem_type: ctx.translate(elem_type),
         },
         Some(IterableKind::CustomIterable { elem_type }) => VirIterKind::CustomIterable {
-            elem_type,
+            elem_type: ctx.translate(elem_type),
             vir_elem_type: ctx.translate(elem_type),
         },
         Some(IterableKind::Generic { elem_type }) => VirIterKind::Generic {
-            elem_type,
+            elem_type: ctx.translate(elem_type),
             vir_elem_type: ctx.translate(elem_type),
         },
         None if ctx.generic => {
@@ -170,14 +177,14 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
                 .get_type(for_stmt.iterable.id)
                 .unwrap_or(TypeId::UNKNOWN);
             VirIterKind::Generic {
-                elem_type: iter_ty,
+                elem_type: ctx.translate(iter_ty),
                 vir_elem_type: ctx.translate(iter_ty),
             }
         }
         None => {
             // Concrete mode fallback for error types -- treat as array of i64.
             VirIterKind::Array {
-                elem_type: TypeId::I64,
+                elem_type: ctx.translate(TypeId::I64),
                 vir_elem_type: ctx.translate(TypeId::I64),
                 union_storage: None,
             }
@@ -186,16 +193,16 @@ fn lower_for(for_stmt: &vole_frontend::ast::ForStmt, ctx: &mut LoweringCtx<'_>) 
 
     // Determine the element type for the loop variable.
     let var_type = match kind {
-        VirIterKind::Range => TypeId::I64,
+        VirIterKind::Range => ctx.translate(TypeId::I64),
         VirIterKind::Array { elem_type, .. } => elem_type,
-        VirIterKind::String => TypeId::STRING,
+        VirIterKind::String => ctx.translate(TypeId::STRING),
         VirIterKind::IteratorInterface { elem_type, .. }
         | VirIterKind::CustomIterator { elem_type, .. }
         | VirIterKind::CustomIterable { elem_type, .. }
         | VirIterKind::Generic { elem_type, .. } => elem_type,
     };
 
-    let vir_var_type = ctx.translate(var_type);
+    let vir_var_type = var_type;
     VirStmt::For(VirFor {
         var_name: for_stmt.var_name,
         var_type,
@@ -223,7 +230,7 @@ fn lower_if_stmt(if_stmt: &vole_frontend::ast::IfStmt, ctx: &mut LoweringCtx<'_>
             cond,
             then_body,
             else_body,
-            ty: TypeId::VOID,
+            ty: vir_ty,
             vir_ty,
         }),
     }
@@ -254,7 +261,7 @@ fn lower_destructure_pattern(
             let vir_ty = ctx.translate(ty);
             VirDestructurePattern::Bind {
                 name: *name,
-                ty,
+                ty: vir_ty,
                 vir_ty,
             }
         }
@@ -286,7 +293,7 @@ fn lower_destructure_tuple(
                 let vir_ty = ctx.translate(elem_ty);
                 VirDestructureElement {
                     pattern: lower_destructure_pattern(pat, elem_ty, ctx),
-                    ty: elem_ty,
+                    ty: vir_ty,
                     vir_ty,
                 }
             })
@@ -304,14 +311,14 @@ fn lower_destructure_tuple(
             .iter()
             .map(|pat| VirDestructureElement {
                 pattern: lower_destructure_pattern(pat, elem_ty, ctx),
-                ty: elem_ty,
+                ty: vir_elem_ty,
                 vir_ty: vir_elem_ty,
             })
             .collect();
         return VirDestructurePattern::Tuple {
             elements: elems,
             kind: DestructureTupleKind::FixedArray {
-                elem_ty,
+                elem_ty: vir_elem_ty,
                 vir_elem_ty,
             },
         };
@@ -323,7 +330,7 @@ fn lower_destructure_tuple(
         .iter()
         .map(|pat| VirDestructureElement {
             pattern: lower_destructure_pattern(pat, TypeId::UNKNOWN, ctx),
-            ty: TypeId::UNKNOWN,
+            ty: vir_unknown,
             vir_ty: vir_unknown,
         })
         .collect();
@@ -360,7 +367,7 @@ fn lower_destructure_record(
                 Some(VirModuleBinding {
                     export_name: f.field_name,
                     binding: f.binding,
-                    export_ty,
+                    export_ty: vir_export_ty,
                     vir_export_ty,
                 })
             })
@@ -389,7 +396,7 @@ fn lower_destructure_record(
                 field_name: f.field_name,
                 binding: f.binding,
                 slot,
-                ty: field_ty,
+                ty: vir_ty,
                 vir_ty,
             }
         })
@@ -398,7 +405,7 @@ fn lower_destructure_record(
     let vir_source_ty = ctx.translate(ty);
     VirDestructurePattern::Record {
         fields: vir_fields,
-        source_ty: ty,
+        source_ty: vir_source_ty,
         vir_source_ty,
         is_struct,
     }

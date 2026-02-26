@@ -919,6 +919,34 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.prepare_dynamic_array_store_with_hint(value, elem_type_id, None)
     }
 
+    /// Convert a value to dynamic array storage representation when element
+    /// type information is unavailable.
+    ///
+    /// TEMP(N279-C): migration bridge for fallback paths where sema array
+    /// element `TypeId` is currently unavailable.
+    pub(crate) fn prepare_dynamic_array_store_untyped(
+        &mut self,
+        value: CompiledValue,
+    ) -> CodegenResult<(Value, Value, CompiledValue)> {
+        let value = if self.arena().is_struct(value.type_id) {
+            self.copy_struct_to_heap(value)?
+        } else {
+            value
+        };
+        let tag = {
+            let arena = self.arena();
+            crate::types::array_element_tag_id(value.type_id, arena)
+        };
+        let tag_val = self.iconst_cached(types::I64, tag);
+        if let Some(wide) = crate::types::wide_ops::WideType::from_cranelift_type(value.ty) {
+            let i128_bits = wide.to_i128_bits(self.builder, value.value);
+            let boxed = self.call_runtime(RuntimeKey::Wide128Box, &[i128_bits])?;
+            return Ok((tag_val, boxed, value));
+        }
+        let payload_bits = crate::structs::convert_to_i64_for_storage(self.builder, &value);
+        Ok((tag_val, payload_bits, value))
+    }
+
     /// Convert a value to dynamic array storage representation, with an
     /// optional sema-provided union storage hint.
     pub fn prepare_dynamic_array_store_with_hint(

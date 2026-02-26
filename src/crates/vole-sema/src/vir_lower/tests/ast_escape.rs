@@ -101,7 +101,7 @@ fn lower_expr_import() {
 
     match vir_ref.as_ref() {
         VirExpr::Import { ty, .. } => {
-            assert_eq!(*ty, TypeId::UNKNOWN);
+            assert_eq!(*ty, vir_type_id(TypeId::UNKNOWN));
         }
         other => panic!("expected Import, got {other:?}"),
     }
@@ -134,7 +134,7 @@ fn lower_expr_import_with_type() {
 
     match vir_ref.as_ref() {
         VirExpr::Import { ty, .. } => {
-            assert_eq!(*ty, dummy_type_id());
+            assert_eq!(*ty, vir_type_id(dummy_type_id()));
         }
         other => panic!("expected Import with type, got {other:?}"),
     }
@@ -430,7 +430,7 @@ fn lower_expr_array_literal_becomes_vir() {
     match vir_ref.as_ref() {
         VirExpr::ArrayLiteral { elements, ty, .. } => {
             assert_eq!(elements.len(), 3);
-            assert_eq!(*ty, TypeId::UNKNOWN);
+            assert_eq!(*ty, vir_type_id(TypeId::UNKNOWN));
         }
         other => panic!("expected ArrayLiteral, got {other:?}"),
     }
@@ -467,7 +467,7 @@ fn lower_expr_repeat_literal_becomes_vir() {
             element, count, ty, ..
         } => {
             assert_eq!(*count, 10);
-            assert_eq!(*ty, TypeId::UNKNOWN);
+            assert_eq!(*ty, vir_type_id(TypeId::UNKNOWN));
             match element.as_ref() {
                 VirExpr::IntLiteral { value: 0, .. } => {}
                 other => panic!("expected IntLiteral(0) as element, got {other:?}"),
@@ -607,7 +607,7 @@ fn lower_expr_call_preserves_type() {
     // The VirExpr::Call should carry the sema-computed type
     match vir_ref.as_ref() {
         VirExpr::Call { ty, .. } => {
-            assert_eq!(*ty, TypeId::I64);
+            assert_eq!(*ty, vir_type_id(TypeId::I64));
         }
         other => panic!("expected Call with type, got {other:?}"),
     }

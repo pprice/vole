@@ -42,9 +42,36 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         })?;
         let field_slots = metadata.field_slots.clone();
 
-        let total_size = self
-            .struct_total_byte_size(result_type_id)
-            .expect("INTERNAL: valid struct must have computable size");
+        // Prefer the VIR-provided result type, but fall back to metadata type_id
+        // when VIR->sema mapping degraded to UNKNOWN during migration.
+        // TEMP(N279-C): remove fallback once struct literals are VirTypeId-native.
+        let preferred_type_id = self.try_substitute_type(result_type_id);
+        let layout_type_id = if self.struct_total_byte_size(preferred_type_id).is_some() {
+            preferred_type_id
+        } else {
+            let fallback = self
+                .query()
+                .get_type(type_def_id)
+                .base_type_id
+                .map(|ty| self.try_substitute_type(ty))
+                .unwrap_or(TypeId::UNKNOWN);
+            if self.struct_total_byte_size(fallback).is_some() {
+                fallback
+            } else {
+                return Err(CodegenError::internal_with_context(
+                    "struct literal layout type unavailable",
+                    format!(
+                        "type_def_id={type_def_id:?}, preferred={preferred_type_id:?}, fallback={fallback:?}"
+                    ),
+                ));
+            }
+        };
+        let total_size = self.struct_total_byte_size(layout_type_id).ok_or_else(|| {
+            CodegenError::internal_with_context(
+                "struct literal size lookup failed",
+                format!("type_id={layout_type_id:?}, type_def_id={type_def_id:?}"),
+            )
+        })?;
         let slot = self.alloc_stack(total_size);
 
         let field_types = self.collect_field_types(type_def_id);
@@ -55,8 +82,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let field_slot = *field_slots.get(init_name).ok_or_else(|| {
                 CodegenError::not_found("field", format!("{init_name} in struct"))
             })?;
-            let offset = self.struct_field_byte_offset(result_type_id, field_slot);
-            let mut value = self.compile_vir_expr(value_expr)?;
+            let offset = self.struct_field_byte_offset(layout_type_id, field_slot);
+            let mut value = if let Some(&field_type_id) = field_types.get(init_name) {
+                self.compile_vir_expr_with_expected_type(value_expr, field_type_id)?
+            } else {
+                self.compile_vir_expr(value_expr)?
+            };
             self.coerce_struct_field(&field_types, init_name, &mut value)?;
             self.store_struct_field(value, slot, offset)?;
             value.mark_consumed();
@@ -69,13 +100,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             fields,
             &field_slots,
             &field_types,
-            result_type_id,
+            layout_type_id,
             slot,
         )?;
 
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(CompiledValue::new(ptr, ptr_type, result_type_id))
+        Ok(CompiledValue::new(ptr, ptr_type, layout_type_id))
     }
 
     /// Compile a VIR class instance (heap-allocated reference type).
@@ -314,7 +345,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get(init_name)
             .ok_or_else(|| CodegenError::not_found("field", format!("{init_name} in class")))?;
         let field_type_id = field_types.get(init_name).copied();
-        let mut value = self.compile_vir_expr(value_expr)?;
+        let mut value = if let Some(field_type_id) = field_type_id {
+            self.compile_vir_expr_with_expected_type(value_expr, field_type_id)?
+        } else {
+            self.compile_vir_expr(value_expr)?
+        };
 
         // RC: inc borrowed field values (skip unions -- handled by coercion).
         if self.rc_scopes.has_active_scope()

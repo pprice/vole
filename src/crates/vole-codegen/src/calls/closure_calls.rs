@@ -129,11 +129,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // When named args were used, sema stored a resolved_call_args mapping that tells
         // us which arg_source[j] fills each parameter slot i (and None means use the default).
         let mut rc_temp_args = Vec::new();
+        let arg_count = arg_source.len();
+        let expected_params = params.len();
+        let mapping_is_valid = |mapping: &[Option<usize>]| {
+            if mapping.len() != expected_params {
+                return false;
+            }
+            let mut seen = vec![false; arg_count];
+            let mut mapped_count = 0usize;
+            for call_idx in mapping.iter().flatten().copied() {
+                if call_idx >= arg_count || seen[call_idx] {
+                    return false;
+                }
+                seen[call_idx] = true;
+                mapped_count += 1;
+            }
+            mapped_count == arg_count
+        };
         let named_mapping = self
             .analyzed()
             .node_map
             .get_resolved_call_args(call_expr_id)
-            .map(|s| s.to_vec());
+            .map(|s| s.to_vec())
+            .filter(|mapping| mapping_is_valid(mapping));
         if let Some(ref mapping) = named_mapping {
             self.compile_closure_named_args(
                 arg_source,

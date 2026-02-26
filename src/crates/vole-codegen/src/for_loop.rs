@@ -679,6 +679,29 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
         union_storage: Option<vole_sema::UnionStorageKind>,
     ) -> CodegenResult<Value> {
+        if self.arena().is_unknown(elem_type_id) {
+            // TEMP(N279-C): when VIR element type degrades to `unknown`, keep a
+            // pointer to the in-array TaggedValue slot so downstream unknown
+            // operations can still inspect tag+payload without re-boxing.
+            let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
+            let elem_tag =
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
+            let unknown_heap_tag = self.iconst_cached(
+                types::I64,
+                vole_runtime::value::RuntimeTypeId::UnknownHeap as i64,
+            );
+            let is_unknown_heap = self
+                .builder
+                .ins()
+                .icmp(IntCC::Equal, elem_tag, unknown_heap_tag);
+            return Ok(self
+                .builder
+                .ins()
+                .select(is_unknown_heap, elem_val, elem_ptr));
+        }
+
         let elem_cr_type = self.cranelift_type(elem_type_id);
         let elem_wide = crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena());
         if let Some(storage) = union_storage {

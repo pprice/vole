@@ -220,10 +220,25 @@ impl Cg<'_, '_, '_> {
         else {
             unreachable!("compile_vir_for_array called with non-Array kind");
         };
-        let elem_type_id = *elem_type_id;
-        let union_storage = *union_storage;
+        let mut elem_type_id = self.sema_type_from_vir(*elem_type_id);
+        let mut union_storage = *union_storage;
 
         let arr = self.compile_vir_expr(&vir_for.iterable)?;
+
+        // TEMP(N279-C): if VIR iterator metadata degraded to `unknown`, recover
+        // element typing/storage from the compiled iterable value.
+        if let Some(arr_elem_type_id) = self.arena().unwrap_array(arr.type_id) {
+            elem_type_id = arr_elem_type_id;
+            if union_storage.is_none() && self.arena().is_union(arr_elem_type_id) {
+                union_storage = Some(
+                    if self.union_array_prefers_inline_storage(arr_elem_type_id) {
+                        vole_sema::UnionStorageKind::Inline
+                    } else {
+                        vole_sema::UnionStorageKind::Heap
+                    },
+                );
+            }
+        }
 
         // Track owned iterable in a dedicated RC scope.
         self.push_rc_scope();
@@ -359,7 +374,7 @@ impl Cg<'_, '_, '_> {
                 Ok((iter_val, TypeId::STRING, true))
             }
             VirIterKind::IteratorInterface { elem_type, .. } => {
-                let hint = *elem_type;
+                let hint = self.sema_type_from_vir(*elem_type);
                 let mut iter = self.compile_vir_expr(&vir_for.iterable)?;
                 // NOTE: arena() retained — wrap_interface_iter requires sema TypeId.
                 // Remove when iterator dispatch uses VirTypeId (Phase D).
@@ -380,7 +395,7 @@ impl Cg<'_, '_, '_> {
                 Ok((iter.value, elem_type_id, false))
             }
             VirIterKind::CustomIterator { elem_type, .. } => {
-                let elem_type_id = *elem_type;
+                let elem_type_id = self.sema_type_from_vir(*elem_type);
                 let iterable = self.compile_vir_expr(&vir_for.iterable)?;
                 let iterator_type_def = self
                     .name_table()
@@ -402,7 +417,7 @@ impl Cg<'_, '_, '_> {
                 Ok((iter.value, elem_type_id, false))
             }
             VirIterKind::CustomIterable { elem_type, .. } => {
-                let elem_type_id = *elem_type;
+                let elem_type_id = self.sema_type_from_vir(*elem_type);
                 let iterable = self.compile_vir_expr(&vir_for.iterable)?;
                 let iter_value = self.call_iterable_iter_method(&iterable, elem_type_id)?;
                 let iter = self.wrap_interface_iter(iter_value, elem_type_id)?;

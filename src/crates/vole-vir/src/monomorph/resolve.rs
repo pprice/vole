@@ -355,10 +355,10 @@ mod tests {
     use crate::calls::CallTarget;
     use crate::expr::VirExpr;
     use crate::func::{VirBody, VirFunction};
-    use vole_identity::{FunctionId, Symbol, TypeId, VirTypeId};
+    use vole_identity::{FunctionId, Symbol, VirTypeId};
 
-    fn type_id(n: u32) -> TypeId {
-        TypeId::from_raw(n)
+    fn type_id(n: u32) -> VirTypeId {
+        VirTypeId::from_raw(n)
     }
 
     fn sym(n: u32) -> Symbol {

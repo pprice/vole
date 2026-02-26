@@ -53,7 +53,7 @@ impl Cg<'_, '_, '_> {
                         module_path: info.module_path,
                         native_name: info.native_name,
                     }),
-                    *func_type_id,
+                    self.sema_type_from_vir(*func_type_id),
                 ),
                 _ => {
                     return Err(CodegenError::not_found(
@@ -109,12 +109,13 @@ impl Cg<'_, '_, '_> {
                     .type_keys
                     .iter()
                     .map(|&type_id| {
+                        let sema_type_id = self.sema_type_from_vir(type_id);
                         if let Some(subs) = self.substitutions
-                            && let Some(name_id) = self.arena().unwrap_type_param(type_id)
+                            && let Some(name_id) = self.arena().unwrap_type_param(sema_type_id)
                         {
-                            subs.get(&name_id).copied().unwrap_or(type_id)
+                            subs.get(&name_id).copied().unwrap_or(sema_type_id)
                         } else {
-                            type_id
+                            sema_type_id
                         }
                     })
                     .collect();
@@ -355,12 +356,24 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let word_type = self.ptr_type();
         let word_bytes = word_type.bytes() as i32;
+        let dispatch_func_type_id = self
+            .arena()
+            .unwrap_interface(obj.type_id)
+            .and_then(|(interface_type_def_id, _)| {
+                self.registry()
+                    .interface_methods_ordered(interface_type_def_id)
+                    .get(slot)
+                    .copied()
+            })
+            .map(|method_id| self.registry().get_method(method_id).signature_id)
+            .unwrap_or(func_type_id);
 
         // Unwrap function type to get params and return type
         let (param_count, param_type_ids, return_type_id, is_void_return) = {
             let arena = self.arena();
-            let (params, ret_id, _is_closure) =
-                arena.unwrap_function(func_type_id).ok_or_else(|| {
+            let (params, ret_id, _is_closure) = arena
+                .unwrap_function(dispatch_func_type_id)
+                .ok_or_else(|| {
                     CodegenError::type_mismatch(
                         "interface dispatch",
                         "function type",

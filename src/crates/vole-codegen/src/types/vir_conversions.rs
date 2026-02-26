@@ -12,9 +12,223 @@
 
 use cranelift::prelude::*;
 
-use vole_identity::{TypeDefId, VirTypeId};
+use vole_identity::{TypeDefId, TypeId, VirTypeId};
+use vole_sema::type_arena::{TypeArena, TypeIdVec};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};
+
+/// Temporary bridge from `VirTypeId` to sema `TypeId`.
+///
+/// Reserved type IDs are aligned by raw index; dynamic VIR IDs cannot be
+/// reliably mapped without a dedicated bridge table, so they degrade to
+/// `TypeId::UNKNOWN` for legacy sema-typed code paths.
+/// TODO(N279-C): remove after all codegen consumers are `VirTypeId`-native.
+pub(crate) fn vir_to_sema_type_id_lossy(vir_ty: VirTypeId) -> TypeId {
+    if vir_ty.raw() < TypeId::FIRST_DYNAMIC {
+        TypeId::from_raw(vir_ty.raw())
+    } else {
+        TypeId::UNKNOWN
+    }
+}
+
+/// Convert a `VirTypeId` to sema `TypeId` using VIR structure and arena lookups.
+///
+/// This handles both true VIR dynamic IDs (lookup via `VirTypeTable`) and
+/// legacy sema-encoded IDs carried in compatibility fields by falling back to
+/// raw `TypeId` when the candidate exists in the arena.
+pub(crate) fn vir_to_sema_type_id(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    arena: &TypeArena,
+) -> TypeId {
+    let mapped = vir_to_sema_type_id_lossy(vir_ty);
+    if mapped != TypeId::UNKNOWN || vir_ty == VirTypeId::UNKNOWN {
+        return mapped;
+    }
+
+    let in_vir_table = (vir_ty.raw() as usize) < table.len();
+    if in_vir_table {
+        let resolved = match table.get(vir_ty) {
+            VirType::Primitive(_) => Some(vir_to_sema_type_id_lossy(vir_ty)),
+            VirType::Array { elem } => {
+                let elem_id = vir_to_sema_type_id(*elem, table, arena);
+                arena.lookup_array(elem_id)
+            }
+            VirType::FixedArray { elem, len } => {
+                let elem_id = vir_to_sema_type_id(*elem, table, arena);
+                arena.lookup_fixed_array(elem_id, *len as usize)
+            }
+            VirType::Tuple { elems } => {
+                let mapped: TypeIdVec = elems
+                    .iter()
+                    .map(|&elem| vir_to_sema_type_id(elem, table, arena))
+                    .collect();
+                arena.lookup_tuple(mapped)
+            }
+            VirType::Union { variants } => {
+                let mapped: TypeIdVec = variants
+                    .iter()
+                    .map(|&variant| vir_to_sema_type_id(variant, table, arena))
+                    .collect();
+                arena.lookup_union(mapped)
+            }
+            VirType::Optional { inner } => {
+                let value_id = vir_to_sema_type_id(*inner, table, arena);
+                arena.lookup_optional(value_id)
+            }
+            VirType::Fallible { success, errors } => {
+                let success_id = vir_to_sema_type_id(*success, table, arena);
+                let error_id = if let [single] = errors.as_slice() {
+                    vir_to_sema_type_id(*single, table, arena)
+                } else {
+                    let mapped_errors: TypeIdVec = errors
+                        .iter()
+                        .map(|&error_ty| vir_to_sema_type_id(error_ty, table, arena))
+                        .collect();
+                    arena.lookup_union(mapped_errors).unwrap_or(TypeId::UNKNOWN)
+                };
+                arena.lookup_fallible(success_id, error_id)
+            }
+            VirType::Function { params, ret } => {
+                let mapped_params: TypeIdVec = params
+                    .iter()
+                    .map(|&param| vir_to_sema_type_id(param, table, arena))
+                    .collect();
+                let ret_id = vir_to_sema_type_id(*ret, table, arena);
+                arena
+                    .lookup_function(mapped_params.clone(), ret_id, false)
+                    .or_else(|| arena.lookup_function(mapped_params, ret_id, true))
+            }
+            VirType::RuntimeIterator { elem } => {
+                let elem_id = vir_to_sema_type_id(*elem, table, arena);
+                arena.lookup_runtime_iterator(elem_id)
+            }
+            VirType::Class { def, type_args } => {
+                let mapped_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&arg| vir_to_sema_type_id(arg, table, arena))
+                    .collect();
+                arena.lookup_class(*def, mapped_args)
+            }
+            VirType::Struct { def, type_args } => {
+                let mapped_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&arg| vir_to_sema_type_id(arg, table, arena))
+                    .collect();
+                arena.lookup_struct(*def, mapped_args)
+            }
+            VirType::Interface { def, type_args } => {
+                let mapped_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&arg| vir_to_sema_type_id(arg, table, arena))
+                    .collect();
+                arena.lookup_interface(*def, mapped_args)
+            }
+            VirType::Error { def } => arena.lookup_error(*def),
+            VirType::Range => Some(TypeId::RANGE),
+            VirType::MetaType => Some(TypeId::METATYPE),
+            VirType::Never => Some(TypeId::NEVER),
+            VirType::Void => Some(TypeId::VOID),
+            VirType::Nil => Some(TypeId::NIL),
+            VirType::Done => Some(TypeId::DONE),
+            VirType::Unknown => Some(TypeId::UNKNOWN),
+            VirType::Param { name } => arena.lookup_type_param(*name).or(Some(TypeId::UNKNOWN)),
+        };
+        if let Some(id) = resolved {
+            return id;
+        }
+
+        // For true VIR type IDs present in the table, raw-ID fallback is only
+        // safe when the sema candidate has a compatible shape. This keeps
+        // legacy compat behavior for same-kind IDs while avoiding accidental
+        // reinterpretation (e.g. VIR Array ID colliding with sema Interface ID).
+        let candidate = TypeId::from_raw(vir_ty.raw());
+        let candidate_exists = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = arena.get(candidate);
+        }))
+        .is_ok();
+        if candidate_exists && raw_fallback_kind_matches(vir_ty, candidate, table, arena) {
+            return candidate;
+        }
+
+        return TypeId::UNKNOWN;
+    }
+
+    let candidate = TypeId::from_raw(vir_ty.raw());
+    let candidate_exists = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = arena.get(candidate);
+    }))
+    .is_ok();
+    if candidate_exists {
+        candidate
+    } else {
+        TypeId::UNKNOWN
+    }
+}
+
+fn raw_fallback_kind_matches(
+    vir_ty: VirTypeId,
+    candidate: TypeId,
+    table: &VirTypeTable,
+    arena: &TypeArena,
+) -> bool {
+    match table.get(vir_ty) {
+        VirType::Primitive(kind) => match kind {
+            VirPrimitiveKind::I8 => candidate == TypeId::I8,
+            VirPrimitiveKind::I16 => candidate == TypeId::I16,
+            VirPrimitiveKind::I32 => candidate == TypeId::I32,
+            VirPrimitiveKind::I64 => candidate == TypeId::I64,
+            VirPrimitiveKind::I128 => candidate == TypeId::I128,
+            VirPrimitiveKind::U8 => candidate == TypeId::U8,
+            VirPrimitiveKind::U16 => candidate == TypeId::U16,
+            VirPrimitiveKind::U32 => candidate == TypeId::U32,
+            VirPrimitiveKind::U64 => candidate == TypeId::U64,
+            VirPrimitiveKind::F32 => candidate == TypeId::F32,
+            VirPrimitiveKind::F64 => candidate == TypeId::F64,
+            VirPrimitiveKind::Bool => candidate == TypeId::BOOL,
+            VirPrimitiveKind::String => candidate == TypeId::STRING,
+            VirPrimitiveKind::Handle => candidate == TypeId::HANDLE,
+        },
+        VirType::Array { elem } => {
+            let Some(candidate_elem) = arena.unwrap_array(candidate) else {
+                return false;
+            };
+            let expected_elem = vir_to_sema_type_id(*elem, table, arena);
+            expected_elem == TypeId::UNKNOWN || candidate_elem == expected_elem
+        }
+        VirType::FixedArray { elem, len } => {
+            let Some((candidate_elem, candidate_len)) = arena.unwrap_fixed_array(candidate) else {
+                return false;
+            };
+            let expected_elem = vir_to_sema_type_id(*elem, table, arena);
+            candidate_len == *len as usize
+                && (expected_elem == TypeId::UNKNOWN || candidate_elem == expected_elem)
+        }
+        VirType::Tuple { .. } => arena.unwrap_tuple(candidate).is_some(),
+        VirType::Union { .. } => {
+            arena.unwrap_union(candidate).is_some() && !arena.is_optional(candidate)
+        }
+        VirType::Optional { .. } => arena.is_optional(candidate),
+        VirType::Fallible { .. } => arena.unwrap_fallible(candidate).is_some(),
+        VirType::Function { .. } => arena.is_function(candidate),
+        VirType::RuntimeIterator { .. } => arena.is_runtime_iterator(candidate),
+        VirType::Class { .. } => arena.is_class(candidate),
+        VirType::Struct { .. } => arena.is_struct(candidate),
+        VirType::Interface { .. } => arena.is_interface(candidate),
+        VirType::Error { .. } => arena.is_error(candidate),
+        VirType::Range => candidate == TypeId::RANGE,
+        VirType::MetaType => candidate == TypeId::METATYPE,
+        VirType::Never => candidate == TypeId::NEVER,
+        VirType::Void => candidate == TypeId::VOID,
+        VirType::Nil => candidate == TypeId::NIL,
+        VirType::Done => candidate == TypeId::DONE,
+        VirType::Unknown => candidate == TypeId::UNKNOWN,
+        VirType::Param { .. } => {
+            arena.unwrap_type_param(candidate).is_some()
+                || arena.unwrap_type_param_ref(candidate).is_some()
+        }
+    }
+}
 
 /// Map a `VirTypeId` to a Cranelift type using the VIR type table.
 ///
@@ -25,6 +239,10 @@ pub(crate) fn vir_type_to_cranelift(
     table: &VirTypeTable,
     pointer_type: Type,
 ) -> Type {
+    if vir_ty == VirTypeId::F128 {
+        return types::F128;
+    }
+
     match table.get(vir_ty) {
         VirType::Primitive(kind) => vir_primitive_to_cranelift(*kind, pointer_type),
 
@@ -292,8 +510,8 @@ pub(crate) fn vir_is_runtime_iterator(vir_ty: VirTypeId, table: &VirTypeTable) -
 }
 
 /// Check if a `VirTypeId` is the unknown (boxed TaggedValue) type.
-pub(crate) fn vir_is_unknown(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    matches!(table.get(vir_ty), VirType::Unknown)
+pub(crate) fn vir_is_unknown(vir_ty: VirTypeId, _table: &VirTypeTable) -> bool {
+    vir_ty == VirTypeId::UNKNOWN
 }
 
 /// Check if a `VirTypeId` is the void type.
@@ -394,6 +612,9 @@ pub(crate) fn vir_is_payload_union(vir_ty: VirTypeId, table: &VirTypeTable) -> b
 /// by the runtime's `TaggedValue.tag` field.
 pub(crate) fn vir_unknown_type_tag(vir_ty: VirTypeId, table: &VirTypeTable) -> u64 {
     use vole_runtime::value::RuntimeTypeId;
+    if (vir_ty.raw() as usize) >= table.len() {
+        return RuntimeTypeId::I64 as u64;
+    }
     match table.get(vir_ty) {
         VirType::Primitive(VirPrimitiveKind::String) => RuntimeTypeId::String as u64,
         VirType::Primitive(
@@ -1019,6 +1240,7 @@ mod tests {
         assert!(vir_is_unknown(VirTypeId::UNKNOWN, &table));
         assert!(!vir_is_unknown(VirTypeId::I64, &table));
         assert!(!vir_is_unknown(VirTypeId::STRING, &table));
+        assert!(!vir_is_unknown(VirTypeId::F128, &table));
     }
 
     #[test]
