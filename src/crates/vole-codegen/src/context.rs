@@ -25,7 +25,6 @@ use vole_sema::type_arena::TypeId;
 
 use super::lambda::CaptureBinding;
 use super::rc_cleanup::RcScopeStack;
-use super::rc_state::RcState;
 use super::types::{
     CodegenCtx, CompileEnv, CompiledValue, MonomorphIndexEntry, PendingMonomorph, TypeMetadataMap,
 };
@@ -141,8 +140,6 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub(crate) callable_backend_preference: CallableBackendPreference,
     /// Cache for substituted types
     pub(crate) substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
-    /// Cache for RC state computations
-    pub(crate) rc_state_cache: RefCell<FxHashMap<TypeId, RcState>>,
     /// Module export bindings registered within this function body (destructuring imports inside a function).
     /// Looked up first; falls back to `global_module_bindings` for top-level registrations.
     pub local_module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
@@ -230,7 +227,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             substitutions: None,
             callable_backend_preference: CallableBackendPreference::PreferInline,
             substitution_cache: RefCell::new(FxHashMap::default()),
-            rc_state_cache: RefCell::new(FxHashMap::default()),
             // No clone: local_module_bindings starts empty for within-function inserts.
             // Global bindings are accessed via the read-only reference below.
             local_module_bindings: FxHashMap::default(),

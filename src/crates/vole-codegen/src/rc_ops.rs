@@ -452,7 +452,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== RC state queries ==========
 
-    /// Get the RC state for a type. Results are cached.
+    /// Get the RC state for a type.
     ///
     /// Returns information about how this type handles reference counting:
     /// - `RcState::None`: Type does not need RC cleanup
@@ -461,16 +461,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - `RcState::Union`: Union with some RC variants
     ///
     pub fn rc_state(&self, type_id: TypeId) -> RcState {
-        // Check cache first
-        if let Some(state) = self.rc_state_cache.borrow().get(&type_id) {
-            return state.clone();
-        }
-        // Compute and cache
-        let state = compute_rc_state(self.arena(), self.registry(), type_id);
-        self.rc_state_cache
-            .borrow_mut()
-            .insert(type_id, state.clone());
-        state
+        compute_rc_state(self.arena(), self.registry(), type_id)
     }
 
     /// Get the field type tag for a type, determining how instance fields of this
