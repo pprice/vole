@@ -41,14 +41,14 @@ impl Cg<'_, '_, '_> {
             .iterator_type_def
             .ok_or_else(|| CodegenError::not_found("interface", "Iterator"))?;
 
-        let iter_def = self.query().get_type(iter_type_id);
+        let iter_def = self.analyzed().query().get_type(iter_type_id);
 
         // Find the method by name
         let method_id = iter_def
             .methods
             .iter()
             .find(|&&mid| {
-                let m = self.query().get_method(mid);
+                let m = self.analyzed().query().get_method(mid);
                 self.analyzed()
                     .name_table()
                     .last_segment_str(m.name_id)
@@ -58,6 +58,7 @@ impl Cg<'_, '_, '_> {
 
         // Get the external binding for this method
         let external_info = *self
+            .analyzed()
             .query()
             .method_external_binding(*method_id)
             .ok_or_else(|| CodegenError::not_found("external binding for Iterator", method_name))?;

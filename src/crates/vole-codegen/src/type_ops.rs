@@ -188,7 +188,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// This uses the same resolution path as sema: primitives, current module,
     /// imports, builtin module, and interface/class fallback.
     pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let query = self.query();
+        let query = self.analyzed().query();
         let module_id = self
             .current_module_id()
             .unwrap_or(self.env.analyzed.module_id);

@@ -976,9 +976,10 @@ impl Cg<'_, '_, '_> {
             self.resolve_raise_error_type_def(error_type_id, raise_stmt.error_name)?;
 
         let error_fields: Vec<_> = self
+            .analyzed()
             .query()
             .fields_on_type(error_type_def_id)
-            .map(|field_id| self.query().get_field(field_id).clone())
+            .map(|field_id| self.analyzed().query().get_field(field_id).clone())
             .collect();
 
         // Create the tag value
@@ -1018,7 +1019,8 @@ impl Cg<'_, '_, '_> {
         let name_table = self.name_table();
         let result = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
             // Single error type
-            let name = name_table.last_segment_str(self.query().type_name_id(type_def_id));
+            let name =
+                name_table.last_segment_str(self.analyzed().query().type_name_id(type_def_id));
             if name.as_deref() == Some(raise_error_name) {
                 Some(type_def_id)
             } else {
@@ -1028,7 +1030,8 @@ impl Cg<'_, '_, '_> {
             // Union of error types
             variants.iter().find_map(|&v| {
                 if let Some(type_def_id) = arena.unwrap_error(v) {
-                    let name = name_table.last_segment_str(self.query().type_name_id(type_def_id));
+                    let name = name_table
+                        .last_segment_str(self.analyzed().query().type_name_id(type_def_id));
                     if name.as_deref() == Some(raise_error_name) {
                         return Some(type_def_id);
                     }
@@ -1519,9 +1522,10 @@ impl Cg<'_, '_, '_> {
         let error_type_def_id = self.resolve_raise_error_type_def(error_type_id, error_name)?;
 
         let error_fields: Vec<_> = self
+            .analyzed()
             .query()
             .fields_on_type(error_type_def_id)
-            .map(|field_id| self.query().get_field(field_id).clone())
+            .map(|field_id| self.analyzed().query().get_field(field_id).clone())
             .collect();
 
         let tag_val = self.iconst_cached(types::I64, error_tag);
@@ -1973,8 +1977,11 @@ impl Cg<'_, '_, '_> {
     fn sentinel_type_id_for_symbol(&self, sym: Symbol) -> Option<TypeId> {
         let name = self.interner().resolve(sym);
         let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
-        let type_def_id = self.query().resolve_type_def_by_str(module_id, name)?;
-        self.query().sentinel_base_type(type_def_id)
+        let type_def_id = self
+            .analyzed()
+            .query()
+            .resolve_type_def_by_str(module_id, name)?;
+        self.analyzed().query().sentinel_base_type(type_def_id)
     }
 
     /// Register RC tracking for a newly compiled VIR let binding.

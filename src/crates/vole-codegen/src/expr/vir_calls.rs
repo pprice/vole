@@ -72,7 +72,7 @@ impl Cg<'_, '_, '_> {
         return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Resolve FunctionId -> NameId -> FunctionKey -> FuncId
-        let func_def = self.query().get_function(function_id);
+        let func_def = self.analyzed().query().get_function(function_id);
         let full_name_id = func_def.full_name_id;
         let func_key = self.funcs().intern_name_id(full_name_id);
         let func_id = self

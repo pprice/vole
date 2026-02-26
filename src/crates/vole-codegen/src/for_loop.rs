@@ -637,10 +637,11 @@ impl Cg<'_, '_, '_> {
                 })?;
             tdef
         };
-        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let type_name_id = self.analyzed().query().get_type(type_def_id).name_id;
 
         // Look up the "iter" method's NameId
         let iter_name_id = self
+            .analyzed()
             .query()
             .try_method_name_id_by_str("iter")
             .ok_or_else(|| CodegenError::not_found("method name_id", "iter"))?;
@@ -656,6 +657,7 @@ impl Cg<'_, '_, '_> {
 
         // Get the return type from the method binding (Iterator<T> interface)
         let return_type_id = self
+            .analyzed()
             .query()
             .method_binding(type_def_id, iter_name_id)
             .map(|b| b.func_type.return_type_id)

@@ -55,10 +55,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // They may not be in type_metadata if they come from prelude modules,
         // so handle them early before the metadata lookup.
         {
-            if self.query().is_sentinel_type(type_def_id) {
+            if self.analyzed().query().is_sentinel_type(type_def_id) {
                 let sentinel_type_id = self.get_expr_type(&expr.id).unwrap_or_else(|| {
                     // Fall back to the base TypeId from entity registry, or type_metadata
-                    self.query()
+                    self.analyzed()
+                        .query()
                         .sentinel_base_type(type_def_id)
                         .or_else(|| self.type_metadata().get(&type_def_id).map(|m| m.vole_type))
                         .unwrap_or(TypeId::NIL)
@@ -74,7 +75,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .ok_or_else(|| CodegenError::not_found("type in type_metadata", &path_str))?;
 
         // Check if this is a struct type (stack-allocated value type)
-        let is_struct_type = self.query().is_struct_type(type_def_id);
+        let is_struct_type = self.analyzed().query().is_struct_type(type_def_id);
 
         if is_struct_type {
             let result_type_id = self.get_expr_type(&expr.id).unwrap_or(metadata.vole_type);
@@ -111,7 +112,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // from a different instantiation (since all share the same AST).
             // We compute the correct concrete type args by looking up each class
             // type parameter in the current function's substitution map.
-            let type_def = self.query().get_type(type_def_id);
+            let type_def = self.analyzed().query().get_type(type_def_id);
             if let Some(generic_info) = &type_def.generic_info {
                 if !generic_info.type_params.is_empty() {
                     let concrete_args: Vec<_> = generic_info
@@ -155,10 +156,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let set_func_ref = self.runtime_func_ref(RuntimeKey::InstanceSetField)?;
 
         let field_types: HashMap<String, TypeId> = self
+            .analyzed()
             .query()
             .fields_on_type(type_def_id)
             .map(|field_id| {
-                let field = self.query().get_field(field_id);
+                let field = self.analyzed().query().get_field(field_id);
                 (
                     self.name_table()
                         .last_segment_str(field.name_id)
@@ -276,7 +278,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .or_else(|| {
                 if sl.path.len() == 1 {
                     let type_name = self.interner().resolve(sl.path[0]);
-                    let query = self.query();
+                    let query = self.analyzed().query();
                     let module_id = self
                         .current_module_id()
                         .unwrap_or(self.env.analyzed.module_id);
@@ -359,7 +361,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let mut defaults = Vec::new();
 
         // Get the type definition to find out which module it's in.
-        let type_def = self.query().get_type(type_def_id);
+        let type_def = self.analyzed().query().get_type(type_def_id);
         let type_module = type_def.module;
 
         // analyzed() returns &'ctx AnalyzedProgram, giving 'ctx-lifetime references
@@ -644,10 +646,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Compile and store each explicitly provided field
         let field_types: HashMap<String, TypeId> = self
+            .analyzed()
             .query()
             .fields_on_type(type_def_id)
             .map(|field_id| {
-                let field = self.query().get_field(field_id);
+                let field = self.analyzed().query().get_field(field_id);
                 (
                     self.name_table()
                         .last_segment_str(field.name_id)

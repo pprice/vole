@@ -219,13 +219,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Try prelude Vole functions (e.g., assert from builtins.vole)
         let prelude_paths: Vec<String> = self
+            .analyzed()
             .query()
             .module_paths()
             .filter(|p| p.starts_with("std:prelude/"))
             .map(String::from)
             .collect();
         for module_path in &prelude_paths {
-            let module_id = self.query().module_id_or_main(module_path);
+            let module_id = self.analyzed().query().module_id_or_main(module_path);
             let name_id = crate::types::module_name_id(self.analyzed(), module_id, callee_name);
             if let Some(name_id) = name_id {
                 let func_key = self.funcs().intern_name_id(name_id);
@@ -312,7 +313,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
             name_table
                 .name_id(module_id, &[callee_sym], self.interner())
-                .and_then(|name_id| self.query().global(name_id))
+                .and_then(|name_id| self.analyzed().query().global(name_id))
                 .map(|global_def| global_def.type_id)
         };
 
@@ -320,9 +321,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // If declared as functional interface, call via vtable dispatch
             let iface_info = self.interface_type_def_id(declared_type_id);
             if let Some(type_def_id) = iface_info
-                && let Some(method_id) = self.query().is_functional_interface(type_def_id)
+                && let Some(method_id) =
+                    self.analyzed().query().is_functional_interface(type_def_id)
             {
-                let method = self.query().get_method(method_id);
+                let method = self.analyzed().query().get_method(method_id);
                 let func_type_id = method.signature_id;
                 let method_name_id = method.name_id;
                 // Box the lambda value to create the interface representation
@@ -379,7 +381,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         // Look up the function's NameId for param types and default args.
-        // Use self.interner() (not self.query()) because callee_sym comes from the
+        // Use self.interner() (not self.analyzed().query()) because callee_sym comes from the
         // current AST, which may be a module with its own interner. ProgramQuery
         // always uses the main program's interner, causing index-out-of-bounds when
         // a module Symbol index exceeds the main interner's size.
@@ -484,8 +486,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Get parameter TypeIds from the function definition for union coercion
         let param_type_ids: Vec<TypeId> = param_type_ids_override.unwrap_or_else(|| {
             name_id
-                .and_then(|id| self.query().function_id_by_name_id(id))
-                .map(|fid| self.query().function_param_type_ids(fid))
+                .and_then(|id| self.analyzed().query().function_id_by_name_id(id))
+                .map(|fid| self.analyzed().query().function_param_type_ids(fid))
                 .unwrap_or_default()
         });
 
@@ -598,7 +600,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         rc_temp_args: &mut Vec<CompiledValue>,
     ) -> CodegenResult<()> {
         let expected_user_params = expected_types.len() - user_param_offset;
-        let func_id = name_id.and_then(|id| self.query().function_id_by_name_id(id));
+        let func_id = name_id.and_then(|id| self.analyzed().query().function_id_by_name_id(id));
         for slot in 0..expected_user_params {
             let compiled = if let Some(&Some(call_arg_idx)) = mapping.get(slot) {
                 // This slot maps to arg_source[call_arg_idx]
@@ -623,6 +625,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     {
                         self.compile_vir_expr(&default_vir)?
                     } else if self
+                        .analyzed()
                         .query()
                         .function_default_expr_by_id(func_id, slot)
                         .is_some()
@@ -732,14 +735,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         start_index: usize,
         param_type_ids_override: &[TypeId],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        let func_id = self.query().function_id_by_name_id(name_id);
+        let func_id = self.analyzed().query().function_id_by_name_id(name_id);
         let Some(func_id) = func_id else {
             return Ok((Vec::new(), Vec::new()));
         };
 
         // Determine which type IDs to use for the omitted parameters.
         let param_type_ids: Vec<TypeId> = if param_type_ids_override.is_empty() {
-            self.query().function_param_type_ids(func_id)
+            self.analyzed().query().function_param_type_ids(func_id)
         } else {
             param_type_ids_override.to_vec()
         };
@@ -777,7 +780,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let name_id = self
                 .name_table()
                 .name_id(module_id, &[callee_sym], self.interner());
-            name_id.and_then(|id| self.query().function_id_by_name_id(id))
+            name_id.and_then(|id| self.analyzed().query().function_id_by_name_id(id))
         };
 
         let Some(func_id) = func_id else {
@@ -794,6 +797,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         {
             let Some(default_vir) = self.function_default_vir_init(func_id, idx).cloned() else {
                 if self
+                    .analyzed()
                     .query()
                     .function_default_expr_by_id(func_id, idx)
                     .is_some()

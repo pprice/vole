@@ -403,7 +403,7 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // Look up to_string method via query
-        let method_id = self.query().method_name_id_by_str("to_string");
+        let method_id = self.analyzed().query().method_name_id_by_str("to_string");
 
         let method_impl = self
             .analyzed()

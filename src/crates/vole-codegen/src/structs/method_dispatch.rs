@@ -121,7 +121,7 @@ impl Cg<'_, '_, '_> {
                     .collect();
                 MonomorphKey::new(key.func_name, effective_type_keys)
             })
-            .or_else(|| expr_id.and_then(|id| self.query().monomorph_for(id).cloned()));
+            .or_else(|| expr_id.and_then(|id| self.analyzed().query().monomorph_for(id).cloned()));
 
         if let Some(monomorph_key) = monomorph_key.as_ref() {
             let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {

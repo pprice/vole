@@ -80,7 +80,7 @@ pub(super) fn build_field_meta_array(
 
 /// Collect field info tuples for all fields, including annotations.
 fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
-    let query = cg.query();
+    let query = cg.analyzed().query();
     let arena = cg.arena();
     query
         .fields_on_type(type_def_id)
@@ -332,7 +332,7 @@ fn collect_annotation_field_type_tags(
     cg: &Cg,
     ann_type_def_id: TypeDefId,
 ) -> Vec<vole_runtime::type_registry::FieldTypeTag> {
-    let query = cg.query();
+    let query = cg.analyzed().query();
     query
         .fields_on_type(ann_type_def_id)
         .map(|field_id| {

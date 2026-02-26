@@ -328,14 +328,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.codegen_ctx.ptr_type()
     }
 
-    /// Get the query interface for the analyzed program.
-    /// Returns ProgramQuery<'ctx> so that references obtained from it
-    /// have the full `'ctx` lifetime, enabling them to outlive `self` borrows.
-    #[inline]
-    pub fn query(&self) -> vole_sema::ProgramQuery<'ctx> {
-        self.env.analyzed.query()
-    }
-
     /// Get the type arena.
     /// Returns `&'ctx TypeArena` so that references obtained from it
     /// have the full `'ctx` lifetime, enabling them to outlive `self` borrows.
@@ -618,7 +610,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Eagerly register: allocate a new runtime type_id with field type tags
         let new_type_id = vole_runtime::type_registry::alloc_type_id();
         let field_type_tags: Vec<_> = {
-            let query = self.query();
+            let query = self.analyzed().query();
             query
                 .fields_on_type(type_def_id)
                 .map(|field_id| {
@@ -1430,7 +1422,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ),
         };
         let return_type_id = func_type.return_type_id;
-        let mangled_name = self.query().display_name(mangled_name_id);
+        let mangled_name = self.analyzed().query().display_name(mangled_name_id);
 
         let sig = build_monomorph_signature(
             func_type,

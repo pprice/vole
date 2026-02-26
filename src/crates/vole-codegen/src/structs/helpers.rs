@@ -17,7 +17,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     cg: &crate::context::Cg,
 ) -> CodegenResult<(usize, TypeId)> {
     let arena = cg.arena();
-    let query = cg.query();
+    let query = cg.analyzed().query();
 
     // Apply function-level substitutions first (for monomorphized generics)
     // This handles the case where type_id is a TypeParam that needs to be

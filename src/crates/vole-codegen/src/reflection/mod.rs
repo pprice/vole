@@ -127,6 +127,7 @@ fn resolve_type_param_meta(
 
     let concrete_type_id = substitutions.get(&name_id).copied().ok_or_else(|| {
         let param_name = cg
+            .analyzed()
             .query()
             .last_segment(name_id)
             .unwrap_or_else(|| "?".to_string());
@@ -272,8 +273,9 @@ fn build_type_meta_instance(cg: &mut Cg, type_def_id: TypeDefId) -> CodegenResul
     let info = resolve_reflection_types(cg)?;
 
     let type_name = {
-        let type_def = cg.query().get_type(type_def_id);
-        cg.query()
+        let type_def = cg.analyzed().query().get_type(type_def_id);
+        cg.analyzed()
+            .query()
             .last_segment(type_def.name_id)
             .unwrap_or_else(|| "?".to_string())
     };

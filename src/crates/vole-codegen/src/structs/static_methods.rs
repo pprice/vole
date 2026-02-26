@@ -81,7 +81,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Get the method's name_id for lookup
-        let method_def = self.query().get_method(method_id);
+        let method_def = self.analyzed().query().get_method(method_id);
         let method_name_id = method_def.name_id;
 
         // Check for monomorphized static method (generic classes)
@@ -102,7 +102,7 @@ impl Cg<'_, '_, '_> {
 
         // Look up the static method info via unified method_func_keys map
         // Uses type's NameId for stable lookup across different analyzer instances
-        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let type_name_id = self.analyzed().query().get_type(type_def_id).name_id;
         let func_key = *self.method_func_keys()
             .get(&(type_name_id, method_name_id))
             .ok_or_else(|| {
@@ -123,7 +123,7 @@ impl Cg<'_, '_, '_> {
                     .instances()
                     .filter(|(k, _)| k.class_name == type_name_id && k.method_name == method_name_id)
                     .map(|(k, inst)| {
-                        let mangled = self.query().display_name(inst.mangled_name);
+                        let mangled = self.analyzed().query().display_name(inst.mangled_name);
                         format!("{:?} -> {}", k, mangled)
                     })
                     .collect();
@@ -283,7 +283,14 @@ impl Cg<'_, '_, '_> {
                         .collect(),
                 )
             })
-            .or_else(|| expr_id.and_then(|id| self.query().static_method_generic_at(id).cloned()));
+            .or_else(|| {
+                expr_id.and_then(|id| {
+                    self.analyzed()
+                        .query()
+                        .static_method_generic_at(id)
+                        .cloned()
+                })
+            });
 
         // Try direct monomorph lookup with key rewriting
         if let Some(mono_key) = mono_key.as_ref() {
@@ -336,7 +343,7 @@ impl Cg<'_, '_, '_> {
         // This handles class-independent static helpers where sema records an abstract key
         // (or no concrete key in module-local NodeId space), while still preferring a
         // concrete instance that matches the current substitution map when available.
-        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let type_name_id = self.analyzed().query().get_type(type_def_id).name_id;
         let subs = self.substitutions;
         let arena = self.arena();
         self.registry()
@@ -454,7 +461,7 @@ impl Cg<'_, '_, '_> {
         method_sym: Symbol,
     ) -> CodegenResult<Option<CompiledValue>> {
         // Get type name_id and check if it's f32 or f64
-        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let type_name_id = self.analyzed().query().get_type(type_def_id).name_id;
         let name_table = self.name_table();
         let is_f32 = type_name_id == name_table.primitives.f32;
         let is_f64 = type_name_id == name_table.primitives.f64;
@@ -522,7 +529,7 @@ impl Cg<'_, '_, '_> {
         return_type_hint: Option<TypeId>,
     ) -> CodegenResult<Option<CompiledValue>> {
         // Check if this is Array.filled
-        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let type_name_id = self.analyzed().query().get_type(type_def_id).name_id;
         let type_name = self.name_table().last_segment_str(type_name_id);
         if type_name.as_deref() != Some("Array") {
             return Ok(None);
