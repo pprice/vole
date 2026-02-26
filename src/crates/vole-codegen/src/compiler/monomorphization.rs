@@ -1492,14 +1492,38 @@ impl Compiler<'_> {
                         self_binding,
                         Some(return_type_id),
                     );
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        cg_module_id,
-                        Some(&data.substitutions),
-                    )?;
+                    // Prefer VIR when an expanded monomorph body is present in
+                    // the assembled VirProgram (matched by mangled display
+                    // name). Keep AST fallback for entries not yet VIR-lowered.
+                    let vir_body = self
+                        .analyzed
+                        .vir_program
+                        .functions
+                        .iter()
+                        .find(|vf| vf.name == data.mangled_name_str)
+                        .map(|vf| vf.body.clone());
+                    if let Some(vir_body) = vir_body {
+                        compile_function_inner_with_vir(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            &vir_body,
+                            cg_module_id,
+                            Some(&data.substitutions),
+                        )?;
+                    } else {
+                        // TEMP(vol-619h): expanded abstract class method
+                        // monomorphs without VIR bodies still use AST codegen.
+                        compile_function_inner_with_params(
+                            builder,
+                            &mut codegen_ctx,
+                            &env,
+                            config,
+                            cg_module_id,
+                            Some(&data.substitutions),
+                        )?;
+                    }
                 }
 
                 self.finalize_function(func_id)?;
