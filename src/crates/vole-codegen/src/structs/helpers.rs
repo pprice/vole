@@ -28,6 +28,7 @@ impl StructEntityLookup for crate::analyzed::AnalyzedProgram {
     }
 }
 
+#[cfg(test)]
 impl StructEntityLookup for vole_sema::entity_registry::EntityRegistry {
     fn generic_field_types(&self, type_def_id: TypeDefId) -> Option<Vec<TypeId>> {
         self.get_type(type_def_id)

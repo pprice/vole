@@ -38,6 +38,7 @@ impl TypeEntityLookup for AnalyzedProgram {
     }
 }
 
+#[cfg(test)]
 impl TypeEntityLookup for vole_sema::entity_registry::EntityRegistry {
     fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
         self.fields_on_type(type_def_id).collect()
