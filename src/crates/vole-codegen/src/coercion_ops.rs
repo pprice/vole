@@ -470,15 +470,52 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         start_index: usize,
         expected_type_ids: &[TypeId],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        // Collect &'ctx Expr references before taking &mut self.
-        // query() returns ProgramQuery<'ctx>, so default_refs lives as 'ctx.
-        let default_refs: Vec<Option<&'ctx Expr>> = {
-            let query = self.query();
-            (start_index..start_index + expected_type_ids.len())
-                .map(|idx| query.function_default_expr_by_id(func_id, idx))
-                .collect()
-        };
-        self.compile_defaults_from_refs(&default_refs, expected_type_ids, false)
+        let mut args = Vec::new();
+        let mut rc_owned = Vec::new();
+
+        for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
+            let slot = start_index + offset;
+            let Some(default_vir) = self.function_default_vir_init(func_id, slot).cloned() else {
+                if self
+                    .query()
+                    .function_default_expr_by_id(func_id, slot)
+                    .is_some()
+                {
+                    return Err(CodegenError::internal_with_context(
+                        "missing VIR function default expression",
+                        format!("{func_id:?} param {slot}"),
+                    ));
+                }
+                continue;
+            };
+
+            let compiled = self.compile_vir_expr(&default_vir)?;
+            if compiled.is_owned() {
+                rc_owned.push(compiled);
+            }
+
+            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            let expected_ty = self.cranelift_type(param_type_id);
+            let compiled = if compiled.ty.is_int()
+                && expected_ty.is_int()
+                && expected_ty.bits() != compiled.ty.bits()
+            {
+                let new_value = if expected_ty.bits() < compiled.ty.bits() {
+                    self.builder.ins().ireduce(expected_ty, compiled.value)
+                } else if self.arena().is_unsigned(param_type_id) {
+                    uextend_const(self.builder, expected_ty, compiled.value)
+                } else {
+                    sextend_const(self.builder, expected_ty, compiled.value)
+                };
+                CompiledValue::new(new_value, expected_ty, param_type_id)
+            } else {
+                compiled
+            };
+
+            args.push(compiled.value);
+        }
+
+        Ok((args, rc_owned))
     }
 
     /// Compile default expressions for omitted parameters using typed method ID.

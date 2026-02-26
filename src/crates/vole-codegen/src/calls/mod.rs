@@ -616,11 +616,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 }
             } else {
                 // mapping[slot] = None: compile the default expression for this slot
-                if let Some(func_id) = func_id
-                    && let Some(default_expr) =
-                        self.query().function_default_expr_by_id(func_id, slot)
-                {
-                    self.expr(default_expr)?
+                if let Some(func_id) = func_id {
+                    if let Some(default_vir) =
+                        self.function_default_vir_init(func_id, slot).cloned()
+                    {
+                        self.compile_vir_expr(&default_vir)?
+                    } else if self
+                        .query()
+                        .function_default_expr_by_id(func_id, slot)
+                        .is_some()
+                    {
+                        return Err(CodegenError::internal_with_context(
+                            "missing VIR function default expression",
+                            format!("{func_id:?} param {slot}"),
+                        ));
+                    } else {
+                        // No default -- this shouldn't happen if sema validated correctly
+                        continue;
+                    }
                 } else {
                     // No default -- this shouldn't happen if sema validated correctly
                     continue;
@@ -770,22 +783,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return Ok(args);
         };
 
-        // Collect &'ctx Expr references for the missing parameters before taking &mut self.
         let start_index = args.len();
-        let default_refs: Vec<Option<&'ctx vole_frontend::Expr>> = (start_index
-            ..expected_param_count)
-            .map(|idx| self.query().function_default_expr_by_id(func_id, idx))
-            .collect();
-
         // Compile each default and apply Cranelift type coercion to match the signature.
-        for (default_ref, &expected_ty) in default_refs
+        for (idx, &expected_ty) in expected_types
             .iter()
-            .zip(expected_types[start_index..].iter())
+            .enumerate()
+            .take(expected_param_count)
+            .skip(start_index)
         {
-            let Some(default_expr) = default_ref else {
+            let Some(default_vir) = self.function_default_vir_init(func_id, idx).cloned() else {
+                if self
+                    .query()
+                    .function_default_expr_by_id(func_id, idx)
+                    .is_some()
+                {
+                    return Err(CodegenError::internal_with_context(
+                        "missing VIR function default expression",
+                        format!("{func_id:?} param {idx}"),
+                    ));
+                }
                 continue;
             };
-            let compiled = self.expr(default_expr)?;
+            let compiled = self.compile_vir_expr(&default_vir)?;
             let arg_value = self.coerce_arg_to_sig_type(compiled, Some(expected_ty));
             args.push(arg_value);
         }

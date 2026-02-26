@@ -19,7 +19,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
-use vole_identity::{FieldId, ModuleId, NameId};
+use vole_identity::{FieldId, FunctionId, ModuleId, NameId};
 use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::TypeId;
 
@@ -787,6 +787,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .vir_program
             .global_inits
             .get(&name)
+            .map(|r| r.as_ref())
+    }
+
+    /// Get VIR-lowered default parameter expression by semantic `FunctionId`.
+    pub fn function_default_vir_init(
+        &self,
+        func_id: FunctionId,
+        slot: usize,
+    ) -> Option<&vole_vir::VirExpr> {
+        self.analyzed()
+            .vir_program
+            .get_function_default(func_id, slot)
             .map(|r| r.as_ref())
     }
 
