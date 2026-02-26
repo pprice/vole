@@ -1661,7 +1661,8 @@ fn collect_interface_methods_ctx<C: VtableCtx>(
 /// Convert an i64 word back to its properly typed Cranelift value.
 ///
 /// Consolidates the repeated `word_to_value_type_id(builder, word, ty, ctx.ptr_type(),
-/// ctx.analyzed().entity_registry(), ctx.analyzed().type_arena())` call pattern used throughout vtable wrapper compilation.
+/// ctx.analyzed(), ctx.analyzed().type_arena())` call pattern used throughout
+/// vtable wrapper compilation.
 #[inline]
 fn word_to_value_ctx<C: VtableCtx>(
     builder: &mut FunctionBuilder,
@@ -1674,7 +1675,7 @@ fn word_to_value_ctx<C: VtableCtx>(
         word,
         type_id,
         ctx.ptr_type(),
-        ctx.analyzed().entity_registry(),
+        ctx.analyzed(),
         ctx.analyzed().type_arena(),
     )
 }
@@ -1682,7 +1683,7 @@ fn word_to_value_ctx<C: VtableCtx>(
 /// Convert a typed value to an i64 word for vtable dispatch.
 ///
 /// Consolidates `value_to_word(builder, value, ctx.ptr_type(), heap_alloc_ref,
-/// ctx.analyzed().type_arena(), ctx.analyzed().entity_registry())` call sites.
+/// ctx.analyzed().type_arena(), ctx.analyzed())` call sites.
 #[inline]
 fn value_to_word_ctx<C: VtableCtx>(
     builder: &mut FunctionBuilder,
@@ -1696,7 +1697,7 @@ fn value_to_word_ctx<C: VtableCtx>(
         ctx.ptr_type(),
         heap_alloc_ref,
         ctx.analyzed().type_arena(),
-        ctx.analyzed().entity_registry(),
+        ctx.analyzed(),
     )
 }
 
@@ -1710,13 +1711,14 @@ fn impl_type_name_id_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> Option<NameId> {
 
 /// Get the byte size of a TypeId using vtable context internals.
 ///
-/// Consolidates `type_id_size(ty, ctx.ptr_type(), ctx.analyzed().entity_registry(), ctx.analyzed().type_arena())` call sites.
+/// Consolidates `type_id_size(ty, ctx.ptr_type(), ctx.analyzed(), ctx.analyzed().type_arena())`
+/// call sites.
 #[inline]
 fn type_size_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> u32 {
     type_id_size(
         ty,
         ctx.ptr_type(),
-        ctx.analyzed().entity_registry(),
+        ctx.analyzed(),
         ctx.analyzed().type_arena(),
     )
 }

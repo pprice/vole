@@ -256,68 +256,69 @@ fn compute_composite_rc_offsets(
 ) -> Option<CompositeRcOffsets> {
     // Struct: iterate fields, collect offsets of RC-typed fields
     if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id)
-        && let Some(field_types) = entities.generic_field_types(type_def_id) {
-            let concrete_field_types: Vec<TypeId> = if !type_args.is_empty() {
-                let type_params = entities.type_params(type_def_id);
-                if type_params.is_empty() {
-                    field_types
-                } else {
-                    let subs: FxHashMap<_, _> = type_params
-                        .iter()
-                        .zip(type_args.iter())
-                        .map(|(&param, &arg)| (param, arg))
-                        .collect();
-                    field_types
-                        .iter()
-                        .map(|&field_ty| {
-                            arena.expect_substitute(field_ty, &subs, "rc_state struct fields")
-                        })
-                        .collect()
+        && let Some(field_types) = entities.generic_field_types(type_def_id)
+    {
+        let concrete_field_types: Vec<TypeId> = if !type_args.is_empty() {
+            let type_params = entities.type_params(type_def_id);
+            if type_params.is_empty() {
+                field_types
+            } else {
+                let subs: FxHashMap<_, _> = type_params
+                    .iter()
+                    .zip(type_args.iter())
+                    .map(|(&param, &arg)| (param, arg))
+                    .collect();
+                field_types
+                    .iter()
+                    .map(|&field_ty| {
+                        arena.expect_substitute(field_ty, &subs, "rc_state struct fields")
+                    })
+                    .collect()
+            }
+        } else {
+            field_types
+        };
+
+        let mut shallow_offsets = Vec::new();
+        let mut deep_offsets = Vec::new();
+        let mut union_fields = Vec::new();
+        let mut byte_offset = 0i32;
+
+        for field_type in &concrete_field_types {
+            let slots = crate::structs::field_flat_slots(*field_type, arena, entities);
+
+            // Shallow: only direct RC fields
+            if is_simple_rc_type(arena, *field_type) {
+                shallow_offsets.push(byte_offset);
+                deep_offsets.push(byte_offset);
+            } else if let Some(variants) = arena.unwrap_union(*field_type) {
+                // Inline union field: collect RC variant tags for tag-based cleanup
+                let rc_tags = compute_union_rc_variants(arena, variants);
+                if !rc_tags.is_empty() {
+                    union_fields.push((byte_offset, rc_tags));
                 }
             } else {
-                field_types
-            };
-
-            let mut shallow_offsets = Vec::new();
-            let mut deep_offsets = Vec::new();
-            let mut union_fields = Vec::new();
-            let mut byte_offset = 0i32;
-
-            for field_type in &concrete_field_types {
-                let slots = crate::structs::field_flat_slots(*field_type, arena, entities);
-
-                // Shallow: only direct RC fields
-                if is_simple_rc_type(arena, *field_type) {
-                    shallow_offsets.push(byte_offset);
-                    deep_offsets.push(byte_offset);
-                } else if let Some(variants) = arena.unwrap_union(*field_type) {
-                    // Inline union field: collect RC variant tags for tag-based cleanup
-                    let rc_tags = compute_union_rc_variants(arena, variants);
-                    if !rc_tags.is_empty() {
-                        union_fields.push((byte_offset, rc_tags));
+                // Deep: recursively collect from nested structs
+                if let Some((_, nested_deep, nested_unions)) =
+                    compute_composite_rc_offsets(arena, entities, *field_type)
+                {
+                    for off in nested_deep {
+                        deep_offsets.push(byte_offset + off);
                     }
-                } else {
-                    // Deep: recursively collect from nested structs
-                    if let Some((_, nested_deep, nested_unions)) =
-                        compute_composite_rc_offsets(arena, entities, *field_type)
-                    {
-                        for off in nested_deep {
-                            deep_offsets.push(byte_offset + off);
-                        }
-                        for (off, tags) in nested_unions {
-                            union_fields.push((byte_offset + off, tags));
-                        }
+                    for (off, tags) in nested_unions {
+                        union_fields.push((byte_offset + off, tags));
                     }
                 }
-
-                byte_offset += (slots as i32) * 8;
             }
 
-            if shallow_offsets.is_empty() && deep_offsets.is_empty() && union_fields.is_empty() {
-                return None;
-            }
-            return Some((shallow_offsets, deep_offsets, union_fields));
+            byte_offset += (slots as i32) * 8;
         }
+
+        if shallow_offsets.is_empty() && deep_offsets.is_empty() && union_fields.is_empty() {
+            return None;
+        }
+        return Some((shallow_offsets, deep_offsets, union_fields));
+    }
 
     // Fixed array: if element type is RC, all elements need cleanup
     if let Some((elem_type_id, size)) = arena.unwrap_fixed_array(type_id) {

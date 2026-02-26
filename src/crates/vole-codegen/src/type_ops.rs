@@ -101,12 +101,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get the size (in bits) of a TypeId
     pub fn type_size(&self, ty: TypeId) -> u32 {
-        type_id_size(
-            ty,
-            self.ptr_type(),
-            self.analyzed().entity_registry(),
-            self.arena(),
-        )
+        type_id_size(ty, self.ptr_type(), self.analyzed(), self.arena())
     }
 
     /// Compute the memory layout for a tuple type.
@@ -116,22 +111,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         super::types::tuple_layout_id(
             elem_type_ids,
             self.ptr_type(),
-            self.analyzed().entity_registry(),
+            self.analyzed(),
             self.arena(),
         )
     }
 
     /// Convert a typed value to its word (i64) representation for generic dispatch.
     ///
-    /// Wrapper around `value_to_word` that internalizes the ptr_type/registry/arena
-    /// parameters, keeping call sites free of self.analyzed().entity_registry() passes.
+    /// Wrapper around `value_to_word` that internalizes ptr_type/analyzed/arena
+    /// parameters for call sites.
     pub fn emit_word(
         &mut self,
         compiled: &CompiledValue,
         heap_alloc_ref: Option<FuncRef>,
     ) -> crate::errors::CodegenResult<Value> {
         let ptr_type = self.ptr_type();
-        let registry = self.analyzed().entity_registry();
+        let analyzed = self.analyzed();
         let arena = self.arena();
         value_to_word(
             self.builder,
@@ -139,7 +134,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ptr_type,
             heap_alloc_ref,
             arena,
-            registry,
+            analyzed,
         )
     }
 
@@ -147,9 +142,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn convert_from_i64_storage(&mut self, word: Value, type_id: TypeId) -> Value {
         use super::types::word_to_value_type_id;
         let ptr_type = self.ptr_type();
-        let registry = self.analyzed().entity_registry();
+        let analyzed = self.analyzed();
         let arena = self.arena();
-        word_to_value_type_id(self.builder, word, type_id, ptr_type, registry, arena)
+        word_to_value_type_id(self.builder, word, type_id, ptr_type, analyzed, arena)
     }
 
     // ========== Type resolution ==========
