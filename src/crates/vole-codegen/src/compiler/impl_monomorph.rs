@@ -68,12 +68,20 @@ impl Compiler<'_> {
         let (self_type_id, impl_type_id) = match &impl_block.target_type.kind {
             TypeExprKind::Primitive(p) => {
                 let type_id = ast_primitive_type_id(*p);
-                let impl_id = self.impl_type_id_from_type_id(type_id);
+                let impl_id = ImplTypeId::from_type_id(
+                    type_id,
+                    self.arena(),
+                    self.analyzed.entity_registry(),
+                );
                 (type_id, impl_id)
             }
             TypeExprKind::Handle => {
                 let type_id = TypeId::HANDLE;
-                let impl_id = self.impl_type_id_from_type_id(type_id);
+                let impl_id = ImplTypeId::from_type_id(
+                    type_id,
+                    self.arena(),
+                    self.analyzed.entity_registry(),
+                );
                 (type_id, impl_id)
             }
             // Array target type: `extend [T] with Iterable<T>`.
@@ -94,7 +102,11 @@ impl Compiler<'_> {
                 let type_name_str = interner.resolve(*sym).to_string();
                 let primitive_type_id = primitive_type_id_by_name(&type_name_str);
                 if !primitive_type_id.is_invalid() {
-                    let impl_id = self.impl_type_id_from_type_id(primitive_type_id);
+                    let impl_id = ImplTypeId::from_type_id(
+                        primitive_type_id,
+                        self.arena(),
+                        self.analyzed.entity_registry(),
+                    );
                     (primitive_type_id, impl_id)
                 } else {
                     // Use module-specific interner for symbol resolution
@@ -115,7 +127,11 @@ impl Compiler<'_> {
                             format!("{:?}", type_def_id),
                         )
                     })?;
-                    let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
+                    let impl_id = ImplTypeId::from_type_id(
+                        metadata.vole_type,
+                        self.arena(),
+                        self.analyzed.entity_registry(),
+                    );
                     (metadata.vole_type, impl_id)
                 }
             }
@@ -362,12 +378,20 @@ impl Compiler<'_> {
         let (self_type_id, impl_type_id) = match &impl_block.target_type.kind {
             TypeExprKind::Primitive(p) => {
                 let type_id = ast_primitive_type_id(*p);
-                let impl_id = self.impl_type_id_from_type_id(type_id);
+                let impl_id = ImplTypeId::from_type_id(
+                    type_id,
+                    self.arena(),
+                    self.analyzed.entity_registry(),
+                );
                 (type_id, impl_id)
             }
             TypeExprKind::Handle => {
                 let type_id = TypeId::HANDLE;
-                let impl_id = self.impl_type_id_from_type_id(type_id);
+                let impl_id = ImplTypeId::from_type_id(
+                    type_id,
+                    self.arena(),
+                    self.analyzed.entity_registry(),
+                );
                 (type_id, impl_id)
             }
             // Array target type: `extend [T] with Iterable<T>`.
@@ -402,7 +426,11 @@ impl Compiler<'_> {
                 let primitive_type_id = primitive_type_id_by_name(&type_name_str);
                 if !primitive_type_id.is_invalid() {
                     let type_id = primitive_type_id;
-                    let impl_id = self.impl_type_id_from_type_id(type_id);
+                    let impl_id = ImplTypeId::from_type_id(
+                        type_id,
+                        self.arena(),
+                        self.analyzed.entity_registry(),
+                    );
                     (type_id, impl_id)
                 } else {
                     // Look up TypeDefId from Symbol (for Generic, uses the base class name)
@@ -441,7 +469,11 @@ impl Compiler<'_> {
                         )
                     })?;
                     // Use TypeId directly
-                    let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
+                    let impl_id = ImplTypeId::from_type_id(
+                        metadata.vole_type,
+                        self.arena(),
+                        self.analyzed.entity_registry(),
+                    );
                     (metadata.vole_type, impl_id)
                 }
             }
@@ -767,7 +799,8 @@ impl Compiler<'_> {
             }
         };
         // Get TypeDefId for method lookup via method_func_keys
-        let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
+        let impl_type_id =
+            ImplTypeId::from_type_id(self_type_id, self.arena(), self.analyzed.entity_registry());
         let type_def_id =
             impl_type_id.and_then(|id| self.analyzed.query().try_type_def_id(id.name_id()));
 
@@ -1095,7 +1128,8 @@ impl Compiler<'_> {
             }
         };
 
-        let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
+        let impl_type_id =
+            ImplTypeId::from_type_id(self_type_id, self.arena(), self.analyzed.entity_registry());
         let type_def_id = impl_type_id
             .and_then(|id: ImplTypeId| self.analyzed.query().try_type_def_id(id.name_id()));
 
@@ -1375,7 +1409,8 @@ impl Compiler<'_> {
         interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
+        let impl_type_id =
+            ImplTypeId::from_type_id(self_type_id, self.arena(), self.analyzed.entity_registry());
         let type_def_id = impl_type_id
             .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()));
         let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name)
@@ -1615,9 +1650,9 @@ impl Compiler<'_> {
         method_info: Option<MethodInfo>,
     ) -> CodegenResult<()> {
         // Look up MethodId from entity_registry first (needed for func_key and signature)
-        let type_def_id = self
-            .impl_type_id_from_type_id(self_type_id)
-            .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()));
+        let type_def_id =
+            ImplTypeId::from_type_id(self_type_id, self.arena(), self.analyzed.entity_registry())
+                .and_then(|impl_id| self.analyzed.query().try_type_def_id(impl_id.name_id()));
         let method_name_id = self.method_name_id(method.name)?;
 
         let semantic_method_id = type_def_id

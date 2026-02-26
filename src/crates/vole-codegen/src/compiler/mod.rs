@@ -68,7 +68,6 @@ use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeKey};
 use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId};
 use vole_runtime::NativeRegistry;
-use vole_sema::{ImplTypeId, type_arena::TypeId};
 
 pub use state::TestInfo;
 
@@ -178,11 +177,6 @@ impl<'a> Compiler<'a> {
             .query()
             .try_method_name_id(name)
             .ok_or_else(|| CodegenError::not_found("method name_id", self.resolve_symbol(name)))
-    }
-
-    /// Get ImplTypeId from a TypeId
-    fn impl_type_id_from_type_id(&self, ty: TypeId) -> Option<ImplTypeId> {
-        ImplTypeId::from_type_id(ty, self.arena(), self.analyzed.entity_registry())
     }
 
     /// Check if a function has implicit generic info (structural type params).

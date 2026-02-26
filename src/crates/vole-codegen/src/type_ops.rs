@@ -11,7 +11,6 @@ use cranelift_codegen::ir::FuncRef;
 
 use vole_frontend::Symbol;
 use vole_identity::{TypeDefId, VirTypeId};
-use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
@@ -120,14 +119,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.analyzed().entity_registry(),
             self.arena(),
         )
-    }
-
-    /// Convert a TypeId to an ImplTypeId if the type supports implementation blocks.
-    ///
-    /// Wrapper around `ImplTypeId::from_type_id` that internalizes the registry/arena
-    /// lookups, keeping call sites free of self.analyzed().entity_registry() passes.
-    pub fn impl_type_id_for(&self, ty: TypeId) -> Option<ImplTypeId> {
-        ImplTypeId::from_type_id(ty, self.arena(), self.analyzed().entity_registry())
     }
 
     /// Convert a typed value to its word (i64) representation for generic dispatch.
