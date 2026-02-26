@@ -19,7 +19,10 @@ use crate::types::{
 use crate::union_layout;
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
-use vole_sema::type_arena::{SemaType, TypeId};
+use vole_sema::{
+    ProgramQuery,
+    type_arena::{SemaType, TypeId},
+};
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
 /// Method slots start at index 1.
@@ -1984,7 +1987,7 @@ pub(crate) fn interface_method_slot_by_type_def_id(
     method_name_id: NameId,
     analyzed: &AnalyzedProgram,
 ) -> CodegenResult<usize> {
-    let entity_registry = analyzed.entity_registry();
+    let query = analyzed.query();
     // Collect all methods from the interface and its parents
     let methods = collect_interface_methods_via_entity_registry(interface_id, analyzed)?;
 
@@ -1992,7 +1995,7 @@ pub(crate) fn interface_method_slot_by_type_def_id(
     methods
         .iter()
         .position(|method_id| {
-            let method = entity_registry.get_method(*method_id);
+            let method = query.get_method(*method_id);
             method.name_id == method_name_id
         })
         .ok_or_else(|| {
@@ -2016,11 +2019,11 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
     interface_id: TypeDefId,
     analyzed: &AnalyzedProgram,
 ) -> CodegenResult<Vec<MethodId>> {
-    let entity_registry = analyzed.entity_registry();
-    let interface = entity_registry.get_type(interface_id);
+    let query = analyzed.query();
 
     // Verify this is an interface
-    if !entity_registry.is_interface_type(interface_id) {
+    if !query.is_interface_type(interface_id) {
+        let interface = query.get_type(interface_id);
         return Err(CodegenError::type_mismatch(
             "interface vtable",
             "interface",
@@ -2034,7 +2037,7 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
 
     collect_interface_methods_inner_entity_registry(
         interface_id,
-        analyzed,
+        &query,
         &mut methods,
         &mut seen_interfaces,
         &mut seen_methods,
@@ -2045,23 +2048,22 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
 
 fn collect_interface_methods_inner_entity_registry(
     interface_id: TypeDefId,
-    analyzed: &AnalyzedProgram,
+    query: &ProgramQuery<'_>,
     methods: &mut Vec<MethodId>,
     seen_interfaces: &mut HashSet<TypeDefId>,
     seen_methods: &mut HashSet<NameId>,
 ) {
-    let entity_registry = analyzed.entity_registry();
     if !seen_interfaces.insert(interface_id) {
         return;
     }
 
-    let interface = entity_registry.get_type(interface_id);
+    let interface = query.get_type(interface_id);
 
     // Process parent interfaces first (to match the order of collect_interface_methods)
     for parent_id in interface.extends.clone() {
         collect_interface_methods_inner_entity_registry(
             parent_id,
-            analyzed,
+            query,
             methods,
             seen_interfaces,
             seen_methods,
@@ -2070,7 +2072,7 @@ fn collect_interface_methods_inner_entity_registry(
 
     // Add this interface's methods
     for method_id in &interface.methods {
-        let method = entity_registry.get_method(*method_id);
+        let method = query.get_method(*method_id);
         if seen_methods.insert(method.name_id) {
             methods.push(*method_id);
         }
