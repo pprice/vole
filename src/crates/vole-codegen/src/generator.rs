@@ -308,8 +308,7 @@ fn emit_capture_closure(
         block_params.iter().zip(param_type_ids.iter()).enumerate()
     {
         let is_interface = arena.is_interface(param_type_id);
-        let is_rc =
-            compute_rc_state(arena, env.analyzed.entity_registry(), param_type_id).needs_cleanup();
+        let is_rc = compute_rc_state(arena, env.analyzed, param_type_id).needs_cleanup();
 
         // RC captures need rc_inc so the closure owns its own reference.
         // For interfaces, rc_inc the data_ptr (offset 0 of fat pointer),
@@ -325,12 +324,7 @@ fn emit_capture_closure(
             }
         }
 
-        let size = type_id_size(
-            param_type_id,
-            ptr_type,
-            env.analyzed.entity_registry(),
-            arena,
-        );
+        let size = type_id_size(param_type_id, ptr_type, env.analyzed, arena);
         let size_val = builder.ins().iconst(types::I64, size as i64);
 
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);

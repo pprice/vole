@@ -15,8 +15,9 @@
 // - union_variants() -> Option<&[(u8, bool)]>
 
 use rustc_hash::FxHashMap;
-use vole_sema::entity_registry::EntityRegistry;
 use vole_sema::type_arena::{SemaType, TypeArena, TypeId};
+
+use crate::structs::helpers::StructEntityLookup;
 
 /// Reference counting state for a type.
 ///
@@ -149,11 +150,11 @@ impl RcState {
 ///
 /// # Arguments
 /// * `arena` - The type arena for type lookups
-/// * `registry` - The entity registry for type definitions (structs, classes, etc.)
+/// * `entities` - Type metadata lookup for struct definitions and substitutions
 /// * `type_id` - The type to analyze
 pub(crate) fn compute_rc_state(
     arena: &TypeArena,
-    registry: &EntityRegistry,
+    entities: &impl StructEntityLookup,
     type_id: TypeId,
 ) -> RcState {
     // Check for simple RC types first (most common case for RC values)
@@ -173,7 +174,7 @@ pub(crate) fn compute_rc_state(
 
     // Check for composite types (struct, tuple, fixed array) with RC fields
     if let Some((shallow_offsets, deep_offsets, union_fields)) =
-        compute_composite_rc_offsets(arena, registry, type_id)
+        compute_composite_rc_offsets(arena, entities, type_id)
     {
         return RcState::Composite {
             shallow_offsets,
@@ -250,71 +251,73 @@ type CompositeRcOffsets = (Vec<i32>, Vec<i32>, Vec<(i32, Vec<(u8, bool)>)>);
 /// - `union_fields`: Inline union fields with RC variants, as (offset, rc_tags) pairs
 fn compute_composite_rc_offsets(
     arena: &TypeArena,
-    registry: &EntityRegistry,
+    entities: &impl StructEntityLookup,
     type_id: TypeId,
 ) -> Option<CompositeRcOffsets> {
     // Struct: iterate fields, collect offsets of RC-typed fields
-    if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id) {
-        let type_def = registry.get_type(type_def_id);
-        let generic_info = type_def.generic_info.as_ref()?;
-        let field_types: Vec<TypeId> = if !type_args.is_empty()
-            && !generic_info.type_params.is_empty()
-        {
-            let subs: FxHashMap<_, _> = generic_info
-                .type_params
-                .iter()
-                .zip(type_args.iter())
-                .map(|(param, &arg)| (param.name_id, arg))
-                .collect();
-            generic_info
-                .field_types
-                .iter()
-                .map(|&field_ty| arena.expect_substitute(field_ty, &subs, "rc_state struct fields"))
-                .collect()
-        } else {
-            generic_info.field_types.clone()
-        };
-
-        let mut shallow_offsets = Vec::new();
-        let mut deep_offsets = Vec::new();
-        let mut union_fields = Vec::new();
-        let mut byte_offset = 0i32;
-
-        for field_type in &field_types {
-            let slots = crate::structs::field_flat_slots(*field_type, arena, registry);
-
-            // Shallow: only direct RC fields
-            if is_simple_rc_type(arena, *field_type) {
-                shallow_offsets.push(byte_offset);
-                deep_offsets.push(byte_offset);
-            } else if let Some(variants) = arena.unwrap_union(*field_type) {
-                // Inline union field: collect RC variant tags for tag-based cleanup
-                let rc_tags = compute_union_rc_variants(arena, variants);
-                if !rc_tags.is_empty() {
-                    union_fields.push((byte_offset, rc_tags));
+    if let Some((type_def_id, type_args)) = arena.unwrap_struct(type_id)
+        && let Some(field_types) = entities.generic_field_types(type_def_id) {
+            let concrete_field_types: Vec<TypeId> = if !type_args.is_empty() {
+                let type_params = entities.type_params(type_def_id);
+                if type_params.is_empty() {
+                    field_types
+                } else {
+                    let subs: FxHashMap<_, _> = type_params
+                        .iter()
+                        .zip(type_args.iter())
+                        .map(|(&param, &arg)| (param, arg))
+                        .collect();
+                    field_types
+                        .iter()
+                        .map(|&field_ty| {
+                            arena.expect_substitute(field_ty, &subs, "rc_state struct fields")
+                        })
+                        .collect()
                 }
             } else {
-                // Deep: recursively collect from nested structs
-                if let Some((_, nested_deep, nested_unions)) =
-                    compute_composite_rc_offsets(arena, registry, *field_type)
-                {
-                    for off in nested_deep {
-                        deep_offsets.push(byte_offset + off);
+                field_types
+            };
+
+            let mut shallow_offsets = Vec::new();
+            let mut deep_offsets = Vec::new();
+            let mut union_fields = Vec::new();
+            let mut byte_offset = 0i32;
+
+            for field_type in &concrete_field_types {
+                let slots = crate::structs::field_flat_slots(*field_type, arena, entities);
+
+                // Shallow: only direct RC fields
+                if is_simple_rc_type(arena, *field_type) {
+                    shallow_offsets.push(byte_offset);
+                    deep_offsets.push(byte_offset);
+                } else if let Some(variants) = arena.unwrap_union(*field_type) {
+                    // Inline union field: collect RC variant tags for tag-based cleanup
+                    let rc_tags = compute_union_rc_variants(arena, variants);
+                    if !rc_tags.is_empty() {
+                        union_fields.push((byte_offset, rc_tags));
                     }
-                    for (off, tags) in nested_unions {
-                        union_fields.push((byte_offset + off, tags));
+                } else {
+                    // Deep: recursively collect from nested structs
+                    if let Some((_, nested_deep, nested_unions)) =
+                        compute_composite_rc_offsets(arena, entities, *field_type)
+                    {
+                        for off in nested_deep {
+                            deep_offsets.push(byte_offset + off);
+                        }
+                        for (off, tags) in nested_unions {
+                            union_fields.push((byte_offset + off, tags));
+                        }
                     }
                 }
+
+                byte_offset += (slots as i32) * 8;
             }
 
-            byte_offset += (slots as i32) * 8;
+            if shallow_offsets.is_empty() && deep_offsets.is_empty() && union_fields.is_empty() {
+                return None;
+            }
+            return Some((shallow_offsets, deep_offsets, union_fields));
         }
-
-        if shallow_offsets.is_empty() && deep_offsets.is_empty() && union_fields.is_empty() {
-            return None;
-        }
-        return Some((shallow_offsets, deep_offsets, union_fields));
-    }
 
     // Fixed array: if element type is RC, all elements need cleanup
     if let Some((elem_type_id, size)) = arena.unwrap_fixed_array(type_id) {
@@ -327,7 +330,7 @@ fn compute_composite_rc_offsets(
 
     // Tuple: compute offsets based on element sizes, then filter RC elements
     if let Some(elem_types) = arena.unwrap_tuple(type_id) {
-        let all_offsets = compute_tuple_offsets(arena, registry, elem_types);
+        let all_offsets = compute_tuple_offsets(arena, entities, elem_types);
         let rc_offsets: Vec<i32> = elem_types
             .iter()
             .enumerate()
@@ -350,7 +353,7 @@ fn compute_composite_rc_offsets(
 /// `types::tuple_layout_id` but doesn't require a Cranelift pointer type.
 fn compute_tuple_offsets(
     arena: &TypeArena,
-    registry: &EntityRegistry,
+    entities: &impl StructEntityLookup,
     elem_types: &[TypeId],
 ) -> Vec<i32> {
     let mut offsets = Vec::with_capacity(elem_types.len());
@@ -358,7 +361,7 @@ fn compute_tuple_offsets(
 
     for &elem in elem_types {
         offsets.push(offset);
-        let elem_size = compute_type_size_aligned(arena, registry, elem);
+        let elem_size = compute_type_size_aligned(arena, entities, elem);
         offset += elem_size;
     }
 
@@ -369,7 +372,11 @@ fn compute_tuple_offsets(
 ///
 /// This is a simplified version of `type_id_size` that assumes 64-bit pointers
 /// and aligns all sizes to 8 bytes (matching tuple layout behavior).
-fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_id: TypeId) -> i32 {
+fn compute_type_size_aligned(
+    arena: &TypeArena,
+    entities: &impl StructEntityLookup,
+    type_id: TypeId,
+) -> i32 {
     // Sentinel types are zero-sized
     if arena.is_sentinel(type_id) {
         return 0;
@@ -392,7 +399,7 @@ fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_
                 // Tag byte + max variant payload, aligned
                 let max_payload = variants
                     .iter()
-                    .map(|&v| compute_type_size_aligned(arena, registry, v))
+                    .map(|&v| compute_type_size_aligned(arena, entities, v))
                     .max()
                     .unwrap_or(0);
                 crate::union_layout::TAG_ONLY_SIZE as i32 + max_payload
@@ -401,16 +408,16 @@ fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_
                 // Sum of aligned element sizes
                 elements
                     .iter()
-                    .map(|&e| compute_type_size_aligned(arena, registry, e))
+                    .map(|&e| compute_type_size_aligned(arena, entities, e))
                     .sum()
             }
             SemaType::FixedArray { element, size } => {
-                let elem_size = compute_type_size_aligned(arena, registry, *element);
+                let elem_size = compute_type_size_aligned(arena, entities, *element);
                 elem_size * (*size as i32)
             }
             SemaType::Struct { .. } => {
                 // Use struct_total_byte_size helper
-                crate::structs::struct_total_byte_size(type_id, arena, registry)
+                crate::structs::struct_total_byte_size(type_id, arena, entities)
                     .expect("INTERNAL: valid struct must have computable size")
                     as i32
             }
@@ -441,6 +448,7 @@ fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vole_sema::entity_registry::EntityRegistry;
 
     /// Helper to create a test arena and registry for basic tests
     fn setup_test_arena() -> (TypeArena, EntityRegistry) {
