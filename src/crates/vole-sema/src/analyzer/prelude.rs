@@ -193,13 +193,12 @@ impl Analyzer {
 
         let mut prelude_interner = parser.into_interner();
         prelude_interner.seed_builtin_symbols();
-        let prelude_interner = Rc::new(prelude_interner);
 
         // Create a sub-analyzer that shares the same context
         let mut sub_analyzer = self.fork_for_prelude(prelude_module, module_info.path.clone());
 
         // Analyze the prelude file
-        let analyze_result = sub_analyzer.analyze(&program, &prelude_interner);
+        let analyze_result = sub_analyzer.analyze(&program, &mut prelude_interner);
         let partial_error_count = match &analyze_result {
             Ok(()) => 0,
             Err(errors) => errors.len(),
@@ -222,6 +221,7 @@ impl Analyzer {
         // Cache the analysis results. Extract the subset of per-node data
         // that CachedModule needs as individual FxHashMaps, then merge the
         // sub-analyzer's NodeMap directly into the shared merged_node_map.
+        let prelude_interner = Rc::new(prelude_interner);
         let prelude_node_map = sub_analyzer.results.node_map;
         if let Some(ref cache) = self.ctx.module_cache {
             let (
@@ -427,7 +427,7 @@ func partial_warning_probe() -> i64 {
             .module
             .module_loader
             .set_project_root(project_root.to_path_buf());
-        let result = analyzer.analyze(&program, &interner);
+        let result = analyzer.analyze(&program, &mut interner);
         assert!(
             result.is_ok(),
             "main program should still analyze successfully"
@@ -509,7 +509,7 @@ func partial_warning_probe() -> i64 {
             .module
             .module_loader
             .set_project_root(project_root.to_path_buf());
-        match analyzer.analyze(&program, &interner) {
+        match analyzer.analyze(&program, &mut interner) {
             Ok(()) => vec![],
             Err(errors) => errors.into_iter().map(|e| e.error).collect(),
         }

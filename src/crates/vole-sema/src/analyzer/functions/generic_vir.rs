@@ -29,7 +29,7 @@ impl Analyzer {
     pub(in crate::analyzer) fn lower_generic_bodies_to_vir(
         &mut self,
         program: &Program,
-        interner: &Interner,
+        interner: &mut Interner,
     ) -> (Vec<(NameId, VirFunction)>, VirTypeTable) {
         let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
         self.collect_generic_func_asts_for_vir(
@@ -83,7 +83,7 @@ impl Analyzer {
         &mut self,
         name_id: NameId,
         func: &FuncDecl,
-        interner: &Interner,
+        interner: &mut Interner,
         shared_type_table: &mut VirTypeTable,
     ) -> Option<VirFunction> {
         let (func_id, generic_info) = {
@@ -268,7 +268,7 @@ impl Analyzer {
         func: &FuncDecl,
         func_id: vole_identity::FunctionId,
         generic_info: &GenericFuncInfo,
-        interner: &Interner,
+        interner: &mut Interner,
         shared_type_table: &mut VirTypeTable,
     ) -> VirFunction {
         let param_types: Vec<_> = func
@@ -279,10 +279,6 @@ impl Analyzer {
             .collect();
 
         let display_name = interner.resolve(func.name).to_string();
-
-        // Clone the interner for VIR lowering (the lowering may intern
-        // new string literals, requiring &mut Interner).
-        let mut lowering_interner = interner.clone();
 
         let node_map = &self.results.node_map;
         let type_arena = self.type_arena();
@@ -302,7 +298,7 @@ impl Analyzer {
             &param_types,
             generic_info.return_type,
             node_map,
-            &mut lowering_interner,
+            interner,
             &type_arena,
             &entities,
             &names,

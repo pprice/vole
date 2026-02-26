@@ -464,7 +464,7 @@ impl Analyzer {
     pub fn analyze(
         &mut self,
         program: &Program,
-        interner: &Interner,
+        interner: &mut Interner,
     ) -> Result<(), Vec<TypeError>> {
         self.register_primitive_name_ids(interner);
         self.register_builtin_methods(interner);
@@ -567,7 +567,7 @@ impl Analyzer {
     pub(crate) fn analyze_virtual_module(
         &mut self,
         program: &Program,
-        interner: &Interner,
+        interner: &mut Interner,
         virtual_module_id: ModuleId,
     ) {
         let parent_module = self.module.current_module;
@@ -621,7 +621,7 @@ impl Analyzer {
     fn check_declaration_bodies(
         &mut self,
         program: &Program,
-        interner: &Interner,
+        interner: &mut Interner,
     ) -> Result<(), Vec<TypeError>> {
         for decl in &program.declarations {
             match decl {

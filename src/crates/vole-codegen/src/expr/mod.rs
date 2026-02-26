@@ -983,6 +983,9 @@ impl Cg<'_, '_, '_> {
         let left = self.compile_vir_expr(lhs)?;
         let right = self.compile_vir_expr(rhs)?;
         let ast_op = vir_binop_to_ast(op);
+        if ast_op == BinaryOp::Add && left.type_id == TypeId::STRING {
+            return self.string_concat(left, right);
+        }
         self.binary_op(left, right, ast_op, line)
     }
 

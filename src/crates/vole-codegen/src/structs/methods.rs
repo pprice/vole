@@ -477,10 +477,14 @@ impl Cg<'_, '_, '_> {
         // In monomorphized context, skip sema resolution because it was computed for the type parameter,
         // not the concrete type.
         let resolution = if let Some(dispatch) = vir_dispatch {
-            dispatch
-                .resolved_method
-                .as_ref()
-                .map(MethodResolutionRef::Vir)
+            if self.substitutions.is_some() {
+                None
+            } else {
+                dispatch
+                    .resolved_method
+                    .as_ref()
+                    .map(MethodResolutionRef::Vir)
+            }
         } else if self.substitutions.is_some() {
             None
         } else {

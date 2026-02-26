@@ -6,17 +6,17 @@ use vole_frontend::ast::LambdaPurity;
 fn check(source: &str) -> Result<(), Vec<TypeError>> {
     let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
-    analyzer.analyze(&program, &interner)
+    analyzer.analyze(&program, &mut interner)
 }
 
 fn analyze_output(source: &str) -> AnalysisOutput {
     let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
-    analyzer.analyze(&program, &interner).unwrap();
+    analyzer.analyze(&program, &mut interner).unwrap();
     analyzer.into_analysis_results()
 }
 
@@ -263,9 +263,9 @@ fn generic_nested_call_records_correct_callee_monomorph_key() {
     "#;
     let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
-    analyzer.analyze(&program, &interner).unwrap();
+    analyzer.analyze(&program, &mut interner).unwrap();
     let output = analyzer.into_analysis_results();
     let node_map = output.node_map;
     let names = output.db.names();
@@ -384,9 +384,9 @@ fn analyze_i64_to_i32_narrowing_error() {
 fn parse_and_analyze(source: &str) -> (Program, Interner, NodeMap) {
     let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
-    analyzer.analyze(&program, &interner).unwrap();
+    analyzer.analyze(&program, &mut interner).unwrap();
     let output = analyzer.into_analysis_results();
     (program, interner, output.node_map)
 }
@@ -715,9 +715,9 @@ fn lambda_side_effects_take_precedence_over_captures() {
 fn analyze_and_check_interface(source: &str) -> Analyzer {
     let mut parser = Parser::new(source, ModuleId::new(0));
     let program = parser.parse_program().unwrap();
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
     let mut analyzer = Analyzer::new("test.vole");
-    let _ = analyzer.analyze(&program, &interner);
+    let _ = analyzer.analyze(&program, &mut interner);
     analyzer
 }
 

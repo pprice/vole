@@ -150,7 +150,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
     let sema_start = Instant::now();
     let mut analyzer = Analyzer::new(file_path);
     analyzer
-        .analyze(&program, &interner)
+        .analyze(&program, &mut interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
     let output = analyzer.into_analysis_results();
     let sema_ns = sema_start.elapsed().as_nanos() as u64;
@@ -204,7 +204,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
     // Analyze
     let mut analyzer = Analyzer::new(file_path);
     analyzer
-        .analyze(&program, &interner)
+        .analyze(&program, &mut interner)
         .map_err(|errors| format!("semantic error: {:?}", errors[0].error))?;
     let output = analyzer.into_analysis_results();
 

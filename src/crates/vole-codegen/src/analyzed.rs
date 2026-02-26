@@ -2325,11 +2325,6 @@ fn run_early_vir_monomorphize(
         let Some(func_id) = entities.function_by_name(sema_instance.original_name) else {
             continue;
         };
-        let is_unconstrained_generic = entities
-            .get_function(func_id)
-            .generic_info
-            .as_ref()
-            .is_some_and(|gi| gi.type_params.iter().all(|tp| tp.constraint.is_none()));
         // Find the generic VIR template to get the type param order.
         let template = generic_vir_functions.iter().find(|f| f.id == func_id);
         let Some(template) = template else {
@@ -2358,9 +2353,7 @@ fn run_early_vir_monomorphize(
             function_id: func_id,
             type_args,
         };
-        if is_unconstrained_generic {
-            seed_mangled_names.insert(seed.clone(), sema_instance.mangled_name);
-        }
+        seed_mangled_names.insert(seed.clone(), sema_instance.mangled_name);
         seeds.push(seed);
     }
 

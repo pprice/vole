@@ -288,7 +288,7 @@ impl Analyzer {
         // Destructure ParsedModule so file_path can be moved independently
         let ParsedModule {
             program: module_program,
-            interner: module_interner,
+            interner: mut module_interner,
             file_path: module_file_path,
         } = parsed;
 
@@ -297,7 +297,7 @@ impl Analyzer {
 
         // Phase 5a: Run sub-analysis
         let mut sub_analyzer = self.fork_for_module(module_id, Some(module_file_path));
-        let analyze_result = sub_analyzer.analyze(&module_program, &module_interner);
+        let analyze_result = sub_analyzer.analyze(&module_program, &mut module_interner);
         if let Err(ref errors) = analyze_result {
             tracing::warn!(import_path, ?errors, "module analysis errors");
             for err in errors {

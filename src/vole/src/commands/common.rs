@@ -209,7 +209,7 @@ pub fn compile_source(
     } = opts;
 
     // Parse phase
-    let (mut program, interner) = {
+    let (mut program, mut interner) = {
         let _span = tracing::info_span!("parse", file = %file_path).entered();
         let mut parser = Parser::new(source, ModuleId::new(0));
         parser.set_skip_tests(skip_tests);
@@ -247,7 +247,7 @@ pub fn compile_source(
         }
         let mut analyzer = builder.build();
         analyzer.set_skip_tests(skip_tests);
-        if let Err(errs) = analyzer.analyze(&program, &interner) {
+        if let Err(errs) = analyzer.analyze(&program, &mut interner) {
             return Err(PipelineError::Sema(errs));
         }
         tracing::debug!("type checking complete");

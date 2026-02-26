@@ -408,7 +408,7 @@ impl Analyzer {
     pub(crate) fn check_tests(
         &mut self,
         tests_decl: &TestsDecl,
-        interner: &Interner,
+        interner: &mut Interner,
     ) -> Result<(), Vec<TypeError>> {
         // Allocate a virtual ModuleId with a synthetic path
         let label = tests_decl.label.as_deref().unwrap_or("anonymous");
