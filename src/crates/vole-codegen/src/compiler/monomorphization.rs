@@ -1903,12 +1903,11 @@ impl Compiler<'_> {
     /// Called before body compilation in both `compile_module_functions` and
     /// `compile_program_body`.
     pub(super) fn build_monomorph_index(&mut self) {
-        let registry = self.analyzed.entity_registry();
         let arena = self.arena();
         let mut index = FxHashMap::default();
 
         // Index free-function monomorphs (no filtering needed)
-        for (_, instance) in registry.monomorph_cache.instances() {
+        for (_, instance) in self.analyzed.monomorph_cache().instances() {
             index.insert(
                 instance.mangled_name,
                 MonomorphIndexEntry::Function(instance.clone()),
@@ -1916,7 +1915,7 @@ impl Compiler<'_> {
         }
 
         // Index class method monomorphs (skip external + abstract templates)
-        for (_, instance) in registry.class_method_monomorph_cache.instances() {
+        for (_, instance) in self.analyzed.class_method_monomorph_cache().instances() {
             if instance.external_info.is_some() {
                 continue;
             }
@@ -1934,7 +1933,7 @@ impl Compiler<'_> {
         }
 
         // Index static method monomorphs (skip abstract templates)
-        for (_, instance) in registry.static_method_monomorph_cache.instances() {
+        for (_, instance) in self.analyzed.static_method_monomorph_cache().instances() {
             if instance
                 .substitutions
                 .values()

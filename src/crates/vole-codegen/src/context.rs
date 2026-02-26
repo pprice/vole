@@ -895,7 +895,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get monomorph cache from entity registry
     #[inline]
     pub fn monomorph_cache(&self) -> &'ctx vole_sema::generic::MonomorphCache {
-        &self.env.analyzed.entity_registry().monomorph_cache
+        self.env.analyzed.monomorph_cache()
     }
 
     /// Get current module as Option<ModuleId> - use current_module_id() for new code

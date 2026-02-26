@@ -117,8 +117,8 @@ impl Cg<'_, '_, '_> {
                         format!("({}, {})", tn, mn)
                     })
                     .collect();
-                let static_candidates: Vec<_> = self.analyzed().entity_registry()
-                    .static_method_monomorph_cache
+                let static_candidates: Vec<_> = self.analyzed()
+                    .static_method_monomorph_cache()
                     .instances()
                     .filter(|(k, _)| k.class_name == type_name_id && k.method_name == method_name_id)
                     .map(|(k, inst)| {

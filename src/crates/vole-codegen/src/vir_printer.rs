@@ -9,7 +9,6 @@
 use std::fmt::Write;
 
 use vole_identity::{Symbol, VirTypeId};
-use vole_sema::type_display::display_type_id_short;
 
 use vole_vir::calls::{CallTarget, NativeAbi};
 use vole_vir::expr::{
@@ -991,12 +990,7 @@ impl<'a> VirPrinter<'a> {
 
     fn ty(&self, id: VirTypeId) -> String {
         let sema_ty = crate::types::vir_conversions::vir_to_sema_type_id_lossy(id);
-        display_type_id_short(
-            sema_ty,
-            self.analyzed.type_arena(),
-            self.analyzed.name_table(),
-            self.analyzed.entity_registry(),
-        )
+        self.analyzed.display_type_id_short(sema_ty)
     }
 }
 

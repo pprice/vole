@@ -416,6 +416,31 @@ impl AnalyzedProgram {
         &self.implements
     }
 
+    /// Get the free-function monomorph cache.
+    pub fn monomorph_cache(&self) -> &vole_sema::generic::MonomorphCache {
+        &self.entity_registry().monomorph_cache
+    }
+
+    /// Get the class-method monomorph cache.
+    pub fn class_method_monomorph_cache(&self) -> &vole_sema::generic::ClassMethodMonomorphCache {
+        &self.entity_registry().class_method_monomorph_cache
+    }
+
+    /// Get the static-method monomorph cache.
+    pub fn static_method_monomorph_cache(&self) -> &vole_sema::generic::StaticMethodMonomorphCache {
+        &self.entity_registry().static_method_monomorph_cache
+    }
+
+    /// Render a short human-readable type name for diagnostics/debug output.
+    pub fn display_type_id_short(&self, type_id: vole_sema::type_arena::TypeId) -> String {
+        vole_sema::type_display::display_type_id_short(
+            type_id,
+            self.type_arena(),
+            self.name_table(),
+            self.entity_registry(),
+        )
+    }
+
     /// Resolve the implement-registry type key NameId for a concrete sema TypeId.
     pub fn impl_type_name_id_from_type_id(
         &self,
