@@ -13,14 +13,50 @@
 
 use cranelift::prelude::*;
 
-use vole_identity::{TypeId, VirTypeId};
-use vole_sema::EntityRegistry;
+use vole_identity::{FieldId, TypeDefId, TypeId, VirTypeId};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{VirPrimitiveKind, VirType};
 
 use super::vir_conversions::{
     vir_field_byte_size, vir_field_slot_count, vir_unwrap_struct, vir_unwrap_union,
 };
+
+pub(crate) trait VirStructEntityLookup {
+    fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool;
+    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId>;
+    fn field_type(&self, field_id: FieldId) -> TypeId;
+}
+
+impl VirStructEntityLookup for crate::analyzed::AnalyzedProgram {
+    fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_registry()
+            .get_type(type_def_id)
+            .kind
+            .is_sentinel()
+    }
+
+    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+        self.entity_registry().fields_on_type(type_def_id).collect()
+    }
+
+    fn field_type(&self, field_id: FieldId) -> TypeId {
+        self.entity_registry().get_field(field_id).ty
+    }
+}
+
+impl VirStructEntityLookup for vole_sema::entity_registry::EntityRegistry {
+    fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
+        self.get_type(type_def_id).kind.is_sentinel()
+    }
+
+    fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+        self.fields_on_type(type_def_id).collect()
+    }
+
+    fn field_type(&self, field_id: FieldId) -> TypeId {
+        self.get_field(field_id).ty
+    }
+}
 
 // ============================================================================
 // Payload union detection
@@ -34,7 +70,7 @@ use super::vir_conversions::{
 pub(crate) fn vir_is_payload_union(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl VirStructEntityLookup,
 ) -> bool {
     let Some(variants) = vir_unwrap_union(vir_ty, table) else {
         return false;
@@ -50,11 +86,11 @@ pub(crate) fn vir_is_payload_union(
 fn vir_is_sentinel_or_void(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl VirStructEntityLookup,
 ) -> bool {
     match table.get(vir_ty) {
         VirType::Nil | VirType::Done | VirType::Void => true,
-        VirType::Struct { def, .. } => entities.get_type(*def).kind.is_sentinel(),
+        VirType::Struct { def, .. } => entities.is_sentinel_type_def(*def),
         _ => false,
     }
 }
@@ -87,7 +123,7 @@ fn sema_to_vir_hint(sema_ty: TypeId) -> VirTypeId {
 pub(crate) fn vir_field_flat_slots_recursive(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl VirStructEntityLookup,
 ) -> usize {
     if let Some(count) = vir_struct_flat_slot_count(vir_ty, table, entities) {
         return count;
@@ -106,14 +142,13 @@ pub(crate) fn vir_field_flat_slots_recursive(
 pub(crate) fn vir_struct_flat_slot_count(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl VirStructEntityLookup,
 ) -> Option<usize> {
     let (type_def_id, _type_args) = vir_unwrap_struct(vir_ty, table)?;
 
     let mut total = 0usize;
-    for field_id in entities.fields_on_type(type_def_id) {
-        let field = entities.get_field(field_id);
-        let field_vir = sema_to_vir_hint(field.ty);
+    for field_id in entities.field_ids_on_type(type_def_id) {
+        let field_vir = sema_to_vir_hint(entities.field_type(field_id));
         total += vir_field_flat_slots_recursive(field_vir, table, entities);
     }
     Some(total)
@@ -127,19 +162,18 @@ pub(crate) fn vir_struct_field_byte_offset(
     vir_ty: VirTypeId,
     slot: usize,
     table: &VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl VirStructEntityLookup,
 ) -> Option<i32> {
     let (type_def_id, _type_args) = vir_unwrap_struct(vir_ty, table)?;
 
-    let fields: Vec<_> = entities.fields_on_type(type_def_id).collect();
+    let fields = entities.field_ids_on_type(type_def_id);
     if slot > fields.len() {
         return None;
     }
 
     let mut offset = 0i32;
     for &field_id in fields.iter().take(slot) {
-        let field = entities.get_field(field_id);
-        let field_vir = sema_to_vir_hint(field.ty);
+        let field_vir = sema_to_vir_hint(entities.field_type(field_id));
         let slots = vir_field_flat_slots_recursive(field_vir, table, entities);
         offset += (slots as i32) * 8;
     }
@@ -152,7 +186,7 @@ pub(crate) fn vir_struct_field_byte_offset(
 pub(crate) fn vir_struct_total_byte_size(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl VirStructEntityLookup,
 ) -> Option<u32> {
     vir_struct_flat_slot_count(vir_ty, table, entities).map(|n| (n as u32) * 8)
 }
@@ -182,15 +216,14 @@ fn vir_leaf_cranelift_type(vir_ty: VirTypeId, table: &VirTypeTable) -> Type {
 pub(crate) fn vir_struct_flat_field_cranelift_types(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl VirStructEntityLookup,
 ) -> Option<Vec<(i32, Type)>> {
     let (type_def_id, _type_args) = vir_unwrap_struct(vir_ty, table)?;
 
     let mut result = Vec::new();
     let mut offset = 0i32;
-    for field_id in entities.fields_on_type(type_def_id) {
-        let field = entities.get_field(field_id);
-        let field_vir = sema_to_vir_hint(field.ty);
+    for field_id in entities.field_ids_on_type(type_def_id) {
+        let field_vir = sema_to_vir_hint(entities.field_type(field_id));
         vir_collect_leaf_slots(field_vir, table, entities, &mut offset, &mut result);
     }
     Some(result)
@@ -203,15 +236,14 @@ pub(crate) fn vir_struct_flat_field_cranelift_types(
 fn vir_collect_leaf_slots(
     vir_ty: VirTypeId,
     table: &VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl VirStructEntityLookup,
     offset: &mut i32,
     out: &mut Vec<(i32, Type)>,
 ) {
     // Recursively flatten nested structs
     if let Some((nested_def, _nested_args)) = vir_unwrap_struct(vir_ty, table) {
-        for field_id in entities.fields_on_type(nested_def) {
-            let field = entities.get_field(field_id);
-            let field_vir = sema_to_vir_hint(field.ty);
+        for field_id in entities.field_ids_on_type(nested_def) {
+            let field_vir = sema_to_vir_hint(entities.field_type(field_id));
             vir_collect_leaf_slots(field_vir, table, entities, offset, out);
         }
         return;
@@ -290,6 +322,7 @@ pub(crate) fn vir_convert_field_value(
 mod tests {
     use super::*;
     use vole_identity::TypeDefId;
+    use vole_sema::entity_registry::EntityRegistry;
     use vole_vir::type_table::VirTypeTable;
 
     fn test_table() -> VirTypeTable {
