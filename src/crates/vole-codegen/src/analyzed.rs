@@ -9,6 +9,7 @@ use vole_frontend::{Decl, Interner, LetInit, Program, Symbol};
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
 };
+use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::{
     AnalysisOutput, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
@@ -398,6 +399,36 @@ impl AnalyzedProgram {
     /// Get read-only access to implement registry
     pub fn implement_registry(&self) -> &ImplementRegistry {
         &self.implements
+    }
+
+    /// Resolve the implement-registry type key NameId for a concrete sema TypeId.
+    pub fn impl_type_name_id_from_type_id(
+        &self,
+        type_id: vole_sema::type_arena::TypeId,
+    ) -> Option<NameId> {
+        ImplTypeId::from_type_id(type_id, self.type_arena(), self.entity_registry())
+            .map(ImplTypeId::name_id)
+    }
+
+    /// Look up an implement-registry method by concrete type-name key.
+    pub fn implement_method_by_name(
+        &self,
+        type_name_id: NameId,
+        method_name_id: NameId,
+    ) -> Option<&vole_sema::implement_registry::MethodImpl> {
+        self.implement_registry()
+            .get_method(&ImplTypeId::from_name_id(type_name_id), method_name_id)
+    }
+
+    /// Resolve and look up an implement-registry method from a sema TypeId.
+    pub fn implement_method_for_type(
+        &self,
+        type_id: vole_sema::type_arena::TypeId,
+        method_name_id: NameId,
+    ) -> Option<(NameId, &vole_sema::implement_registry::MethodImpl)> {
+        let type_name_id = self.impl_type_name_id_from_type_id(type_id)?;
+        let method_impl = self.implement_method_by_name(type_name_id, method_name_id)?;
+        Some((type_name_id, method_impl))
     }
 
     /// Look up a VIR function by its monomorphized mangled NameId.

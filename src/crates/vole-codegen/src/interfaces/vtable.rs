@@ -18,7 +18,7 @@ use crate::union_layout;
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::EntityRegistry;
-use vole_sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
+use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::{SemaType, TypeId};
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
@@ -29,7 +29,7 @@ pub(crate) const VTABLE_METHOD_OFFSET: usize = 1;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 enum InterfaceConcreteType {
-    ImplTypeId(ImplTypeId),
+    TypeNameId(NameId),
     Function { is_closure: bool },
 }
 
@@ -133,13 +133,14 @@ impl InterfaceVtableRegistry {
             {
                 InterfaceConcreteType::Function { is_closure }
             } else {
-                let impl_type_id = impl_type_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "cannot build vtable for unsupported type",
-                        format!("{:?}", concrete_type_id),
-                    )
-                })?;
-                InterfaceConcreteType::ImplTypeId(impl_type_id)
+                let type_name_id =
+                    impl_type_name_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "cannot build vtable for unsupported type",
+                            format!("{:?}", concrete_type_id),
+                        )
+                    })?;
+                InterfaceConcreteType::TypeNameId(type_name_id)
             }
         };
         // Resolve interface name to string for key (Symbol is interner-specific)
@@ -194,8 +195,8 @@ impl InterfaceVtableRegistry {
 
         // Build vtable name and declare data
         let type_name = match concrete_key {
-            InterfaceConcreteType::ImplTypeId(type_id) => {
-                ctx.analyzed().name_table().display(type_id.name_id())
+            InterfaceConcreteType::TypeNameId(type_name_id) => {
+                ctx.analyzed().name_table().display(type_name_id)
             }
             InterfaceConcreteType::Function { is_closure } => {
                 if is_closure {
@@ -256,13 +257,14 @@ impl InterfaceVtableRegistry {
             {
                 InterfaceConcreteType::Function { is_closure }
             } else {
-                let impl_type_id = impl_type_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
-                    CodegenError::internal_with_context(
-                        "cannot build vtable for unsupported type",
-                        format!("{:?}", concrete_type_id),
-                    )
-                })?;
-                InterfaceConcreteType::ImplTypeId(impl_type_id)
+                let type_name_id =
+                    impl_type_name_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
+                        CodegenError::internal_with_context(
+                            "cannot build vtable for unsupported type",
+                            format!("{:?}", concrete_type_id),
+                        )
+                    })?;
+                InterfaceConcreteType::TypeNameId(type_name_id)
             }
         };
         // Resolve interface name to string for key (Symbol is interner-specific)
@@ -1698,16 +1700,12 @@ fn value_to_word_ctx<C: VtableCtx>(
     )
 }
 
-/// Convert a TypeId to an ImplTypeId using vtable context internals.
+/// Convert a TypeId to an implement-registry type NameId using vtable context internals.
 ///
-/// Consolidates `ImplTypeId::from_type_id(ty, ctx.analyzed().type_arena(), ctx.analyzed().entity_registry())` call sites.
+/// Consolidates `analyzed().impl_type_name_id_from_type_id(ty)` call sites.
 #[inline]
-fn impl_type_id_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> Option<ImplTypeId> {
-    ImplTypeId::from_type_id(
-        ty,
-        ctx.analyzed().type_arena(),
-        ctx.analyzed().entity_registry(),
-    )
+fn impl_type_name_id_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> Option<NameId> {
+    ctx.analyzed().impl_type_name_id_from_type_id(ty)
 }
 
 /// Get the byte size of a TypeId using vtable context internals.
@@ -2219,7 +2217,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         });
     }
 
-    let impl_type_id = impl_type_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
+    let impl_type_name_id = impl_type_name_id_ctx(concrete_type_id, ctx).ok_or_else(|| {
         CodegenError::not_found(
             "interface method",
             format!("{} on {:?}", method_name_str, concrete_type_id),
@@ -2233,8 +2231,7 @@ fn resolve_vtable_target<C: VtableCtx>(
     if let Some(method_name_id) = method_name_id
         && let Some(impl_) = ctx
             .analyzed()
-            .implement_registry()
-            .get_method(&impl_type_id, method_name_id)
+            .implement_method_by_name(impl_type_name_id, method_name_id)
     {
         // Use substituted types when available (required for generic implement blocks
         // where the registry stores abstract types like `T | Done` but we need concrete
@@ -2281,7 +2278,7 @@ fn resolve_vtable_target<C: VtableCtx>(
             });
         }
         // Look up via unified method_func_keys using type's NameId for stable lookup
-        let type_name_id = impl_type_id.name_id();
+        let type_name_id = impl_type_name_id;
         let func_key = *ctx
             .method_func_keys()
             .get(&(type_name_id, method_name_id))
@@ -2392,7 +2389,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         // copies default methods onto the implementing type, and the compiler registers
         // their JIT functions in method_func_keys during register_implement_block.
         if let Some(method_name_id) = method_name_id {
-            let type_name_id = impl_type_id.name_id();
+            let type_name_id = impl_type_name_id;
             if let Some(&func_key) = ctx.method_func_keys().get(&(type_name_id, method_name_id)) {
                 let (param_type_ids, return_type_id) = substituted_types.unwrap_or_else(|| {
                     let arena = ctx.analyzed().type_arena();

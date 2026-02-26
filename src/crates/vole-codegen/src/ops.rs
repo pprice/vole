@@ -8,7 +8,6 @@ use cranelift_codegen::ir::{Function, InstructionData};
 
 use crate::RuntimeKey;
 use vole_frontend::{BinaryExpr, BinaryOp, ExprKind};
-use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 use vole_vir::numeric_model::numeric_result_type;
 
@@ -399,19 +398,12 @@ impl Cg<'_, '_, '_> {
     /// Call to_string() on a value via the Stringable interface.
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> CodegenResult<Value> {
-        let impl_type_id =
-            ImplTypeId::from_type_id(val.type_id, self.arena(), self.analyzed().entity_registry())
-                .ok_or_else(|| {
-                    CodegenError::not_found("ImplTypeId for type_id", format!("{:?}", val.type_id))
-                })?;
-
         // Look up to_string method via query
         let method_id = self.analyzed().query().method_name_id_by_str("to_string");
 
-        let method_impl = self
+        let (type_name_id, method_impl) = self
             .analyzed()
-            .implement_registry()
-            .get_method(&impl_type_id, method_id)
+            .implement_method_for_type(val.type_id, method_id)
             .ok_or_else(|| {
                 CodegenError::not_found("to_string method", format!("{:?}", val.type_id))
             })?;
@@ -424,9 +416,7 @@ impl Cg<'_, '_, '_> {
             return Ok(result.value);
         }
 
-        // Otherwise, it's a Vole method - look up via unified method_func_keys
-        // Use type's NameId directly for stable lookup across analyzer instances
-        let type_name_id = impl_type_id.name_id();
+        // Otherwise, it's a Vole method - look up via unified method_func_keys.
         let func_key = *self
             .method_func_keys()
             .get(&(type_name_id, method_id))
