@@ -1463,10 +1463,6 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.env.analyzed.type_arena()
     }
 
-    fn registry(&self) -> &vole_sema::EntityRegistry {
-        self.env.analyzed.entity_registry()
-    }
-
     fn interner(&self) -> &vole_frontend::Interner {
         self.env.interner
     }

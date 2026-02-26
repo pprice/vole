@@ -972,7 +972,7 @@ fn resolve_concrete_type_name<C: VtableCtx>(
 
 /// Resolve TypeMeta and FieldMeta class metadata from type_metadata.
 fn resolve_reflection_meta<C: VtableCtx>(ctx: &C) -> CodegenResult<ReflectionMetaInfo> {
-    let registry = ctx.registry();
+    let registry = ctx.analyzed().entity_registry();
     let name_table = ctx.analyzed().name_table();
 
     let type_meta_def_id = registry
@@ -1636,19 +1636,19 @@ fn emit_build_field_array<C: VtableCtx>(
 
 /// Collect all method IDs for an interface using the vtable context.
 ///
-/// Consolidates `collect_interface_methods_via_entity_registry(id, ctx.registry())`
+/// Consolidates `collect_interface_methods_via_entity_registry(id, ctx.analyzed().entity_registry())`
 /// at vtable construction sites.
 fn collect_interface_methods_ctx<C: VtableCtx>(
     interface_id: TypeDefId,
     ctx: &C,
 ) -> CodegenResult<Vec<MethodId>> {
-    collect_interface_methods_via_entity_registry(interface_id, ctx.registry())
+    collect_interface_methods_via_entity_registry(interface_id, ctx.analyzed().entity_registry())
 }
 
 /// Convert an i64 word back to its properly typed Cranelift value.
 ///
 /// Consolidates the repeated `word_to_value_type_id(builder, word, ty, ctx.ptr_type(),
-/// ctx.registry(), ctx.arena())` call pattern used throughout vtable wrapper compilation.
+/// ctx.analyzed().entity_registry(), ctx.arena())` call pattern used throughout vtable wrapper compilation.
 #[inline]
 fn word_to_value_ctx<C: VtableCtx>(
     builder: &mut FunctionBuilder,
@@ -1661,7 +1661,7 @@ fn word_to_value_ctx<C: VtableCtx>(
         word,
         type_id,
         ctx.ptr_type(),
-        ctx.registry(),
+        ctx.analyzed().entity_registry(),
         ctx.arena(),
     )
 }
@@ -1669,7 +1669,7 @@ fn word_to_value_ctx<C: VtableCtx>(
 /// Convert a typed value to an i64 word for vtable dispatch.
 ///
 /// Consolidates `value_to_word(builder, value, ctx.ptr_type(), heap_alloc_ref,
-/// ctx.arena(), ctx.registry())` call sites.
+/// ctx.arena(), ctx.analyzed().entity_registry())` call sites.
 #[inline]
 fn value_to_word_ctx<C: VtableCtx>(
     builder: &mut FunctionBuilder,
@@ -1683,24 +1683,29 @@ fn value_to_word_ctx<C: VtableCtx>(
         ctx.ptr_type(),
         heap_alloc_ref,
         ctx.arena(),
-        ctx.registry(),
+        ctx.analyzed().entity_registry(),
     )
 }
 
 /// Convert a TypeId to an ImplTypeId using vtable context internals.
 ///
-/// Consolidates `ImplTypeId::from_type_id(ty, ctx.arena(), ctx.registry())` call sites.
+/// Consolidates `ImplTypeId::from_type_id(ty, ctx.arena(), ctx.analyzed().entity_registry())` call sites.
 #[inline]
 fn impl_type_id_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> Option<ImplTypeId> {
-    ImplTypeId::from_type_id(ty, ctx.arena(), ctx.registry())
+    ImplTypeId::from_type_id(ty, ctx.arena(), ctx.analyzed().entity_registry())
 }
 
 /// Get the byte size of a TypeId using vtable context internals.
 ///
-/// Consolidates `type_id_size(ty, ctx.ptr_type(), ctx.registry(), ctx.arena())` call sites.
+/// Consolidates `type_id_size(ty, ctx.ptr_type(), ctx.analyzed().entity_registry(), ctx.arena())` call sites.
 #[inline]
 fn type_size_ctx<C: VtableCtx>(ty: TypeId, ctx: &C) -> u32 {
-    type_id_size(ty, ctx.ptr_type(), ctx.registry(), ctx.arena())
+    type_id_size(
+        ty,
+        ctx.ptr_type(),
+        ctx.analyzed().entity_registry(),
+        ctx.arena(),
+    )
 }
 
 /// Compile wrapper body for Function target (closure/function pointer calls)
