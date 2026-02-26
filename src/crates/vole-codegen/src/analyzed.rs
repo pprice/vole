@@ -10,7 +10,7 @@ use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
 };
 use vole_sema::{
-    AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
+    AnalysisOutput, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
 };
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirBody, VirFunction, VirProgram, VirRef, VirTest};
@@ -32,8 +32,14 @@ pub struct AnalyzedProgram {
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
-    /// Compilation database converted for codegen use (Rc-shared, immutable)
-    pub db: CodegenDb,
+    /// Type arena (Rc-shared, immutable during codegen).
+    pub types: Rc<TypeArena>,
+    /// Entity registry (Rc-shared, immutable during codegen).
+    pub entities: Rc<EntityRegistry>,
+    /// Implement registry (Rc-shared, immutable during codegen).
+    pub implements: Rc<ImplementRegistry>,
+    /// Name table (Rc-shared, immutable during codegen).
+    pub names: Rc<NameTable>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
     pub module_id: ModuleId,
     /// Module paths that had sema errors. Codegen should skip compiling
@@ -340,7 +346,10 @@ impl AnalyzedProgram {
             node_map: output.node_map,
             tests_virtual_modules: output.tests_virtual_modules,
             module_programs,
-            db,
+            types: db.types,
+            entities: db.entities,
+            implements: db.implements,
+            names: db.names,
             module_id: output.module_id,
             modules_with_errors: output.modules_with_errors,
             vir_program,
@@ -363,7 +372,7 @@ impl AnalyzedProgram {
 
     /// Get read-only access to the name table
     pub fn name_table(&self) -> &NameTable {
-        &self.db.names
+        &self.names
     }
 
     /// Get a shared reference to the name table Rc (cloned)
@@ -373,22 +382,22 @@ impl AnalyzedProgram {
 
     /// Get a reference to the name table Rc (borrowed, no clone)
     pub fn name_table_ref(&self) -> &Rc<NameTable> {
-        &self.db.names
+        &self.names
     }
 
     /// Get read-only access to the type arena
     pub fn type_arena(&self) -> &TypeArena {
-        &self.db.types
+        &self.types
     }
 
     /// Get read-only access to entity registry
     pub fn entity_registry(&self) -> &EntityRegistry {
-        &self.db.entities
+        &self.entities
     }
 
     /// Get read-only access to implement registry
     pub fn implement_registry(&self) -> &ImplementRegistry {
-        &self.db.implements
+        &self.implements
     }
 
     /// Look up a VIR function by its monomorphized mangled NameId.
