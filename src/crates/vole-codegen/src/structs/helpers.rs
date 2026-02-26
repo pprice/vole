@@ -7,8 +7,39 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::uextend_const;
 use crate::types::CompiledValue;
 use vole_identity::{NameId, TypeDefId};
-use vole_sema::EntityRegistry;
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId, TypeIdVec};
+
+pub(crate) trait StructEntityLookup {
+    fn generic_field_types(&self, type_def_id: TypeDefId) -> Option<Vec<TypeId>>;
+    fn type_params(&self, type_def_id: TypeDefId) -> Vec<NameId>;
+}
+
+impl StructEntityLookup for crate::analyzed::AnalyzedProgram {
+    fn generic_field_types(&self, type_def_id: TypeDefId) -> Option<Vec<TypeId>> {
+        self.entity_registry()
+            .get_type(type_def_id)
+            .generic_info
+            .as_ref()
+            .map(|g| g.field_types.clone())
+    }
+
+    fn type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
+        self.entity_registry().type_params(type_def_id)
+    }
+}
+
+impl StructEntityLookup for vole_sema::entity_registry::EntityRegistry {
+    fn generic_field_types(&self, type_def_id: TypeDefId) -> Option<Vec<TypeId>> {
+        self.get_type(type_def_id)
+            .generic_info
+            .as_ref()
+            .map(|g| g.field_types.clone())
+    }
+
+    fn type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
+        vole_sema::entity_registry::EntityRegistry::type_params(self, type_def_id)
+    }
+}
 
 /// Get field slot and type for a field access (Cg API).
 pub(crate) fn get_field_slot_and_type_id_cg(
@@ -330,17 +361,16 @@ pub(crate) fn load_wide_field(
 pub(crate) fn struct_flat_slot_count(
     type_id: TypeId,
     arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl StructEntityLookup,
 ) -> Option<usize> {
     let (type_def_id, type_args) = arena.unwrap_struct(type_id)?;
-    let type_def = entities.get_type(type_def_id);
-    let generic_info = type_def.generic_info.as_ref()?;
+    let field_types = entities.generic_field_types(type_def_id)?;
 
     // Build substitution map for generic structs (type param NameId -> concrete TypeId)
     let subs = build_type_arg_subs(type_def_id, type_args, entities);
 
     let mut total = 0usize;
-    for field_type in &generic_info.field_types {
+    for field_type in &field_types {
         let concrete_type = substitute_field_type(*field_type, &subs, arena);
         total += field_flat_slots(concrete_type, arena, entities);
     }
@@ -354,7 +384,7 @@ pub(crate) fn struct_flat_slot_count(
 pub(crate) fn field_flat_slots(
     type_id: TypeId,
     arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl StructEntityLookup,
 ) -> usize {
     if let Some(count) = struct_flat_slot_count(type_id, arena, entities) {
         return count;
@@ -422,17 +452,16 @@ fn leaf_cranelift_type(type_id: TypeId, arena: &TypeArena) -> Type {
 pub(crate) fn struct_flat_field_cranelift_types(
     type_id: TypeId,
     arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl StructEntityLookup,
 ) -> Option<Vec<(i32, Type)>> {
     let (type_def_id, type_args) = arena.unwrap_struct(type_id)?;
-    let type_def = entities.get_type(type_def_id);
-    let generic_info = type_def.generic_info.as_ref()?;
+    let field_types = entities.generic_field_types(type_def_id)?;
 
     let subs = build_type_arg_subs(type_def_id, type_args, entities);
 
     let mut result = Vec::new();
     let mut offset = 0i32;
-    for field_type in &generic_info.field_types {
+    for field_type in &field_types {
         let concrete = substitute_field_type(*field_type, &subs, arena);
         collect_leaf_slots(concrete, arena, entities, &mut offset, &mut result);
     }
@@ -444,22 +473,20 @@ pub(crate) fn struct_flat_field_cranelift_types(
 fn collect_leaf_slots(
     type_id: TypeId,
     arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl StructEntityLookup,
     offset: &mut i32,
     out: &mut Vec<(i32, Type)>,
 ) {
     // Recursively flatten nested structs
-    if let Some((nested_def, nested_args)) = arena.unwrap_struct(type_id) {
-        let nested_def_data = entities.get_type(nested_def);
-        if let Some(nested_info) = nested_def_data.generic_info.as_ref() {
+    if let Some((nested_def, nested_args)) = arena.unwrap_struct(type_id)
+        && let Some(nested_field_types) = entities.generic_field_types(nested_def) {
             let nested_subs = build_type_arg_subs(nested_def, nested_args, entities);
-            for field_type in &nested_info.field_types {
+            for field_type in &nested_field_types {
                 let concrete = substitute_field_type(*field_type, &nested_subs, arena);
                 collect_leaf_slots(concrete, arena, entities, offset, out);
             }
             return;
         }
-    }
     // Payload-carrying unions occupy 2 x 8-byte slots (tag + payload) inline,
     // comparable as two i64 words (like i128 but without reconstruction).
     if is_payload_union(type_id, arena) {
@@ -483,13 +510,12 @@ pub(crate) fn struct_field_byte_offset(
     type_id: TypeId,
     slot: usize,
     arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl StructEntityLookup,
 ) -> Option<i32> {
     let (type_def_id, type_args) = arena.unwrap_struct(type_id)?;
-    let type_def = entities.get_type(type_def_id);
-    let generic_info = type_def.generic_info.as_ref()?;
+    let field_types = entities.generic_field_types(type_def_id)?;
 
-    if slot > generic_info.field_types.len() {
+    if slot > field_types.len() {
         return None;
     }
 
@@ -497,7 +523,7 @@ pub(crate) fn struct_field_byte_offset(
     let subs = build_type_arg_subs(type_def_id, type_args, entities);
 
     let mut offset = 0i32;
-    for field_type in generic_info.field_types.iter().take(slot) {
+    for field_type in field_types.iter().take(slot) {
         let concrete_type = substitute_field_type(*field_type, &subs, arena);
         let slots = field_flat_slots(concrete_type, arena, entities);
         offset += (slots as i32) * 8;
@@ -509,7 +535,7 @@ pub(crate) fn struct_field_byte_offset(
 pub(crate) fn struct_total_byte_size(
     type_id: TypeId,
     arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl StructEntityLookup,
 ) -> Option<u32> {
     struct_flat_slot_count(type_id, arena, entities).map(|n| (n as u32) * 8)
 }
@@ -519,7 +545,7 @@ pub(crate) fn struct_total_byte_size(
 fn build_type_arg_subs(
     type_def_id: TypeDefId,
     type_args: &TypeIdVec,
-    entities: &EntityRegistry,
+    entities: &impl StructEntityLookup,
 ) -> FxHashMap<NameId, TypeId> {
     if type_args.is_empty() {
         return FxHashMap::default();
