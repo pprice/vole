@@ -730,82 +730,74 @@ fn first_expr_node_id(stmt: &vole_frontend::ast::Stmt) -> Option<vole_identity::
 /// registry, e.g. structural type params).  Recurses into `Decl::Tests`
 /// blocks so that test-scoped generic functions are also available for
 /// monomorphized VIR lowering.
-fn build_generic_func_map<'a>(
-    program: &'a Program,
+fn build_generic_func_map<'decl>(
+    program: &'decl Program,
     interner: &Interner,
     names: &NameTable,
     entities: &EntityRegistry,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     module_id: ModuleId,
-) -> FxHashMap<NameId, &'a vole_frontend::FuncDecl> {
+) -> FxHashMap<NameId, &'decl vole_frontend::FuncDecl> {
     let namer = NamerLookup::new(names, interner);
-    let mut map = FxHashMap::default();
-
-    collect_generic_funcs(
-        &program.declarations,
-        &namer,
+    let mut collector = GenericFuncCollector {
+        namer: &namer,
         names,
         entities,
         tests_virtual_modules,
-        module_id,
-        &mut map,
-    );
-
-    map
+        root_module_id: module_id,
+        map: FxHashMap::default(),
+    };
+    collector.collect(&program.declarations, module_id);
+    collector.map
 }
 
-/// Recursively collect generic function ASTs from a slice of declarations.
-///
-fn collect_generic_funcs<'a>(
-    decls: &'a [Decl],
-    namer: &NamerLookup<'_>,
-    names: &NameTable,
-    entities: &EntityRegistry,
-    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
-    module_id: ModuleId,
-    map: &mut FxHashMap<NameId, &'a vole_frontend::FuncDecl>,
-) {
-    for decl in decls {
-        match decl {
-            Decl::Function(func) => {
-                // Include both explicit generics (`type_params`) and implicit
-                // generics (generic_info populated by sema, e.g. structural
-                // constraints).
-                for (idx, candidate_module) in
-                    [module_id, names.main_module()].into_iter().enumerate()
-                {
-                    if idx == 1 && candidate_module == module_id {
-                        continue;
-                    }
-                    let Some(name_id) = namer.function(candidate_module, func.name) else {
-                        continue;
-                    };
-                    let Some(func_id) = entities.function_by_name(name_id) else {
-                        continue;
-                    };
-                    let is_generic = !func.type_params.is_empty()
-                        || entities.get_function(func_id).generic_info.is_some();
-                    if is_generic {
-                        map.insert(name_id, func);
+/// Collect generic function ASTs from declarations, including test-scoped
+/// functions that live under virtual test modules.
+struct GenericFuncCollector<'a, 'namer> {
+    namer: &'namer NamerLookup<'namer>,
+    names: &'namer NameTable,
+    entities: &'namer EntityRegistry,
+    tests_virtual_modules: &'namer FxHashMap<Span, ModuleId>,
+    root_module_id: ModuleId,
+    map: FxHashMap<NameId, &'a vole_frontend::FuncDecl>,
+}
+
+impl<'a, 'namer> GenericFuncCollector<'a, 'namer> {
+    fn collect(&mut self, decls: &'a [Decl], module_id: ModuleId) {
+        for decl in decls {
+            match decl {
+                Decl::Function(func) => {
+                    // Include both explicit generics (`type_params`) and
+                    // implicit generics (`generic_info`, e.g. structural constraints).
+                    let module_candidates =
+                        [module_id, self.root_module_id, self.names.main_module()];
+                    for (idx, candidate_module) in module_candidates.into_iter().enumerate() {
+                        if module_candidates[..idx].contains(&candidate_module) {
+                            continue;
+                        }
+                        let Some(name_id) = self.namer.function(candidate_module, func.name) else {
+                            continue;
+                        };
+                        let Some(func_id) = self.entities.function_by_name(name_id) else {
+                            continue;
+                        };
+                        let is_generic = !func.type_params.is_empty()
+                            || self.entities.get_function(func_id).generic_info.is_some();
+                        if is_generic {
+                            self.map.insert(name_id, func);
+                        }
                     }
                 }
+                Decl::Tests(tests_decl) => {
+                    let tests_module_id = self
+                        .tests_virtual_modules
+                        .get(&tests_decl.span)
+                        .copied()
+                        .unwrap_or(module_id);
+                    self.collect(&tests_decl.decls, tests_module_id);
+                }
+                _ => {}
             }
-            Decl::Tests(tests_decl) => {
-                let tests_module_id = tests_virtual_modules
-                    .get(&tests_decl.span)
-                    .copied()
-                    .unwrap_or(module_id);
-                collect_generic_funcs(
-                    &tests_decl.decls,
-                    namer,
-                    names,
-                    entities,
-                    tests_virtual_modules,
-                    tests_module_id,
-                    map,
-                );
-            }
-            _ => {}
         }
     }
 }

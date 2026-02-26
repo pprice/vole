@@ -369,17 +369,10 @@ impl Compiler<'_> {
                         )?;
                     }
                 } else {
-                    // TEMP(vol-eenl): some unconstrained generic monomorph
-                    // instances still arrive without a VIR lookup key.
-                    // Keep AST fallback until full VIR key coverage lands.
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        None,
-                        Some(&instance.substitutions),
-                    )?;
+                    return Err(CodegenError::not_found(
+                        "VIR monomorphized function",
+                        format!("{mangled_name} ({:?})", instance.mangled_name),
+                    ));
                 }
             } else {
                 // TEMP(vol-eenl): constrained generic free-function monomorphs
