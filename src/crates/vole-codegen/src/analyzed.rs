@@ -106,8 +106,14 @@ impl AnalyzedProgram {
             &db.types,
         );
 
-        let generic_func_asts =
-            build_generic_func_map(&program, &interner, &db.names, output.module_id);
+        let generic_func_asts = build_generic_func_map(
+            &program,
+            &interner,
+            &db.names,
+            &db.entities,
+            &output.tests_virtual_modules,
+            output.module_id,
+        );
         lower_monomorphized_instances(
             &generic_func_asts,
             &mut module_programs,
@@ -728,40 +734,76 @@ fn build_generic_func_map<'a>(
     program: &'a Program,
     interner: &Interner,
     names: &NameTable,
+    entities: &EntityRegistry,
+    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     module_id: ModuleId,
 ) -> FxHashMap<NameId, &'a vole_frontend::FuncDecl> {
     let namer = NamerLookup::new(names, interner);
     let mut map = FxHashMap::default();
 
-    collect_generic_funcs(&program.declarations, &namer, module_id, &mut map);
+    collect_generic_funcs(
+        &program.declarations,
+        &namer,
+        names,
+        entities,
+        tests_virtual_modules,
+        module_id,
+        &mut map,
+    );
 
     map
 }
 
 /// Recursively collect generic function ASTs from a slice of declarations.
 ///
-/// Test-scoped functions are registered under the program's module_id (not the
-/// virtual test module), so we use the same `module_id` for name resolution
-/// regardless of nesting depth.
 fn collect_generic_funcs<'a>(
     decls: &'a [Decl],
     namer: &NamerLookup<'_>,
+    names: &NameTable,
+    entities: &EntityRegistry,
+    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     module_id: ModuleId,
     map: &mut FxHashMap<NameId, &'a vole_frontend::FuncDecl>,
 ) {
     for decl in decls {
         match decl {
             Decl::Function(func) => {
-                if func.type_params.is_empty() {
-                    continue;
+                // Include both explicit generics (`type_params`) and implicit
+                // generics (generic_info populated by sema, e.g. structural
+                // constraints).
+                for (idx, candidate_module) in
+                    [module_id, names.main_module()].into_iter().enumerate()
+                {
+                    if idx == 1 && candidate_module == module_id {
+                        continue;
+                    }
+                    let Some(name_id) = namer.function(candidate_module, func.name) else {
+                        continue;
+                    };
+                    let Some(func_id) = entities.function_by_name(name_id) else {
+                        continue;
+                    };
+                    let is_generic = !func.type_params.is_empty()
+                        || entities.get_function(func_id).generic_info.is_some();
+                    if is_generic {
+                        map.insert(name_id, func);
+                    }
                 }
-                let Some(name_id) = namer.function(module_id, func.name) else {
-                    continue;
-                };
-                map.insert(name_id, func);
             }
             Decl::Tests(tests_decl) => {
-                collect_generic_funcs(&tests_decl.decls, namer, module_id, map);
+                let tests_module_id = tests_virtual_modules
+                    .get(&tests_decl.span)
+                    .copied()
+                    .unwrap_or(module_id);
+                collect_generic_funcs(
+                    &tests_decl.decls,
+                    namer,
+                    names,
+                    entities,
+                    tests_virtual_modules,
+                    tests_module_id,
+                    map,
+                );
             }
             _ => {}
         }
@@ -2304,7 +2346,6 @@ fn run_early_vir_monomorphize(
             .generic_info
             .as_ref()
             .is_some_and(|gi| gi.type_params.iter().all(|tp| tp.constraint.is_none()));
-
         // Find the generic VIR template to get the type param order.
         let template = generic_vir_functions.iter().find(|f| f.id == func_id);
         let Some(template) = template else {

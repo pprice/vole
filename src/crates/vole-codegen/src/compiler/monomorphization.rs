@@ -314,6 +314,18 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
+        let use_vir_monomorph = self
+            .registry()
+            .function_by_name(instance.original_name)
+            .map(|original_func_id| {
+                self.registry()
+                    .get_function(original_func_id)
+                    .generic_info
+                    .as_ref()
+                    .is_some_and(|gi| gi.type_params.iter().all(|tp| tp.constraint.is_none()))
+            })
+            .unwrap_or(false);
+
         let source_file_ptr = self.source_file_ptr();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -327,19 +339,35 @@ impl Compiler<'_> {
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
 
-            // VIR path preferred; AST fallback for monomorphs where sema data
-            // was incomplete (e.g. structural type parameters)
-            if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
-                compile_function_inner_with_vir(
-                    builder,
-                    &mut codegen_ctx,
-                    &env,
-                    config,
-                    &vir_func.body,
-                    None,
-                    Some(&instance.substitutions),
-                )?;
+            if use_vir_monomorph {
+                if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
+                    compile_function_inner_with_vir(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        &vir_func.body,
+                        None,
+                        Some(&instance.substitutions),
+                    )?;
+                } else {
+                    // TEMP(vol-eenl): some unconstrained generic monomorph
+                    // instances still arrive without a VIR lookup key.
+                    // Keep AST fallback until full VIR key coverage lands.
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        None,
+                        Some(&instance.substitutions),
+                    )?;
+                }
             } else {
+                // TEMP(vol-eenl): constrained generic free-function monomorphs
+                // still hit behavioral/runtime mismatches on VIR bodies.
+                // Keep AST fallback until constrained VIR monomorph parity
+                // lands (tracked by vol-o61p).
                 compile_function_inner_with_params(
                     builder,
                     &mut codegen_ctx,
