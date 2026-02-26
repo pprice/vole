@@ -17,7 +17,10 @@ use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::primitive_type_id_by_name;
 use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CodegenCtx, MethodInfo, method_name_id_with_interner, type_id_to_cranelift};
+use crate::types::{
+    CodegenCtx, MethodInfo, ast_primitive_type_id, method_name_id_with_interner,
+    type_id_to_cranelift,
+};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::{ImplementBlock, StaticsBlock};
 use vole_frontend::{FuncDecl, Interner, Symbol, TypeExprKind};
@@ -64,8 +67,7 @@ impl Compiler<'_> {
         // Handles primitive types, handle, array, and named/generic types.
         let (self_type_id, impl_type_id) = match &impl_block.target_type.kind {
             TypeExprKind::Primitive(p) => {
-                let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                let type_id = self.arena().primitive(prim_type);
+                let type_id = ast_primitive_type_id(*p);
                 let impl_id = self.impl_type_id_from_type_id(type_id);
                 (type_id, impl_id)
             }
@@ -348,8 +350,7 @@ impl Compiler<'_> {
         // Get type_id directly from metadata to avoid to_type() conversion
         let (self_type_id, impl_type_id) = match &impl_block.target_type.kind {
             TypeExprKind::Primitive(p) => {
-                let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                let type_id = self.arena().primitive(prim_type);
+                let type_id = ast_primitive_type_id(*p);
                 let impl_id = self.impl_type_id_from_type_id(type_id);
                 (type_id, impl_id)
             }
@@ -702,10 +703,7 @@ impl Compiler<'_> {
         // Get the TypeId for `self` binding
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
         let self_type_id = match &impl_block.target_type.kind {
-            TypeExprKind::Primitive(p) => {
-                let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                self.arena().primitive(prim_type)
-            }
+            TypeExprKind::Primitive(p) => ast_primitive_type_id(*p),
             TypeExprKind::Handle => TypeId::HANDLE,
             TypeExprKind::Named(sym) | TypeExprKind::Generic { name: sym, .. } => {
                 // Try given module first, then fall back to program module
@@ -1021,10 +1019,7 @@ impl Compiler<'_> {
 
         // Get the TypeId for `self` binding
         let self_type_id = match &impl_block.target_type.kind {
-            TypeExprKind::Primitive(p) => {
-                let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                self.arena().primitive(prim_type)
-            }
+            TypeExprKind::Primitive(p) => ast_primitive_type_id(*p),
             TypeExprKind::Handle => TypeId::HANDLE,
             // Array target type: `extend [T] with Iterable<T>`.
             // All array TypeIds map to pointer_type in Cranelift, so use any existing

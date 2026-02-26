@@ -7,8 +7,8 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::uextend_const;
 use crate::types::CompiledValue;
 use vole_identity::{NameId, TypeDefId};
+use vole_sema::EntityRegistry;
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId, TypeIdVec};
-use vole_sema::{EntityRegistry, PrimitiveType};
 
 /// Get field slot and type for a field access (Cg API - uses TypeCtx internally).
 /// This bridges Cg to the new TypeCtx-based API.
@@ -126,43 +126,42 @@ pub(crate) fn convert_field_value_id(
     type_id: TypeId,
     arena: &TypeArena,
 ) -> (Value, Type) {
-    match arena.get(type_id) {
-        ArenaType::Primitive(PrimitiveType::F64) => {
+    match type_id {
+        TypeId::F64 => {
             let fval = builder
                 .ins()
                 .bitcast(types::F64, MemFlags::new(), raw_value);
             (fval, types::F64)
         }
-        ArenaType::Primitive(PrimitiveType::F32) => {
+        TypeId::F32 => {
             let i32_val = builder.ins().ireduce(types::I32, raw_value);
             let fval = builder.ins().bitcast(types::F32, MemFlags::new(), i32_val);
             (fval, types::F32)
         }
-        ArenaType::Primitive(PrimitiveType::F128) => {
+        TypeId::F128 => {
             panic!("f128 cannot be reconstructed from a single i64 slot")
         }
-        ArenaType::Primitive(PrimitiveType::Bool) => {
+        TypeId::BOOL => {
             let bval = builder.ins().ireduce(types::I8, raw_value);
             (bval, types::I8)
         }
-        ArenaType::Primitive(PrimitiveType::I8 | PrimitiveType::U8) => {
+        TypeId::I8 | TypeId::U8 => {
             let val = builder.ins().ireduce(types::I8, raw_value);
             (val, types::I8)
         }
-        ArenaType::Primitive(PrimitiveType::I16 | PrimitiveType::U16) => {
+        TypeId::I16 | TypeId::U16 => {
             let val = builder.ins().ireduce(types::I16, raw_value);
             (val, types::I16)
         }
-        ArenaType::Primitive(PrimitiveType::I32 | PrimitiveType::U32) => {
+        TypeId::I32 | TypeId::U32 => {
             let val = builder.ins().ireduce(types::I32, raw_value);
             (val, types::I32)
         }
-        ArenaType::Primitive(PrimitiveType::String)
-        | ArenaType::Array(_)
-        | ArenaType::Class { .. } => {
+        TypeId::STRING => {
             // Pointers stay as i64
             (raw_value, types::I64)
         }
+        _ if arena.is_array(type_id) || arena.is_class(type_id) => (raw_value, types::I64),
         _ => (raw_value, types::I64),
     }
 }
@@ -389,12 +388,13 @@ pub(crate) fn is_payload_union(type_id: TypeId, arena: &TypeArena) -> bool {
 /// All other primitive/pointer types (integers, bool, string, handles, etc.)
 /// are compared as I64 after zero-extension to a uniform slot width.
 fn leaf_cranelift_type(type_id: TypeId, arena: &TypeArena) -> Type {
-    match arena.get(type_id) {
-        ArenaType::Primitive(PrimitiveType::F32) => types::F32,
-        ArenaType::Primitive(PrimitiveType::F64) => types::F64,
-        ArenaType::Primitive(PrimitiveType::F128) => types::F128,
-        ArenaType::Primitive(PrimitiveType::I128) => types::I128,
-        ty => {
+    match type_id {
+        TypeId::F32 => types::F32,
+        TypeId::F64 => types::F64,
+        TypeId::F128 => types::F128,
+        TypeId::I128 => types::I128,
+        _ => {
+            let ty = arena.get(type_id);
             debug_assert!(
                 matches!(
                     ty,

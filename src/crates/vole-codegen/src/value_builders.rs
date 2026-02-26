@@ -12,8 +12,7 @@ use cranelift::prelude::{
 };
 use cranelift_codegen::ir::StackSlot;
 
-use vole_sema::PrimitiveType;
-use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
+use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
@@ -141,16 +140,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let v = self.builder.ins().f64const(n);
             return CompiledValue::new(v, types::F64, TypeId::F64);
         }
-        let (ty, value) = match arena.get(type_id) {
-            ArenaType::Primitive(PrimitiveType::F32) => {
+        let (ty, value) = match type_id {
+            TypeId::F32 => {
                 let v = self.builder.ins().f32const(n as f32);
                 (types::F32, v)
             }
-            ArenaType::Primitive(PrimitiveType::F64) => {
+            TypeId::F64 => {
                 let v = self.builder.ins().f64const(n);
                 (types::F64, v)
             }
-            ArenaType::Primitive(PrimitiveType::F128) => {
+            TypeId::F128 => {
                 // Runtime f128 currently uses a compact software representation:
                 // low 64 bits = f64 payload, high 64 bits = 0.
                 let low = self.iconst_cached(types::I64, n.to_bits() as i64);

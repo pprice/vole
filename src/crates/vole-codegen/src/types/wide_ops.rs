@@ -11,7 +11,6 @@
 // instead of duplicating the i128/f128 branching logic.
 
 use cranelift::prelude::*;
-use vole_sema::PrimitiveType;
 use vole_sema::type_arena::{TypeArena, TypeId};
 
 use crate::types::CompiledValue;
@@ -26,12 +25,13 @@ pub enum WideType {
 impl WideType {
     /// Try to classify a Vole `TypeId` as a wide type.
     /// Returns `None` for non-wide types.
-    pub fn from_type_id(type_id: TypeId, arena: &TypeArena) -> Option<Self> {
-        use vole_sema::type_arena::SemaType;
-        match arena.get(type_id) {
-            SemaType::Primitive(PrimitiveType::I128) => Some(WideType::I128),
-            SemaType::Primitive(PrimitiveType::F128) => Some(WideType::F128),
-            _ => None,
+    pub fn from_type_id(type_id: TypeId, _arena: &TypeArena) -> Option<Self> {
+        if type_id == TypeId::I128 {
+            Some(WideType::I128)
+        } else if type_id == TypeId::F128 {
+            Some(WideType::F128)
+        } else {
+            None
         }
     }
 

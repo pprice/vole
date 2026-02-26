@@ -9,11 +9,11 @@ use rustc_hash::FxHashMap;
 use crate::AnalyzedProgram;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
-use vole_frontend::{Interner, Symbol};
+use vole_frontend::{Interner, PrimitiveType as AstPrimitiveType, Symbol};
 use vole_identity::{ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
 use vole_runtime::native_registry::NativeType;
+use vole_sema::EntityRegistry;
 use vole_sema::type_arena::{TypeArena, TypeId};
-use vole_sema::{EntityRegistry, PrimitiveType};
 
 use super::codegen_state::TypeMetadataMap;
 use crate::ops::{sextend_const, uextend_const};
@@ -226,6 +226,26 @@ pub(crate) fn function_name_id_with_interner(
     namer.function(module, name)
 }
 
+/// Convert an AST primitive type into the corresponding canonical TypeId.
+pub(crate) fn ast_primitive_type_id(prim: AstPrimitiveType) -> TypeId {
+    match prim {
+        AstPrimitiveType::I8 => TypeId::I8,
+        AstPrimitiveType::I16 => TypeId::I16,
+        AstPrimitiveType::I32 => TypeId::I32,
+        AstPrimitiveType::I64 => TypeId::I64,
+        AstPrimitiveType::I128 => TypeId::I128,
+        AstPrimitiveType::U8 => TypeId::U8,
+        AstPrimitiveType::U16 => TypeId::U16,
+        AstPrimitiveType::U32 => TypeId::U32,
+        AstPrimitiveType::U64 => TypeId::U64,
+        AstPrimitiveType::F32 => TypeId::F32,
+        AstPrimitiveType::F64 => TypeId::F64,
+        AstPrimitiveType::F128 => TypeId::F128,
+        AstPrimitiveType::Bool => TypeId::BOOL,
+        AstPrimitiveType::String => TypeId::STRING,
+    }
+}
+
 /// Convert a TypeId to a Cranelift type.
 ///
 /// # Panics
@@ -246,30 +266,27 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
     if arena.is_sentinel(ty) {
         return types::I8;
     }
+
+    match ty {
+        TypeId::I8 | TypeId::U8 => return types::I8,
+        TypeId::I16 | TypeId::U16 => return types::I16,
+        TypeId::I32 | TypeId::U32 => return types::I32,
+        TypeId::I64 | TypeId::U64 => return types::I64,
+        TypeId::I128 => return types::I128,
+        TypeId::F32 => return types::F32,
+        TypeId::F64 => return types::F64,
+        TypeId::F128 => return types::F128,
+        TypeId::BOOL => return types::I8,
+        TypeId::STRING => return pointer_type,
+        _ => {}
+    }
+
     use vole_sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
-        ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
-            types::I8
-        }
-        ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => {
-            types::I16
-        }
-        ArenaType::Primitive(PrimitiveType::I32) | ArenaType::Primitive(PrimitiveType::U32) => {
-            types::I32
-        }
-        ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => {
-            types::I64
-        }
-        ArenaType::Primitive(PrimitiveType::I128) => types::I128,
-        ArenaType::Primitive(PrimitiveType::F32) => types::F32,
-        ArenaType::Primitive(PrimitiveType::F64) => types::F64,
-        ArenaType::Primitive(PrimitiveType::F128) => types::F128,
-        ArenaType::Primitive(PrimitiveType::Bool) => types::I8,
         // Pointer-sized types: heap-allocated (String, Handle, Interface, Union, etc.),
         // stack-allocated via pointer (Struct, FixedArray, Tuple, Fallible, Range),
         // or boxed (Unknown as TaggedValue).
-        ArenaType::Primitive(PrimitiveType::String)
-        | ArenaType::Handle
+        ArenaType::Handle
         | ArenaType::Interface { .. }
         | ArenaType::Union(_)
         | ArenaType::Fallible { .. }
@@ -299,18 +316,19 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
         // Bottom type and sema-internal types.  These should not appear as value types
         // in codegen; treat as pointer-erased to preserve prior behaviour.
         // Note: `Never` appears in unreachable branches; `MetaType` is the type of types.
-        ArenaType::Never | ArenaType::MetaType | ArenaType::Module(_) | ArenaType::Structural(_) | ArenaType::Invalid { .. } => pointer_type,
+        ArenaType::Never
+        | ArenaType::MetaType
+        | ArenaType::Module(_)
+        | ArenaType::Structural(_)
+        | ArenaType::Invalid { .. }
+        | ArenaType::Primitive(_) => pointer_type,
     }
 }
 
 /// Check if a type requires 2 u64 slots in class instance storage.
 /// Currently only i128 (128-bit integer) is wider than a single u64.
-pub(crate) fn is_wide_type(ty: TypeId, arena: &TypeArena) -> bool {
-    use vole_sema::type_arena::SemaType;
-    matches!(
-        arena.get(ty),
-        SemaType::Primitive(PrimitiveType::I128 | PrimitiveType::F128)
-    )
+pub(crate) fn is_wide_type(ty: TypeId, _arena: &TypeArena) -> bool {
+    matches!(ty, TypeId::I128 | TypeId::F128)
 }
 
 /// Get the byte size of a field: 16 for i128 (wide) types, 8 for all others.
@@ -373,20 +391,20 @@ pub(crate) fn type_id_size(
     if arena.is_sentinel(ty) {
         return 0;
     }
+
+    match ty {
+        TypeId::I8 | TypeId::U8 | TypeId::BOOL => return 1,
+        TypeId::I16 | TypeId::U16 => return 2,
+        TypeId::I32 | TypeId::U32 | TypeId::F32 => return 4,
+        TypeId::I64 | TypeId::U64 | TypeId::F64 => return 8,
+        TypeId::I128 | TypeId::F128 => return 16,
+        TypeId::STRING => return pointer_type.bytes(),
+        _ => {}
+    }
+
     use vole_sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
-        ArenaType::Primitive(PrimitiveType::I8)
-        | ArenaType::Primitive(PrimitiveType::U8)
-        | ArenaType::Primitive(PrimitiveType::Bool) => 1,
-        ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => 2,
-        ArenaType::Primitive(PrimitiveType::I32)
-        | ArenaType::Primitive(PrimitiveType::U32)
-        | ArenaType::Primitive(PrimitiveType::F32) => 4,
-        ArenaType::Primitive(PrimitiveType::I64)
-        | ArenaType::Primitive(PrimitiveType::U64)
-        | ArenaType::Primitive(PrimitiveType::F64) => 8,
-        ArenaType::Primitive(PrimitiveType::I128) | ArenaType::Primitive(PrimitiveType::F128) => 16,
-        ArenaType::Primitive(PrimitiveType::String) | ArenaType::Array(_) => pointer_type.bytes(),
+        ArenaType::Array(_) => pointer_type.bytes(),
         ArenaType::Handle => pointer_type.bytes(),
         ArenaType::Interface { .. } => pointer_type.bytes(),
         ArenaType::Void => 0,
@@ -466,7 +484,8 @@ pub(crate) fn type_id_size(
         | ArenaType::MetaType
         | ArenaType::Module(_)
         | ArenaType::Structural(_)
-        | ArenaType::Invalid { .. } => pointer_type.bytes(),
+        | ArenaType::Invalid { .. }
+        | ArenaType::Primitive(_) => pointer_type.bytes(),
     }
 }
 
@@ -700,26 +719,23 @@ pub(crate) fn value_to_word(
         return Ok(alloc_ptr);
     }
 
-    use vole_sema::type_arena::SemaType as ArenaType;
-    let word = match arena.get(value.type_id) {
-        ArenaType::Primitive(PrimitiveType::F64) => {
-            builder
-                .ins()
-                .bitcast(types::I64, MemFlags::new(), value.value)
-        }
-        ArenaType::Primitive(PrimitiveType::F32) => {
+    let word = match value.type_id {
+        TypeId::F64 => builder
+            .ins()
+            .bitcast(types::I64, MemFlags::new(), value.value),
+        TypeId::F32 => {
             let i32_val = builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
             uextend_const(builder, word_type, i32_val)
         }
-        ArenaType::Primitive(PrimitiveType::Bool)
-        | ArenaType::Primitive(PrimitiveType::I8)
-        | ArenaType::Primitive(PrimitiveType::U8)
-        | ArenaType::Primitive(PrimitiveType::I16)
-        | ArenaType::Primitive(PrimitiveType::U16)
-        | ArenaType::Primitive(PrimitiveType::I32)
-        | ArenaType::Primitive(PrimitiveType::U32) => {
+        TypeId::BOOL
+        | TypeId::I8
+        | TypeId::U8
+        | TypeId::I16
+        | TypeId::U16
+        | TypeId::I32
+        | TypeId::U32 => {
             // Only extend if the Cranelift value isn't already word-sized
             if value.ty == word_type {
                 value.value
@@ -727,10 +743,8 @@ pub(crate) fn value_to_word(
                 uextend_const(builder, word_type, value.value)
             }
         }
-        ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => {
-            value.value
-        }
-        ArenaType::Primitive(PrimitiveType::I128) => {
+        TypeId::I64 | TypeId::U64 => value.value,
+        TypeId::I128 => {
             let low = builder.ins().ireduce(types::I64, value.value);
             if word_type == types::I64 {
                 low
@@ -754,7 +768,6 @@ pub(crate) fn word_to_value_type_id(
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
 ) -> Value {
-    use vole_sema::type_arena::SemaType as ArenaType;
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
     let needs_unbox = type_id_size(type_id, pointer_type, entity_registry, arena) > word_bytes;
@@ -769,25 +782,17 @@ pub(crate) fn word_to_value_type_id(
         return builder.ins().load(target_type, MemFlags::new(), word, 0);
     }
 
-    match arena.get(type_id) {
-        ArenaType::Primitive(PrimitiveType::F64) => {
-            builder.ins().bitcast(types::F64, MemFlags::new(), word)
-        }
-        ArenaType::Primitive(PrimitiveType::F32) => {
+    match type_id {
+        TypeId::F64 => builder.ins().bitcast(types::F64, MemFlags::new(), word),
+        TypeId::F32 => {
             let i32_val = builder.ins().ireduce(types::I32, word);
             builder.ins().bitcast(types::F32, MemFlags::new(), i32_val)
         }
-        ArenaType::Primitive(PrimitiveType::Bool)
-        | ArenaType::Primitive(PrimitiveType::I8)
-        | ArenaType::Primitive(PrimitiveType::U8) => builder.ins().ireduce(types::I8, word),
-        ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => {
-            builder.ins().ireduce(types::I16, word)
-        }
-        ArenaType::Primitive(PrimitiveType::I32) | ArenaType::Primitive(PrimitiveType::U32) => {
-            builder.ins().ireduce(types::I32, word)
-        }
-        ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => word,
-        ArenaType::Primitive(PrimitiveType::I128) => {
+        TypeId::BOOL | TypeId::I8 | TypeId::U8 => builder.ins().ireduce(types::I8, word),
+        TypeId::I16 | TypeId::U16 => builder.ins().ireduce(types::I16, word),
+        TypeId::I32 | TypeId::U32 => builder.ins().ireduce(types::I32, word),
+        TypeId::I64 | TypeId::U64 => word,
+        TypeId::I128 => {
             let low = if word_type == types::I64 {
                 word
             } else {
@@ -814,19 +819,22 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
     if arena.is_sentinel(ty) {
         return RuntimeTypeId::I64 as i64;
     }
+    if ty == TypeId::STRING {
+        return RuntimeTypeId::String as i64;
+    }
+    if matches!(ty, TypeId::I64 | TypeId::I32 | TypeId::I16 | TypeId::I8) {
+        return RuntimeTypeId::I64 as i64;
+    }
+    if matches!(ty, TypeId::I128 | TypeId::F128) {
+        return RuntimeTypeId::Wide128 as i64;
+    }
+    if matches!(ty, TypeId::F64 | TypeId::F32) {
+        return RuntimeTypeId::F64 as i64;
+    }
+    if ty == TypeId::BOOL {
+        return RuntimeTypeId::Bool as i64;
+    }
     match arena.get(ty) {
-        ArenaType::Primitive(PrimitiveType::String) => RuntimeTypeId::String as i64,
-        ArenaType::Primitive(PrimitiveType::I64)
-        | ArenaType::Primitive(PrimitiveType::I32)
-        | ArenaType::Primitive(PrimitiveType::I16)
-        | ArenaType::Primitive(PrimitiveType::I8) => RuntimeTypeId::I64 as i64,
-        ArenaType::Primitive(PrimitiveType::I128 | PrimitiveType::F128) => {
-            RuntimeTypeId::Wide128 as i64
-        }
-        ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => {
-            RuntimeTypeId::F64 as i64
-        }
-        ArenaType::Primitive(PrimitiveType::Bool) => RuntimeTypeId::Bool as i64,
         ArenaType::Array(_) => RuntimeTypeId::Array as i64,
         ArenaType::Function { .. } => RuntimeTypeId::Closure as i64,
         ArenaType::Class { .. } => RuntimeTypeId::Instance as i64,
@@ -851,20 +859,29 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
 pub(crate) fn unknown_type_tag(ty: TypeId, arena: &TypeArena) -> u64 {
     use vole_runtime::value::RuntimeTypeId;
     use vole_sema::type_arena::SemaType as ArenaType;
+    if ty == TypeId::STRING {
+        return RuntimeTypeId::String as u64;
+    }
+    if matches!(
+        ty,
+        TypeId::I64
+            | TypeId::I32
+            | TypeId::I16
+            | TypeId::I8
+            | TypeId::U64
+            | TypeId::U32
+            | TypeId::U16
+            | TypeId::U8
+    ) {
+        return RuntimeTypeId::I64 as u64;
+    }
+    if matches!(ty, TypeId::F64 | TypeId::F32) {
+        return RuntimeTypeId::F64 as u64;
+    }
+    if ty == TypeId::BOOL {
+        return RuntimeTypeId::Bool as u64;
+    }
     match arena.get(ty) {
-        ArenaType::Primitive(PrimitiveType::String) => RuntimeTypeId::String as u64,
-        ArenaType::Primitive(PrimitiveType::I64)
-        | ArenaType::Primitive(PrimitiveType::I32)
-        | ArenaType::Primitive(PrimitiveType::I16)
-        | ArenaType::Primitive(PrimitiveType::I8)
-        | ArenaType::Primitive(PrimitiveType::U64)
-        | ArenaType::Primitive(PrimitiveType::U32)
-        | ArenaType::Primitive(PrimitiveType::U16)
-        | ArenaType::Primitive(PrimitiveType::U8) => RuntimeTypeId::I64 as u64,
-        ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => {
-            RuntimeTypeId::F64 as u64
-        }
-        ArenaType::Primitive(PrimitiveType::Bool) => RuntimeTypeId::Bool as u64,
         ArenaType::Array(_) | ArenaType::FixedArray { .. } => RuntimeTypeId::Array as u64,
         ArenaType::Function { .. } => RuntimeTypeId::Closure as u64,
         ArenaType::Class { .. } => RuntimeTypeId::Instance as u64,

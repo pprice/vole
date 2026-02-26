@@ -3241,8 +3241,22 @@ fn resolve_implement_target(
             entities.type_by_short_name(sym_str, names)
         }
         TypeExprKind::Primitive(p) => {
-            let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-            let prim_name = prim_type.name();
+            let prim_name = match p {
+                vole_frontend::PrimitiveType::I8 => "i8",
+                vole_frontend::PrimitiveType::I16 => "i16",
+                vole_frontend::PrimitiveType::I32 => "i32",
+                vole_frontend::PrimitiveType::I64 => "i64",
+                vole_frontend::PrimitiveType::I128 => "i128",
+                vole_frontend::PrimitiveType::U8 => "u8",
+                vole_frontend::PrimitiveType::U16 => "u16",
+                vole_frontend::PrimitiveType::U32 => "u32",
+                vole_frontend::PrimitiveType::U64 => "u64",
+                vole_frontend::PrimitiveType::F32 => "f32",
+                vole_frontend::PrimitiveType::F64 => "f64",
+                vole_frontend::PrimitiveType::F128 => "f128",
+                vole_frontend::PrimitiveType::Bool => "bool",
+                vole_frontend::PrimitiveType::String => "string",
+            };
             entities.type_by_short_name(prim_name, names)
         }
         TypeExprKind::Handle => entities.type_by_short_name("handle", names),

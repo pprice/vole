@@ -370,71 +370,68 @@ fn compute_tuple_offsets(
 /// This is a simplified version of `type_id_size` that assumes 64-bit pointers
 /// and aligns all sizes to 8 bytes (matching tuple layout behavior).
 fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_id: TypeId) -> i32 {
-    use vole_sema::PrimitiveType;
-
     // Sentinel types are zero-sized
     if arena.is_sentinel(type_id) {
         return 0;
     }
 
-    let raw_size: i32 = match arena.get(type_id) {
-        SemaType::Primitive(PrimitiveType::I8)
-        | SemaType::Primitive(PrimitiveType::U8)
-        | SemaType::Primitive(PrimitiveType::Bool) => 1,
-        SemaType::Primitive(PrimitiveType::I16) | SemaType::Primitive(PrimitiveType::U16) => 2,
-        SemaType::Primitive(PrimitiveType::I32)
-        | SemaType::Primitive(PrimitiveType::U32)
-        | SemaType::Primitive(PrimitiveType::F32) => 4,
-        SemaType::Primitive(PrimitiveType::I64)
-        | SemaType::Primitive(PrimitiveType::U64)
-        | SemaType::Primitive(PrimitiveType::F64) => 8,
-        SemaType::Primitive(PrimitiveType::I128) | SemaType::Primitive(PrimitiveType::F128) => 16,
-        SemaType::Primitive(PrimitiveType::String) | SemaType::Array(_) => 8, // pointer
-        SemaType::Handle => 8,                                                // pointer
-        SemaType::Interface { .. } => 8,                                      // pointer
-        SemaType::Void => 0,
-        SemaType::Range => 16, // start + end
-        SemaType::Union(variants) => {
-            // Tag byte + max variant payload, aligned
-            let max_payload = variants
-                .iter()
-                .map(|&v| compute_type_size_aligned(arena, registry, v))
-                .max()
-                .unwrap_or(0);
-            crate::union_layout::TAG_ONLY_SIZE as i32 + max_payload
-        }
-        SemaType::Tuple(elements) => {
-            // Sum of aligned element sizes
-            elements
-                .iter()
-                .map(|&e| compute_type_size_aligned(arena, registry, e))
-                .sum()
-        }
-        SemaType::FixedArray { element, size } => {
-            let elem_size = compute_type_size_aligned(arena, registry, *element);
-            elem_size * (*size as i32)
-        }
-        SemaType::Struct { .. } => {
-            // Use struct_total_byte_size helper
-            crate::structs::struct_total_byte_size(type_id, arena, registry)
-                .expect("INTERNAL: valid struct must have computable size") as i32
-        }
-        SemaType::Unknown => 16, // TaggedValue: 8-byte tag + 8-byte value
-        // Heap-allocated nominal types and function pointers — pointer-sized.
-        SemaType::Class { .. }
-        | SemaType::RuntimeIterator(_)
-        | SemaType::Function { .. }
-        | SemaType::Error { .. }
-        | SemaType::Fallible { .. } => 8,
-        // Erased generic type parameters in uninstantiated generic function bodies.
-        SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => 8, // pointer-erased
-        // Unresolved inference placeholders and sema-internal types: pointer-erased.
-        SemaType::Placeholder(_)
-        | SemaType::Never
-        | SemaType::MetaType
-        | SemaType::Module(_)
-        | SemaType::Structural(_)
-        | SemaType::Invalid { .. } => 8,
+    let raw_size: i32 = match type_id {
+        TypeId::I8 | TypeId::U8 | TypeId::BOOL => 1,
+        TypeId::I16 | TypeId::U16 => 2,
+        TypeId::I32 | TypeId::U32 | TypeId::F32 => 4,
+        TypeId::I64 | TypeId::U64 | TypeId::F64 => 8,
+        TypeId::I128 | TypeId::F128 => 16,
+        TypeId::STRING => 8,
+        _ => match arena.get(type_id) {
+            SemaType::Array(_) => 8,         // pointer
+            SemaType::Handle => 8,           // pointer
+            SemaType::Interface { .. } => 8, // pointer
+            SemaType::Void => 0,
+            SemaType::Range => 16, // start + end
+            SemaType::Union(variants) => {
+                // Tag byte + max variant payload, aligned
+                let max_payload = variants
+                    .iter()
+                    .map(|&v| compute_type_size_aligned(arena, registry, v))
+                    .max()
+                    .unwrap_or(0);
+                crate::union_layout::TAG_ONLY_SIZE as i32 + max_payload
+            }
+            SemaType::Tuple(elements) => {
+                // Sum of aligned element sizes
+                elements
+                    .iter()
+                    .map(|&e| compute_type_size_aligned(arena, registry, e))
+                    .sum()
+            }
+            SemaType::FixedArray { element, size } => {
+                let elem_size = compute_type_size_aligned(arena, registry, *element);
+                elem_size * (*size as i32)
+            }
+            SemaType::Struct { .. } => {
+                // Use struct_total_byte_size helper
+                crate::structs::struct_total_byte_size(type_id, arena, registry)
+                    .expect("INTERNAL: valid struct must have computable size")
+                    as i32
+            }
+            SemaType::Unknown => 16, // TaggedValue: 8-byte tag + 8-byte value
+            // Heap-allocated nominal types and function pointers — pointer-sized.
+            SemaType::Class { .. }
+            | SemaType::RuntimeIterator(_)
+            | SemaType::Function { .. }
+            | SemaType::Error { .. }
+            | SemaType::Fallible { .. } => 8,
+            // Erased generic type parameters in uninstantiated generic function bodies.
+            SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => 8, // pointer-erased
+            // Unresolved inference placeholders and sema-internal types: pointer-erased.
+            SemaType::Placeholder(_)
+            | SemaType::Never
+            | SemaType::MetaType
+            | SemaType::Module(_)
+            | SemaType::Structural(_)
+            | SemaType::Invalid { .. }
+            | SemaType::Primitive(_) => 8,
+        },
     };
 
     // Align to 8 bytes
