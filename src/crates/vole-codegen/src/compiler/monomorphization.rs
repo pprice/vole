@@ -731,9 +731,8 @@ impl Compiler<'_> {
                     self_binding,
                     Some(return_type_id),
                 );
-                // VIR path preferred; AST fallback for class method monomorphs
-                // (NodeMap shares entries across instances, so VIR is not lowered
-                // for class method monomorphs — see analyzed.rs comment)
+                // VIR path preferred; AST fallback remains temporarily until all
+                // class method monomorph bodies are VIR-lowered.
                 if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
                     compile_function_inner_with_vir(
                         builder,
@@ -745,6 +744,9 @@ impl Compiler<'_> {
                         Some(&instance.substitutions),
                     )?;
                 } else {
+                    // TEMP(vol-619h): keep AST fallback until class method
+                    // monomorph VIR coverage is complete (missing VIR bodies
+                    // currently fail in many unit tests).
                     compile_function_inner_with_params(
                         builder,
                         &mut codegen_ctx,
@@ -965,8 +967,8 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
-                // VIR path preferred; AST fallback for static method monomorphs
-                // (not all static method monomorphs are VIR-lowered yet)
+                // VIR path preferred; AST fallback remains temporarily until all
+                // static method monomorph bodies are VIR-lowered.
                 if let Some(vir_func) = self.analyzed.get_vir_monomorph(instance.mangled_name) {
                     compile_function_inner_with_vir(
                         builder,
@@ -978,6 +980,9 @@ impl Compiler<'_> {
                         Some(&instance.substitutions),
                     )?;
                 } else {
+                    // TEMP(vol-619h): keep AST fallback until static method
+                    // monomorph VIR coverage is complete (missing VIR bodies
+                    // currently fail in many unit tests).
                     compile_function_inner_with_params(
                         builder,
                         &mut codegen_ctx,
@@ -1492,9 +1497,6 @@ impl Compiler<'_> {
                         self_binding,
                         Some(return_type_id),
                     );
-                    // Prefer VIR when an expanded monomorph body is present in
-                    // the assembled VirProgram (matched by mangled display
-                    // name). Keep AST fallback for entries not yet VIR-lowered.
                     let vir_body = self
                         .analyzed
                         .vir_program
@@ -1513,8 +1515,9 @@ impl Compiler<'_> {
                             Some(&data.substitutions),
                         )?;
                     } else {
-                        // TEMP(vol-619h): expanded abstract class method
-                        // monomorphs without VIR bodies still use AST codegen.
+                        // TEMP(vol-619h): keep AST fallback until expanded
+                        // abstract class method monomorph VIR coverage is
+                        // complete.
                         compile_function_inner_with_params(
                             builder,
                             &mut codegen_ctx,
