@@ -15,7 +15,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         compound: &CompoundAssignExpr,
         line: u32,
-        expr_id: vole_frontend::NodeId,
+        expr_id: vole_identity::NodeId,
     ) -> CodegenResult<CompiledValue> {
         match &compound.target {
             AssignTarget::Discard => {
@@ -72,7 +72,7 @@ impl Cg<'_, '_, '_> {
         index: &vole_frontend::Expr,
         compound: &CompoundAssignExpr,
         line: u32,
-        expr_id: vole_frontend::NodeId,
+        expr_id: vole_identity::NodeId,
     ) -> CodegenResult<CompiledValue> {
         let arr = self.expr(object)?;
         let idx = self.expr(index)?;

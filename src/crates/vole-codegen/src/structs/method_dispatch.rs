@@ -13,7 +13,7 @@ type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, module_name_id, type_id_to_cranelift};
-use vole_frontend::NodeId;
+use vole_identity::NodeId;
 use vole_identity::TypeDefId;
 use vole_identity::{ModuleId, NameId};
 use vole_sema::generic::MonomorphKey;

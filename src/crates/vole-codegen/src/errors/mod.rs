@@ -14,7 +14,7 @@
 use miette::{Diagnostic, LabeledSpan};
 use std::fmt;
 use thiserror::Error;
-use vole_frontend::Span;
+use vole_identity::Span;
 
 /// The kind of code generation error.
 #[derive(Debug, Clone)]

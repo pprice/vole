@@ -21,8 +21,8 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::methods::ArgSource;
 
 use vole_frontend::ast::CallExpr;
-use vole_frontend::{ExprKind, NodeId, Symbol};
-use vole_identity::NameId;
+use vole_frontend::{ExprKind, Symbol};
+use vole_identity::{NameId, NodeId};
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;

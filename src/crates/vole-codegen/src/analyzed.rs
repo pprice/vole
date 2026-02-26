@@ -5,9 +5,9 @@ use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use vole_frontend::{Decl, Interner, LetInit, Program, Span, Symbol};
+use vole_frontend::{Decl, Interner, LetInit, Program, Symbol};
 use vole_identity::{
-    FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId,
+    FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
 };
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
@@ -1111,7 +1111,7 @@ fn lower_lambda_default_inits(
     type_arena: &TypeArena,
     modules_with_errors: &HashSet<String>,
     type_table: &mut VirTypeTable,
-) -> FxHashMap<(vole_frontend::NodeId, usize), VirRef> {
+) -> FxHashMap<(vole_identity::NodeId, usize), VirRef> {
     let mut map = FxHashMap::default();
     let lambda_nodes = node_map.collect_lambda_default_nodes();
     if lambda_nodes.is_empty() {
@@ -1166,7 +1166,7 @@ fn lower_lambda_default_inits(
 /// Lower default parameter expressions for a single lambda expression node.
 #[allow(clippy::too_many_arguments)]
 fn lower_single_lambda_default_init(
-    lambda_node_id: vole_frontend::NodeId,
+    lambda_node_id: vole_identity::NodeId,
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
@@ -1174,7 +1174,7 @@ fn lower_single_lambda_default_init(
     node_map: &NodeMap,
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
-    map: &mut FxHashMap<(vole_frontend::NodeId, usize), VirRef>,
+    map: &mut FxHashMap<(vole_identity::NodeId, usize), VirRef>,
 ) {
     use crate::calls::find_lambda_in_program;
     use vole_sema::vir_lower::expr::lower_expr;

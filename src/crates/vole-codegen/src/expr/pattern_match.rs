@@ -13,8 +13,8 @@ use crate::types::{
 };
 
 use vole_frontend::ast::{MatchExpr, RecordFieldPattern};
-use vole_frontend::{ExprKind, NodeId, Pattern, PatternKind, Symbol, TypeExpr, TypeExprKind};
-use vole_identity::VirTypeId;
+use vole_frontend::{ExprKind, Pattern, PatternKind, Symbol, TypeExpr, TypeExprKind};
+use vole_identity::{NodeId, VirTypeId};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 

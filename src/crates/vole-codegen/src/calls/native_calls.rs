@@ -6,8 +6,8 @@
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{NodeId, Symbol};
-use vole_identity::ModuleId;
+use vole_frontend::Symbol;
+use vole_identity::{ModuleId, NodeId};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::implement_registry::{TypeMappingEntry, TypeMappingKind};
 use vole_sema::type_arena::TypeId;

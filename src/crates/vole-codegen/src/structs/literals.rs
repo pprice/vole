@@ -263,7 +263,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     fn resolve_struct_literal_type_def(
         &self,
         sl: &StructLiteralExpr,
-        expr_id: &vole_frontend::NodeId,
+        expr_id: &vole_identity::NodeId,
         path_str: &str,
     ) -> CodegenResult<vole_identity::TypeDefId> {
         self.get_expr_type(expr_id)

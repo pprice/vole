@@ -7,8 +7,9 @@ use cranelift::prelude::*;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
 
+use vole_frontend::ExprKind;
 use vole_frontend::ast::{BlockExpr, IfExpr, WhenExpr};
-use vole_frontend::{ExprKind, NodeId};
+use vole_identity::NodeId;
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 

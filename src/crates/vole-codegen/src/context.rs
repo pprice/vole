@@ -546,7 +546,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// NodeIds are globally unique (they embed a ModuleId), so a single flat
     /// lookup covers both main-program and module nodes.
     #[inline]
-    pub fn get_expr_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+    pub fn get_expr_type(&self, node_id: &vole_identity::NodeId) -> Option<TypeId> {
         self.env.analyzed.node_map.get_type(*node_id)
     }
 
@@ -556,7 +556,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// call results). Module code stores generic types (e.g., `V`) which must be substituted
     /// to concrete types (e.g., `i64`) in monomorphized contexts.
     #[inline]
-    pub fn get_expr_type_substituted(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+    pub fn get_expr_type_substituted(&self, node_id: &vole_identity::NodeId) -> Option<TypeId> {
         let ty = self.get_expr_type(node_id)?;
         if self.current_module.is_some() && self.substitutions.is_some() {
             Some(self.try_substitute_type(ty))
@@ -646,7 +646,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_is_check_result(
         &self,
-        node_id: vole_frontend::NodeId,
+        node_id: vole_identity::NodeId,
     ) -> Option<vole_sema::IsCheckResult> {
         self.env.analyzed.node_map.get_is_check_result(node_id)
     }
@@ -655,7 +655,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_lambda_analysis(
         &self,
-        node_id: vole_frontend::NodeId,
+        node_id: vole_identity::NodeId,
     ) -> Option<&vole_sema::LambdaAnalysis> {
         self.env.analyzed.node_map.get_lambda_analysis(node_id)
     }
@@ -664,7 +664,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_it_lambda_info(
         &self,
-        node_id: vole_frontend::NodeId,
+        node_id: vole_identity::NodeId,
     ) -> Option<&vole_sema::ItLambdaInfo> {
         self.env.analyzed.node_map.get_it_lambda_info(node_id)
     }
@@ -673,14 +673,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_optional_chain(
         &self,
-        node_id: vole_frontend::NodeId,
+        node_id: vole_identity::NodeId,
     ) -> Option<&vole_sema::OptionalChainInfo> {
         self.env.analyzed.node_map.get_optional_chain(node_id)
     }
 
     /// Get substituted return type for generic method calls.
     #[inline]
-    pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+    pub fn get_substituted_return_type(&self, node_id: &vole_identity::NodeId) -> Option<TypeId> {
         self.env
             .analyzed
             .node_map
@@ -691,7 +691,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get declared variable type for let statements with explicit type annotations.
     /// Used for union wrapping, numeric widening, and interface boxing.
     #[inline]
-    pub fn get_declared_var_type(&self, init_node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+    pub fn get_declared_var_type(&self, init_node_id: &vole_identity::NodeId) -> Option<TypeId> {
         self.env
             .analyzed
             .node_map
@@ -702,7 +702,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_iterable_kind(
         &self,
-        iterable_node_id: vole_frontend::NodeId,
+        iterable_node_id: vole_identity::NodeId,
     ) -> Option<vole_sema::IterableKind> {
         self.env
             .analyzed
@@ -714,7 +714,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_coercion_kind(
         &self,
-        expr_node_id: vole_frontend::NodeId,
+        expr_node_id: vole_identity::NodeId,
     ) -> Option<vole_sema::CoercionKind> {
         self.env.analyzed.node_map.get_coercion_kind(expr_node_id)
     }
@@ -723,7 +723,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_method_dispatch_kind(
         &self,
-        expr_node_id: vole_frontend::NodeId,
+        expr_node_id: vole_identity::NodeId,
     ) -> Option<vole_sema::MethodDispatchKind> {
         self.env
             .analyzed
@@ -736,7 +736,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_union_storage_kind(
         &self,
-        node_id: vole_frontend::NodeId,
+        node_id: vole_identity::NodeId,
     ) -> Option<vole_sema::UnionStorageKind> {
         self.env.analyzed.node_map.get_union_storage_kind(node_id)
     }
@@ -745,7 +745,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_string_conversion(
         &self,
-        expr_node_id: vole_frontend::NodeId,
+        expr_node_id: vole_identity::NodeId,
     ) -> Option<&vole_sema::StringConversion> {
         self.env
             .analyzed
@@ -817,7 +817,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get VIR-lowered default parameter expression by lambda `NodeId`.
     pub fn lambda_default_vir_init(
         &self,
-        lambda_node_id: vole_frontend::NodeId,
+        lambda_node_id: vole_identity::NodeId,
         slot: usize,
     ) -> Option<&vole_vir::VirExpr> {
         self.analyzed()

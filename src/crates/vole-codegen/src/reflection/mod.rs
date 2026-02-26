@@ -40,7 +40,7 @@ use crate::types::CompiledValue;
 /// - `Dynamic`: loads the meta getter from the interface vtable and calls it
 pub fn compile_meta_access(
     cg: &mut Cg,
-    expr_node_id: vole_frontend::NodeId,
+    expr_node_id: vole_identity::NodeId,
     meta_access: &MetaAccessExpr,
 ) -> CodegenResult<CompiledValue> {
     let meta_kind = cg
@@ -119,7 +119,7 @@ fn resolve_type_param_meta(
     cg: &mut Cg,
     name_id: NameId,
     meta_access: &MetaAccessExpr,
-    expr_node_id: vole_frontend::NodeId,
+    expr_node_id: vole_identity::NodeId,
 ) -> CodegenResult<CompiledValue> {
     let substitutions = cg.substitutions.ok_or_else(|| {
         CodegenError::unsupported("T.@meta requires concrete type (not in a monomorphized context)")
@@ -167,7 +167,7 @@ fn resolve_type_param_meta(
 fn compile_static_meta(
     cg: &mut Cg,
     type_def_id: TypeDefId,
-    expr_node_id: vole_frontend::NodeId,
+    expr_node_id: vole_identity::NodeId,
 ) -> CodegenResult<CompiledValue> {
     let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
         resolve_reflection_types(cg)
@@ -314,7 +314,7 @@ fn build_type_meta_instance(cg: &mut Cg, type_def_id: TypeDefId) -> CodegenResul
 fn compile_dynamic_meta(
     cg: &mut Cg,
     meta_access: &MetaAccessExpr,
-    expr_node_id: vole_frontend::NodeId,
+    expr_node_id: vole_identity::NodeId,
 ) -> CodegenResult<CompiledValue> {
     let obj = cg.expr(&meta_access.object)?;
     let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {

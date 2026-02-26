@@ -13,7 +13,8 @@ use crate::types::{
 };
 use crate::union_layout;
 
-use vole_frontend::{Expr, ExprKind, NodeId};
+use vole_frontend::{Expr, ExprKind};
+use vole_identity::NodeId;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirExpr;
 use vole_vir::expr::VirMethodDispatchMeta;

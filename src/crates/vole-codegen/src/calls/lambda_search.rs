@@ -2,7 +2,8 @@
 //
 // Lambda search utilities: find lambda expressions by NodeId in the AST.
 
-use vole_frontend::{Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt};
+use vole_frontend::{Decl, Expr, ExprKind, LambdaExpr, Program, Stmt};
+use vole_identity::NodeId;
 
 /// Find a lambda expression by NodeId in a program.
 pub(crate) fn find_lambda_in_program(program: &Program, node_id: NodeId) -> Option<&LambdaExpr> {

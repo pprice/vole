@@ -7,7 +7,8 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{Block, Capture, Expr, FuncBody, LambdaExpr, NodeId, Symbol};
+use vole_frontend::{Block, Capture, Expr, FuncBody, LambdaExpr, Symbol};
+use vole_identity::NodeId;
 use vole_sema::type_arena::{TypeArena, TypeId};
 use vole_vir::VirBody;
 use vole_vir::expr::VirCapture;
@@ -202,7 +203,7 @@ impl Cg<'_, '_, '_> {
         // on the VIR path).
         let dummy_body = FuncBody::Block(Block {
             stmts: Vec::new(),
-            span: vole_frontend::Span::default(),
+            span: vole_identity::Span::default(),
         });
         let mut lambda_ctx = self.jit_module().make_context();
         lambda_ctx.func.signature = sig;

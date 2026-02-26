@@ -9,8 +9,8 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, type_id_to_cranelift};
 use crate::union_layout;
 
-use vole_frontend::NodeId;
 use vole_frontend::ast::{AsCastExpr, AsCastKind};
+use vole_identity::NodeId;
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 

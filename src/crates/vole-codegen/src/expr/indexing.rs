@@ -51,7 +51,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         object: &Expr,
         index: &Expr,
-        expr_id: vole_frontend::NodeId,
+        expr_id: vole_identity::NodeId,
     ) -> CodegenResult<CompiledValue> {
         let obj = self.expr(object)?;
 
@@ -182,7 +182,7 @@ impl Cg<'_, '_, '_> {
         obj: CompiledValue,
         index: &Expr,
         element_id: TypeId,
-        expr_id: vole_frontend::NodeId,
+        expr_id: vole_identity::NodeId,
     ) -> CodegenResult<CompiledValue> {
         let idx = self.expr(index)?;
         let raw_value = self.call_runtime(RuntimeKey::ArrayGetValue, &[obj.value, idx.value])?;
