@@ -28,6 +28,7 @@ pub mod types;
 // Re-export paste so the define_int_op_enum macro works from downstream crates.
 #[doc(hidden)]
 pub use paste;
+pub use vole_identity::{NodeId, Span};
 
 pub use builder::VirBuilder;
 pub use calls::{BuiltinMethod, CallTarget, NativeAbi};
