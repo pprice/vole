@@ -318,11 +318,11 @@ impl Cg<'_, '_, '_> {
             let mut value = self.compile_vir_expr(&vir_init)?;
             self.coerce_global_to_declared_type(sym, &mut value)?;
             Ok(value)
-        } else if let Some(global_init) = self.global_init(sym).cloned() {
-            // AST fallback for global initializers not yet lowered to VIR
-            let mut value = self.expr(&global_init)?;
-            self.coerce_global_to_declared_type(sym, &mut value)?;
-            Ok(value)
+        } else if self.global_init(sym).is_some() {
+            Err(CodegenError::internal_with_context(
+                "missing VIR global initializer",
+                self.interner().resolve(sym),
+            ))
         } else if let Some(func_type_id) = self.get_expr_type(&expr.id)
             && self.arena().is_function(func_type_id)
         {
@@ -1397,22 +1397,17 @@ impl Cg<'_, '_, '_> {
             return self.module_binding_value(module_id, export_name, export_type_id);
         }
 
-        // Global initializer — VIR path preferred, AST fallback.
         if let Some(vir_init) = self.global_vir_init(sym).cloned() {
             let mut value = self.compile_vir_expr(&vir_init)?;
             return self
                 .coerce_global_to_declared_type(sym, &mut value)
                 .map(|()| value);
         }
-        // AST fallback: globals whose initializers weren't lowered to VIR
-        // (e.g. sema didn't record type info for the expression).
-        // This path is only reachable from functions compiled via the AST
-        // entry point (monomorphized class methods, expanded abstract methods).
-        if let Some(global_init) = self.global_init(sym).cloned() {
-            let mut value = self.expr(&global_init)?;
-            return self
-                .coerce_global_to_declared_type(sym, &mut value)
-                .map(|()| value);
+        if self.global_init(sym).is_some() {
+            return Err(CodegenError::internal_with_context(
+                "missing VIR global initializer",
+                self.interner().resolve(sym),
+            ));
         }
 
         // Function reference

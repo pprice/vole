@@ -776,6 +776,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if let Some(module_map) = analyzed.vir_program.module_global_inits.get(module_path) {
                 return module_map.get(&name).map(|r| r.as_ref());
             }
+            // Imported modules use their own interner; Symbol indices are not
+            // comparable with main-program globals. Don't fall back to the
+            // main global VIR map in that case.
+            if !std::ptr::eq(self.interner(), analyzed.interner.as_ref()) {
+                return None;
+            }
         }
         analyzed
             .vir_program
