@@ -22,14 +22,14 @@ use vole_sema::vir_lower::{
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
-    pub program: Program,
+    program: Program,
     interner: Rc<Interner>,
     /// All expression-level metadata (types, method resolutions, generic calls).
     /// Vec-backed per-node store, keyed by `NodeId`.
     node_map: NodeMap,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
     /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed NodeMap.
-    pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
+    tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Parsed module programs for compiling pure Vole functions
     module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     /// Type arena (Rc-shared, immutable during codegen).
@@ -44,7 +44,7 @@ pub struct AnalyzedProgram {
     module_id: ModuleId,
     /// Module paths that had sema errors. Codegen should skip compiling
     /// function bodies for these modules to avoid INVALID type IDs.
-    pub modules_with_errors: HashSet<String>,
+    modules_with_errors: HashSet<String>,
     /// All VIR data: functions, tests, global inits, type table, and lookup maps.
     ///
     /// This is the single entry point for all VIR data produced during lowering.
@@ -459,6 +459,11 @@ impl AnalyzedProgram {
         &self.names
     }
 
+    /// Get read-only access to the analyzed root program AST.
+    pub fn program(&self) -> &Program {
+        &self.program
+    }
+
     /// Get read-only access to the interner.
     pub fn interner(&self) -> &Interner {
         &self.interner
@@ -487,6 +492,16 @@ impl AnalyzedProgram {
     /// Get read-only access to parsed module programs and their interners.
     pub fn module_programs(&self) -> &FxHashMap<String, (Program, Rc<Interner>)> {
         &self.module_programs
+    }
+
+    /// Get read-only access to tests block virtual module IDs.
+    pub fn tests_virtual_modules(&self) -> &FxHashMap<Span, ModuleId> {
+        &self.tests_virtual_modules
+    }
+
+    /// Get read-only access to module paths that had sema errors.
+    pub fn modules_with_errors(&self) -> &HashSet<String> {
+        &self.modules_with_errors
     }
 
     /// Get read-only access to the lowered VIR program.

@@ -199,15 +199,20 @@ impl Compiler<'_> {
         let mut default_methods_to_compile: Vec<DefaultMethodInfo> = Vec::new();
         for interface_name_str in &interface_name_strs {
             // Search main program first
-            let found_in_main = self.analyzed.program.declarations.iter().find_map(|decl| {
-                if let vole_frontend::Decl::Interface(iface) = decl {
-                    let name_str = self.analyzed.interner().resolve(iface.name);
-                    if name_str == interface_name_str {
-                        return Some(iface.methods.clone());
+            let found_in_main = self
+                .analyzed
+                .program()
+                .declarations
+                .iter()
+                .find_map(|decl| {
+                    if let vole_frontend::Decl::Interface(iface) = decl {
+                        let name_str = self.analyzed.interner().resolve(iface.name);
+                        if name_str == interface_name_str {
+                            return Some(iface.methods.clone());
+                        }
                     }
-                }
-                None
-            });
+                    None
+                });
             if let Some(methods) = found_in_main {
                 for method in methods {
                     let method_name_str = self.analyzed.interner().resolve(method.name).to_string();

@@ -616,7 +616,7 @@ fn run_source_tests_with_modules(
         let _ = compiler.import_modules();
 
         // Compile just the main program
-        let result = compiler.compile_program_only(&analyzed.program);
+        let result = compiler.compile_program_only(analyzed.program());
 
         let tests = compiler.take_tests();
         (jit, result, tests)
@@ -631,7 +631,7 @@ fn run_source_tests_with_modules(
 
         // Compile main program
         let result = if modules_result.is_ok() {
-            compiler.compile_program_only(&analyzed.program)
+            compiler.compile_program_only(analyzed.program())
         } else {
             modules_result
         };
@@ -763,7 +763,7 @@ fn run_source_tests_with_progress(
 
         // Then compile just the main program
         let result = if modules_result.is_ok() {
-            compiler.compile_program_only(&analyzed.program)
+            compiler.compile_program_only(analyzed.program())
         } else {
             modules_result
         };

@@ -225,7 +225,7 @@ fn compile_with_cached_modules(
 
     let _ = compiler.import_modules();
     let result = compiler
-        .compile_program_only(&analyzed.program)
+        .compile_program_only(&analyzed.program())
         .map_err(|e| e.to_string());
     let tests = compiler.take_tests();
 
@@ -246,7 +246,7 @@ fn compile_fresh(
     let modules_result = compiler.compile_modules_only();
     let result = if modules_result.is_ok() {
         compiler
-            .compile_program_only(&analyzed.program)
+            .compile_program_only(&analyzed.program())
             .map_err(|e| e.to_string())
     } else {
         modules_result.map_err(|e| e.to_string())

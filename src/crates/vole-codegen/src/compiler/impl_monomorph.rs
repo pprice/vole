@@ -1749,7 +1749,7 @@ impl Compiler<'_> {
         Option<ModuleId>,
     )> {
         // Search main program first
-        for decl in &self.analyzed.program.declarations {
+        for decl in &self.analyzed.program().declarations {
             if let vole_frontend::Decl::Interface(iface) = decl {
                 let iface_name = self.analyzed.interner().resolve(iface.name);
                 if iface_name != interface_name_str {

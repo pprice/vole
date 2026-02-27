@@ -371,7 +371,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         if type_module == program_module {
             // Type is in the main program - search there.
-            if let Some(fields) = find_type_fields(&analyzed.program, type_name) {
+            if let Some(fields) = find_type_fields(analyzed.program(), type_name) {
                 for field in fields {
                     let field_name = self.interner().resolve(field.name).to_string();
                     if !provided_fields.contains(&field_name)
