@@ -129,7 +129,10 @@ impl MethodResolutionRef<'_> {
 
     fn external_info(self) -> Option<ExternalMethodRef> {
         match self {
-            MethodResolutionRef::Ast(r) => r.external_info().copied().map(ExternalMethodRef::from),
+            MethodResolutionRef::Ast(r) => r.external_info().map(|info| ExternalMethodRef {
+                module_path: info.module_path,
+                native_name: info.native_name,
+            }),
             MethodResolutionRef::Vir(r) => r.external_info().map(ExternalMethodRef::from),
         }
     }
@@ -1015,7 +1018,10 @@ impl Cg<'_, '_, '_> {
                 }
                 let return_type_id =
                     self.maybe_convert_iterator_return_type(binding.func_type.return_type_id);
-                let ext = ExternalMethodRef::from(external_info);
+                let ext = ExternalMethodRef {
+                    module_path: external_info.module_path,
+                    native_name: external_info.native_name,
+                };
                 let result = self.call_external_id(&ext, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call
                 let mut obj = obj;

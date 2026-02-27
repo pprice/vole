@@ -77,7 +77,13 @@ impl Cg<'_, '_, '_> {
                     format!("{}::{}", module_path, method_name_str),
                 ));
             };
-            (external_info.map(ExternalMethodRef::from), *func_type_id)
+            (
+                external_info.map(|info| ExternalMethodRef {
+                    module_path: info.module_path,
+                    native_name: info.native_name,
+                }),
+                *func_type_id,
+            )
         };
 
         // Get return type from arena

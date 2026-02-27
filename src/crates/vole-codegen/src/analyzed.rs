@@ -52,6 +52,90 @@ pub struct AnalyzedProgram {
     pub vir_program: VirProgram,
 }
 
+/// Codegen-local external binding payload from implement-registry lookups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ExternalMethodInfoRef {
+    pub module_path: NameId,
+    pub native_name: NameId,
+}
+
+impl From<vole_sema::implement_registry::ExternalMethodInfo> for ExternalMethodInfoRef {
+    fn from(value: vole_sema::implement_registry::ExternalMethodInfo) -> Self {
+        Self {
+            module_path: value.module_path,
+            native_name: value.native_name,
+        }
+    }
+}
+
+/// Codegen-local mapping kind for generic external dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GenericTypeMappingKind {
+    Exact(vole_sema::type_arena::TypeId),
+    Default,
+}
+
+impl From<&vole_sema::implement_registry::TypeMappingKind> for GenericTypeMappingKind {
+    fn from(value: &vole_sema::implement_registry::TypeMappingKind) -> Self {
+        match value {
+            vole_sema::implement_registry::TypeMappingKind::Exact(type_id) => Self::Exact(*type_id),
+            vole_sema::implement_registry::TypeMappingKind::Default => Self::Default,
+        }
+    }
+}
+
+/// Codegen-local where-mapping entry for generic external dispatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GenericTypeMappingEntry {
+    pub kind: GenericTypeMappingKind,
+    pub intrinsic_key: String,
+}
+
+impl From<&vole_sema::implement_registry::TypeMappingEntry> for GenericTypeMappingEntry {
+    fn from(value: &vole_sema::implement_registry::TypeMappingEntry) -> Self {
+        Self {
+            kind: GenericTypeMappingKind::from(&value.kind),
+            intrinsic_key: value.intrinsic_key.clone(),
+        }
+    }
+}
+
+/// Codegen-local generic external metadata payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GenericExternalInfoRef {
+    pub module_path: NameId,
+    pub type_mappings: Vec<GenericTypeMappingEntry>,
+}
+
+impl From<&vole_sema::implement_registry::GenericExternalInfo> for GenericExternalInfoRef {
+    fn from(value: &vole_sema::implement_registry::GenericExternalInfo) -> Self {
+        Self {
+            module_path: value.module_path,
+            type_mappings: value
+                .type_mappings
+                .iter()
+                .map(GenericTypeMappingEntry::from)
+                .collect(),
+        }
+    }
+}
+
+/// Codegen-local implement-method payload used by dispatch paths.
+#[derive(Debug, Clone)]
+pub(crate) struct MethodImplRef {
+    pub func_type: vole_sema::types::FunctionType,
+    pub external_info: Option<ExternalMethodInfoRef>,
+}
+
+impl From<&vole_sema::implement_registry::MethodImpl> for MethodImplRef {
+    fn from(value: &vole_sema::implement_registry::MethodImpl) -> Self {
+        Self {
+            func_type: value.func_type.clone(),
+            external_info: value.external_info.map(ExternalMethodInfoRef::from),
+        }
+    }
+}
+
 impl AnalyzedProgram {
     /// Construct AnalyzedProgram from parsed program and analysis output.
     ///
@@ -417,29 +501,29 @@ impl AnalyzedProgram {
     }
 
     /// Look up external function binding metadata by short function name.
-    pub fn external_func_by_name(
-        &self,
-        name: &str,
-    ) -> Option<&vole_sema::implement_registry::ExternalMethodInfo> {
-        self.implement_registry().get_external_func(name)
+    pub(crate) fn external_func_by_name(&self, name: &str) -> Option<ExternalMethodInfoRef> {
+        self.implement_registry()
+            .get_external_func(name)
+            .copied()
+            .map(ExternalMethodInfoRef::from)
     }
 
     /// Look up generic external function metadata by short function name.
-    pub fn generic_external_by_name(
-        &self,
-        name: &str,
-    ) -> Option<&vole_sema::implement_registry::GenericExternalInfo> {
-        self.implement_registry().get_generic_external(name)
+    pub(crate) fn generic_external_by_name(&self, name: &str) -> Option<GenericExternalInfoRef> {
+        self.implement_registry()
+            .get_generic_external(name)
+            .map(GenericExternalInfoRef::from)
     }
 
     /// Look up generic external method metadata by defining type and method name.
-    pub fn generic_external_method(
+    pub(crate) fn generic_external_method(
         &self,
         type_def_id: TypeDefId,
         method_name: NameId,
-    ) -> Option<&vole_sema::implement_registry::GenericExternalInfo> {
+    ) -> Option<GenericExternalInfoRef> {
         self.implement_registry()
             .get_generic_external_method(type_def_id, method_name)
+            .map(GenericExternalInfoRef::from)
     }
 
     /// Get the free-function monomorph cache.
@@ -476,21 +560,22 @@ impl AnalyzedProgram {
     }
 
     /// Look up an implement-registry method by concrete type-name key.
-    pub fn implement_method_by_name(
+    pub(crate) fn implement_method_by_name(
         &self,
         type_name_id: NameId,
         method_name_id: NameId,
-    ) -> Option<&vole_sema::implement_registry::MethodImpl> {
+    ) -> Option<MethodImplRef> {
         self.implement_registry()
             .get_method_by_name(type_name_id, method_name_id)
+            .map(MethodImplRef::from)
     }
 
     /// Resolve and look up an implement-registry method from a sema TypeId.
-    pub fn implement_method_for_type(
+    pub(crate) fn implement_method_for_type(
         &self,
         type_id: vole_sema::type_arena::TypeId,
         method_name_id: NameId,
-    ) -> Option<(NameId, &vole_sema::implement_registry::MethodImpl)> {
+    ) -> Option<(NameId, MethodImplRef)> {
         let type_name_id = self.impl_type_name_id_from_type_id(type_id)?;
         let method_impl = self.implement_method_by_name(type_name_id, method_name_id)?;
         Some((type_name_id, method_impl))

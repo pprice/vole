@@ -2387,7 +2387,10 @@ fn resolve_vtable_target<C: VtableCtx>(
                 param_type_ids,
                 return_type_id,
                 union_tag_remap: None,
-                target: VtableMethodTarget::External(ExternalMethodRef::from(*external_info)),
+                target: VtableMethodTarget::External(ExternalMethodRef {
+                    module_path: external_info.module_path,
+                    native_name: external_info.native_name,
+                }),
             });
         }
         // Handle Vole-body default methods: look up the compiled function via

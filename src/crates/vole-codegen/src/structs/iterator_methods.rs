@@ -61,8 +61,10 @@ impl Cg<'_, '_, '_> {
             .analyzed()
             .query()
             .method_external_binding(*method_id)
-            .copied()
-            .map(ExternalMethodRef::from)
+            .map(|info| ExternalMethodRef {
+                module_path: info.module_path,
+                native_name: info.native_name,
+            })
             .ok_or_else(|| CodegenError::not_found("external binding for Iterator", method_name))?;
 
         // In monomorphized module contexts, substituted_return_type can be absent.

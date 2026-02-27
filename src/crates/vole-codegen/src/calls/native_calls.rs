@@ -9,9 +9,9 @@ use cranelift_module::Module;
 use vole_frontend::Symbol;
 use vole_identity::{ModuleId, NodeId};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
-use vole_sema::implement_registry::{TypeMappingEntry, TypeMappingKind};
 use vole_sema::type_arena::TypeId;
 
+use crate::analyzed::{GenericTypeMappingEntry, GenericTypeMappingKind};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::methods::ArgSource;
 use crate::types::{CompiledValue, native_type_to_cranelift};
@@ -282,7 +282,7 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn resolve_intrinsic_key_for_monomorph(
         &self,
         callee_name: &str,
-        type_mappings: &[TypeMappingEntry],
+        type_mappings: &[GenericTypeMappingEntry],
         substitutions: &rustc_hash::FxHashMap<vole_identity::NameId, TypeId>,
     ) -> CodegenResult<String> {
         let substitution_types: std::collections::HashSet<TypeId> =
@@ -292,12 +292,12 @@ impl Cg<'_, '_, '_> {
 
         for mapping in type_mappings {
             match mapping.kind {
-                TypeMappingKind::Exact(type_id) => {
+                GenericTypeMappingKind::Exact(type_id) => {
                     if substitution_types.contains(&type_id) {
                         exact_matches.push((type_id, mapping.intrinsic_key.as_str()));
                     }
                 }
-                TypeMappingKind::Default => {
+                GenericTypeMappingKind::Default => {
                     default_key = Some(mapping.intrinsic_key.as_str());
                 }
             }

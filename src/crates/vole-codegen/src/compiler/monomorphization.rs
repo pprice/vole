@@ -30,7 +30,7 @@ struct ExpandedMethodData {
     class_name: NameId,
     method_name: NameId,
     self_type: TypeId,
-    external_info: Option<vole_sema::implement_registry::ExternalMethodInfo>,
+    external_info: Option<crate::analyzed::ExternalMethodInfoRef>,
     /// FunctionKey assigned during JIT declaration (set in step 4)
     func_key: Option<crate::FunctionKey>,
 }
@@ -1343,7 +1343,9 @@ impl Compiler<'_> {
                     class_name: tmpl.class_name,
                     method_name: tmpl.method_name,
                     self_type: concrete_self_type,
-                    external_info: tmpl.external_info,
+                    external_info: tmpl
+                        .external_info
+                        .map(crate::analyzed::ExternalMethodInfoRef::from),
                     func_key: None,
                 });
             }

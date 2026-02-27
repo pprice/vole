@@ -35,8 +35,8 @@ pub(crate) struct ExternalMethodRef {
     pub native_name: NameId,
 }
 
-impl From<vole_sema::implement_registry::ExternalMethodInfo> for ExternalMethodRef {
-    fn from(value: vole_sema::implement_registry::ExternalMethodInfo) -> Self {
+impl From<crate::analyzed::ExternalMethodInfoRef> for ExternalMethodRef {
+    fn from(value: crate::analyzed::ExternalMethodInfoRef) -> Self {
         Self {
             module_path: value.module_path,
             native_name: value.native_name,
