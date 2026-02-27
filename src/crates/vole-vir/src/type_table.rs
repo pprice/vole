@@ -6,7 +6,7 @@
 // only (`VirTypeId`).
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use vole_identity::VirTypeId;
+use vole_identity::{TypeDefId, VirTypeId};
 
 use crate::types::{StorageClass, VirPrimitiveKind, VirType, VirTypeLayout};
 
@@ -123,6 +123,206 @@ impl VirTypeTable {
     /// Whether the table is empty (it never is after `new()`).
     pub fn is_empty(&self) -> bool {
         self.types.is_empty()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Type decomposition methods
+// ---------------------------------------------------------------------------
+
+impl VirTypeTable {
+    // -- Unwrap methods (extract structural data from compound types) --------
+
+    /// Extract the variant list from a `Union` type.
+    pub fn unwrap_union(&self, id: VirTypeId) -> Option<&[VirTypeId]> {
+        match self.get(id) {
+            VirType::Union { variants } => Some(variants),
+            _ => None,
+        }
+    }
+
+    /// Extract `(params, return_type)` from a `Function` type.
+    pub fn unwrap_function(&self, id: VirTypeId) -> Option<(&[VirTypeId], VirTypeId)> {
+        match self.get(id) {
+            VirType::Function { params, ret } => Some((params, *ret)),
+            _ => None,
+        }
+    }
+
+    /// Extract the inner type from an `Optional` type.
+    pub fn unwrap_optional(&self, id: VirTypeId) -> Option<VirTypeId> {
+        match self.get(id) {
+            VirType::Optional { inner } => Some(*inner),
+            _ => None,
+        }
+    }
+
+    /// Extract the element type from an `Array` type.
+    pub fn unwrap_array(&self, id: VirTypeId) -> Option<VirTypeId> {
+        match self.get(id) {
+            VirType::Array { elem } => Some(*elem),
+            _ => None,
+        }
+    }
+
+    /// Extract `(elem, len)` from a `FixedArray` type.
+    pub fn unwrap_fixed_array(&self, id: VirTypeId) -> Option<(VirTypeId, u32)> {
+        match self.get(id) {
+            VirType::FixedArray { elem, len } => Some((*elem, *len)),
+            _ => None,
+        }
+    }
+
+    /// Extract the element list from a `Tuple` type.
+    pub fn unwrap_tuple(&self, id: VirTypeId) -> Option<&[VirTypeId]> {
+        match self.get(id) {
+            VirType::Tuple { elems } => Some(elems),
+            _ => None,
+        }
+    }
+
+    /// Extract `(success, errors)` from a `Fallible` type.
+    pub fn unwrap_fallible(&self, id: VirTypeId) -> Option<(VirTypeId, &[VirTypeId])> {
+        match self.get(id) {
+            VirType::Fallible { success, errors } => Some((*success, errors)),
+            _ => None,
+        }
+    }
+
+    /// Extract `(def, type_args)` from a `Class` type.
+    pub fn unwrap_class(&self, id: VirTypeId) -> Option<(TypeDefId, &[VirTypeId])> {
+        match self.get(id) {
+            VirType::Class { def, type_args } => Some((*def, type_args)),
+            _ => None,
+        }
+    }
+
+    /// Extract `(def, type_args)` from a `Struct` type.
+    pub fn unwrap_struct(&self, id: VirTypeId) -> Option<(TypeDefId, &[VirTypeId])> {
+        match self.get(id) {
+            VirType::Struct { def, type_args } => Some((*def, type_args)),
+            _ => None,
+        }
+    }
+
+    /// Extract `(def, type_args)` from an `Interface` type.
+    pub fn unwrap_interface(&self, id: VirTypeId) -> Option<(TypeDefId, &[VirTypeId])> {
+        match self.get(id) {
+            VirType::Interface { def, type_args } => Some((*def, type_args)),
+            _ => None,
+        }
+    }
+
+    /// Extract the element type from a `RuntimeIterator` type.
+    pub fn unwrap_runtime_iterator(&self, id: VirTypeId) -> Option<VirTypeId> {
+        match self.get(id) {
+            VirType::RuntimeIterator { elem } => Some(*elem),
+            _ => None,
+        }
+    }
+
+    // -- Type identity predicates -------------------------------------------
+
+    /// Whether this is a `Union` type.
+    pub fn is_union(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Union { .. })
+    }
+
+    /// Whether this is a `Function` type.
+    pub fn is_function(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Function { .. })
+    }
+
+    /// Whether this is an `Optional` type.
+    pub fn is_optional(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Optional { .. })
+    }
+
+    /// Whether this is an `Array` type.
+    pub fn is_array(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Array { .. })
+    }
+
+    /// Whether this is a `Class` type.
+    pub fn is_class(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Class { .. })
+    }
+
+    /// Whether this is a `Struct` type.
+    pub fn is_struct(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Struct { .. })
+    }
+
+    /// Whether this is an `Interface` type.
+    pub fn is_interface(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Interface { .. })
+    }
+
+    /// Whether this is a `Primitive(String)` type.
+    pub fn is_string(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Primitive(VirPrimitiveKind::String))
+    }
+
+    /// Whether this is the `Void` type.
+    pub fn is_void(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Void)
+    }
+
+    /// Whether this is the `Never` type.
+    pub fn is_never(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Never)
+    }
+
+    /// Whether this is the `Unknown` type.
+    pub fn is_unknown(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Unknown)
+    }
+
+    /// Whether this is a sentinel type (`Nil` or `Done`).
+    pub fn is_sentinel(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Nil | VirType::Done)
+    }
+
+    /// Whether this is the `Range` type.
+    pub fn is_range(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Range)
+    }
+
+    /// Whether this is an `Error` type.
+    pub fn is_error(&self, id: VirTypeId) -> bool {
+        matches!(self.get(id), VirType::Error { .. })
+    }
+
+    // -- Layout predicates --------------------------------------------------
+
+    /// Whether this type is reference-counted (from layout). Returns `false`
+    /// if no layout is available.
+    pub fn is_rc(&self, id: VirTypeId) -> bool {
+        self.get_layout(id).is_some_and(|l| l.is_rc)
+    }
+
+    /// Whether this type requires two register slots (from layout). Returns
+    /// `false` if no layout is available.
+    pub fn is_wide(&self, id: VirTypeId) -> bool {
+        self.get_layout(id).is_some_and(|l| l.is_wide)
+    }
+
+    /// Whether this type lives on the heap (from layout). Returns `false`
+    /// if no layout is available.
+    pub fn is_heap(&self, id: VirTypeId) -> bool {
+        self.get_layout(id).is_some_and(|l| l.is_heap)
+    }
+
+    /// Number of register slots for this type (from layout). Returns `0`
+    /// if no layout is available.
+    pub fn slot_count(&self, id: VirTypeId) -> u8 {
+        self.get_layout(id).map_or(0, |l| l.slot_count)
+    }
+
+    /// The storage class for this type (from layout). Returns `None` if
+    /// no layout is available.
+    pub fn storage_class(&self, id: VirTypeId) -> Option<StorageClass> {
+        self.get_layout(id).map(|l| l.storage)
     }
 }
 
@@ -602,5 +802,335 @@ mod tests {
 
         let f64_layout = table.get_layout(VirTypeId::F64).unwrap();
         assert_eq!(f64_layout.storage, StorageClass::Float);
+    }
+
+    // -- Type decomposition tests -------------------------------------------
+
+    #[test]
+    fn unwrap_union() {
+        let mut table = VirTypeTable::new();
+        let id = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::I64, VirTypeId::STRING],
+            },
+            None,
+        );
+        let variants = table.unwrap_union(id).expect("should be a union");
+        assert_eq!(variants, &[VirTypeId::I64, VirTypeId::STRING]);
+        // Non-union returns None.
+        assert!(table.unwrap_union(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_function() {
+        let mut table = VirTypeTable::new();
+        let id = table.intern(
+            VirType::Function {
+                params: vec![VirTypeId::I64, VirTypeId::BOOL],
+                ret: VirTypeId::STRING,
+            },
+            None,
+        );
+        let (params, ret) = table.unwrap_function(id).expect("should be a function");
+        assert_eq!(params, &[VirTypeId::I64, VirTypeId::BOOL]);
+        assert_eq!(ret, VirTypeId::STRING);
+        assert!(table.unwrap_function(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_optional() {
+        let mut table = VirTypeTable::new();
+        let id = table.intern(
+            VirType::Optional {
+                inner: VirTypeId::I64,
+            },
+            None,
+        );
+        assert_eq!(table.unwrap_optional(id), Some(VirTypeId::I64));
+        assert!(table.unwrap_optional(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_array() {
+        let mut table = VirTypeTable::new();
+        let id = table.intern(
+            VirType::Array {
+                elem: VirTypeId::STRING,
+            },
+            None,
+        );
+        assert_eq!(table.unwrap_array(id), Some(VirTypeId::STRING));
+        assert!(table.unwrap_array(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_fixed_array() {
+        let mut table = VirTypeTable::new();
+        let id = table.intern(
+            VirType::FixedArray {
+                elem: VirTypeId::F64,
+                len: 8,
+            },
+            None,
+        );
+        let (elem, len) = table
+            .unwrap_fixed_array(id)
+            .expect("should be a fixed array");
+        assert_eq!(elem, VirTypeId::F64);
+        assert_eq!(len, 8);
+        assert!(table.unwrap_fixed_array(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_tuple() {
+        let mut table = VirTypeTable::new();
+        let id = table.intern(
+            VirType::Tuple {
+                elems: vec![VirTypeId::I64, VirTypeId::BOOL, VirTypeId::STRING],
+            },
+            None,
+        );
+        let elems = table.unwrap_tuple(id).expect("should be a tuple");
+        assert_eq!(elems, &[VirTypeId::I64, VirTypeId::BOOL, VirTypeId::STRING]);
+        assert!(table.unwrap_tuple(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_fallible() {
+        let mut table = VirTypeTable::new();
+        let err_ty = table.intern(
+            VirType::Error {
+                def: TypeDefId::new(99),
+            },
+            None,
+        );
+        let id = table.intern(
+            VirType::Fallible {
+                success: VirTypeId::I64,
+                errors: vec![err_ty],
+            },
+            None,
+        );
+        let (success, errors) = table.unwrap_fallible(id).expect("should be fallible");
+        assert_eq!(success, VirTypeId::I64);
+        assert_eq!(errors, &[err_ty]);
+        assert!(table.unwrap_fallible(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_class() {
+        let mut table = VirTypeTable::new();
+        let def = TypeDefId::new(42);
+        let id = table.intern(
+            VirType::Class {
+                def,
+                type_args: vec![VirTypeId::STRING],
+            },
+            None,
+        );
+        let (d, args) = table.unwrap_class(id).expect("should be a class");
+        assert_eq!(d, def);
+        assert_eq!(args, &[VirTypeId::STRING]);
+        assert!(table.unwrap_class(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_struct() {
+        let mut table = VirTypeTable::new();
+        let def = TypeDefId::new(7);
+        let id = table.intern(
+            VirType::Struct {
+                def,
+                type_args: vec![],
+            },
+            None,
+        );
+        let (d, args) = table.unwrap_struct(id).expect("should be a struct");
+        assert_eq!(d, def);
+        assert!(args.is_empty());
+        assert!(table.unwrap_struct(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_interface() {
+        let mut table = VirTypeTable::new();
+        let def = TypeDefId::new(13);
+        let id = table.intern(
+            VirType::Interface {
+                def,
+                type_args: vec![VirTypeId::I64],
+            },
+            None,
+        );
+        let (d, args) = table.unwrap_interface(id).expect("should be an interface");
+        assert_eq!(d, def);
+        assert_eq!(args, &[VirTypeId::I64]);
+        assert!(table.unwrap_interface(VirTypeId::I64).is_none());
+    }
+
+    #[test]
+    fn unwrap_runtime_iterator() {
+        let mut table = VirTypeTable::new();
+        let id = table.intern(
+            VirType::RuntimeIterator {
+                elem: VirTypeId::I64,
+            },
+            None,
+        );
+        assert_eq!(table.unwrap_runtime_iterator(id), Some(VirTypeId::I64));
+        assert!(table.unwrap_runtime_iterator(VirTypeId::I64).is_none());
+    }
+
+    // -- Type identity predicate tests --------------------------------------
+
+    #[test]
+    fn type_identity_predicates_reserved() {
+        let table = VirTypeTable::new();
+        assert!(table.is_string(VirTypeId::STRING));
+        assert!(table.is_void(VirTypeId::VOID));
+        assert!(table.is_never(VirTypeId::NEVER));
+        assert!(table.is_unknown(VirTypeId::UNKNOWN));
+        assert!(table.is_sentinel(VirTypeId::NIL));
+        assert!(table.is_sentinel(VirTypeId::DONE));
+        assert!(table.is_range(VirTypeId::RANGE));
+
+        // Negative cases.
+        assert!(!table.is_string(VirTypeId::I64));
+        assert!(!table.is_void(VirTypeId::I64));
+        assert!(!table.is_never(VirTypeId::I64));
+        assert!(!table.is_sentinel(VirTypeId::I64));
+        assert!(!table.is_range(VirTypeId::I64));
+    }
+
+    #[test]
+    fn type_identity_predicates_compound() {
+        let mut table = VirTypeTable::new();
+        let union_id = table.intern(
+            VirType::Union {
+                variants: vec![VirTypeId::I64],
+            },
+            None,
+        );
+        let func_id = table.intern(
+            VirType::Function {
+                params: vec![],
+                ret: VirTypeId::VOID,
+            },
+            None,
+        );
+        let opt_id = table.intern(
+            VirType::Optional {
+                inner: VirTypeId::I64,
+            },
+            None,
+        );
+        let arr_id = table.intern(
+            VirType::Array {
+                elem: VirTypeId::I64,
+            },
+            None,
+        );
+        let class_id = table.intern(
+            VirType::Class {
+                def: TypeDefId::new(1),
+                type_args: vec![],
+            },
+            None,
+        );
+        let struct_id = table.intern(
+            VirType::Struct {
+                def: TypeDefId::new(2),
+                type_args: vec![],
+            },
+            None,
+        );
+        let iface_id = table.intern(
+            VirType::Interface {
+                def: TypeDefId::new(3),
+                type_args: vec![],
+            },
+            None,
+        );
+        let err_id = table.intern(
+            VirType::Error {
+                def: TypeDefId::new(4),
+            },
+            None,
+        );
+
+        assert!(table.is_union(union_id));
+        assert!(table.is_function(func_id));
+        assert!(table.is_optional(opt_id));
+        assert!(table.is_array(arr_id));
+        assert!(table.is_class(class_id));
+        assert!(table.is_struct(struct_id));
+        assert!(table.is_interface(iface_id));
+        assert!(table.is_error(err_id));
+
+        // Cross-check: none match the wrong predicate.
+        assert!(!table.is_union(func_id));
+        assert!(!table.is_function(union_id));
+        assert!(!table.is_class(struct_id));
+        assert!(!table.is_struct(class_id));
+    }
+
+    // -- Layout predicate tests ---------------------------------------------
+
+    #[test]
+    fn layout_predicates_reserved() {
+        let table = VirTypeTable::new();
+
+        // String: RC, heap, not wide, 1 slot, Pointer.
+        assert!(table.is_rc(VirTypeId::STRING));
+        assert!(table.is_heap(VirTypeId::STRING));
+        assert!(!table.is_wide(VirTypeId::STRING));
+        assert_eq!(table.slot_count(VirTypeId::STRING), 1);
+        assert_eq!(
+            table.storage_class(VirTypeId::STRING),
+            Some(StorageClass::Pointer)
+        );
+
+        // I128: wide, 2 slots.
+        assert!(table.is_wide(VirTypeId::I128));
+        assert!(!table.is_rc(VirTypeId::I128));
+        assert_eq!(table.slot_count(VirTypeId::I128), 2);
+        assert_eq!(
+            table.storage_class(VirTypeId::I128),
+            Some(StorageClass::Wide)
+        );
+
+        // I64: word, 1 slot, not RC.
+        assert!(!table.is_rc(VirTypeId::I64));
+        assert!(!table.is_heap(VirTypeId::I64));
+        assert!(!table.is_wide(VirTypeId::I64));
+        assert_eq!(table.slot_count(VirTypeId::I64), 1);
+        assert_eq!(
+            table.storage_class(VirTypeId::I64),
+            Some(StorageClass::Word)
+        );
+
+        // Void: 0 slots.
+        assert_eq!(table.slot_count(VirTypeId::VOID), 0);
+        assert_eq!(
+            table.storage_class(VirTypeId::VOID),
+            Some(StorageClass::Void)
+        );
+    }
+
+    #[test]
+    fn layout_predicates_no_layout() {
+        let mut table = VirTypeTable::new();
+        let id = table.intern(
+            VirType::Array {
+                elem: VirTypeId::I64,
+            },
+            None,
+        );
+        // No layout was provided, so all layout predicates return defaults.
+        assert!(!table.is_rc(id));
+        assert!(!table.is_wide(id));
+        assert!(!table.is_heap(id));
+        assert_eq!(table.slot_count(id), 0);
+        assert_eq!(table.storage_class(id), None);
     }
 }
