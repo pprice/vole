@@ -441,7 +441,7 @@ impl AnalyzedProgram {
     }
 
     /// Get a query interface for accessing type information and analysis results.
-    pub fn query(&self) -> ProgramQuery<'_> {
+    pub(crate) fn query(&self) -> ProgramQuery<'_> {
         ProgramQuery::new(
             &self.entities,
             &self.node_map,
@@ -475,7 +475,7 @@ impl AnalyzedProgram {
     }
 
     /// Get read-only access to the node map.
-    pub fn node_map(&self) -> &NodeMap {
+    pub(crate) fn node_map(&self) -> &NodeMap {
         &self.node_map
     }
 
@@ -515,7 +515,7 @@ impl AnalyzedProgram {
     }
 
     /// Get read-only access to the type arena
-    pub fn type_arena(&self) -> &TypeArena {
+    pub(crate) fn type_arena(&self) -> &TypeArena {
         &self.types
     }
 
@@ -605,22 +605,26 @@ impl AnalyzedProgram {
     }
 
     /// Get the free-function monomorph cache.
-    pub fn monomorph_cache(&self) -> &vole_sema::generic::MonomorphCache {
+    pub(crate) fn monomorph_cache(&self) -> &vole_sema::generic::MonomorphCache {
         &self.entities.monomorph_cache
     }
 
     /// Get the class-method monomorph cache.
-    pub fn class_method_monomorph_cache(&self) -> &vole_sema::generic::ClassMethodMonomorphCache {
+    pub(crate) fn class_method_monomorph_cache(
+        &self,
+    ) -> &vole_sema::generic::ClassMethodMonomorphCache {
         &self.entities.class_method_monomorph_cache
     }
 
     /// Get the static-method monomorph cache.
-    pub fn static_method_monomorph_cache(&self) -> &vole_sema::generic::StaticMethodMonomorphCache {
+    pub(crate) fn static_method_monomorph_cache(
+        &self,
+    ) -> &vole_sema::generic::StaticMethodMonomorphCache {
         &self.entities.static_method_monomorph_cache
     }
 
     /// Render a short human-readable type name for diagnostics/debug output.
-    pub fn display_type_id_short(&self, type_id: vole_sema::type_arena::TypeId) -> String {
+    pub(crate) fn display_type_id_short(&self, type_id: vole_sema::type_arena::TypeId) -> String {
         vole_sema::type_display::display_type_id_short(
             type_id,
             self.type_arena(),
