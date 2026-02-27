@@ -35,9 +35,9 @@ pub struct AnalyzedProgram {
     /// Type arena (Rc-shared, immutable during codegen).
     pub types: Rc<TypeArena>,
     /// Entity registry (Rc-shared, immutable during codegen).
-    pub entities: Rc<EntityRegistry>,
+    entities: Rc<EntityRegistry>,
     /// Implement registry (Rc-shared, immutable during codegen).
-    pub implements: Rc<ImplementRegistry>,
+    implements: Rc<ImplementRegistry>,
     /// Name table (Rc-shared, immutable during codegen).
     pub names: Rc<NameTable>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
