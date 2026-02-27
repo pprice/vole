@@ -443,12 +443,12 @@ impl AnalyzedProgram {
     /// Get a query interface for accessing type information and analysis results.
     pub fn query(&self) -> ProgramQuery<'_> {
         ProgramQuery::new(
-            self.entity_registry(),
+            &self.entities,
             &self.node_map,
             &self.tests_virtual_modules,
             self.name_table_ref(),
             &self.interner,
-            self.implement_registry(),
+            &self.implements,
             &self.module_programs,
             self.type_arena(),
         )
@@ -474,45 +474,40 @@ impl AnalyzedProgram {
         &self.types
     }
 
-    /// Get read-only access to entity registry
-    pub(crate) fn entity_registry(&self) -> &EntityRegistry {
-        &self.entities
-    }
-
     /// Resolve the EntityRegistry NameId used for all array implement dispatch.
     pub fn array_type_name_id(&self) -> Option<NameId> {
-        self.entity_registry().array_name_id()
+        self.entities.array_name_id()
     }
 
     /// Resolve a type's canonical entity NameId from its TypeDefId.
     pub fn entity_type_name_id(&self, type_def_id: TypeDefId) -> NameId {
-        self.entity_registry().name_id(type_def_id)
+        self.entities.name_id(type_def_id)
     }
 
     /// Return whether a type definition is marked as an annotation type.
     pub fn type_is_annotation(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_registry().get_type(type_def_id).is_annotation
+        self.entities.get_type(type_def_id).is_annotation
     }
 
     /// Return interface method IDs in deterministic slot order.
     pub fn interface_method_ids_ordered(&self, interface_type_def_id: TypeDefId) -> Vec<MethodId> {
-        self.entity_registry()
+        self.entities
             .interface_methods_ordered(interface_type_def_id)
     }
 
     /// Return all field IDs declared on a type definition.
     pub fn entity_field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.entity_registry().fields_on_type(type_def_id).collect()
+        self.entities.fields_on_type(type_def_id).collect()
     }
 
     /// Return the semantic field type for a field ID.
     pub fn entity_field_type(&self, field_id: FieldId) -> vole_sema::type_arena::TypeId {
-        self.entity_registry().get_field(field_id).ty
+        self.entities.get_field(field_id).ty
     }
 
     /// Return declared type parameter NameIds for a type definition.
     pub fn entity_type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
-        self.entity_registry().type_params(type_def_id)
+        self.entities.type_params(type_def_id)
     }
 
     /// Return generic field types metadata for a type definition, if present.
@@ -520,7 +515,7 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
     ) -> Option<Vec<vole_sema::type_arena::TypeId>> {
-        self.entity_registry()
+        self.entities
             .get_type(type_def_id)
             .generic_info
             .as_ref()
@@ -529,26 +524,18 @@ impl AnalyzedProgram {
 
     /// Return whether a type definition is a sentinel type.
     pub fn entity_type_is_sentinel(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_registry()
-            .get_type(type_def_id)
-            .kind
-            .is_sentinel()
+        self.entities.get_type(type_def_id).kind.is_sentinel()
     }
 
     /// Find a type by its short (last-segment) name in the entity registry.
     pub fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
-        self.entity_registry()
+        self.entities
             .type_by_short_name(short_name, self.name_table())
-    }
-
-    /// Get read-only access to implement registry
-    pub(crate) fn implement_registry(&self) -> &ImplementRegistry {
-        &self.implements
     }
 
     /// Look up external function binding metadata by short function name.
     pub(crate) fn external_func_by_name(&self, name: &str) -> Option<ExternalMethodInfoRef> {
-        self.implement_registry()
+        self.implements
             .get_external_func(name)
             .copied()
             .map(ExternalMethodInfoRef::from)
@@ -556,7 +543,7 @@ impl AnalyzedProgram {
 
     /// Look up generic external function metadata by short function name.
     pub(crate) fn generic_external_by_name(&self, name: &str) -> Option<GenericExternalInfoRef> {
-        self.implement_registry()
+        self.implements
             .get_generic_external(name)
             .map(GenericExternalInfoRef::from)
     }
@@ -567,24 +554,24 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name: NameId,
     ) -> Option<GenericExternalInfoRef> {
-        self.implement_registry()
+        self.implements
             .get_generic_external_method(type_def_id, method_name)
             .map(GenericExternalInfoRef::from)
     }
 
     /// Get the free-function monomorph cache.
     pub fn monomorph_cache(&self) -> &vole_sema::generic::MonomorphCache {
-        &self.entity_registry().monomorph_cache
+        &self.entities.monomorph_cache
     }
 
     /// Get the class-method monomorph cache.
     pub fn class_method_monomorph_cache(&self) -> &vole_sema::generic::ClassMethodMonomorphCache {
-        &self.entity_registry().class_method_monomorph_cache
+        &self.entities.class_method_monomorph_cache
     }
 
     /// Get the static-method monomorph cache.
     pub fn static_method_monomorph_cache(&self) -> &vole_sema::generic::StaticMethodMonomorphCache {
-        &self.entity_registry().static_method_monomorph_cache
+        &self.entities.static_method_monomorph_cache
     }
 
     /// Render a short human-readable type name for diagnostics/debug output.
@@ -593,7 +580,7 @@ impl AnalyzedProgram {
             type_id,
             self.type_arena(),
             self.name_table(),
-            self.entity_registry(),
+            &self.entities,
         )
     }
 
@@ -602,7 +589,7 @@ impl AnalyzedProgram {
         &self,
         type_id: vole_sema::type_arena::TypeId,
     ) -> Option<NameId> {
-        ImplementRegistry::type_name_id_for_type(type_id, self.type_arena(), self.entity_registry())
+        ImplementRegistry::type_name_id_for_type(type_id, self.type_arena(), &self.entities)
     }
 
     /// Look up an implement-registry method by concrete type-name key.
@@ -611,7 +598,7 @@ impl AnalyzedProgram {
         type_name_id: NameId,
         method_name_id: NameId,
     ) -> Option<MethodImplRef> {
-        self.implement_registry()
+        self.implements
             .get_method_by_name(type_name_id, method_name_id)
             .map(MethodImplRef::from)
     }
