@@ -1,6 +1,7 @@
 //! Vole code generation: Cranelift JIT compilation.
 
 mod analyzed;
+mod analyzed_lower_field_default_inits;
 mod analyzed_lower_function_default_inits;
 mod analyzed_lower_global_inits;
 mod analyzed_lower_lambda_default_inits;
