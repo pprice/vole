@@ -604,6 +604,21 @@ impl AnalyzedProgram {
         vole_identity::method_name_id_by_str(self.name_table(), self.interner(), name_str)
     }
 
+    /// Resolve NameId by module and symbol segments using the main interner.
+    pub(crate) fn try_name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> Option<NameId> {
+        self.names.name_id(module_id, segments, self.interner())
+    }
+
+    /// Resolve NameId by module and symbol segments with an explicit interner.
+    pub(crate) fn try_name_id_with_interner(
+        &self,
+        module_id: ModuleId,
+        segments: &[Symbol],
+        interner: &Interner,
+    ) -> Option<NameId> {
+        self.names.name_id(module_id, segments, interner)
+    }
+
     /// Resolve method NameId by short string, panicking when missing.
     pub(crate) fn method_name_id_by_str(&self, name_str: &str) -> NameId {
         self.try_method_name_id_by_str(name_str)
@@ -753,6 +768,11 @@ impl AnalyzedProgram {
     /// Return the single abstract method for functional interfaces.
     pub(crate) fn is_functional_interface(&self, type_def_id: TypeDefId) -> Option<MethodId> {
         self.entities.is_functional(type_def_id)
+    }
+
+    /// Resolve virtual module ID for a tests block span.
+    pub(crate) fn tests_virtual_module(&self, span: Span) -> Option<ModuleId> {
+        self.tests_virtual_modules.get(&span).copied()
     }
 
     /// Resolve function NameId by module and Symbol, panicking when missing.
