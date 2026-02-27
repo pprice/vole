@@ -1643,15 +1643,12 @@ fn emit_build_field_array<C: VtableCtx>(
     arr_ptr
 }
 
-/// Collect all method IDs for an interface using the vtable context.
-///
-/// Consolidates `collect_interface_methods_via_entity_registry(id, ctx.analyzed())`
-/// at vtable construction sites.
+/// Collect all method IDs for an interface using analyzed wrapper APIs.
 fn collect_interface_methods_ctx<C: VtableCtx>(
     interface_id: TypeDefId,
     ctx: &C,
 ) -> CodegenResult<Vec<MethodId>> {
-    collect_interface_methods_via_entity_registry(interface_id, ctx.analyzed())
+    collect_interface_methods_ordered(interface_id, ctx.analyzed())
 }
 
 /// Convert an i64 word back to its properly typed Cranelift value.
@@ -1973,16 +1970,14 @@ fn compile_external_wrapper<C: VtableCtx>(
     Ok(builder.inst_results(call).to_vec())
 }
 
-/// Look up an interface method slot using EntityRegistry (TypeDefId-based)
-///
-/// This uses TypeDefId and NameId to locate methods without string comparisons.
+/// Look up an interface method slot by TypeDefId/NameId.
 pub(crate) fn interface_method_slot_by_type_def_id(
     interface_id: TypeDefId,
     method_name_id: NameId,
     analyzed: &AnalyzedProgram,
 ) -> CodegenResult<usize> {
     // Collect all methods from the interface and its parents
-    let methods = collect_interface_methods_via_entity_registry(interface_id, analyzed)?;
+    let methods = collect_interface_methods_ordered(interface_id, analyzed)?;
 
     // Find the method by its name_id
     methods
@@ -2002,13 +1997,10 @@ pub(crate) fn interface_method_slot_by_type_def_id(
         })
 }
 
-/// Collect all methods from an interface and its parent interfaces using EntityRegistry
+/// Collect all methods from an interface and its parent interfaces in stable vtable order.
 ///
-/// Returns methods in a consistent order for vtable slot assignment.
 /// Parent interface methods come first, then the interface's own methods.
-/// This matches the order used by collect_interface_methods.
-/// Collect all methods from an interface and its parent interfaces using EntityRegistry
-pub(crate) fn collect_interface_methods_via_entity_registry(
+pub(crate) fn collect_interface_methods_ordered(
     interface_id: TypeDefId,
     analyzed: &AnalyzedProgram,
 ) -> CodegenResult<Vec<MethodId>> {
@@ -2046,7 +2038,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
         }
     };
 
-    // Look up the interface Symbol name via EntityRegistry
+    // Resolve the interface Symbol name via analyzed wrapper metadata.
     let interface_def = env.analyzed.get_type(type_def_id);
     let interface_name_str = env
         .analyzed
@@ -2125,7 +2117,7 @@ fn resolve_vtable_target<C: VtableCtx>(
     interface_method_id: MethodId,
     substitutions: &FxHashMap<NameId, TypeId>,
 ) -> CodegenResult<VtableMethod> {
-    // Get method info from EntityRegistry
+    // Resolve interface method metadata from analyzed wrappers.
     let interface_method = ctx.analyzed().get_method(interface_method_id);
     let method_name_str = ctx
         .analyzed()
@@ -2258,7 +2250,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         let meta = type_metadata_by_name_id(ctx.type_metadata(), type_name_id)?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
-        // Look up method signature via ProgramQuery - require TypeId fields
+        // Look up method signature via analyzed wrappers (TypeDefId + method NameId).
         let sig_from_entity = ctx
             .analyzed()
             .find_method(type_def_id, method_name_id)
@@ -2300,7 +2292,7 @@ fn resolve_vtable_target<C: VtableCtx>(
 
     // Fall back to interface default if method has one
     if interface_method.has_default {
-        // Check for default external binding via EntityRegistry
+        // Check for default external binding via analyzed wrappers.
         if let Some(interface_type_def_id) = ctx.analyzed().try_type_def_id(interface_name_id)
             && let Some(method_name_id) = method_name_id
             && let Some(found_method_id) = ctx
