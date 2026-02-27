@@ -347,8 +347,8 @@ impl Cg<'_, '_, '_> {
             if idx < self.interner().len() {
                 return Some(self.interner().resolve(sym));
             }
-            if idx < self.analyzed().interner.len() {
-                return Some(self.analyzed().interner.resolve(sym));
+            if idx < self.analyzed().interner().len() {
+                return Some(self.analyzed().interner().resolve(sym));
             }
             None
         };

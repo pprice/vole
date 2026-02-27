@@ -124,7 +124,7 @@ impl Compiler<'_> {
         tests_decl: &TestsDecl,
         test_count: &mut usize,
     ) -> CodegenResult<()> {
-        let interner = &self.analyzed.interner;
+        let interner = self.analyzed.interner();
 
         // Look up the virtual module ID for scoped type declarations
         let virtual_module_id = self.analyzed.query().tests_virtual_module(tests_decl.span);
@@ -289,7 +289,7 @@ impl Compiler<'_> {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
-                    let name = self.analyzed.interner.resolve(func.name);
+                    let name = self.analyzed.interner().resolve(func.name);
                     self.build_function_ir(func)?;
                     writeln!(writer, "// func {}", name).map_err(CodegenError::io)?;
                     writeln!(writer, "{}", self.jit.ctx.func).map_err(CodegenError::io)?;
@@ -321,7 +321,7 @@ impl Compiler<'_> {
             .query()
             .function_id(program_module, func.name)
             .ok_or_else(|| {
-                CodegenError::not_found("function", self.analyzed.interner.resolve(func.name))
+                CodegenError::not_found("function", self.analyzed.interner().resolve(func.name))
             })?;
         let func_def = self.analyzed.query().get_function(semantic_func_id);
         let (param_type_ids, return_type_id) = (
@@ -354,7 +354,7 @@ impl Compiler<'_> {
             let env = CompileEnv {
                 analyzed: self.analyzed,
                 state: &self.state,
-                interner: &self.analyzed.interner,
+                interner: self.analyzed.interner(),
                 source_file_ptr,
                 global_module_bindings: &self.global_module_bindings,
             };
@@ -419,7 +419,7 @@ impl Compiler<'_> {
             let env = CompileEnv {
                 analyzed: self.analyzed,
                 state: &self.state,
-                interner: &self.analyzed.interner,
+                interner: self.analyzed.interner(),
                 source_file_ptr,
                 global_module_bindings: &self.global_module_bindings,
             };

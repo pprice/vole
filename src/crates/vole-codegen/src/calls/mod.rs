@@ -510,7 +510,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
         let named_arg_mapping = self
             .analyzed()
-            .node_map
+            .node_map()
             .get_resolved_call_args(call_expr_id)
             .map(|s| s.to_vec())
             .filter(|mapping| mapping_is_valid(mapping));

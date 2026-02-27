@@ -23,10 +23,10 @@ use vole_sema::vir_lower::{
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
     pub program: Program,
-    pub interner: Rc<Interner>,
+    interner: Rc<Interner>,
     /// All expression-level metadata (types, method resolutions, generic calls).
     /// Vec-backed per-node store, keyed by `NodeId`.
-    pub node_map: NodeMap,
+    node_map: NodeMap,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
     /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed NodeMap.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
@@ -457,6 +457,21 @@ impl AnalyzedProgram {
     /// Get read-only access to the name table
     pub fn name_table(&self) -> &NameTable {
         &self.names
+    }
+
+    /// Get read-only access to the interner.
+    pub fn interner(&self) -> &Interner {
+        &self.interner
+    }
+
+    /// Clone the interner Rc for APIs that need shared ownership.
+    pub fn interner_rc(&self) -> Rc<Interner> {
+        Rc::clone(&self.interner)
+    }
+
+    /// Get read-only access to the node map.
+    pub fn node_map(&self) -> &NodeMap {
+        &self.node_map
     }
 
     /// Get a shared reference to the name table Rc (cloned)

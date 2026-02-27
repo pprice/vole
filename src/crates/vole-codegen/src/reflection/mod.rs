@@ -46,7 +46,7 @@ pub fn compile_meta_access(
     let meta_kind = cg
         .env
         .analyzed
-        .node_map
+        .node_map()
         .get_meta_access(expr_node_id)
         .ok_or_else(|| CodegenError::unsupported("@meta access without sema annotation"))?;
 

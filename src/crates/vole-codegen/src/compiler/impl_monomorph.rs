@@ -43,7 +43,7 @@ impl Compiler<'_> {
         impl_block: &ImplementBlock,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        let interner = self.analyzed.interner.clone();
+        let interner = self.analyzed.interner_rc();
         self.register_implement_block_with_interner(impl_block, &interner, module_id)
     }
 
@@ -1022,7 +1022,7 @@ impl Compiler<'_> {
 
         // Compile static methods from statics block (if present)
         if let Some(ref statics) = impl_block.statics {
-            let interner = self.analyzed.interner.clone();
+            let interner = self.analyzed.interner_rc();
             self.compile_implement_statics(statics, &type_name, type_def_id, None, &interner)?;
         }
 
@@ -1751,23 +1751,18 @@ impl Compiler<'_> {
         // Search main program first
         for decl in &self.analyzed.program.declarations {
             if let vole_frontend::Decl::Interface(iface) = decl {
-                let iface_name = self.analyzed.interner.resolve(iface.name);
+                let iface_name = self.analyzed.interner().resolve(iface.name);
                 if iface_name != interface_name_str {
                     continue;
                 }
                 for method in &iface.methods {
-                    let m_name = self.analyzed.interner.resolve(method.name);
+                    let m_name = self.analyzed.interner().resolve(method.name);
                     if m_name == method_name_str
                         && let Some(body) = &method.body
                     {
                         let param_syms: Vec<Symbol> =
                             method.params.iter().map(|p| p.name).collect();
-                        return Some((
-                            body.clone(),
-                            param_syms,
-                            self.analyzed.interner.clone(),
-                            None,
-                        ));
+                        return Some((body.clone(), param_syms, self.analyzed.interner_rc(), None));
                     }
                 }
             }

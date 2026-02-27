@@ -11,7 +11,7 @@ macro_rules! compile_env {
         crate::types::CompileEnv {
             analyzed: $self.analyzed,
             state: &$self.state,
-            interner: &$self.analyzed.interner,
+            interner: $self.analyzed.interner(),
             source_file_ptr: $source_file_ptr,
             global_module_bindings: &$self.global_module_bindings,
         }
@@ -155,13 +155,13 @@ impl<'a> Compiler<'a> {
 
     /// Resolve a Symbol to a string (owned, for use across mutable operations)
     fn resolve_symbol(&self, sym: Symbol) -> String {
-        self.analyzed.interner.resolve(sym).to_string()
+        self.analyzed.interner().resolve(sym).to_string()
     }
 
     /// Get the "self" keyword symbol (panics if not interned - should never happen)
     fn self_symbol(&self) -> Symbol {
         self.analyzed
-            .interner
+            .interner()
             .lookup("self")
             .expect("INTERNAL: 'self' keyword not interned")
     }

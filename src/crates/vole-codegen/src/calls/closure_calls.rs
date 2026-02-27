@@ -121,7 +121,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Check if this call has lambda defaults
         let lambda_defaults = self
             .analyzed()
-            .node_map
+            .node_map()
             .get_lambda_defaults(call_expr_id)
             .cloned();
 
@@ -148,7 +148,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
         let named_mapping = self
             .analyzed()
-            .node_map
+            .node_map()
             .get_resolved_call_args(call_expr_id)
             .map(|s| s.to_vec())
             .filter(|mapping| mapping_is_valid(mapping));

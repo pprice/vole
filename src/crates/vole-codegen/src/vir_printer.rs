@@ -980,7 +980,7 @@ impl<'a> VirPrinter<'a> {
     fn sym(&self, s: Symbol) -> String {
         // Module functions may carry Symbols interned in a different interner.
         // Guard against out-of-bounds by falling back to a numeric label.
-        let interner = &self.analyzed.interner;
+        let interner = self.analyzed.interner();
         if (s.index() as usize) < interner.len() {
             interner.resolve(s).to_string()
         } else {

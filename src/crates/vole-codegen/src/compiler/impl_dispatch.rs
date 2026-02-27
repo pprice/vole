@@ -201,7 +201,7 @@ impl Compiler<'_> {
             // Search main program first
             let found_in_main = self.analyzed.program.declarations.iter().find_map(|decl| {
                 if let vole_frontend::Decl::Interface(iface) = decl {
-                    let name_str = self.analyzed.interner.resolve(iface.name);
+                    let name_str = self.analyzed.interner().resolve(iface.name);
                     if name_str == interface_name_str {
                         return Some(iface.methods.clone());
                     }
@@ -210,7 +210,7 @@ impl Compiler<'_> {
             });
             if let Some(methods) = found_in_main {
                 for method in methods {
-                    let method_name_str = self.analyzed.interner.resolve(method.name).to_string();
+                    let method_name_str = self.analyzed.interner().resolve(method.name).to_string();
                     if method.body.is_some() && !direct_method_name_strs.contains(&method_name_str)
                     {
                         default_methods_to_compile.push(DefaultMethodInfo {

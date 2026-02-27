@@ -1262,7 +1262,7 @@ impl Cg<'_, '_, '_> {
                     None
                 } else {
                     self.analyzed()
-                        .node_map
+                        .node_map()
                         .get_resolved_call_args(expr_id)
                         .map(|s| s.to_vec())
                 }

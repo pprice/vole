@@ -64,7 +64,7 @@ impl Compiler<'_> {
     /// This extracts module exports from the pattern and stores them in global_module_bindings.
     pub(super) fn register_global_module_bindings(&mut self, let_tuple: &LetTupleStmt) {
         // Get the module type from semantic analysis
-        let module_type_id = self.analyzed.node_map.get_type(let_tuple.init.id);
+        let module_type_id = self.analyzed.node_map().get_type(let_tuple.init.id);
         let module_type_id = match module_type_id {
             Some(id) => id,
             None => return, // No type info available
@@ -85,7 +85,7 @@ impl Compiler<'_> {
         if let PatternKind::Record { fields, .. } = &let_tuple.pattern.kind {
             for field_pattern in fields {
                 let export_name = field_pattern.field_name;
-                let export_name_str = self.analyzed.interner.resolve(export_name);
+                let export_name_str = self.analyzed.interner().resolve(export_name);
 
                 // Find the export type in the module
                 let export_type_id = module_info
@@ -132,7 +132,7 @@ impl Compiler<'_> {
                 && let ExprKind::Import(_) = &let_tuple.init.kind
             {
                 // Look up the import expression's type directly (NodeId is globally unique)
-                let module_type_id = analyzed.node_map.get_type(let_tuple.init.id);
+                let module_type_id = analyzed.node_map().get_type(let_tuple.init.id);
                 let Some(module_type_id) = module_type_id else {
                     continue;
                 };
