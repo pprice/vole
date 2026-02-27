@@ -7,8 +7,6 @@
 //! - Module type method compilation (`compile_module_type_methods` and helpers)
 //! - Shared helpers (`register_method_func`, `get_type_name_from_expr`)
 
-use rustc_hash::FxHashSet;
-
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::{ModuleCompileInfo, TypeDeclInfo, TypeMethodsData};
 use super::{Compiler, DeclareMode, SelfParam};
@@ -606,11 +604,10 @@ impl Compiler<'_> {
         let vir_func = self.analyzed.get_vir_method(semantic_method_id);
 
         // Create function builder and compile using the module interner
-        let no_global_inits = FxHashSet::default();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-            let env = compile_env!(self, interner, &no_global_inits, source_file_ptr);
+            let env = compile_env!(self, interner, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(
                 &mut self.jit.module,
                 &mut self.func_registry,
@@ -767,7 +764,6 @@ impl Compiler<'_> {
         type_decl: &T,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &FxHashSet<Symbol>,
     ) -> CodegenResult<()> {
         // Generic types are compiled via monomorphized instances.
         if type_decl.has_type_params() {
@@ -816,7 +812,6 @@ impl Compiler<'_> {
         let module_info = ModuleCompileInfo {
             interner: module_interner,
             module_id,
-            global_inits: module_global_inits,
         };
 
         // Compile instance methods
@@ -930,12 +925,7 @@ impl Compiler<'_> {
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = compile_env!(
-                    self,
-                    module_info.interner,
-                    module_info.global_inits,
-                    source_file_ptr
-                );
+                let env = compile_env!(self, module_info.interner, source_file_ptr);
                 let mut codegen_ctx = CodegenCtx::new(
                     &mut self.jit.module,
                     &mut self.func_registry,
@@ -1058,12 +1048,7 @@ impl Compiler<'_> {
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = compile_env!(
-                    self,
-                    module_info.interner,
-                    module_info.global_inits,
-                    source_file_ptr
-                );
+                let env = compile_env!(self, module_info.interner, source_file_ptr);
                 let mut codegen_ctx = CodegenCtx::new(
                     &mut self.jit.module,
                     &mut self.func_registry,
@@ -1096,9 +1081,8 @@ impl Compiler<'_> {
         class: &ClassDecl,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &FxHashSet<Symbol>,
     ) -> CodegenResult<()> {
-        self.compile_module_type_methods(class, module_interner, module_path, module_global_inits)
+        self.compile_module_type_methods(class, module_interner, module_path)
     }
 
     /// Compile methods for a module struct (uses module interner)
@@ -1107,13 +1091,7 @@ impl Compiler<'_> {
         struct_decl: &StructDecl,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &FxHashSet<Symbol>,
     ) -> CodegenResult<()> {
-        self.compile_module_type_methods(
-            struct_decl,
-            module_interner,
-            module_path,
-            module_global_inits,
-        )
+        self.compile_module_type_methods(struct_decl, module_interner, module_path)
     }
 }

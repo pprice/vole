@@ -1,7 +1,5 @@
 use std::collections::BTreeSet;
 
-use rustc_hash::FxHashSet;
-
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
@@ -11,7 +9,7 @@ use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, function_name_id_with_interner, type_id_to_cranelift};
 use vole_frontend::ast::LetTupleStmt;
-use vole_frontend::{Decl, ExprKind, FuncDecl, Interner, LetInit, PatternKind, Program, Symbol};
+use vole_frontend::{Decl, ExprKind, FuncDecl, Interner, PatternKind, Program, Symbol};
 use vole_identity::{ModuleId, NameId};
 use vole_sema::type_arena::TypeId;
 use vole_vir::calls::CallTarget;
@@ -248,18 +246,15 @@ impl Compiler<'_> {
                         test_count += 1;
                     }
                 }
-                Decl::Let(let_stmt) => {
-                    // Store global initializer expressions (skip type aliases)
-                    if let LetInit::Expr(_) = &let_stmt.init {
-                        self.global_inits.insert(let_stmt.name);
-                    }
-                }
                 Decl::LetTuple(let_tuple) => {
                     // Handle top-level destructuring imports
                     // Populate global_module_bindings for each destructured name
                     if matches!(&let_tuple.init.kind, ExprKind::Import(_)) {
                         self.register_global_module_bindings(let_tuple);
                     }
+                }
+                Decl::Let(_) => {
+                    // Global initializer presence is resolved via ProgramQuery lookups.
                 }
                 Decl::Class(class) => {
                     self.finalize_class(class, program)?;
@@ -588,21 +583,6 @@ impl Compiler<'_> {
         tracing::debug!(module_path, "compile_module_functions: compiling bodies");
         let (program, module_interner) = &self.analyzed.module_programs[module_path];
 
-        // Extract module global initializer expressions
-        let module_global_inits: FxHashSet<Symbol> = program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Let(let_stmt) = decl
-                    && let LetInit::Expr(_) = &let_stmt.init
-                {
-                    Some(let_stmt.name)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
         // Register destructured import bindings for this module.
         // When a module uses `let { add } = import "./other"`, the binding must
         // be available during compilation of the module's function bodies.
@@ -646,13 +626,7 @@ impl Compiler<'_> {
                     continue;
                 }
 
-                self.compile_module_function(
-                    module_path,
-                    name_id,
-                    func,
-                    module_interner,
-                    &module_global_inits,
-                )?;
+                self.compile_module_function(module_path, name_id, func, module_interner)?;
             }
         }
 
@@ -668,12 +642,7 @@ impl Compiler<'_> {
         for decl in &program.declarations {
             if let Decl::Class(class) = decl {
                 tracing::debug!(class_name = %module_interner.resolve(class.name), "Compiling module class methods");
-                self.compile_module_class_methods(
-                    class,
-                    module_interner,
-                    module_path,
-                    &module_global_inits,
-                )?;
+                self.compile_module_class_methods(class, module_interner, module_path)?;
             }
         }
 
@@ -683,12 +652,7 @@ impl Compiler<'_> {
                 && (!struct_decl.methods.is_empty() || struct_decl.statics.is_some())
             {
                 tracing::debug!(struct_name = %module_interner.resolve(struct_decl.name), "Compiling module struct methods");
-                self.compile_module_struct_methods(
-                    struct_decl,
-                    module_interner,
-                    module_path,
-                    &module_global_inits,
-                )?;
+                self.compile_module_struct_methods(struct_decl, module_interner, module_path)?;
             }
         }
 
@@ -811,7 +775,6 @@ impl Compiler<'_> {
         name_id: NameId,
         func: &FuncDecl,
         module_interner: &Interner,
-        module_global_inits: &FxHashSet<Symbol>,
     ) -> CodegenResult<()> {
         let func_key = self.func_registry.intern_name_id(name_id);
         let display_name = self.analyzed.query().display_name(name_id);
@@ -845,7 +808,7 @@ impl Compiler<'_> {
                 )
             });
             let source_file_ptr = self.source_file_ptr();
-            let env = compile_env!(self, module_interner, module_global_inits, source_file_ptr);
+            let env = compile_env!(self, module_interner, source_file_ptr);
             let gen_params = crate::generator::GeneratorParams {
                 func,
                 jit_func_id,
@@ -893,7 +856,7 @@ impl Compiler<'_> {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
             // Create split contexts
-            let env = compile_env!(self, module_interner, module_global_inits, source_file_ptr);
+            let env = compile_env!(self, module_interner, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(
                 &mut self.jit.module,
                 &mut self.func_registry,

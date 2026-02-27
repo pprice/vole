@@ -2,7 +2,7 @@
 //
 // Compilation environment - session/unit level context.
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use vole_frontend::{Interner, Symbol};
 use vole_identity::ModuleId;
@@ -22,7 +22,7 @@ pub type ModuleExportBinding = (ModuleId, Symbol, TypeId);
 /// function compilation.
 ///
 /// Provides cleaner separation:
-/// - `CompileEnv` = session/unit level (interner, global_inits, module)
+/// - `CompileEnv` = session/unit level (interner, module)
 /// - `Cg` = per-function working context (return_type, substitutions)
 pub struct CompileEnv<'a> {
     /// Analyzed program containing expr_types, method_resolutions, etc.
@@ -31,8 +31,6 @@ pub struct CompileEnv<'a> {
     pub state: &'a CodegenState,
     /// Interner for symbol resolution (main or module-specific)
     pub interner: &'a Interner,
-    /// Global variable names with initializer expressions (main or module-specific)
-    pub global_inits: &'a FxHashSet<Symbol>,
     /// Source file pointer for error reporting
     pub source_file_ptr: (*const u8, usize),
     /// Global module bindings from top-level destructuring imports

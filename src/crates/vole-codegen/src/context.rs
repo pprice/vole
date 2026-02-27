@@ -764,10 +764,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.state.type_metadata
     }
 
-    /// Get global variable initializer by name
+    /// Check whether a global variable initializer exists for the given symbol.
     #[inline]
     pub fn has_global_init(&self, name: Symbol) -> bool {
-        self.env.global_inits.contains(&name)
+        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+        self.name_table()
+            .name_id(module_id, &[name], self.interner())
+            .and_then(|name_id| self.analyzed().query().global(name_id))
+            .is_some()
     }
 
     /// Get VIR-lowered global variable initializer by name.

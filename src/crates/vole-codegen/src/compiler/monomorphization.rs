@@ -235,11 +235,10 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             let source_file_ptr = self.source_file_ptr();
-            let no_global_inits = FxHashSet::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = compile_env!(self, module_interner, &no_global_inits, source_file_ptr);
+                let env = compile_env!(self, module_interner, source_file_ptr);
                 let mut codegen_ctx = CodegenCtx::new(
                     &mut self.jit.module,
                     &mut self.func_registry,
@@ -695,7 +694,6 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let empty_inits = FxHashSet::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             // Determine module_id for Cg context (needed for expression data lookup)
             let cg_module_id =
@@ -704,7 +702,7 @@ impl Compiler<'_> {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = if let Some(path) = module_path {
                     let (_, interner) = &self.analyzed.module_programs[path];
-                    compile_env!(self, interner, &empty_inits, source_file_ptr)
+                    compile_env!(self, interner, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
                 };
@@ -927,7 +925,6 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let empty_inits = FxHashSet::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             // Determine module_id for Cg context (needed for expression data lookup)
             let cg_module_id =
@@ -936,7 +933,7 @@ impl Compiler<'_> {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = if let Some(path) = module_path {
                     let (_, interner) = &self.analyzed.module_programs[path];
-                    compile_env!(self, interner, &empty_inits, source_file_ptr)
+                    compile_env!(self, interner, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
                 };
@@ -1458,7 +1455,6 @@ impl Compiler<'_> {
                     })?;
 
                 let source_file_ptr = self.source_file_ptr();
-                let empty_inits = FxHashSet::default();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 let cg_module_id = Some(module_id);
                 {
@@ -1466,7 +1462,7 @@ impl Compiler<'_> {
                     let env = if let Some((_, interner)) =
                         self.analyzed.module_programs.get(&module_path)
                     {
-                        compile_env!(self, interner, &empty_inits, source_file_ptr)
+                        compile_env!(self, interner, source_file_ptr)
                     } else {
                         compile_env!(self, source_file_ptr)
                     };

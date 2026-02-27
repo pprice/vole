@@ -11,7 +11,7 @@
 
 use std::rc::Rc;
 
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::primitive_type_id_by_name;
@@ -962,12 +962,10 @@ impl Compiler<'_> {
                     type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
                 let self_binding = (self_sym, self_type_id, self_cranelift_type);
 
-                let no_global_inits = FxHashSet::default();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env =
-                        compile_env!(self, &iface_interner, &no_global_inits, source_file_ptr);
+                    let env = compile_env!(self, &iface_interner, source_file_ptr);
                     let mut codegen_ctx = CodegenCtx::new(
                         &mut self.jit.module,
                         &mut self.func_registry,
@@ -1297,12 +1295,10 @@ impl Compiler<'_> {
                     type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
                 let self_binding = (self_sym, self_type_id, self_cranelift_type);
 
-                let no_global_inits = FxHashSet::default();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env =
-                        compile_env!(self, &iface_interner, &no_global_inits, source_file_ptr);
+                    let env = compile_env!(self, &iface_interner, source_file_ptr);
                     let mut codegen_ctx = CodegenCtx::new(
                         &mut self.jit.module,
                         &mut self.func_registry,
@@ -1462,12 +1458,11 @@ impl Compiler<'_> {
                 panic!("VIR must be available for module implement method (MethodId={semantic_method_id:?})")
             });
 
-        let no_global_inits = FxHashSet::default();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             // Use module interner for compilation
-            let env = compile_env!(self, interner, &no_global_inits, source_file_ptr);
+            let env = compile_env!(self, interner, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(
                 &mut self.jit.module,
                 &mut self.func_registry,
@@ -1569,7 +1564,6 @@ impl Compiler<'_> {
             let resolved_module_id = module_id;
 
             // Create function builder and compile
-            let no_global_inits = FxHashSet::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -1577,7 +1571,7 @@ impl Compiler<'_> {
                 // otherwise AST Symbols from the module interner are resolved against
                 // the main program interner (which has different indices).
                 let env = if let Some(_mid) = resolved_module_id {
-                    compile_env!(self, interner, &no_global_inits, source_file_ptr)
+                    compile_env!(self, interner, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
                 };
@@ -2005,12 +1999,10 @@ impl Compiler<'_> {
                     type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
                 let self_binding = (self_sym, self_type_id, self_cranelift_type);
 
-                let no_global_inits = FxHashSet::default();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env =
-                        compile_env!(self, &iface_interner, &no_global_inits, source_file_ptr);
+                    let env = compile_env!(self, &iface_interner, source_file_ptr);
                     let mut codegen_ctx = CodegenCtx::new(
                         &mut self.jit.module,
                         &mut self.func_registry,

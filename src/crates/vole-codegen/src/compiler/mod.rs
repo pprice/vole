@@ -12,18 +12,16 @@ macro_rules! compile_env {
             analyzed: $self.analyzed,
             state: &$self.state,
             interner: &$self.analyzed.interner,
-            global_inits: &$self.global_inits,
             source_file_ptr: $source_file_ptr,
             global_module_bindings: &$self.global_module_bindings,
         }
     };
-    // Module variant with custom interner and global_inits
-    ($self:expr, $interner:expr, $global_inits:expr, $source_file_ptr:expr) => {
+    // Module variant with custom interner.
+    ($self:expr, $interner:expr, $source_file_ptr:expr) => {
         crate::types::CompileEnv {
             analyzed: $self.analyzed,
             state: &$self.state,
             interner: $interner,
-            global_inits: $global_inits,
             source_file_ptr: $source_file_ptr,
             global_module_bindings: &$self.global_module_bindings,
         }
@@ -78,8 +76,6 @@ pub struct Compiler<'a> {
     analyzed: &'a AnalyzedProgram,
     pointer_type: clif_types::Type,
     tests: Vec<TestInfo>,
-    /// Global variable names that have initializer expressions.
-    global_inits: FxHashSet<Symbol>,
     /// FunctionKeys for declared test functions by index
     test_func_keys: Vec<FunctionKey>,
     /// Codegen lookup tables (type_metadata, method_infos, vtables, etc.)
@@ -128,7 +124,6 @@ impl<'a> Compiler<'a> {
             analyzed,
             pointer_type,
             tests: Vec::new(),
-            global_inits: FxHashSet::default(),
             test_func_keys: Vec::new(),
             state: CodegenState::new(native_registry),
             func_registry,

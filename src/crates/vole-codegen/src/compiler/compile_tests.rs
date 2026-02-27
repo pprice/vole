@@ -11,7 +11,7 @@ use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use vole_frontend::ast::{TestCase, TestsDecl};
-use vole_frontend::{Decl, ExprKind, LetInit, Program};
+use vole_frontend::{Decl, ExprKind, Program};
 
 impl Compiler<'_> {
     /// Compile all tests in a tests block
@@ -270,12 +270,6 @@ impl Compiler<'_> {
                         test_count += 1;
                     }
                 }
-                Decl::Let(let_stmt) => {
-                    // Store global initializer expressions so module variables are available
-                    if let LetInit::Expr(_) = &let_stmt.init {
-                        self.global_inits.insert(let_stmt.name);
-                    }
-                }
                 Decl::LetTuple(let_tuple) => {
                     // Handle top-level destructuring imports
                     if matches!(&let_tuple.init.kind, ExprKind::Import(_)) {
@@ -361,7 +355,6 @@ impl Compiler<'_> {
                 analyzed: self.analyzed,
                 state: &self.state,
                 interner: &self.analyzed.interner,
-                global_inits: &self.global_inits,
                 source_file_ptr,
                 global_module_bindings: &self.global_module_bindings,
             };
@@ -427,7 +420,6 @@ impl Compiler<'_> {
                 analyzed: self.analyzed,
                 state: &self.state,
                 interner: &self.analyzed.interner,
-                global_inits: &self.global_inits,
                 source_file_ptr,
                 global_module_bindings: &self.global_module_bindings,
             };
