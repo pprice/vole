@@ -11,7 +11,7 @@
 
 use std::rc::Rc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::primitive_type_id_by_name;
@@ -962,7 +962,7 @@ impl Compiler<'_> {
                     type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
                 let self_binding = (self_sym, self_type_id, self_cranelift_type);
 
-                let no_global_inits = FxHashMap::default();
+                let no_global_inits = FxHashSet::default();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -1297,7 +1297,7 @@ impl Compiler<'_> {
                     type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
                 let self_binding = (self_sym, self_type_id, self_cranelift_type);
 
-                let no_global_inits = FxHashMap::default();
+                let no_global_inits = FxHashSet::default();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -1462,7 +1462,7 @@ impl Compiler<'_> {
                 panic!("VIR must be available for module implement method (MethodId={semantic_method_id:?})")
             });
 
-        let no_global_inits = FxHashMap::default();
+        let no_global_inits = FxHashSet::default();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -1569,7 +1569,7 @@ impl Compiler<'_> {
             let resolved_module_id = module_id;
 
             // Create function builder and compile
-            let no_global_inits = FxHashMap::default();
+            let no_global_inits = FxHashSet::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -2005,7 +2005,7 @@ impl Compiler<'_> {
                     type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
                 let self_binding = (self_sym, self_type_id, self_cranelift_type);
 
-                let no_global_inits = FxHashMap::default();
+                let no_global_inits = FxHashSet::default();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);

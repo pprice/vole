@@ -1,4 +1,4 @@
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext};
 
@@ -235,7 +235,7 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             let source_file_ptr = self.source_file_ptr();
-            let no_global_inits = FxHashMap::default();
+            let no_global_inits = FxHashSet::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -367,14 +367,14 @@ impl Compiler<'_> {
     /// Returns true when the type references a nominal definition from the main
     /// program (or a tests virtual module), not from imported module programs.
     fn type_depends_on_program_definitions(&self, type_id: TypeId) -> bool {
-        let mut visited = rustc_hash::FxHashSet::default();
+        let mut visited = FxHashSet::default();
         self.type_depends_on_program_definitions_inner(type_id, &mut visited)
     }
 
     fn type_depends_on_program_definitions_inner(
         &self,
         type_id: TypeId,
-        visited: &mut rustc_hash::FxHashSet<TypeId>,
+        visited: &mut FxHashSet<TypeId>,
     ) -> bool {
         if !visited.insert(type_id) {
             return false; // cycle — treat as not program-owned
@@ -695,7 +695,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let empty_inits = FxHashMap::default();
+            let empty_inits = FxHashSet::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             // Determine module_id for Cg context (needed for expression data lookup)
             let cg_module_id =
@@ -927,7 +927,7 @@ impl Compiler<'_> {
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-            let empty_inits = FxHashMap::default();
+            let empty_inits = FxHashSet::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             // Determine module_id for Cg context (needed for expression data lookup)
             let cg_module_id =
@@ -1134,7 +1134,7 @@ impl Compiler<'_> {
         // Deduplicate type arg vectors per class using a set.
         // TypeId doesn't implement Ord, so we use a HashSet for dedup.
         for type_arg_vecs in class_concrete_type_args.values_mut() {
-            let mut seen = rustc_hash::FxHashSet::default();
+            let mut seen = FxHashSet::default();
             type_arg_vecs.retain(|v| seen.insert(v.clone()));
         }
 
@@ -1159,8 +1159,7 @@ impl Compiler<'_> {
         // Look up concrete type argument vectors for the template's class, then build
         // substitutions by mapping each vector position to the template's TypeParam.
         let mut expanded: Vec<ExpandedMethodData> = Vec::new();
-        let mut expanded_keys: rustc_hash::FxHashSet<ClassMethodMonomorphKey> =
-            rustc_hash::FxHashSet::default();
+        let mut expanded_keys: FxHashSet<ClassMethodMonomorphKey> = FxHashSet::default();
 
         for (abstract_key, tmpl) in &abstract_templates {
             // Extract the TypeParam positions from the abstract type_keys.
@@ -1459,7 +1458,7 @@ impl Compiler<'_> {
                     })?;
 
                 let source_file_ptr = self.source_file_ptr();
-                let empty_inits = FxHashMap::default();
+                let empty_inits = FxHashSet::default();
                 let mut builder_ctx = FunctionBuilderContext::new();
                 let cg_module_id = Some(module_id);
                 {

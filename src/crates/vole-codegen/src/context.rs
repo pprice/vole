@@ -5,7 +5,6 @@
 
 use std::cell::RefCell;
 use std::mem::size_of;
-use std::rc::Rc;
 
 use cranelift::prelude::{
     Block, FunctionBuilder, Imm64, InstBuilder, MemFlags, Type, Value, Variable, types,
@@ -18,7 +17,7 @@ use crate::callable_registry::CallableBackendPreference;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
-use vole_frontend::{Expr, Symbol};
+use vole_frontend::Symbol;
 use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId};
 use vole_sema::type_arena::TypeId;
 
@@ -767,8 +766,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get global variable initializer by name
     #[inline]
-    pub fn global_init(&self, name: Symbol) -> Option<&Rc<Expr>> {
-        self.env.global_inits.get(&name)
+    pub fn has_global_init(&self, name: Symbol) -> bool {
+        self.env.global_inits.contains(&name)
     }
 
     /// Get VIR-lowered global variable initializer by name.

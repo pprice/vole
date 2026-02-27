@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
-use std::rc::Rc;
 
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
@@ -12,9 +11,7 @@ use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, function_name_id_with_interner, type_id_to_cranelift};
 use vole_frontend::ast::LetTupleStmt;
-use vole_frontend::{
-    Decl, Expr, ExprKind, FuncDecl, Interner, LetInit, PatternKind, Program, Symbol,
-};
+use vole_frontend::{Decl, ExprKind, FuncDecl, Interner, LetInit, PatternKind, Program, Symbol};
 use vole_identity::{ModuleId, NameId};
 use vole_sema::type_arena::TypeId;
 use vole_vir::calls::CallTarget;
@@ -253,9 +250,8 @@ impl Compiler<'_> {
                 }
                 Decl::Let(let_stmt) => {
                     // Store global initializer expressions (skip type aliases)
-                    if let LetInit::Expr(expr) = &let_stmt.init {
-                        self.global_inits
-                            .insert(let_stmt.name, Rc::new(expr.clone()));
+                    if let LetInit::Expr(_) = &let_stmt.init {
+                        self.global_inits.insert(let_stmt.name);
                     }
                 }
                 Decl::LetTuple(let_tuple) => {
@@ -593,14 +589,14 @@ impl Compiler<'_> {
         let (program, module_interner) = &self.analyzed.module_programs[module_path];
 
         // Extract module global initializer expressions
-        let module_global_inits: FxHashMap<Symbol, Rc<Expr>> = program
+        let module_global_inits: FxHashSet<Symbol> = program
             .declarations
             .iter()
             .filter_map(|decl| {
                 if let Decl::Let(let_stmt) = decl
-                    && let LetInit::Expr(expr) = &let_stmt.init
+                    && let LetInit::Expr(_) = &let_stmt.init
                 {
-                    Some((let_stmt.name, Rc::new(expr.clone())))
+                    Some(let_stmt.name)
                 } else {
                     None
                 }
@@ -815,7 +811,7 @@ impl Compiler<'_> {
         name_id: NameId,
         func: &FuncDecl,
         module_interner: &Interner,
-        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+        module_global_inits: &FxHashSet<Symbol>,
     ) -> CodegenResult<()> {
         let func_key = self.func_registry.intern_name_id(name_id);
         let display_name = self.analyzed.query().display_name(name_id);

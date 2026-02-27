@@ -290,7 +290,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         call_expr_id: NodeId,
     ) -> CodegenResult<Option<CompiledValue>> {
         let Some(vir_init) = self.global_vir_init(callee_sym).cloned() else {
-            if self.global_init(callee_sym).is_some() {
+            if self.has_global_init(callee_sym) {
                 return Err(CodegenError::internal_with_context(
                     "missing VIR global initializer",
                     self.interner().resolve(callee_sym),

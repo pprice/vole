@@ -7,9 +7,7 @@
 //! - Module type method compilation (`compile_module_type_methods` and helpers)
 //! - Shared helpers (`register_method_func`, `get_type_name_from_expr`)
 
-use std::rc::Rc;
-
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_vir};
 use super::impls::{ModuleCompileInfo, TypeDeclInfo, TypeMethodsData};
@@ -18,7 +16,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, TypeMetadata, method_name_id_with_interner, type_id_to_cranelift};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::{ClassDecl, InterfaceMethod, StaticsBlock, StructDecl};
-use vole_frontend::{Expr, FuncDecl, Interner, Symbol, TypeExpr, TypeExprKind};
+use vole_frontend::{FuncDecl, Interner, Symbol, TypeExpr, TypeExprKind};
 use vole_identity::{MethodId, ModuleId};
 use vole_sema::type_arena::TypeId;
 
@@ -608,7 +606,7 @@ impl Compiler<'_> {
         let vir_func = self.analyzed.get_vir_method(semantic_method_id);
 
         // Create function builder and compile using the module interner
-        let no_global_inits = FxHashMap::default();
+        let no_global_inits = FxHashSet::default();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
@@ -769,7 +767,7 @@ impl Compiler<'_> {
         type_decl: &T,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+        module_global_inits: &FxHashSet<Symbol>,
     ) -> CodegenResult<()> {
         // Generic types are compiled via monomorphized instances.
         if type_decl.has_type_params() {
@@ -1098,7 +1096,7 @@ impl Compiler<'_> {
         class: &ClassDecl,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+        module_global_inits: &FxHashSet<Symbol>,
     ) -> CodegenResult<()> {
         self.compile_module_type_methods(class, module_interner, module_path, module_global_inits)
     }
@@ -1109,7 +1107,7 @@ impl Compiler<'_> {
         struct_decl: &StructDecl,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+        module_global_inits: &FxHashSet<Symbol>,
     ) -> CodegenResult<()> {
         self.compile_module_type_methods(
             struct_decl,

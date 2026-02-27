@@ -4,12 +4,10 @@
 //! - `impl_dispatch` (class/struct method compilation)
 //! - `impl_monomorph` (implement block registration and compilation)
 
-use std::rc::Rc;
-
-use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 
 use vole_frontend::ast::{ClassDecl, PrimitiveType as AstPrimitive, StaticsBlock, StructDecl};
-use vole_frontend::{Expr, FuncDecl, Interner, Symbol};
+use vole_frontend::{FuncDecl, Interner, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
 
@@ -85,7 +83,7 @@ impl<'a> TypeMethodsData<'a> {
 pub(super) struct ModuleCompileInfo<'a> {
     pub interner: &'a Interner,
     pub module_id: ModuleId,
-    pub global_inits: &'a FxHashMap<Symbol, Rc<Expr>>,
+    pub global_inits: &'a FxHashSet<Symbol>,
 }
 
 /// Trait to abstract over class and struct declarations for unified method compilation.

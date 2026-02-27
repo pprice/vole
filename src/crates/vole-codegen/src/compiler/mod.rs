@@ -1,5 +1,7 @@
 // src/codegen/compiler/mod.rs
 
+use std::rc::Rc;
+
 /// Macro to construct CompileEnv from Compiler fields.
 /// This is a macro (not a method) to allow field-level borrowing,
 /// which lets the borrow checker see that CompileEnv uses different
@@ -42,8 +44,6 @@ mod type_registry;
 
 pub use signatures::{SelfParam, VirSelfParam};
 
-use std::rc::Rc;
-
 /// Mode for function declaration in JIT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DeclareMode {
@@ -65,7 +65,7 @@ use crate::types::CodegenState;
 use crate::AnalyzedProgram;
 use crate::types::PendingMonomorph;
 use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeKey};
-use vole_frontend::{Expr, Symbol};
+use vole_frontend::Symbol;
 use vole_identity::{ModuleId, NameId};
 use vole_runtime::NativeRegistry;
 
@@ -78,8 +78,8 @@ pub struct Compiler<'a> {
     analyzed: &'a AnalyzedProgram,
     pointer_type: clif_types::Type,
     tests: Vec<TestInfo>,
-    /// Global variable initializer expressions keyed by name (Rc to avoid cloning AST nodes)
-    global_inits: FxHashMap<Symbol, Rc<Expr>>,
+    /// Global variable names that have initializer expressions.
+    global_inits: FxHashSet<Symbol>,
     /// FunctionKeys for declared test functions by index
     test_func_keys: Vec<FunctionKey>,
     /// Codegen lookup tables (type_metadata, method_infos, vtables, etc.)
@@ -128,7 +128,7 @@ impl<'a> Compiler<'a> {
             analyzed,
             pointer_type,
             tests: Vec::new(),
-            global_inits: FxHashMap::default(),
+            global_inits: FxHashSet::default(),
             test_func_keys: Vec::new(),
             state: CodegenState::new(native_registry),
             func_registry,

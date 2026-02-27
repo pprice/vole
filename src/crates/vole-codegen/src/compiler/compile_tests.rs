@@ -272,9 +272,8 @@ impl Compiler<'_> {
                 }
                 Decl::Let(let_stmt) => {
                     // Store global initializer expressions so module variables are available
-                    if let LetInit::Expr(expr) = &let_stmt.init {
-                        self.global_inits
-                            .insert(let_stmt.name, std::rc::Rc::new(expr.clone()));
+                    if let LetInit::Expr(_) = &let_stmt.init {
+                        self.global_inits.insert(let_stmt.name);
                     }
                 }
                 Decl::LetTuple(let_tuple) => {

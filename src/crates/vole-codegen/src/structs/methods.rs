@@ -546,14 +546,14 @@ impl Cg<'_, '_, '_> {
         let receiver_is_global_init_rc_iface = match mc {
             MethodCallSource::Ast(ast_mc) => {
                 if let ExprKind::Identifier(sym) = &ast_mc.object.kind {
-                    self.global_init(*sym).is_some()
+                    self.has_global_init(*sym)
                 } else {
                     false
                 }
             }
             MethodCallSource::Vir { receiver, .. } => {
                 if let vole_vir::VirExpr::LocalLoad { name, .. } = receiver {
-                    self.global_init(*name).is_some()
+                    self.has_global_init(*name)
                 } else {
                     false
                 }

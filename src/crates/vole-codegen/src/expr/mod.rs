@@ -321,7 +321,7 @@ impl Cg<'_, '_, '_> {
             let mut value = self.compile_vir_expr(&vir_init)?;
             self.coerce_global_to_declared_type(sym, &mut value)?;
             Ok(value)
-        } else if self.global_init(sym).is_some() {
+        } else if self.has_global_init(sym) {
             Err(CodegenError::internal_with_context(
                 "missing VIR global initializer",
                 self.interner().resolve(sym),
@@ -1406,7 +1406,7 @@ impl Cg<'_, '_, '_> {
                 .coerce_global_to_declared_type(sym, &mut value)
                 .map(|()| value);
         }
-        if self.global_init(sym).is_some() {
+        if self.has_global_init(sym) {
             return Err(CodegenError::internal_with_context(
                 "missing VIR global initializer",
                 self.interner().resolve(sym),

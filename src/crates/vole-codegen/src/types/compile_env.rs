@@ -2,11 +2,9 @@
 //
 // Compilation environment - session/unit level context.
 
-use std::rc::Rc;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use rustc_hash::FxHashMap;
-
-use vole_frontend::{Expr, Interner, Symbol};
+use vole_frontend::{Interner, Symbol};
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
 
@@ -33,8 +31,8 @@ pub struct CompileEnv<'a> {
     pub state: &'a CodegenState,
     /// Interner for symbol resolution (main or module-specific)
     pub interner: &'a Interner,
-    /// Global variable initializer expressions (main or module-specific, Rc to avoid cloning)
-    pub global_inits: &'a FxHashMap<Symbol, Rc<Expr>>,
+    /// Global variable names with initializer expressions (main or module-specific)
+    pub global_inits: &'a FxHashSet<Symbol>,
     /// Source file pointer for error reporting
     pub source_file_ptr: (*const u8, usize),
     /// Global module bindings from top-level destructuring imports
