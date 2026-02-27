@@ -10,6 +10,9 @@ use crate::analyzed_lower_function_default_inits::{
     lower_function_default_inits, lower_module_function_default_inits,
 };
 use crate::analyzed_lower_global_inits::{lower_global_inits, lower_module_global_inits};
+use crate::analyzed_lower_lambda_default_inits::{
+    LowerLambdaDefaultInitsArgs, lower_lambda_default_inits,
+};
 use crate::analyzed_lower_method_default_inits::{
     LowerMethodDefaultInitsArgs, LowerModuleMethodDefaultInitsArgs, lower_method_default_inits,
     lower_module_method_default_inits,
@@ -395,19 +398,19 @@ impl AnalyzedProgram {
                 type_table: &mut type_table,
             });
         vir_method_default_inits.extend(module_vir_method_default_inits);
-        let vir_lambda_default_inits = lower_lambda_default_inits(
-            &program,
-            &mut interner,
-            &mut module_programs,
-            output.module_id,
-            &output.tests_virtual_modules,
-            &db.names,
-            &db.entities,
-            &output.node_map,
-            &db.types,
-            &output.modules_with_errors,
-            &mut type_table,
-        );
+        let vir_lambda_default_inits = lower_lambda_default_inits(LowerLambdaDefaultInitsArgs {
+            program: &program,
+            interner: &mut interner,
+            module_programs: &mut module_programs,
+            main_module_id: output.module_id,
+            tests_virtual_modules: &output.tests_virtual_modules,
+            names: &db.names,
+            entities: &db.entities,
+            node_map: &output.node_map,
+            type_arena: &db.types,
+            modules_with_errors: &output.modules_with_errors,
+            type_table: &mut type_table,
+        });
         let mut vir_field_default_inits = lower_field_default_inits(
             &program,
             &mut interner,
@@ -1109,112 +1112,6 @@ impl AnalyzedProgram {
     /// Returns `None` if no VIR body was lowered for this test.
     pub(crate) fn get_vir_test(&self, span: Span) -> Option<&VirBody> {
         self.vir_program.get_test(span)
-    }
-}
-
-/// Lower default parameter expressions for lambdas referenced by call-site
-/// `LambdaDefaults` metadata.
-#[allow(clippy::too_many_arguments)]
-fn lower_lambda_default_inits(
-    program: &Program,
-    interner: &mut Interner,
-    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
-    main_module_id: ModuleId,
-    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    node_map: &NodeMap,
-    type_arena: &TypeArena,
-    modules_with_errors: &HashSet<String>,
-    type_table: &mut VirTypeTable,
-) -> FxHashMap<(vole_identity::NodeId, usize), VirRef> {
-    let mut map = FxHashMap::default();
-    let lambda_nodes = node_map.collect_lambda_default_nodes();
-    if lambda_nodes.is_empty() {
-        return map;
-    }
-
-    let mut main_module_ids = HashSet::<ModuleId>::default();
-    let _ = main_module_ids.insert(main_module_id);
-    let _ = main_module_ids.insert(names.main_module());
-    main_module_ids.extend(tests_virtual_modules.values().copied());
-
-    for lambda_node_id in lambda_nodes {
-        if main_module_ids.contains(&lambda_node_id.module) {
-            lower_single_lambda_default_init(
-                lambda_node_id,
-                program,
-                interner,
-                names,
-                entities,
-                node_map,
-                type_arena,
-                type_table,
-                &mut map,
-            );
-            continue;
-        }
-
-        let module_path = names.module_path(lambda_node_id.module).to_string();
-        if modules_with_errors.contains(&module_path) {
-            continue;
-        }
-        let Some((module_program, module_interner)) = module_programs.get_mut(&module_path) else {
-            continue;
-        };
-        let module_interner = Rc::make_mut(module_interner);
-        lower_single_lambda_default_init(
-            lambda_node_id,
-            module_program,
-            module_interner,
-            names,
-            entities,
-            node_map,
-            type_arena,
-            type_table,
-            &mut map,
-        );
-    }
-
-    map
-}
-
-/// Lower default parameter expressions for a single lambda expression node.
-#[allow(clippy::too_many_arguments)]
-fn lower_single_lambda_default_init(
-    lambda_node_id: vole_identity::NodeId,
-    program: &Program,
-    interner: &mut Interner,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    node_map: &NodeMap,
-    type_arena: &TypeArena,
-    type_table: &mut VirTypeTable,
-    map: &mut FxHashMap<(vole_identity::NodeId, usize), VirRef>,
-) {
-    use crate::calls::find_lambda_in_program;
-    use vole_sema::vir_lower::expr::lower_expr;
-
-    let Some(lambda) = find_lambda_in_program(program, lambda_node_id) else {
-        return;
-    };
-
-    let mut ctx = vole_sema::vir_lower::LoweringCtx {
-        node_map,
-        interner,
-        type_arena,
-        entities: entities.as_entity_registry(),
-        name_table: names,
-        type_table,
-        generic: false,
-    };
-
-    for (slot, param) in lambda.params.iter().enumerate() {
-        let Some(default_expr) = param.default_value.as_ref() else {
-            continue;
-        };
-        let vir = lower_expr(default_expr, &mut ctx);
-        map.insert((lambda_node_id, slot), vir);
     }
 }
 
