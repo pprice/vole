@@ -1,6 +1,7 @@
 //! Vole code generation: Cranelift JIT compilation.
 
 mod analyzed;
+mod analyzed_lowering_lookup;
 mod callable_registry;
 mod calls;
 mod coercion_ops;
