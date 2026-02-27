@@ -563,6 +563,14 @@ impl AnalyzedProgram {
         self.entities.get_function(function_id)
     }
 
+    /// Query-compatible alias for resolving a sema FunctionDef by ID.
+    pub(crate) fn get_function(
+        &self,
+        function_id: FunctionId,
+    ) -> &vole_sema::entity_defs::FunctionDef {
+        self.function_def(function_id)
+    }
+
     /// Resolve a sema MethodDef by ID.
     pub(crate) fn method_def(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
         self.entities.get_method(method_id)
@@ -664,6 +672,12 @@ impl AnalyzedProgram {
         self.entities.function_by_name(name_id)
     }
 
+    /// Resolve semantic FunctionId by module and Symbol.
+    pub(crate) fn function_id(&self, module_id: ModuleId, name: Symbol) -> Option<FunctionId> {
+        let name_id = self.try_function_name_id(module_id, name)?;
+        self.function_id_by_name_id(name_id)
+    }
+
     /// Resolve a string type name in a module context.
     pub(crate) fn resolve_type_def_by_str(
         &self,
@@ -689,6 +703,11 @@ impl AnalyzedProgram {
     /// Return whether a type definition is a struct (not class/interface/sentinel).
     pub(crate) fn is_struct_type(&self, type_def_id: TypeDefId) -> bool {
         self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Struct
+    }
+
+    /// Return whether a type definition is an interface.
+    pub(crate) fn is_interface_type(&self, type_def_id: TypeDefId) -> bool {
+        self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Interface
     }
 
     /// Return whether a type definition is an alias.
@@ -800,6 +819,11 @@ impl AnalyzedProgram {
                 module_path: info.module_path,
                 native_name: info.native_name,
             })
+    }
+
+    /// Return true when all methods on a type are external-only.
+    pub(crate) fn is_external_only(&self, type_def_id: TypeDefId) -> bool {
+        self.entities.is_external_only(type_def_id)
     }
 
     /// Return resolved method metadata for a call node.
@@ -1069,12 +1093,11 @@ impl AnalyzedProgram {
 
     /// Return whether a VIR function belongs to the given module.
     pub fn vir_function_in_module(&self, func: &VirFunction, module_id: ModuleId) -> bool {
-        let query = self.query();
         if let Some(method_id) = func.method_id {
-            let method_def = query.get_method(method_id);
-            query.get_type(method_def.defining_type).module == module_id
+            let method_def = self.get_method(method_id);
+            self.get_type(method_def.defining_type).module == module_id
         } else {
-            query.get_function(func.id).module == module_id
+            self.get_function(func.id).module == module_id
         }
     }
 

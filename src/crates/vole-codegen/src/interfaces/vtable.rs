@@ -1,5 +1,4 @@
 use rustc_hash::FxHashMap;
-use std::collections::HashSet;
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
@@ -162,7 +161,7 @@ impl InterfaceVtableRegistry {
 
         // Get interface metadata from the passed TypeDefId (don't re-resolve by name
         // since interface_by_short_name could return a different interface with the same name)
-        let interface_def = ctx.analyzed().query().get_type(interface_type_def_id);
+        let interface_def = ctx.analyzed().get_type(interface_type_def_id);
         let interface_name_id = interface_def.name_id;
 
         // Build substitution map from type param names to concrete type args (already TypeIds)
@@ -184,7 +183,7 @@ impl InterfaceVtableRegistry {
             .unwrap_nominal(concrete_type_id)
             .map(|(id, args, _)| (id, args.to_vec()));
         if let Some((class_def_id, class_type_args)) = class_info {
-            let class_def = ctx.analyzed().query().get_type(class_def_id);
+            let class_def = ctx.analyzed().get_type(class_def_id);
             for (param_name, arg_id) in class_def.type_params.iter().zip(class_type_args.iter()) {
                 substitutions.insert(*param_name, *arg_id);
             }
@@ -325,7 +324,7 @@ impl InterfaceVtableRegistry {
         };
 
         for (index, &method_id) in state.method_ids.iter().enumerate() {
-            let method = ctx.analyzed().query().get_method(method_id);
+            let method = ctx.analyzed().get_method(method_id);
             let method_name_str = ctx.analyzed().name_table().display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
@@ -974,10 +973,9 @@ fn resolve_concrete_type_name<C: VtableCtx>(
                 format!("{:?}", concrete_type_id),
             )
         })?;
-    let type_def = ctx.analyzed().query().get_type(type_def_id);
+    let type_def = ctx.analyzed().get_type(type_def_id);
     let type_name = ctx
         .analyzed()
-        .query()
         .last_segment(type_def.name_id)
         .unwrap_or_else(|| "?".to_string());
     Ok((type_def_id, type_name))
@@ -1030,13 +1028,12 @@ fn collect_concrete_field_info<C: VtableCtx>(
     ctx: &C,
     type_def_id: TypeDefId,
 ) -> Vec<ConcreteFieldInfo> {
-    let query = ctx.analyzed().query();
     let arena = ctx.analyzed().type_arena();
     let name_table = ctx.analyzed().name_table();
-    query
+    ctx.analyzed()
         .fields_on_type(type_def_id)
         .map(|field_id| {
-            let field = query.get_field(field_id);
+            let field = ctx.analyzed().get_field(field_id);
             let name = name_table
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
@@ -1984,7 +1981,6 @@ pub(crate) fn interface_method_slot_by_type_def_id(
     method_name_id: NameId,
     analyzed: &AnalyzedProgram,
 ) -> CodegenResult<usize> {
-    let query = analyzed.query();
     // Collect all methods from the interface and its parents
     let methods = collect_interface_methods_via_entity_registry(interface_id, analyzed)?;
 
@@ -1992,7 +1988,7 @@ pub(crate) fn interface_method_slot_by_type_def_id(
     methods
         .iter()
         .position(|method_id| {
-            let method = query.get_method(*method_id);
+            let method = analyzed.get_method(*method_id);
             method.name_id == method_name_id
         })
         .ok_or_else(|| {
@@ -2017,8 +2013,8 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
     analyzed: &AnalyzedProgram,
 ) -> CodegenResult<Vec<MethodId>> {
     // Verify this is an interface
-    if !analyzed.query().is_interface_type(interface_id) {
-        let interface = analyzed.query().get_type(interface_id);
+    if !analyzed.is_interface_type(interface_id) {
+        let interface = analyzed.get_type(interface_id);
         return Err(CodegenError::type_mismatch(
             "interface vtable",
             "interface",
@@ -2026,56 +2022,7 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
         ));
     }
 
-    let mut methods = Vec::new();
-    let mut seen_interfaces = HashSet::new();
-    let mut seen_methods = HashSet::new();
-
-    collect_interface_methods_inner_entity_registry(
-        interface_id,
-        analyzed,
-        &mut methods,
-        &mut seen_interfaces,
-        &mut seen_methods,
-    );
-
-    Ok(methods)
-}
-
-fn collect_interface_methods_inner_entity_registry(
-    interface_id: TypeDefId,
-    analyzed: &AnalyzedProgram,
-    methods: &mut Vec<MethodId>,
-    seen_interfaces: &mut HashSet<TypeDefId>,
-    seen_methods: &mut HashSet<NameId>,
-) {
-    if !seen_interfaces.insert(interface_id) {
-        return;
-    }
-
-    let (parent_interface_ids, method_ids) = {
-        let query = analyzed.query();
-        let interface = query.get_type(interface_id);
-        (interface.extends.clone(), interface.methods.clone())
-    };
-
-    // Process parent interfaces first (to match the order of collect_interface_methods)
-    for parent_id in parent_interface_ids {
-        collect_interface_methods_inner_entity_registry(
-            parent_id,
-            analyzed,
-            methods,
-            seen_interfaces,
-            seen_methods,
-        );
-    }
-
-    // Add this interface's methods
-    for method_id in method_ids {
-        let method = analyzed.query().get_method(method_id);
-        if seen_methods.insert(method.name_id) {
-            methods.push(method_id);
-        }
-    }
+    Ok(analyzed.interface_method_ids_ordered(interface_id))
 }
 
 /// Box a value as an interface type using TypeId.
@@ -2100,7 +2047,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     };
 
     // Look up the interface Symbol name via EntityRegistry
-    let interface_def = env.analyzed.query().get_type(type_def_id);
+    let interface_def = env.analyzed.get_type(type_def_id);
     let interface_name_str = env
         .analyzed
         .name_table()
@@ -2119,7 +2066,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     }
 
     // Check if this is an external-only interface
-    if env.analyzed.query().is_external_only(type_def_id) {
+    if env.analyzed.is_external_only(type_def_id) {
         tracing::debug!("external-only interface, skip boxing");
         return Ok(CompiledValue::new(
             value.value,
@@ -2179,7 +2126,7 @@ fn resolve_vtable_target<C: VtableCtx>(
     substitutions: &FxHashMap<NameId, TypeId>,
 ) -> CodegenResult<VtableMethod> {
     // Get method info from EntityRegistry
-    let interface_method = ctx.analyzed().query().get_method(interface_method_id);
+    let interface_method = ctx.analyzed().get_method(interface_method_id);
     let method_name_str = ctx
         .analyzed()
         .name_table()
@@ -2307,17 +2254,16 @@ fn resolve_vtable_target<C: VtableCtx>(
         let arena = ctx.analyzed().type_arena();
         let type_def_id = arena.unwrap_class(concrete_type_id).map(|(id, _)| id)?;
 
-        let type_name_id = ctx.analyzed().query().get_type(type_def_id).name_id;
+        let type_name_id = ctx.analyzed().get_type(type_def_id).name_id;
         let meta = type_metadata_by_name_id(ctx.type_metadata(), type_name_id)?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
         // Look up method signature via ProgramQuery - require TypeId fields
         let sig_from_entity = ctx
             .analyzed()
-            .query()
             .find_method(type_def_id, method_name_id)
             .and_then(|m_id| {
-                let method = ctx.analyzed().query().get_method(m_id);
+                let method = ctx.analyzed().get_method(m_id);
                 let arena = ctx.analyzed().type_arena();
                 let (params, ret, _) = arena.unwrap_function(method.signature_id)?;
                 Some((params.to_vec(), ret))
@@ -2355,17 +2301,12 @@ fn resolve_vtable_target<C: VtableCtx>(
     // Fall back to interface default if method has one
     if interface_method.has_default {
         // Check for default external binding via EntityRegistry
-        if let Some(interface_type_def_id) =
-            ctx.analyzed().query().try_type_def_id(interface_name_id)
+        if let Some(interface_type_def_id) = ctx.analyzed().try_type_def_id(interface_name_id)
             && let Some(method_name_id) = method_name_id
             && let Some(found_method_id) = ctx
                 .analyzed()
-                .query()
                 .find_method(interface_type_def_id, method_name_id)
-            && let Some(external_info) = ctx
-                .analyzed()
-                .query()
-                .method_external_binding(found_method_id)
+            && let Some(external_info) = ctx.analyzed().method_external_binding(found_method_id)
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.

@@ -127,7 +127,7 @@ impl Compiler<'_> {
         let interner = self.analyzed.interner();
 
         // Look up the virtual module ID for scoped type declarations
-        let virtual_module_id = self.analyzed.query().tests_virtual_module(tests_decl.span);
+        let virtual_module_id = self.analyzed.tests_virtual_module(tests_decl.span);
 
         for inner_decl in &tests_decl.decls {
             match inner_decl {
@@ -189,7 +189,6 @@ impl Compiler<'_> {
         // Scoped types are registered under the virtual module in sema
         let virtual_module_id = self
             .analyzed
-            .query()
             .tests_virtual_module(tests_decl.span)
             .unwrap_or(program_module);
 
@@ -201,19 +200,11 @@ impl Compiler<'_> {
                         continue;
                     }
                     // Check for implicit generics
-                    let query = self.analyzed.query();
-                    let name_id = query.function_name_id(program_module, func.name);
+                    let name_id = self.analyzed.function_name_id(program_module, func.name);
                     let has_implicit_generic_info = self
                         .analyzed
-                        .query()
                         .function_id_by_name_id(name_id)
-                        .map(|func_id| {
-                            self.analyzed
-                                .query()
-                                .get_function(func_id)
-                                .generic_info
-                                .is_some()
-                        })
+                        .map(|func_id| self.analyzed.function_def(func_id).generic_info.is_some())
                         .unwrap_or(false);
                     if has_implicit_generic_info {
                         continue;
@@ -318,12 +309,11 @@ impl Compiler<'_> {
         // Get FunctionId and extract pre-resolved signature data
         let semantic_func_id = self
             .analyzed
-            .query()
             .function_id(program_module, func.name)
             .ok_or_else(|| {
                 CodegenError::not_found("function", self.analyzed.interner().resolve(func.name))
             })?;
-        let func_def = self.analyzed.query().get_function(semantic_func_id);
+        let func_def = self.analyzed.function_def(semantic_func_id);
         let (param_type_ids, return_type_id) = (
             func_def.signature.params_id.clone(),
             func_def.signature.return_type_id,

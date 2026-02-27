@@ -236,10 +236,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .iter()
             .map(|(name, _)| self.interner().resolve(*name).to_string())
             .collect();
-        let field_ids: Vec<_> = self
-            .analyzed()
-            .fields_on_type(type_def_id)
-            .collect();
+        let field_ids: Vec<_> = self.analyzed().fields_on_type(type_def_id).collect();
         for field_id in field_ids {
             let field = self.analyzed().field_def(field_id);
             let Some(field_name) = self.name_table().last_segment_str(field.name_id) else {
@@ -380,10 +377,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .iter()
             .map(|(name, _)| self.interner().resolve(*name).to_string())
             .collect();
-        let field_ids: Vec<_> = self
-            .analyzed()
-            .fields_on_type(type_def_id)
-            .collect();
+        let field_ids: Vec<_> = self.analyzed().fields_on_type(type_def_id).collect();
         for field_id in field_ids {
             let field = self.analyzed().field_def(field_id);
             let Some(field_name) = self.name_table().last_segment_str(field.name_id) else {

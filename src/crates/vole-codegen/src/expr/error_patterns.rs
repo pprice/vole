@@ -129,10 +129,7 @@ impl Cg<'_, '_, '_> {
         let Some(type_def_id) = self.arena().unwrap_error_or_struct_def(type_id) else {
             return false;
         };
-        let fields: Vec<_> = self
-            .analyzed()
-            .fields_on_type(type_def_id)
-            .collect();
+        let fields: Vec<_> = self.analyzed().fields_on_type(type_def_id).collect();
         match fields.len() {
             0 => true, // null payload, rc_dec is no-op
             1 => {
@@ -148,10 +145,7 @@ impl Cg<'_, '_, '_> {
         let Some(type_def_id) = self.arena().unwrap_error_or_struct_def(type_id) else {
             return false;
         };
-        let fields: Vec<_> = self
-            .analyzed()
-            .fields_on_type(type_def_id)
-            .collect();
+        let fields: Vec<_> = self.analyzed().fields_on_type(type_def_id).collect();
         if fields.len() != 1 {
             return false;
         }
