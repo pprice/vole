@@ -34,7 +34,6 @@ impl Cg<'_, '_, '_> {
         &mut self,
         object: &VirExpr,
         field: Symbol,
-        _ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let obj = self.compile_vir_expr(object)?;
 

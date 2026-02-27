@@ -155,7 +155,6 @@ impl Cg<'_, '_, '_> {
         value_expr: &VirExpr,
         default_expr: &VirExpr,
         inner_type_id: TypeId,
-        _ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let value = self.compile_vir_expr(value_expr)?;
         let nil_tag = self.find_nil_variant(value.type_id).ok_or_else(|| {

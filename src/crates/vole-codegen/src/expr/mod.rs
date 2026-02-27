@@ -405,13 +405,10 @@ impl Cg<'_, '_, '_> {
                 op,
                 lhs,
                 rhs,
-                ty,
                 line,
                 ..
-            } => self.compile_vir_binary_op(*op, lhs, rhs, self.sema_type_from_vir(*ty), *line),
-            VirExpr::UnaryOp {
-                op, operand, ty, ..
-            } => self.compile_vir_unary_op(*op, operand, self.sema_type_from_vir(*ty)),
+            } => self.compile_vir_binary_op(*op, lhs, rhs, *line),
+            VirExpr::UnaryOp { op, operand, .. } => self.compile_vir_unary_op(*op, operand),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
             VirExpr::InterpolatedString { parts } => self.compile_vir_interpolated_string(parts),
 
@@ -530,10 +527,8 @@ impl Cg<'_, '_, '_> {
             VirExpr::FieldLoad {
                 object,
                 field,
-                storage: _,
-                ty,
                 ..
-            } => self.compile_vir_field_load(object, *field, self.sema_type_from_vir(*ty)),
+            } => self.compile_vir_field_load(object, *field),
             VirExpr::FieldStore {
                 object,
                 field,
@@ -607,13 +602,11 @@ impl Cg<'_, '_, '_> {
                 value,
                 default,
                 inner_type,
-                ty,
                 ..
             } => self.compile_vir_null_coalesce(
                 value,
                 default,
                 self.sema_type_from_vir(*inner_type),
-                self.sema_type_from_vir(*ty),
             ),
             VirExpr::OptionalChain {
                 object,
@@ -686,7 +679,6 @@ impl Cg<'_, '_, '_> {
         op: VirBinOp,
         lhs: &VirExpr,
         rhs: &VirExpr,
-        _ty: TypeId,
         line: u32,
     ) -> CodegenResult<CompiledValue> {
         let left = self.compile_vir_expr(lhs)?;
@@ -706,7 +698,6 @@ impl Cg<'_, '_, '_> {
         &mut self,
         op: VirUnOp,
         operand: &VirExpr,
-        _ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let compiled = self.compile_vir_expr(operand)?;
         let ast_op = vir_unop_to_ast(op);
