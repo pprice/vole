@@ -64,7 +64,7 @@ impl VirBuilder {
         Box::new(VirExpr::IntLiteral {
             value,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         })
     }
 
@@ -74,7 +74,7 @@ impl VirBuilder {
             low,
             high,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         })
     }
 
@@ -83,7 +83,7 @@ impl VirBuilder {
         Box::new(VirExpr::FloatLiteral {
             value,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         })
     }
 
@@ -116,7 +116,7 @@ impl VirBuilder {
             lhs,
             rhs,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
             line,
         })
     }
@@ -127,7 +127,7 @@ impl VirBuilder {
             op,
             operand,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         })
     }
 
@@ -137,7 +137,7 @@ impl VirBuilder {
             target,
             args,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         })
     }
 
@@ -153,8 +153,8 @@ impl VirBuilder {
             value,
             from,
             to,
-            vir_from: VirTypeId::INVALID,
-            vir_to: VirTypeId::INVALID,
+            vir_from: from,
+            vir_to: to,
             kind,
         })
     }
@@ -190,7 +190,7 @@ impl VirBuilder {
             field,
             storage,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         })
     }
 
@@ -199,7 +199,7 @@ impl VirBuilder {
         Box::new(VirExpr::LocalLoad {
             name,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         })
     }
 
@@ -216,7 +216,7 @@ impl VirBuilder {
             then_body,
             else_body,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         })
     }
 
@@ -235,7 +235,7 @@ impl VirBuilder {
             value,
             mutable,
             ty,
-            vir_ty: VirTypeId::INVALID,
+            vir_ty: ty,
         }
     }
 
@@ -284,7 +284,7 @@ impl VirBuilder {
             name,
             params,
             return_type: return_ty,
-            vir_return_type: VirTypeId::INVALID,
+            vir_return_type: return_ty,
             body,
             mangled_name_id: None,
             method_id: None,

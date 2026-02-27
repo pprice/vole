@@ -23,7 +23,7 @@ pub struct VirFunction {
     pub params: Vec<(Symbol, VirTypeId, VirTypeId)>,
     /// Return type (concrete after monomorphization).
     pub return_type: VirTypeId,
-    /// VIR return type (migration: `VirTypeId::INVALID`).
+    /// VIR return type.
     pub vir_return_type: VirTypeId,
     /// The function body.
     pub body: VirBody,

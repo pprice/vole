@@ -124,7 +124,7 @@ pub struct VirFor {
     pub var_name: Symbol,
     /// The type of the loop variable.
     pub var_type: VirTypeId,
-    /// VIR type of the loop variable (migration: `VirTypeId::INVALID`).
+    /// VIR type of the loop variable.
     pub vir_var_type: VirTypeId,
     /// The iterable expression.
     pub iterable: VirRef,
@@ -269,7 +269,7 @@ pub struct VirDestructureElement {
     pub pattern: VirDestructurePattern,
     /// Pre-resolved element type.
     pub ty: VirTypeId,
-    /// VIR type of the element (migration: `VirTypeId::INVALID`).
+    /// VIR type of the element.
     pub vir_ty: VirTypeId,
 }
 
@@ -284,7 +284,7 @@ pub struct VirDestructureField {
     pub slot: u32,
     /// Pre-resolved field type from `EntityRegistry`.
     pub ty: VirTypeId,
-    /// VIR type of the field (migration: `VirTypeId::INVALID`).
+    /// VIR type of the field.
     pub vir_ty: VirTypeId,
 }
 
@@ -297,6 +297,6 @@ pub struct VirModuleBinding {
     pub binding: Symbol,
     /// The export's type.
     pub export_ty: VirTypeId,
-    /// VIR type of the export (migration: `VirTypeId::INVALID`).
+    /// VIR type of the export.
     pub vir_export_ty: VirTypeId,
 }

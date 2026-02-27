@@ -767,7 +767,7 @@ pub struct VirMatchArm {
     pub body: VirBody,
     /// The type of the arm's result expression.
     pub ty: VirTypeId,
-    /// VIR type of the arm's result expression (migration: `VirTypeId::INVALID`).
+    /// VIR type of the arm's result expression.
     pub vir_ty: VirTypeId,
 }
 
@@ -951,7 +951,7 @@ pub struct VirTupleBinding {
     pub element_index: usize,
     /// The element type, pre-resolved from `TypeArena::unwrap_tuple`.
     pub ty: VirTypeId,
-    /// VIR type of the element (migration: `VirTypeId::INVALID`).
+    /// VIR type of the element.
     pub vir_ty: VirTypeId,
 }
 
@@ -969,7 +969,7 @@ pub struct VirRecordFieldBinding {
     pub field_slot: u32,
     /// Pre-resolved field type from `EntityRegistry`.
     pub ty: VirTypeId,
-    /// VIR type of the field (migration: `VirTypeId::INVALID`).
+    /// VIR type of the field.
     pub vir_ty: VirTypeId,
 }
 
@@ -1013,7 +1013,7 @@ pub struct VirCapture {
     pub name: Symbol,
     /// The type of the captured variable.
     pub ty: VirTypeId,
-    /// VIR type of the captured variable (migration: `VirTypeId::INVALID`).
+    /// VIR type of the captured variable.
     pub vir_ty: VirTypeId,
     /// Whether the variable is captured by reference (true) or by value
     /// (false).
