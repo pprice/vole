@@ -455,7 +455,7 @@ impl AnalyzedProgram {
     }
 
     /// Get read-only access to the name table
-    pub fn name_table(&self) -> &NameTable {
+    pub(crate) fn name_table(&self) -> &NameTable {
         &self.names
     }
 
@@ -465,23 +465,18 @@ impl AnalyzedProgram {
     }
 
     /// Get read-only access to the interner.
-    pub fn interner(&self) -> &Interner {
+    pub(crate) fn interner(&self) -> &Interner {
         &self.interner
     }
 
     /// Clone the interner Rc for APIs that need shared ownership.
-    pub fn interner_rc(&self) -> Rc<Interner> {
+    pub(crate) fn interner_rc(&self) -> Rc<Interner> {
         Rc::clone(&self.interner)
     }
 
     /// Get read-only access to the node map.
     pub(crate) fn node_map(&self) -> &NodeMap {
         &self.node_map
-    }
-
-    /// Get a shared reference to the name table Rc (cloned)
-    pub fn name_table_rc(&self) -> Rc<NameTable> {
-        Rc::clone(self.name_table_ref())
     }
 
     /// Get the main/root module ID for this analyzed program.
@@ -494,13 +489,8 @@ impl AnalyzedProgram {
         &self.module_programs
     }
 
-    /// Get read-only access to tests block virtual module IDs.
-    pub fn tests_virtual_modules(&self) -> &FxHashMap<Span, ModuleId> {
-        &self.tests_virtual_modules
-    }
-
     /// Get read-only access to module paths that had sema errors.
-    pub fn modules_with_errors(&self) -> &HashSet<String> {
+    pub(crate) fn modules_with_errors(&self) -> &HashSet<String> {
         &self.modules_with_errors
     }
 
@@ -510,7 +500,7 @@ impl AnalyzedProgram {
     }
 
     /// Get a reference to the name table Rc (borrowed, no clone)
-    pub fn name_table_ref(&self) -> &Rc<NameTable> {
+    pub(crate) fn name_table_ref(&self) -> &Rc<NameTable> {
         &self.names
     }
 
@@ -520,43 +510,46 @@ impl AnalyzedProgram {
     }
 
     /// Resolve the EntityRegistry NameId used for all array implement dispatch.
-    pub fn array_type_name_id(&self) -> Option<NameId> {
+    pub(crate) fn array_type_name_id(&self) -> Option<NameId> {
         self.entities.array_name_id()
     }
 
     /// Resolve a type's canonical entity NameId from its TypeDefId.
-    pub fn entity_type_name_id(&self, type_def_id: TypeDefId) -> NameId {
+    pub(crate) fn entity_type_name_id(&self, type_def_id: TypeDefId) -> NameId {
         self.entities.name_id(type_def_id)
     }
 
     /// Return whether a type definition is marked as an annotation type.
-    pub fn type_is_annotation(&self, type_def_id: TypeDefId) -> bool {
+    pub(crate) fn type_is_annotation(&self, type_def_id: TypeDefId) -> bool {
         self.entities.get_type(type_def_id).is_annotation
     }
 
     /// Return interface method IDs in deterministic slot order.
-    pub fn interface_method_ids_ordered(&self, interface_type_def_id: TypeDefId) -> Vec<MethodId> {
+    pub(crate) fn interface_method_ids_ordered(
+        &self,
+        interface_type_def_id: TypeDefId,
+    ) -> Vec<MethodId> {
         self.entities
             .interface_methods_ordered(interface_type_def_id)
     }
 
     /// Return all field IDs declared on a type definition.
-    pub fn entity_field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+    pub(crate) fn entity_field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
         self.entities.fields_on_type(type_def_id).collect()
     }
 
     /// Return the semantic field type for a field ID.
-    pub fn entity_field_type(&self, field_id: FieldId) -> vole_sema::type_arena::TypeId {
+    pub(crate) fn entity_field_type(&self, field_id: FieldId) -> vole_sema::type_arena::TypeId {
         self.entities.get_field(field_id).ty
     }
 
     /// Return declared type parameter NameIds for a type definition.
-    pub fn entity_type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
+    pub(crate) fn entity_type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
         self.entities.type_params(type_def_id)
     }
 
     /// Return generic field types metadata for a type definition, if present.
-    pub fn entity_generic_field_types(
+    pub(crate) fn entity_generic_field_types(
         &self,
         type_def_id: TypeDefId,
     ) -> Option<Vec<vole_sema::type_arena::TypeId>> {
@@ -568,12 +561,12 @@ impl AnalyzedProgram {
     }
 
     /// Return whether a type definition is a sentinel type.
-    pub fn entity_type_is_sentinel(&self, type_def_id: TypeDefId) -> bool {
+    pub(crate) fn entity_type_is_sentinel(&self, type_def_id: TypeDefId) -> bool {
         self.entities.get_type(type_def_id).kind.is_sentinel()
     }
 
     /// Find a type by its short (last-segment) name in the entity registry.
-    pub fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
+    pub(crate) fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
         self.entities
             .type_by_short_name(short_name, self.name_table())
     }
@@ -634,7 +627,7 @@ impl AnalyzedProgram {
     }
 
     /// Resolve the implement-registry type key NameId for a concrete sema TypeId.
-    pub fn impl_type_name_id_from_type_id(
+    pub(crate) fn impl_type_name_id_from_type_id(
         &self,
         type_id: vole_sema::type_arena::TypeId,
     ) -> Option<NameId> {
@@ -665,19 +658,19 @@ impl AnalyzedProgram {
 
     /// Look up a VIR function by its monomorphized mangled NameId.
     /// Returns `None` if no VIR function was lowered for this instance.
-    pub fn get_vir_monomorph(&self, mangled_name_id: NameId) -> Option<&VirFunction> {
+    pub(crate) fn get_vir_monomorph(&self, mangled_name_id: NameId) -> Option<&VirFunction> {
         self.vir_program.get_monomorph(mangled_name_id)
     }
 
     /// Look up a VIR function by its semantic FunctionId.
     /// Returns `None` if no VIR function was lowered for this function.
-    pub fn get_vir_function(&self, func_id: FunctionId) -> Option<&VirFunction> {
+    pub(crate) fn get_vir_function(&self, func_id: FunctionId) -> Option<&VirFunction> {
         self.vir_program.get_function(func_id)
     }
 
     /// Look up a VIR function by its semantic MethodId.
     /// Returns `None` if no VIR function was lowered for this method.
-    pub fn get_vir_method(&self, method_id: MethodId) -> Option<&VirFunction> {
+    pub(crate) fn get_vir_method(&self, method_id: MethodId) -> Option<&VirFunction> {
         self.vir_program.get_method(method_id)
     }
 
@@ -692,15 +685,9 @@ impl AnalyzedProgram {
         }
     }
 
-    /// Look up a generic VIR function template by its original `NameId`.
-    /// Returns `None` if no generic VIR function was lowered for this name.
-    pub fn get_generic_vir_function(&self, original_name: NameId) -> Option<&VirFunction> {
-        self.vir_program.get_generic_function(original_name)
-    }
-
     /// Look up a VIR test body by the test case's span.
     /// Returns `None` if no VIR body was lowered for this test.
-    pub fn get_vir_test(&self, span: Span) -> Option<&VirBody> {
+    pub(crate) fn get_vir_test(&self, span: Span) -> Option<&VirBody> {
         self.vir_program.get_test(span)
     }
 }
