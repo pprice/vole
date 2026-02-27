@@ -33,13 +33,13 @@ pub struct AnalyzedProgram {
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     /// Type arena (Rc-shared, immutable during codegen).
-    pub types: Rc<TypeArena>,
+    types: Rc<TypeArena>,
     /// Entity registry (Rc-shared, immutable during codegen).
     entities: Rc<EntityRegistry>,
     /// Implement registry (Rc-shared, immutable during codegen).
     implements: Rc<ImplementRegistry>,
     /// Name table (Rc-shared, immutable during codegen).
-    pub names: Rc<NameTable>,
+    names: Rc<NameTable>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
     pub module_id: ModuleId,
     /// Module paths that had sema errors. Codegen should skip compiling
