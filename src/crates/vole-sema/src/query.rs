@@ -25,6 +25,22 @@ use vole_identity::{
 
 use crate::resolve::ResolverEntityExt;
 
+/// Resolve a type name string to a TypeDefId using sema's full resolution chain.
+///
+/// This mirrors `ProgramQuery::resolve_type_def_by_str` without requiring a
+/// `ProgramQuery` instance.
+#[must_use]
+pub fn resolve_type_def_by_str(
+    interner: &Interner,
+    name_table: &NameTable,
+    registry: &EntityRegistry,
+    module: ModuleId,
+    name: &str,
+) -> Option<TypeDefId> {
+    let resolver = Resolver::new(interner, name_table, module, &[]);
+    resolver.resolve_type_str_or_interface(name, registry)
+}
+
 /// Query interface for accessing analyzed program data.
 ///
 /// Provides a unified API for type queries, method resolution lookups,
@@ -241,8 +257,7 @@ impl<'a> ProgramQuery<'a> {
     /// Resolve a type name string to a TypeDefId using the full resolution chain.
     #[must_use]
     pub fn resolve_type_def_by_str(&self, module: ModuleId, name: &str) -> Option<TypeDefId> {
-        let resolver = Resolver::new(self.interner, self.name_table, module, &[]);
-        resolver.resolve_type_str_or_interface(name, self.registry)
+        resolve_type_def_by_str(self.interner, self.name_table, self.registry, module, name)
     }
 
     /// Resolve a type alias to its underlying type.

@@ -9,9 +9,7 @@ use vole_frontend::{Decl, Interner, LetInit, Program, Symbol};
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
 };
-use vole_sema::{
-    AnalysisOutput, EntityRegistry, ImplementRegistry, NodeMap, ProgramQuery, TypeArena,
-};
+use vole_sema::{AnalysisOutput, EntityRegistry, ImplementRegistry, NodeMap, TypeArena};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirBody, VirFunction, VirProgram, VirRef, VirTest};
 
@@ -456,20 +454,6 @@ impl AnalyzedProgram {
         }
     }
 
-    /// Get a query interface for accessing type information and analysis results.
-    pub(crate) fn query(&self) -> ProgramQuery<'_> {
-        ProgramQuery::new(
-            &self.entities,
-            &self.node_map,
-            &self.tests_virtual_modules,
-            self.name_table_ref(),
-            &self.interner,
-            &self.implements,
-            &self.module_programs,
-            self.type_arena(),
-        )
-    }
-
     /// Get read-only access to the name table
     pub(crate) fn name_table(&self) -> &NameTable {
         &self.names
@@ -684,7 +668,13 @@ impl AnalyzedProgram {
         module_id: ModuleId,
         name: &str,
     ) -> Option<TypeDefId> {
-        self.query().resolve_type_def_by_str(module_id, name)
+        vole_sema::query::resolve_type_def_by_str(
+            self.interner(),
+            self.name_table(),
+            &self.entities,
+            module_id,
+            name,
+        )
     }
 
     /// Return sentinel base type for a sentinel TypeDef, when present.
