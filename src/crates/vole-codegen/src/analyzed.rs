@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::analyzed_lowering_facade::{LowerVirProgramArgs, lower_vir_program};
+use crate::entity_view::EntityView;
 use vole_frontend::{Interner, Program, Symbol};
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
@@ -28,6 +29,9 @@ pub struct AnalyzedProgram {
     /// Type arena (Rc-shared, immutable during codegen).
     types: Rc<TypeArena>,
     /// Entity registry (Rc-shared, immutable during codegen).
+    /// Retained for external sema functions that take `&EntityRegistry`
+    /// (resolve_type_def_by_str, display_type_id_short, type_name_id_for_type).
+    /// All entity ID-based helpers now read from `entity_view`.
     entities: Rc<EntityRegistry>,
     /// Implement registry (Rc-shared, immutable during codegen).
     /// Retained for vol-8t2v removal; all helpers now read from `implement_view`.
@@ -50,6 +54,11 @@ pub struct AnalyzedProgram {
     /// Populated once during `from_analysis`; all implement helpers read
     /// from this view instead of `Rc<ImplementRegistry>`.
     implement_view: ImplementView,
+    /// Codegen-local metadata view for entity-registry lookups.
+    ///
+    /// Populated once during `from_analysis`; all entity helpers read
+    /// from this view instead of `Rc<EntityRegistry>`.
+    entity_view: EntityView,
 }
 
 /// Codegen-local external binding payload from implement-registry lookups.
@@ -254,6 +263,7 @@ impl AnalyzedProgram {
         let module_programs = lowering_output.module_programs;
         let vir_program = lowering_output.vir_program;
         let implement_view = ImplementView::from_registry(&db.implements);
+        let entity_view = EntityView::from_registry(&db.entities, &db.names);
         Self {
             program,
             interner: Rc::new(interner),
@@ -268,6 +278,7 @@ impl AnalyzedProgram {
             modules_with_errors,
             vir_program,
             implement_view,
+            entity_view,
         }
     }
 
@@ -328,17 +339,17 @@ impl AnalyzedProgram {
 
     /// Resolve the EntityRegistry NameId used for all array implement dispatch.
     pub(crate) fn array_type_name_id(&self) -> Option<NameId> {
-        self.entities.array_name_id()
+        self.entity_view.array_name_id()
     }
 
     /// Resolve a type's canonical entity NameId from its TypeDefId.
     pub(crate) fn entity_type_name_id(&self, type_def_id: TypeDefId) -> NameId {
-        self.entities.name_id(type_def_id)
+        self.entity_view.type_name_id(type_def_id)
     }
 
     /// Resolve a sema TypeDef by ID.
     pub(crate) fn type_def(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
-        self.entities.get_type(type_def_id)
+        self.entity_view.get_type(type_def_id)
     }
 
     /// Query-compatible alias for resolving a sema TypeDef by ID.
@@ -348,7 +359,7 @@ impl AnalyzedProgram {
 
     /// Resolve a sema FieldDef by ID.
     pub(crate) fn field_def(&self, field_id: FieldId) -> &vole_sema::entity_defs::FieldDef {
-        self.entities.get_field(field_id)
+        self.entity_view.get_field(field_id)
     }
 
     /// Query-compatible alias for resolving a sema FieldDef by ID.
@@ -361,7 +372,7 @@ impl AnalyzedProgram {
         &self,
         function_id: FunctionId,
     ) -> &vole_sema::entity_defs::FunctionDef {
-        self.entities.get_function(function_id)
+        self.entity_view.get_function(function_id)
     }
 
     /// Query-compatible alias for resolving a sema FunctionDef by ID.
@@ -374,7 +385,7 @@ impl AnalyzedProgram {
 
     /// Resolve a sema MethodDef by ID.
     pub(crate) fn method_def(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
-        self.entities.get_method(method_id)
+        self.entity_view.get_method(method_id)
     }
 
     /// Query-compatible alias for resolving a sema MethodDef by ID.
@@ -384,7 +395,7 @@ impl AnalyzedProgram {
 
     /// Return the sema signature TypeId for a method.
     pub(crate) fn method_signature_id(&self, method_id: MethodId) -> vole_sema::type_arena::TypeId {
-        self.entities.get_method(method_id).signature_id
+        self.entity_view.get_method(method_id).signature_id
     }
 
     /// Return all field IDs declared on a type definition.
@@ -392,12 +403,12 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
     ) -> impl Iterator<Item = FieldId> + '_ {
-        self.entities.fields_on_type(type_def_id)
+        self.entity_view.fields_on_type(type_def_id).iter().copied()
     }
 
     /// Return true when a global is present for the given NameId.
     pub(crate) fn has_global(&self, name_id: NameId) -> bool {
-        self.entities.global_by_name(name_id).is_some()
+        self.entity_view.global_by_name(name_id).is_some()
     }
 
     /// Resolve a NameId to display form (e.g. module::Type::method).
@@ -417,7 +428,7 @@ impl AnalyzedProgram {
 
     /// Resolve type definition by NameId.
     pub(crate) fn try_type_def_id(&self, name_id: NameId) -> Option<TypeDefId> {
-        self.entities.type_by_name(name_id)
+        self.entity_view.type_by_name(name_id)
     }
 
     /// Resolve method NameId by Symbol.
@@ -470,7 +481,7 @@ impl AnalyzedProgram {
 
     /// Resolve semantic FunctionId by NameId.
     pub(crate) fn function_id_by_name_id(&self, name_id: NameId) -> Option<FunctionId> {
-        self.entities.function_by_name(name_id)
+        self.entity_view.function_by_name(name_id)
     }
 
     /// Resolve semantic FunctionId by module and Symbol.
@@ -499,7 +510,7 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
     ) -> Option<vole_sema::type_arena::TypeId> {
-        self.entities.get_type(type_def_id).base_type_id
+        self.entity_view.get_type(type_def_id).base_type_id
     }
 
     /// Return whether a type definition is a sentinel.
@@ -509,17 +520,18 @@ impl AnalyzedProgram {
 
     /// Return whether a type definition is a struct (not class/interface/sentinel).
     pub(crate) fn is_struct_type(&self, type_def_id: TypeDefId) -> bool {
-        self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Struct
+        self.entity_view.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Struct
     }
 
     /// Return whether a type definition is an interface.
     pub(crate) fn is_interface_type(&self, type_def_id: TypeDefId) -> bool {
-        self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Interface
+        self.entity_view.get_type(type_def_id).kind
+            == vole_sema::entity_defs::TypeDefKind::Interface
     }
 
     /// Return whether a type definition is an alias.
     pub(crate) fn is_alias_type(&self, type_def_id: TypeDefId) -> bool {
-        self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Alias
+        self.entity_view.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Alias
     }
 
     /// Return aliased arena TypeId for alias types.
@@ -527,17 +539,18 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
     ) -> Option<vole_sema::type_arena::TypeId> {
-        self.entities.get_type(type_def_id).aliased_type
+        self.entity_view.get_type(type_def_id).aliased_type
     }
 
     /// Return whether a type definition is an error type.
     pub(crate) fn is_error_type(&self, type_def_id: TypeDefId) -> bool {
-        self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::ErrorType
+        self.entity_view.get_type(type_def_id).kind
+            == vole_sema::entity_defs::TypeDefKind::ErrorType
     }
 
     /// Return whether an error type has additional error_info payload.
     pub(crate) fn is_error_type_with_info(&self, type_def_id: TypeDefId) -> bool {
-        let type_def = self.entities.get_type(type_def_id);
+        let type_def = self.entity_view.get_type(type_def_id);
         type_def.kind == vole_sema::entity_defs::TypeDefKind::ErrorType
             && type_def.error_info.is_some()
     }
@@ -548,7 +561,7 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name_id: NameId,
     ) -> Option<vole_sema::type_arena::TypeId> {
-        self.entities
+        self.entity_view
             .find_method_binding(type_def_id, method_name_id)
             .map(|binding| binding.func_type.return_type_id)
     }
@@ -559,7 +572,7 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name_id: NameId,
     ) -> Option<MethodBindingRef> {
-        self.entities
+        self.entity_view
             .find_method_binding(type_def_id, method_name_id)
             .map(MethodBindingRef::from)
     }
@@ -570,13 +583,13 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name_id: NameId,
     ) -> Option<MethodId> {
-        self.entities
+        self.entity_view
             .find_method_on_type(type_def_id, method_name_id)
     }
 
     /// Return direct method IDs declared on a type definition.
     pub(crate) fn type_methods(&self, type_def_id: TypeDefId) -> Vec<MethodId> {
-        self.entities.methods_on_type(type_def_id).collect()
+        self.entity_view.methods_on_type(type_def_id).to_vec()
     }
 
     /// Build interface type-parameter substitutions for a concrete implementation.
@@ -585,10 +598,10 @@ impl AnalyzedProgram {
         implementing_type_id: TypeDefId,
         interface_id: TypeDefId,
     ) -> FxHashMap<NameId, vole_sema::type_arena::TypeId> {
-        let type_params = self.entities.type_params(interface_id);
+        let type_params = self.entity_view.type_params(interface_id);
         let type_args = self
-            .entities
-            .get_implementation_type_args(implementing_type_id, interface_id);
+            .entity_view
+            .implementation_type_args(implementing_type_id, interface_id);
         type_params
             .into_iter()
             .zip(type_args.iter().copied())
@@ -601,18 +614,18 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name_id: NameId,
     ) -> Option<MethodId> {
-        self.entities
+        self.entity_view
             .find_static_method_on_type(type_def_id, method_name_id)
     }
 
     /// Get the full NameId for a semantic method.
     pub(crate) fn method_full_name(&self, method_id: MethodId) -> NameId {
-        self.entities.method_full_name(method_id)
+        self.entity_view.method_full_name(method_id)
     }
 
     /// Return all interfaces implemented by a type definition.
     pub(crate) fn implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId> {
-        self.entities.get_implemented_interfaces(type_def_id)
+        self.entity_view.implemented_interfaces(type_def_id)
     }
 
     /// Return external binding metadata for a method, when available.
@@ -620,17 +633,12 @@ impl AnalyzedProgram {
         &self,
         method_id: MethodId,
     ) -> Option<ExternalMethodInfoRef> {
-        self.entities
-            .get_external_binding(method_id)
-            .map(|info| ExternalMethodInfoRef {
-                module_path: info.module_path,
-                native_name: info.native_name,
-            })
+        self.entity_view.method_external_binding(method_id)
     }
 
     /// Return true when all methods on a type are external-only.
     pub(crate) fn is_external_only(&self, type_def_id: TypeDefId) -> bool {
-        self.entities.is_external_only(type_def_id)
+        self.entity_view.is_external_only(type_def_id)
     }
 
     /// Return resolved method metadata for a call node.
@@ -667,7 +675,7 @@ impl AnalyzedProgram {
 
     /// Return the single abstract method for functional interfaces.
     pub(crate) fn is_functional_interface(&self, type_def_id: TypeDefId) -> Option<MethodId> {
-        self.entities.is_functional(type_def_id)
+        self.entity_view.is_functional(type_def_id)
     }
 
     /// Resolve virtual module ID for a tests block span.
@@ -691,7 +699,7 @@ impl AnalyzedProgram {
         &self,
         func_id: FunctionId,
     ) -> Vec<vole_sema::type_arena::TypeId> {
-        self.entities
+        self.entity_view
             .get_function(func_id)
             .signature
             .params_id
@@ -700,8 +708,8 @@ impl AnalyzedProgram {
 
     /// Return global declared TypeId by NameId.
     pub(crate) fn global_type_id(&self, name_id: NameId) -> Option<vole_sema::type_arena::TypeId> {
-        let global_id = self.entities.global_by_name(name_id)?;
-        Some(self.entities.get_global(global_id).type_id)
+        let global_id = self.entity_view.global_by_name(name_id)?;
+        Some(self.entity_view.get_global(global_id).type_id)
     }
 
     /// Return module ID for a path, falling back to main module.
@@ -723,16 +731,20 @@ impl AnalyzedProgram {
 
     /// Return whether a function parameter has a default expression.
     pub(crate) fn has_function_default_expr(&self, func_id: FunctionId, param_idx: usize) -> bool {
-        self.entities
-            .function_default_expr(func_id, param_idx)
-            .is_some()
+        self.entity_view
+            .get_function(func_id)
+            .param_defaults
+            .get(param_idx)
+            .is_some_and(|opt| opt.is_some())
     }
 
     /// Return whether a method parameter has a default expression.
     pub(crate) fn has_method_default_expr(&self, method_id: MethodId, param_idx: usize) -> bool {
-        self.entities
-            .method_default_expr(method_id, param_idx)
-            .is_some()
+        self.entity_view
+            .get_method(method_id)
+            .param_defaults
+            .get(param_idx)
+            .is_some_and(|opt| opt.is_some())
     }
 
     /// Return imported-module interner for a module ID, when available.
@@ -745,7 +757,7 @@ impl AnalyzedProgram {
 
     /// Return whether a type definition is marked as an annotation type.
     pub(crate) fn type_is_annotation(&self, type_def_id: TypeDefId) -> bool {
-        self.entities.get_type(type_def_id).is_annotation
+        self.entity_view.get_type(type_def_id).is_annotation
     }
 
     /// Return interface method IDs in deterministic slot order.
@@ -753,23 +765,23 @@ impl AnalyzedProgram {
         &self,
         interface_type_def_id: TypeDefId,
     ) -> Vec<MethodId> {
-        self.entities
+        self.entity_view
             .interface_methods_ordered(interface_type_def_id)
     }
 
     /// Return all field IDs declared on a type definition.
     pub(crate) fn entity_field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.entities.fields_on_type(type_def_id).collect()
+        self.entity_view.fields_on_type(type_def_id).to_vec()
     }
 
     /// Return the semantic field type for a field ID.
     pub(crate) fn entity_field_type(&self, field_id: FieldId) -> vole_sema::type_arena::TypeId {
-        self.entities.get_field(field_id).ty
+        self.entity_view.get_field(field_id).ty
     }
 
     /// Return declared type parameter NameIds for a type definition.
     pub(crate) fn entity_type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
-        self.entities.type_params(type_def_id)
+        self.entity_view.type_params(type_def_id)
     }
 
     /// Return generic field types metadata for a type definition, if present.
@@ -777,7 +789,7 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
     ) -> Option<Vec<vole_sema::type_arena::TypeId>> {
-        self.entities
+        self.entity_view
             .get_type(type_def_id)
             .generic_info
             .as_ref()
@@ -786,13 +798,12 @@ impl AnalyzedProgram {
 
     /// Return whether a type definition is a sentinel type.
     pub(crate) fn entity_type_is_sentinel(&self, type_def_id: TypeDefId) -> bool {
-        self.entities.get_type(type_def_id).kind.is_sentinel()
+        self.entity_view.get_type(type_def_id).kind.is_sentinel()
     }
 
-    /// Find a type by its short (last-segment) name in the entity registry.
+    /// Find a type by its short (last-segment) name in the entity view.
     pub(crate) fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
-        self.entities
-            .type_by_short_name(short_name, self.name_table())
+        self.entity_view.type_by_short_name(short_name)
     }
 
     /// Look up external function binding metadata by short function name.
@@ -819,21 +830,21 @@ impl AnalyzedProgram {
 
     /// Get the free-function monomorph cache.
     pub(crate) fn monomorph_cache(&self) -> &vole_sema::generic::MonomorphCache {
-        &self.entities.monomorph_cache
+        self.entity_view.monomorph_cache()
     }
 
     /// Get the class-method monomorph cache.
     pub(crate) fn class_method_monomorph_cache(
         &self,
     ) -> &vole_sema::generic::ClassMethodMonomorphCache {
-        &self.entities.class_method_monomorph_cache
+        self.entity_view.class_method_monomorph_cache()
     }
 
     /// Get the static-method monomorph cache.
     pub(crate) fn static_method_monomorph_cache(
         &self,
     ) -> &vole_sema::generic::StaticMethodMonomorphCache {
-        &self.entities.static_method_monomorph_cache
+        self.entity_view.static_method_monomorph_cache()
     }
 
     /// Render a short human-readable type name for diagnostics/debug output.

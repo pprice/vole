@@ -10,10 +10,13 @@
 //! You can use:
 //!   let (kind, name) = self.entity_registry().type_kind_and_name(id);
 
-use crate::entity_defs::{GenericTypeInfo, TypeDefKind};
+use crate::entity_defs::{
+    FieldDef, FunctionDef, GenericTypeInfo, GlobalDef, MethodDef, TypeDef, TypeDefKind,
+};
 use crate::generic::TypeParamInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
-use vole_identity::{FieldId, MethodId, NameId, TypeDefId};
+use rustc_hash::FxHashMap;
+use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, NameId, TypeDefId};
 
 use super::EntityRegistry;
 
@@ -176,7 +179,7 @@ impl EntityRegistry {
     #[inline]
     pub fn function_default_expr(
         &self,
-        func_id: vole_identity::FunctionId,
+        func_id: FunctionId,
         param_idx: usize,
     ) -> Option<&vole_frontend::Expr> {
         self.get_function(func_id)
@@ -199,5 +202,57 @@ impl EntityRegistry {
             .param_defaults
             .get(param_idx)
             .and_then(|opt| opt.as_deref())
+    }
+
+    // ===== Snapshot accessors (for codegen views) =====
+
+    /// Return a read-only slice of all type definitions.
+    pub fn all_type_defs(&self) -> &[TypeDef] {
+        &self.type_defs
+    }
+
+    /// Return a read-only slice of all method definitions.
+    pub fn all_method_defs(&self) -> &[MethodDef] {
+        &self.method_defs
+    }
+
+    /// Return a read-only slice of all field definitions.
+    pub fn all_field_defs(&self) -> &[FieldDef] {
+        &self.field_defs
+    }
+
+    /// Return a read-only slice of all function definitions.
+    pub fn all_function_defs(&self) -> &[FunctionDef] {
+        &self.function_defs
+    }
+
+    /// Return a read-only slice of all global definitions.
+    pub fn all_global_defs(&self) -> &[GlobalDef] {
+        &self.global_defs
+    }
+
+    /// Return a read-only reference to the type-by-name lookup map.
+    pub fn type_by_name_map(&self) -> &FxHashMap<NameId, TypeDefId> {
+        &self.type_by_name
+    }
+
+    /// Return a read-only reference to the function-by-name lookup map.
+    pub fn function_by_name_map(&self) -> &FxHashMap<NameId, FunctionId> {
+        &self.function_by_name
+    }
+
+    /// Return a read-only reference to the global-by-name lookup map.
+    pub fn global_by_name_map(&self) -> &FxHashMap<NameId, GlobalId> {
+        &self.global_by_name
+    }
+
+    /// Return a read-only reference to the methods-by-type lookup map.
+    pub fn methods_by_type_map(&self) -> &FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>> {
+        &self.methods_by_type
+    }
+
+    /// Return a read-only reference to the static-methods-by-type lookup map.
+    pub fn static_methods_by_type_map(&self) -> &FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>> {
+        &self.static_methods_by_type
     }
 }

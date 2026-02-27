@@ -19,6 +19,7 @@ mod coercion_ops;
 pub mod compiler;
 mod compound_assign;
 mod context;
+mod entity_view;
 pub mod errors;
 mod expr;
 mod function_registry;
