@@ -476,12 +476,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
             let slot = start_index + offset;
             let Some(default_vir) = self.function_default_vir_init(func_id, slot).cloned() else {
-                if self
-                    .analyzed()
-                    .query()
-                    .function_default_expr_by_id(func_id, slot)
-                    .is_some()
-                {
+                if self.analyzed().has_function_default_expr(func_id, slot) {
                     return Err(CodegenError::internal_with_context(
                         "missing VIR function default expression",
                         format!("{func_id:?} param {slot}"),
@@ -542,12 +537,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         for (offset, &param_type_id) in expected_type_ids.iter().enumerate() {
             let slot = start_index + offset;
             let Some(default_vir) = self.method_default_vir_init(method_id, slot).cloned() else {
-                if self
-                    .analyzed()
-                    .query()
-                    .method_default_expr_by_id(method_id, slot)
-                    .is_some()
-                {
+                if self.analyzed().has_method_default_expr(method_id, slot) {
                     return Err(CodegenError::internal_with_context(
                         "missing VIR method default expression",
                         format!("{method_id:?} param {slot}"),

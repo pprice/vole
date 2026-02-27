@@ -626,16 +626,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Eagerly register: allocate a new runtime type_id with field type tags
         let new_type_id = vole_runtime::type_registry::alloc_type_id();
-        let field_type_tags: Vec<_> = {
-            let query = self.analyzed().query();
-            query
-                .fields_on_type(type_def_id)
-                .map(|field_id| {
-                    let field = query.get_field(field_id);
-                    self.field_type_tag(field.ty)
-                })
-                .collect()
-        };
+        let field_type_tags: Vec<_> = self
+            .analyzed()
+            .fields_on_type(type_def_id)
+            .into_iter()
+            .map(|field_id| {
+                let field = self.analyzed().field_def(field_id);
+                self.field_type_tag(field.ty)
+            })
+            .collect();
         vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
 
         self.env
@@ -770,8 +769,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
         self.name_table()
             .name_id(module_id, &[name], self.interner())
-            .and_then(|name_id| self.analyzed().query().global(name_id))
-            .is_some()
+            .is_some_and(|name_id| self.analyzed().has_global(name_id))
     }
 
     /// Get VIR-lowered global variable initializer by name.
@@ -1442,7 +1440,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ),
         };
         let return_type_id = func_type.return_type_id;
-        let mangled_name = self.analyzed().query().display_name(mangled_name_id);
+        let mangled_name = self.analyzed().display_name(mangled_name_id);
 
         let sig = build_monomorph_signature(
             func_type,

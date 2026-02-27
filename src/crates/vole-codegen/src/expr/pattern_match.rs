@@ -57,9 +57,9 @@ impl Cg<'_, '_, '_> {
                 // name resolution system. Uses current module context or main module.
                 let name = self.interner().resolve(*sym);
                 let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
-                let query = self.analyzed().query();
-                if let Some(type_def_id) = query.resolve_type_def_by_str(module_id, name) {
-                    return query.sentinel_base_type(type_def_id);
+                if let Some(type_def_id) = self.analyzed().resolve_type_def_by_str(module_id, name)
+                {
+                    return self.analyzed().sentinel_base_type(type_def_id);
                 }
                 // If name resolution failed, check if this is a type parameter
                 // that can be resolved via the current substitutions map.

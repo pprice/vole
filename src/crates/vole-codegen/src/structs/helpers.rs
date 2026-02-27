@@ -45,7 +45,6 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     cg: &crate::context::Cg,
 ) -> CodegenResult<(usize, TypeId)> {
     let arena = cg.arena();
-    let query = cg.analyzed().query();
 
     // Apply function-level substitutions first (for monomorphized generics)
     // This handles the case where type_id is a TypeParam that needs to be
@@ -80,7 +79,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
                 CodegenError::type_mismatch("field access", "class or struct", "other type")
             })?;
 
-    let type_def = query.get_type(type_def_id);
+    let type_def = cg.analyzed().type_def(type_def_id);
     let generic_info = type_def
         .generic_info
         .as_ref()
@@ -114,7 +113,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     let is_class = arena.unwrap_class(resolved_type_id).is_some();
     let mut physical_slot = 0usize;
     for (idx, field_name_id) in generic_info.field_names.iter().enumerate() {
-        let name = query.last_segment(*field_name_id);
+        let name = cg.analyzed().last_segment(*field_name_id);
         if name.as_deref() == Some(field_name) {
             let base_type_id = generic_info.field_types[idx];
             let field_type_id = if !combined_subs.is_empty() {

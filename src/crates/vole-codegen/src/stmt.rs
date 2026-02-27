@@ -981,11 +981,12 @@ impl Cg<'_, '_, '_> {
         let error_type_def_id =
             self.resolve_raise_error_type_def(error_type_id, raise_stmt.error_name)?;
 
-        let query = self.analyzed().query();
-        let error_fields: Vec<_> = query
+        let error_fields: Vec<_> = self
+            .analyzed()
             .fields_on_type(error_type_def_id)
+            .into_iter()
             .map(|field_id| {
-                let field = query.get_field(field_id);
+                let field = self.analyzed().field_def(field_id);
                 RaiseFieldLayout {
                     name_id: field.name_id,
                     ty: field.ty,
@@ -1031,7 +1032,7 @@ impl Cg<'_, '_, '_> {
         let result = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
             // Single error type
             let name =
-                name_table.last_segment_str(self.analyzed().query().type_name_id(type_def_id));
+                name_table.last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
             if name.as_deref() == Some(raise_error_name) {
                 Some(type_def_id)
             } else {
@@ -1042,7 +1043,7 @@ impl Cg<'_, '_, '_> {
             variants.iter().find_map(|&v| {
                 if let Some(type_def_id) = arena.unwrap_error(v) {
                     let name = name_table
-                        .last_segment_str(self.analyzed().query().type_name_id(type_def_id));
+                        .last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
                     if name.as_deref() == Some(raise_error_name) {
                         return Some(type_def_id);
                     }
@@ -1532,11 +1533,12 @@ impl Cg<'_, '_, '_> {
 
         let error_type_def_id = self.resolve_raise_error_type_def(error_type_id, error_name)?;
 
-        let query = self.analyzed().query();
-        let error_fields: Vec<_> = query
+        let error_fields: Vec<_> = self
+            .analyzed()
             .fields_on_type(error_type_def_id)
+            .into_iter()
             .map(|field_id| {
-                let field = query.get_field(field_id);
+                let field = self.analyzed().field_def(field_id);
                 RaiseFieldLayout {
                     name_id: field.name_id,
                     ty: field.ty,
@@ -1993,11 +1995,8 @@ impl Cg<'_, '_, '_> {
     fn sentinel_type_id_for_symbol(&self, sym: Symbol) -> Option<TypeId> {
         let name = self.interner().resolve(sym);
         let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
-        let type_def_id = self
-            .analyzed()
-            .query()
-            .resolve_type_def_by_str(module_id, name)?;
-        self.analyzed().query().sentinel_base_type(type_def_id)
+        let type_def_id = self.analyzed().resolve_type_def_by_str(module_id, name)?;
+        self.analyzed().sentinel_base_type(type_def_id)
     }
 
     /// Register RC tracking for a newly compiled VIR let binding.

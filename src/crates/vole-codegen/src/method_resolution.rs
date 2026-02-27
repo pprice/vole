@@ -38,7 +38,7 @@ pub(crate) fn get_type_def_id_from_type_id(
         _ => None,
     };
     if let Some(name_id) = primitive_name_id {
-        return analyzed.query().try_type_def_id(name_id);
+        return analyzed.try_type_def_id(name_id);
     }
 
     // For Class, Struct, and Interface, extract TypeDefId directly
@@ -48,11 +48,11 @@ pub(crate) fn get_type_def_id_from_type_id(
         SemaType::Interface { type_def_id, .. } => Some(*type_def_id),
         SemaType::Handle => {
             let name_id = analyzed.name_table().primitives.handle;
-            analyzed.query().try_type_def_id(name_id)
+            analyzed.try_type_def_id(name_id)
         }
         SemaType::Array(_) => {
             let name_id = analyzed.array_type_name_id()?;
-            analyzed.query().try_type_def_id(name_id)
+            analyzed.try_type_def_id(name_id)
         }
         _ => None,
     }

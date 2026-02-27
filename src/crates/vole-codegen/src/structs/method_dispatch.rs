@@ -65,7 +65,7 @@ impl Cg<'_, '_, '_> {
                     "module method call is missing expr_id and VIR resolution metadata",
                 )
             })?;
-            let resolution = self.analyzed().query().method_at(expr_id);
+            let resolution = self.analyzed().method_at(expr_id);
             let Some(ResolvedMethod::Implemented {
                 external_info,
                 func_type_id,
@@ -124,7 +124,7 @@ impl Cg<'_, '_, '_> {
                     .collect();
                 MonomorphKey::new(key.func_name, effective_type_keys)
             })
-            .or_else(|| expr_id.and_then(|id| self.analyzed().query().monomorph_for(id).cloned()));
+            .or_else(|| expr_id.and_then(|id| self.analyzed().monomorph_for(id).cloned()));
 
         if let Some(monomorph_key) = monomorph_key.as_ref() {
             let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
@@ -366,7 +366,7 @@ impl Cg<'_, '_, '_> {
                     .get(slot)
                     .copied()
             })
-            .map(|method_id| self.analyzed().query().get_method(method_id).signature_id)
+            .map(|method_id| self.analyzed().method_signature_id(method_id))
             .unwrap_or(func_type_id);
 
         // Unwrap function type to get params and return type

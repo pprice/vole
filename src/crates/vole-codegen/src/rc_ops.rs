@@ -64,7 +64,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.arena();
 
         // Check if any field type is a TypeParam that maps to an RC type
-        let type_def = self.analyzed().query().get_type(type_def_id);
+        let type_def = self.analyzed().type_def(type_def_id);
         let Some(generic_info) = &type_def.generic_info else {
             return base_type_id;
         };

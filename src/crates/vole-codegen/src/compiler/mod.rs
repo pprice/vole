@@ -169,7 +169,6 @@ impl<'a> Compiler<'a> {
     /// Look up a method NameId by Symbol
     fn method_name_id(&self, name: Symbol) -> CodegenResult<NameId> {
         self.analyzed
-            .query()
             .try_method_name_id(name)
             .ok_or_else(|| CodegenError::not_found("method name_id", self.resolve_symbol(name)))
     }
@@ -180,15 +179,8 @@ impl<'a> Compiler<'a> {
     /// normal compilation - they're compiled via monomorphized instances instead.
     fn has_implicit_generic_info(&self, name_id: NameId) -> bool {
         self.analyzed
-            .query()
             .function_id_by_name_id(name_id)
-            .map(|func_id| {
-                self.analyzed
-                    .query()
-                    .get_function(func_id)
-                    .generic_info
-                    .is_some()
-            })
+            .map(|func_id| self.analyzed.function_def(func_id).generic_info.is_some())
             .unwrap_or(false)
     }
 
@@ -286,7 +278,7 @@ impl<'a> Compiler<'a> {
         mode: DeclareMode,
     ) -> Option<FunctionKey> {
         // Look up semantic FunctionId from NameId
-        let semantic_func_id = self.analyzed.query().function_id_by_name_id(name_id)?;
+        let semantic_func_id = self.analyzed.function_id_by_name_id(name_id)?;
 
         // Build signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);
@@ -304,8 +296,7 @@ impl<'a> Compiler<'a> {
         // Record return type from pre-resolved signature
         let return_type_id = self
             .analyzed
-            .query()
-            .get_function(semantic_func_id)
+            .function_def(semantic_func_id)
             .signature
             .return_type_id;
         self.func_registry.set_return_type(func_key, return_type_id);
@@ -323,10 +314,9 @@ impl<'a> Compiler<'a> {
     fn declare_main_function(&mut self, name: Symbol) -> Option<FunctionKey> {
         // Get name_id and display_name
         let (name_id, display_name) = {
-            let query = self.analyzed.query();
             let module_id = self.program_module();
-            let name_id = query.try_function_name_id(module_id, name)?;
-            let display_name = query.resolve_symbol(name).to_string();
+            let name_id = self.analyzed.try_function_name_id(module_id, name)?;
+            let display_name = self.analyzed.resolve_symbol(name).to_string();
             (name_id, display_name)
         };
 

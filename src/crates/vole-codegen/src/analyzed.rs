@@ -519,6 +519,176 @@ impl AnalyzedProgram {
         self.entities.name_id(type_def_id)
     }
 
+    /// Resolve a sema TypeDef by ID.
+    pub(crate) fn type_def(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
+        self.entities.get_type(type_def_id)
+    }
+
+    /// Resolve a sema FieldDef by ID.
+    pub(crate) fn field_def(&self, field_id: FieldId) -> &vole_sema::entity_defs::FieldDef {
+        self.entities.get_field(field_id)
+    }
+
+    /// Resolve a sema FunctionDef by ID.
+    pub(crate) fn function_def(
+        &self,
+        function_id: FunctionId,
+    ) -> &vole_sema::entity_defs::FunctionDef {
+        self.entities.get_function(function_id)
+    }
+
+    /// Resolve a sema MethodDef by ID.
+    pub(crate) fn method_def(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
+        self.entities.get_method(method_id)
+    }
+
+    /// Return the sema signature TypeId for a method.
+    pub(crate) fn method_signature_id(&self, method_id: MethodId) -> vole_sema::type_arena::TypeId {
+        self.entities.get_method(method_id).signature_id
+    }
+
+    /// Return all field IDs declared on a type definition.
+    pub(crate) fn fields_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+        self.entity_field_ids_on_type(type_def_id)
+    }
+
+    /// Return true when a global is present for the given NameId.
+    pub(crate) fn has_global(&self, name_id: NameId) -> bool {
+        self.entities.global_by_name(name_id).is_some()
+    }
+
+    /// Resolve a NameId to display form (e.g. module::Type::method).
+    pub(crate) fn display_name(&self, name_id: NameId) -> String {
+        self.names.display(name_id)
+    }
+
+    /// Resolve a symbol in the main-program interner.
+    pub(crate) fn resolve_symbol(&self, sym: Symbol) -> &str {
+        self.interner.resolve(sym)
+    }
+
+    /// Resolve a NameId to its last segment.
+    pub(crate) fn last_segment(&self, name_id: NameId) -> Option<String> {
+        self.names.last_segment_str(name_id)
+    }
+
+    /// Resolve type definition by NameId.
+    pub(crate) fn try_type_def_id(&self, name_id: NameId) -> Option<TypeDefId> {
+        self.entities.type_by_name(name_id)
+    }
+
+    /// Resolve method NameId by Symbol.
+    pub(crate) fn try_method_name_id(&self, name: Symbol) -> Option<NameId> {
+        let namer = NamerLookup::new(self.name_table(), self.interner());
+        namer.method(name)
+    }
+
+    /// Resolve method NameId by short string.
+    pub(crate) fn try_method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
+        vole_identity::method_name_id_by_str(self.name_table(), self.interner(), name_str)
+    }
+
+    /// Resolve method NameId by short string, panicking when missing.
+    pub(crate) fn method_name_id_by_str(&self, name_str: &str) -> NameId {
+        self.try_method_name_id_by_str(name_str)
+            .unwrap_or_else(|| panic!("method name_id not found for '{}'", name_str))
+    }
+
+    /// Resolve function NameId by module and Symbol.
+    pub(crate) fn try_function_name_id(&self, module_id: ModuleId, name: Symbol) -> Option<NameId> {
+        let namer = NamerLookup::new(self.name_table(), self.interner());
+        namer.function(module_id, name)
+    }
+
+    /// Resolve semantic FunctionId by NameId.
+    pub(crate) fn function_id_by_name_id(&self, name_id: NameId) -> Option<FunctionId> {
+        self.entities.function_by_name(name_id)
+    }
+
+    /// Resolve a string type name in a module context.
+    pub(crate) fn resolve_type_def_by_str(
+        &self,
+        module_id: ModuleId,
+        name: &str,
+    ) -> Option<TypeDefId> {
+        self.query().resolve_type_def_by_str(module_id, name)
+    }
+
+    /// Return sentinel base type for a sentinel TypeDef, when present.
+    pub(crate) fn sentinel_base_type(
+        &self,
+        type_def_id: TypeDefId,
+    ) -> Option<vole_sema::type_arena::TypeId> {
+        self.entities.get_type(type_def_id).base_type_id
+    }
+
+    /// Return interface method binding return type, when a binding exists.
+    pub(crate) fn method_binding_return_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<vole_sema::type_arena::TypeId> {
+        self.entities
+            .find_method_binding(type_def_id, method_name_id)
+            .map(|binding| binding.func_type.return_type_id)
+    }
+
+    /// Return external binding metadata for a method, when available.
+    pub(crate) fn method_external_binding(
+        &self,
+        method_id: MethodId,
+    ) -> Option<ExternalMethodInfoRef> {
+        self.entities
+            .get_external_binding(method_id)
+            .map(|info| ExternalMethodInfoRef {
+                module_path: info.module_path,
+                native_name: info.native_name,
+            })
+    }
+
+    /// Return resolved method metadata for a call node.
+    pub(crate) fn method_at(
+        &self,
+        node_id: vole_identity::NodeId,
+    ) -> Option<&vole_sema::ResolvedMethod> {
+        self.node_map.get_method(node_id)
+    }
+
+    /// Return monomorph key metadata for a call node.
+    pub(crate) fn monomorph_for(
+        &self,
+        node_id: vole_identity::NodeId,
+    ) -> Option<&vole_sema::generic::MonomorphKey> {
+        self.node_map.get_generic(node_id)
+    }
+
+    /// Return the single abstract method for functional interfaces.
+    pub(crate) fn is_functional_interface(&self, type_def_id: TypeDefId) -> Option<MethodId> {
+        self.entities.is_functional(type_def_id)
+    }
+
+    /// Return whether a function parameter has a default expression.
+    pub(crate) fn has_function_default_expr(&self, func_id: FunctionId, param_idx: usize) -> bool {
+        self.entities
+            .function_default_expr(func_id, param_idx)
+            .is_some()
+    }
+
+    /// Return whether a method parameter has a default expression.
+    pub(crate) fn has_method_default_expr(&self, method_id: MethodId, param_idx: usize) -> bool {
+        self.entities
+            .method_default_expr(method_id, param_idx)
+            .is_some()
+    }
+
+    /// Return imported-module interner for a module ID, when available.
+    pub(crate) fn module_interner(&self, module_id: ModuleId) -> Option<&Interner> {
+        let module_path = self.names.module_path(module_id);
+        self.module_programs
+            .get(module_path)
+            .map(|(_, interner)| &**interner)
+    }
+
     /// Return whether a type definition is marked as an annotation type.
     pub(crate) fn type_is_annotation(&self, type_def_id: TypeDefId) -> bool {
         self.entities.get_type(type_def_id).is_annotation

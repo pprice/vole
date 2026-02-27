@@ -219,9 +219,7 @@ pub(crate) fn module_name_id(
     module_id: ModuleId,
     name: &str,
 ) -> Option<NameId> {
-    let query = analyzed.query();
-    let module_path = query.module_path(module_id);
-    let (_, module_interner) = query.module_program(&module_path)?;
+    let module_interner = analyzed.module_interner(module_id)?;
     let sym = module_interner.lookup(name)?;
     analyzed
         .name_table()

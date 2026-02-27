@@ -424,7 +424,7 @@ impl Cg<'_, '_, '_> {
         call_expr_id: NodeId,
         arg_source: &ArgSource<'_>,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let Some(monomorph_key) = self.analyzed().query().monomorph_for(call_expr_id) else {
+        let Some(monomorph_key) = self.analyzed().monomorph_for(call_expr_id) else {
             return Ok(None);
         };
 
@@ -495,15 +495,11 @@ impl Cg<'_, '_, '_> {
             return Ok(None);
         };
 
-        let Some(method_id) = self
-            .analyzed()
-            .query()
-            .is_functional_interface(iface_type_def_id)
-        else {
+        let Some(method_id) = self.analyzed().is_functional_interface(iface_type_def_id) else {
             return Ok(None);
         };
 
-        let method = self.analyzed().query().get_method(method_id);
+        let method = self.analyzed().method_def(method_id);
         let func_type_id = method.signature_id;
         let method_name_id = method.name_id;
 
@@ -528,7 +524,7 @@ impl Cg<'_, '_, '_> {
         _callee_sym: Symbol,
         callee_name: &str,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let Some(monomorph_key) = self.analyzed().query().monomorph_for(call_expr_id) else {
+        let Some(monomorph_key) = self.analyzed().monomorph_for(call_expr_id) else {
             return Ok(None);
         };
 

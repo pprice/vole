@@ -400,7 +400,7 @@ impl Cg<'_, '_, '_> {
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> CodegenResult<Value> {
         // Look up to_string method via query
-        let method_id = self.analyzed().query().method_name_id_by_str("to_string");
+        let method_id = self.analyzed().method_name_id_by_str("to_string");
 
         let (type_name_id, method_impl) = self
             .analyzed()
