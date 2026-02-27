@@ -28,14 +28,12 @@ use crate::analyzed_lower_method_default_inits::{
 use crate::analyzed_lower_monomorph_functions::{
     LowerMonomorphizedInstancesArgs, build_generic_func_map, lower_monomorphized_instances,
 };
+use crate::analyzed_lower_test_scoped_type_methods::lower_test_scoped_type_methods;
 use crate::analyzed_lower_type_method_monomorph::{
     MethodMonomorphLoweringCtx, MethodMonomorphLoweringWork,
     lower_type_method_monomorphized_instances,
 };
-use crate::analyzed_lower_type_methods::{
-    lower_module_type_methods, lower_top_level_type_methods, lower_type_default_methods,
-    lower_type_methods,
-};
+use crate::analyzed_lower_type_methods::{lower_module_type_methods, lower_top_level_type_methods};
 use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{
@@ -45,9 +43,7 @@ use vole_sema::{AnalysisOutput, EntityRegistry, ImplementRegistry, NodeMap, Type
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirBody, VirFunction, VirProgram, VirTest};
 
-use vole_sema::vir_lower::{
-    lower_function, lower_interface_method, lower_method, lower_stmts, lower_test_body,
-};
+use vole_sema::vir_lower::{lower_interface_method, lower_method, lower_stmts, lower_test_body};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
@@ -1177,258 +1173,6 @@ fn build_vir_method_map(vir_functions: &[VirFunction]) -> FxHashMap<MethodId, us
     map
 }
 
-/// Lower type methods for classes/structs declared inside test blocks.
-///
-/// Test blocks can contain `Decl::Class` and `Decl::Struct` declarations that
-/// are scoped to a virtual module.  This function recursively walks `Decl::Tests`
-/// blocks and lowers their class/struct methods (direct + default) to VIR.
-#[allow(clippy::too_many_arguments)]
-fn lower_test_scoped_type_methods(
-    program: &Program,
-    interner: &mut Interner,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    type_arena: &TypeArena,
-    node_map: &NodeMap,
-    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
-    module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
-    module_id: ModuleId,
-    vir_functions: &mut Vec<VirFunction>,
-    type_table: &mut VirTypeTable,
-) {
-    for decl in &program.declarations {
-        if let Decl::Tests(tests_decl) = decl {
-            lower_tests_decl_type_methods(
-                tests_decl,
-                program,
-                interner,
-                names,
-                entities,
-                type_arena,
-                node_map,
-                tests_virtual_modules,
-                module_programs,
-                module_id,
-                vir_functions,
-                type_table,
-            );
-        }
-    }
-}
-
-/// Recursively lower type methods from a single `TestsDecl`.
-#[allow(clippy::too_many_arguments)]
-fn lower_tests_decl_type_methods(
-    tests_decl: &vole_frontend::ast::TestsDecl,
-    program: &Program,
-    interner: &mut Interner,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    type_arena: &TypeArena,
-    node_map: &NodeMap,
-    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
-    module_programs: Option<&FxHashMap<String, (Program, Rc<Interner>)>>,
-    module_id: ModuleId,
-    vir_functions: &mut Vec<VirFunction>,
-    type_table: &mut VirTypeTable,
-) {
-    let virtual_module_id = tests_virtual_modules
-        .get(&tests_decl.span)
-        .copied()
-        .unwrap_or_else(|| names.main_module());
-
-    // Test-scoped functions are registered under the program's module_id (not the virtual
-    // test module), so use the passed module_id for function name resolution. This must
-    // match what codegen uses in compile_function (program_module = analyzed.module_id()).
-    let main_module_id = module_id;
-
-    for inner_decl in &tests_decl.decls {
-        match inner_decl {
-            Decl::Function(func) => {
-                if !func.type_params.is_empty() {
-                    continue;
-                }
-                // Resolve the function in the main module (test-scoped functions use
-                // program_module for name resolution, same as top-level functions)
-                let func_id_and_def = {
-                    let namer = NamerLookup::new(names, interner);
-                    let name_id = namer.function(main_module_id, func.name);
-                    name_id.and_then(|nid| {
-                        let fid = entities.function_by_name(nid)?;
-                        let fdef = entities.get_function(fid);
-                        if fdef.generic_info.is_some() {
-                            return None;
-                        }
-                        Some((fid, fdef))
-                    })
-                };
-                if let Some((func_id, func_def)) = func_id_and_def {
-                    let param_types: Vec<_> = func
-                        .params
-                        .iter()
-                        .zip(func_def.signature.params_id.iter())
-                        .map(|(p, &ty)| (p.name, ty))
-                        .collect();
-                    let vir = lower_function(
-                        func,
-                        func_id,
-                        interner.resolve(func.name).to_string(),
-                        &param_types,
-                        func_def.signature.return_type_id,
-                        node_map,
-                        interner,
-                        type_arena,
-                        entities.as_entity_registry(),
-                        names,
-                        type_table,
-                    );
-                    vir_functions.push(vir);
-                }
-            }
-            Decl::Class(class) => {
-                if !class.type_params.is_empty() {
-                    continue;
-                }
-                lower_type_methods(
-                    &class.methods,
-                    class.statics.as_ref(),
-                    class.name,
-                    interner,
-                    names,
-                    entities,
-                    type_arena,
-                    node_map,
-                    virtual_module_id,
-                    vir_functions,
-                    type_table,
-                );
-                let direct_method_names: HashSet<String> = class
-                    .methods
-                    .iter()
-                    .map(|m| interner.resolve(m.name).to_string())
-                    .collect();
-                lower_type_default_methods(
-                    &direct_method_names,
-                    class.name,
-                    interner,
-                    names,
-                    entities,
-                    type_arena,
-                    node_map,
-                    virtual_module_id,
-                    program,
-                    module_programs,
-                    vir_functions,
-                    type_table,
-                );
-            }
-            Decl::Struct(s) => {
-                if !s.type_params.is_empty() {
-                    continue;
-                }
-                lower_type_methods(
-                    &s.methods,
-                    s.statics.as_ref(),
-                    s.name,
-                    interner,
-                    names,
-                    entities,
-                    type_arena,
-                    node_map,
-                    virtual_module_id,
-                    vir_functions,
-                    type_table,
-                );
-                let direct_method_names: HashSet<String> = s
-                    .methods
-                    .iter()
-                    .map(|m| interner.resolve(m.name).to_string())
-                    .collect();
-                lower_type_default_methods(
-                    &direct_method_names,
-                    s.name,
-                    interner,
-                    names,
-                    entities,
-                    type_arena,
-                    node_map,
-                    virtual_module_id,
-                    program,
-                    module_programs,
-                    vir_functions,
-                    type_table,
-                );
-            }
-            Decl::Implement(impl_block) => {
-                let type_def_id = resolve_implement_target(
-                    &impl_block.target_type,
-                    interner,
-                    names,
-                    entities,
-                    virtual_module_id,
-                );
-                if let Some(type_def_id) = type_def_id {
-                    lower_implement_direct_methods(
-                        &impl_block.methods,
-                        type_def_id,
-                        interner,
-                        names,
-                        entities,
-                        type_arena,
-                        node_map,
-                        vir_functions,
-                        type_table,
-                    );
-                    if let Some(ref statics) = impl_block.statics {
-                        lower_implement_static_methods(
-                            statics,
-                            type_def_id,
-                            interner,
-                            names,
-                            entities,
-                            type_arena,
-                            node_map,
-                            vir_functions,
-                            type_table,
-                        );
-                    }
-                    lower_implement_default_methods(
-                        impl_block,
-                        type_def_id,
-                        interner,
-                        names,
-                        entities,
-                        type_arena,
-                        node_map,
-                        virtual_module_id,
-                        program,
-                        module_programs,
-                        vir_functions,
-                        type_table,
-                    );
-                }
-            }
-            Decl::Tests(nested) => {
-                lower_tests_decl_type_methods(
-                    nested,
-                    program,
-                    interner,
-                    names,
-                    entities,
-                    type_arena,
-                    node_map,
-                    tests_virtual_modules,
-                    module_programs,
-                    module_id,
-                    vir_functions,
-                    type_table,
-                );
-            }
-            _ => {}
-        }
-    }
-}
-
 /// Lower all test function bodies in the program to VIR.
 ///
 /// Walks the program's `Decl::Tests` blocks (including nested ones) and
@@ -1630,7 +1374,7 @@ fn lower_single_implement_block(
 /// Resolve the target type of an implement block to a `TypeDefId`.
 ///
 /// Handles `Named`, `Generic`, `Primitive`, `Handle`, and `Array` target types.
-fn resolve_implement_target(
+pub(crate) fn resolve_implement_target(
     target_type: &vole_frontend::TypeExpr,
     interner: &Interner,
     names: &NameTable,
@@ -1679,7 +1423,7 @@ fn resolve_implement_target(
 
 /// Lower direct instance methods from an implement block to VIR.
 #[allow(clippy::too_many_arguments)]
-fn lower_implement_direct_methods(
+pub(crate) fn lower_implement_direct_methods(
     methods: &[vole_frontend::FuncDecl],
     type_def_id: TypeDefId,
     interner: &mut Interner,
@@ -1742,7 +1486,7 @@ fn lower_implement_direct_methods(
 
 /// Lower static methods from an implement block's statics section to VIR.
 #[allow(clippy::too_many_arguments)]
-fn lower_implement_static_methods(
+pub(crate) fn lower_implement_static_methods(
     statics: &vole_frontend::ast::StaticsBlock,
     type_def_id: TypeDefId,
     interner: &mut Interner,
@@ -1810,7 +1554,7 @@ fn lower_implement_static_methods(
 /// locates the interface's AST body and lowers it with the implementing
 /// type's MethodId.
 #[allow(clippy::too_many_arguments)]
-fn lower_implement_default_methods(
+pub(crate) fn lower_implement_default_methods(
     impl_block: &vole_frontend::ast::ImplementBlock,
     type_def_id: TypeDefId,
     interner: &mut Interner,
