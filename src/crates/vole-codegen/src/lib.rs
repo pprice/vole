@@ -2,6 +2,7 @@
 
 mod analyzed;
 mod analyzed_lower_annotation_inits;
+mod analyzed_lower_entity_metadata;
 mod analyzed_lower_field_default_inits;
 mod analyzed_lower_function_default_inits;
 mod analyzed_lower_functions;

@@ -14,6 +14,7 @@
 
 pub mod builder;
 pub mod calls;
+pub mod entity_metadata;
 pub mod expr;
 pub mod func;
 pub mod intrinsics;
@@ -32,6 +33,10 @@ pub use vole_identity::{NodeId, Span};
 
 pub use builder::VirBuilder;
 pub use calls::{BuiltinMethod, CallTarget, NativeAbi};
+pub use entity_metadata::{
+    VirEntityMetadata, VirFieldDef, VirImplementation, VirMethodBinding, VirMethodDef, VirTypeDef,
+    VirTypeDefKind,
+};
 pub use expr::{
     AsCastKind, CoerceKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture,
     VirClassMethodMonomorphKey, VirErrorFieldBinding, VirErrorPatternKind, VirExpr,

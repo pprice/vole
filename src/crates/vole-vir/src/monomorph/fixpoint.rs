@@ -605,6 +605,7 @@ mod tests {
             field_default_inits: FxHashMap::default(),
             annotation_inits: FxHashMap::default(),
             vir_monomorph_base: usize::MAX,
+            entity_metadata: crate::entity_metadata::VirEntityMetadata::new(),
         }
     }
 

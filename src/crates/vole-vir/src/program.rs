@@ -6,6 +6,7 @@
 use rustc_hash::FxHashMap;
 use vole_identity::{FieldId, FunctionId, MethodId, NameId, NodeId, Span, Symbol};
 
+use crate::entity_metadata::VirEntityMetadata;
 use crate::func::{VirBody, VirFunction, VirTest};
 use crate::refs::VirRef;
 use crate::type_table::VirTypeTable;
@@ -91,6 +92,12 @@ pub struct VirProgram {
     /// monomorphization pass and are referenced by `CallTarget::VirDirect`.
     /// Set by `run_vir_monomorphize`; defaults to `usize::MAX` (no VIR monomorphs).
     pub vir_monomorph_base: usize,
+
+    /// Entity metadata: type definitions, field definitions, and method
+    /// definitions.  Populated during VIR lowering from sema's
+    /// `EntityRegistry`.  Replaces `EntityView` as the VIR-native source
+    /// of entity-level data for codegen.
+    pub entity_metadata: VirEntityMetadata,
 }
 
 impl VirProgram {
@@ -150,5 +157,15 @@ impl VirProgram {
     /// Look up VIR-lowered annotations for a field by semantic `FieldId`.
     pub fn get_field_annotations(&self, field_id: FieldId) -> Option<&[VirAnnotation]> {
         self.annotation_inits.get(&field_id).map(|v| v.as_slice())
+    }
+
+    /// Get a read-only reference to the entity metadata.
+    pub fn entity_metadata(&self) -> &VirEntityMetadata {
+        &self.entity_metadata
+    }
+
+    /// Get a mutable reference to the entity metadata (for population).
+    pub fn entity_metadata_mut(&mut self) -> &mut VirEntityMetadata {
+        &mut self.entity_metadata
     }
 }
