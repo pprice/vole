@@ -3,9 +3,10 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed::{
-    lower_implement_default_methods, lower_implement_direct_methods,
-    lower_implement_static_methods, resolve_implement_target,
+use crate::analyzed_lower_implement_blocks::{
+    LowerImplementDefaultMethodsArgs, LowerImplementDirectMethodsArgs,
+    LowerImplementStaticMethodsArgs, lower_implement_default_methods,
+    lower_implement_direct_methods, lower_implement_static_methods, resolve_implement_target,
 };
 use crate::analyzed_lower_type_methods::{lower_type_default_methods, lower_type_methods};
 use crate::analyzed_lowering_lookup::LoweringEntityLookup;
@@ -207,8 +208,8 @@ fn lower_tests_decl_type_methods(
                     virtual_module_id,
                 );
                 if let Some(type_def_id) = type_def_id {
-                    lower_implement_direct_methods(
-                        &impl_block.methods,
+                    lower_implement_direct_methods(LowerImplementDirectMethodsArgs {
+                        methods: &impl_block.methods,
                         type_def_id,
                         interner,
                         names,
@@ -217,9 +218,9 @@ fn lower_tests_decl_type_methods(
                         node_map,
                         vir_functions,
                         type_table,
-                    );
+                    });
                     if let Some(ref statics) = impl_block.statics {
-                        lower_implement_static_methods(
+                        lower_implement_static_methods(LowerImplementStaticMethodsArgs {
                             statics,
                             type_def_id,
                             interner,
@@ -229,9 +230,9 @@ fn lower_tests_decl_type_methods(
                             node_map,
                             vir_functions,
                             type_table,
-                        );
+                        });
                     }
-                    lower_implement_default_methods(
+                    lower_implement_default_methods(LowerImplementDefaultMethodsArgs {
                         impl_block,
                         type_def_id,
                         interner,
@@ -239,12 +240,11 @@ fn lower_tests_decl_type_methods(
                         entities,
                         type_arena,
                         node_map,
-                        virtual_module_id,
                         program,
                         module_programs,
                         vir_functions,
                         type_table,
-                    );
+                    });
                 }
             }
             Decl::Tests(nested) => {

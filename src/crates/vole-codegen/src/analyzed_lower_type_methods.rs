@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed::{collect_default_method_ids, find_interface_method_ast};
+use crate::analyzed_lower_implement_blocks::{
+    collect_default_method_ids, find_interface_method_ast,
+};
 use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{MethodId, ModuleId, NameTable};

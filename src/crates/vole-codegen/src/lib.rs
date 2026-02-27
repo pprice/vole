@@ -5,6 +5,7 @@ mod analyzed_lower_field_default_inits;
 mod analyzed_lower_function_default_inits;
 mod analyzed_lower_functions;
 mod analyzed_lower_global_inits;
+mod analyzed_lower_implement_blocks;
 mod analyzed_lower_lambda_default_inits;
 mod analyzed_lower_method_default_inits;
 mod analyzed_lower_monomorph_functions;
