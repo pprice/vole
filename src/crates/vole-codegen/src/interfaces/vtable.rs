@@ -19,10 +19,7 @@ use crate::types::{
 use crate::union_layout;
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
-use vole_sema::{
-    ProgramQuery,
-    type_arena::{SemaType, TypeId},
-};
+use vole_sema::type_arena::{SemaType, TypeId};
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
 /// Method slots start at index 1.
@@ -2019,11 +2016,9 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
     interface_id: TypeDefId,
     analyzed: &AnalyzedProgram,
 ) -> CodegenResult<Vec<MethodId>> {
-    let query = analyzed.query();
-
     // Verify this is an interface
-    if !query.is_interface_type(interface_id) {
-        let interface = query.get_type(interface_id);
+    if !analyzed.query().is_interface_type(interface_id) {
+        let interface = analyzed.query().get_type(interface_id);
         return Err(CodegenError::type_mismatch(
             "interface vtable",
             "interface",
@@ -2037,7 +2032,7 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
 
     collect_interface_methods_inner_entity_registry(
         interface_id,
-        &query,
+        analyzed,
         &mut methods,
         &mut seen_interfaces,
         &mut seen_methods,
@@ -2048,7 +2043,7 @@ pub(crate) fn collect_interface_methods_via_entity_registry(
 
 fn collect_interface_methods_inner_entity_registry(
     interface_id: TypeDefId,
-    query: &ProgramQuery<'_>,
+    analyzed: &AnalyzedProgram,
     methods: &mut Vec<MethodId>,
     seen_interfaces: &mut HashSet<TypeDefId>,
     seen_methods: &mut HashSet<NameId>,
@@ -2057,13 +2052,17 @@ fn collect_interface_methods_inner_entity_registry(
         return;
     }
 
-    let interface = query.get_type(interface_id);
+    let (parent_interface_ids, method_ids) = {
+        let query = analyzed.query();
+        let interface = query.get_type(interface_id);
+        (interface.extends.clone(), interface.methods.clone())
+    };
 
     // Process parent interfaces first (to match the order of collect_interface_methods)
-    for parent_id in interface.extends.clone() {
+    for parent_id in parent_interface_ids {
         collect_interface_methods_inner_entity_registry(
             parent_id,
-            query,
+            analyzed,
             methods,
             seen_interfaces,
             seen_methods,
@@ -2071,10 +2070,10 @@ fn collect_interface_methods_inner_entity_registry(
     }
 
     // Add this interface's methods
-    for method_id in &interface.methods {
-        let method = query.get_method(*method_id);
+    for method_id in method_ids {
+        let method = analyzed.query().get_method(method_id);
         if seen_methods.insert(method.name_id) {
-            methods.push(*method_id);
+            methods.push(method_id);
         }
     }
 }
