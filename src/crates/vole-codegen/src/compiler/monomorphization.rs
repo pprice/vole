@@ -72,11 +72,7 @@ impl Compiler<'_> {
     /// Declare all monomorphized function instances
     pub(super) fn declare_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Collect instances to avoid borrow issues
-        let instances = self
-            .analyzed
-            .entity_registry()
-            .monomorph_cache
-            .collect_instances();
+        let instances = self.analyzed.monomorph_cache().collect_instances();
 
         for instance in instances {
             // Skip external functions - they don't need JIT compilation
@@ -116,11 +112,7 @@ impl Compiler<'_> {
         }
 
         // Collect instances to avoid borrow issues
-        let instances = self
-            .analyzed
-            .entity_registry()
-            .monomorph_cache
-            .collect_instances();
+        let instances = self.analyzed.monomorph_cache().collect_instances();
 
         for instance in instances {
             // Skip external functions - they don't have AST bodies
@@ -473,8 +465,7 @@ impl Compiler<'_> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
-            .entity_registry()
-            .class_method_monomorph_cache
+            .class_method_monomorph_cache()
             .collect_instances();
 
         tracing::debug!(
@@ -516,8 +507,7 @@ impl Compiler<'_> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
-            .entity_registry()
-            .class_method_monomorph_cache
+            .class_method_monomorph_cache()
             .collect_instances();
 
         tracing::debug!(
@@ -765,8 +755,7 @@ impl Compiler<'_> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
-            .entity_registry()
-            .static_method_monomorph_cache
+            .static_method_monomorph_cache()
             .collect_instances();
 
         tracing::debug!(
@@ -801,8 +790,7 @@ impl Compiler<'_> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
-            .entity_registry()
-            .static_method_monomorph_cache
+            .static_method_monomorph_cache()
             .collect_instances();
 
         tracing::debug!(
@@ -1009,14 +997,12 @@ impl Compiler<'_> {
         // Early-exit if monomorph caches haven't grown since last expansion
         let current_cache_size = self
             .analyzed
-            .entity_registry()
-            .class_method_monomorph_cache
+            .class_method_monomorph_cache()
             .instances()
             .count()
             + self
                 .analyzed
-                .entity_registry()
-                .static_method_monomorph_cache
+                .static_method_monomorph_cache()
                 .instances()
                 .count();
         if current_cache_size == self.last_expansion_cache_size {
@@ -1035,8 +1021,7 @@ impl Compiler<'_> {
 
         let abstract_templates: Vec<(ClassMethodMonomorphKey, ClassMethodMonomorphInstance)> = self
             .analyzed
-            .entity_registry()
-            .class_method_monomorph_cache
+            .class_method_monomorph_cache()
             .instances()
             .filter(|(_, inst)| {
                 inst.substitutions
@@ -1071,12 +1056,7 @@ impl Compiler<'_> {
             FxHashMap::default();
 
         // Collect from concrete static method monomorphs
-        for (key, inst) in self
-            .analyzed
-            .entity_registry()
-            .static_method_monomorph_cache
-            .instances()
-        {
+        for (key, inst) in self.analyzed.static_method_monomorph_cache().instances() {
             // Skip abstract entries (TypeParam in substitutions)
             if inst
                 .substitutions
@@ -1126,12 +1106,7 @@ impl Compiler<'_> {
         }
 
         // Collect from concrete class method monomorphs
-        for (key, inst) in self
-            .analyzed
-            .entity_registry()
-            .class_method_monomorph_cache
-            .instances()
-        {
+        for (key, inst) in self.analyzed.class_method_monomorph_cache().instances() {
             // Skip abstract entries
             if inst
                 .substitutions
@@ -1243,8 +1218,7 @@ impl Compiler<'_> {
                 // Skip if already in sema cache or already expanded
                 if self
                     .analyzed
-                    .entity_registry()
-                    .class_method_monomorph_cache
+                    .class_method_monomorph_cache()
                     .get(&concrete_key)
                     .is_some()
                 {
