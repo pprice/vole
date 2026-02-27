@@ -8,6 +8,7 @@ pub mod entity_registry;
 pub mod errors;
 pub mod generic;
 pub mod implement_registry;
+pub mod lowering_lookup;
 pub mod memory_kind;
 pub mod module;
 pub mod node_map;
@@ -40,6 +41,7 @@ pub use errors::{SemanticError, SemanticWarning};
 pub use implement_registry::{
     ImplTypeId, ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId,
 };
+pub use lowering_lookup::LoweringEntityLookup;
 pub use memory_kind::MemoryKind;
 pub use module::{LoadError, ModuleInfo, ModuleLoader};
 pub use node_map::NodeMap;

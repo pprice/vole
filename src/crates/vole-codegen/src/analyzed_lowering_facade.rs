@@ -40,9 +40,9 @@ use crate::analyzed_lower_type_method_monomorph::{
     lower_type_method_monomorphized_instances,
 };
 use crate::analyzed_lower_type_methods::{lower_module_type_methods, lower_top_level_type_methods};
-use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Interner, Program};
 use vole_identity::{ModuleId, NameId, NameTable, Span};
+use vole_sema::LoweringEntityLookup;
 use vole_sema::{NodeMap, TypeArena};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirFunction, VirProgram};

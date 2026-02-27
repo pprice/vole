@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Decl, Interner, LetInit, Program, Symbol};
 use vole_identity::NameTable;
+use vole_sema::LoweringEntityLookup;
 use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;

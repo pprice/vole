@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{ModuleId, NameTable, NamerLookup};
+use vole_sema::LoweringEntityLookup;
 use vole_sema::vir_lower::lower_function;
 use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;

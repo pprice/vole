@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::ast::{FuncBody, Stmt};
 use vole_frontend::{Decl, FuncDecl, Interner, Program};
 use vole_identity::{FunctionId, ModuleId, NameId, NameTable, NamerLookup, NodeId, Span};
+use vole_sema::LoweringEntityLookup;
 use vole_sema::generic::MonomorphInstance;
 use vole_sema::vir_lower::lower_monomorphized_function;
 use vole_sema::{NodeMap, TypeArena};

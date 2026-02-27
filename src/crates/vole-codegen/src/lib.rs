@@ -13,7 +13,6 @@ mod analyzed_lower_test_scoped_type_methods;
 mod analyzed_lower_type_method_monomorph;
 mod analyzed_lower_type_methods;
 mod analyzed_lowering_facade;
-mod analyzed_lowering_lookup;
 mod callable_registry;
 mod calls;
 mod coercion_ops;

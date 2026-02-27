@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use crate::calls::find_lambda_in_program;
 use vole_frontend::{Interner, Program};
 use vole_identity::{ModuleId, NameTable, NodeId, Span};
+use vole_sema::LoweringEntityLookup;
 use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;

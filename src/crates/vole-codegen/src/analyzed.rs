@@ -6,11 +6,11 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::analyzed_lowering_facade::{LowerVirProgramArgs, lower_vir_program};
-use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
 };
+use vole_sema::LoweringEntityLookup;
 use vole_sema::{AnalysisOutput, EntityRegistry, ImplementRegistry, NodeMap, TypeArena};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirBody, VirFunction, VirProgram, VirTest};

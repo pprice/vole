@@ -9,9 +9,9 @@ use crate::analyzed_lower_implement_blocks::{
     lower_implement_direct_methods, lower_implement_static_methods, resolve_implement_target,
 };
 use crate::analyzed_lower_type_methods::{lower_type_default_methods, lower_type_methods};
-use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{ModuleId, NameTable, NamerLookup, Span};
+use vole_sema::LoweringEntityLookup;
 use vole_sema::vir_lower::lower_function;
 use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;

@@ -6,9 +6,9 @@ use rustc_hash::FxHashMap;
 use crate::analyzed_lower_implement_blocks::{
     collect_default_method_ids, find_interface_method_ast,
 };
-use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{MethodId, ModuleId, NameTable};
+use vole_sema::LoweringEntityLookup;
 use vole_sema::vir_lower::{lower_interface_method, lower_method};
 use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;

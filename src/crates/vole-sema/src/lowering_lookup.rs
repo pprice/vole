@@ -1,11 +1,12 @@
 use std::rc::Rc;
 
 use vole_identity::{FunctionId, MethodId, NameId, NameTable, TypeDefId};
-use vole_sema::EntityRegistry;
 
-/// Bridge trait used by analyzed lowering helpers so they can run against
+use crate::EntityRegistry;
+
+/// Bridge trait used by VIR lowering helpers so they can run against
 /// `EntityRegistry` and `Rc<EntityRegistry>` uniformly.
-pub(crate) trait LoweringEntityLookup {
+pub trait LoweringEntityLookup {
     fn function_by_name(&self, name_id: NameId) -> Option<FunctionId>;
     fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId>;
     fn type_by_short_name(&self, short_name: &str, names: &NameTable) -> Option<TypeDefId>;
@@ -21,18 +22,17 @@ pub(crate) trait LoweringEntityLookup {
     ) -> Option<MethodId>;
     fn as_entity_registry(&self) -> &EntityRegistry;
     fn array_name_id(&self) -> Option<NameId>;
-    fn get_type(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef;
-    fn get_function(&self, func_id: FunctionId) -> &vole_sema::entity_defs::FunctionDef;
-    fn get_method(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef;
+    fn get_type(&self, type_def_id: TypeDefId) -> &crate::entity_defs::TypeDef;
+    fn get_function(&self, func_id: FunctionId) -> &crate::entity_defs::FunctionDef;
+    fn get_method(&self, method_id: MethodId) -> &crate::entity_defs::MethodDef;
     fn get_implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId>;
     fn methods_on_type(&self, type_def_id: TypeDefId) -> Vec<MethodId>;
-    fn monomorph_instances(&self) -> Vec<vole_sema::generic::MonomorphInstance>;
-    fn class_method_monomorph_instances(
-        &self,
-    ) -> Vec<vole_sema::generic::ClassMethodMonomorphInstance>;
+    fn monomorph_instances(&self) -> Vec<crate::generic::MonomorphInstance>;
+    fn class_method_monomorph_instances(&self)
+    -> Vec<crate::generic::ClassMethodMonomorphInstance>;
     fn static_method_monomorph_instances(
         &self,
-    ) -> Vec<vole_sema::generic::StaticMethodMonomorphInstance>;
+    ) -> Vec<crate::generic::StaticMethodMonomorphInstance>;
 }
 
 impl LoweringEntityLookup for EntityRegistry {
@@ -72,15 +72,15 @@ impl LoweringEntityLookup for EntityRegistry {
         EntityRegistry::array_name_id(self)
     }
 
-    fn get_type(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
+    fn get_type(&self, type_def_id: TypeDefId) -> &crate::entity_defs::TypeDef {
         EntityRegistry::get_type(self, type_def_id)
     }
 
-    fn get_function(&self, func_id: FunctionId) -> &vole_sema::entity_defs::FunctionDef {
+    fn get_function(&self, func_id: FunctionId) -> &crate::entity_defs::FunctionDef {
         EntityRegistry::get_function(self, func_id)
     }
 
-    fn get_method(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
+    fn get_method(&self, method_id: MethodId) -> &crate::entity_defs::MethodDef {
         EntityRegistry::get_method(self, method_id)
     }
 
@@ -92,19 +92,19 @@ impl LoweringEntityLookup for EntityRegistry {
         EntityRegistry::methods_on_type(self, type_def_id).collect()
     }
 
-    fn monomorph_instances(&self) -> Vec<vole_sema::generic::MonomorphInstance> {
+    fn monomorph_instances(&self) -> Vec<crate::generic::MonomorphInstance> {
         self.monomorph_cache.collect_instances()
     }
 
     fn class_method_monomorph_instances(
         &self,
-    ) -> Vec<vole_sema::generic::ClassMethodMonomorphInstance> {
+    ) -> Vec<crate::generic::ClassMethodMonomorphInstance> {
         self.class_method_monomorph_cache.collect_instances()
     }
 
     fn static_method_monomorph_instances(
         &self,
-    ) -> Vec<vole_sema::generic::StaticMethodMonomorphInstance> {
+    ) -> Vec<crate::generic::StaticMethodMonomorphInstance> {
         self.static_method_monomorph_cache.collect_instances()
     }
 }
@@ -149,15 +149,15 @@ where
         (**self).array_name_id()
     }
 
-    fn get_type(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
+    fn get_type(&self, type_def_id: TypeDefId) -> &crate::entity_defs::TypeDef {
         (**self).get_type(type_def_id)
     }
 
-    fn get_function(&self, func_id: FunctionId) -> &vole_sema::entity_defs::FunctionDef {
+    fn get_function(&self, func_id: FunctionId) -> &crate::entity_defs::FunctionDef {
         (**self).get_function(func_id)
     }
 
-    fn get_method(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
+    fn get_method(&self, method_id: MethodId) -> &crate::entity_defs::MethodDef {
         (**self).get_method(method_id)
     }
 
@@ -169,19 +169,19 @@ where
         (**self).methods_on_type(type_def_id)
     }
 
-    fn monomorph_instances(&self) -> Vec<vole_sema::generic::MonomorphInstance> {
+    fn monomorph_instances(&self) -> Vec<crate::generic::MonomorphInstance> {
         (**self).monomorph_instances()
     }
 
     fn class_method_monomorph_instances(
         &self,
-    ) -> Vec<vole_sema::generic::ClassMethodMonomorphInstance> {
+    ) -> Vec<crate::generic::ClassMethodMonomorphInstance> {
         (**self).class_method_monomorph_instances()
     }
 
     fn static_method_monomorph_instances(
         &self,
-    ) -> Vec<vole_sema::generic::StaticMethodMonomorphInstance> {
+    ) -> Vec<crate::generic::StaticMethodMonomorphInstance> {
         (**self).static_method_monomorph_instances()
     }
 }
