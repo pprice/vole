@@ -527,6 +527,187 @@ impl AnalyzedProgram {
     }
 }
 
+trait LoweringEntityLookup {
+    fn function_by_name(&self, name_id: NameId) -> Option<FunctionId>;
+    fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId>;
+    fn type_by_short_name(&self, short_name: &str, names: &NameTable) -> Option<TypeDefId>;
+    fn find_method_on_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId>;
+    fn find_static_method_on_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId>;
+    fn as_entity_registry(&self) -> &EntityRegistry;
+    fn array_name_id(&self) -> Option<NameId>;
+    fn get_type(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef;
+    fn get_function(&self, func_id: FunctionId) -> &vole_sema::entity_defs::FunctionDef;
+    fn get_method(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef;
+    fn get_implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId>;
+    fn methods_on_type(&self, type_def_id: TypeDefId) -> Vec<MethodId>;
+    fn monomorph_instances(&self) -> Vec<vole_sema::generic::MonomorphInstance>;
+    fn class_method_monomorph_instances(
+        &self,
+    ) -> Vec<vole_sema::generic::ClassMethodMonomorphInstance>;
+    fn static_method_monomorph_instances(
+        &self,
+    ) -> Vec<vole_sema::generic::StaticMethodMonomorphInstance>;
+}
+
+impl LoweringEntityLookup for EntityRegistry {
+    fn function_by_name(&self, name_id: NameId) -> Option<FunctionId> {
+        EntityRegistry::function_by_name(self, name_id)
+    }
+
+    fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
+        EntityRegistry::type_by_name(self, name_id)
+    }
+
+    fn type_by_short_name(&self, short_name: &str, names: &NameTable) -> Option<TypeDefId> {
+        EntityRegistry::type_by_short_name(self, short_name, names)
+    }
+
+    fn find_method_on_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        EntityRegistry::find_method_on_type(self, type_def_id, method_name_id)
+    }
+
+    fn find_static_method_on_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        EntityRegistry::find_static_method_on_type(self, type_def_id, method_name_id)
+    }
+
+    fn as_entity_registry(&self) -> &EntityRegistry {
+        self
+    }
+
+    fn array_name_id(&self) -> Option<NameId> {
+        EntityRegistry::array_name_id(self)
+    }
+
+    fn get_type(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
+        EntityRegistry::get_type(self, type_def_id)
+    }
+
+    fn get_function(&self, func_id: FunctionId) -> &vole_sema::entity_defs::FunctionDef {
+        EntityRegistry::get_function(self, func_id)
+    }
+
+    fn get_method(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
+        EntityRegistry::get_method(self, method_id)
+    }
+
+    fn get_implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId> {
+        EntityRegistry::get_implemented_interfaces(self, type_def_id)
+    }
+
+    fn methods_on_type(&self, type_def_id: TypeDefId) -> Vec<MethodId> {
+        EntityRegistry::methods_on_type(self, type_def_id).collect()
+    }
+
+    fn monomorph_instances(&self) -> Vec<vole_sema::generic::MonomorphInstance> {
+        self.monomorph_cache.collect_instances()
+    }
+
+    fn class_method_monomorph_instances(
+        &self,
+    ) -> Vec<vole_sema::generic::ClassMethodMonomorphInstance> {
+        self.class_method_monomorph_cache.collect_instances()
+    }
+
+    fn static_method_monomorph_instances(
+        &self,
+    ) -> Vec<vole_sema::generic::StaticMethodMonomorphInstance> {
+        self.static_method_monomorph_cache.collect_instances()
+    }
+}
+
+impl<T> LoweringEntityLookup for Rc<T>
+where
+    T: LoweringEntityLookup + ?Sized,
+{
+    fn function_by_name(&self, name_id: NameId) -> Option<FunctionId> {
+        (**self).function_by_name(name_id)
+    }
+
+    fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
+        (**self).type_by_name(name_id)
+    }
+
+    fn type_by_short_name(&self, short_name: &str, names: &NameTable) -> Option<TypeDefId> {
+        (**self).type_by_short_name(short_name, names)
+    }
+
+    fn find_method_on_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        (**self).find_method_on_type(type_def_id, method_name_id)
+    }
+
+    fn find_static_method_on_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        (**self).find_static_method_on_type(type_def_id, method_name_id)
+    }
+
+    fn as_entity_registry(&self) -> &EntityRegistry {
+        (**self).as_entity_registry()
+    }
+
+    fn array_name_id(&self) -> Option<NameId> {
+        (**self).array_name_id()
+    }
+
+    fn get_type(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
+        (**self).get_type(type_def_id)
+    }
+
+    fn get_function(&self, func_id: FunctionId) -> &vole_sema::entity_defs::FunctionDef {
+        (**self).get_function(func_id)
+    }
+
+    fn get_method(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
+        (**self).get_method(method_id)
+    }
+
+    fn get_implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId> {
+        (**self).get_implemented_interfaces(type_def_id)
+    }
+
+    fn methods_on_type(&self, type_def_id: TypeDefId) -> Vec<MethodId> {
+        (**self).methods_on_type(type_def_id)
+    }
+
+    fn monomorph_instances(&self) -> Vec<vole_sema::generic::MonomorphInstance> {
+        (**self).monomorph_instances()
+    }
+
+    fn class_method_monomorph_instances(
+        &self,
+    ) -> Vec<vole_sema::generic::ClassMethodMonomorphInstance> {
+        (**self).class_method_monomorph_instances()
+    }
+
+    fn static_method_monomorph_instances(
+        &self,
+    ) -> Vec<vole_sema::generic::StaticMethodMonomorphInstance> {
+        (**self).static_method_monomorph_instances()
+    }
+}
+
 /// Lower global variable initializer expressions from the main program to VIR.
 ///
 /// Iterates `Decl::Let` declarations and lowers each initializer expression
@@ -536,7 +717,7 @@ fn lower_global_inits(
     interner: &mut Interner,
     node_map: &NodeMap,
     type_arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     names: &NameTable,
     type_table: &mut VirTypeTable,
 ) -> FxHashMap<Symbol, VirRef> {
@@ -547,7 +728,7 @@ fn lower_global_inits(
         node_map,
         interner,
         type_arena,
-        entities,
+        entities: entities.as_entity_registry(),
         name_table: names,
         type_table,
         generic: false,
@@ -578,7 +759,7 @@ fn lower_module_global_inits(
     names: &NameTable,
     node_map: &NodeMap,
     type_arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     modules_with_errors: &HashSet<String>,
     type_table: &mut VirTypeTable,
 ) -> FxHashMap<String, FxHashMap<Symbol, VirRef>> {
@@ -594,7 +775,7 @@ fn lower_module_global_inits(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities: entities.as_entity_registry(),
             name_table: names,
             type_table,
             generic: false,
@@ -625,7 +806,7 @@ fn lower_function_default_inits(
     module_id: ModuleId,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
@@ -634,7 +815,7 @@ fn lower_function_default_inits(
         node_map,
         interner,
         type_arena,
-        entities,
+        entities: entities.as_entity_registry(),
         name_table: names,
         type_table,
         generic: false,
@@ -657,7 +838,7 @@ fn lower_function_default_inits(
 fn lower_module_function_default_inits(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     modules_with_errors: &HashSet<String>,
@@ -676,7 +857,7 @@ fn lower_module_function_default_inits(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities: entities.as_entity_registry(),
             name_table: names,
             type_table,
             generic: false,
@@ -700,7 +881,7 @@ fn lower_function_default_inits_in_decls(
     module_id: ModuleId,
     tests_virtual_modules: Option<&FxHashMap<Span, ModuleId>>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(FunctionId, usize), VirRef>,
 ) {
@@ -745,7 +926,7 @@ fn lower_external_function_default_params(
     func: &vole_frontend::ast::ExternalFunc,
     module_id: ModuleId,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(FunctionId, usize), VirRef>,
 ) {
@@ -774,7 +955,7 @@ fn lower_function_default_params(
     func: &vole_frontend::ast::FuncDecl,
     module_id: ModuleId,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(FunctionId, usize), VirRef>,
 ) {
@@ -806,7 +987,7 @@ fn lower_method_default_inits(
     module_id: ModuleId,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
@@ -815,7 +996,7 @@ fn lower_method_default_inits(
         node_map,
         interner,
         type_arena,
-        entities,
+        entities: entities.as_entity_registry(),
         name_table: names,
         type_table,
         generic: false,
@@ -838,7 +1019,7 @@ fn lower_method_default_inits(
 fn lower_module_method_default_inits(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     modules_with_errors: &HashSet<String>,
@@ -857,7 +1038,7 @@ fn lower_module_method_default_inits(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities: entities.as_entity_registry(),
             name_table: names,
             type_table,
             generic: false,
@@ -881,7 +1062,7 @@ fn lower_method_default_inits_in_decls(
     module_id: ModuleId,
     tests_virtual_modules: Option<&FxHashMap<Span, ModuleId>>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
@@ -969,7 +1150,7 @@ fn lower_type_decl_method_default_inits<'a>(
     external_blocks: impl Iterator<Item = &'a vole_frontend::ast::ExternalBlock>,
     module_id: ModuleId,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
@@ -1042,7 +1223,7 @@ fn lower_interface_method_decl_defaults(
     is_static: bool,
     module_id: ModuleId,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
@@ -1081,7 +1262,7 @@ fn lower_external_method_decl_defaults(
     is_static: bool,
     names: &NameTable,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
     for func in funcs {
@@ -1111,7 +1292,7 @@ fn lower_implement_method_default_inits(
     impl_block: &vole_frontend::ast::ImplementBlock,
     module_id: ModuleId,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
@@ -1211,7 +1392,7 @@ fn lower_lambda_default_inits(
     main_module_id: ModuleId,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     modules_with_errors: &HashSet<String>,
@@ -1275,7 +1456,7 @@ fn lower_single_lambda_default_init(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
@@ -1292,7 +1473,7 @@ fn lower_single_lambda_default_init(
         node_map,
         interner,
         type_arena,
-        entities,
+        entities: entities.as_entity_registry(),
         name_table: names,
         type_table,
         generic: false,
@@ -1318,7 +1499,7 @@ fn lower_field_default_inits(
     module_id: ModuleId,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
@@ -1329,7 +1510,7 @@ fn lower_field_default_inits(
         node_map,
         interner,
         type_arena,
-        entities,
+        entities: entities.as_entity_registry(),
         name_table: names,
         type_table,
         generic: false,
@@ -1352,7 +1533,7 @@ fn lower_field_default_inits(
 fn lower_module_field_default_inits(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     node_map: &NodeMap,
     type_arena: &TypeArena,
     modules_with_errors: &HashSet<String>,
@@ -1371,7 +1552,7 @@ fn lower_module_field_default_inits(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities: entities.as_entity_registry(),
             name_table: names,
             type_table,
             generic: false,
@@ -1395,7 +1576,7 @@ fn lower_field_default_inits_in_decls(
     module_id: ModuleId,
     tests_virtual_modules: Option<&FxHashMap<Span, ModuleId>>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<FieldId, VirRef>,
 ) {
@@ -1448,7 +1629,7 @@ fn lower_type_default_fields(
     fields: &[vole_frontend::ast::FieldDef],
     module_id: ModuleId,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<FieldId, VirRef>,
 ) {
@@ -1488,7 +1669,7 @@ fn lower_top_level_functions(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
@@ -1537,7 +1718,7 @@ fn lower_top_level_functions(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities.as_entity_registry(),
             names,
             type_table,
         );
@@ -1565,7 +1746,7 @@ fn lower_monomorphized_instances(
     generic_func_asts: &FxHashMap<NameId, &vole_frontend::FuncDecl>,
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
@@ -1575,7 +1756,7 @@ fn lower_monomorphized_instances(
     vir_handled_function_ids: &HashSet<FunctionId>,
 ) {
     // Iterate all monomorphized instances in the cache
-    for (_, instance) in entities.monomorph_cache.instances() {
+    for instance in entities.monomorph_instances() {
         // Skip instances already handled by VIR monomorphization.
         // VIR monomorph produced concrete functions for these via type
         // substitution on generic templates.
@@ -1589,7 +1770,7 @@ fn lower_monomorphized_instances(
             // Found in the main program — lower with the main interner
             lower_single_monomorph(
                 func,
-                instance,
+                &instance,
                 names,
                 entities,
                 type_arena,
@@ -1603,7 +1784,7 @@ fn lower_monomorphized_instances(
 
         // Not in the main program — search module programs
         lower_module_monomorph(
-            instance,
+            &instance,
             module_programs,
             names,
             entities,
@@ -1619,7 +1800,7 @@ fn lower_monomorphized_instances(
 /// Shared references used while lowering class/static method monomorphs to VIR.
 struct MethodMonomorphLoweringCtx<'a> {
     names: &'a NameTable,
-    entities: &'a EntityRegistry,
+    entities: &'a dyn LoweringEntityLookup,
     type_arena: &'a TypeArena,
     node_map: &'a NodeMap,
     modules_with_errors: &'a HashSet<String>,
@@ -1654,10 +1835,7 @@ fn lower_class_method_monomorphized_instances(
     work: &mut MethodMonomorphLoweringWork<'_>,
     ctx: &MethodMonomorphLoweringCtx<'_>,
 ) {
-    let instances = ctx
-        .entities
-        .class_method_monomorph_cache
-        .collect_instances();
+    let instances = ctx.entities.class_method_monomorph_instances();
     for instance in instances {
         // External methods are runtime calls and have no Vole body to lower.
         if instance.external_info.is_some() {
@@ -1726,10 +1904,7 @@ fn lower_static_method_monomorphized_instances(
     work: &mut MethodMonomorphLoweringWork<'_>,
     ctx: &MethodMonomorphLoweringCtx<'_>,
 ) {
-    let instances = ctx
-        .entities
-        .static_method_monomorph_cache
-        .collect_instances();
+    let instances = ctx.entities.static_method_monomorph_instances();
     for instance in instances {
         let method_name = ctx.names.display(instance.method_name);
 
@@ -1817,7 +1992,7 @@ fn lower_class_method_monomorph_vir(
         ctx.node_map,
         interner,
         ctx.type_arena,
-        ctx.entities,
+        ctx.entities.as_entity_registry(),
         ctx.names,
         type_table,
     );
@@ -1857,7 +2032,7 @@ fn lower_static_method_monomorph_vir(
         ctx.node_map,
         interner,
         ctx.type_arena,
-        ctx.entities,
+        ctx.entities.as_entity_registry(),
         ctx.names,
         type_table,
     )?;
@@ -2031,7 +2206,7 @@ fn lower_single_monomorph(
     func: &vole_frontend::FuncDecl,
     instance: &vole_sema::generic::MonomorphInstance,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     interner: &mut Interner,
@@ -2058,7 +2233,7 @@ fn lower_single_monomorph(
         type_arena,
         instance.mangled_name,
         interner,
-        entities,
+        entities.as_entity_registry(),
         names,
         type_table,
     );
@@ -2077,7 +2252,7 @@ fn lower_module_monomorph(
     instance: &vole_sema::generic::MonomorphInstance,
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
@@ -2141,7 +2316,7 @@ fn lower_module_monomorph(
         type_arena,
         instance.mangled_name,
         interner,
-        entities,
+        entities.as_entity_registry(),
         names,
         type_table,
     );
@@ -2201,7 +2376,7 @@ fn build_generic_func_map<'decl>(
     program: &'decl Program,
     interner: &Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
     module_id: ModuleId,
 ) -> FxHashMap<NameId, &'decl vole_frontend::FuncDecl> {
@@ -2223,7 +2398,7 @@ fn build_generic_func_map<'decl>(
 struct GenericFuncCollector<'a, 'namer> {
     namer: &'namer NamerLookup<'namer>,
     names: &'namer NameTable,
-    entities: &'namer EntityRegistry,
+    entities: &'namer dyn LoweringEntityLookup,
     tests_virtual_modules: &'namer FxHashMap<Span, ModuleId>,
     root_module_id: ModuleId,
     map: FxHashMap<NameId, &'a vole_frontend::FuncDecl>,
@@ -2279,7 +2454,7 @@ impl<'a, 'namer> GenericFuncCollector<'a, 'namer> {
 fn lower_module_functions(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
@@ -2314,7 +2489,7 @@ fn lower_module_program_functions(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
@@ -2361,7 +2536,7 @@ fn lower_module_program_functions(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities.as_entity_registry(),
             names,
             type_table,
         );
@@ -2421,7 +2596,7 @@ fn lower_top_level_type_methods(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
@@ -2520,7 +2695,7 @@ fn lower_type_methods(
     type_name: Symbol,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
@@ -2614,7 +2789,7 @@ fn lower_type_methods(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities.as_entity_registry(),
             names,
             type_table,
         ) {
@@ -2635,7 +2810,7 @@ fn lower_type_default_methods(
     type_name: Symbol,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
@@ -2690,7 +2865,7 @@ fn lower_type_default_methods(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities.as_entity_registry(),
             names,
             type_table,
         ) {
@@ -2710,7 +2885,7 @@ fn lower_single_method(
     names: &NameTable,
     node_map: &NodeMap,
     type_arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     vir_functions: &mut Vec<VirFunction>,
     type_table: &mut VirTypeTable,
 ) {
@@ -2740,7 +2915,7 @@ fn lower_single_method(
         node_map,
         interner,
         type_arena,
-        entities,
+        entities.as_entity_registry(),
         names,
         type_table,
     );
@@ -2758,7 +2933,7 @@ fn lower_single_method(
 fn lower_module_type_methods(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
@@ -2888,7 +3063,7 @@ fn lower_test_scoped_type_methods(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
@@ -2924,7 +3099,7 @@ fn lower_tests_decl_type_methods(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     tests_virtual_modules: &FxHashMap<Span, ModuleId>,
@@ -2979,7 +3154,7 @@ fn lower_tests_decl_type_methods(
                         node_map,
                         interner,
                         type_arena,
-                        entities,
+                        entities.as_entity_registry(),
                         names,
                         type_table,
                     );
@@ -3140,7 +3315,7 @@ fn lower_test_bodies(
     node_map: &NodeMap,
     interner: &mut Interner,
     type_arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     names: &NameTable,
     type_table: &mut VirTypeTable,
 ) -> Vec<VirTest> {
@@ -3162,7 +3337,7 @@ fn lower_tests_decl_bodies(
     node_map: &NodeMap,
     interner: &mut Interner,
     type_arena: &TypeArena,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     names: &NameTable,
     tests: &mut Vec<VirTest>,
     type_table: &mut VirTypeTable,
@@ -3183,7 +3358,7 @@ fn lower_tests_decl_bodies(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities: entities.as_entity_registry(),
             name_table: names,
             type_table,
             generic: false,
@@ -3193,7 +3368,13 @@ fn lower_tests_decl_bodies(
 
     for test in &tests_decl.tests {
         let mut vir_body = lower_test_body(
-            &test.body, node_map, interner, type_arena, entities, names, type_table,
+            &test.body,
+            node_map,
+            interner,
+            type_arena,
+            entities.as_entity_registry(),
+            names,
+            type_table,
         );
         if !scoped_let_vir_stmts.is_empty() {
             vir_body
@@ -3227,7 +3408,7 @@ fn lower_implement_block_methods(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
@@ -3259,7 +3440,7 @@ fn lower_single_implement_block(
     impl_block: &vole_frontend::ast::ImplementBlock,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     module_id: ModuleId,
@@ -3329,7 +3510,7 @@ fn resolve_implement_target(
     target_type: &vole_frontend::TypeExpr,
     interner: &Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     module_id: ModuleId,
 ) -> Option<TypeDefId> {
     use vole_frontend::TypeExprKind;
@@ -3379,7 +3560,7 @@ fn lower_implement_direct_methods(
     type_def_id: TypeDefId,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     vir_functions: &mut Vec<VirFunction>,
@@ -3427,7 +3608,7 @@ fn lower_implement_direct_methods(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities.as_entity_registry(),
             names,
             type_table,
         );
@@ -3442,7 +3623,7 @@ fn lower_implement_static_methods(
     type_def_id: TypeDefId,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     vir_functions: &mut Vec<VirFunction>,
@@ -3489,7 +3670,7 @@ fn lower_implement_static_methods(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities.as_entity_registry(),
             names,
             type_table,
         ) {
@@ -3510,7 +3691,7 @@ fn lower_implement_default_methods(
     type_def_id: TypeDefId,
     interner: &mut Interner,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     _module_id: ModuleId,
@@ -3568,7 +3749,7 @@ fn lower_implement_default_methods(
             node_map,
             interner,
             type_arena,
-            entities,
+            entities.as_entity_registry(),
             names,
             type_table,
         ) {
@@ -3582,7 +3763,7 @@ fn lower_implement_default_methods(
 /// Returns `(impl_method_id, method_name_str, interface_tdef_id)` tuples.
 fn collect_default_method_ids(
     type_def_id: TypeDefId,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     names: &NameTable,
     direct_method_names: &HashSet<String>,
 ) -> Vec<(MethodId, String, TypeDefId)> {
@@ -3673,7 +3854,7 @@ fn find_interface_method_ast<'a>(
 fn lower_module_implement_block_methods(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     node_map: &NodeMap,
     modules_with_errors: &HashSet<String>,
@@ -3820,7 +4001,7 @@ fn run_early_vir_monomorphize(
     generic_vir_functions: &[VirFunction],
     generic_vir_map: &FxHashMap<NameId, usize>,
     type_table: &mut VirTypeTable,
-    entities: &EntityRegistry,
+    entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
 ) -> HashSet<FunctionId> {
     use vole_sema::vir_lower::type_translate::translate_type_id;
@@ -3831,7 +4012,7 @@ fn run_early_vir_monomorphize(
     let mut seeds: Vec<vole_vir::MonomorphInstance> = Vec::new();
     let mut seed_mangled_names: FxHashMap<vole_vir::MonomorphInstance, NameId> =
         FxHashMap::default();
-    for (_, sema_instance) in entities.monomorph_cache.instances() {
+    for sema_instance in entities.monomorph_instances() {
         let Some(func_id) = entities.function_by_name(sema_instance.original_name) else {
             continue;
         };
