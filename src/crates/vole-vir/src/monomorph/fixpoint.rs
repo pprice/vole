@@ -972,4 +972,178 @@ mod tests {
         let result = monomorphize(&mut program);
         assert!(result.functions.is_empty());
     }
+
+    /// After monomorphization, the program's type table should have layouts
+    /// for all concrete types referenced by monomorphized functions.
+    #[test]
+    fn type_table_populated_after_monomorphize() {
+        let t_name = name(100);
+        let generic_id = FunctionId::new(1);
+
+        let mut type_table = VirTypeTable::new();
+        let param_vir_ty = type_table.intern(VirType::Param { name: t_name }, None);
+
+        // Generic: fn wrap<T>(x: T) -> Array<T> { [x] }
+        let array_of_param = type_table.intern(VirType::Array { elem: param_vir_ty }, None);
+        let template = VirFunction {
+            id: generic_id,
+            name: "wrap".to_string(),
+            params: vec![(sym(1), type_id(10), param_vir_ty)],
+            return_type: type_id(20),
+            vir_return_type: array_of_param,
+            body: VirBody {
+                stmts: vec![],
+                trailing: Some(Box::new(VirExpr::ArrayLiteral {
+                    elements: vec![Box::new(VirExpr::LocalLoad {
+                        name: sym(1),
+                        ty: type_id(10),
+                        vir_ty: param_vir_ty,
+                    })],
+                    ty: type_id(20),
+                    vir_ty: array_of_param,
+                })),
+            },
+            mangled_name_id: None,
+            method_id: None,
+            type_params: vec![t_name],
+        };
+
+        // Caller: wrap<i64>(42)
+        let caller = build_caller(generic_id, vec![VirTypeId::I64], VirTypeId::I64);
+
+        let mut program = build_minimal_program(vec![caller], vec![template]);
+        program.type_table = type_table;
+
+        let result = monomorphize(&mut program);
+        assert_eq!(result.functions.len(), 1);
+
+        let mono_func = &result.functions[0];
+
+        // The monomorphized function's return type should be Array<I64>.
+        let ret_vir_ty = mono_func.vir_return_type;
+        let ret_type = program.type_table.get(ret_vir_ty);
+        assert_eq!(
+            *ret_type,
+            VirType::Array {
+                elem: VirTypeId::I64
+            }
+        );
+
+        // That type must have a layout in the program type table.
+        let layout = program
+            .type_table
+            .get_layout(ret_vir_ty)
+            .expect("Array<I64> should have a layout after monomorphization");
+        assert!(layout.is_rc);
+        assert!(layout.is_heap);
+
+        // The param type should have been substituted to I64.
+        let param_vir_ty_in_mono = mono_func.params[0].2;
+        assert_eq!(param_vir_ty_in_mono, VirTypeId::I64);
+        assert!(
+            program
+                .type_table
+                .get_layout(param_vir_ty_in_mono)
+                .is_some(),
+            "I64 must have a layout"
+        );
+    }
+
+    /// After monomorphization, every VirTypeId in the program's type table
+    /// that isn't a Param should have a layout.
+    #[test]
+    fn all_non_param_types_have_layouts_after_monomorphize() {
+        let t_name = name(100);
+        let generic_id = FunctionId::new(1);
+
+        let mut type_table = VirTypeTable::new();
+        let param_vir_ty = type_table.intern(VirType::Param { name: t_name }, None);
+
+        let template = build_identity_template(generic_id, t_name, param_vir_ty);
+        let caller = build_caller(generic_id, vec![VirTypeId::I64], VirTypeId::I64);
+
+        let mut program = build_minimal_program(vec![caller], vec![template]);
+        program.type_table = type_table;
+
+        let _result = monomorphize(&mut program);
+
+        // Walk every entry in the program's type table.
+        for i in 0..program.type_table.len() as u32 {
+            let id = VirTypeId::from_raw(i);
+            let ty = program.type_table.get(id);
+            if matches!(ty, VirType::Param { .. }) {
+                // Param types intentionally have no layout.
+                continue;
+            }
+            assert!(
+                program.type_table.get_layout(id).is_some(),
+                "type at index {i} ({ty:?}) should have a layout"
+            );
+        }
+    }
+
+    /// Monomorphization via external seeds also populates layouts correctly.
+    #[test]
+    fn seed_based_monomorphize_populates_type_table() {
+        let t_name = name(100);
+        let generic_id = FunctionId::new(1);
+
+        let mut type_table = VirTypeTable::new();
+        let param_vir_ty = type_table.intern(VirType::Param { name: t_name }, None);
+        let opt_of_param = type_table.intern(
+            VirType::Optional {
+                inner: param_vir_ty,
+            },
+            None,
+        );
+
+        // Generic: fn maybe<T>(x: T) -> T? { x }
+        let template = VirFunction {
+            id: generic_id,
+            name: "maybe".to_string(),
+            params: vec![(sym(1), type_id(10), param_vir_ty)],
+            return_type: type_id(20),
+            vir_return_type: opt_of_param,
+            body: VirBody {
+                stmts: vec![],
+                trailing: Some(Box::new(VirExpr::LocalLoad {
+                    name: sym(1),
+                    ty: type_id(10),
+                    vir_ty: param_vir_ty,
+                })),
+            },
+            mangled_name_id: None,
+            method_id: None,
+            type_params: vec![t_name],
+        };
+
+        // No concrete callers -- seed directly.
+        let mut program = build_minimal_program(vec![], vec![template]);
+        program.type_table = type_table;
+
+        let seeds = vec![MonomorphInstance {
+            function_id: generic_id,
+            type_args: vec![VirTypeId::STRING],
+        }];
+
+        let result = monomorphize_with_seeds(&mut program, seeds);
+        assert_eq!(result.functions.len(), 1);
+
+        let mono = &result.functions[0];
+        let ret_ty = mono.vir_return_type;
+        let ret_type = program.type_table.get(ret_ty);
+        assert_eq!(
+            *ret_type,
+            VirType::Optional {
+                inner: VirTypeId::STRING
+            }
+        );
+
+        let layout = program
+            .type_table
+            .get_layout(ret_ty)
+            .expect("Optional<String> should have layout after seed monomorphization");
+        assert!(layout.is_rc);
+        assert!(layout.is_heap);
+    }
 }

@@ -878,4 +878,194 @@ mod tests {
         assert_eq!(layout.slot_count, 2);
         assert_eq!(layout.storage, StorageClass::Wide);
     }
+
+    /// After substitution, every non-Param type in the target table must have a layout.
+    #[test]
+    fn all_substituted_types_have_layouts() {
+        let mut source = VirTypeTable::new();
+        let t_name = name(100);
+        let param_id = source.intern(VirType::Param { name: t_name }, None);
+
+        // Build a variety of compound types containing the param.
+        let array_id = source.intern(VirType::Array { elem: param_id }, None);
+        let opt_id = source.intern(VirType::Optional { inner: param_id }, None);
+        let tuple_id = source.intern(
+            VirType::Tuple {
+                elems: vec![param_id, VirTypeId::I64],
+            },
+            None,
+        );
+        let union_id = source.intern(
+            VirType::Union {
+                variants: vec![param_id, VirTypeId::STRING],
+            },
+            None,
+        );
+        let func_id = source.intern(
+            VirType::Function {
+                params: vec![param_id],
+                ret: param_id,
+            },
+            None,
+        );
+        let def = TypeDefId::new(42);
+        let class_id = source.intern(
+            VirType::Class {
+                def,
+                type_args: vec![param_id],
+            },
+            None,
+        );
+        let struct_id = source.intern(
+            VirType::Struct {
+                def,
+                type_args: vec![param_id],
+            },
+            None,
+        );
+        let iface_id = source.intern(
+            VirType::Interface {
+                def,
+                type_args: vec![param_id],
+            },
+            None,
+        );
+        let fallible_id = source.intern(
+            VirType::Fallible {
+                success: param_id,
+                errors: vec![],
+            },
+            None,
+        );
+        let iter_id = source.intern(VirType::RuntimeIterator { elem: param_id }, None);
+        let fixed_id = source.intern(
+            VirType::FixedArray {
+                elem: param_id,
+                len: 3,
+            },
+            None,
+        );
+        // Deeply nested: Array<Optional<T>>
+        let nested_id = source.intern(VirType::Array { elem: opt_id }, None);
+
+        let mut target = VirTypeTable::new();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, VirTypeId::I64);
+
+        let mapping = substitute_types(&source, &mut target, &subs);
+
+        // Every substituted compound type must have a layout.
+        let ids_to_check = [
+            ("Array<T>", array_id),
+            ("Optional<T>", opt_id),
+            ("Tuple<T,i64>", tuple_id),
+            ("Union<T,String>", union_id),
+            ("Function(T)->T", func_id),
+            ("Class<T>", class_id),
+            ("Struct<T>", struct_id),
+            ("Interface<T>", iface_id),
+            ("Fallible<T>", fallible_id),
+            ("RuntimeIterator<T>", iter_id),
+            ("FixedArray<T,3>", fixed_id),
+            ("Array<Optional<T>>", nested_id),
+        ];
+
+        for (label, old_id) in ids_to_check {
+            let new_id = mapping[&old_id];
+            assert!(
+                target.get_layout(new_id).is_some(),
+                "{label}: substituted type at {new_id:?} should have a layout"
+            );
+        }
+
+        // The param itself maps to I64, which has a reserved layout.
+        let new_param = mapping[&param_id];
+        assert_eq!(new_param, VirTypeId::I64);
+        assert!(
+            target.get_layout(new_param).is_some(),
+            "substituted param (now I64) should have a layout"
+        );
+    }
+
+    /// When source == target (simulating the monomorphize_one clone pattern),
+    /// all pre-existing types retain their layouts.
+    #[test]
+    fn clone_target_preserves_existing_layouts() {
+        let mut program_table = VirTypeTable::new();
+        let arr_id = program_table.intern(
+            VirType::Array {
+                elem: VirTypeId::I64,
+            },
+            Some(VirTypeLayout {
+                is_rc: true,
+                is_heap: true,
+                is_wide: false,
+                slot_count: 1,
+                storage: StorageClass::Pointer,
+            }),
+        );
+
+        let t_name = name(100);
+        let _param_id = program_table.intern(VirType::Param { name: t_name }, None);
+
+        // Clone to simulate fixpoint.rs monomorphize_one pattern.
+        let mut target = program_table.clone();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, VirTypeId::I64);
+
+        let mapping = substitute_types(&program_table, &mut target, &subs);
+
+        // Pre-existing Array<I64> should retain its layout.
+        let mapped_arr = mapping[&arr_id];
+        let layout = target
+            .get_layout(mapped_arr)
+            .expect("pre-existing Array<I64> should retain layout");
+        assert!(layout.is_rc);
+        assert_eq!(layout.storage, StorageClass::Pointer);
+    }
+
+    /// Substitution with a non-reserved concrete type (e.g., Array<String>)
+    /// produces correct layouts for compound types wrapping that type.
+    #[test]
+    fn substitution_with_non_reserved_concrete_type() {
+        let mut source = VirTypeTable::new();
+        let t_name = name(100);
+        let param_id = source.intern(VirType::Param { name: t_name }, None);
+        let opt_of_param = source.intern(VirType::Optional { inner: param_id }, None);
+
+        // The concrete type is Array<String> (not a reserved VirTypeId).
+        let concrete_arr = source.intern(
+            VirType::Array {
+                elem: VirTypeId::STRING,
+            },
+            Some(VirTypeLayout {
+                is_rc: true,
+                is_heap: true,
+                is_wide: false,
+                slot_count: 1,
+                storage: StorageClass::Pointer,
+            }),
+        );
+
+        let mut target = VirTypeTable::new();
+        let mut subs = TypeSubstitution::default();
+        subs.insert(t_name, concrete_arr);
+
+        let mapping = substitute_types(&source, &mut target, &subs);
+
+        // Optional<Array<String>> should have a layout.
+        let new_opt = mapping[&opt_of_param];
+        let layout = target
+            .get_layout(new_opt)
+            .expect("Optional<Array<String>> should have a layout");
+        assert!(layout.is_rc);
+        assert!(layout.is_heap);
+
+        // The concrete Array<String> itself should have a layout in the target.
+        let new_arr = mapping[&concrete_arr];
+        let arr_layout = target
+            .get_layout(new_arr)
+            .expect("Array<String> should have a layout in target");
+        assert!(arr_layout.is_rc);
+    }
 }
