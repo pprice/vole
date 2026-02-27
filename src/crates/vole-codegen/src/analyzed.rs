@@ -540,9 +540,19 @@ impl AnalyzedProgram {
         self.entities.get_type(type_def_id)
     }
 
+    /// Query-compatible alias for resolving a sema TypeDef by ID.
+    pub(crate) fn get_type(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
+        self.type_def(type_def_id)
+    }
+
     /// Resolve a sema FieldDef by ID.
     pub(crate) fn field_def(&self, field_id: FieldId) -> &vole_sema::entity_defs::FieldDef {
         self.entities.get_field(field_id)
+    }
+
+    /// Query-compatible alias for resolving a sema FieldDef by ID.
+    pub(crate) fn get_field(&self, field_id: FieldId) -> &vole_sema::entity_defs::FieldDef {
+        self.field_def(field_id)
     }
 
     /// Resolve a sema FunctionDef by ID.
@@ -558,14 +568,22 @@ impl AnalyzedProgram {
         self.entities.get_method(method_id)
     }
 
+    /// Query-compatible alias for resolving a sema MethodDef by ID.
+    pub(crate) fn get_method(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
+        self.method_def(method_id)
+    }
+
     /// Return the sema signature TypeId for a method.
     pub(crate) fn method_signature_id(&self, method_id: MethodId) -> vole_sema::type_arena::TypeId {
         self.entities.get_method(method_id).signature_id
     }
 
     /// Return all field IDs declared on a type definition.
-    pub(crate) fn fields_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.entity_field_ids_on_type(type_def_id)
+    pub(crate) fn fields_on_type(
+        &self,
+        type_def_id: TypeDefId,
+    ) -> impl Iterator<Item = FieldId> + '_ {
+        self.entities.fields_on_type(type_def_id)
     }
 
     /// Return true when a global is present for the given NameId.
@@ -607,6 +625,16 @@ impl AnalyzedProgram {
     /// Resolve NameId by module and symbol segments using the main interner.
     pub(crate) fn try_name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> Option<NameId> {
         self.names.name_id(module_id, segments, self.interner())
+    }
+
+    /// Query-compatible alias for resolving NameId by module and symbol segments.
+    pub(crate) fn name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> NameId {
+        self.try_name_id(module_id, segments).unwrap_or_else(|| {
+            panic!(
+                "name_id not found for segments {:?} in {:?}",
+                segments, module_id
+            )
+        })
     }
 
     /// Resolve NameId by module and symbol segments with an explicit interner.
@@ -720,6 +748,47 @@ impl AnalyzedProgram {
             .find_method_on_type(type_def_id, method_name_id)
     }
 
+    /// Return direct method IDs declared on a type definition.
+    pub(crate) fn type_methods(&self, type_def_id: TypeDefId) -> Vec<MethodId> {
+        self.entities.methods_on_type(type_def_id)
+    }
+
+    /// Build interface type-parameter substitutions for a concrete implementation.
+    pub(crate) fn interface_impl_type_param_subs(
+        &self,
+        implementing_type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> FxHashMap<NameId, vole_sema::type_arena::TypeId> {
+        let type_params = self.entities.type_params(interface_id);
+        let type_args = self
+            .entities
+            .get_implementation_type_args(implementing_type_id, interface_id);
+        type_params
+            .into_iter()
+            .zip(type_args.iter().copied())
+            .collect()
+    }
+
+    /// Find a static method on a type by method NameId.
+    pub(crate) fn find_static_method(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        self.entities
+            .find_static_method_on_type(type_def_id, method_name_id)
+    }
+
+    /// Get the full NameId for a semantic method.
+    pub(crate) fn method_full_name(&self, method_id: MethodId) -> NameId {
+        self.entities.method_full_name(method_id)
+    }
+
+    /// Return all interfaces implemented by a type definition.
+    pub(crate) fn implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId> {
+        self.entities.get_implemented_interfaces(type_def_id)
+    }
+
     /// Return external binding metadata for a method, when available.
     pub(crate) fn method_external_binding(
         &self,
@@ -809,6 +878,11 @@ impl AnalyzedProgram {
         self.names
             .module_id_if_known(path)
             .unwrap_or_else(|| self.names.main_module())
+    }
+
+    /// Return module ID when known for a path.
+    pub(crate) fn module_id_if_known(&self, path: &str) -> Option<ModuleId> {
+        self.names.module_id_if_known(path)
     }
 
     /// Return known imported module paths.

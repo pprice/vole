@@ -984,7 +984,6 @@ impl Cg<'_, '_, '_> {
         let error_fields: Vec<_> = self
             .analyzed()
             .fields_on_type(error_type_def_id)
-            .into_iter()
             .map(|field_id| {
                 let field = self.analyzed().field_def(field_id);
                 RaiseFieldLayout {
@@ -1536,7 +1535,6 @@ impl Cg<'_, '_, '_> {
         let error_fields: Vec<_> = self
             .analyzed()
             .fields_on_type(error_type_def_id)
-            .into_iter()
             .map(|field_id| {
                 let field = self.analyzed().field_def(field_id);
                 RaiseFieldLayout {

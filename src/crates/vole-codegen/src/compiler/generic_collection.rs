@@ -94,17 +94,17 @@ impl Compiler<'_> {
                     };
                     if let Some(sym) = target_sym
                         && let Some(name_id) = self.analyzed.try_name_id(module_id, &[sym])
-                            && name_id == class_name_id
+                        && name_id == class_name_id
+                    {
+                        // Found matching implement block - search its methods
+                        if let Some(method) = impl_block
+                            .methods
+                            .iter()
+                            .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str)
                         {
-                            // Found matching implement block - search its methods
-                            if let Some(method) = impl_block
-                                .methods
-                                .iter()
-                                .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str)
-                            {
-                                return Some(method);
-                            }
+                            return Some(method);
                         }
+                    }
                 }
                 Decl::Tests(tests_decl) => {
                     let vm_id = self

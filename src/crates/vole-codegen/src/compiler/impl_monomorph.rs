@@ -101,9 +101,8 @@ impl Compiler<'_> {
                     // Use module-specific interner for symbol resolution
                     let type_def_id = self
                         .analyzed
-                        .query()
                         .try_name_id_with_interner(module_id, &[*sym], interner)
-                        .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id))
+                        .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
                         .ok_or_else(|| {
                             CodegenError::internal_with_context(
                                 "import_module_implement_block: type not found",
@@ -130,14 +129,14 @@ impl Compiler<'_> {
         };
 
         let impl_type_name_id_for_def = impl_type_name_id;
-        let type_def_id_opt = impl_type_name_id_for_def
-            .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
+        let type_def_id_opt =
+            impl_type_name_id_for_def.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
 
         // Import explicitly declared instance methods
         for method in &impl_block.methods {
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
             let type_def_id = impl_type_name_id_for_def
-                .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
+                .and_then(|name_id| self.analyzed.try_type_def_id(name_id));
 
             let (sig, semantic_method_id) = {
                 let tdef_id = type_def_id.ok_or_else(|| {
@@ -152,16 +151,12 @@ impl Compiler<'_> {
                         format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
                 })?;
-                let method_id = self
-                    .analyzed
-                    .query()
-                    .find_method(tdef_id, name_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal_with_context(
-                            "import: method not in entity_registry",
-                            format!("{}.{}", type_name, interner.resolve(method.name)),
-                        )
-                    })?;
+                let method_id = self.analyzed.find_method(tdef_id, name_id).ok_or_else(|| {
+                    CodegenError::internal_with_context(
+                        "import: method not in entity_registry",
+                        format!("{}.{}", type_name, interner.resolve(method.name)),
+                    )
+                })?;
                 let sig =
                     self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
                 (sig, method_id)
@@ -171,7 +166,7 @@ impl Compiler<'_> {
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
             {
-                let type_name_id = self.analyzed.query().get_type(tdef_id).name_id;
+                let type_name_id = self.analyzed.get_type(tdef_id).name_id;
                 self.state
                     .method_func_keys
                     .insert((type_name_id, name_id), func_key);
@@ -189,7 +184,7 @@ impl Compiler<'_> {
                 .collect();
 
             let iface_default_methods: Vec<(MethodId, NameId, TypeDefId)> = {
-                let query = self.analyzed.query();
+                let query = self.analyzed;
                 let mut results = Vec::new();
                 for interface_tdef_id in query.implemented_interfaces(type_def_id) {
                     for iface_method_id in query.type_methods(interface_tdef_id) {
@@ -212,12 +207,11 @@ impl Compiler<'_> {
                 results
             };
 
-            let type_name_id = self.analyzed.query().get_type(type_def_id).name_id;
+            let type_name_id = self.analyzed.get_type(type_def_id).name_id;
             for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
                 // Build TypeParam substitution map for this interface implementation.
                 let type_param_subs = self
                     .analyzed
-                    .query()
                     .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
                 // Skip abstract/generic default methods (not compiled in the module).
                 if !type_param_subs.is_empty() {
@@ -230,7 +224,7 @@ impl Compiler<'_> {
                     }
                 }
                 let sig = {
-                    let method_def = self.analyzed.query().get_method(semantic_method_id);
+                    let method_def = self.analyzed.get_method(semantic_method_id);
                     let arena = self.arena();
                     let (param_type_ids, return_type_id) = match arena
                         .unwrap_function(method_def.signature_id)
@@ -287,10 +281,7 @@ impl Compiler<'_> {
         interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
-        let type_def_id = self
-            .analyzed
-            .query()
-            .resolve_type_def_by_str(module_id, type_name);
+        let type_def_id = self.analyzed.resolve_type_def_by_str(module_id, type_name);
 
         for method in &statics.methods {
             if method.body.is_none() {
@@ -312,7 +303,6 @@ impl Compiler<'_> {
                 })?;
                 let method_id = self
                     .analyzed
-                    .query()
                     .find_static_method(tdef_id, name_id)
                     .ok_or_else(|| {
                         CodegenError::internal_with_context(
@@ -327,7 +317,6 @@ impl Compiler<'_> {
 
             let type_name_id =
                 self.analyzed
-                    .query()
                     .get_type(type_def_id.ok_or_else(|| {
                         CodegenError::internal("import statics: missing type_def_id")
                     })?)
@@ -414,19 +403,15 @@ impl Compiler<'_> {
                     // (implement blocks in tests blocks may target parent-scope types)
                     let type_def_id = self
                         .analyzed
-                        .query()
                         .try_name_id_with_interner(module_id, &[*sym], interner)
-                        .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id))
+                        .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
                         .or_else(|| {
                             let prog_mod = self.program_module();
                             if prog_mod != module_id {
                                 // Fall back to program module using its interner
                                 self.analyzed
-                                    .query()
                                     .try_name_id(prog_mod, &[*sym])
-                                    .and_then(|name_id| {
-                                        self.analyzed.query().try_type_def_id(name_id)
-                                    })
+                                    .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
                             } else {
                                 None
                             }
@@ -461,8 +446,8 @@ impl Compiler<'_> {
         for method in &impl_block.methods {
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
             // Get TypeDefId if available
-            let type_def_id = impl_type_name_id
-                .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
+            let type_def_id =
+                impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
 
             // Build signature from pre-resolved types via sema
             let (sig, semantic_method_id) = {
@@ -478,11 +463,8 @@ impl Compiler<'_> {
                         format!("{}.{}", type_name, interner.resolve(method.name)),
                     )
                 })?;
-                let semantic_method_id = self
-                    .analyzed
-                    .query()
-                    .find_method(tdef_id, name_id)
-                    .ok_or_else(|| {
+                let semantic_method_id =
+                    self.analyzed.find_method(tdef_id, name_id).ok_or_else(|| {
                         CodegenError::internal_with_context(
                             "implement block instance method not in entity_registry",
                             format!(
@@ -506,7 +488,7 @@ impl Compiler<'_> {
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
             {
-                let type_name_id = self.analyzed.query().get_type(tdef_id).name_id;
+                let type_name_id = self.analyzed.get_type(tdef_id).name_id;
                 self.state
                     .method_func_keys
                     .insert((type_name_id, name_id), func_key);
@@ -518,7 +500,7 @@ impl Compiler<'_> {
         // Default methods (not overridden) also need to be registered so that
         // codegen can find them via method_func_keys at call sites.
         if let Some(type_def_id) =
-            impl_type_name_id.and_then(|name_id| self.analyzed.query().try_type_def_id(name_id))
+            impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id))
         {
             // Collect direct method names (to skip explicitly implemented ones)
             let direct_method_name_strs: std::collections::HashSet<String> = impl_block
@@ -532,7 +514,7 @@ impl Compiler<'_> {
             // copied default methods onto the implementing type in the entity registry.
             // We just need to find them and register their JIT functions.
             let iface_default_methods: Vec<(MethodId, NameId, TypeDefId)> = {
-                let query = self.analyzed.query();
+                let query = self.analyzed;
                 // For each interface the type implements, collect its default methods
                 let mut results = Vec::new();
                 for interface_tdef_id in query.implemented_interfaces(type_def_id) {
@@ -568,12 +550,11 @@ impl Compiler<'_> {
             // TypeParam(T) substituted with the concrete interface type arg (e.g., i64 for
             // Iterable<i64>), so that the JIT function declaration signature matches what
             // the compiler will emit.
-            let type_name_id = self.analyzed.query().get_type(type_def_id).name_id;
+            let type_name_id = self.analyzed.get_type(type_def_id).name_id;
             for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
                 // Build TypeParam substitution map for this interface's implementation.
                 let type_param_subs = self
                     .analyzed
-                    .query()
                     .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
                 // Skip registration if any substitution value is still a TypeParam (abstract).
                 // Generic interface implementations (e.g., `extend [T] with Iterable<T>`) are
@@ -588,7 +569,7 @@ impl Compiler<'_> {
                     }
                 }
                 let sig = {
-                    let method_def = self.analyzed.query().get_method(semantic_method_id);
+                    let method_def = self.analyzed.get_method(semantic_method_id);
                     let arena = self.arena();
                     let (param_type_ids, return_type_id) = match arena
                         .unwrap_function(method_def.signature_id)
@@ -633,8 +614,8 @@ impl Compiler<'_> {
         if let Some(ref statics) = impl_block.statics {
             // Reuse the already-resolved impl type identity.
             // This works for module-local types and avoids program_module()-only lookup.
-            let type_def_id = impl_type_name_id
-                .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
+            let type_def_id =
+                impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
 
             for method in &statics.methods {
                 // Only register methods with bodies
@@ -662,7 +643,6 @@ impl Compiler<'_> {
                     })?;
                     let method_id = self
                         .analyzed
-                        .query()
                         .find_static_method(tdef_id, name_id)
                         .ok_or_else(|| {
                             CodegenError::internal_with_context(
@@ -687,7 +667,7 @@ impl Compiler<'_> {
                 let tdef_id = type_def_id.ok_or_else(|| {
                     CodegenError::internal("register_implement_block statics: missing type_def_id")
                 })?;
-                let type_name_id = self.analyzed.query().get_type(tdef_id).name_id;
+                let type_name_id = self.analyzed.get_type(tdef_id).name_id;
                 self.state.method_func_keys.insert(
                     (
                         type_name_id,
@@ -734,16 +714,14 @@ impl Compiler<'_> {
                 // Try given module first, then fall back to program module
                 let type_def_id = self
                     .analyzed
-                    .query()
                     .try_name_id(module_id, &[*sym])
-                    .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id))
+                    .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
                     .or_else(|| {
                         let prog_mod = self.program_module();
                         if prog_mod != module_id {
                             self.analyzed
-                                .query()
                                 .try_name_id(prog_mod, &[*sym])
-                                .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id))
+                                .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
                         } else {
                             None
                         }
@@ -774,12 +752,12 @@ impl Compiler<'_> {
         // Get TypeDefId for method lookup via method_func_keys
         let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
         let type_def_id =
-            impl_type_name_id.and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
+            impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
 
         for method in &impl_block.methods {
             let method_key = if let Some(type_def_id) = type_def_id {
                 // Use type's NameId for stable lookup across analyzer instances
-                let type_name_id = self.analyzed.query().get_type(type_def_id).name_id;
+                let type_name_id = self.analyzed.get_type(type_def_id).name_id;
                 let method_id = self.method_name_id(method.name)?;
                 self.state
                     .method_func_keys
@@ -803,7 +781,7 @@ impl Compiler<'_> {
 
             // Collect (interface_name_str, default_method_name_id, interface_tdef_id) triples.
             let iface_default_method_ids: Vec<(String, MethodId, NameId, TypeDefId)> = {
-                let query = self.analyzed.query();
+                let query = self.analyzed;
                 let mut results = Vec::new();
                 for interface_tdef_id in query.implemented_interfaces(type_def_id) {
                     let iface_name_str = {
@@ -847,7 +825,7 @@ impl Compiler<'_> {
                 iface_default_method_ids
             {
                 // Look up function key (registered in pass 1)
-                let type_name_id = self.analyzed.query().get_type(type_def_id).name_id;
+                let type_name_id = self.analyzed.get_type(type_def_id).name_id;
                 let func_key = match self
                     .state
                     .method_func_keys
@@ -889,7 +867,6 @@ impl Compiler<'_> {
                 // E.g., for `extend range with Iterable<i64>`, maps T_name_id -> i64.
                 let type_param_subs = self
                     .analyzed
-                    .query()
                     .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
 
                 // Skip compilation if any substitution value is still a TypeParam (abstract/generic).
@@ -909,7 +886,7 @@ impl Compiler<'_> {
                 //   1. Placeholder(SelfType) -> self_type_id
                 //   2. TypeParam(T) -> concrete element type (via type_param_subs)
                 let (param_type_ids, return_type_id) = {
-                    let method_def = self.analyzed.query().get_method(semantic_method_id);
+                    let method_def = self.analyzed.get_method(semantic_method_id);
                     let arena = self.arena();
                     match arena.unwrap_function(method_def.signature_id) {
                         Some((params, ret, _)) => {
@@ -1070,9 +1047,8 @@ impl Compiler<'_> {
                     // Use module-specific interner for symbol resolution
                     let type_def_id = self
                         .analyzed
-                        .query()
                         .try_name_id_with_interner(module_id, &[*sym], interner)
-                        .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id))
+                        .and_then(|name_id| self.analyzed.try_type_def_id(name_id))
                         .ok_or_else(|| {
                             CodegenError::internal_with_context(
                                 "implement block self type not in entity registry",
@@ -1100,12 +1076,12 @@ impl Compiler<'_> {
 
         let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
         let type_def_id =
-            impl_type_name_id.and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
+            impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
 
         // Compile instance methods using module interner for name resolution
         for method in &impl_block.methods {
             let method_key = type_def_id.and_then(|type_def_id| {
-                let type_name_id = self.analyzed.query().get_type(type_def_id).name_id;
+                let type_name_id = self.analyzed.get_type(type_def_id).name_id;
                 // Use module interner for method name lookup (cross-interner safe)
                 let method_name_id =
                     method_name_id_with_interner(self.analyzed, interner, method.name);
@@ -1137,7 +1113,7 @@ impl Compiler<'_> {
 
             // Collect (interface_name_str, default_method_name_id, interface_tdef_id) triples.
             let iface_default_method_ids: Vec<(String, MethodId, NameId, TypeDefId)> = {
-                let query = self.analyzed.query();
+                let query = self.analyzed;
                 let mut results = Vec::new();
                 for interface_tdef_id in query.implemented_interfaces(type_def_id) {
                     let iface_name_str = {
@@ -1180,7 +1156,7 @@ impl Compiler<'_> {
                 iface_default_method_ids
             {
                 // Look up function key (registered in pass 1)
-                let type_name_id = self.analyzed.query().get_type(type_def_id).name_id;
+                let type_name_id = self.analyzed.get_type(type_def_id).name_id;
                 let func_key = match self
                     .state
                     .method_func_keys
@@ -1222,7 +1198,6 @@ impl Compiler<'_> {
                 // E.g., for `extend range with Iterable<i64>`, maps T_name_id -> i64.
                 let type_param_subs = self
                     .analyzed
-                    .query()
                     .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
 
                 // Skip compilation if any substitution value is still a TypeParam (abstract/generic).
@@ -1242,7 +1217,7 @@ impl Compiler<'_> {
                 //   1. Placeholder(SelfType) -> self_type_id
                 //   2. TypeParam(T) -> concrete element type (via type_param_subs)
                 let (param_type_ids, return_type_id) = {
-                    let method_def = self.analyzed.query().get_method(semantic_method_id);
+                    let method_def = self.analyzed.get_method(semantic_method_id);
                     let arena = self.arena();
                     match arena.unwrap_function(method_def.signature_id) {
                         Some((params, ret, _)) => {
@@ -1378,7 +1353,7 @@ impl Compiler<'_> {
     ) -> CodegenResult<()> {
         let impl_type_name_id = self.analyzed.impl_type_name_id_from_type_id(self_type_id);
         let type_def_id =
-            impl_type_name_id.and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
+            impl_type_name_id.and_then(|name_id| self.analyzed.try_type_def_id(name_id));
         let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name)
             .ok_or_else(|| {
                 CodegenError::internal_with_context(
@@ -1388,7 +1363,7 @@ impl Compiler<'_> {
             })?;
 
         let semantic_method_id = type_def_id
-            .and_then(|tdef_id| self.analyzed.query().find_method(tdef_id, method_name_id))
+            .and_then(|tdef_id| self.analyzed.find_method(tdef_id, method_name_id))
             .ok_or_else(|| {
                 CodegenError::internal_with_context(
                     "implement block method not registered",
@@ -1403,7 +1378,7 @@ impl Compiler<'_> {
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else {
-            let method_def = self.analyzed.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(semantic_method_id);
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
@@ -1425,7 +1400,7 @@ impl Compiler<'_> {
 
         // Build params: skip explicit `self` params — they are handled via the separate self_binding.
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let method_def = self.analyzed.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(semantic_method_id);
             let arena = self.arena();
             let (param_type_ids, _, _) = arena
                 .unwrap_function(method_def.signature_id)
@@ -1445,7 +1420,7 @@ impl Compiler<'_> {
         };
 
         let method_return_type_id = {
-            let method_def = self.analyzed.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(semantic_method_id);
             let arena = self.arena();
             arena
                 .unwrap_function(method_def.signature_id)
@@ -1509,12 +1484,9 @@ impl Compiler<'_> {
 
             // Resolve MethodId for this static method
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
-            let semantic_method_id =
-                type_def_id
-                    .zip(method_name_id)
-                    .and_then(|(tdef_id, name_id)| {
-                        self.analyzed.query().find_static_method(tdef_id, name_id)
-                    });
+            let semantic_method_id = type_def_id
+                .zip(method_name_id)
+                .and_then(|(tdef_id, name_id)| self.analyzed.find_static_method(tdef_id, name_id));
 
             let method_id = semantic_method_id.ok_or_else(|| {
                 let method_name_str = interner.resolve(method.name);
@@ -1527,7 +1499,7 @@ impl Compiler<'_> {
             // Look up the registered function via its full NameId
             let func_key = self
                 .func_registry
-                .intern_name_id(self.analyzed.query().method_full_name(method_id));
+                .intern_name_id(self.analyzed.method_full_name(method_id));
             let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 CodegenError::not_found(
                     "static method",
@@ -1536,7 +1508,7 @@ impl Compiler<'_> {
             })?;
 
             // Use pre-resolved signature from MethodDef
-            let method_def = self.analyzed.query().get_method(method_id);
+            let method_def = self.analyzed.get_method(method_id);
             let arena = self.arena();
             let (params, ret, _) =
                 arena
@@ -1617,11 +1589,11 @@ impl Compiler<'_> {
         let type_def_id = self
             .analyzed
             .impl_type_name_id_from_type_id(self_type_id)
-            .and_then(|name_id| self.analyzed.query().try_type_def_id(name_id));
+            .and_then(|name_id| self.analyzed.try_type_def_id(name_id));
         let method_name_id = self.method_name_id(method.name)?;
 
         let semantic_method_id = type_def_id
-            .and_then(|tdef_id| self.analyzed.query().find_method(tdef_id, method_name_id))
+            .and_then(|tdef_id| self.analyzed.find_method(tdef_id, method_name_id))
             .ok_or_else(|| {
                 let method_name_str = self.resolve_symbol(method.name);
                 CodegenError::internal_with_context(
@@ -1636,7 +1608,7 @@ impl Compiler<'_> {
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else {
-            let method_def = self.analyzed.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(semantic_method_id);
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
@@ -1659,7 +1631,7 @@ impl Compiler<'_> {
         // Get param TypeIds from the method signature and pair with AST param names.
         // Skip explicit `self` params — they are handled via the separate self_binding.
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let method_def = self.analyzed.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(semantic_method_id);
             let arena = self.arena();
             let (param_type_ids, _, _) = arena
                 .unwrap_function(method_def.signature_id)
@@ -1680,7 +1652,7 @@ impl Compiler<'_> {
 
         // Get the method's return type from the pre-resolved signature
         let method_return_type_id = {
-            let method_def = self.analyzed.query().get_method(semantic_method_id);
+            let method_def = self.analyzed.get_method(semantic_method_id);
             let arena = self.arena();
             arena
                 .unwrap_function(method_def.signature_id)
@@ -1783,7 +1755,7 @@ impl Compiler<'_> {
                         {
                             let param_syms: Vec<Symbol> =
                                 method.params.iter().map(|p| p.name).collect();
-                            let module_id = self.analyzed.query().module_id_if_known(module_path);
+                            let module_id = self.analyzed.module_id_if_known(module_path);
                             return Some((body.clone(), param_syms, interner.clone(), module_id));
                         }
                     }
@@ -1812,7 +1784,7 @@ impl Compiler<'_> {
                 Some(id) => id,
                 None => return Ok(()), // array not registered, nothing to do
             };
-            match self.analyzed.query().try_type_def_id(array_name_id) {
+            match self.analyzed.try_type_def_id(array_name_id) {
                 Some(id) => id,
                 None => return Ok(()),
             }
@@ -1820,7 +1792,7 @@ impl Compiler<'_> {
 
         // Find Iterable TypeDefId (the interface array implements)
         let iterable_tdef_id = {
-            let interfaces = self.analyzed.query().implemented_interfaces(array_tdef_id);
+            let interfaces = self.analyzed.implemented_interfaces(array_tdef_id);
             if interfaces.is_empty() {
                 return Ok(());
             }
@@ -1831,7 +1803,6 @@ impl Compiler<'_> {
         let t_name_id: NameId = {
             let subs = self
                 .analyzed
-                .query()
                 .interface_impl_type_param_subs(array_tdef_id, iterable_tdef_id);
             if subs.is_empty() {
                 return Ok(());
@@ -1846,7 +1817,7 @@ impl Compiler<'_> {
 
         // Get the interface name string for collect_interface_method_body
         let iface_name_str: String = {
-            let iface_name_id = self.analyzed.query().get_type(iterable_tdef_id).name_id;
+            let iface_name_id = self.analyzed.get_type(iterable_tdef_id).name_id;
             self.analyzed
                 .name_table()
                 .last_segment_str(iface_name_id)
@@ -1856,7 +1827,7 @@ impl Compiler<'_> {
         // Collect non-external Iterable default methods registered on the array type
         // We skip external methods (provided by runtime, not compiled from Vole source)
         let default_methods: Vec<(MethodId, NameId, String)> = {
-            let query = self.analyzed.query();
+            let query = self.analyzed;
             let mut results = Vec::new();
             for iface_method_id in query.type_methods(iterable_tdef_id) {
                 let method_def = query.get_method(iface_method_id);
@@ -1920,7 +1891,7 @@ impl Compiler<'_> {
                 // this elem_type), skip this method — it can't be compiled without a concrete
                 // return type. Params fall back to abstract type on failure (safe for ptr-size).
                 let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
-                    let method_def = self.analyzed.query().get_method(*semantic_method_id);
+                    let method_def = self.analyzed.get_method(*semantic_method_id);
                     let arena = self.arena();
                     arena
                         .unwrap_function(method_def.signature_id)
@@ -2048,14 +2019,14 @@ impl Compiler<'_> {
                 Some(id) => id,
                 None => return Ok(()),
             };
-            match self.analyzed.query().try_type_def_id(array_name_id) {
+            match self.analyzed.try_type_def_id(array_name_id) {
                 Some(id) => id,
                 None => return Ok(()),
             }
         };
 
         let iterable_tdef_id = {
-            let interfaces = self.analyzed.query().implemented_interfaces(array_tdef_id);
+            let interfaces = self.analyzed.implemented_interfaces(array_tdef_id);
             if interfaces.is_empty() {
                 return Ok(());
             }
@@ -2065,7 +2036,6 @@ impl Compiler<'_> {
         let t_name_id: NameId = {
             let subs = self
                 .analyzed
-                .query()
                 .interface_impl_type_param_subs(array_tdef_id, iterable_tdef_id);
             if subs.is_empty() {
                 return Ok(());
@@ -2077,7 +2047,7 @@ impl Compiler<'_> {
         };
 
         let default_methods: Vec<(MethodId, NameId, String)> = {
-            let query = self.analyzed.query();
+            let query = self.analyzed;
             let mut results = Vec::new();
             for iface_method_id in query.type_methods(iterable_tdef_id) {
                 let method_def = query.get_method(iface_method_id);
@@ -2117,7 +2087,7 @@ impl Compiler<'_> {
 
                 // Build the concrete signature (same as compile path)
                 let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
-                    let method_def = self.analyzed.query().get_method(*semantic_method_id);
+                    let method_def = self.analyzed.get_method(*semantic_method_id);
                     let arena = self.arena();
                     arena
                         .unwrap_function(method_def.signature_id)

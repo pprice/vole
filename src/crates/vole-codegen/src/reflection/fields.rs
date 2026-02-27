@@ -89,7 +89,6 @@ fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
     let arena = cg.arena();
     cg.analyzed()
         .fields_on_type(type_def_id)
-        .into_iter()
         .map(|field_id| {
             let field = cg.analyzed().field_def(field_id);
             let name = cg
@@ -348,7 +347,6 @@ fn collect_annotation_field_type_tags(
 ) -> Vec<vole_runtime::type_registry::FieldTypeTag> {
     cg.analyzed()
         .fields_on_type(ann_type_def_id)
-        .into_iter()
         .map(|field_id| {
             let field = cg.analyzed().field_def(field_id);
             cg.field_type_tag(field.ty)

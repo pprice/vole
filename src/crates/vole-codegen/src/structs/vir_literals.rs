@@ -178,7 +178,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> HashMap<String, TypeId> {
         self.analyzed()
             .fields_on_type(type_def_id)
-            .into_iter()
             .map(|field_id| {
                 let field = self.analyzed().field_def(field_id);
                 (
@@ -240,7 +239,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_ids: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .into_iter()
             .collect();
         for field_id in field_ids {
             let field = self.analyzed().field_def(field_id);
@@ -385,7 +383,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_ids: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .into_iter()
             .collect();
         for field_id in field_ids {
             let field = self.analyzed().field_def(field_id);

@@ -132,7 +132,6 @@ impl Cg<'_, '_, '_> {
         let fields: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .into_iter()
             .collect();
         match fields.len() {
             0 => true, // null payload, rc_dec is no-op
@@ -152,7 +151,6 @@ impl Cg<'_, '_, '_> {
         let fields: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .into_iter()
             .collect();
         if fields.len() != 1 {
             return false;
@@ -350,7 +348,6 @@ impl Cg<'_, '_, '_> {
         let error_fields: Vec<_> = self
             .analyzed()
             .fields_on_type(error_type_def_id)
-            .into_iter()
             .map(|field_id| self.analyzed().field_def(field_id).clone())
             .collect();
 

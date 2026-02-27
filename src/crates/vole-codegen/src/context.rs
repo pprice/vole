@@ -629,7 +629,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_type_tags: Vec<_> = self
             .analyzed()
             .fields_on_type(type_def_id)
-            .into_iter()
             .map(|field_id| {
                 let field = self.analyzed().field_def(field_id);
                 self.field_type_tag(field.ty)
