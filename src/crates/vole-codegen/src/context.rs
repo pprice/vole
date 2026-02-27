@@ -602,12 +602,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let (type_def_id, _) = self.arena().unwrap_struct(type_id)?;
 
         // Check sema's is_annotation flag (authoritative source)
-        if !self
-            .analyzed()
-            .entity_registry()
-            .get_type(type_def_id)
-            .is_annotation
-        {
+        if !self.analyzed().type_is_annotation(type_def_id) {
             return None;
         }
 

@@ -362,17 +362,11 @@ impl Cg<'_, '_, '_> {
             .unwrap_interface(obj.type_id)
             .and_then(|(interface_type_def_id, _)| {
                 self.analyzed()
-                    .entity_registry()
-                    .interface_methods_ordered(interface_type_def_id)
+                    .interface_method_ids_ordered(interface_type_def_id)
                     .get(slot)
                     .copied()
             })
-            .map(|method_id| {
-                self.analyzed()
-                    .entity_registry()
-                    .get_method(method_id)
-                    .signature_id
-            })
+            .map(|method_id| self.analyzed().query().get_method(method_id).signature_id)
             .unwrap_or(func_type_id);
 
         // Unwrap function type to get params and return type

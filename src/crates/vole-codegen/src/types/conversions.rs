@@ -26,15 +26,15 @@ pub(crate) trait TypeEntityLookup: StructEntityLookup {
 
 impl TypeEntityLookup for AnalyzedProgram {
     fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.entity_registry().fields_on_type(type_def_id).collect()
+        self.entity_field_ids_on_type(type_def_id)
     }
 
     fn field_type(&self, field_id: FieldId) -> TypeId {
-        self.entity_registry().get_field(field_id).ty
+        self.entity_field_type(field_id)
     }
 
     fn type_name_id(&self, type_def_id: TypeDefId) -> NameId {
-        self.entity_registry().name_id(type_def_id)
+        self.entity_type_name_id(type_def_id)
     }
 }
 

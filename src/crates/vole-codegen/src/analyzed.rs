@@ -489,6 +489,52 @@ impl AnalyzedProgram {
         self.entity_registry().name_id(type_def_id)
     }
 
+    /// Return whether a type definition is marked as an annotation type.
+    pub fn type_is_annotation(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_registry().get_type(type_def_id).is_annotation
+    }
+
+    /// Return interface method IDs in deterministic slot order.
+    pub fn interface_method_ids_ordered(&self, interface_type_def_id: TypeDefId) -> Vec<MethodId> {
+        self.entity_registry()
+            .interface_methods_ordered(interface_type_def_id)
+    }
+
+    /// Return all field IDs declared on a type definition.
+    pub fn entity_field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
+        self.entity_registry().fields_on_type(type_def_id).collect()
+    }
+
+    /// Return the semantic field type for a field ID.
+    pub fn entity_field_type(&self, field_id: FieldId) -> vole_sema::type_arena::TypeId {
+        self.entity_registry().get_field(field_id).ty
+    }
+
+    /// Return declared type parameter NameIds for a type definition.
+    pub fn entity_type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
+        self.entity_registry().type_params(type_def_id)
+    }
+
+    /// Return generic field types metadata for a type definition, if present.
+    pub fn entity_generic_field_types(
+        &self,
+        type_def_id: TypeDefId,
+    ) -> Option<Vec<vole_sema::type_arena::TypeId>> {
+        self.entity_registry()
+            .get_type(type_def_id)
+            .generic_info
+            .as_ref()
+            .map(|g| g.field_types.clone())
+    }
+
+    /// Return whether a type definition is a sentinel type.
+    pub fn entity_type_is_sentinel(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_registry()
+            .get_type(type_def_id)
+            .kind
+            .is_sentinel()
+    }
+
     /// Find a type by its short (last-segment) name in the entity registry.
     pub fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
         self.entity_registry()

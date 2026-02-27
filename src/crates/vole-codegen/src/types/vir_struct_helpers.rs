@@ -29,18 +29,15 @@ pub(crate) trait VirStructEntityLookup {
 
 impl VirStructEntityLookup for crate::analyzed::AnalyzedProgram {
     fn is_sentinel_type_def(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_registry()
-            .get_type(type_def_id)
-            .kind
-            .is_sentinel()
+        self.entity_type_is_sentinel(type_def_id)
     }
 
     fn field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.entity_registry().fields_on_type(type_def_id).collect()
+        self.entity_field_ids_on_type(type_def_id)
     }
 
     fn field_type(&self, field_id: FieldId) -> TypeId {
-        self.entity_registry().get_field(field_id).ty
+        self.entity_field_type(field_id)
     }
 }
 

@@ -276,8 +276,7 @@ impl Cg<'_, '_, '_> {
         let slot = resolved.method_index()? as usize;
         let method_id = self
             .analyzed()
-            .entity_registry()
-            .interface_methods_ordered(interface_type_def_id)
+            .interface_method_ids_ordered(interface_type_def_id)
             .get(slot)
             .copied()?;
         Some(self.analyzed().query().get_method(method_id).signature_id)
@@ -1175,8 +1174,7 @@ impl Cg<'_, '_, '_> {
                 // Look up the monomorphized instance
                 if let Some(instance) = self
                     .analyzed()
-                    .entity_registry()
-                    .class_method_monomorph_cache
+                    .class_method_monomorph_cache()
                     .get(&effective_key)
                 {
                     return_type_id = instance.func_type.return_type_id;

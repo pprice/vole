@@ -16,15 +16,11 @@ pub(crate) trait StructEntityLookup {
 
 impl StructEntityLookup for crate::analyzed::AnalyzedProgram {
     fn generic_field_types(&self, type_def_id: TypeDefId) -> Option<Vec<TypeId>> {
-        self.entity_registry()
-            .get_type(type_def_id)
-            .generic_info
-            .as_ref()
-            .map(|g| g.field_types.clone())
+        self.entity_generic_field_types(type_def_id)
     }
 
     fn type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
-        self.entity_registry().type_params(type_def_id)
+        self.entity_type_params(type_def_id)
     }
 }
 
