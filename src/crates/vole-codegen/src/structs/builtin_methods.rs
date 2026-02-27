@@ -12,38 +12,6 @@ use crate::types::CompiledValue;
 use vole_sema::type_arena::TypeId;
 
 impl Cg<'_, '_, '_> {
-    /// Compile range.iter() - creates a range iterator from start..end
-    /// `iter_type_hint` is the pre-computed RuntimeIterator type from sema's concrete_return_hint.
-    pub(super) fn range_iter(
-        &mut self,
-        range: &vole_frontend::ast::RangeExpr,
-        iter_type_hint: Option<TypeId>,
-    ) -> CodegenResult<CompiledValue> {
-        // Compile start and end expressions
-        let start = self.expr(&range.start)?;
-        let end_val = self.expr(&range.end)?;
-
-        // For inclusive ranges, add 1 to the end (since our iterator is exclusive-end)
-        let end_value = if range.inclusive {
-            self.builder.ins().iadd_imm(end_val.value, 1)
-        } else {
-            end_val.value
-        };
-
-        // Call vole_range_iter(start, end) -> RuntimeIterator<i64>
-        let result = self.call_runtime(RuntimeKey::RangeIter, &[start.value, end_value])?;
-
-        // Use sema's pre-computed RuntimeIterator type, or look it up from the
-        // element type (needed for monomorphized generic functions where sema
-        // resolution is skipped).
-        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-            self.arena()
-                .lookup_runtime_iterator(TypeId::I64)
-                .expect("INTERNAL: range iterator: RuntimeIterator<i64> type not pre-created")
-        });
-        Ok(CompiledValue::owned(result, self.ptr_type(), iter_type_id))
-    }
-
     /// VIR path for range.iter() - compiles start/end from VIR expressions.
     /// Mirrors [`range_iter()`] but works from VIR `VirExpr` nodes instead of AST.
     pub(super) fn vir_range_iter(
@@ -204,10 +172,7 @@ impl Cg<'_, '_, '_> {
         arr_obj: &CompiledValue,
         arg_source: &ArgSource<'_>,
     ) -> CodegenResult<CompiledValue> {
-        let arg_count = match arg_source {
-            ArgSource::Ast(a) => a.len(),
-            ArgSource::Vir(r) => r.len(),
-        };
+        let arg_count = arg_source.len();
         // We expect exactly one argument
         if arg_count != 1 {
             return Err(CodegenError::arg_count("array.push", 1, arg_count));

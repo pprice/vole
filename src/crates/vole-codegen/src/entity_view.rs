@@ -396,9 +396,10 @@ impl EntityView {
         // Sentinel priority: "nil" and "Done" must resolve to their sentinel
         // TypeDefId, not a primitive or other type with the same short name.
         if (name == "nil" || name == "Done")
-            && let Some(id) = self.sentinel_by_short_name(name, names) {
-                return Some(id);
-            }
+            && let Some(id) = self.sentinel_by_short_name(name, names)
+        {
+            return Some(id);
+        }
         // Scoped NameId resolution (primitives, current module, builtin).
         let resolver = vole_identity::Resolver::new(interner, names, module_id, &[]);
         if let Some(name_id) = resolver.resolve_str(name)

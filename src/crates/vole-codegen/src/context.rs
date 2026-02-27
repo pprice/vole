@@ -645,42 +645,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Some(new_type_id)
     }
 
-    /// Get IsCheckResult for an is-expression or type pattern.
-    #[inline]
-    pub fn get_is_check_result(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<vole_sema::IsCheckResult> {
-        self.env.analyzed.node_map().get_is_check_result(node_id)
-    }
-
-    /// Get lambda analysis results (captures and side effects) for a lambda expression
-    #[inline]
-    pub fn get_lambda_analysis(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<&vole_sema::LambdaAnalysis> {
-        self.env.analyzed.node_map().get_lambda_analysis(node_id)
-    }
-
-    /// Get the compact info for an implicit `it`-expression, if one was synthesized.
-    #[inline]
-    pub fn get_it_lambda_info(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<&vole_sema::ItLambdaInfo> {
-        self.env.analyzed.node_map().get_it_lambda_info(node_id)
-    }
-
-    /// Get the optional chain info for an optional chain expression.
-    #[inline]
-    pub fn get_optional_chain(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<&vole_sema::OptionalChainInfo> {
-        self.env.analyzed.node_map().get_optional_chain(node_id)
-    }
-
     /// Get substituted return type for generic method calls.
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_identity::NodeId) -> Option<TypeId> {
@@ -699,61 +663,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .analyzed
             .node_map()
             .get_declared_var_type(*init_node_id)
-    }
-
-    /// Get the iterable kind annotation for a for-loop's iterable expression.
-    #[inline]
-    pub fn get_iterable_kind(
-        &self,
-        iterable_node_id: vole_identity::NodeId,
-    ) -> Option<vole_sema::IterableKind> {
-        self.env
-            .analyzed
-            .node_map()
-            .get_iterable_kind(iterable_node_id)
-    }
-
-    /// Get the coercion kind annotation for a method call expression.
-    #[inline]
-    pub fn get_coercion_kind(
-        &self,
-        expr_node_id: vole_identity::NodeId,
-    ) -> Option<vole_sema::CoercionKind> {
-        self.env.analyzed.node_map().get_coercion_kind(expr_node_id)
-    }
-
-    /// Get the method dispatch kind annotation for a method call expression.
-    #[inline]
-    pub fn get_method_dispatch_kind(
-        &self,
-        expr_node_id: vole_identity::NodeId,
-    ) -> Option<vole_sema::MethodDispatchKind> {
-        self.env
-            .analyzed
-            .node_map()
-            .get_method_dispatch_kind(expr_node_id)
-    }
-
-    /// Get the union storage kind annotation for an expression involving
-    /// union array elements (for-loops, indexing, compound assignments).
-    #[inline]
-    pub fn get_union_storage_kind(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<vole_sema::UnionStorageKind> {
-        self.env.analyzed.node_map().get_union_storage_kind(node_id)
-    }
-
-    /// Get the string conversion annotation for an interpolation expression part.
-    #[inline]
-    pub fn get_string_conversion(
-        &self,
-        expr_node_id: vole_identity::NodeId,
-    ) -> Option<&vole_sema::StringConversion> {
-        self.env
-            .analyzed
-            .node_map()
-            .get_string_conversion(expr_node_id)
     }
 
     /// Get type metadata map

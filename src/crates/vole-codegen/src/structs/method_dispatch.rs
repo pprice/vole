@@ -269,10 +269,7 @@ impl Cg<'_, '_, '_> {
 
             // Compile arguments - closure pointer first, then user args
             let mut args: ArgVec = smallvec![func_ptr_or_closure];
-            let func_arg_count = match arg_source {
-                ArgSource::Ast(a) => a.len(),
-                ArgSource::Vir(r) => r.len(),
-            };
+            let func_arg_count = arg_source.len();
             for i in 0..func_arg_count {
                 let compiled = self.compile_arg_from_source(arg_source, i)?;
                 args.push(compiled.value);
@@ -423,10 +420,7 @@ impl Cg<'_, '_, '_> {
         // Pass the full boxed interface pointer (not just data_word) so wrappers can
         // access both data and vtable. This is needed for Iterator methods that create
         // RcIterator adapters via vole_interface_iter.
-        let iface_arg_count = match arg_source {
-            ArgSource::Ast(a) => a.len(),
-            ArgSource::Vir(r) => r.len(),
-        };
+        let iface_arg_count = arg_source.len();
         let mut call_args: ArgVec = smallvec![obj.value];
         for i in 0..iface_arg_count {
             let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {

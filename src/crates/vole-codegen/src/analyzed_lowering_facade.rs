@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use crate::analyzed_lower_annotation_inits::lower_annotation_inits;
 use crate::analyzed_lower_field_default_inits::{
     LowerFieldDefaultInitsArgs, LowerModuleFieldDefaultInitsArgs, lower_field_default_inits,
     lower_module_field_default_inits,
@@ -330,6 +331,7 @@ where
         });
     vir_field_default_inits.extend(module_vir_field_default_inits);
 
+    let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
     let mut vir_program = VirProgram {
         type_table,
         functions: vir_functions,
@@ -345,6 +347,7 @@ where
         method_default_inits: vir_method_default_inits,
         lambda_default_inits: vir_lambda_default_inits,
         field_default_inits: vir_field_default_inits,
+        annotation_inits: vir_annotation_inits,
         vir_monomorph_base: usize::MAX,
     };
     run_vir_monomorphize(&mut vir_program);
@@ -594,6 +597,7 @@ fn run_early_vir_monomorphize(
         method_default_inits: FxHashMap::default(),
         lambda_default_inits: FxHashMap::default(),
         field_default_inits: FxHashMap::default(),
+        annotation_inits: FxHashMap::default(),
         vir_monomorph_base: usize::MAX,
     };
 

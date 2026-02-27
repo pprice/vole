@@ -7,8 +7,7 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{Block, Capture, Expr, FuncBody, LambdaExpr, Symbol};
-use vole_identity::NodeId;
+use vole_frontend::{Block, Capture, FuncBody, Symbol};
 use vole_sema::type_arena::{TypeArena, TypeId};
 use vole_vir::VirBody;
 use vole_vir::expr::VirCapture;
@@ -432,34 +431,5 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .store(MemFlags::new(), value, heap_ptr, 0);
         }
-    }
-
-    /// Compile an implicit `it` lambda from the original expression.
-    ///
-    /// Reconstructs a lambda with `it` as the single parameter and the original
-    /// expression as the body, using types from sema's analysis. The original
-    /// expression is wrapped in `FuncBody::Expr` (or `FuncBody::Block` for void
-    /// returns) so it can be compiled through the standard lambda machinery.
-    pub fn compile_it_lambda(
-        &mut self,
-        _expr: &Expr,
-        node_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
-        Err(CodegenError::internal_with_context(
-            "unexpected AST implicit it-lambda compilation path",
-            format!("node={node_id:?}"),
-        ))
-    }
-
-    /// Compile a lambda expression
-    pub fn lambda(
-        &mut self,
-        _lambda: &LambdaExpr,
-        node_id: NodeId,
-    ) -> CodegenResult<CompiledValue> {
-        Err(CodegenError::internal_with_context(
-            "unexpected AST lambda compilation path",
-            format!("node={node_id:?}"),
-        ))
     }
 }

@@ -5,15 +5,16 @@
 // For each field on the target type, allocates a FieldMeta class instance
 // with name, type_name, annotations, getter, and setter closures.
 //
-// Annotations are populated from sema's ValidatedAnnotation data: each
-// annotation struct is allocated as a heap instance, its fields are filled
-// from the compiled argument expressions, and it is boxed as unknown
-// before being pushed into the [unknown] annotations array.
+// Annotations are populated from VIR-lowered constant data: each annotation
+// struct is allocated as a heap instance, its fields are filled from compiled
+// VirConstant values, and it is boxed as unknown before being pushed into
+// the [unknown] annotations array.
 
 use cranelift::prelude::*;
-use vole_frontend::Expr;
-use vole_identity::{NameId, TypeDefId};
+use cranelift_codegen::ir::FuncRef;
+use vole_identity::{Symbol, TypeDefId};
 use vole_sema::type_arena::TypeId;
+use vole_vir::types::{VirAnnotation, VirAnnotationValue, VirConstant};
 
 use crate::RuntimeKey;
 use crate::context::Cg;
@@ -31,14 +32,7 @@ struct FieldInfo {
     type_name: String,
     slot: usize,
     type_id: TypeId,
-    annotations: Vec<FieldAnnotation>,
-}
-
-/// Codegen-local annotation payload shape used by reflection metadata builders.
-#[derive(Debug, Clone)]
-struct FieldAnnotation {
-    type_def_id: TypeDefId,
-    args: Vec<(NameId, Expr)>,
+    annotations: Vec<VirAnnotation>,
 }
 
 /// Build a dynamic array of FieldMeta instances for all fields on the type.
@@ -84,9 +78,10 @@ pub(super) fn build_field_meta_array(
     Ok(CompiledValue::new(arr_ptr, cg.ptr_type(), array_type_id))
 }
 
-/// Collect field info tuples for all fields, including annotations.
+/// Collect field info tuples for all fields, including VIR-lowered annotations.
 fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
     let arena = cg.arena();
+    let vir_program = cg.analyzed().vir_program();
     cg.analyzed()
         .fields_on_type(type_def_id)
         .map(|field_id| {
@@ -96,23 +91,16 @@ fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
             let type_name = arena.display_basic(field.ty);
+            let annotations = vir_program
+                .get_field_annotations(field_id)
+                .map(|anns| anns.to_vec())
+                .unwrap_or_default();
             FieldInfo {
                 name,
                 type_name,
                 slot: field.slot,
                 type_id: field.ty,
-                annotations: field
-                    .annotations
-                    .iter()
-                    .map(|ann| FieldAnnotation {
-                        type_def_id: ann.type_def_id,
-                        args: ann
-                            .args
-                            .iter()
-                            .map(|(name_id, expr)| (*name_id, (**expr).clone()))
-                            .collect(),
-                    })
-                    .collect(),
+                annotations,
             }
         })
         .collect()
@@ -137,7 +125,7 @@ fn build_single_field_meta(
     target_type_def_id: TypeDefId,
     field_slot: usize,
     field_type_id: TypeId,
-    annotations: &[FieldAnnotation],
+    annotations: &[VirAnnotation],
 ) -> CodegenResult<Value> {
     // Compute the RuntimeTypeId tag for this field's type (used by getter boxing).
     let runtime_tag = crate::types::unknown_type_tag(field_type_id, cg.arena()) as i64;
@@ -165,7 +153,7 @@ fn build_single_field_meta(
         &type_name_cv,
     );
 
-    // annotations ([unknown] array, populated from sema-validated field annotation data)
+    // annotations ([unknown] array, populated from VIR-lowered annotation data)
     let annotations_cv = build_annotations_array(cg, annotations)?;
     store_field_value(
         cg,
@@ -186,7 +174,7 @@ fn build_single_field_meta(
     Ok(instance_ptr)
 }
 
-/// Build the [unknown] annotations array from validated annotations.
+/// Build the [unknown] annotations array from VIR-lowered annotations.
 ///
 /// For each annotation, allocates a heap instance of the annotation struct,
 /// compiles and stores each field value, then boxes it into a heap-allocated
@@ -201,7 +189,7 @@ fn build_single_field_meta(
 /// since annotation structs are allocated as class instances via `InstanceNew`.
 fn build_annotations_array(
     cg: &mut Cg,
-    annotations: &[FieldAnnotation],
+    annotations: &[VirAnnotation],
 ) -> CodegenResult<CompiledValue> {
     let arr_ptr = cg.call_runtime(RuntimeKey::ArrayNew, &[])?;
 
@@ -218,37 +206,7 @@ fn build_annotations_array(
 
     for ann in annotations {
         let ann_ptr = build_annotation_instance(cg, ann)?;
-
-        // Allocate a heap TaggedValue: [tag: i64 @ 0, value: i64 @ 8]
-        // Tag = Instance (annotation structs are heap-allocated class instances).
-        let pt = cg.ptr_type();
-        let size_val = cg.iconst_cached(pt, union_layout::STANDARD_SIZE as i64);
-        let alloc_call = cg.builder.ins().call(heap_alloc_ref, &[size_val]);
-        let heap_tv_ptr = cg.builder.inst_results(alloc_call)[0];
-
-        let inner_tag = cg.iconst_cached(
-            types::I64,
-            vole_runtime::value::RuntimeTypeId::Instance as i64,
-        );
-        cg.builder
-            .ins()
-            .store(MemFlags::new(), inner_tag, heap_tv_ptr, 0);
-        cg.builder.ins().store(
-            MemFlags::new(),
-            ann_ptr,
-            heap_tv_ptr,
-            union_layout::PAYLOAD_OFFSET,
-        );
-
-        // Push as UnknownHeap so that array_drop calls unknown_heap_cleanup
-        // on the heap TaggedValue, which rc_dec's the inner annotation instance
-        // and frees the 16-byte buffer. The actual type tag lives inside the
-        // heap TaggedValue at offset 0.
-        let array_tag = cg.iconst_cached(
-            types::I64,
-            vole_runtime::value::RuntimeTypeId::UnknownHeap as i64,
-        );
-        cg.emit_call(array_push_ref, &[arr_ptr, array_tag, heap_tv_ptr]);
+        push_boxed_annotation(cg, array_push_ref, heap_alloc_ref, arr_ptr, ann_ptr);
     }
 
     Ok(CompiledValue::new(
@@ -258,36 +216,90 @@ fn build_annotations_array(
     ))
 }
 
-/// Build a heap-allocated instance of an annotation struct.
+/// Box an annotation instance and push it into the annotations array.
+///
+/// Allocates a heap TaggedValue, stores the Instance tag and annotation
+/// pointer, then pushes as UnknownHeap for proper RC cleanup.
+fn push_boxed_annotation(
+    cg: &mut Cg,
+    array_push_ref: FuncRef,
+    heap_alloc_ref: FuncRef,
+    arr_ptr: Value,
+    ann_ptr: Value,
+) {
+    let pt = cg.ptr_type();
+    let size_val = cg.iconst_cached(pt, union_layout::STANDARD_SIZE as i64);
+    let alloc_call = cg.builder.ins().call(heap_alloc_ref, &[size_val]);
+    let heap_tv_ptr = cg.builder.inst_results(alloc_call)[0];
+
+    let inner_tag = cg.iconst_cached(
+        types::I64,
+        vole_runtime::value::RuntimeTypeId::Instance as i64,
+    );
+    cg.builder
+        .ins()
+        .store(MemFlags::new(), inner_tag, heap_tv_ptr, 0);
+    cg.builder.ins().store(
+        MemFlags::new(),
+        ann_ptr,
+        heap_tv_ptr,
+        union_layout::PAYLOAD_OFFSET,
+    );
+
+    // Push as UnknownHeap so that array_drop calls unknown_heap_cleanup
+    // on the heap TaggedValue, which rc_dec's the inner annotation instance
+    // and frees the 16-byte buffer.
+    let array_tag = cg.iconst_cached(
+        types::I64,
+        vole_runtime::value::RuntimeTypeId::UnknownHeap as i64,
+    );
+    cg.emit_call(array_push_ref, &[arr_ptr, array_tag, heap_tv_ptr]);
+}
+
+/// Build a heap-allocated instance of an annotation struct from VIR data.
 ///
 /// Annotation types are normally structs (stack-allocated), but when used in
 /// FieldMeta.annotations they need to be heap-allocated class instances so they
 /// can be stored in [unknown] arrays with proper RC lifecycle. This function:
 /// 1. Ensures the annotation type is registered with the runtime type registry
 /// 2. Allocates a heap instance with the registered type_id
-/// 3. Compiles and stores each field value
-fn build_annotation_instance(cg: &mut Cg, ann: &FieldAnnotation) -> CodegenResult<Value> {
-    // Ensure the annotation type has a runtime type_id for proper field cleanup
-    let (runtime_type_id, field_count) = ensure_annotation_type_registered(cg, ann.type_def_id)?;
-
-    // Allocate the heap instance
+/// 3. Compiles and stores each field value from VirConstant data
+fn build_annotation_instance(cg: &mut Cg, ann: &VirAnnotation) -> CodegenResult<Value> {
+    let (runtime_type_id, field_count) = ensure_annotation_type_registered(cg, ann.type_def)?;
     let instance_ptr = allocate_annotation_instance(cg, runtime_type_id, field_count)?;
 
-    if ann.args.is_empty() {
+    let VirAnnotationValue::Instance { fields } = &ann.value;
+    if fields.is_empty() {
         return Ok(instance_ptr);
     }
 
     // Pre-collect field slot info to avoid borrow conflicts
-    let field_slots = collect_annotation_field_slots(cg, ann.type_def_id, &ann.args);
-
+    let field_slots = collect_annotation_field_slots(cg, ann.type_def, fields);
     let set_func_ref = cg.runtime_func_ref(RuntimeKey::InstanceSetField)?;
 
-    for ((_, expr), slot) in ann.args.iter().zip(field_slots.into_iter()) {
-        let compiled = cg.expr(expr)?;
+    for ((_, constant), slot) in fields.iter().zip(field_slots.into_iter()) {
+        let compiled = compile_vir_constant(cg, constant)?;
         store_field_value(cg, set_func_ref, instance_ptr, slot, &compiled);
     }
 
     Ok(instance_ptr)
+}
+
+/// Compile a `VirConstant` to a Cranelift value.
+///
+/// Annotation arguments are restricted to simple literals so the compilation
+/// is straightforward: integers, floats, booleans, and strings.
+fn compile_vir_constant(cg: &mut Cg, constant: &VirConstant) -> CodegenResult<CompiledValue> {
+    match constant {
+        VirConstant::Int(value) => Ok(cg.int_const(*value, TypeId::I64)),
+        VirConstant::Float(value) => Ok(cg.float_const(*value, TypeId::F64)),
+        VirConstant::Bool(value) => Ok(cg.bool_const(*value)),
+        VirConstant::String(s) => cg.string_literal(s),
+        VirConstant::Nil => {
+            let value = cg.iconst_cached(types::I8, 0);
+            Ok(CompiledValue::new(value, types::I8, TypeId::NIL))
+        }
+    }
 }
 
 /// Ensure an annotation struct type is registered in the runtime type registry.
@@ -301,7 +313,6 @@ fn ensure_annotation_type_registered(
     cg: &Cg,
     ann_type_def_id: TypeDefId,
 ) -> CodegenResult<(u32, usize)> {
-    // Check if this annotation type is already a class with a non-zero type_id
     let meta = cg
         .type_metadata()
         .get(&ann_type_def_id)
@@ -310,7 +321,6 @@ fn ensure_annotation_type_registered(
     let field_count = meta.physical_slot_count;
 
     if meta.type_id != 0 {
-        // Already a class type with proper runtime registration
         return Ok((meta.type_id, field_count));
     }
 
@@ -330,7 +340,6 @@ fn ensure_annotation_type_registered(
     let field_type_tags = collect_annotation_field_type_tags(cg, ann_type_def_id);
     vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
 
-    // Cache for future use
     cg.env
         .state
         .annotation_type_ids
@@ -372,23 +381,24 @@ fn allocate_annotation_instance(
     )
 }
 
-/// Collect field slot indices for annotation args from type_metadata.
+/// Collect field slot indices for annotation fields from type_metadata.
 ///
-/// Returns a Vec of slot indices parallel to `args`, mapping each annotation
-/// argument to its physical slot in the instance.
+/// Returns a Vec of slot indices parallel to `fields`, mapping each
+/// annotation field to its physical slot in the instance.
 fn collect_annotation_field_slots(
     cg: &Cg,
     ann_type_def_id: TypeDefId,
-    args: &[(NameId, Expr)],
+    fields: &[(Symbol, VirConstant)],
 ) -> Vec<usize> {
-    let name_table = cg.name_table();
+    let interner = cg.interner();
     let type_meta = cg.type_metadata().get(&ann_type_def_id);
 
-    args.iter()
-        .map(|(name_id, _)| {
-            let field_name = name_table.last_segment_str(*name_id).unwrap_or_default();
+    fields
+        .iter()
+        .map(|(sym, _)| {
+            let field_name = interner.resolve(*sym);
             type_meta
-                .and_then(|meta| meta.field_slots.get(&field_name).copied())
+                .and_then(|meta| meta.field_slots.get(field_name).copied())
                 .unwrap_or(0)
         })
         .collect()

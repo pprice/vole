@@ -506,41 +506,10 @@ impl AnalyzedProgram {
         self.entity_type_is_sentinel(type_def_id)
     }
 
-    /// Return whether a type definition is a struct (not class/interface/sentinel).
-    pub(crate) fn is_struct_type(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_view.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Struct
-    }
-
     /// Return whether a type definition is an interface.
     pub(crate) fn is_interface_type(&self, type_def_id: TypeDefId) -> bool {
         self.entity_view.get_type(type_def_id).kind
             == vole_sema::entity_defs::TypeDefKind::Interface
-    }
-
-    /// Return whether a type definition is an alias.
-    pub(crate) fn is_alias_type(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_view.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Alias
-    }
-
-    /// Return aliased arena TypeId for alias types.
-    pub(crate) fn aliased_type(
-        &self,
-        type_def_id: TypeDefId,
-    ) -> Option<vole_sema::type_arena::TypeId> {
-        self.entity_view.get_type(type_def_id).aliased_type
-    }
-
-    /// Return whether a type definition is an error type.
-    pub(crate) fn is_error_type(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_view.get_type(type_def_id).kind
-            == vole_sema::entity_defs::TypeDefKind::ErrorType
-    }
-
-    /// Return whether an error type has additional error_info payload.
-    pub(crate) fn is_error_type_with_info(&self, type_def_id: TypeDefId) -> bool {
-        let type_def = self.entity_view.get_type(type_def_id);
-        type_def.kind == vole_sema::entity_defs::TypeDefKind::ErrorType
-            && type_def.error_info.is_some()
     }
 
     /// Return interface method binding return type, when a binding exists.
@@ -643,14 +612,6 @@ impl AnalyzedProgram {
         node_id: vole_identity::NodeId,
     ) -> Option<&vole_sema::generic::MonomorphKey> {
         self.node_map.get_generic(node_id)
-    }
-
-    /// Return class-method monomorph key metadata for a call node.
-    pub(crate) fn class_method_generic_at(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<&vole_sema::generic::ClassMethodMonomorphKey> {
-        self.node_map.get_class_method_generic(node_id)
     }
 
     /// Return static-method monomorph key metadata for a call node.

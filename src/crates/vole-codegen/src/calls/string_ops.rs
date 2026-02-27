@@ -6,7 +6,6 @@ use cranelift::prelude::*;
 use cranelift_jit::JITModule;
 use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
-use vole_frontend::ast::StringPart;
 use vole_sema::StringConversion;
 use vole_sema::type_arena::TypeId;
 
@@ -101,71 +100,6 @@ impl Cg<'_, '_, '_> {
             self.codegen_ctx.func_registry,
         )?;
         Ok(self.string_temp(value))
-    }
-
-    /// Compile an interpolated string using StringBuilder for efficient single-allocation
-    pub fn interpolated_string(&mut self, parts: &[StringPart]) -> CodegenResult<CompiledValue> {
-        if parts.is_empty() {
-            return self.string_literal("");
-        }
-
-        // Collect all string values, tracking which need cleanup after the build.
-        // - Literals: static (pinned RC), rc_dec is a no-op
-        // - Expr already string: borrowed or owned from expression
-        // - Expr converted via to_string: owned, needs rc_dec
-        let mut string_values: Vec<Value> = Vec::new();
-        let mut owned_flags: Vec<bool> = Vec::new();
-        for part in parts {
-            let (str_val, is_owned) = match part {
-                StringPart::Literal(s) => (self.string_literal(s)?.value, true),
-                StringPart::Expr(expr) => {
-                    let compiled = self.expr(expr)?;
-                    // Read the sema-annotated conversion for this expression part
-                    let conversion = self
-                        .get_string_conversion(expr.id)
-                        .cloned()
-                        .unwrap_or(StringConversion::Identity);
-                    match conversion {
-                        StringConversion::Identity => (compiled.value, compiled.is_owned()),
-                        _ => (self.apply_string_conversion(compiled, &conversion)?, true),
-                    }
-                }
-            };
-            string_values.push(str_val);
-            owned_flags.push(is_owned);
-        }
-
-        // Single part -- return directly, no builder needed.
-        // Preserve the original lifecycle: if the value is borrowed (e.g. a
-        // variable read like `"{local0}"`), return it as borrowed so the
-        // caller emits rc_inc when binding.  Returning a borrowed value as
-        // Owned would skip the inc while still registering a dec on scope
-        // exit, causing a double-free.
-        if string_values.len() == 1 {
-            let mut cv = self.string_temp(string_values[0]);
-            if !owned_flags[0] {
-                cv.mark_borrowed();
-            }
-            return Ok(cv);
-        }
-
-        // Multi-part: use StringBuilder -- one allocation instead of N concats
-        let sb = self.call_runtime(RuntimeKey::SbNew, &[])?;
-
-        for &sv in &string_values {
-            self.call_runtime_void(RuntimeKey::SbPushString, &[sb, sv])?;
-        }
-
-        let result = self.call_runtime(RuntimeKey::SbFinish, &[sb])?;
-
-        // Free all owned input parts -- builder has copied the bytes
-        for (val, is_owned) in string_values.iter().zip(owned_flags.iter()) {
-            if *is_owned {
-                self.emit_rc_dec(*val)?;
-            }
-        }
-
-        Ok(self.string_temp(result))
     }
 
     /// Apply a sema-annotated string conversion to a compiled value.

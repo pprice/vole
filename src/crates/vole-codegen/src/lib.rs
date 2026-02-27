@@ -1,6 +1,7 @@
 //! Vole code generation: Cranelift JIT compilation.
 
 mod analyzed;
+mod analyzed_lower_annotation_inits;
 mod analyzed_lower_field_default_inits;
 mod analyzed_lower_function_default_inits;
 mod analyzed_lower_functions;
@@ -17,7 +18,6 @@ mod callable_registry;
 mod calls;
 mod coercion_ops;
 pub mod compiler;
-mod compound_assign;
 mod context;
 mod entity_view;
 pub mod errors;
@@ -42,7 +42,6 @@ mod value_builders;
 
 // Organized submodules
 mod control_flow;
-mod for_loop;
 mod interfaces;
 mod reflection;
 mod vir_for_loop;

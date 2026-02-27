@@ -9,6 +9,7 @@ use vole_identity::{FieldId, FunctionId, MethodId, NameId, NodeId, Span, Symbol}
 use crate::func::{VirBody, VirFunction, VirTest};
 use crate::refs::VirRef;
 use crate::type_table::VirTypeTable;
+use crate::types::VirAnnotation;
 
 /// The complete VIR output: all lowered functions, tests, global inits, and
 /// type metadata bundled into a single struct.
@@ -77,6 +78,13 @@ pub struct VirProgram {
     /// omit fields that have defaults.
     pub field_default_inits: FxHashMap<FieldId, VirRef>,
 
+    /// VIR-lowered annotation data for field annotations.
+    ///
+    /// Keyed by semantic `FieldId`. Each entry is a list of `VirAnnotation`
+    /// instances for that field, in declaration order. Used by codegen to
+    /// build annotation instances without reaching back to AST `Expr` nodes.
+    pub annotation_inits: FxHashMap<FieldId, Vec<VirAnnotation>>,
+
     /// Base index of VIR-monomorphized functions within `functions`.
     ///
     /// Functions at indices `>= vir_monomorph_base` were produced by the VIR
@@ -137,5 +145,10 @@ impl VirProgram {
     /// Look up a VIR default parameter expression by lambda `NodeId` and slot.
     pub fn get_lambda_default(&self, lambda_node_id: NodeId, slot: usize) -> Option<&VirRef> {
         self.lambda_default_inits.get(&(lambda_node_id, slot))
+    }
+
+    /// Look up VIR-lowered annotations for a field by semantic `FieldId`.
+    pub fn get_field_annotations(&self, field_id: FieldId) -> Option<&[VirAnnotation]> {
+        self.annotation_inits.get(&field_id).map(|v| v.as_slice())
     }
 }

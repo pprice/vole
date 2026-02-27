@@ -21,9 +21,7 @@ mod trampolines;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 use rustc_hash::FxHashMap;
-use vole_frontend::ast::MetaAccessExpr;
-use vole_identity::{NameId, TypeDefId};
-use vole_sema::node_map::MetaAccessKind;
+use vole_identity::TypeDefId;
 use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
@@ -33,156 +31,9 @@ use crate::interfaces::vtable::VTABLE_META_SLOT;
 use crate::structs::helpers::store_field_value;
 use crate::types::CompiledValue;
 
-/// Entry point for compiling a `MetaAccess` expression.
-///
-/// Reads the `MetaAccessKind` annotation from sema and dispatches:
-/// - `Static`: builds a TypeMeta instance for the given TypeDefId
-/// - `Dynamic`: loads the meta getter from the interface vtable and calls it
-pub fn compile_meta_access(
-    cg: &mut Cg,
-    expr_node_id: vole_identity::NodeId,
-    meta_access: &MetaAccessExpr,
-) -> CodegenResult<CompiledValue> {
-    let meta_kind = cg
-        .env
-        .analyzed
-        .node_map()
-        .get_meta_access(expr_node_id)
-        .ok_or_else(|| CodegenError::unsupported("@meta access without sema annotation"))?;
-
-    match meta_kind {
-        MetaAccessKind::Static { type_def_id } => {
-            // In monomorphized contexts, the Static annotation may be stale:
-            // sema re-analyzes each monomorphization of a generic function body
-            // but all share the same NodeId, so the last re-analysis overwrites
-            // earlier ones. Re-derive the TypeDefId from the object expression's
-            // actual type in the current codegen scope.
-            let effective_type_def_id = if cg.substitutions.is_some() {
-                resolve_static_meta_type_def_id(cg, &meta_access.object).unwrap_or(type_def_id)
-            } else {
-                type_def_id
-            };
-            compile_static_meta(cg, effective_type_def_id, expr_node_id)
-        }
-        MetaAccessKind::Dynamic => compile_dynamic_meta(cg, meta_access, expr_node_id),
-        MetaAccessKind::TypeParam { name_id } => {
-            resolve_type_param_meta(cg, name_id, meta_access, expr_node_id)
-        }
-    }
-}
-
-/// Resolve the correct TypeDefId for a value-expression meta access in a
-/// monomorphized context. Returns `None` when the object is a type name
-/// (e.g. `Point.@meta`) or when the type can't be resolved.
-///
-/// For identifiers (the common case: `v.@meta`), looks up the variable's
-/// concrete type in the codegen scope. For other expressions, falls back to
-/// the sema node_map type with type-parameter substitution applied.
-fn resolve_static_meta_type_def_id(
-    cg: &Cg,
-    object: &vole_frontend::ast::Expr,
-) -> Option<TypeDefId> {
-    use vole_frontend::ast::ExprKind;
-
-    let object_type_id = match &object.kind {
-        ExprKind::Identifier(sym) => {
-            // Look up the variable's type in the current codegen scope.
-            // This is set per-monomorphization from the concrete param types.
-            cg.vars.get(sym).map(|(_, ty)| *ty)?
-        }
-        _ => {
-            // For other expressions, use the node_map type with substitution.
-            // `get_expr_type_substituted` applies the current monomorphization's
-            // type-parameter substitutions to the stored type.
-            cg.get_expr_type_substituted(&object.id)?
-        }
-    };
-
-    // Extract the TypeDefId from the concrete nominal type.
-    let (type_def_id, _, _) = cg.arena().unwrap_nominal(object_type_id)?;
-    Some(type_def_id)
-}
-
-/// Resolve a `TypeParam` meta access by looking up the concrete type from
-/// the current monomorphization substitutions.
-///
-/// When codegen compiles a monomorphized generic function (e.g., `get_meta<Point>`),
-/// sema's original annotation for `T.@meta` is `TypeParam { name_id }` because
-/// sema's monomorph re-analysis cannot reclassify it (the identifier `T` isn't
-/// resolvable as a type name or variable during re-analysis). Codegen resolves it
-/// here using the substitution map carried in `FunctionCtx`.
-///
-/// Dispatches to:
-/// - `compile_static_meta` if the concrete type is a nominal (class/struct)
-/// - `compile_dynamic_meta` if the concrete type is an interface
-fn resolve_type_param_meta(
-    cg: &mut Cg,
-    name_id: NameId,
-    meta_access: &MetaAccessExpr,
-    expr_node_id: vole_identity::NodeId,
-) -> CodegenResult<CompiledValue> {
-    let substitutions = cg.substitutions.ok_or_else(|| {
-        CodegenError::unsupported("T.@meta requires concrete type (not in a monomorphized context)")
-    })?;
-
-    let concrete_type_id = substitutions.get(&name_id).copied().ok_or_else(|| {
-        let param_name = cg
-            .analyzed()
-            .last_segment(name_id)
-            .unwrap_or_else(|| "?".to_string());
-        CodegenError::unsupported_with_context(
-            "T.@meta: no substitution for type parameter",
-            param_name,
-        )
-    })?;
-
-    // Interface types require dynamic dispatch via vtable.
-    if cg.arena().is_interface(concrete_type_id) {
-        return compile_dynamic_meta(cg, meta_access, expr_node_id);
-    }
-
-    // Concrete nominal types (class/struct) are resolved statically.
-    if let Some((type_def_id, _, _)) = cg.arena().unwrap_nominal(concrete_type_id) {
-        return compile_static_meta(cg, type_def_id, expr_node_id);
-    }
-
-    // Unsupported concrete type (primitive, array, function, etc.)
-    let display = cg.arena().display_basic(concrete_type_id);
-    Err(CodegenError::unsupported_with_context(
-        "T.@meta: concrete type does not support reflection",
-        display,
-    ))
-}
-
 /// Build a TypeMeta instance for a statically-known type, with singleton caching.
 ///
-/// Uses a runtime-side cache keyed by runtime type_id. On first access the
-/// TypeMeta is built and stored into the cache; subsequent accesses return
-/// the cached pointer with rc_inc so the caller gets an owned reference.
-///
-/// TypeMeta layout (from reflection.vole):
-///   - name: string           (slot 0)
-///   - fields: [FieldMeta]    (slot 1)
-///   - construct: func        (slot 2)
-fn compile_static_meta(
-    cg: &mut Cg,
-    type_def_id: TypeDefId,
-    expr_node_id: vole_identity::NodeId,
-) -> CodegenResult<CompiledValue> {
-    let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
-        resolve_reflection_types(cg)
-            .ok()
-            .map(|i| i.type_meta_type_id)
-            .unwrap_or(TypeId::UNKNOWN)
-    });
-    compile_static_meta_with_type(cg, type_def_id, result_type_id)
-}
-
-/// Build a TypeMeta instance for a statically-known type, with singleton caching.
-///
-/// Like [`compile_static_meta`] but takes the result TypeId directly instead
-/// of looking it up from the NodeMap.  Used by both the AST codegen path
-/// (via `compile_static_meta`) and the VIR codegen path.
+/// Takes the result TypeId directly instead of looking it up from the NodeMap.
 pub(crate) fn compile_static_meta_with_type(
     cg: &mut Cg,
     type_def_id: TypeDefId,
@@ -304,33 +155,9 @@ fn build_type_meta_instance(cg: &mut Cg, type_def_id: TypeDefId) -> CodegenResul
 
 /// Build a TypeMeta instance for a dynamically-typed value (interface type).
 ///
-/// When `val` has an interface type (e.g., `let val: Animal = Dog {}`),
-/// `val.@meta` must return metadata for the concrete type (`Dog`), not the
-/// interface (`Animal`). This is achieved by loading the meta getter function
-/// pointer from vtable slot 0 and calling it.
-///
-/// Vtable layout: `[meta_getter_fn, method_0, method_1, ...]`
-/// Interface box layout: `[data_ptr, vtable_ptr]`
-fn compile_dynamic_meta(
-    cg: &mut Cg,
-    meta_access: &MetaAccessExpr,
-    expr_node_id: vole_identity::NodeId,
-) -> CodegenResult<CompiledValue> {
-    let obj = cg.expr(&meta_access.object)?;
-    let result_type_id = cg.get_expr_type(&expr_node_id).unwrap_or_else(|| {
-        resolve_reflection_types(cg)
-            .ok()
-            .map(|i| i.type_meta_type_id)
-            .unwrap_or(TypeId::UNKNOWN)
-    });
-    compile_dynamic_meta_from_value(cg, obj, result_type_id)
-}
-
-/// Build a TypeMeta instance for a dynamically-typed value (interface type).
-///
-/// Like [`compile_dynamic_meta`] but takes an already-compiled object value
-/// and result TypeId.  Used by both the AST codegen path (via
-/// `compile_dynamic_meta`) and the VIR codegen path.
+/// Takes an already-compiled object value and result TypeId, loads the meta
+/// getter function pointer from vtable slot 0, and calls it to get the
+/// TypeMeta for the concrete type behind the interface.
 pub(crate) fn compile_dynamic_meta_from_value(
     cg: &mut Cg,
     obj: CompiledValue,

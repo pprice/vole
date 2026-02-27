@@ -9,7 +9,6 @@
 use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
 use cranelift_codegen::ir::FuncRef;
 
-use vole_frontend::Symbol;
 use vole_identity::{TypeDefId, VirTypeId};
 use vole_sema::type_arena::TypeId;
 
@@ -162,67 +161,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Unwrap an interface type, returning the TypeDefId if it is one
     pub fn interface_type_def_id(&self, ty: TypeId) -> Option<TypeDefId> {
         self.arena().unwrap_interface(ty).map(|(id, _)| id)
-    }
-
-    /// Resolve a type name Symbol to its TypeDefId using the full resolution chain.
-    ///
-    /// This uses the same resolution path as sema: primitives, current module,
-    /// imports, builtin module, and interface/class fallback.
-    /// Note: We convert the Symbol to string first because the current interner
-    /// may be module-specific while the query uses the main program's interner.
-    pub fn resolve_type(&self, sym: Symbol) -> Option<TypeDefId> {
-        self.resolve_type_str_or_interface(self.interner().resolve(sym))
-    }
-
-    /// Resolve a type name string to its TypeDefId using the full resolution chain.
-    ///
-    /// This uses the same resolution path as sema: primitives, current module,
-    /// imports, builtin module, and interface/class fallback.
-    pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let module_id = self
-            .current_module_id()
-            .unwrap_or(self.env.analyzed.module_id());
-        self.analyzed().resolve_type_def_by_str(module_id, name)
-    }
-
-    /// Find an error type in a union by its short name.
-    ///
-    /// Used to resolve error types from imported modules when matching
-    /// fallible error patterns (e.g., `error NotFound { path: p }`).
-    pub fn find_error_type_in_union(
-        &self,
-        error_union_id: TypeId,
-        name: &str,
-    ) -> Option<TypeDefId> {
-        let arena = self.arena();
-        let name_table = self.name_table();
-        let analyzed = self.analyzed();
-
-        let check_variant = |type_def_id: TypeDefId| -> bool {
-            name_table
-                .last_segment_str(analyzed.entity_type_name_id(type_def_id))
-                .is_some_and(|seg| seg == name)
-        };
-
-        // Check single error type
-        if let Some(type_def_id) = arena.unwrap_error(error_union_id)
-            && check_variant(type_def_id)
-        {
-            return Some(type_def_id);
-        }
-
-        // Check union variants
-        if let Some(variants) = arena.unwrap_union(error_union_id) {
-            for &variant in variants {
-                if let Some(type_def_id) = arena.unwrap_error(variant)
-                    && check_variant(type_def_id)
-                {
-                    return Some(type_def_id);
-                }
-            }
-        }
-
-        None
     }
 
     // ========== Union array storage policy ==========

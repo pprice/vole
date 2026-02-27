@@ -42,10 +42,7 @@ impl Cg<'_, '_, '_> {
             vir_dispatch,
         } = args;
 
-        let arg_count = match arg_source {
-            ArgSource::Ast(a) => a.len(),
-            ArgSource::Vir(r) => r.len(),
-        };
+        let arg_count = arg_source.len();
 
         // Check for float intrinsics (nan, infinity, neg_infinity, epsilon)
         // These are compiled directly to constants, no function call needed.
@@ -399,10 +396,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         // Compile arguments with substituted param types (TypeId-based)
         let param_type_ids = &instance.func_type.params_id;
-        let mono_arg_count = match arg_source {
-            ArgSource::Ast(a) => a.len(),
-            ArgSource::Vir(r) => r.len(),
-        };
+        let mono_arg_count = arg_source.len();
         let mut args = Vec::new();
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         for (i, &param_type_id) in param_type_ids.iter().enumerate().take(mono_arg_count) {
@@ -533,10 +527,7 @@ impl Cg<'_, '_, '_> {
             return Ok(None);
         }
 
-        let filled_arg_count = match arg_source {
-            ArgSource::Ast(a) => a.len(),
-            ArgSource::Vir(r) => r.len(),
-        };
+        let filled_arg_count = arg_source.len();
         // We expect exactly two arguments: count and value
         if filled_arg_count != 2 {
             return Err(CodegenError::arg_count("Array.filled", 2, filled_arg_count));

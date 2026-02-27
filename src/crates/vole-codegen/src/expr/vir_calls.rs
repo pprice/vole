@@ -421,7 +421,7 @@ impl Cg<'_, '_, '_> {
         call_node_id: vole_identity::NodeId,
         line: u32,
     ) -> CodegenResult<CompiledValue> {
-        let arg_source = crate::structs::methods::ArgSource::Vir(args);
+        let arg_source = crate::structs::methods::ArgSource(args);
         let result = self.call_dispatch(callee_sym, &arg_source, line, call_node_id)?;
         Ok(self.mark_rc_owned(result))
     }

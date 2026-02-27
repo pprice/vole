@@ -432,4 +432,200 @@ impl Cg<'_, '_, '_> {
             }
         }
     }
+
+    // =========================================================================
+    // Shared for-loop helpers (moved from deleted for_loop.rs)
+    // =========================================================================
+
+    /// Create a `CompiledValue` for a `RuntimeIterator<T>` from a raw pointer.
+    pub(crate) fn make_runtime_iter_value(
+        &self,
+        raw: Value,
+        elem_type_id: TypeId,
+    ) -> super::types::CompiledValue {
+        let runtime_iter_type_id = self
+            .arena()
+            .lookup_runtime_iterator(elem_type_id)
+            .unwrap_or(TypeId::STRING);
+        super::types::CompiledValue::owned(raw, types::I64, runtime_iter_type_id)
+    }
+
+    /// Track an owned iterator in the current RC scope for cleanup.
+    pub(crate) fn track_iter_in_rc_scope(&mut self, iter: &super::types::CompiledValue) {
+        if iter.is_owned() && self.rc_state(iter.type_id).needs_cleanup() {
+            let tracked_var = self.builder.declare_var(self.cranelift_type(iter.type_id));
+            self.builder.def_var(tracked_var, iter.value);
+            let drop_flag = self.register_rc_local(tracked_var, iter.type_id);
+            crate::rc_cleanup::set_drop_flag_live(self, drop_flag);
+        }
+    }
+
+    /// Push an RC scope for iterator lifetime and track the iterator (and
+    /// optionally a source value) for cleanup on scope exit.
+    pub(crate) fn enter_iter_rc_scope(
+        &mut self,
+        iter: &super::types::CompiledValue,
+        source: Option<&super::types::CompiledValue>,
+    ) {
+        self.push_rc_scope();
+        if let Some(src) = source {
+            self.track_iter_in_rc_scope(src);
+        }
+        self.track_iter_in_rc_scope(iter);
+    }
+
+    /// Wrap an interface value via `InterfaceIter`, consuming the old value and
+    /// returning a `RuntimeIterator` `CompiledValue`.
+    pub(crate) fn wrap_interface_iter(
+        &mut self,
+        mut iface: super::types::CompiledValue,
+        elem_type_id: TypeId,
+    ) -> CodegenResult<super::types::CompiledValue> {
+        let wrapped = self.call_runtime(RuntimeKey::InterfaceIter, &[iface.value])?;
+        self.consume_rc_value(&mut iface)?;
+        Ok(self.make_runtime_iter_value(wrapped, elem_type_id))
+    }
+
+    /// Convert a raw i64 value from iter_next to the element's Cranelift type.
+    pub(crate) fn convert_iter_elem(
+        &mut self,
+        raw_val: Value,
+        elem_type_id: TypeId,
+        elem_cr_type: Type,
+    ) -> CodegenResult<Value> {
+        if let Some(wide) =
+            crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena())
+        {
+            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[raw_val])?;
+            Ok(wide.reinterpret_i128(self.builder, wide_bits))
+        } else if elem_cr_type == types::F64 {
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F64, MemFlags::new(), raw_val))
+        } else if elem_cr_type == types::F32 {
+            let i32_val = self.builder.ins().ireduce(types::I32, raw_val);
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F32, MemFlags::new(), i32_val))
+        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            Ok(self.builder.ins().ireduce(elem_cr_type, raw_val))
+        } else {
+            Ok(raw_val)
+        }
+    }
+
+    /// Call the `.iter()` method on an Iterable value, returning the Iterator<T> interface.
+    pub(crate) fn call_iterable_iter_method(
+        &mut self,
+        iterable: &super::types::CompiledValue,
+        _elem_type_id: TypeId,
+    ) -> CodegenResult<super::types::CompiledValue> {
+        let type_def_id = {
+            let arena = self.arena();
+            let (tdef, _, _) = arena
+                .unwrap_class_or_struct(iterable.type_id)
+                .ok_or_else(|| {
+                    CodegenError::internal("for_iterable: expected class/struct type")
+                })?;
+            tdef
+        };
+        let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
+
+        let iter_name_id = self
+            .analyzed()
+            .try_method_name_id_by_str("iter")
+            .ok_or_else(|| CodegenError::not_found("method name_id", "iter"))?;
+
+        let func_key = self
+            .method_func_keys()
+            .get(&(type_name_id, iter_name_id))
+            .copied()
+            .ok_or_else(|| {
+                CodegenError::not_found("iter method func_key", format!("{type_def_id:?}::iter"))
+            })?;
+
+        let return_type_id = self
+            .analyzed()
+            .method_binding_return_type(type_def_id, iter_name_id)
+            .unwrap_or(TypeId::VOID);
+
+        let func_ref = self.func_ref(func_key)?;
+        let call_inst = self.emit_call(func_ref, &[iterable.value]);
+
+        self.call_result(call_inst, return_type_id)
+    }
+
+    /// Decode a raw array element value to the correct Cranelift type.
+    ///
+    /// Handles union storage (inline/heap), wide types (i128), narrow
+    /// integers, and float reinterpretation.
+    pub(crate) fn decode_array_elem(
+        &mut self,
+        elem_val: Value,
+        elem_ptr: Value,
+        elem_type_id: TypeId,
+        union_storage: Option<vole_sema::UnionStorageKind>,
+    ) -> CodegenResult<Value> {
+        if self.arena().is_unknown(elem_type_id) {
+            let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
+            let elem_tag =
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
+            let unknown_heap_tag = self.iconst_cached(
+                types::I64,
+                vole_runtime::value::RuntimeTypeId::UnknownHeap as i64,
+            );
+            let is_unknown_heap = self
+                .builder
+                .ins()
+                .icmp(IntCC::Equal, elem_tag, unknown_heap_tag);
+            return Ok(self
+                .builder
+                .ins()
+                .select(is_unknown_heap, elem_val, elem_ptr));
+        }
+
+        let elem_cr_type = self.cranelift_type(elem_type_id);
+        let elem_wide = crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena());
+        if let Some(storage) = union_storage {
+            use vole_sema::UnionStorageKind;
+            match storage {
+                UnionStorageKind::Inline => {
+                    let tag_offset =
+                        std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
+                    let elem_tag =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), elem_ptr, tag_offset);
+                    Ok(self
+                        .decode_dynamic_array_union_element(elem_tag, elem_val, elem_type_id)
+                        .value)
+                }
+                UnionStorageKind::Heap => {
+                    Ok(self.copy_union_heap_to_stack(elem_val, elem_type_id).value)
+                }
+            }
+        } else if let Some(wide) = elem_wide {
+            let wide_bits = self.call_runtime(RuntimeKey::Wide128Unbox, &[elem_val])?;
+            Ok(wide.reinterpret_i128(self.builder, wide_bits))
+        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            Ok(self.builder.ins().ireduce(elem_cr_type, elem_val))
+        } else if elem_cr_type == types::F64 {
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F64, MemFlags::new(), elem_val))
+        } else if elem_cr_type == types::F32 {
+            let i32_val = self.builder.ins().ireduce(types::I32, elem_val);
+            Ok(self
+                .builder
+                .ins()
+                .bitcast(types::F32, MemFlags::new(), i32_val))
+        } else {
+            Ok(elem_val)
+        }
+    }
 }

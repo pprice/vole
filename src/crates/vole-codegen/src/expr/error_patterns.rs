@@ -8,15 +8,14 @@ use rustc_hash::FxHashMap;
 use crate::errors::CodegenResult;
 use crate::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, fallible_error_tag_by_id,
-    load_fallible_payload, load_fallible_tag, type_id_to_cranelift,
+    load_fallible_payload, load_fallible_tag,
 };
 
+use vole_frontend::Symbol;
 use vole_frontend::ast::RecordFieldPattern;
-use vole_frontend::{Pattern, PatternKind, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use super::super::context::Cg;
-use super::super::structs::get_field_slot_and_type_id_cg;
 
 impl Cg<'_, '_, '_> {
     // =========================================================================
@@ -154,129 +153,6 @@ impl Cg<'_, '_, '_> {
     }
 
     // =========================================================================
-    // Error pattern helpers
-    // =========================================================================
-
-    /// Compile an error pattern match, returning the condition value.
-    pub(super) fn compile_error_pattern(
-        &mut self,
-        inner: &Option<Box<Pattern>>,
-        scrutinee: &CompiledValue,
-        tag: Value,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> CodegenResult<Option<Value>> {
-        let Some(inner_pat) = inner else {
-            // Bare error pattern: error => ...
-            let is_error = self
-                .builder
-                .ins()
-                .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
-            return Ok(Some(is_error));
-        };
-
-        match &inner_pat.kind {
-            PatternKind::Identifier { name } => {
-                self.compile_error_identifier_pattern(*name, scrutinee, tag, arm_variables)
-            }
-            PatternKind::Record {
-                type_name: Some(type_expr),
-                fields,
-            } => {
-                if let Some(name) = Self::type_expr_terminal_symbol(type_expr) {
-                    self.compile_error_record_pattern(name, fields, scrutinee, tag, arm_variables)
-                } else {
-                    let is_error =
-                        self.builder
-                            .ins()
-                            .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
-                    Ok(Some(is_error))
-                }
-            }
-            _ => {
-                // Catch-all for other patterns (like wildcard)
-                let is_error =
-                    self.builder
-                        .ins()
-                        .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
-                Ok(Some(is_error))
-            }
-        }
-    }
-
-    /// Compile an identifier pattern inside an error pattern.
-    /// Handles both specific error types (error DivByZero) and catch-all bindings (error e).
-    fn compile_error_identifier_pattern(
-        &mut self,
-        name: Symbol,
-        scrutinee: &CompiledValue,
-        tag: Value,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> CodegenResult<Option<Value>> {
-        // Check if this is an error type name by looking in the fallible's error union.
-        // This handles error types from imported modules that aren't in the consumer's scope.
-        let is_error_type = self
-            .resolve_type(name)
-            .is_some_and(|type_id| self.analyzed().is_error_type(type_id))
-            || {
-                // Fallback: check if name matches an error type in the fallible's error union
-                self.arena()
-                    .unwrap_fallible(scrutinee.type_id)
-                    .and_then(|(_, error_type_id)| self.error_tag_for(error_type_id, name))
-                    .is_some()
-            };
-
-        if is_error_type {
-            return self.compile_specific_error_type_pattern(name, scrutinee, tag);
-        }
-
-        // Catch-all error binding: error e => ...
-        let is_error = self
-            .builder
-            .ins()
-            .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
-
-        // Extract error type and bind
-        // Get types before using builder to avoid borrow conflict
-        let error_type_opt = self.arena().unwrap_fallible(scrutinee.type_id);
-        if let Some((_, error_type_id)) = error_type_opt {
-            let ptr_type = self.ptr_type();
-            let payload_ty = {
-                let arena = self.arena();
-                type_id_to_cranelift(error_type_id, arena, ptr_type)
-            };
-            let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
-            let var = self.builder.declare_var(payload_ty);
-            self.builder.def_var(var, payload);
-            arm_variables.insert(name, (var, error_type_id));
-        }
-
-        Ok(Some(is_error))
-    }
-
-    /// Compile a specific error type pattern (e.g., error DivByZero).
-    fn compile_specific_error_type_pattern(
-        &mut self,
-        name: Symbol,
-        scrutinee: &CompiledValue,
-        tag: Value,
-    ) -> CodegenResult<Option<Value>> {
-        let Some((_success_type_id, error_type_id)) =
-            self.arena().unwrap_fallible(scrutinee.type_id)
-        else {
-            // Not matching on a fallible type
-            return Ok(Some(self.iconst_cached(types::I8, 0)));
-        };
-
-        let Some(error_tag) = self.error_tag_for(error_type_id, name) else {
-            // Error type not found in fallible - will never match
-            return Ok(Some(self.iconst_cached(types::I8, 0)));
-        };
-
-        let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
-        Ok(Some(is_this_error))
-    }
-
-    // =========================================================================
     // Record field extraction helpers
     // =========================================================================
 
@@ -293,39 +169,6 @@ impl Cg<'_, '_, '_> {
             self.name_table(),
             self.analyzed(),
         )
-    }
-
-    /// Extract and bind fields from a destructure pattern source.
-    ///
-    /// For class/instance types, uses `InstanceGetField` runtime call.
-    /// For struct types (auto-boxed in unions), uses `struct_field_load` since the
-    /// source pointer is a raw heap pointer, not an `RcInstance`.
-    pub(super) fn extract_record_fields(
-        &mut self,
-        fields: &[RecordFieldPattern],
-        field_source: Value,
-        field_source_type_id: TypeId,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> CodegenResult<()> {
-        let is_struct = self.arena().is_struct(field_source_type_id);
-        for field_pattern in fields {
-            let field_name = self.interner().resolve(field_pattern.field_name);
-            let (slot, field_type_id) =
-                get_field_slot_and_type_id_cg(field_source_type_id, field_name, self)?;
-
-            let converted = if is_struct {
-                // Struct was auto-boxed: field_source is a raw heap pointer
-                // with fields at flat offsets, same layout as stack structs
-                self.struct_field_load(field_source, slot, field_type_id, field_source_type_id)?
-            } else {
-                // Class/instance: use runtime InstanceGetField
-                self.get_instance_field(field_source, slot, field_type_id)?
-            };
-            let var = self.builder.declare_var(converted.ty);
-            self.builder.def_var(var, converted.value);
-            arm_variables.insert(field_pattern.binding, (var, field_type_id));
-        }
-        Ok(())
     }
 
     /// Extract field bindings from an error record pattern. Loads fields from the
@@ -437,61 +280,5 @@ impl Cg<'_, '_, '_> {
         }
 
         Ok(())
-    }
-
-    /// Compile a destructure pattern inside an error pattern (e.g., error Overflow { value, max }).
-    pub(super) fn compile_error_record_pattern(
-        &mut self,
-        name: Symbol,
-        fields: &[RecordFieldPattern],
-        scrutinee: &CompiledValue,
-        tag: Value,
-        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> CodegenResult<Option<Value>> {
-        // Look up error type_def_id via EntityRegistry, with fallback to
-        // searching the fallible's error union for imported module error types
-        let error_type_id = self
-            .resolve_type(name)
-            .and_then(|type_id| {
-                if self.analyzed().is_error_type_with_info(type_id) {
-                    Some(type_id)
-                } else {
-                    None
-                }
-            })
-            .or_else(|| {
-                // Fallback: search error types in the fallible's error union by name
-                let name_str = self.interner().resolve(name);
-                let arena = self.arena();
-                let (_, error_union_id) = arena.unwrap_fallible(scrutinee.type_id)?;
-                self.find_error_type_in_union(error_union_id, name_str)
-            });
-
-        let Some(error_type_def_id) = error_type_id else {
-            // Unknown error type
-            return Ok(Some(self.iconst_cached(types::I8, 0)));
-        };
-
-        let Some((_success_type_id, fallible_error_type_id)) =
-            self.arena().unwrap_fallible(scrutinee.type_id)
-        else {
-            return Ok(Some(self.iconst_cached(types::I8, 0)));
-        };
-
-        let Some(error_tag) = self.error_tag_for(fallible_error_type_id, name) else {
-            // Error type not found in fallible
-            return Ok(Some(self.iconst_cached(types::I8, 0)));
-        };
-
-        let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
-
-        self.extract_error_field_bindings(
-            error_type_def_id,
-            scrutinee.value,
-            fields,
-            arm_variables,
-        )?;
-
-        Ok(Some(is_this_error))
     }
 }

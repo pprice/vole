@@ -22,8 +22,7 @@ use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
-use vole_frontend::ast::YieldExpr;
-use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
+use vole_frontend::{BinaryOp, Symbol};
 use vole_identity::{ModuleId, TypeDefId, VirTypeId};
 use vole_sema::type_arena::TypeId;
 use vole_vir::{
@@ -83,262 +82,6 @@ impl Cg<'_, '_, '_> {
             | VirExpr::IndexStore { .. }
             | VirExpr::LocalStore { .. }
             | VirExpr::Yield { .. } => None,
-        }
-    }
-
-    /// Compile an expression.
-    pub fn expr(&mut self, expr: &Expr) -> CodegenResult<CompiledValue> {
-        // Check for captures first if in closure context
-        if self.has_captures()
-            && let ExprKind::Identifier(sym) = &expr.kind
-            && let Some(binding) = self.get_capture(sym).copied()
-        {
-            return self.load_capture(&binding);
-        }
-
-        // Check if this expression was synthesized as an implicit `it` lambda.
-        // If so, compile it as a lambda (closure) instead of a bare expression.
-        // Skip this check if `it` is already bound in scope — that means we're
-        // inside the lambda body itself, compiling the inner expression.
-        if self.get_it_lambda_info(expr.id).is_some() {
-            let it_sym = self.interner().lookup("it");
-            let it_already_bound = it_sym.is_some_and(|sym| self.vars.contains_key(&sym));
-            if !it_already_bound {
-                let result = self.compile_it_lambda(expr, expr.id)?;
-                return Ok(self.mark_rc_owned(result));
-            }
-        }
-
-        match &expr.kind {
-            ExprKind::IntLiteral(n, _) => {
-                // Look up inferred type from semantic analysis for bidirectional type inference.
-                // Uses get_expr_type helper to check module-specific expr_types when compiling prelude.
-                // Falls back to I64 for interface default methods which are analyzed once but
-                // compiled multiple times for different implementing types - the single recorded
-                // type from sema may not match the compilation context.
-                let type_id = self.get_expr_type(&expr.id).unwrap_or(TypeId::I64);
-                Ok(self.int_const(*n, type_id))
-            }
-            ExprKind::FloatLiteral(n, _) => {
-                // Look up inferred type from semantic analysis for bidirectional type inference.
-                // Falls back to F64 for interface default methods (see IntLiteral comment above).
-                let type_id = self.get_expr_type(&expr.id).unwrap_or(TypeId::F64);
-                Ok(self.float_const(*n, type_id))
-            }
-            ExprKind::BoolLiteral(b) => Ok(self.bool_const(*b)),
-            ExprKind::Identifier(sym) => self.identifier(*sym, expr),
-            ExprKind::Binary(bin) => self.binary(bin, expr.span.line),
-            ExprKind::Unary(un) => self.unary(un),
-            ExprKind::Assign(assign) => self.assign(assign),
-            ExprKind::CompoundAssign(compound) => {
-                self.compound_assign(compound, expr.span.line, expr.id)
-            }
-            ExprKind::Grouping(inner) => self.expr(inner),
-            ExprKind::StringLiteral(s) => self.string_literal(s),
-            ExprKind::Call(call) => {
-                let result = self.call(call, expr.span.line, expr.id)?;
-                Ok(self.mark_rc_owned(result))
-            }
-            ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
-            ExprKind::Range(range) => self.range(range),
-            ExprKind::ArrayLiteral(elements) => {
-                let result = self.array_literal(elements, expr)?;
-                Ok(self.mark_rc_owned(result))
-            }
-            ExprKind::RepeatLiteral { element, count } => {
-                let result = self.repeat_literal(element, *count, expr)?;
-                Ok(self.mark_rc_owned(result))
-            }
-            ExprKind::Index(idx) => self.index(&idx.object, &idx.index, expr.id),
-            ExprKind::Match(match_expr) => self.match_expr(match_expr, expr.id),
-            ExprKind::Is(is_expr) => self.is_expr(is_expr, expr.id),
-            ExprKind::AsCast(as_cast) => self.as_cast_expr(as_cast, expr.id, expr.span.line),
-            ExprKind::NullCoalesce(nc) => self.null_coalesce(nc, expr.id),
-            ExprKind::Lambda(lambda) => {
-                let result = self.lambda(lambda, expr.id)?;
-                Ok(self.mark_rc_owned(result))
-            }
-            ExprKind::TypeLiteral(_) => Err(CodegenError::unsupported(
-                "type expressions as runtime values",
-            )),
-            ExprKind::StructLiteral(sl) => {
-                let result = self.struct_literal(sl, expr)?;
-                Ok(self.mark_rc_owned(result))
-            }
-            ExprKind::FieldAccess(fa) => self.field_access(fa),
-            ExprKind::OptionalChain(_) | ExprKind::OptionalMethodCall(_) => {
-                self.optional_chain(expr, expr.id)
-            }
-            ExprKind::MethodCall(mc) => {
-                use crate::structs::methods::MethodCallSource;
-                let src = MethodCallSource::Ast(mc);
-                let result = self.method_call(&src, expr.id, None)?;
-                Ok(self.mark_rc_owned(result))
-            }
-            ExprKind::Try(inner) => self.try_propagate(inner),
-            ExprKind::Import(_) => {
-                // Import expressions produce a compile-time module value
-                // At runtime this is just a placeholder - actual function calls
-                // go through the method resolution mechanism
-                // We need to retrieve the actual Module type from semantic analysis
-                let type_id = self
-                    .get_expr_type(&expr.id)
-                    .unwrap_or(self.arena().primitives.i64);
-                Ok(CompiledValue::new(
-                    self.iconst_cached(types::I64, 0),
-                    types::I64,
-                    type_id,
-                ))
-            }
-            ExprKind::Yield(yield_expr) => self.compile_yield(yield_expr),
-            ExprKind::Block(block_expr) => self.block_expr(block_expr),
-            ExprKind::If(if_expr) => self.if_expr(if_expr, expr.id),
-            ExprKind::When(when_expr) => self.when_expr(when_expr, expr.id),
-            ExprKind::MetaAccess(meta_access) => {
-                let result = crate::reflection::compile_meta_access(self, expr.id, meta_access)?;
-                Ok(result)
-            }
-            ExprKind::Unreachable => self.unreachable_expr(expr.span.line),
-        }
-    }
-
-    // =========================================================================
-    // Identifier and module binding resolution
-    // =========================================================================
-
-    /// Compile an identifier lookup
-    fn identifier(&mut self, sym: Symbol, expr: &Expr) -> CodegenResult<CompiledValue> {
-        // Sentinel values (nil, Done, user-defined) are always available as i8(0).
-        // First try the sema-provided type, then fall back to name resolution.
-        {
-            let sentinel_type_id = self
-                .get_expr_type(&expr.id)
-                .filter(|&tid| self.arena().is_sentinel(tid))
-                .or_else(|| {
-                    let name = self.interner().resolve(sym);
-                    let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
-                    let type_def_id = self.analyzed().resolve_type_def_by_str(module_id, name)?;
-                    if self.analyzed().is_sentinel_type(type_def_id) {
-                        self.analyzed().sentinel_base_type(type_def_id)
-                    } else {
-                        None
-                    }
-                });
-            if let Some(type_id) = sentinel_type_id {
-                let value = self.iconst_cached(types::I8, 0);
-                return Ok(CompiledValue::new(value, types::I8, type_id));
-            }
-        }
-
-        if let Some((var, type_id)) = self.vars.get(&sym) {
-            let val = self.builder.use_var(*var);
-            let ty = self.builder.func.dfg.value_type(val);
-
-            // Check for narrowed type from semantic analysis.
-            // In monomorphized generic bodies we substitute both the union and the
-            // narrowed type, then verify the narrowed type is an actual variant of
-            // the resolved union before extracting the payload.
-            if let Some(raw_narrowed_type_id) = self.get_expr_type(&expr.id) {
-                let resolved_union_type_id = self.try_substitute_type(*type_id);
-                let narrowed_type_id = self.try_substitute_type(raw_narrowed_type_id);
-                if self.arena().is_union(resolved_union_type_id)
-                    && !self.arena().is_union(narrowed_type_id)
-                    && narrowed_type_id != resolved_union_type_id
-                {
-                    let narrowed_variant = self
-                        .arena()
-                        .unwrap_union(resolved_union_type_id)
-                        .and_then(|variants| {
-                            variants
-                                .iter()
-                                .copied()
-                                .find(|&variant| variant == narrowed_type_id)
-                                .or_else(|| {
-                                    if self.arena().is_integer(narrowed_type_id) {
-                                        variants
-                                            .iter()
-                                            .copied()
-                                            .find(|&variant| self.arena().is_integer(variant))
-                                    } else {
-                                        None
-                                    }
-                                })
-                        });
-                    if let Some(narrowed_variant) = narrowed_variant {
-                        // Union layout: [tag:1][padding:7][payload]
-                        let payload_ty =
-                            type_id_to_cranelift(narrowed_variant, self.arena(), self.ptr_type());
-                        let payload =
-                            self.load_union_payload(val, resolved_union_type_id, payload_ty);
-                        let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
-                        // The extracted payload is borrowed from the union variable —
-                        // callers must rc_inc if they take ownership.
-                        self.mark_borrowed_if_rc(&mut cv);
-                        return Ok(cv);
-                    }
-                }
-            }
-
-            // Check for narrowed type from unknown
-            if let Some(narrowed_type_id) = self.get_expr_type(&expr.id)
-                && self.arena().is_unknown(*type_id)
-                && !self.arena().is_unknown(narrowed_type_id)
-            {
-                // TaggedValue layout: [tag:8][value:8]
-                // Extract the value from offset 8 and convert to proper type
-                let raw_value = self.builder.ins().load(
-                    types::I64,
-                    MemFlags::new(),
-                    val,
-                    union_layout::PAYLOAD_OFFSET,
-                );
-                let extracted = self.extract_unknown_value(raw_value, narrowed_type_id);
-                return Ok(extracted);
-            }
-
-            let mut cv = CompiledValue::new(val, ty, *type_id);
-            self.mark_borrowed_if_rc(&mut cv);
-            // Union variables with RC variants are managed by scope-level
-            // union cleanup (UnionRcLocal). Mark them Borrowed so that
-            // match arm payload extraction knows the inner payload will be
-            // dec'd at scope exit and does not emit a redundant rc_dec.
-            if cv.rc_lifecycle == RcLifecycle::Untracked
-                && self.rc_state(*type_id).union_variants().is_some()
-            {
-                cv.mark_borrowed();
-            }
-            Ok(cv)
-        } else if let Some(&(module_id, export_name, export_type_id)) =
-            self.lookup_module_binding(&sym)
-        {
-            // Module binding - look up the constant value
-            self.module_binding_value(module_id, export_name, export_type_id)
-        } else if let Some(vir_init) = self.global_vir_init(sym).cloned() {
-            // Compile global's VIR-lowered initializer inline
-            let mut value = self.compile_vir_expr(&vir_init)?;
-            self.coerce_global_to_declared_type(sym, &mut value)?;
-            Ok(value)
-        } else if self.has_global_init(sym) {
-            Err(CodegenError::internal_with_context(
-                "missing VIR global initializer",
-                self.interner().resolve(sym),
-            ))
-        } else if let Some(func_type_id) = self.get_expr_type(&expr.id)
-            && self.arena().is_function(func_type_id)
-        {
-            // Identifier refers to a named function - create a closure wrapper
-            self.function_reference(sym, func_type_id)
-        } else if let Some(sentinel_type_id) = self.get_expr_type(&expr.id)
-            && self.arena().is_sentinel(sentinel_type_id)
-        {
-            // Bare identifier refers to a sentinel type - emit i8(0)
-            let value = self.iconst_cached(types::I8, 0);
-            Ok(CompiledValue::new(value, types::I8, sentinel_type_id))
-        } else {
-            Err(CodegenError::not_found(
-                "variable",
-                self.interner().resolve(sym),
-            ))
         }
     }
 
@@ -553,37 +296,7 @@ impl Cg<'_, '_, '_> {
     // Generator yield
     // =========================================================================
 
-    /// Compile a yield expression inside a generator body.
-    ///
-    /// Calls `vole_generator_yield(yielder_ptr, value)` to suspend the coroutine,
-    /// passing the yielded value to the iterator consumer.
-    fn compile_yield(&mut self, yield_expr: &YieldExpr) -> CodegenResult<CompiledValue> {
-        let yielder_var = self.yielder_var.ok_or_else(|| {
-            CodegenError::unsupported("yield expression outside generator context")
-        })?;
-
-        // Compile the value to yield
-        let value = self.expr(&yield_expr.value)?;
-
-        // Load the yielder pointer
-        let yielder_ptr = self.builder.use_var(yielder_var);
-
-        // Call vole_generator_yield(yielder_ptr, value)
-        self.call_runtime_void(RuntimeKey::GeneratorYield, &[yielder_ptr, value.value])?;
-
-        // Yield is a statement-like expression; return a void/zero value.
-        // The type doesn't matter since yield is used in statement position.
-        Ok(CompiledValue::new(
-            self.iconst_cached(types::I64, 0),
-            types::I64,
-            self.arena().primitives.i64,
-        ))
-    }
-
     /// Compile a VIR yield expression inside a generator body.
-    ///
-    /// Like [`compile_yield`] but operates on a VIR `VirRef` value instead of
-    /// an AST `YieldExpr`.
     fn compile_vir_yield(&mut self, value: &VirExpr) -> CodegenResult<CompiledValue> {
         let yielder_var = self.yielder_var.ok_or_else(|| {
             CodegenError::unsupported("yield expression outside generator context")
@@ -746,12 +459,12 @@ impl Cg<'_, '_, '_> {
                 ..
             } => {
                 use crate::structs::methods::MethodCallSource;
-                let src = MethodCallSource::Vir {
+                let src = MethodCallSource {
                     receiver,
                     method: *method,
                     args,
                 };
-                let result = self.method_call(&src, *node_id, Some(dispatch))?;
+                let result = self.method_call(&src, *node_id, dispatch)?;
                 Ok(self.mark_rc_owned(result))
             }
 

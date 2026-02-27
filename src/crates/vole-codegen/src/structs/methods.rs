@@ -13,13 +13,11 @@ use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::CompiledValue;
-use vole_frontend::ast::CallArg;
-use vole_frontend::{ExprKind, MethodCallExpr, Symbol};
+use vole_frontend::Symbol;
 use vole_identity::NamerLookup;
 use vole_identity::NodeId;
 use vole_identity::{MethodId, NameId};
 use vole_sema::generic::ClassMethodMonomorphKey;
-use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirRef;
 use vole_vir::expr::{
@@ -33,126 +31,69 @@ use super::static_methods::StaticMethodCallArgs;
 // MethodCallSource: abstraction over AST and VIR method call data
 // ============================================================================
 
-/// Source of a method call's arguments: either AST `CallArg` slices or VIR refs.
-///
-/// This allows method dispatch code to work with both AST-based (old codegen
-/// path) and VIR-based (new lowered path) method calls without duplication.
-pub enum ArgSource<'a> {
-    Ast(&'a [CallArg]),
-    Vir(&'a [VirRef]),
-}
+/// Source of a method call's arguments: VIR expression refs.
+pub struct ArgSource<'a>(pub &'a [VirRef]);
 
 impl ArgSource<'_> {
     /// Number of arguments in this source.
     pub fn len(&self) -> usize {
-        match self {
-            ArgSource::Ast(args) => args.len(),
-            ArgSource::Vir(refs) => refs.len(),
-        }
+        self.0.len()
     }
 }
 
-/// Source of a method call: either an AST `MethodCallExpr` or VIR-native fields.
+/// Source of a method call: VIR-native fields.
 ///
 /// VIR method calls carry the pre-lowered receiver and args as `VirExpr` nodes
-/// plus the original `NodeId` for sema metadata lookup.  The AST path carries
-/// the original `MethodCallExpr` unchanged.
-pub enum MethodCallSource<'a> {
-    Ast(&'a MethodCallExpr),
-    Vir {
-        receiver: &'a vole_vir::VirExpr,
-        method: Symbol,
-        args: &'a [VirRef],
-    },
+/// plus the original `NodeId` for sema metadata lookup.
+pub struct MethodCallSource<'a> {
+    pub receiver: &'a vole_vir::VirExpr,
+    pub method: Symbol,
+    pub args: &'a [VirRef],
 }
 
 impl<'a> MethodCallSource<'a> {
-    /// The method name symbol.
-    pub fn method(&self) -> Symbol {
-        match self {
-            MethodCallSource::Ast(mc) => mc.method,
-            MethodCallSource::Vir { method, .. } => *method,
-        }
-    }
-
     /// The call arguments as an `ArgSource`.
     pub fn arg_source(&self) -> ArgSource<'a> {
-        match self {
-            MethodCallSource::Ast(mc) => ArgSource::Ast(&mc.args),
-            MethodCallSource::Vir { args, .. } => ArgSource::Vir(args),
-        }
+        ArgSource(self.args)
     }
 
     /// Number of arguments (not counting receiver).
     pub fn arg_count(&self) -> usize {
-        match self {
-            MethodCallSource::Ast(mc) => mc.args.len(),
-            MethodCallSource::Vir { args, .. } => args.len(),
-        }
+        self.args.len()
     }
 }
 
+/// Thin wrapper around `VirResolvedMethod` for method resolution access.
 #[derive(Clone, Copy, Debug)]
-enum MethodResolutionRef<'a> {
-    Ast(&'a ResolvedMethod),
-    Vir(&'a VirResolvedMethod),
-}
+struct MethodResolutionRef<'a>(&'a VirResolvedMethod);
 
 impl MethodResolutionRef<'_> {
     fn method_id(self) -> Option<MethodId> {
-        match self {
-            MethodResolutionRef::Ast(r) => r.method_id(),
-            MethodResolutionRef::Vir(r) => r.method_id(),
-        }
+        self.0.method_id()
     }
 
     fn type_def_id(self) -> Option<vole_identity::TypeDefId> {
-        match self {
-            MethodResolutionRef::Ast(r) => r.type_def_id(),
-            MethodResolutionRef::Vir(r) => r.type_def_id(),
-        }
+        self.0.type_def_id()
     }
 
     fn is_builtin(self) -> bool {
-        match self {
-            MethodResolutionRef::Ast(r) => r.is_builtin(),
-            MethodResolutionRef::Vir(r) => r.is_builtin(),
-        }
+        self.0.is_builtin()
     }
 
     fn method_index(self) -> Option<u32> {
-        match self {
-            MethodResolutionRef::Ast(r) => r.method_index(),
-            MethodResolutionRef::Vir(r) => r.method_index(),
-        }
+        self.0.method_index()
     }
 
     fn external_info(self) -> Option<ExternalMethodRef> {
-        match self {
-            MethodResolutionRef::Ast(r) => r.external_info().map(|info| ExternalMethodRef {
-                module_path: info.module_path,
-                native_name: info.native_name,
-            }),
-            MethodResolutionRef::Vir(r) => r.external_info().map(ExternalMethodRef::from),
-        }
+        self.0.external_info().map(ExternalMethodRef::from)
     }
 
     fn is_interface_method(self) -> bool {
-        match self {
-            MethodResolutionRef::Ast(r) => matches!(r, ResolvedMethod::InterfaceMethod { .. }),
-            MethodResolutionRef::Vir(r) => r.is_interface_method(),
-        }
+        self.0.is_interface_method()
     }
 
     fn interface_type_def_id_for_default(self) -> Option<vole_identity::TypeDefId> {
-        match self {
-            MethodResolutionRef::Ast(ResolvedMethod::DefaultMethod {
-                interface_type_def_id,
-                ..
-            }) => Some(*interface_type_def_id),
-            MethodResolutionRef::Ast(_) => None,
-            MethodResolutionRef::Vir(r) => r.default_interface_type_def_id(),
-        }
+        self.0.default_interface_type_def_id()
     }
 }
 
@@ -169,7 +110,7 @@ fn sema_dispatch_kind_from_vir(kind: VirMethodDispatchKind) -> vole_sema::Method
 
 impl Cg<'_, '_, '_> {
     // ========================================================================
-    // ArgSource helpers: compile arguments from either AST or VIR
+    // ArgSource helpers: compile arguments from VIR refs
     // ========================================================================
 
     /// Compile a single argument from an `ArgSource` at the given index.
@@ -178,31 +119,21 @@ impl Cg<'_, '_, '_> {
         source: &ArgSource<'_>,
         index: usize,
     ) -> CodegenResult<CompiledValue> {
-        match source {
-            ArgSource::Ast(args) => self.expr(args[index].expr()),
-            ArgSource::Vir(refs) => self.compile_vir_expr(&refs[index]),
-        }
+        self.compile_vir_expr(&source.0[index])
     }
 
     /// Compile a single argument from an `ArgSource` with an expected type.
     ///
-    /// For AST, delegates to `expr_with_expected_type` which propagates the
-    /// expected type into array literal compilation (union elem hints).
-    ///
-    /// For VIR, compiles the expression without coercion.  The caller is
-    /// responsible for calling `coerce_to_type` after recording RC ownership
-    /// in `rc_temps`, matching the AST path's two-step pattern (compile ->
-    /// track ownership -> coerce).
+    /// Compiles the expression without coercion.  The caller is responsible
+    /// for calling `coerce_to_type` after recording RC ownership in
+    /// `rc_temps` (compile -> track ownership -> coerce).
     pub(crate) fn compile_arg_with_expected_type(
         &mut self,
         source: &ArgSource<'_>,
         index: usize,
-        expected_type: TypeId,
+        _expected_type: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        match source {
-            ArgSource::Ast(args) => self.expr_with_expected_type(args[index].expr(), expected_type),
-            ArgSource::Vir(refs) => self.compile_vir_expr(&refs[index]),
-        }
+        self.compile_vir_expr(&source.0[index])
     }
 
     /// Compile all arguments from an `ArgSource`, tracking RC temps.
@@ -210,10 +141,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         source: &ArgSource<'_>,
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        let count = match source {
-            ArgSource::Ast(args) => args.len(),
-            ArgSource::Vir(refs) => refs.len(),
-        };
+        let count = source.len();
         let mut values = Vec::with_capacity(count);
         let mut rc_temps = Vec::new();
         for i in 0..count {
@@ -227,17 +155,11 @@ impl Cg<'_, '_, '_> {
     }
 
     fn resolved_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
-        match resolved {
-            MethodResolutionRef::Ast(r) => r.func_type_id(),
-            MethodResolutionRef::Vir(r) => self.sema_type_from_vir(r.func_type_id()),
-        }
+        self.sema_type_from_vir(resolved.0.func_type_id())
     }
 
     fn resolved_return_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
-        match resolved {
-            MethodResolutionRef::Ast(r) => r.return_type_id(),
-            MethodResolutionRef::Vir(r) => self.sema_type_from_vir(r.return_type_id()),
-        }
+        self.sema_type_from_vir(resolved.0.return_type_id())
     }
 
     fn resolved_dispatch_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
@@ -255,12 +177,10 @@ impl Cg<'_, '_, '_> {
     }
 
     fn resolved_concrete_return_hint(&self, resolved: MethodResolutionRef<'_>) -> Option<TypeId> {
-        match resolved {
-            MethodResolutionRef::Ast(r) => r.concrete_return_hint(),
-            MethodResolutionRef::Vir(r) => r
-                .concrete_return_hint()
-                .map(|ty| self.sema_type_from_vir(ty)),
-        }
+        resolved
+            .0
+            .concrete_return_hint()
+            .map(|ty| self.sema_type_from_vir(ty))
     }
 
     /// Resolve canonical interface method signature from `(interface, slot)`.
@@ -314,8 +234,8 @@ impl Cg<'_, '_, '_> {
         if let Some((params, _, _)) = self.arena().unwrap_function(resolved_signature_id) {
             return Some(params.to_vec());
         }
-        if let MethodResolutionRef::Vir(r) = resolved
-            && let VirType::Function { params, .. } = self.vir_type_table().get(r.func_type_id())
+        if let VirType::Function { params, .. } =
+            self.vir_type_table().get(resolved.0.func_type_id())
         {
             return Some(
                 params
@@ -428,164 +348,92 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| CodegenError::not_found("method name_id", self.interner().resolve(name)))
     }
 
-    #[tracing::instrument(skip(self, mc), fields(method = %self.interner().resolve(mc.method())))]
+    #[tracing::instrument(skip(self, mc), fields(method = %self.interner().resolve(mc.method)))]
     pub fn method_call(
         &mut self,
         mc: &MethodCallSource<'_>,
         expr_id: NodeId,
-        vir_dispatch: Option<&VirMethodDispatchMeta>,
+        dispatch: &VirMethodDispatchMeta,
     ) -> CodegenResult<CompiledValue> {
-        let mc_method = mc.method();
+        let mc_method = mc.method;
 
         // Check for static method call FIRST - don't try to compile the receiver
-        if let Some(dispatch) = vir_dispatch {
-            if let Some(VirResolvedMethod::Static {
-                type_def_id,
-                method_id,
-                func_type_id,
-                ..
-            }) = dispatch.resolved_method.as_ref()
-            {
-                return self.static_method_call(StaticMethodCallArgs {
-                    type_def_id: *type_def_id,
-                    method_id: *method_id,
-                    func_type_id: self.sema_type_from_vir(*func_type_id),
-                    arg_source: &mc.arg_source(),
-                    method_sym: mc_method,
-                    expr_id,
-                    vir_dispatch: Some(dispatch),
-                });
-            }
-        } else if let Some(ResolvedMethod::Static {
+        if let Some(VirResolvedMethod::Static {
             type_def_id,
             method_id,
             func_type_id,
             ..
-        }) = self.analyzed().method_at(expr_id)
+        }) = dispatch.resolved_method.as_ref()
         {
             return self.static_method_call(StaticMethodCallArgs {
                 type_def_id: *type_def_id,
                 method_id: *method_id,
-                func_type_id: *func_type_id,
+                func_type_id: self.sema_type_from_vir(*func_type_id),
                 arg_source: &mc.arg_source(),
                 method_sym: mc_method,
                 expr_id,
-                vir_dispatch: None,
+                vir_dispatch: Some(dispatch),
             });
         }
 
         // Look up method resolution early to get concrete_return_hint for builtin methods.
         // In monomorphized context, skip sema resolution because it was computed for the type parameter,
         // not the concrete type.
-        let resolution = if let Some(dispatch) = vir_dispatch {
-            if self.substitutions.is_some() {
-                None
-            } else {
-                dispatch
-                    .resolved_method
-                    .as_ref()
-                    .map(MethodResolutionRef::Vir)
-            }
-        } else if self.substitutions.is_some() {
+        let resolution = if self.substitutions.is_some() {
             None
         } else {
-            self.analyzed()
-                .method_at(expr_id)
-                .map(MethodResolutionRef::Ast)
+            dispatch.resolved_method.as_ref().map(MethodResolutionRef)
         };
 
         // Extract concrete_return_hint for builtin iterator methods (array.iter, string.iter, range.iter)
         let concrete_return_hint = resolution.and_then(|r| self.resolved_concrete_return_hint(r));
 
         // Handle range.iter() specially since range expressions can't be compiled to values directly.
-        // Unwrap Grouping nodes (parenthesization) so `(0..n).iter()` is handled here
-        // instead of falling through to builtin_method.
-        // Both AST and VIR paths need special handling because the normal dispatch
-        // route for range.iter() resolves as Implemented (not Builtin) and calls the
-        // external function with wrong arguments (pointer instead of start/end pair).
-        match mc {
-            MethodCallSource::Ast(ast_mc) => {
-                let unwrapped_object = {
-                    let mut expr = &ast_mc.object;
-                    while let ExprKind::Grouping(inner) = &expr.kind {
-                        expr = inner;
-                    }
-                    expr
-                };
-                if let ExprKind::Range(range) = &unwrapped_object.kind {
-                    let method_name = self.interner().resolve(mc_method);
-                    if method_name == "iter" {
-                        return self.range_iter(range, concrete_return_hint);
-                    }
-                }
-            }
-            MethodCallSource::Vir { receiver, .. } => {
-                if let vole_vir::VirExpr::Range {
-                    start,
-                    end,
-                    inclusive,
-                } = *receiver
-                {
-                    let method_name = self.interner().resolve(mc_method);
-                    if method_name == "iter" {
-                        return self.vir_range_iter(start, end, *inclusive, concrete_return_hint);
-                    }
-                }
+        // Special handling needed because the normal dispatch route for range.iter() resolves as
+        // Implemented (not Builtin) and calls the external function with wrong arguments
+        // (pointer instead of start/end pair).
+        if let vole_vir::VirExpr::Range {
+            start,
+            end,
+            inclusive,
+        } = mc.receiver
+        {
+            let method_name = self.interner().resolve(mc_method);
+            if method_name == "iter" {
+                return self.vir_range_iter(start, end, *inclusive, concrete_return_hint);
             }
         }
 
         // Track whether the receiver is a global init producing an RC interface.
         // Global inits re-compile the expression each time, creating a temporary
         // allocation (closure boxed to interface) that must be freed after the call.
-        let receiver_is_global_init_rc_iface = match mc {
-            MethodCallSource::Ast(ast_mc) => {
-                if let ExprKind::Identifier(sym) = &ast_mc.object.kind {
-                    self.has_global_init(*sym)
-                } else {
-                    false
-                }
-            }
-            MethodCallSource::Vir { receiver, .. } => {
-                if let vole_vir::VirExpr::LocalLoad { name, .. } = receiver {
-                    self.has_global_init(*name)
-                } else {
-                    false
-                }
-            }
-        };
+        let receiver_is_global_init_rc_iface =
+            if let vole_vir::VirExpr::LocalLoad { name, .. } = mc.receiver {
+                self.has_global_init(*name)
+            } else {
+                false
+            };
 
         // Compile the receiver expression.
-        let obj = match mc {
-            MethodCallSource::Ast(ast_mc) => self.expr(&ast_mc.object)?,
-            MethodCallSource::Vir { receiver, .. } => self.compile_vir_expr(receiver)?,
-        };
+        let obj = self.compile_vir_expr(mc.receiver)?;
         let method_name_str = self.interner().resolve(mc_method);
 
         // Route method dispatch based on sema's MethodDispatchKind annotation.
         // In monomorphized contexts sema doesn't annotate (resolution is skipped),
         // so we fall back to type-detection for those cases.
-        let dispatch_kind = if let Some(dispatch) = vir_dispatch {
-            dispatch
-                .dispatch_kind
-                .map(sema_dispatch_kind_from_vir)
-                .unwrap_or_else(|| self.infer_method_dispatch_kind(&obj, method_name_str))
-        } else {
-            self.get_method_dispatch_kind(expr_id)
-                .unwrap_or_else(|| self.infer_method_dispatch_kind(&obj, method_name_str))
-        };
+        let dispatch_kind = dispatch
+            .dispatch_kind
+            .map(sema_dispatch_kind_from_vir)
+            .unwrap_or_else(|| self.infer_method_dispatch_kind(&obj, method_name_str));
         match dispatch_kind {
             vole_sema::MethodDispatchKind::Module(module_id) => {
                 return self.module_method_call(
                     module_id,
                     &mc.arg_source(),
                     method_name_str,
-                    if vir_dispatch.is_some() {
-                        None
-                    } else {
-                        Some(expr_id)
-                    },
-                    vir_dispatch.and_then(|d| d.resolved_method.as_ref()),
-                    vir_dispatch.and_then(|d| d.generic_monomorph.as_ref()),
+                    None,
+                    dispatch.resolved_method.as_ref(),
+                    dispatch.generic_monomorph.as_ref(),
                 );
             }
             vole_sema::MethodDispatchKind::Builtin => {
@@ -612,22 +460,16 @@ impl Cg<'_, '_, '_> {
         // (not sema annotation) because the Iterator<T> → RuntimeIterator<T>
         // conversion happens in codegen only.
         if let Some(elem_type_id) = self.arena().unwrap_runtime_iterator(obj.type_id) {
-            let return_type_hint = vir_dispatch
-                .and_then(|d| {
-                    d.substituted_return_type
-                        .map(|ty| self.sema_type_from_vir(ty))
-                })
+            let return_type_hint = dispatch
+                .substituted_return_type
+                .map(|ty| self.sema_type_from_vir(ty))
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &obj,
                 &mc.arg_source(),
                 method_name_str,
                 elem_type_id,
-                if vir_dispatch.is_some() {
-                    None
-                } else {
-                    Some(expr_id)
-                },
+                None,
                 return_type_hint,
             );
         }
@@ -635,35 +477,23 @@ impl Cg<'_, '_, '_> {
         // Handle custom Iterator<T> implementors: box as Iterator<T> interface,
         // wrap via InterfaceIter into RuntimeIterator, then dispatch the method.
         // Driven by sema's CoercionKind annotation — no type re-detection needed.
-        let iterator_wrap_elem_type = if let Some(dispatch) = vir_dispatch {
-            dispatch.receiver_coercion.map(|coercion| match coercion {
-                VirMethodReceiverCoercion::IteratorWrap { elem_type, .. } => {
-                    self.sema_type_from_vir(elem_type)
-                }
-            })
-        } else {
-            self.get_coercion_kind(expr_id).map(|kind| match kind {
-                vole_sema::CoercionKind::IteratorWrap { elem_type } => elem_type,
-            })
-        };
+        let iterator_wrap_elem_type = dispatch.receiver_coercion.map(|coercion| match coercion {
+            VirMethodReceiverCoercion::IteratorWrap { elem_type, .. } => {
+                self.sema_type_from_vir(elem_type)
+            }
+        });
         if let Some(elem_type) = iterator_wrap_elem_type {
             let runtime_iter = self.box_custom_iterator_to_runtime(&obj, elem_type)?;
-            let return_type_hint = vir_dispatch
-                .and_then(|d| {
-                    d.substituted_return_type
-                        .map(|ty| self.sema_type_from_vir(ty))
-                })
+            let return_type_hint = dispatch
+                .substituted_return_type
+                .map(|ty| self.sema_type_from_vir(ty))
                 .or_else(|| resolution.map(|r| self.resolved_return_type_id(r)));
             return self.runtime_iterator_method(
                 &runtime_iter,
                 &mc.arg_source(),
                 method_name_str,
                 elem_type,
-                if vir_dispatch.is_some() {
-                    None
-                } else {
-                    Some(expr_id)
-                },
+                None,
                 return_type_hint,
             );
         }
@@ -733,17 +563,12 @@ impl Cg<'_, '_, '_> {
             }
 
             // Functional interface calls
-            let functional_func_type_id = match resolved {
-                MethodResolutionRef::Ast(ResolvedMethod::FunctionalInterface {
-                    func_type_id,
-                    ..
-                }) => Some(*func_type_id),
-                MethodResolutionRef::Vir(VirResolvedMethod::FunctionalInterface {
-                    func_type_id,
-                    ..
-                }) => Some(self.sema_type_from_vir(*func_type_id)),
-                MethodResolutionRef::Ast(_) | MethodResolutionRef::Vir(_) => None,
-            };
+            let functional_func_type_id =
+                if let VirResolvedMethod::FunctionalInterface { func_type_id, .. } = resolved.0 {
+                    Some(self.sema_type_from_vir(*func_type_id))
+                } else {
+                    None
+                };
             if let Some(func_type_id) = functional_func_type_id {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
                 let interface_type_def_id = {
@@ -1073,13 +898,10 @@ impl Cg<'_, '_, '_> {
         // stale or collide across generic/module NodeIds.
         let mut return_type_id = if self.substitutions.is_some() {
             return_type_id
-        } else if let Some(dispatch) = vir_dispatch {
+        } else {
             dispatch
                 .substituted_return_type
                 .map(|ty| self.sema_type_from_vir(ty))
-                .unwrap_or(return_type_id)
-        } else {
-            self.get_substituted_return_type(&expr_id)
                 .unwrap_or(return_type_id)
         };
 
@@ -1095,26 +917,16 @@ impl Cg<'_, '_, '_> {
             return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
         }
 
-        let class_method_monomorph_key = vir_dispatch
-            .and_then(|dispatch| {
-                dispatch.class_method_generic.as_ref().map(|key| {
-                    ClassMethodMonomorphKey::new(
-                        key.class_name,
-                        key.method_name,
-                        key.type_keys
-                            .iter()
-                            .map(|&ty| self.sema_type_from_vir(ty))
-                            .collect(),
-                    )
-                })
-            })
-            .or_else(|| {
-                if vir_dispatch.is_some() {
-                    None
-                } else {
-                    self.analyzed().class_method_generic_at(expr_id).cloned()
-                }
-            });
+        let class_method_monomorph_key = dispatch.class_method_generic.as_ref().map(|key| {
+            ClassMethodMonomorphKey::new(
+                key.class_name,
+                key.method_name,
+                key.type_keys
+                    .iter()
+                    .map(|&ty| self.sema_type_from_vir(ty))
+                    .collect(),
+            )
+        });
 
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
@@ -1237,18 +1049,9 @@ impl Cg<'_, '_, '_> {
         };
         // When named args were used, sema stored a resolved_call_args mapping that tells
         // us which call.args[j] fills each parameter slot i (and None means use the default).
-        let named_mapping = vir_dispatch
-            .and_then(|dispatch| dispatch.resolved_call_args.clone())
-            .or_else(|| {
-                if vir_dispatch.is_some() {
-                    None
-                } else {
-                    self.analyzed()
-                        .node_map()
-                        .get_resolved_call_args(expr_id)
-                        .map(|s| s.to_vec())
-                }
-            })
+        let named_mapping = dispatch
+            .resolved_call_args
+            .clone()
             .filter(|mapping| mapping_is_valid(mapping));
         if let Some(ref mapping) = named_mapping {
             let method_id_for_defaults = resolution.and_then(|r| r.method_id());
