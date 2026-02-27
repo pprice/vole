@@ -12,6 +12,7 @@ use cranelift::prelude::{
 };
 use cranelift_codegen::ir::StackSlot;
 
+use vole_identity::VirTypeId;
 use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
@@ -114,22 +115,59 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(value, ty, type_id)
     }
 
-    /// Create a wide (i128/f128) literal from pre-split low/high u64 halves.
+    /// Create an integer constant using a VIR type ID.
     ///
-    /// Used by `compile_vir_expr` for `VirExpr::WideLiteral`. The low/high
-    /// values are produced during VIR lowering when the type is i128 or f128.
-    pub fn wide_literal_const(&mut self, low: u64, high: u64, type_id: TypeId) -> CompiledValue {
+    /// VIR-native version of `int_const` — queries VirTypeTable instead of
+    /// TypeArena. Returns a `CompiledValue` with both `type_id` (derived via
+    /// bridge for backward compat) and `vir_type_id` set.
+    pub fn vir_int_const(&mut self, n: i64, vir_ty: VirTypeId) -> CompiledValue {
+        let table = self.vir_type_table();
+        let is_union = table.is_union(vir_ty);
+        let cranelift_ty =
+            crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, table, self.ptr_type());
+        // If the VIR type resolved to float or union, fall back to i64
+        // (float conversion is handled by FloatLiteral, not int_const).
+        let (cranelift_ty, vir_ty) =
+            if cranelift_ty == types::F64 || cranelift_ty == types::F32 || is_union {
+                (types::I64, VirTypeId::I64)
+            } else {
+                (cranelift_ty, vir_ty)
+            };
+        let value = if cranelift_ty == types::I128 {
+            let i64_val = self.iconst_cached(types::I64, n);
+            sextend_const(self.builder, types::I128, i64_val)
+        } else if cranelift_ty == types::F128 {
+            let low = self.iconst_cached(types::I64, (n as f64).to_bits() as i64);
+            let wide = uextend_const(self.builder, types::I128, low);
+            self.builder
+                .ins()
+                .bitcast(types::F128, MemFlags::new(), wide)
+        } else {
+            self.iconst_cached(cranelift_ty, n)
+        };
+        let type_id = self.sema_type_from_vir(vir_ty);
+        CompiledValue::new(value, cranelift_ty, type_id).with_vir_type(vir_ty)
+    }
+
+    /// Create a wide (i128/f128) literal using a VIR type ID.
+    pub fn vir_wide_literal_const(
+        &mut self,
+        low: u64,
+        high: u64,
+        vir_ty: VirTypeId,
+    ) -> CompiledValue {
         let low_val = self.iconst_cached(types::I64, low as i64);
         let high_val = self.iconst_cached(types::I64, high as i64);
         let i128_val = crate::structs::reconstruct_i128(self.builder, low_val, high_val);
-        if type_id == TypeId::F128 {
+        let type_id = self.sema_type_from_vir(vir_ty);
+        if vir_ty == VirTypeId::F128 {
             let value = self
                 .builder
                 .ins()
                 .bitcast(types::F128, MemFlags::new(), i128_val);
-            CompiledValue::new(value, types::F128, type_id)
+            CompiledValue::new(value, types::F128, type_id).with_vir_type(vir_ty)
         } else {
-            CompiledValue::new(i128_val, types::I128, type_id)
+            CompiledValue::new(i128_val, types::I128, type_id).with_vir_type(vir_ty)
         }
     }
 
@@ -168,6 +206,40 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ),
         };
         CompiledValue::new(value, ty, type_id)
+    }
+
+    /// Create a float constant using a VIR type ID.
+    pub fn vir_float_const(&mut self, n: f64, vir_ty: VirTypeId) -> CompiledValue {
+        let table = self.vir_type_table();
+        if table.is_union(vir_ty) {
+            let v = self.builder.ins().f64const(n);
+            return CompiledValue::new(v, types::F64, TypeId::F64).with_vir_type(VirTypeId::F64);
+        }
+        let (ty, value) = match vir_ty {
+            VirTypeId::F32 => {
+                let v = self.builder.ins().f32const(n as f32);
+                (types::F32, v)
+            }
+            VirTypeId::F64 => {
+                let v = self.builder.ins().f64const(n);
+                (types::F64, v)
+            }
+            VirTypeId::F128 => {
+                let low = self.iconst_cached(types::I64, n.to_bits() as i64);
+                let wide = uextend_const(self.builder, types::I128, low);
+                let v = self
+                    .builder
+                    .ins()
+                    .bitcast(types::F128, MemFlags::new(), wide);
+                (types::F128, v)
+            }
+            _ => unreachable!(
+                "INTERNAL: vir_float_const called with non-float VIR type {:?}",
+                vir_ty
+            ),
+        };
+        let type_id = self.sema_type_from_vir(vir_ty);
+        CompiledValue::new(value, ty, type_id).with_vir_type(vir_ty)
     }
 
     // ========== Tag helpers ==========

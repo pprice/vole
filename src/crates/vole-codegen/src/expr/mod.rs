@@ -359,24 +359,12 @@ impl Cg<'_, '_, '_> {
     pub fn compile_vir_expr(&mut self, vir_expr: &VirExpr) -> CodegenResult<CompiledValue> {
         let result = match vir_expr {
             // -- Lowered literals -----------------------------------------
-            VirExpr::IntLiteral { value, ty, .. } => {
-                let type_id = if *ty == VirTypeId::UNKNOWN {
-                    TypeId::I64
-                } else {
-                    self.sema_type_from_vir(*ty)
-                };
-                Ok(self.int_const(*value, type_id))
-            }
-            VirExpr::WideLiteral { low, high, ty, .. } => {
-                Ok(self.wide_literal_const(*low, *high, self.sema_type_from_vir(*ty)))
-            }
-            VirExpr::FloatLiteral { value, ty, .. } => {
-                let type_id = if *ty == VirTypeId::UNKNOWN {
-                    TypeId::F64
-                } else {
-                    self.sema_type_from_vir(*ty)
-                };
-                Ok(self.float_const(*value, type_id))
+            VirExpr::IntLiteral { value, vir_ty, .. } => Ok(self.vir_int_const(*value, *vir_ty)),
+            VirExpr::WideLiteral {
+                low, high, vir_ty, ..
+            } => Ok(self.vir_wide_literal_const(*low, *high, *vir_ty)),
+            VirExpr::FloatLiteral { value, vir_ty, .. } => {
+                Ok(self.vir_float_const(*value, *vir_ty))
             }
             VirExpr::BoolLiteral(b) => Ok(self.bool_const(*b)),
             VirExpr::StringLiteral(sym) => {
@@ -390,17 +378,18 @@ impl Cg<'_, '_, '_> {
 
             // -- Simple expressions -----------------------------------------
             VirExpr::Unreachable { line } => self.unreachable_expr(*line),
-            VirExpr::Import { ty, .. } => {
+            VirExpr::Import { ty, vir_ty } => {
+                // Module types don't round-trip through vir_to_sema losslessly,
+                // so read the sema-encoded `ty` for backward compat.
                 let type_id = if *ty == VirTypeId::UNKNOWN {
                     TypeId::I64
                 } else {
                     self.sema_type_from_vir(*ty)
                 };
-                Ok(CompiledValue::new(
-                    self.iconst_cached(types::I64, 0),
-                    types::I64,
-                    type_id,
-                ))
+                Ok(
+                    CompiledValue::new(self.iconst_cached(types::I64, 0), types::I64, type_id)
+                        .with_vir_type(*vir_ty),
+                )
             }
             VirExpr::TypeLiteral => Err(CodegenError::unsupported(
                 "type expressions as runtime values",
