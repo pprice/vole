@@ -3,15 +3,15 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use crate::LoweringEntityLookup;
+use crate::{NodeMap, TypeArena};
 use vole_frontend::ast::{ExternalFunc, FuncDecl};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{FunctionId, ModuleId, NameTable, Span};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;
 
-pub(crate) struct LowerFunctionDefaultInitsArgs<'a> {
+pub struct LowerFunctionDefaultInitsArgs<'a> {
     pub program: &'a Program,
     pub interner: &'a mut Interner,
     pub module_id: ModuleId,
@@ -23,7 +23,7 @@ pub(crate) struct LowerFunctionDefaultInitsArgs<'a> {
     pub type_table: &'a mut VirTypeTable,
 }
 
-pub(crate) struct LowerModuleFunctionDefaultInitsArgs<'a> {
+pub struct LowerModuleFunctionDefaultInitsArgs<'a> {
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
     pub names: &'a NameTable,
     pub entities: &'a dyn LoweringEntityLookup,
@@ -34,7 +34,7 @@ pub(crate) struct LowerModuleFunctionDefaultInitsArgs<'a> {
 }
 
 /// Lower default parameter expressions for functions in the main program.
-pub(crate) fn lower_function_default_inits(
+pub fn lower_function_default_inits(
     args: LowerFunctionDefaultInitsArgs<'_>,
 ) -> FxHashMap<(FunctionId, usize), VirRef> {
     let LowerFunctionDefaultInitsArgs {
@@ -49,7 +49,7 @@ pub(crate) fn lower_function_default_inits(
         type_table,
     } = args;
 
-    let mut ctx = vole_sema::vir_lower::LoweringCtx {
+    let mut ctx = crate::vir_lower::LoweringCtx {
         node_map,
         interner,
         type_arena,
@@ -72,7 +72,7 @@ pub(crate) fn lower_function_default_inits(
 }
 
 /// Lower default parameter expressions for imported-module functions.
-pub(crate) fn lower_module_function_default_inits(
+pub fn lower_module_function_default_inits(
     args: LowerModuleFunctionDefaultInitsArgs<'_>,
 ) -> FxHashMap<(FunctionId, usize), VirRef> {
     let LowerModuleFunctionDefaultInitsArgs {
@@ -94,7 +94,7 @@ pub(crate) fn lower_module_function_default_inits(
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
-        let mut ctx = vole_sema::vir_lower::LoweringCtx {
+        let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
             interner,
             type_arena,
@@ -123,7 +123,7 @@ fn lower_function_default_inits_in_decls(
     tests_virtual_modules: Option<&FxHashMap<Span, ModuleId>>,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(FunctionId, usize), VirRef>,
 ) {
     for decl in decls {
@@ -168,10 +168,10 @@ fn lower_external_function_default_params(
     module_id: ModuleId,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(FunctionId, usize), VirRef>,
 ) {
-    use vole_sema::vir_lower::expr::lower_expr;
+    use crate::vir_lower::expr::lower_expr;
 
     let Some(name_id) = names.name_id(module_id, &[func.vole_name], ctx.interner) else {
         return;
@@ -197,10 +197,10 @@ fn lower_function_default_params(
     module_id: ModuleId,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(FunctionId, usize), VirRef>,
 ) {
-    use vole_sema::vir_lower::expr::lower_expr;
+    use crate::vir_lower::expr::lower_expr;
 
     let Some(name_id) = names.name_id(module_id, &[func.name], ctx.interner) else {
         return;

@@ -3,14 +3,12 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed_lower_implement_blocks::{
-    collect_default_method_ids, find_interface_method_ast,
-};
+use super::implement_blocks::{collect_default_method_ids, find_interface_method_ast};
+use crate::LoweringEntityLookup;
+use crate::vir_lower::{lower_interface_method, lower_method};
+use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{MethodId, ModuleId, NameTable};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::vir_lower::{lower_interface_method, lower_method};
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
@@ -19,7 +17,7 @@ use vole_vir::type_table::VirTypeTable;
 /// Iterates the program's class and struct declarations, looks up each type's
 /// methods in the entity registry, and lowers non-generic methods to VIR.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn lower_top_level_type_methods(
+pub fn lower_top_level_type_methods(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,
@@ -116,7 +114,7 @@ pub(crate) fn lower_top_level_type_methods(
 
 /// Lower instance methods and static methods for a single type declaration.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn lower_type_methods(
+pub fn lower_type_methods(
     methods: &[vole_frontend::FuncDecl],
     statics: Option<&vole_frontend::ast::StaticsBlock>,
     type_name: Symbol,
@@ -232,7 +230,7 @@ pub(crate) fn lower_type_methods(
 /// the default. This covers default methods from the type's own `implements` clause,
 /// as opposed to `lower_implement_default_methods` which covers `extend T with I` blocks.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn lower_type_default_methods(
+pub fn lower_type_default_methods(
     direct_method_names: &HashSet<String>,
     type_name: Symbol,
     interner: &mut Interner,
@@ -306,7 +304,7 @@ pub(crate) fn lower_type_default_methods(
 fn lower_single_method(
     method: &vole_frontend::FuncDecl,
     method_id: MethodId,
-    method_def: &vole_sema::MethodDef,
+    method_def: &crate::MethodDef,
     type_name_str: &str,
     interner: &mut Interner,
     names: &NameTable,
@@ -357,7 +355,7 @@ fn lower_single_method(
 /// lookup, so we collect per-type work items during the first (mutable) pass
 /// and process them in a second (immutable) pass.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn lower_module_type_methods(
+pub fn lower_module_type_methods(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
     entities: &impl LoweringEntityLookup,

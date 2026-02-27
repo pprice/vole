@@ -3,17 +3,17 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed_lower_monomorph_functions::body_has_sema_data;
+use super::monomorph_functions::body_has_sema_data;
+use crate::LoweringEntityLookup;
+use crate::vir_lower::{lower_interface_method, lower_method};
+use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{MethodId, ModuleId, NameId, NameTable, Span};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::vir_lower::{lower_interface_method, lower_method};
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
 /// Shared references used while lowering class/static method monomorphs to VIR.
-pub(crate) struct MethodMonomorphLoweringCtx<'a> {
+pub struct MethodMonomorphLoweringCtx<'a> {
     pub names: &'a NameTable,
     pub entities: &'a dyn LoweringEntityLookup,
     pub type_arena: &'a TypeArena,
@@ -22,7 +22,7 @@ pub(crate) struct MethodMonomorphLoweringCtx<'a> {
 }
 
 /// Mutable state used while lowering class/static method monomorphs to VIR.
-pub(crate) struct MethodMonomorphLoweringWork<'a> {
+pub struct MethodMonomorphLoweringWork<'a> {
     pub program: &'a Program,
     pub interner: &'a mut Interner,
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
@@ -33,7 +33,7 @@ pub(crate) struct MethodMonomorphLoweringWork<'a> {
 }
 
 /// Lower class/static method monomorph cache entries into VIR.
-pub(crate) fn lower_type_method_monomorphized_instances(
+pub fn lower_type_method_monomorphized_instances(
     work: &mut MethodMonomorphLoweringWork<'_>,
     ctx: &MethodMonomorphLoweringCtx<'_>,
 ) {
@@ -181,7 +181,7 @@ fn lower_static_method_monomorphized_instances(
 /// Lower a single class method monomorph to a VIR function tagged by mangled name.
 fn lower_class_method_monomorph_vir(
     method: &vole_frontend::FuncDecl,
-    instance: &vole_sema::generic::ClassMethodMonomorphInstance,
+    instance: &crate::generic::ClassMethodMonomorphInstance,
     interner: &mut Interner,
     ctx: &MethodMonomorphLoweringCtx<'_>,
     type_table: &mut VirTypeTable,
@@ -220,7 +220,7 @@ fn lower_class_method_monomorph_vir(
 /// Lower a single static method monomorph to a VIR function tagged by mangled name.
 fn lower_static_method_monomorph_vir(
     method: &vole_frontend::ast::InterfaceMethod,
-    instance: &vole_sema::generic::StaticMethodMonomorphInstance,
+    instance: &crate::generic::StaticMethodMonomorphInstance,
     interner: &mut Interner,
     ctx: &MethodMonomorphLoweringCtx<'_>,
     type_table: &mut VirTypeTable,

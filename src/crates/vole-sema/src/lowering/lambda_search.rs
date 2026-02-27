@@ -6,7 +6,7 @@ use vole_frontend::{Decl, Expr, ExprKind, LambdaExpr, Program, Stmt};
 use vole_identity::NodeId;
 
 /// Find a lambda expression by NodeId in a program.
-pub(crate) fn find_lambda_in_program(program: &Program, node_id: NodeId) -> Option<&LambdaExpr> {
+pub fn find_lambda_in_program(program: &Program, node_id: NodeId) -> Option<&LambdaExpr> {
     // Search expressions in declarations and statements
     for decl in &program.declarations {
         if let Some(lambda) = find_lambda_in_decl(decl, node_id) {

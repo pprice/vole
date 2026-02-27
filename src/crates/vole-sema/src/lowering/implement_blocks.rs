@@ -3,15 +3,15 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use crate::LoweringEntityLookup;
+use crate::vir_lower::{lower_interface_method, lower_method};
+use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{MethodId, ModuleId, NameTable, NamerLookup, TypeDefId};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::vir_lower::{lower_interface_method, lower_method};
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
-pub(crate) struct LowerImplementBlockMethodsArgs<'a> {
+pub struct LowerImplementBlockMethodsArgs<'a> {
     pub program: &'a Program,
     pub interner: &'a mut Interner,
     pub names: &'a NameTable,
@@ -23,7 +23,7 @@ pub(crate) struct LowerImplementBlockMethodsArgs<'a> {
     pub type_table: &'a mut VirTypeTable,
 }
 
-pub(crate) struct LowerModuleImplementBlockMethodsArgs<'a> {
+pub struct LowerModuleImplementBlockMethodsArgs<'a> {
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
     pub names: &'a NameTable,
     pub entities: &'a dyn LoweringEntityLookup,
@@ -34,7 +34,7 @@ pub(crate) struct LowerModuleImplementBlockMethodsArgs<'a> {
     pub type_table: &'a mut VirTypeTable,
 }
 
-pub(crate) struct LowerImplementDirectMethodsArgs<'a> {
+pub struct LowerImplementDirectMethodsArgs<'a> {
     pub methods: &'a [vole_frontend::FuncDecl],
     pub type_def_id: TypeDefId,
     pub interner: &'a mut Interner,
@@ -46,7 +46,7 @@ pub(crate) struct LowerImplementDirectMethodsArgs<'a> {
     pub type_table: &'a mut VirTypeTable,
 }
 
-pub(crate) struct LowerImplementStaticMethodsArgs<'a> {
+pub struct LowerImplementStaticMethodsArgs<'a> {
     pub statics: &'a vole_frontend::ast::StaticsBlock,
     pub type_def_id: TypeDefId,
     pub interner: &'a mut Interner,
@@ -58,7 +58,7 @@ pub(crate) struct LowerImplementStaticMethodsArgs<'a> {
     pub type_table: &'a mut VirTypeTable,
 }
 
-pub(crate) struct LowerImplementDefaultMethodsArgs<'a> {
+pub struct LowerImplementDefaultMethodsArgs<'a> {
     pub impl_block: &'a vole_frontend::ast::ImplementBlock,
     pub type_def_id: TypeDefId,
     pub interner: &'a mut Interner,
@@ -91,7 +91,7 @@ struct LowerSingleImplementBlockArgs<'a> {
 /// method's `MethodId` from the entity registry, and lowers the body.
 /// Default interface methods (not in the implement block AST) are handled
 /// by `lower_implement_default_methods`.
-pub(crate) fn lower_implement_block_methods(args: LowerImplementBlockMethodsArgs<'_>) {
+pub fn lower_implement_block_methods(args: LowerImplementBlockMethodsArgs<'_>) {
     let LowerImplementBlockMethodsArgs {
         program,
         interner,
@@ -191,7 +191,7 @@ fn lower_single_implement_block(args: LowerSingleImplementBlockArgs<'_>) {
 /// Resolve the target type of an implement block to a `TypeDefId`.
 ///
 /// Handles `Named`, `Generic`, `Primitive`, `Handle`, and `Array` target types.
-pub(crate) fn resolve_implement_target(
+pub fn resolve_implement_target(
     target_type: &vole_frontend::TypeExpr,
     interner: &Interner,
     names: &NameTable,
@@ -237,7 +237,7 @@ pub(crate) fn resolve_implement_target(
 }
 
 /// Lower direct instance methods from an implement block to VIR.
-pub(crate) fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>) {
+pub fn lower_implement_direct_methods(args: LowerImplementDirectMethodsArgs<'_>) {
     let LowerImplementDirectMethodsArgs {
         methods,
         type_def_id,
@@ -301,7 +301,7 @@ pub(crate) fn lower_implement_direct_methods(args: LowerImplementDirectMethodsAr
 }
 
 /// Lower static methods from an implement block's statics section to VIR.
-pub(crate) fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>) {
+pub fn lower_implement_static_methods(args: LowerImplementStaticMethodsArgs<'_>) {
     let LowerImplementStaticMethodsArgs {
         statics,
         type_def_id,
@@ -370,7 +370,7 @@ pub(crate) fn lower_implement_static_methods(args: LowerImplementStaticMethodsAr
 /// by the implement block's direct methods. For each such default method,
 /// finds the interface AST body and lowers it with the implementing type's
 /// `MethodId`.
-pub(crate) fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_>) {
+pub fn lower_implement_default_methods(args: LowerImplementDefaultMethodsArgs<'_>) {
     let LowerImplementDefaultMethodsArgs {
         impl_block,
         type_def_id,
@@ -441,7 +441,7 @@ pub(crate) fn lower_implement_default_methods(args: LowerImplementDefaultMethods
 /// Collect interface default method IDs for a type, skipping overridden ones.
 ///
 /// Returns `(impl_method_id, method_name_str, interface_tdef_id)` tuples.
-pub(crate) fn collect_default_method_ids(
+pub fn collect_default_method_ids(
     type_def_id: TypeDefId,
     entities: &dyn LoweringEntityLookup,
     names: &NameTable,
@@ -475,7 +475,7 @@ pub(crate) fn collect_default_method_ids(
 /// Find an interface method AST node by interface and method name.
 ///
 /// Searches the main program and, when provided, imported module programs.
-pub(crate) fn find_interface_method_ast<'a>(
+pub fn find_interface_method_ast<'a>(
     interface_name: &str,
     method_name: &str,
     program: &'a Program,
@@ -522,7 +522,7 @@ pub(crate) fn find_interface_method_ast<'a>(
 /// Two-pass behavior:
 /// 1) lower direct instance + static methods
 /// 2) lower inherited interface default methods
-pub(crate) fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMethodsArgs<'_>) {
+pub fn lower_module_implement_block_methods(args: LowerModuleImplementBlockMethodsArgs<'_>) {
     let LowerModuleImplementBlockMethodsArgs {
         module_programs,
         names,

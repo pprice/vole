@@ -3,17 +3,17 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed_lower_implement_blocks::{
+use super::implement_blocks::{
     LowerImplementDefaultMethodsArgs, LowerImplementDirectMethodsArgs,
     LowerImplementStaticMethodsArgs, lower_implement_default_methods,
     lower_implement_direct_methods, lower_implement_static_methods, resolve_implement_target,
 };
-use crate::analyzed_lower_type_methods::{lower_type_default_methods, lower_type_methods};
+use super::type_methods::{lower_type_default_methods, lower_type_methods};
+use crate::LoweringEntityLookup;
+use crate::vir_lower::lower_function;
+use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{ModuleId, NameTable, NamerLookup, Span};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::vir_lower::lower_function;
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
@@ -23,7 +23,7 @@ use vole_vir::type_table::VirTypeTable;
 /// are scoped to a virtual module. This function recursively walks `Decl::Tests`
 /// blocks and lowers their class/struct methods (direct + default) to VIR.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn lower_test_scoped_type_methods(
+pub fn lower_test_scoped_type_methods(
     program: &Program,
     interner: &mut Interner,
     names: &NameTable,

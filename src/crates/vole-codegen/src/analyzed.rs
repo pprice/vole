@@ -5,12 +5,12 @@ use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use crate::analyzed_lowering_facade::{LowerVirProgramArgs, lower_vir_program};
 use crate::entity_view::EntityView;
 use vole_frontend::{Interner, Program, Symbol};
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
 };
+use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 use vole_sema::{AnalysisOutput, ImplementRegistry, NodeMap, TypeArena};
 use vole_vir::{VirBody, VirFunction, VirProgram};
 

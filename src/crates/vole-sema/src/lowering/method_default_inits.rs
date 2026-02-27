@@ -3,17 +3,17 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use crate::LoweringEntityLookup;
+use crate::{NodeMap, TypeArena};
 use vole_frontend::ast::{
     ExternalBlock, ExternalFunc, FuncDecl, ImplementBlock, InterfaceMethod, Param, StaticsBlock,
 };
 use vole_frontend::{Decl, Interner, PrimitiveType, Program, Symbol, TypeExpr, TypeExprKind};
 use vole_identity::{MethodId, ModuleId, NameTable, NamerLookup, Span, TypeDefId};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;
 
-pub(crate) struct LowerMethodDefaultInitsArgs<'a> {
+pub struct LowerMethodDefaultInitsArgs<'a> {
     pub program: &'a Program,
     pub interner: &'a mut Interner,
     pub module_id: ModuleId,
@@ -25,7 +25,7 @@ pub(crate) struct LowerMethodDefaultInitsArgs<'a> {
     pub type_table: &'a mut VirTypeTable,
 }
 
-pub(crate) struct LowerModuleMethodDefaultInitsArgs<'a> {
+pub struct LowerModuleMethodDefaultInitsArgs<'a> {
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
     pub names: &'a NameTable,
     pub entities: &'a dyn LoweringEntityLookup,
@@ -36,7 +36,7 @@ pub(crate) struct LowerModuleMethodDefaultInitsArgs<'a> {
 }
 
 /// Lower default parameter expressions for methods in the main program.
-pub(crate) fn lower_method_default_inits(
+pub fn lower_method_default_inits(
     args: LowerMethodDefaultInitsArgs<'_>,
 ) -> FxHashMap<(MethodId, usize), VirRef> {
     let LowerMethodDefaultInitsArgs {
@@ -51,7 +51,7 @@ pub(crate) fn lower_method_default_inits(
         type_table,
     } = args;
 
-    let mut ctx = vole_sema::vir_lower::LoweringCtx {
+    let mut ctx = crate::vir_lower::LoweringCtx {
         node_map,
         interner,
         type_arena,
@@ -74,7 +74,7 @@ pub(crate) fn lower_method_default_inits(
 }
 
 /// Lower default parameter expressions for methods in imported modules.
-pub(crate) fn lower_module_method_default_inits(
+pub fn lower_module_method_default_inits(
     args: LowerModuleMethodDefaultInitsArgs<'_>,
 ) -> FxHashMap<(MethodId, usize), VirRef> {
     let LowerModuleMethodDefaultInitsArgs {
@@ -96,7 +96,7 @@ pub(crate) fn lower_module_method_default_inits(
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
-        let mut ctx = vole_sema::vir_lower::LoweringCtx {
+        let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
             interner,
             type_arena,
@@ -125,7 +125,7 @@ fn lower_method_default_inits_in_decls(
     tests_virtual_modules: Option<&FxHashMap<Span, ModuleId>>,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
     for decl in decls {
@@ -213,7 +213,7 @@ fn lower_type_decl_method_default_inits<'a>(
     module_id: ModuleId,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
     let Some(type_name_id) = names.name_id(module_id, &[type_name], ctx.interner) else {
@@ -286,7 +286,7 @@ fn lower_interface_method_decl_defaults(
     module_id: ModuleId,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
     let Some(type_name_id) = names.name_id(module_id, &[type_name], ctx.interner) else {
@@ -323,7 +323,7 @@ fn lower_external_method_decl_defaults(
     funcs: &[ExternalFunc],
     is_static: bool,
     names: &NameTable,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     entities: &dyn LoweringEntityLookup,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
@@ -355,7 +355,7 @@ fn lower_implement_method_default_inits(
     module_id: ModuleId,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
     let Some(type_def_id) = resolve_implement_target_for_defaults(
@@ -477,10 +477,10 @@ fn resolve_implement_target_for_defaults(
 fn lower_method_default_params(
     method_id: MethodId,
     params: &[Param],
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<(MethodId, usize), VirRef>,
 ) {
-    use vole_sema::vir_lower::expr::lower_expr;
+    use crate::vir_lower::expr::lower_expr;
 
     for (slot, param) in params.iter().enumerate() {
         let Some(default_expr) = param.default_value.as_ref() else {

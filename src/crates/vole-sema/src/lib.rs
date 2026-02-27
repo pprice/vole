@@ -8,6 +8,7 @@ pub mod entity_registry;
 pub mod errors;
 pub mod generic;
 pub mod implement_registry;
+pub mod lowering;
 pub mod lowering_lookup;
 pub mod memory_kind;
 pub mod module;

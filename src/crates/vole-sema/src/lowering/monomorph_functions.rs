@@ -3,17 +3,17 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use crate::LoweringEntityLookup;
+use crate::generic::MonomorphInstance;
+use crate::vir_lower::lower_monomorphized_function;
+use crate::{NodeMap, TypeArena};
 use vole_frontend::ast::{FuncBody, Stmt};
 use vole_frontend::{Decl, FuncDecl, Interner, Program};
 use vole_identity::{FunctionId, ModuleId, NameId, NameTable, NamerLookup, NodeId, Span};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::generic::MonomorphInstance;
-use vole_sema::vir_lower::lower_monomorphized_function;
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
-pub(crate) struct LowerMonomorphizedInstancesArgs<'a, 'decl> {
+pub struct LowerMonomorphizedInstancesArgs<'a, 'decl> {
     pub generic_func_asts: &'a FxHashMap<NameId, &'decl FuncDecl>,
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
     pub names: &'a NameTable,
@@ -64,7 +64,7 @@ struct LowerModuleMonomorphArgs<'a> {
 /// module-originating generics without VIR templates) are lowered here.
 ///
 /// Debug-asserts that no `TypeId` in the output contains a type parameter.
-pub(crate) fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '_>) {
+pub fn lower_monomorphized_instances(args: LowerMonomorphizedInstancesArgs<'_, '_>) {
     let LowerMonomorphizedInstancesArgs {
         generic_func_asts,
         module_programs,
@@ -255,7 +255,7 @@ fn lower_module_monomorph(args: LowerModuleMonomorphArgs<'_>) {
 /// generics. This check is a safety guard: if sema analysis failed to
 /// populate the NodeMap for a body (e.g., due to errors), VIR lowering would
 /// panic, so we skip and let codegen fall back to the AST path.
-pub(crate) fn body_has_sema_data(body: &FuncBody, node_map: &NodeMap) -> bool {
+pub fn body_has_sema_data(body: &FuncBody, node_map: &NodeMap) -> bool {
     match body {
         FuncBody::Expr(expr) => node_map.get_type(expr.id).is_some(),
         FuncBody::Block(block) => {
@@ -293,7 +293,7 @@ fn first_expr_node_id(stmt: &Stmt) -> Option<NodeId> {
 /// registry, e.g. structural type params). Recurses into `Decl::Tests`
 /// blocks so that test-scoped generic functions are also available for
 /// monomorphized VIR lowering.
-pub(crate) fn build_generic_func_map<'decl>(
+pub fn build_generic_func_map<'decl>(
     program: &'decl Program,
     interner: &Interner,
     names: &NameTable,

@@ -9,10 +9,8 @@
 //   string_ops     - string literal, interpolation, and value-to-string conversion
 
 mod closure_calls;
-mod lambda_search;
 mod native_calls;
 pub(crate) mod string_ops;
-pub(crate) use lambda_search::find_lambda_in_program;
 
 use cranelift::prelude::*;
 use cranelift_module::Module;

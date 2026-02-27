@@ -3,15 +3,15 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::calls::find_lambda_in_program;
+use super::lambda_search::find_lambda_in_program;
+use crate::LoweringEntityLookup;
+use crate::{NodeMap, TypeArena};
 use vole_frontend::{Interner, Program};
 use vole_identity::{ModuleId, NameTable, NodeId, Span};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;
 
-pub(crate) struct LowerLambdaDefaultInitsArgs<'a> {
+pub struct LowerLambdaDefaultInitsArgs<'a> {
     pub program: &'a Program,
     pub interner: &'a mut Interner,
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
@@ -39,7 +39,7 @@ struct LowerSingleLambdaDefaultInitArgs<'a> {
 
 /// Lower default parameter expressions for lambdas referenced by call-site
 /// `LambdaDefaults` metadata.
-pub(crate) fn lower_lambda_default_inits(
+pub fn lower_lambda_default_inits(
     args: LowerLambdaDefaultInitsArgs<'_>,
 ) -> FxHashMap<(NodeId, usize), VirRef> {
     let LowerLambdaDefaultInitsArgs {
@@ -109,7 +109,7 @@ pub(crate) fn lower_lambda_default_inits(
 
 /// Lower default parameter expressions for a single lambda expression node.
 fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) {
-    use vole_sema::vir_lower::expr::lower_expr;
+    use crate::vir_lower::expr::lower_expr;
 
     let LowerSingleLambdaDefaultInitArgs {
         lambda_node_id,
@@ -127,7 +127,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         return;
     };
 
-    let mut ctx = vole_sema::vir_lower::LoweringCtx {
+    let mut ctx = crate::vir_lower::LoweringCtx {
         node_map,
         interner,
         type_arena,

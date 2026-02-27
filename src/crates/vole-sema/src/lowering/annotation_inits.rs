@@ -7,18 +7,18 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::LoweringEntityLookup;
+use crate::entity_defs::ValidatedAnnotation;
 use vole_frontend::Interner;
 use vole_frontend::ast::ExprKind;
 use vole_identity::{FieldId, NameId, NameTable};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::entity_defs::ValidatedAnnotation;
 use vole_vir::types::{VirAnnotation, VirAnnotationValue, VirConstant};
 
 /// Lower all field annotations in the entity registry to VIR constants.
 ///
 /// Returns a map from `FieldId` to lowered annotations. Only fields that
 /// have at least one annotation are included.
-pub(crate) fn lower_annotation_inits<E: LoweringEntityLookup>(
+pub fn lower_annotation_inits<E: LoweringEntityLookup>(
     entities: &E,
     interner: &mut Interner,
     names: &NameTable,

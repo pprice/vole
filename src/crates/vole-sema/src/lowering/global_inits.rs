@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use crate::LoweringEntityLookup;
+use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, LetInit, Program, Symbol};
 use vole_identity::NameTable;
-use vole_sema::LoweringEntityLookup;
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;
 
@@ -14,7 +14,7 @@ use vole_vir::type_table::VirTypeTable;
 ///
 /// Iterates `Decl::Let` declarations and lowers each initializer expression
 /// using `lower_expr`. The resulting map is keyed by the binding's `Symbol`.
-pub(crate) fn lower_global_inits(
+pub fn lower_global_inits(
     program: &Program,
     interner: &mut Interner,
     node_map: &NodeMap,
@@ -23,8 +23,8 @@ pub(crate) fn lower_global_inits(
     names: &NameTable,
     type_table: &mut VirTypeTable,
 ) -> FxHashMap<Symbol, VirRef> {
-    use vole_sema::vir_lower::LoweringCtx;
-    use vole_sema::vir_lower::expr::lower_expr;
+    use crate::vir_lower::LoweringCtx;
+    use crate::vir_lower::expr::lower_expr;
 
     let mut ctx = LoweringCtx {
         node_map,
@@ -56,7 +56,7 @@ pub(crate) fn lower_global_inits(
 /// Iterates each module's `Decl::Let` declarations and lowers their
 /// initializer expressions. Returns a nested map keyed first by module path,
 /// then by the binding's `Symbol`.
-pub(crate) fn lower_module_global_inits(
+pub fn lower_module_global_inits(
     module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
     names: &NameTable,
     node_map: &NodeMap,
@@ -65,7 +65,7 @@ pub(crate) fn lower_module_global_inits(
     modules_with_errors: &HashSet<String>,
     type_table: &mut VirTypeTable,
 ) -> FxHashMap<String, FxHashMap<Symbol, VirRef>> {
-    use vole_sema::vir_lower::expr::lower_expr;
+    use crate::vir_lower::expr::lower_expr;
 
     let mut result = FxHashMap::default();
     for (module_path, (program, module_interner)) in module_programs.iter_mut() {
@@ -73,7 +73,7 @@ pub(crate) fn lower_module_global_inits(
             continue;
         }
         let interner = Rc::make_mut(module_interner);
-        let mut ctx = vole_sema::vir_lower::LoweringCtx {
+        let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
             interner,
             type_arena,

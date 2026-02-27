@@ -3,15 +3,15 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use crate::LoweringEntityLookup;
+use crate::{NodeMap, TypeArena};
 use vole_frontend::ast::FieldDef;
 use vole_frontend::{Decl, Interner, Program, Symbol};
 use vole_identity::{FieldId, ModuleId, NameTable, Span};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirRef;
 use vole_vir::type_table::VirTypeTable;
 
-pub(crate) struct LowerFieldDefaultInitsArgs<'a> {
+pub struct LowerFieldDefaultInitsArgs<'a> {
     pub program: &'a Program,
     pub interner: &'a mut Interner,
     pub module_id: ModuleId,
@@ -23,7 +23,7 @@ pub(crate) struct LowerFieldDefaultInitsArgs<'a> {
     pub type_table: &'a mut VirTypeTable,
 }
 
-pub(crate) struct LowerModuleFieldDefaultInitsArgs<'a> {
+pub struct LowerModuleFieldDefaultInitsArgs<'a> {
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
     pub names: &'a NameTable,
     pub entities: &'a dyn LoweringEntityLookup,
@@ -37,10 +37,10 @@ pub(crate) struct LowerModuleFieldDefaultInitsArgs<'a> {
 ///
 /// Includes declarations nested in `tests {}` blocks (using virtual test-module
 /// IDs when available) so test-scoped types can use VIR default initializers.
-pub(crate) fn lower_field_default_inits(
+pub fn lower_field_default_inits(
     args: LowerFieldDefaultInitsArgs<'_>,
 ) -> FxHashMap<FieldId, VirRef> {
-    use vole_sema::vir_lower::LoweringCtx;
+    use crate::vir_lower::LoweringCtx;
 
     let LowerFieldDefaultInitsArgs {
         program,
@@ -77,7 +77,7 @@ pub(crate) fn lower_field_default_inits(
 }
 
 /// Lower default field initializer expressions from imported module type declarations to VIR.
-pub(crate) fn lower_module_field_default_inits(
+pub fn lower_module_field_default_inits(
     args: LowerModuleFieldDefaultInitsArgs<'_>,
 ) -> FxHashMap<FieldId, VirRef> {
     let LowerModuleFieldDefaultInitsArgs {
@@ -99,7 +99,7 @@ pub(crate) fn lower_module_field_default_inits(
             .module_id_if_known(module_path)
             .unwrap_or_else(|| names.main_module());
         let interner = Rc::make_mut(module_interner);
-        let mut ctx = vole_sema::vir_lower::LoweringCtx {
+        let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
             interner,
             type_arena,
@@ -128,7 +128,7 @@ fn lower_field_default_inits_in_decls(
     tests_virtual_modules: Option<&FxHashMap<Span, ModuleId>>,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<FieldId, VirRef>,
 ) {
     for decl in decls {
@@ -181,10 +181,10 @@ fn lower_type_default_fields(
     module_id: ModuleId,
     names: &NameTable,
     entities: &dyn LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
+    ctx: &mut crate::vir_lower::LoweringCtx<'_>,
     map: &mut FxHashMap<FieldId, VirRef>,
 ) {
-    use vole_sema::vir_lower::expr::lower_expr;
+    use crate::vir_lower::expr::lower_expr;
 
     let Some(type_name_id) = names.name_id(module_id, &[type_name], ctx.interner) else {
         return;

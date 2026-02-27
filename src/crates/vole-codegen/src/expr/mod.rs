@@ -402,11 +402,7 @@ impl Cg<'_, '_, '_> {
 
             // -- Operators ------------------------------------------------
             VirExpr::BinaryOp {
-                op,
-                lhs,
-                rhs,
-                line,
-                ..
+                op, lhs, rhs, line, ..
             } => self.compile_vir_binary_op(*op, lhs, rhs, *line),
             VirExpr::UnaryOp { op, operand, .. } => self.compile_vir_unary_op(*op, operand),
             VirExpr::StringConcat { parts } => self.compile_vir_string_concat(parts),
@@ -524,11 +520,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // -- Field access -------------------------------------------------
-            VirExpr::FieldLoad {
-                object,
-                field,
-                ..
-            } => self.compile_vir_field_load(object, *field),
+            VirExpr::FieldLoad { object, field, .. } => self.compile_vir_field_load(object, *field),
             VirExpr::FieldStore {
                 object,
                 field,
@@ -603,11 +595,9 @@ impl Cg<'_, '_, '_> {
                 default,
                 inner_type,
                 ..
-            } => self.compile_vir_null_coalesce(
-                value,
-                default,
-                self.sema_type_from_vir(*inner_type),
-            ),
+            } => {
+                self.compile_vir_null_coalesce(value, default, self.sema_type_from_vir(*inner_type))
+            }
             VirExpr::OptionalChain {
                 object,
                 field,

@@ -3,15 +3,15 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
+use crate::LoweringEntityLookup;
+use crate::vir_lower::lower_function;
+use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{ModuleId, NameTable, NamerLookup};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::vir_lower::lower_function;
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::VirFunction;
 use vole_vir::type_table::VirTypeTable;
 
-pub(crate) struct LowerTopLevelFunctionsArgs<'a> {
+pub struct LowerTopLevelFunctionsArgs<'a> {
     pub program: &'a Program,
     pub interner: &'a mut Interner,
     pub names: &'a NameTable,
@@ -22,7 +22,7 @@ pub(crate) struct LowerTopLevelFunctionsArgs<'a> {
     pub type_table: &'a mut VirTypeTable,
 }
 
-pub(crate) struct LowerModuleFunctionsArgs<'a> {
+pub struct LowerModuleFunctionsArgs<'a> {
     pub module_programs: &'a mut FxHashMap<String, (Program, Rc<Interner>)>,
     pub names: &'a NameTable,
     pub entities: &'a dyn LoweringEntityLookup,
@@ -51,7 +51,7 @@ struct LowerModuleProgramFunctionsArgs<'a> {
 /// in the entity registry, and calls `lower_function()` to produce a
 /// `VirFunction`. Generic functions and implicit generics are skipped
 /// because they are monomorphized during codegen.
-pub(crate) fn lower_top_level_functions(args: LowerTopLevelFunctionsArgs<'_>) -> Vec<VirFunction> {
+pub fn lower_top_level_functions(args: LowerTopLevelFunctionsArgs<'_>) -> Vec<VirFunction> {
     let LowerTopLevelFunctionsArgs {
         program,
         interner,
@@ -122,7 +122,7 @@ pub(crate) fn lower_top_level_functions(args: LowerTopLevelFunctionsArgs<'_>) ->
 /// the module's interner and module ID, and calls `lower_function()` for each
 /// non-generic, non-implicitly-generic function. Modules with sema errors are
 /// skipped to avoid INVALID type IDs.
-pub(crate) fn lower_module_functions(args: LowerModuleFunctionsArgs<'_>) {
+pub fn lower_module_functions(args: LowerModuleFunctionsArgs<'_>) {
     let LowerModuleFunctionsArgs {
         module_programs,
         names,

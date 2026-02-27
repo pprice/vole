@@ -552,123 +552,147 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // These accept `VirTypeId` directly — use in migrated VIR codegen paths
     // where the VIR type is already available (e.g. from `VirExpr` fields or
     // `CompiledValue::vir_type_id`).  No `vir_lookup` translation needed.
+    //
+    // Allow dead_code: these are the migration target — callers will be
+    // added as expression/statement compilation is migrated from TypeId to
+    // VirTypeId.
     // =====================================================================
 
     /// Check if a VIR type is a struct.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_struct(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is a union.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_union(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is a class.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_class(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_class(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is an interface.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_interface(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is void.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_void(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is nil.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_nil(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_nil(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is unknown.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_unknown(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_unknown(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is a wide type (i128).
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_wide(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_wide(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is reference-counted.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_rc(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_rc(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is a fallible type.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_fallible(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_fallible(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is a payload union.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_payload_union(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_payload_union(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is a string.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_string(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_string(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is an array.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_array(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_array(vir_ty, self.vir_type_table())
     }
 
     /// Check if a VIR type is a class or struct.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_is_class_or_struct(&self, vir_ty: VirTypeId) -> bool {
         crate::types::vir_conversions::vir_is_class_or_struct(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a VIR union type to its variants.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_unwrap_union(&self, vir_ty: VirTypeId) -> Option<&[VirTypeId]> {
         crate::types::vir_conversions::vir_unwrap_union(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a VIR optional type to its inner type.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_unwrap_optional(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
         crate::types::vir_conversions::vir_unwrap_optional(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap a VIR nominal type to its TypeDefId.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_unwrap_nominal(&self, vir_ty: VirTypeId) -> Option<vole_identity::TypeDefId> {
         crate::types::vir_conversions::vir_unwrap_nominal(vir_ty, self.vir_type_table())
     }
 
     /// Get the field byte size for a VIR type.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_field_byte_size(&self, vir_ty: VirTypeId) -> u32 {
         crate::types::vir_conversions::vir_field_byte_size(vir_ty, self.vir_type_table())
     }
 
     /// Get the runtime type tag for boxing a value to unknown.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_unknown_type_tag(&self, vir_ty: VirTypeId) -> u64 {
         crate::types::vir_conversions::vir_unknown_type_tag(vir_ty, self.vir_type_table())
     }
 
     /// Get a human-readable type display string.
+    #[allow(dead_code)]
     #[inline]
     pub fn vir_display_basic(&self, vir_ty: VirTypeId) -> String {
         crate::types::vir_conversions::vir_display_basic(vir_ty, self.vir_type_table())

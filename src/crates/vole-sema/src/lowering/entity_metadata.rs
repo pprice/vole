@@ -4,10 +4,10 @@
 // lowering.  This is the bridge that converts sema entity definitions
 // (TypeDef, FieldDef, MethodDef) into VIR-native metadata.
 
-use vole_sema::LoweringEntityLookup;
-use vole_sema::TypeArena;
-use vole_sema::entity_defs::{self, TypeDefKind};
-use vole_sema::vir_lower::type_translate::translate_type_id;
+use crate::LoweringEntityLookup;
+use crate::TypeArena;
+use crate::entity_defs::{self, TypeDefKind};
+use crate::vir_lower::type_translate::translate_type_id;
 use vole_vir::entity_metadata::{
     VirEntityMetadata, VirFieldDef, VirImplementation, VirMethodBinding, VirMethodDef, VirTypeDef,
     VirTypeDefKind,
@@ -20,7 +20,7 @@ use vole_vir::type_table::VirTypeTable;
 /// in the `EntityRegistry` and translates them into VIR-native metadata.
 /// Field types are translated from sema `TypeId` to `VirTypeId` using the
 /// existing `translate_type_id` machinery.
-pub(crate) fn build_entity_metadata(
+pub fn build_entity_metadata(
     entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     type_table: &VirTypeTable,

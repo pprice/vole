@@ -3,50 +3,48 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use crate::analyzed_lower_annotation_inits::lower_annotation_inits;
-use crate::analyzed_lower_entity_metadata::build_entity_metadata;
-use crate::analyzed_lower_field_default_inits::{
+use super::annotation_inits::lower_annotation_inits;
+use super::entity_metadata::build_entity_metadata;
+use super::field_default_inits::{
     LowerFieldDefaultInitsArgs, LowerModuleFieldDefaultInitsArgs, lower_field_default_inits,
     lower_module_field_default_inits,
 };
-use crate::analyzed_lower_function_default_inits::{
+use super::function_default_inits::{
     LowerFunctionDefaultInitsArgs, LowerModuleFunctionDefaultInitsArgs,
     lower_function_default_inits, lower_module_function_default_inits,
 };
-use crate::analyzed_lower_functions::{
+use super::functions::{
     LowerModuleFunctionsArgs, LowerTopLevelFunctionsArgs, lower_module_functions,
     lower_top_level_functions,
 };
-use crate::analyzed_lower_global_inits::{lower_global_inits, lower_module_global_inits};
-use crate::analyzed_lower_implement_blocks::{
+use super::global_inits::{lower_global_inits, lower_module_global_inits};
+use super::implement_blocks::{
     LowerImplementBlockMethodsArgs, LowerModuleImplementBlockMethodsArgs,
     lower_implement_block_methods, lower_module_implement_block_methods,
 };
-use crate::analyzed_lower_lambda_default_inits::{
-    LowerLambdaDefaultInitsArgs, lower_lambda_default_inits,
-};
-use crate::analyzed_lower_method_default_inits::{
+use super::lambda_default_inits::{LowerLambdaDefaultInitsArgs, lower_lambda_default_inits};
+use super::method_default_inits::{
     LowerMethodDefaultInitsArgs, LowerModuleMethodDefaultInitsArgs, lower_method_default_inits,
     lower_module_method_default_inits,
 };
-use crate::analyzed_lower_monomorph_functions::{
+use super::monomorph_functions::{
     LowerMonomorphizedInstancesArgs, build_generic_func_map, lower_monomorphized_instances,
 };
-use crate::analyzed_lower_test_scoped_type_methods::lower_test_scoped_type_methods;
-use crate::analyzed_lower_type_method_monomorph::{
+use super::test_scoped_type_methods::lower_test_scoped_type_methods;
+use super::type_method_monomorph::{
     MethodMonomorphLoweringCtx, MethodMonomorphLoweringWork,
     lower_type_method_monomorphized_instances,
 };
-use crate::analyzed_lower_type_methods::{lower_module_type_methods, lower_top_level_type_methods};
+use super::type_methods::{lower_module_type_methods, lower_top_level_type_methods};
+use crate::LoweringEntityLookup;
+use crate::vir_lower::{lower_stmts, lower_test_body};
+use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
 use vole_identity::{FunctionId, MethodId, ModuleId, NameId, NameTable, Span};
-use vole_sema::LoweringEntityLookup;
-use vole_sema::vir_lower::{lower_stmts, lower_test_body};
-use vole_sema::{NodeMap, TypeArena};
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::{VirFunction, VirProgram, VirTest};
 
-pub(crate) struct LowerVirProgramArgs<'a, E>
+pub struct LowerVirProgramArgs<'a, E>
 where
     E: LoweringEntityLookup,
 {
@@ -64,13 +62,13 @@ where
     pub generic_vir_type_table: VirTypeTable,
 }
 
-pub(crate) struct LowerVirProgramOutput {
+pub struct LowerVirProgramOutput {
     pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     pub vir_program: VirProgram,
 }
 
 /// Run the codegen-side VIR lowering orchestration and return assembled outputs.
-pub(crate) fn lower_vir_program<E>(args: LowerVirProgramArgs<'_, E>) -> LowerVirProgramOutput
+pub fn lower_vir_program<E>(args: LowerVirProgramArgs<'_, E>) -> LowerVirProgramOutput
 where
     E: LoweringEntityLookup,
 {
@@ -453,7 +451,7 @@ fn lower_tests_decl_bodies(
     let scoped_let_vir_stmts = if scoped_let_stmts.is_empty() {
         Vec::new()
     } else {
-        let mut ctx = vole_sema::vir_lower::LoweringCtx {
+        let mut ctx = crate::vir_lower::LoweringCtx {
             node_map,
             interner,
             type_arena,
@@ -536,7 +534,7 @@ fn run_early_vir_monomorphize(
     entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
 ) -> HashSet<FunctionId> {
-    use vole_sema::vir_lower::type_translate::translate_type_id;
+    use crate::vir_lower::type_translate::translate_type_id;
 
     let mut handled = HashSet::new();
 
