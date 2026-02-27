@@ -5,6 +5,10 @@ use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
+use crate::analyzed_lower_function_default_inits::{
+    LowerFunctionDefaultInitsArgs, LowerModuleFunctionDefaultInitsArgs,
+    lower_function_default_inits, lower_module_function_default_inits,
+};
 use crate::analyzed_lower_global_inits::{lower_global_inits, lower_module_global_inits};
 use crate::analyzed_lowering_lookup::LoweringEntityLookup;
 use vole_frontend::{Decl, Interner, Program, Symbol};
@@ -341,26 +345,28 @@ impl AnalyzedProgram {
             &output.modules_with_errors,
             &mut type_table,
         );
-        let mut vir_function_default_inits = lower_function_default_inits(
-            &program,
-            &mut interner,
-            output.module_id,
-            &output.tests_virtual_modules,
-            &db.names,
-            &db.entities,
-            &output.node_map,
-            &db.types,
-            &mut type_table,
-        );
-        let module_vir_function_default_inits = lower_module_function_default_inits(
-            &mut module_programs,
-            &db.names,
-            &db.entities,
-            &output.node_map,
-            &db.types,
-            &output.modules_with_errors,
-            &mut type_table,
-        );
+        let mut vir_function_default_inits =
+            lower_function_default_inits(LowerFunctionDefaultInitsArgs {
+                program: &program,
+                interner: &mut interner,
+                module_id: output.module_id,
+                tests_virtual_modules: &output.tests_virtual_modules,
+                names: &db.names,
+                entities: &db.entities,
+                node_map: &output.node_map,
+                type_arena: &db.types,
+                type_table: &mut type_table,
+            });
+        let module_vir_function_default_inits =
+            lower_module_function_default_inits(LowerModuleFunctionDefaultInitsArgs {
+                module_programs: &mut module_programs,
+                names: &db.names,
+                entities: &db.entities,
+                node_map: &output.node_map,
+                type_arena: &db.types,
+                modules_with_errors: &output.modules_with_errors,
+                type_table: &mut type_table,
+            });
         vir_function_default_inits.extend(module_vir_function_default_inits);
         let mut vir_method_default_inits = lower_method_default_inits(
             &program,
@@ -1097,187 +1103,6 @@ impl AnalyzedProgram {
     /// Returns `None` if no VIR body was lowered for this test.
     pub(crate) fn get_vir_test(&self, span: Span) -> Option<&VirBody> {
         self.vir_program.get_test(span)
-    }
-}
-
-/// Lower default parameter expressions for functions in the main program.
-#[allow(clippy::too_many_arguments)]
-fn lower_function_default_inits(
-    program: &Program,
-    interner: &mut Interner,
-    module_id: ModuleId,
-    tests_virtual_modules: &FxHashMap<Span, ModuleId>,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    node_map: &NodeMap,
-    type_arena: &TypeArena,
-    type_table: &mut VirTypeTable,
-) -> FxHashMap<(FunctionId, usize), VirRef> {
-    let mut ctx = vole_sema::vir_lower::LoweringCtx {
-        node_map,
-        interner,
-        type_arena,
-        entities: entities.as_entity_registry(),
-        name_table: names,
-        type_table,
-        generic: false,
-    };
-    let mut map = FxHashMap::default();
-    lower_function_default_inits_in_decls(
-        &program.declarations,
-        module_id,
-        Some(tests_virtual_modules),
-        names,
-        entities,
-        &mut ctx,
-        &mut map,
-    );
-    map
-}
-
-/// Lower default parameter expressions for imported-module functions.
-#[allow(clippy::too_many_arguments)]
-fn lower_module_function_default_inits(
-    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    node_map: &NodeMap,
-    type_arena: &TypeArena,
-    modules_with_errors: &HashSet<String>,
-    type_table: &mut VirTypeTable,
-) -> FxHashMap<(FunctionId, usize), VirRef> {
-    let mut map = FxHashMap::default();
-    for (module_path, (program, module_interner)) in module_programs.iter_mut() {
-        if modules_with_errors.contains(module_path.as_str()) {
-            continue;
-        }
-        let module_id = names
-            .module_id_if_known(module_path)
-            .unwrap_or_else(|| names.main_module());
-        let interner = Rc::make_mut(module_interner);
-        let mut ctx = vole_sema::vir_lower::LoweringCtx {
-            node_map,
-            interner,
-            type_arena,
-            entities: entities.as_entity_registry(),
-            name_table: names,
-            type_table,
-            generic: false,
-        };
-        lower_function_default_inits_in_decls(
-            &program.declarations,
-            module_id,
-            None,
-            names,
-            entities,
-            &mut ctx,
-            &mut map,
-        );
-    }
-    map
-}
-
-/// Recursively lower function default parameter expressions in declarations.
-fn lower_function_default_inits_in_decls(
-    decls: &[Decl],
-    module_id: ModuleId,
-    tests_virtual_modules: Option<&FxHashMap<Span, ModuleId>>,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
-    map: &mut FxHashMap<(FunctionId, usize), VirRef>,
-) {
-    for decl in decls {
-        match decl {
-            Decl::Function(func_decl) => {
-                lower_function_default_params(func_decl, module_id, names, entities, ctx, map);
-            }
-            Decl::External(external_block) => {
-                for external_func in &external_block.functions {
-                    lower_external_function_default_params(
-                        external_func,
-                        module_id,
-                        names,
-                        entities,
-                        ctx,
-                        map,
-                    );
-                }
-            }
-            Decl::Tests(tests_decl) => {
-                let tests_module_id = tests_virtual_modules
-                    .and_then(|m| m.get(&tests_decl.span).copied())
-                    .unwrap_or(module_id);
-                lower_function_default_inits_in_decls(
-                    &tests_decl.decls,
-                    tests_module_id,
-                    tests_virtual_modules,
-                    names,
-                    entities,
-                    ctx,
-                    map,
-                );
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Lower default parameter expressions for a single external function declaration.
-fn lower_external_function_default_params(
-    func: &vole_frontend::ast::ExternalFunc,
-    module_id: ModuleId,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
-    map: &mut FxHashMap<(FunctionId, usize), VirRef>,
-) {
-    use vole_sema::vir_lower::expr::lower_expr;
-
-    let Some(name_id) = names.name_id(module_id, &[func.vole_name], ctx.interner) else {
-        return;
-    };
-    let Some(func_id) = entities.function_by_name(name_id) else {
-        return;
-    };
-    for (slot, param) in func.params.iter().enumerate() {
-        let Some(default_expr) = param.default_value.as_ref() else {
-            continue;
-        };
-        if ctx.node_map.get_type(default_expr.id).is_none() {
-            continue;
-        }
-        let vir = lower_expr(default_expr, ctx);
-        map.insert((func_id, slot), vir);
-    }
-}
-
-/// Lower default parameter expressions for a single function declaration.
-fn lower_function_default_params(
-    func: &vole_frontend::ast::FuncDecl,
-    module_id: ModuleId,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    ctx: &mut vole_sema::vir_lower::LoweringCtx<'_>,
-    map: &mut FxHashMap<(FunctionId, usize), VirRef>,
-) {
-    use vole_sema::vir_lower::expr::lower_expr;
-
-    let Some(name_id) = names.name_id(module_id, &[func.name], ctx.interner) else {
-        return;
-    };
-    let Some(func_id) = entities.function_by_name(name_id) else {
-        return;
-    };
-    for (slot, param) in func.params.iter().enumerate() {
-        let Some(default_expr) = param.default_value.as_ref() else {
-            continue;
-        };
-        if ctx.node_map.get_type(default_expr.id).is_none() {
-            continue;
-        }
-        let vir = lower_expr(default_expr, ctx);
-        map.insert((func_id, slot), vir);
     }
 }
 
