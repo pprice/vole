@@ -1036,19 +1036,6 @@ pub enum VirStringPart {
     },
 }
 
-/// Result of an `is` type-check, pre-computed by sema.
-///
-/// VIR defines its own copy of this enum (rather than depending on vole-sema)
-/// to keep the VIR crate dependency-light and avoid circular dependencies.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum IsCheckResult {
-    /// The check always succeeds (e.g. `x is Int` when x is `Int`).
-    AlwaysTrue,
-    /// The check always fails (e.g. `x is Int` when x is `String`).
-    AlwaysFalse,
-    /// Runtime check needed: compare against this union variant tag.
-    CheckTag(u32),
-    /// Runtime check needed for unknown type: compare against this type's
-    /// runtime tag.  The `VirTypeId` indicates what type we are checking for.
-    CheckUnknown(VirTypeId, VirTypeId),
-}
+// Re-export from vole-identity — canonical definition lives there.
+// Locally aliased as `IsCheckResult` to minimise churn within the VIR crate.
+pub use vole_identity::VirIsCheckResult as IsCheckResult;

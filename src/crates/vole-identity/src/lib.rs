@@ -12,12 +12,14 @@ mod intern;
 mod primitive_type;
 mod span;
 mod symbol;
+mod type_layout;
 
-pub use annotations::{StringConversion, UnionStorageKind};
+pub use annotations::{IsCheckResult, StringConversion, UnionStorageKind, VirIsCheckResult};
 pub use intern::Interner;
 pub use primitive_type::PrimitiveType;
 pub use span::Span;
 pub use symbol::Symbol;
+pub use type_layout::{StorageClass, TypeLayout};
 
 mod entities;
 mod namer;

@@ -114,38 +114,8 @@ impl VirPrimitiveKind {
 // StorageClass and VirTypeLayout
 // ---------------------------------------------------------------------------
 
-/// The register class / allocation strategy for a VIR type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum StorageClass {
-    /// Integer registers (i8–i64, u8–u64, bool, handle).
-    Word,
-    /// Float registers (f32, f64).
-    Float,
-    /// Reference-counted heap allocation (class, string, array).
-    Pointer,
-    /// Two registers (i128).
-    Wide,
-    /// No storage (void, never, done).
-    Void,
-}
-
-/// Physical layout descriptor for a VIR type.
-///
-/// Layout computation is deferred to the `VirTypeTable` (vol-56s0).
-/// This struct is the *shape* that will be stored per type entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct VirTypeLayout {
-    /// Whether this type is reference-counted.
-    pub is_rc: bool,
-    /// Whether this type lives on the heap.
-    pub is_heap: bool,
-    /// Whether this type requires two registers (i128).
-    pub is_wide: bool,
-    /// Number of register slots: 0 for void, 1 for most, 2 for i128.
-    pub slot_count: u8,
-    /// The register class / allocation strategy.
-    pub storage: StorageClass,
-}
+// Re-export from vole-identity — canonical definitions live there.
+pub use vole_identity::{StorageClass, TypeLayout as VirTypeLayout};
 
 // ---------------------------------------------------------------------------
 // Struct and union layouts

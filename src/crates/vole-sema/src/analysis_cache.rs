@@ -19,29 +19,15 @@ use crate::compilation_db::CompilationDb;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::node_map::StructLiteralInfo;
 use crate::resolution::ResolvedMethod;
-use crate::type_arena::TypeId;
 use crate::types::FunctionType;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 use vole_frontend::{Interner, NodeId, Program};
+use vole_identity::TypeId;
 
-/// Result of compile-time analysis for type checks (`is` expressions and type patterns).
-///
-/// Used to eliminate runtime type lookups when the result can be determined at compile time,
-/// or to provide the tag value when a runtime check is needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IsCheckResult {
-    /// The check always succeeds (e.g., `x is Int` when x is `Int`)
-    AlwaysTrue,
-    /// The check always fails (e.g., `x is Int` when x is `String`)
-    AlwaysFalse,
-    /// Runtime check needed - compare against this union variant tag
-    CheckTag(u32),
-    /// Runtime check needed for unknown type - compare against this type's tag
-    /// The TypeId indicates what type we're checking for at runtime.
-    CheckUnknown(TypeId),
-}
+// Re-export from vole-identity — canonical definition lives there.
+pub use vole_identity::IsCheckResult;
 
 /// Cached analysis results for a single module.
 ///

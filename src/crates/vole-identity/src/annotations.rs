@@ -6,7 +6,46 @@
 // dependency is `TypeId`.  They live in vole-identity so that vole-vir
 // can reference them without depending on vole-sema.
 
-use crate::TypeId;
+use crate::{TypeId, VirTypeId};
+
+/// Result of compile-time analysis for type checks (`is` expressions and type patterns).
+///
+/// Used by sema to record whether a runtime type check can be eliminated at compile time,
+/// or to provide the tag value when a runtime check is needed.
+/// Uses `TypeId` (sema's type representation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsCheckResult {
+    /// The check always succeeds (e.g., `x is Int` when x is `Int`).
+    AlwaysTrue,
+    /// The check always fails (e.g., `x is Int` when x is `String`).
+    AlwaysFalse,
+    /// Runtime check needed — compare against this union variant tag.
+    CheckTag(u32),
+    /// Runtime check needed for unknown type — compare against this type's tag.
+    /// The `TypeId` indicates what type we're checking for at runtime.
+    CheckUnknown(TypeId),
+}
+
+/// VIR-level result of an `is` type-check, pre-computed by sema and lowered
+/// into VIR nodes.
+///
+/// Mirrors [`IsCheckResult`] but uses `VirTypeId` (post-lowering type identity)
+/// instead of `TypeId`.  The `CheckUnknown` variant carries two IDs:
+/// a compat-layer `VirTypeId` (for sema round-trip) and a native `VirTypeId`
+/// (for VIR-side rederivation after monomorphization).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VirIsCheckResult {
+    /// The check always succeeds (e.g. `x is Int` when x is `Int`).
+    AlwaysTrue,
+    /// The check always fails (e.g. `x is Int` when x is `String`).
+    AlwaysFalse,
+    /// Runtime check needed: compare against this union variant tag.
+    CheckTag(u32),
+    /// Runtime check needed for unknown type: compare against this type's
+    /// runtime tag.  The first `VirTypeId` is the compat-layer ID; the second
+    /// is the native VIR type ID for the tested type.
+    CheckUnknown(VirTypeId, VirTypeId),
+}
 
 /// Union storage strategy annotation.
 ///
