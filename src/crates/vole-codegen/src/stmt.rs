@@ -1992,7 +1992,7 @@ impl Cg<'_, '_, '_> {
     /// Resolve a symbol to a sentinel base `TypeId` in the current module context.
     fn sentinel_type_id_for_symbol(&self, sym: Symbol) -> Option<TypeId> {
         let name = self.interner().resolve(sym);
-        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
         let type_def_id = self
             .analyzed()
             .query()

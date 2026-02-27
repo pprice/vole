@@ -31,7 +31,7 @@ pub struct AnalyzedProgram {
     /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed NodeMap.
     pub tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Parsed module programs for compiling pure Vole functions
-    pub module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
+    module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     /// Type arena (Rc-shared, immutable during codegen).
     types: Rc<TypeArena>,
     /// Entity registry (Rc-shared, immutable during codegen).
@@ -41,7 +41,7 @@ pub struct AnalyzedProgram {
     /// Name table (Rc-shared, immutable during codegen).
     names: Rc<NameTable>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
-    pub module_id: ModuleId,
+    module_id: ModuleId,
     /// Module paths that had sema errors. Codegen should skip compiling
     /// function bodies for these modules to avoid INVALID type IDs.
     pub modules_with_errors: HashSet<String>,
@@ -49,7 +49,7 @@ pub struct AnalyzedProgram {
     ///
     /// This is the single entry point for all VIR data produced during lowering.
     /// Codegen accesses VIR through this struct rather than individual fields.
-    pub vir_program: VirProgram,
+    vir_program: VirProgram,
 }
 
 /// Codegen-local external binding payload from implement-registry lookups.
@@ -477,6 +477,21 @@ impl AnalyzedProgram {
     /// Get a shared reference to the name table Rc (cloned)
     pub fn name_table_rc(&self) -> Rc<NameTable> {
         Rc::clone(self.name_table_ref())
+    }
+
+    /// Get the main/root module ID for this analyzed program.
+    pub fn module_id(&self) -> ModuleId {
+        self.module_id
+    }
+
+    /// Get read-only access to parsed module programs and their interners.
+    pub fn module_programs(&self) -> &FxHashMap<String, (Program, Rc<Interner>)> {
+        &self.module_programs
+    }
+
+    /// Get read-only access to the lowered VIR program.
+    pub fn vir_program(&self) -> &VirProgram {
+        &self.vir_program
     }
 
     /// Get a reference to the name table Rc (borrowed, no clone)
@@ -3259,7 +3274,7 @@ fn lower_tests_decl_type_methods(
 
     // Test-scoped functions are registered under the program's module_id (not the virtual
     // test module), so use the passed module_id for function name resolution. This must
-    // match what codegen uses in compile_function (program_module = analyzed.module_id).
+    // match what codegen uses in compile_function (program_module = analyzed.module_id()).
     let main_module_id = module_id;
 
     for inner_decl in &tests_decl.decls {

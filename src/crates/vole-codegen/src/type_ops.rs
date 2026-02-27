@@ -182,7 +182,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let query = self.analyzed().query();
         let module_id = self
             .current_module_id()
-            .unwrap_or(self.env.analyzed.module_id);
+            .unwrap_or(self.env.analyzed.module_id());
         query.resolve_type_def_by_str(module_id, name)
     }
 

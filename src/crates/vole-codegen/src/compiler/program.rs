@@ -451,7 +451,7 @@ impl Compiler<'_> {
     fn declare_module_types_and_functions(&mut self, module_paths: &[String]) -> CodegenResult<()> {
         for module_path in module_paths {
             tracing::debug!(module_path, "compile_module_functions: declaring functions");
-            let (program, module_interner) = &self.analyzed.module_programs[module_path];
+            let (program, module_interner) = &self.analyzed.module_programs()[module_path];
 
             // Declare pure Vole functions
             for decl in &program.declarations {
@@ -581,7 +581,7 @@ impl Compiler<'_> {
     /// Compile all function bodies for a single module.
     fn compile_module_function_bodies(&mut self, module_path: &str) -> CodegenResult<()> {
         tracing::debug!(module_path, "compile_module_functions: compiling bodies");
-        let (program, module_interner) = &self.analyzed.module_programs[module_path];
+        let (program, module_interner) = &self.analyzed.module_programs()[module_path];
 
         // Register destructured import bindings for this module.
         // When a module uses `let { add } = import "./other"`, the binding must
@@ -677,7 +677,7 @@ impl Compiler<'_> {
             .collect();
 
         for module_path in &module_paths {
-            let (program, module_interner) = &self.analyzed.module_programs[module_path];
+            let (program, module_interner) = &self.analyzed.module_programs()[module_path];
 
             // Import pure Vole functions (they're already compiled, just need declarations)
             for decl in &program.declarations {
@@ -1007,7 +1007,7 @@ impl Compiler<'_> {
     /// From those roots, walk `VirDirect` edges transitively and collect
     /// target indices that must be declared/compiled.
     fn vir_monomorph_indices(&self) -> Vec<usize> {
-        collect_reachable_vir_direct_targets(&self.analyzed.vir_program.functions)
+        collect_reachable_vir_direct_targets(&self.analyzed.vir_program().functions)
     }
 
     /// Declare VIR-monomorphized functions in the JIT module.
@@ -1023,7 +1023,7 @@ impl Compiler<'_> {
             return Ok(());
         }
         for idx in indices {
-            let vir_func = &self.analyzed.vir_program.functions[idx];
+            let vir_func = &self.analyzed.vir_program().functions[idx];
             let sig = self.build_signature_for_vir_func(vir_func);
             let jit_name = format!("__vir_monomorph_{}", vir_func.name);
             let func_id = self.jit.declare_function(&jit_name, &sig);
@@ -1048,7 +1048,7 @@ impl Compiler<'_> {
             if self.defined_functions.contains(&func_id) {
                 continue;
             }
-            let vir_func = &self.analyzed.vir_program.functions[idx];
+            let vir_func = &self.analyzed.vir_program().functions[idx];
             let sig = self.build_signature_for_vir_func(vir_func);
             self.jit.ctx.func.signature = sig;
 

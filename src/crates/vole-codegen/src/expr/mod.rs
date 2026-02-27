@@ -216,7 +216,7 @@ impl Cg<'_, '_, '_> {
                 .filter(|&tid| self.arena().is_sentinel(tid))
                 .or_else(|| {
                     let name = self.interner().resolve(sym);
-                    let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+                    let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
                     let type_def_id = self
                         .analyzed()
                         .query()
@@ -508,7 +508,7 @@ impl Cg<'_, '_, '_> {
         let query = self.analyzed().query();
         let module_id = self
             .current_module_id()
-            .unwrap_or(self.env.analyzed.module_id);
+            .unwrap_or(self.env.analyzed.module_id());
         let name_id = query.function_name_id(module_id, sym);
 
         let orig_func_key = self.funcs().intern_name_id(name_id);
@@ -1421,7 +1421,7 @@ impl Cg<'_, '_, '_> {
 
         // Sentinel fallback (name-based resolution)
         let name = self.interner().resolve(sym);
-        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
         if let Some(type_def_id) = self
             .analyzed()
             .query()
@@ -1450,7 +1450,9 @@ impl Cg<'_, '_, '_> {
         value: &mut CompiledValue,
     ) -> CodegenResult<()> {
         let name_table = self.name_table();
-        let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
+        let module_id = self
+            .current_module()
+            .unwrap_or(self.env.analyzed.module_id());
         if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
             && let Some(global_def) = self.analyzed().query().global(name_id)
         {

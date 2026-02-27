@@ -160,7 +160,8 @@ impl Compiler<'_> {
             .to_string();
 
         // Look up the module program and its interner
-        let (module_program, module_interner) = self.analyzed.module_programs.get(&module_path)?;
+        let (module_program, module_interner) =
+            self.analyzed.module_programs().get(&module_path)?;
 
         // Search for the generic class or struct in this module's declarations
         for decl in &module_program.declarations {
@@ -210,7 +211,8 @@ impl Compiler<'_> {
             .module_path(module_id)
             .to_string();
 
-        let (module_program, module_interner) = self.analyzed.module_programs.get(&module_path)?;
+        let (module_program, module_interner) =
+            self.analyzed.module_programs().get(&module_path)?;
 
         for decl in &module_program.declarations {
             match decl {

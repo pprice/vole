@@ -545,7 +545,7 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
 ) -> CodegenResult<()> {
     let return_type_id = Some(crate::types::vir_conversions::vir_to_sema_type_id(
         vir_func.return_type,
-        &env.analyzed.vir_program.type_table,
+        &env.analyzed.vir_program().type_table,
         env.analyzed.type_arena(),
     ))
     .filter(|id| !id.is_void());
@@ -554,7 +554,7 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
     let skip_block_params = if return_type_id.is_some() {
         if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             vir_func.return_type,
-            &env.analyzed.vir_program.type_table,
+            &env.analyzed.vir_program().type_table,
             env.analyzed,
         ) {
             if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
@@ -577,7 +577,7 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
     let block_params = builder.block_params(entry_block).to_vec();
     let mut variables: FxHashMap<Symbol, (Variable, TypeId)> = FxHashMap::default();
     let ptr = codegen_ctx.ptr_type();
-    let vir_table = &env.analyzed.vir_program.type_table;
+    let vir_table = &env.analyzed.vir_program().type_table;
 
     for (i, (name, type_id, _vir_ty)) in vir_func.params.iter().enumerate() {
         let cl_ty = crate::types::vir_conversions::vir_type_to_cranelift(*type_id, vir_table, ptr);

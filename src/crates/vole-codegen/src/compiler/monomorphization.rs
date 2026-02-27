@@ -158,7 +158,7 @@ impl Compiler<'_> {
             .to_string();
 
         let Some((module_program, module_interner)) =
-            self.analyzed.module_programs.get(&module_path)
+            self.analyzed.module_programs().get(&module_path)
         else {
             return Ok(false);
         };
@@ -389,7 +389,7 @@ impl Compiler<'_> {
                 .name_table()
                 .module_path(module_id)
                 .to_string();
-            !self.analyzed.module_programs.contains_key(&module_path)
+            !self.analyzed.module_programs().contains_key(&module_path)
         };
 
         if let Some((type_def_id, type_args)) = arena.unwrap_class(type_id) {
@@ -606,7 +606,7 @@ impl Compiler<'_> {
                     .name_table()
                     .module_path(module_id)
                     .to_string();
-                if let Some((module_program, _)) = self.analyzed.module_programs.get(&module_path)
+                if let Some((module_program, _)) = self.analyzed.module_programs().get(&module_path)
                     && let Some(method) = self
                         .find_implement_block_method(
                             &module_program.declarations,
@@ -701,7 +701,7 @@ impl Compiler<'_> {
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = if let Some(path) = module_path {
-                    let (_, interner) = &self.analyzed.module_programs[path];
+                    let (_, interner) = &self.analyzed.module_programs()[path];
                     compile_env!(self, interner, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
@@ -932,7 +932,7 @@ impl Compiler<'_> {
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = if let Some(path) = module_path {
-                    let (_, interner) = &self.analyzed.module_programs[path];
+                    let (_, interner) = &self.analyzed.module_programs()[path];
                     compile_env!(self, interner, source_file_ptr)
                 } else {
                     compile_env!(self, source_file_ptr)
@@ -1388,7 +1388,8 @@ impl Compiler<'_> {
                     .name_table()
                     .module_path(module_id)
                     .to_string();
-                if let Some((module_program, _)) = self.analyzed.module_programs.get(&module_path) {
+                if let Some((module_program, _)) = self.analyzed.module_programs().get(&module_path)
+                {
                     self.find_implement_block_method(
                         &module_program.declarations,
                         data.class_name,
@@ -1460,7 +1461,7 @@ impl Compiler<'_> {
                 {
                     let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                     let env = if let Some((_, interner)) =
-                        self.analyzed.module_programs.get(&module_path)
+                        self.analyzed.module_programs().get(&module_path)
                     {
                         compile_env!(self, interner, source_file_ptr)
                     } else {
@@ -1795,7 +1796,7 @@ impl Compiler<'_> {
             .name_table()
             .module_path(module_id)
             .to_string();
-        if let Some((module_program, _)) = self.analyzed.module_programs.get(&module_path)
+        if let Some((module_program, _)) = self.analyzed.module_programs().get(&module_path)
             && let Some(method) = self
                 .find_implement_block_method(
                     &module_program.declarations,

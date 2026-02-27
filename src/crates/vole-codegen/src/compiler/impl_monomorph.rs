@@ -1769,7 +1769,7 @@ impl Compiler<'_> {
         }
 
         // Search module programs
-        for (module_path, (program, interner)) in &self.analyzed.module_programs {
+        for (module_path, (program, interner)) in self.analyzed.module_programs() {
             for decl in &program.declarations {
                 if let vole_frontend::Decl::Interface(iface) = decl {
                     let iface_name = interner.resolve(iface.name);

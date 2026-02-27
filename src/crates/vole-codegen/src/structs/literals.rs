@@ -281,7 +281,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     let query = self.analyzed().query();
                     let module_id = self
                         .current_module_id()
-                        .unwrap_or(self.env.analyzed.module_id);
+                        .unwrap_or(self.env.analyzed.module_id());
                     let mut resolved_id = query.resolve_type_def_by_str(module_id, type_name);
 
                     // If this is a type alias, resolve through to the underlying type
@@ -367,7 +367,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // analyzed() returns &'ctx AnalyzedProgram, giving 'ctx-lifetime references
         // to the AST nodes owned inside it.
         let analyzed = self.analyzed();
-        let program_module = analyzed.module_id;
+        let program_module = analyzed.module_id();
 
         if type_module == program_module {
             // Type is in the main program - search there.
@@ -384,7 +384,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             // Type is in a module - find the module path and search there.
             let module_path = self.name_table().module_path(type_module).to_string();
-            if let Some((program, module_interner)) = analyzed.module_programs.get(&module_path) {
+            if let Some((program, module_interner)) = analyzed.module_programs().get(&module_path) {
                 let type_name_str = self.interner().resolve(type_name);
                 if let Some(module_type_sym) = module_interner.lookup(type_name_str)
                     && let Some(fields) = find_type_fields(program, module_type_sym)

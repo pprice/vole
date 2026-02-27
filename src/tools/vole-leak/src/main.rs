@@ -183,7 +183,7 @@ fn compile_and_run_tests(
     // Check if cached modules cover all dependencies.
     let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {
         analyzed
-            .module_programs
+            .module_programs()
             .keys()
             .all(|module_path| modules.has_module(module_path))
     });
@@ -254,7 +254,7 @@ fn compile_fresh(
     let tests = compiler.take_tests();
 
     // Cache modules for future files.
-    if result.is_ok() && !analyzed.module_programs.is_empty() {
+    if result.is_ok() && !analyzed.module_programs().is_empty() {
         let mut modules_jit = JitContext::with_options(options);
         let compile_result = {
             let mut modules_compiler = Compiler::new(&mut modules_jit, analyzed);
@@ -262,7 +262,8 @@ fn compile_fresh(
         };
         match compile_result {
             Ok(()) => {
-                let module_paths: Vec<String> = analyzed.module_programs.keys().cloned().collect();
+                let module_paths: Vec<String> =
+                    analyzed.module_programs().keys().cloned().collect();
                 if let Ok(modules) = CompiledModules::new(modules_jit, module_paths) {
                     *compiled_modules = Some(modules);
                 } else {

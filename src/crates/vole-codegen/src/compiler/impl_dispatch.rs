@@ -224,10 +224,11 @@ impl Compiler<'_> {
             }
 
             // Search module programs
-            let module_paths: Vec<String> = self.analyzed.module_programs.keys().cloned().collect();
+            let module_paths: Vec<String> =
+                self.analyzed.module_programs().keys().cloned().collect();
             for module_path in module_paths {
                 let found = {
-                    let (prog, interner) = &self.analyzed.module_programs[&module_path];
+                    let (prog, interner) = &self.analyzed.module_programs()[&module_path];
                     prog.declarations.iter().find_map(|decl| {
                         if let vole_frontend::Decl::Interface(iface) = decl {
                             let name_str = interner.resolve(iface.name);
@@ -260,7 +261,7 @@ impl Compiler<'_> {
             if info.from_module {
                 let module_path = info.module_path.as_deref().unwrap_or("");
                 let module_id = self.analyzed.query().module_id_or_main(module_path);
-                let module_interner = self.analyzed.module_programs[module_path].1.clone();
+                let module_interner = self.analyzed.module_programs()[module_path].1.clone();
                 self.compile_default_method_with_interner(
                     &info.method,
                     data.name,

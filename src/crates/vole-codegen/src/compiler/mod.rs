@@ -144,13 +144,13 @@ impl<'a> Compiler<'a> {
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
-        &self.analyzed.vir_program.type_table
+        &self.analyzed.vir_program().type_table
     }
 
     /// Get the module ID for the program being compiled.
     /// This may differ from main_module() when using a shared cache with multiple programs.
     fn program_module(&self) -> ModuleId {
-        self.analyzed.module_id
+        self.analyzed.module_id()
     }
 
     /// Resolve a Symbol to a string (owned, for use across mutable operations)

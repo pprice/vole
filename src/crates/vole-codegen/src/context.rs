@@ -356,7 +356,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the VIR type table for `VirTypeId`-based queries.
     #[inline]
     pub fn vir_type_table(&self) -> &vole_vir::type_table::VirTypeTable {
-        &self.env.analyzed.vir_program.type_table
+        &self.env.analyzed.vir_program().type_table
     }
 
     /// Best-effort translation from sema `TypeId` to `VirTypeId`.
@@ -767,7 +767,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check whether a global variable initializer exists for the given symbol.
     #[inline]
     pub fn has_global_init(&self, name: Symbol) -> bool {
-        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+        let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
         self.name_table()
             .name_id(module_id, &[name], self.interner())
             .and_then(|name_id| self.analyzed().query().global(name_id))
@@ -782,7 +782,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let analyzed = self.analyzed();
         if let Some(module_id) = self.current_module() {
             let module_path = self.name_table().module_path(module_id);
-            if let Some(module_map) = analyzed.vir_program.module_global_inits.get(module_path) {
+            if let Some(module_map) = analyzed.vir_program().module_global_inits.get(module_path) {
                 return module_map.get(&name).map(|r| r.as_ref());
             }
             // Imported modules use their own interner; Symbol indices are not
@@ -793,7 +793,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
         analyzed
-            .vir_program
+            .vir_program()
             .global_inits
             .get(&name)
             .map(|r| r.as_ref())
@@ -806,7 +806,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: usize,
     ) -> Option<&vole_vir::VirExpr> {
         self.analyzed()
-            .vir_program
+            .vir_program()
             .get_function_default(func_id, slot)
             .map(|r| r.as_ref())
     }
@@ -818,7 +818,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: usize,
     ) -> Option<&vole_vir::VirExpr> {
         self.analyzed()
-            .vir_program
+            .vir_program()
             .get_method_default(method_id, slot)
             .map(|r| r.as_ref())
     }
@@ -830,7 +830,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         slot: usize,
     ) -> Option<&vole_vir::VirExpr> {
         self.analyzed()
-            .vir_program
+            .vir_program()
             .get_lambda_default(lambda_node_id, slot)
             .map(|r| r.as_ref())
     }
@@ -839,7 +839,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn field_default_vir_init(&self, field_id: FieldId) -> Option<&vole_vir::VirExpr> {
         self.analyzed()
-            .vir_program
+            .vir_program()
             .get_field_default(field_id)
             .map(|r| r.as_ref())
     }

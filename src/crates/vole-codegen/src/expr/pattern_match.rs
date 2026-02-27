@@ -56,7 +56,7 @@ impl Cg<'_, '_, '_> {
                 // Resolve named types (sentinels, structs, classes, etc.) through the
                 // name resolution system. Uses current module context or main module.
                 let name = self.interner().resolve(*sym);
-                let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+                let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
                 let query = self.analyzed().query();
                 if let Some(type_def_id) = query.resolve_type_def_by_str(module_id, name) {
                     return query.sentinel_base_type(type_def_id);
