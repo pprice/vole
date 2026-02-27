@@ -11,7 +11,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::helpers::StructEntityLookup;
 use crate::union_layout;
 use vole_frontend::{Interner, PrimitiveType as AstPrimitiveType, Symbol};
-use vole_identity::{FieldId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
+use vole_identity::{FieldId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId, VirTypeId};
 use vole_runtime::native_registry::NativeType;
 use vole_sema::type_arena::{TypeArena, TypeId};
 
@@ -73,6 +73,9 @@ pub struct CompiledValue {
     pub ty: Type,
     /// The Vole type of this value (interned TypeId handle - use arena to query)
     pub type_id: TypeId,
+    /// The VIR type of this value (proper VirTypeId from VirTypeTable).
+    /// Migration: populated by VIR compilation paths, `VirTypeId::UNKNOWN` elsewhere.
+    pub vir_type_id: VirTypeId,
     /// Lifecycle state for reference-counted values.
     pub rc_lifecycle: RcLifecycle,
     /// Debug-only flag: set by `mark_consumed()` to catch accidental RC ops
@@ -88,6 +91,7 @@ impl CompiledValue {
             value,
             ty,
             type_id,
+            vir_type_id: VirTypeId::UNKNOWN,
             rc_lifecycle: RcLifecycle::Untracked,
             #[cfg(debug_assertions)]
             consumed: false,
@@ -100,6 +104,7 @@ impl CompiledValue {
             value,
             ty,
             type_id,
+            vir_type_id: VirTypeId::UNKNOWN,
             rc_lifecycle: RcLifecycle::Owned,
             #[cfg(debug_assertions)]
             consumed: false,
@@ -112,10 +117,17 @@ impl CompiledValue {
             value,
             ty: self.ty,
             type_id: self.type_id,
+            vir_type_id: self.vir_type_id,
             rc_lifecycle: RcLifecycle::Untracked,
             #[cfg(debug_assertions)]
             consumed: false,
         }
+    }
+
+    /// Return a copy with the given VIR type ID set.
+    pub fn with_vir_type(mut self, vir_type_id: VirTypeId) -> Self {
+        self.vir_type_id = vir_type_id;
+        self
     }
 
     /// Whether this value has Owned lifecycle.

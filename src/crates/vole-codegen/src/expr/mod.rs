@@ -357,7 +357,7 @@ impl Cg<'_, '_, '_> {
     /// dispatch logic that has not yet been fully migrated.
     #[deny(clippy::wildcard_enum_match_arm)]
     pub fn compile_vir_expr(&mut self, vir_expr: &VirExpr) -> CodegenResult<CompiledValue> {
-        match vir_expr {
+        let result = match vir_expr {
             // -- Lowered literals -----------------------------------------
             VirExpr::IntLiteral { value, ty, .. } => {
                 let type_id = if *ty == VirTypeId::UNKNOWN {
@@ -677,7 +677,15 @@ impl Cg<'_, '_, '_> {
 
             // -- Generator ------------------------------------------------
             VirExpr::Yield { value } => self.compile_vir_yield(value),
-        }
+        };
+        // Annotate the result with the proper VIR type ID from the expression
+        // node so downstream consumers can use VirTypeTable instead of arena.
+        result.map(|mut cv| {
+            if let Some(vir_ty) = Self::vir_expr_type_id(vir_expr) {
+                cv.vir_type_id = vir_ty;
+            }
+            cv
+        })
     }
 
     /// Compile a VIR binary operation by delegating to `binary_op()`.
