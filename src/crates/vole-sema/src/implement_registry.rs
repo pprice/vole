@@ -336,6 +336,30 @@ impl ImplementRegistry {
             .collect()
     }
 
+    /// Iterate over all external function entries.
+    pub fn external_func_entries(&self) -> impl Iterator<Item = (&str, &ExternalMethodInfo)> {
+        self.external_func_info.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Iterate over all generic external function entries.
+    pub fn generic_external_entries(&self) -> impl Iterator<Item = (&str, &GenericExternalInfo)> {
+        self.generic_external_info
+            .iter()
+            .map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Iterate over all generic external method entries.
+    pub fn generic_external_method_entries(
+        &self,
+    ) -> impl Iterator<Item = (&GenericExternalMethodKey, &GenericExternalInfo)> {
+        self.generic_external_method_info.iter()
+    }
+
+    /// Iterate over all implement-block method entries.
+    pub fn method_entries(&self) -> impl Iterator<Item = (&MethodKey, &MethodImpl)> {
+        self.methods.iter()
+    }
+
     /// Merge another registry into this one
     pub fn merge(&mut self, other: &ImplementRegistry) {
         for (key, method) in &other.methods {

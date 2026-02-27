@@ -30,6 +30,8 @@ pub struct AnalyzedProgram {
     /// Entity registry (Rc-shared, immutable during codegen).
     entities: Rc<EntityRegistry>,
     /// Implement registry (Rc-shared, immutable during codegen).
+    /// Retained for vol-8t2v removal; all helpers now read from `implement_view`.
+    #[allow(dead_code)]
     implements: Rc<ImplementRegistry>,
     /// Name table (Rc-shared, immutable during codegen).
     names: Rc<NameTable>,
@@ -43,6 +45,11 @@ pub struct AnalyzedProgram {
     /// This is the single entry point for all VIR data produced during lowering.
     /// Codegen accesses VIR through this struct rather than individual fields.
     vir_program: VirProgram,
+    /// Codegen-local metadata view for implement-registry lookups.
+    ///
+    /// Populated once during `from_analysis`; all implement helpers read
+    /// from this view instead of `Rc<ImplementRegistry>`.
+    implement_view: ImplementView,
 }
 
 /// Codegen-local external binding payload from implement-registry lookups.
@@ -129,6 +136,67 @@ impl From<&vole_sema::implement_registry::MethodImpl> for MethodImplRef {
     }
 }
 
+/// Codegen-local metadata view for implement-registry data.
+///
+/// Populated once during `from_analysis` from the sema `ImplementRegistry`.
+/// All helpers on `AnalyzedProgram` that previously read `Rc<ImplementRegistry>`
+/// now read from this view instead.
+pub(crate) struct ImplementView {
+    /// External function info by short name (e.g. "print").
+    external_funcs: FxHashMap<String, ExternalMethodInfoRef>,
+    /// Generic external function info by short name.
+    generic_externals: FxHashMap<String, GenericExternalInfoRef>,
+    /// Generic external method info by (defining type, method name).
+    generic_external_methods: FxHashMap<(TypeDefId, NameId), GenericExternalInfoRef>,
+    /// Implement-block method bindings by (type name key, method name).
+    methods: FxHashMap<(NameId, NameId), MethodImplRef>,
+}
+
+impl ImplementView {
+    /// Build a codegen-local view by materializing all entries from an `ImplementRegistry`.
+    fn from_registry(registry: &ImplementRegistry) -> Self {
+        use vole_sema::implement_registry::ImplTypeId;
+
+        let external_funcs = registry
+            .external_func_entries()
+            .map(|(name, info)| (name.to_string(), ExternalMethodInfoRef::from(*info)))
+            .collect();
+
+        let generic_externals = registry
+            .generic_external_entries()
+            .map(|(name, info)| (name.to_string(), GenericExternalInfoRef::from(info)))
+            .collect();
+
+        let generic_external_methods = registry
+            .generic_external_method_entries()
+            .map(|(key, info)| {
+                (
+                    (key.type_def_id, key.method_name),
+                    GenericExternalInfoRef::from(info),
+                )
+            })
+            .collect();
+
+        let methods = registry
+            .method_entries()
+            .map(|(key, method_impl)| {
+                let type_name_id = ImplTypeId::name_id(key.type_id);
+                (
+                    (type_name_id, key.method_name),
+                    MethodImplRef::from(method_impl),
+                )
+            })
+            .collect();
+
+        Self {
+            external_funcs,
+            generic_externals,
+            generic_external_methods,
+            methods,
+        }
+    }
+}
+
 /// Codegen-local method binding payload for per-type method dispatch.
 #[derive(Debug, Clone)]
 pub(crate) struct MethodBindingRef {
@@ -185,6 +253,7 @@ impl AnalyzedProgram {
         });
         let module_programs = lowering_output.module_programs;
         let vir_program = lowering_output.vir_program;
+        let implement_view = ImplementView::from_registry(&db.implements);
         Self {
             program,
             interner: Rc::new(interner),
@@ -198,6 +267,7 @@ impl AnalyzedProgram {
             module_id,
             modules_with_errors,
             vir_program,
+            implement_view,
         }
     }
 
@@ -727,17 +797,12 @@ impl AnalyzedProgram {
 
     /// Look up external function binding metadata by short function name.
     pub(crate) fn external_func_by_name(&self, name: &str) -> Option<ExternalMethodInfoRef> {
-        self.implements
-            .get_external_func(name)
-            .copied()
-            .map(ExternalMethodInfoRef::from)
+        self.implement_view.external_funcs.get(name).copied()
     }
 
     /// Look up generic external function metadata by short function name.
     pub(crate) fn generic_external_by_name(&self, name: &str) -> Option<GenericExternalInfoRef> {
-        self.implements
-            .get_generic_external(name)
-            .map(GenericExternalInfoRef::from)
+        self.implement_view.generic_externals.get(name).cloned()
     }
 
     /// Look up generic external method metadata by defining type and method name.
@@ -746,9 +811,10 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name: NameId,
     ) -> Option<GenericExternalInfoRef> {
-        self.implements
-            .get_generic_external_method(type_def_id, method_name)
-            .map(GenericExternalInfoRef::from)
+        self.implement_view
+            .generic_external_methods
+            .get(&(type_def_id, method_name))
+            .cloned()
     }
 
     /// Get the free-function monomorph cache.
@@ -794,9 +860,10 @@ impl AnalyzedProgram {
         type_name_id: NameId,
         method_name_id: NameId,
     ) -> Option<MethodImplRef> {
-        self.implements
-            .get_method_by_name(type_name_id, method_name_id)
-            .map(MethodImplRef::from)
+        self.implement_view
+            .methods
+            .get(&(type_name_id, method_name_id))
+            .cloned()
     }
 
     /// Resolve and look up an implement-registry method from a sema TypeId.
