@@ -18,7 +18,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_frontend::Symbol;
-use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId};
+use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, VirTypeId};
 use vole_sema::type_arena::TypeId;
 
 use super::lambda::CaptureBinding;
@@ -369,11 +369,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Once N279-C migrates all VIR consumers to carry `VirTypeId` directly,
     /// this lookup path should be deleted.
     #[inline]
-    pub fn vir_lookup(&self, type_id: TypeId) -> vole_identity::VirTypeId {
-        if type_id.raw() < vole_identity::VirTypeId::FIRST_DYNAMIC {
-            vole_identity::VirTypeId::from_raw(type_id.raw())
+    pub fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
+        if type_id.raw() < VirTypeId::FIRST_DYNAMIC {
+            VirTypeId::from_raw(type_id.raw())
         } else {
-            vole_identity::VirTypeId::UNKNOWN
+            VirTypeId::UNKNOWN
         }
     }
 
@@ -382,7 +382,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_struct(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             self.arena().is_struct(type_id)
         } else {
             crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
@@ -394,7 +394,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_union(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             self.arena().is_union(type_id)
         } else {
             crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
@@ -406,7 +406,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_unknown(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             self.arena().is_unknown(type_id)
         } else {
             crate::types::vir_conversions::vir_is_unknown(vir_ty, self.vir_type_table())
@@ -418,7 +418,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_payload_union(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             crate::structs::helpers::is_payload_union(type_id, self.arena())
         } else {
             crate::types::vir_conversions::vir_is_payload_union(vir_ty, self.vir_type_table())
@@ -430,7 +430,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_void(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             self.arena().is_void(type_id)
         } else {
             crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
@@ -442,7 +442,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_fallible(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             self.arena().unwrap_fallible(type_id).is_some()
         } else {
             crate::types::vir_conversions::vir_is_fallible(vir_ty, self.vir_type_table())
@@ -454,7 +454,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_wide_fallible(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             crate::types::is_wide_fallible(type_id, self.arena())
         } else {
             crate::types::vir_conversions::vir_is_wide_fallible(vir_ty, self.vir_type_table())
@@ -466,7 +466,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_wide(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             crate::types::is_wide_type(type_id, self.arena())
         } else {
             crate::types::vir_conversions::vir_is_wide(vir_ty, self.vir_type_table())
@@ -478,7 +478,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_is_interface(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             self.arena().is_interface(type_id)
         } else {
             crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
@@ -490,7 +490,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_unwrap_nominal(&self, type_id: TypeId) -> Option<vole_identity::TypeDefId> {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             self.arena().unwrap_nominal(type_id).map(|(id, _, _)| id)
         } else {
             crate::types::vir_conversions::vir_unwrap_nominal(vir_ty, self.vir_type_table())
@@ -502,7 +502,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_display_basic(&self, type_id: TypeId) -> String {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             self.arena().display_basic(type_id)
         } else {
             crate::types::vir_conversions::vir_display_basic(vir_ty, self.vir_type_table())
@@ -514,7 +514,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_field_byte_size(&self, type_id: TypeId) -> u32 {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             crate::types::field_byte_size(type_id, self.arena())
         } else {
             crate::types::vir_conversions::vir_field_byte_size(vir_ty, self.vir_type_table())
@@ -526,7 +526,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn vir_query_unknown_type_tag(&self, type_id: TypeId) -> u64 {
         let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             crate::types::unknown_type_tag(type_id, self.arena())
         } else {
             crate::types::vir_conversions::vir_unknown_type_tag(vir_ty, self.vir_type_table())
@@ -539,11 +539,139 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn vir_query_type_to_cranelift(&self, type_id: TypeId) -> Type {
         let vir_ty = self.vir_lookup(type_id);
         let ptr = self.ptr_type();
-        if vir_ty == vole_identity::VirTypeId::UNKNOWN {
+        if vir_ty == VirTypeId::UNKNOWN {
             crate::types::type_id_to_cranelift(type_id, self.arena(), ptr)
         } else {
             crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
         }
+    }
+
+    // =====================================================================
+    // VIR-native type queries (no arena fallback)
+    //
+    // These accept `VirTypeId` directly — use in migrated VIR codegen paths
+    // where the VIR type is already available (e.g. from `VirExpr` fields or
+    // `CompiledValue::vir_type_id`).  No `vir_lookup` translation needed.
+    // =====================================================================
+
+    /// Check if a VIR type is a struct.
+    #[inline]
+    pub fn vir_is_struct(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is a union.
+    #[inline]
+    pub fn vir_is_union(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_union(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is a class.
+    #[inline]
+    pub fn vir_is_class(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_class(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is an interface.
+    #[inline]
+    pub fn vir_is_interface(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_interface(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is void.
+    #[inline]
+    pub fn vir_is_void(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_void(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is nil.
+    #[inline]
+    pub fn vir_is_nil(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_nil(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is unknown.
+    #[inline]
+    pub fn vir_is_unknown(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_unknown(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is a wide type (i128).
+    #[inline]
+    pub fn vir_is_wide(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_wide(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is reference-counted.
+    #[inline]
+    pub fn vir_is_rc(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_rc(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is a fallible type.
+    #[inline]
+    pub fn vir_is_fallible(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_fallible(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is a payload union.
+    #[inline]
+    pub fn vir_is_payload_union(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_payload_union(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is a string.
+    #[inline]
+    pub fn vir_is_string(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_string(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is an array.
+    #[inline]
+    pub fn vir_is_array(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_array(vir_ty, self.vir_type_table())
+    }
+
+    /// Check if a VIR type is a class or struct.
+    #[inline]
+    pub fn vir_is_class_or_struct(&self, vir_ty: VirTypeId) -> bool {
+        crate::types::vir_conversions::vir_is_class_or_struct(vir_ty, self.vir_type_table())
+    }
+
+    /// Unwrap a VIR union type to its variants.
+    #[inline]
+    pub fn vir_unwrap_union(&self, vir_ty: VirTypeId) -> Option<&[VirTypeId]> {
+        crate::types::vir_conversions::vir_unwrap_union(vir_ty, self.vir_type_table())
+    }
+
+    /// Unwrap a VIR optional type to its inner type.
+    #[inline]
+    pub fn vir_unwrap_optional(&self, vir_ty: VirTypeId) -> Option<VirTypeId> {
+        crate::types::vir_conversions::vir_unwrap_optional(vir_ty, self.vir_type_table())
+    }
+
+    /// Unwrap a VIR nominal type to its TypeDefId.
+    #[inline]
+    pub fn vir_unwrap_nominal(&self, vir_ty: VirTypeId) -> Option<vole_identity::TypeDefId> {
+        crate::types::vir_conversions::vir_unwrap_nominal(vir_ty, self.vir_type_table())
+    }
+
+    /// Get the field byte size for a VIR type.
+    #[inline]
+    pub fn vir_field_byte_size(&self, vir_ty: VirTypeId) -> u32 {
+        crate::types::vir_conversions::vir_field_byte_size(vir_ty, self.vir_type_table())
+    }
+
+    /// Get the runtime type tag for boxing a value to unknown.
+    #[inline]
+    pub fn vir_unknown_type_tag(&self, vir_ty: VirTypeId) -> u64 {
+        crate::types::vir_conversions::vir_unknown_type_tag(vir_ty, self.vir_type_table())
+    }
+
+    /// Get a human-readable type display string.
+    #[inline]
+    pub fn vir_display_basic(&self, vir_ty: VirTypeId) -> String {
+        crate::types::vir_conversions::vir_display_basic(vir_ty, self.vir_type_table())
     }
 
     /// Get expression type by NodeId.
