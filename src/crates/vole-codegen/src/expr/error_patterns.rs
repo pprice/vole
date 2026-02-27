@@ -131,13 +131,13 @@ impl Cg<'_, '_, '_> {
         };
         let fields: Vec<_> = self
             .analyzed()
-            .query()
             .fields_on_type(type_def_id)
+            .into_iter()
             .collect();
         match fields.len() {
             0 => true, // null payload, rc_dec is no-op
             1 => {
-                let field = self.analyzed().query().get_field(fields[0]);
+                let field = self.analyzed().field_def(fields[0]);
                 self.rc_state(field.ty).needs_cleanup()
             }
             _ => false, // 2+ fields = stack pointer, NOT safe for rc_dec
@@ -151,13 +151,13 @@ impl Cg<'_, '_, '_> {
         };
         let fields: Vec<_> = self
             .analyzed()
-            .query()
             .fields_on_type(type_def_id)
+            .into_iter()
             .collect();
         if fields.len() != 1 {
             return false;
         }
-        let field = self.analyzed().query().get_field(fields[0]);
+        let field = self.analyzed().field_def(fields[0]);
         self.rc_state(field.ty).needs_cleanup()
     }
 
@@ -224,7 +224,7 @@ impl Cg<'_, '_, '_> {
         // This handles error types from imported modules that aren't in the consumer's scope.
         let is_error_type = self
             .resolve_type(name)
-            .is_some_and(|type_id| self.analyzed().query().is_error_type(type_id))
+            .is_some_and(|type_id| self.analyzed().is_error_type(type_id))
             || {
                 // Fallback: check if name matches an error type in the fallible's error union
                 self.arena()
@@ -349,9 +349,9 @@ impl Cg<'_, '_, '_> {
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self
             .analyzed()
-            .query()
             .fields_on_type(error_type_def_id)
-            .map(|field_id| self.analyzed().query().get_field(field_id).clone())
+            .into_iter()
+            .map(|field_id| self.analyzed().field_def(field_id).clone())
             .collect();
 
         // Fallible layout (consistent with external functions in runtime):
@@ -462,7 +462,7 @@ impl Cg<'_, '_, '_> {
         let error_type_id = self
             .resolve_type(name)
             .and_then(|type_id| {
-                if self.analyzed().query().is_error_type_with_info(type_id) {
+                if self.analyzed().is_error_type_with_info(type_id) {
                     Some(type_id)
                 } else {
                     None

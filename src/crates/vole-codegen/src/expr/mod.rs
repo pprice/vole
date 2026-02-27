@@ -217,12 +217,9 @@ impl Cg<'_, '_, '_> {
                 .or_else(|| {
                     let name = self.interner().resolve(sym);
                     let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
-                    let type_def_id = self
-                        .analyzed()
-                        .query()
-                        .resolve_type_def_by_str(module_id, name)?;
-                    if self.analyzed().query().is_sentinel_type(type_def_id) {
-                        self.analyzed().query().sentinel_base_type(type_def_id)
+                    let type_def_id = self.analyzed().resolve_type_def_by_str(module_id, name)?;
+                    if self.analyzed().is_sentinel_type(type_def_id) {
+                        self.analyzed().sentinel_base_type(type_def_id)
                     } else {
                         None
                     }
@@ -505,11 +502,10 @@ impl Cg<'_, '_, '_> {
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Look up the original function's FuncId using the name table
-        let query = self.analyzed().query();
         let module_id = self
             .current_module_id()
             .unwrap_or(self.env.analyzed.module_id());
-        let name_id = query.function_name_id(module_id, sym);
+        let name_id = self.analyzed().function_name_id(module_id, sym);
 
         let orig_func_key = self.funcs().intern_name_id(name_id);
         let orig_func_id = self.funcs().func_id(orig_func_key).ok_or_else(|| {
@@ -1422,12 +1418,9 @@ impl Cg<'_, '_, '_> {
         // Sentinel fallback (name-based resolution)
         let name = self.interner().resolve(sym);
         let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id());
-        if let Some(type_def_id) = self
-            .analyzed()
-            .query()
-            .resolve_type_def_by_str(module_id, name)
-            && self.analyzed().query().is_sentinel_type(type_def_id)
-            && let Some(sentinel_type_id) = self.analyzed().query().sentinel_base_type(type_def_id)
+        if let Some(type_def_id) = self.analyzed().resolve_type_def_by_str(module_id, name)
+            && self.analyzed().is_sentinel_type(type_def_id)
+            && let Some(sentinel_type_id) = self.analyzed().sentinel_base_type(type_def_id)
         {
             let value = self.iconst_cached(types::I8, 0);
             return Ok(CompiledValue::new(value, types::I8, sentinel_type_id));
@@ -1454,9 +1447,9 @@ impl Cg<'_, '_, '_> {
             .current_module()
             .unwrap_or(self.env.analyzed.module_id());
         if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
-            && let Some(global_def) = self.analyzed().query().global(name_id)
+            && let Some(global_type_id) = self.analyzed().global_type_id(name_id)
         {
-            *value = self.coerce_to_type(*value, global_def.type_id)?;
+            *value = self.coerce_to_type(*value, global_type_id)?;
         }
         Ok(())
     }
@@ -1610,7 +1603,6 @@ impl Cg<'_, '_, '_> {
         let concrete_type_id = substitutions.get(&name_id).copied().ok_or_else(|| {
             let param_name = self
                 .analyzed()
-                .query()
                 .last_segment(name_id)
                 .unwrap_or_else(|| "?".to_string());
             CodegenError::unsupported_with_context(

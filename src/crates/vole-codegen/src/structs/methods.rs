@@ -242,7 +242,7 @@ impl Cg<'_, '_, '_> {
 
     fn resolved_dispatch_func_type_id(&self, resolved: MethodResolutionRef<'_>) -> TypeId {
         if let Some(method_id) = resolved.method_id() {
-            return self.analyzed().query().get_method(method_id).signature_id;
+            return self.analyzed().method_signature_id(method_id);
         }
 
         let resolved_signature_id = self.resolved_func_type_id(resolved);
@@ -279,7 +279,7 @@ impl Cg<'_, '_, '_> {
             .interface_method_ids_ordered(interface_type_def_id)
             .get(slot)
             .copied()?;
-        Some(self.analyzed().query().get_method(method_id).signature_id)
+        Some(self.analyzed().method_signature_id(method_id))
     }
 
     fn signature_has_self_placeholder_param(&self, signature_id: TypeId) -> bool {
@@ -297,7 +297,7 @@ impl Cg<'_, '_, '_> {
         resolved: MethodResolutionRef<'_>,
     ) -> Option<Vec<TypeId>> {
         if let Some(method_id) = resolved.method_id() {
-            let signature_id = self.analyzed().query().get_method(method_id).signature_id;
+            let signature_id = self.analyzed().method_signature_id(method_id);
             if let Some((params, _, _)) = self.arena().unwrap_function(signature_id) {
                 return Some(params.to_vec());
             }
@@ -380,12 +380,7 @@ impl Cg<'_, '_, '_> {
             return resolved;
         }
 
-        let type_params = self
-            .analyzed()
-            .query()
-            .get_type(type_def_id)
-            .type_params
-            .clone();
+        let type_params = self.analyzed().type_def(type_def_id).type_params.clone();
         if type_params.len() != type_args.len() {
             return resolved;
         }
@@ -466,7 +461,7 @@ impl Cg<'_, '_, '_> {
             method_id,
             func_type_id,
             ..
-        }) = self.analyzed().query().method_at(expr_id)
+        }) = self.analyzed().method_at(expr_id)
         {
             return self.static_method_call(StaticMethodCallArgs {
                 type_def_id: *type_def_id,
@@ -495,7 +490,6 @@ impl Cg<'_, '_, '_> {
             None
         } else {
             self.analyzed()
-                .query()
                 .method_at(expr_id)
                 .map(MethodResolutionRef::Ast)
         };
@@ -903,7 +897,7 @@ impl Cg<'_, '_, '_> {
             let type_def_id = resolved
                 .type_def_id()
                 .ok_or_else(|| CodegenError::not_found("type_def_id", method_name_str))?;
-            let type_name_id = self.analyzed().query().get_type(type_def_id).name_id;
+            let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
 
             // Detect if this is a DefaultMethod from Iterable interface.
             // Such methods (range::map, etc.) are compiled from the Iterable body which calls
@@ -962,9 +956,8 @@ impl Cg<'_, '_, '_> {
             if let Some(interface_type_def_id) = interface_type_def_id {
                 let func_type_id = self
                     .analyzed()
-                    .query()
                     .find_method(interface_type_def_id, method_name_id)
-                    .map(|mid| self.analyzed().query().get_method(mid).signature_id)
+                    .map(|mid| self.analyzed().method_signature_id(mid))
                     .ok_or_else(|| {
                         CodegenError::not_found(
                             "interface method",
@@ -994,10 +987,7 @@ impl Cg<'_, '_, '_> {
                     })?;
 
             // Check for external method binding first (interface methods on primitives)
-            if let Some(binding) = self
-                .analyzed()
-                .query()
-                .method_binding(type_def_id, method_name_id)
+            if let Some(binding) = self.analyzed().method_binding(type_def_id, method_name_id)
                 && let Some(external_info) = binding.external_info
             {
                 // External method - call via FFI
@@ -1017,10 +1007,7 @@ impl Cg<'_, '_, '_> {
                 }
                 let return_type_id =
                     self.maybe_convert_iterator_return_type(binding.func_type.return_type_id);
-                let ext = ExternalMethodRef {
-                    module_path: external_info.module_path,
-                    native_name: external_info.native_name,
-                };
+                let ext = ExternalMethodRef::from(external_info);
                 let result = self.call_external_id(&ext, &args, return_type_id)?;
                 // Consume RC receiver and temp args after the call
                 let mut obj = obj;
@@ -1030,7 +1017,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // Try method_func_keys lookup using type's NameId for stable lookup
-            let type_name_id = self.analyzed().query().get_type(type_def_id).name_id;
+            let type_name_id = self.analyzed().entity_type_name_id(type_def_id);
             let func_key = self
                 .method_func_keys()
                 .get(&(type_name_id, method_name_id))
@@ -1049,20 +1036,18 @@ impl Cg<'_, '_, '_> {
             // Get return type and param types from entity registry
             let (return_type_id, fb_param_ids) = self
                 .analyzed()
-                .query()
                 .method_binding(type_def_id, method_name_id)
                 .map(|binding| {
                     (
                         binding.func_type.return_type_id,
-                        Some(binding.func_type.params_id.clone()),
+                        Some(binding.func_type.params_id),
                     )
                 })
                 .or_else(|| {
                     self.analyzed()
-                        .query()
                         .find_method(type_def_id, method_name_id)
                         .map(|mid| {
-                            let method = self.analyzed().query().get_method(mid);
+                            let method = self.analyzed().method_def(mid);
                             let (params, ret) = self
                                 .arena()
                                 .unwrap_function(method.signature_id)
@@ -1127,10 +1112,7 @@ impl Cg<'_, '_, '_> {
                 if vir_dispatch.is_some() {
                     None
                 } else {
-                    self.analyzed()
-                        .query()
-                        .class_method_generic_at(expr_id)
-                        .cloned()
+                    self.analyzed().class_method_generic_at(expr_id).cloned()
                 }
             });
 

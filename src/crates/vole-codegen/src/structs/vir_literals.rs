@@ -32,7 +32,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Sentinels are zero-field structs represented as i8(0).
-        if self.analyzed().query().is_sentinel_type(type_def_id) {
+        if self.analyzed().is_sentinel_type(type_def_id) {
             let value = self.iconst_cached(types::I8, 0);
             return Ok(CompiledValue::new(value, types::I8, result_type_id));
         }
@@ -51,8 +51,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             let fallback = self
                 .analyzed()
-                .query()
-                .get_type(type_def_id)
+                .type_def(type_def_id)
                 .base_type_id
                 .map(|ty| self.try_substitute_type(ty))
                 .unwrap_or(TypeId::UNKNOWN);
@@ -121,7 +120,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         // Sentinels are zero-field structs represented as i8(0).
-        if self.analyzed().query().is_sentinel_type(type_def_id) {
+        if self.analyzed().is_sentinel_type(type_def_id) {
             let value = self.iconst_cached(types::I8, 0);
             return Ok(CompiledValue::new(value, types::I8, result_type_id));
         }
@@ -178,10 +177,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_def_id: vole_identity::TypeDefId,
     ) -> HashMap<String, TypeId> {
         self.analyzed()
-            .query()
             .fields_on_type(type_def_id)
+            .into_iter()
             .map(|field_id| {
-                let field = self.analyzed().query().get_field(field_id);
+                let field = self.analyzed().field_def(field_id);
                 (
                     self.name_table()
                         .last_segment_str(field.name_id)
@@ -240,11 +239,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect();
         let field_ids: Vec<_> = self
             .analyzed()
-            .query()
             .fields_on_type(type_def_id)
+            .into_iter()
             .collect();
         for field_id in field_ids {
-            let field = self.analyzed().query().get_field(field_id);
+            let field = self.analyzed().field_def(field_id);
             let Some(field_name) = self.name_table().last_segment_str(field.name_id) else {
                 continue;
             };
@@ -294,7 +293,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         result_type_id: TypeId,
     ) -> u32 {
         if let Some(subs) = self.substitutions {
-            let type_def = self.analyzed().query().get_type(type_def_id);
+            let type_def = self.analyzed().type_def(type_def_id);
             if let Some(generic_info) = &type_def.generic_info
                 && !generic_info.type_params.is_empty()
             {
@@ -385,11 +384,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect();
         let field_ids: Vec<_> = self
             .analyzed()
-            .query()
             .fields_on_type(type_def_id)
+            .into_iter()
             .collect();
         for field_id in field_ids {
-            let field = self.analyzed().query().get_field(field_id);
+            let field = self.analyzed().field_def(field_id);
             let Some(field_name) = self.name_table().last_segment_str(field.name_id) else {
                 continue;
             };

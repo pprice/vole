@@ -136,6 +136,22 @@ impl From<&vole_sema::implement_registry::MethodImpl> for MethodImplRef {
     }
 }
 
+/// Codegen-local method binding payload for per-type method dispatch.
+#[derive(Debug, Clone)]
+pub(crate) struct MethodBindingRef {
+    pub func_type: vole_sema::types::FunctionType,
+    pub external_info: Option<ExternalMethodInfoRef>,
+}
+
+impl From<&vole_sema::entity_defs::MethodBinding> for MethodBindingRef {
+    fn from(value: &vole_sema::entity_defs::MethodBinding) -> Self {
+        Self {
+            func_type: value.func_type.clone(),
+            external_info: value.external_info.map(ExternalMethodInfoRef::from),
+        }
+    }
+}
+
 impl AnalyzedProgram {
     /// Construct AnalyzedProgram from parsed program and analysis output.
     ///
@@ -622,6 +638,41 @@ impl AnalyzedProgram {
         self.entities.get_type(type_def_id).base_type_id
     }
 
+    /// Return whether a type definition is a sentinel.
+    pub(crate) fn is_sentinel_type(&self, type_def_id: TypeDefId) -> bool {
+        self.entity_type_is_sentinel(type_def_id)
+    }
+
+    /// Return whether a type definition is a struct (not class/interface/sentinel).
+    pub(crate) fn is_struct_type(&self, type_def_id: TypeDefId) -> bool {
+        self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Struct
+    }
+
+    /// Return whether a type definition is an alias.
+    pub(crate) fn is_alias_type(&self, type_def_id: TypeDefId) -> bool {
+        self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::Alias
+    }
+
+    /// Return aliased arena TypeId for alias types.
+    pub(crate) fn aliased_type(
+        &self,
+        type_def_id: TypeDefId,
+    ) -> Option<vole_sema::type_arena::TypeId> {
+        self.entities.get_type(type_def_id).aliased_type
+    }
+
+    /// Return whether a type definition is an error type.
+    pub(crate) fn is_error_type(&self, type_def_id: TypeDefId) -> bool {
+        self.entities.get_type(type_def_id).kind == vole_sema::entity_defs::TypeDefKind::ErrorType
+    }
+
+    /// Return whether an error type has additional error_info payload.
+    pub(crate) fn is_error_type_with_info(&self, type_def_id: TypeDefId) -> bool {
+        let type_def = self.entities.get_type(type_def_id);
+        type_def.kind == vole_sema::entity_defs::TypeDefKind::ErrorType
+            && type_def.error_info.is_some()
+    }
+
     /// Return interface method binding return type, when a binding exists.
     pub(crate) fn method_binding_return_type(
         &self,
@@ -631,6 +682,27 @@ impl AnalyzedProgram {
         self.entities
             .find_method_binding(type_def_id, method_name_id)
             .map(|binding| binding.func_type.return_type_id)
+    }
+
+    /// Return interface method binding metadata, when a binding exists.
+    pub(crate) fn method_binding(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodBindingRef> {
+        self.entities
+            .find_method_binding(type_def_id, method_name_id)
+            .map(MethodBindingRef::from)
+    }
+
+    /// Find a method on a type by method NameId.
+    pub(crate) fn find_method(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        self.entities
+            .find_method_on_type(type_def_id, method_name_id)
     }
 
     /// Return external binding metadata for a method, when available.
@@ -662,9 +734,66 @@ impl AnalyzedProgram {
         self.node_map.get_generic(node_id)
     }
 
+    /// Return class-method monomorph key metadata for a call node.
+    pub(crate) fn class_method_generic_at(
+        &self,
+        node_id: vole_identity::NodeId,
+    ) -> Option<&vole_sema::generic::ClassMethodMonomorphKey> {
+        self.node_map.get_class_method_generic(node_id)
+    }
+
+    /// Return static-method monomorph key metadata for a call node.
+    pub(crate) fn static_method_generic_at(
+        &self,
+        node_id: vole_identity::NodeId,
+    ) -> Option<&vole_sema::generic::StaticMethodMonomorphKey> {
+        self.node_map.get_static_method_generic(node_id)
+    }
+
     /// Return the single abstract method for functional interfaces.
     pub(crate) fn is_functional_interface(&self, type_def_id: TypeDefId) -> Option<MethodId> {
         self.entities.is_functional(type_def_id)
+    }
+
+    /// Resolve function NameId by module and Symbol, panicking when missing.
+    pub(crate) fn function_name_id(&self, module_id: ModuleId, name: Symbol) -> NameId {
+        self.try_function_name_id(module_id, name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "function name_id not found for '{}'",
+                    self.resolve_symbol(name)
+                )
+            })
+    }
+
+    /// Return function parameter TypeIds by FunctionId.
+    pub(crate) fn function_param_type_ids(
+        &self,
+        func_id: FunctionId,
+    ) -> Vec<vole_sema::type_arena::TypeId> {
+        self.entities
+            .get_function(func_id)
+            .signature
+            .params_id
+            .to_vec()
+    }
+
+    /// Return global declared TypeId by NameId.
+    pub(crate) fn global_type_id(&self, name_id: NameId) -> Option<vole_sema::type_arena::TypeId> {
+        let global_id = self.entities.global_by_name(name_id)?;
+        Some(self.entities.get_global(global_id).type_id)
+    }
+
+    /// Return module ID for a path, falling back to main module.
+    pub(crate) fn module_id_or_main(&self, path: &str) -> ModuleId {
+        self.names
+            .module_id_if_known(path)
+            .unwrap_or_else(|| self.names.main_module())
+    }
+
+    /// Return known imported module paths.
+    pub(crate) fn module_paths(&self) -> Vec<String> {
+        self.module_programs.keys().cloned().collect()
     }
 
     /// Return whether a function parameter has a default expression.
