@@ -17,7 +17,6 @@ pub(crate) use vole_fmt as fmt;
 pub(crate) use vole_frontend as frontend;
 pub(crate) use vole_runtime as runtime;
 pub(crate) use vole_sema as sema;
-pub(crate) use vole_vir as vir;
 
 // Targeted re-exports for the vole binary and external tools.
 // Only expose what the public API actually needs.

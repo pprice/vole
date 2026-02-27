@@ -277,11 +277,10 @@ fn inspect_vir(
 
     let include_tests = !no_tests;
     let main_module = analyzed.module_id;
-    let entities = analyzed.entity_registry();
 
     for func in &analyzed.vir_program.functions {
         // Skip non-main-module functions unless --all
-        if !show_all && !is_main_module_vir_func(func, entities, main_module) {
+        if !show_all && !analyzed.vir_function_in_module(func, main_module) {
             continue;
         }
         if !include_tests && is_test_function(&func.name) {
@@ -321,22 +320,4 @@ fn is_prelude_function(name: &str) -> bool {
 fn is_test_function(name: &str) -> bool {
     // Test functions are named "__test_{idx}" by the compiler
     name.starts_with("__test_")
-}
-
-/// Check if a VIR function belongs to the main module.
-///
-/// Methods use their defining type's module; free functions use FunctionDef.module.
-fn is_main_module_vir_func(
-    func: &crate::vir::VirFunction,
-    entities: &crate::sema::EntityRegistry,
-    main_module: ModuleId,
-) -> bool {
-    if let Some(method_id) = func.method_id {
-        let method_def = entities.get_method(method_id);
-        let type_def = entities.get_type(method_def.defining_type);
-        type_def.module == main_module
-    } else {
-        let func_def = entities.get_function(func.id);
-        func_def.module == main_module
-    }
 }

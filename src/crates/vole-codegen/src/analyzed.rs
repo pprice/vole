@@ -475,7 +475,7 @@ impl AnalyzedProgram {
     }
 
     /// Get read-only access to entity registry
-    pub fn entity_registry(&self) -> &EntityRegistry {
+    pub(crate) fn entity_registry(&self) -> &EntityRegistry {
         &self.entities
     }
 
@@ -496,7 +496,7 @@ impl AnalyzedProgram {
     }
 
     /// Get read-only access to implement registry
-    pub fn implement_registry(&self) -> &ImplementRegistry {
+    pub(crate) fn implement_registry(&self) -> &ImplementRegistry {
         &self.implements
     }
 
@@ -597,6 +597,17 @@ impl AnalyzedProgram {
     /// Returns `None` if no VIR function was lowered for this method.
     pub fn get_vir_method(&self, method_id: MethodId) -> Option<&VirFunction> {
         self.vir_program.get_method(method_id)
+    }
+
+    /// Return whether a VIR function belongs to the given module.
+    pub fn vir_function_in_module(&self, func: &VirFunction, module_id: ModuleId) -> bool {
+        let query = self.query();
+        if let Some(method_id) = func.method_id {
+            let method_def = query.get_method(method_id);
+            query.get_type(method_def.defining_type).module == module_id
+        } else {
+            query.get_function(func.id).module == module_id
+        }
     }
 
     /// Look up a generic VIR function template by its original `NameId`.
