@@ -637,6 +637,11 @@ impl EntityRegistry {
         self.primitive_names.get(&prim).copied()
     }
 
+    /// Iterate over all registered primitive-type NameId entries.
+    pub fn primitive_name_entries(&self) -> impl Iterator<Item = (PrimitiveTypeId, NameId)> + '_ {
+        self.primitive_names.iter().map(|(&k, &v)| (k, v))
+    }
+
     /// Get the NameId for the array type
     pub fn array_name_id(&self) -> Option<NameId> {
         self.array_name

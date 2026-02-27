@@ -11,7 +11,7 @@ use vole_frontend::{Interner, Program, Symbol};
 use vole_identity::{
     FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
 };
-use vole_sema::{AnalysisOutput, EntityRegistry, ImplementRegistry, NodeMap, TypeArena};
+use vole_sema::{AnalysisOutput, ImplementRegistry, NodeMap, TypeArena};
 use vole_vir::{VirBody, VirFunction, VirProgram};
 
 /// Result of parsing and analyzing a source file.
@@ -28,15 +28,6 @@ pub struct AnalyzedProgram {
     module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     /// Type arena (Rc-shared, immutable during codegen).
     types: Rc<TypeArena>,
-    /// Entity registry (Rc-shared, immutable during codegen).
-    /// Retained for external sema functions that take `&EntityRegistry`
-    /// (resolve_type_def_by_str, display_type_id_short, type_name_id_for_type).
-    /// All entity ID-based helpers now read from `entity_view`.
-    entities: Rc<EntityRegistry>,
-    /// Implement registry (Rc-shared, immutable during codegen).
-    /// Retained for vol-8t2v removal; all helpers now read from `implement_view`.
-    #[allow(dead_code)]
-    implements: Rc<ImplementRegistry>,
     /// Name table (Rc-shared, immutable during codegen).
     names: Rc<NameTable>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
@@ -271,8 +262,6 @@ impl AnalyzedProgram {
             tests_virtual_modules,
             module_programs,
             types: db.types,
-            entities: db.entities,
-            implements: db.implements,
             names: db.names,
             module_id,
             modules_with_errors,
@@ -496,10 +485,9 @@ impl AnalyzedProgram {
         module_id: ModuleId,
         name: &str,
     ) -> Option<TypeDefId> {
-        vole_sema::query::resolve_type_def_by_str(
+        self.entity_view.resolve_type_def_by_str(
             self.interner(),
             self.name_table(),
-            &self.entities,
             module_id,
             name,
         )
@@ -853,7 +841,7 @@ impl AnalyzedProgram {
             type_id,
             self.type_arena(),
             self.name_table(),
-            &self.entities,
+            &self.entity_view,
         )
     }
 
@@ -862,7 +850,8 @@ impl AnalyzedProgram {
         &self,
         type_id: vole_sema::type_arena::TypeId,
     ) -> Option<NameId> {
-        ImplementRegistry::type_name_id_for_type(type_id, self.type_arena(), &self.entities)
+        self.entity_view
+            .impl_type_name_id_from_type_id(type_id, self.type_arena())
     }
 
     /// Look up an implement-registry method by concrete type-name key.

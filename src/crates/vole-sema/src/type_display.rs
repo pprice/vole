@@ -2,9 +2,24 @@
 //!
 //! This module provides functions to display types directly from TypeId.
 
+use crate::entity_defs::TypeDef;
 use crate::entity_registry::EntityRegistry;
 use crate::type_arena::{InternedStructural, SemaType, TypeArena, TypeId};
-use vole_identity::NameTable;
+use vole_identity::{NameTable, TypeDefId};
+
+/// Minimal trait for type display: look up a `TypeDef` by ID.
+///
+/// Both `EntityRegistry` (sema) and `EntityView` (codegen) implement this,
+/// allowing `display_type_id_short` to work without a concrete registry.
+pub trait TypeDefProvider {
+    fn get_type(&self, id: TypeDefId) -> &TypeDef;
+}
+
+impl TypeDefProvider for EntityRegistry {
+    fn get_type(&self, id: TypeDefId) -> &TypeDef {
+        EntityRegistry::get_type(self, id)
+    }
+}
 
 /// Display a TypeId by matching on SemaType.
 /// This is the canonical way to format types for error messages.
@@ -23,9 +38,9 @@ pub fn display_type_id_short(
     type_id: TypeId,
     arena: &TypeArena,
     names: &NameTable,
-    entity_registry: &EntityRegistry,
+    provider: &impl TypeDefProvider,
 ) -> String {
-    display_sema_type(type_id, arena, names, entity_registry, true)
+    display_sema_type(type_id, arena, names, provider, true)
 }
 
 /// Display an InternedStructural constraint for error messages.
@@ -62,7 +77,7 @@ fn display_sema_type(
     type_id: TypeId,
     arena: &TypeArena,
     names: &NameTable,
-    entity_registry: &EntityRegistry,
+    provider: &impl TypeDefProvider,
     short: bool,
 ) -> String {
     // Sentinel types display with their short name (e.g., "nil", "Done"),
@@ -70,7 +85,7 @@ fn display_sema_type(
     if arena.is_sentinel(type_id)
         && let SemaType::Struct { type_def_id, .. } = arena.get(type_id)
     {
-        let type_def = entity_registry.get_type(*type_def_id);
+        let type_def = provider.get_type(*type_def_id);
         if let Some(name) = names.last_segment_str(type_def.name_id) {
             return name;
         }
@@ -88,33 +103,33 @@ fn display_sema_type(
         SemaType::Function { params, ret, .. } => {
             let params_str = params
                 .iter()
-                .map(|&p| display_sema_type(p, arena, names, entity_registry, short))
+                .map(|&p| display_sema_type(p, arena, names, provider, short))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!(
                 "({}) -> {}",
                 params_str,
-                display_sema_type(*ret, arena, names, entity_registry, short)
+                display_sema_type(*ret, arena, names, provider, short)
             )
         }
 
         SemaType::Union(variants) => variants
             .iter()
-            .map(|&v| display_sema_type(v, arena, names, entity_registry, short))
+            .map(|&v| display_sema_type(v, arena, names, provider, short))
             .collect::<Vec<_>>()
             .join(" | "),
 
         SemaType::Array(elem) => {
             format!(
                 "[{}]",
-                display_sema_type(*elem, arena, names, entity_registry, short)
+                display_sema_type(*elem, arena, names, provider, short)
             )
         }
 
         SemaType::FixedArray { element, size } => {
             format!(
                 "[{}; {}]",
-                display_sema_type(*element, arena, names, entity_registry, short),
+                display_sema_type(*element, arena, names, provider, short),
                 size
             )
         }
@@ -122,7 +137,7 @@ fn display_sema_type(
         SemaType::Tuple(elements) => {
             let elem_list = elements
                 .iter()
-                .map(|&e| display_sema_type(e, arena, names, entity_registry, short))
+                .map(|&e| display_sema_type(e, arena, names, provider, short))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("({})", elem_list)
@@ -131,7 +146,7 @@ fn display_sema_type(
         SemaType::RuntimeIterator(elem) => {
             format!(
                 "Iterator<{}>",
-                display_sema_type(*elem, arena, names, entity_registry, short)
+                display_sema_type(*elem, arena, names, provider, short)
             )
         }
 
@@ -147,7 +162,7 @@ fn display_sema_type(
             type_def_id,
             type_args,
         } => {
-            let name_id = entity_registry.name_id(*type_def_id);
+            let name_id = provider.get_type(*type_def_id).name_id;
             let base = if short {
                 names
                     .last_segment_str(name_id)
@@ -160,7 +175,7 @@ fn display_sema_type(
             } else {
                 let args = type_args
                     .iter()
-                    .map(|&a| display_sema_type(a, arena, names, entity_registry, short))
+                    .map(|&a| display_sema_type(a, arena, names, provider, short))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{}<{}>", base, args)
@@ -168,7 +183,7 @@ fn display_sema_type(
         }
 
         SemaType::Error { type_def_id } => {
-            let name_id = entity_registry.name_id(*type_def_id);
+            let name_id = provider.get_type(*type_def_id).name_id;
             if short {
                 names
                     .last_segment_str(name_id)
@@ -180,8 +195,8 @@ fn display_sema_type(
 
         SemaType::Fallible { success, error } => format!(
             "fallible({}, {})",
-            display_sema_type(*success, arena, names, entity_registry, short),
-            display_sema_type(*error, arena, names, entity_registry, short)
+            display_sema_type(*success, arena, names, provider, short),
+            display_sema_type(*error, arena, names, provider, short)
         ),
 
         SemaType::Module(module) => {
@@ -200,7 +215,7 @@ fn display_sema_type(
                 .iter()
                 .map(|(name_id, type_id)| {
                     let name = names.last_segment_str(*name_id).unwrap_or_default();
-                    let ty = display_sema_type(*type_id, arena, names, entity_registry, short);
+                    let ty = display_sema_type(*type_id, arena, names, provider, short);
                     format!("{}: {}", name, ty)
                 })
                 .collect();
@@ -209,10 +224,9 @@ fn display_sema_type(
                 let params: Vec<String> = method
                     .params
                     .iter()
-                    .map(|&p| display_sema_type(p, arena, names, entity_registry, short))
+                    .map(|&p| display_sema_type(p, arena, names, provider, short))
                     .collect();
-                let ret =
-                    display_sema_type(method.return_type, arena, names, entity_registry, short);
+                let ret = display_sema_type(method.return_type, arena, names, provider, short);
                 format!("func {}({}) -> {}", name, params.join(", "), ret)
             }));
             format!("{{ {} }}", parts.join(", "))

@@ -13,7 +13,9 @@ use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, NameId, NameTable, 
 use vole_sema::EntityRegistry;
 use vole_sema::entity_defs::{FieldDef, FunctionDef, GlobalDef, MethodDef, TypeDef};
 use vole_sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
-use vole_sema::type_arena::TypeId;
+use vole_sema::implement_registry::PrimitiveTypeId;
+use vole_sema::type_arena::{SemaType, TypeArena, TypeId};
+use vole_sema::types::PrimitiveType;
 
 use crate::analyzed::ExternalMethodInfoRef;
 
@@ -45,6 +47,8 @@ pub(crate) struct EntityView {
 
     // -- Miscellaneous --
     array_name: Option<NameId>,
+    /// Primitive type NameIds (i64, string, bool, ...).
+    primitive_names: FxHashMap<PrimitiveTypeId, NameId>,
 
     /// Eagerly-built short-name cache (last segment -> TypeDefIds).
     short_name_map: FxHashMap<String, Vec<TypeDefId>>,
@@ -76,6 +80,7 @@ impl EntityView {
             static_methods_by_type: registry.static_methods_by_type_map().clone(),
 
             array_name: registry.array_name_id(),
+            primitive_names: registry.primitive_name_entries().collect(),
             short_name_map,
 
             monomorph_cache: registry.monomorph_cache.clone(),
@@ -333,6 +338,97 @@ impl EntityView {
     /// Get the static-method monomorph cache.
     pub(crate) fn static_method_monomorph_cache(&self) -> &StaticMethodMonomorphCache {
         &self.static_method_monomorph_cache
+    }
+
+    /// Resolve the implement-registry type-key NameId from a concrete sema TypeId.
+    ///
+    /// Replicates `ImplTypeId::from_type_id` logic using the EntityView's
+    /// own type defs and primitive name table, without reaching back into
+    /// the EntityRegistry.
+    pub(crate) fn impl_type_name_id_from_type_id(
+        &self,
+        type_id: TypeId,
+        arena: &TypeArena,
+    ) -> Option<NameId> {
+        match arena.get(type_id) {
+            SemaType::Primitive(prim) => {
+                let prim_id = match prim {
+                    PrimitiveType::I8 => PrimitiveTypeId::I8,
+                    PrimitiveType::I16 => PrimitiveTypeId::I16,
+                    PrimitiveType::I32 => PrimitiveTypeId::I32,
+                    PrimitiveType::I64 => PrimitiveTypeId::I64,
+                    PrimitiveType::I128 => PrimitiveTypeId::I128,
+                    PrimitiveType::U8 => PrimitiveTypeId::U8,
+                    PrimitiveType::U16 => PrimitiveTypeId::U16,
+                    PrimitiveType::U32 => PrimitiveTypeId::U32,
+                    PrimitiveType::U64 => PrimitiveTypeId::U64,
+                    PrimitiveType::F32 => PrimitiveTypeId::F32,
+                    PrimitiveType::F64 => PrimitiveTypeId::F64,
+                    PrimitiveType::F128 => PrimitiveTypeId::F128,
+                    PrimitiveType::Bool => PrimitiveTypeId::Bool,
+                    PrimitiveType::String => PrimitiveTypeId::String,
+                };
+                self.primitive_names.get(&prim_id).copied()
+            }
+            SemaType::Range => self.primitive_names.get(&PrimitiveTypeId::Range).copied(),
+            SemaType::Handle => self.primitive_names.get(&PrimitiveTypeId::Handle).copied(),
+            SemaType::Array(_) => self.array_name,
+            SemaType::Class { type_def_id, .. } | SemaType::Struct { type_def_id, .. } => {
+                Some(self.get_type(*type_def_id).name_id)
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolve a type definition by short name, matching the sema
+    /// `resolve_type_str_or_interface` resolution chain.
+    ///
+    /// Uses the identity-layer `Resolver` for scoped NameId lookup, then
+    /// maps through `type_by_name`.  Falls back to short-name search
+    /// across all registered types (interfaces, classes, structs, sentinels).
+    pub(crate) fn resolve_type_def_by_str(
+        &self,
+        interner: &vole_frontend::Interner,
+        names: &NameTable,
+        module_id: vole_identity::ModuleId,
+        name: &str,
+    ) -> Option<TypeDefId> {
+        // Sentinel priority: "nil" and "Done" must resolve to their sentinel
+        // TypeDefId, not a primitive or other type with the same short name.
+        if (name == "nil" || name == "Done")
+            && let Some(id) = self.sentinel_by_short_name(name, names) {
+                return Some(id);
+            }
+        // Scoped NameId resolution (primitives, current module, builtin).
+        let resolver = vole_identity::Resolver::new(interner, names, module_id, &[]);
+        if let Some(name_id) = resolver.resolve_str(name)
+            && let Some(id) = self.type_by_name(name_id)
+        {
+            return Some(id);
+        }
+        // Short-name fallback (covers sentinel, interface, class, struct).
+        self.type_by_short_name(name)
+    }
+
+    /// Find a sentinel type by its short (last-segment) name.
+    fn sentinel_by_short_name(&self, short_name: &str, names: &NameTable) -> Option<TypeDefId> {
+        self.short_name_map.get(short_name).and_then(|ids| {
+            ids.iter().copied().find(|&id| {
+                let td = self.get_type(id);
+                td.kind.is_sentinel()
+                    && names.last_segment_str(td.name_id).as_deref() == Some(short_name)
+            })
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TypeDefProvider impl
+// ---------------------------------------------------------------------------
+
+impl vole_sema::TypeDefProvider for EntityView {
+    fn get_type(&self, id: TypeDefId) -> &TypeDef {
+        EntityView::get_type(self, id)
     }
 }
 
