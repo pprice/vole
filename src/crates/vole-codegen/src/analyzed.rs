@@ -13,6 +13,10 @@ use crate::analyzed_lower_function_default_inits::{
     LowerFunctionDefaultInitsArgs, LowerModuleFunctionDefaultInitsArgs,
     lower_function_default_inits, lower_module_function_default_inits,
 };
+use crate::analyzed_lower_functions::{
+    LowerModuleFunctionsArgs, LowerTopLevelFunctionsArgs, lower_module_functions,
+    lower_top_level_functions,
+};
 use crate::analyzed_lower_global_inits::{lower_global_inits, lower_module_global_inits};
 use crate::analyzed_lower_lambda_default_inits::{
     LowerLambdaDefaultInitsArgs, lower_lambda_default_inits,
@@ -182,26 +186,26 @@ impl AnalyzedProgram {
         };
         let mut module_programs = output.module_programs;
         let mut type_table = VirTypeTable::new();
-        let mut vir_functions = lower_top_level_functions(
-            &program,
-            &mut interner,
-            &db.names,
-            &db.entities,
-            &db.types,
-            &output.node_map,
-            output.module_id,
-            &mut type_table,
-        );
-        lower_module_functions(
-            &mut module_programs,
-            &db.names,
-            &db.entities,
-            &db.types,
-            &output.node_map,
-            &output.modules_with_errors,
-            &mut vir_functions,
-            &mut type_table,
-        );
+        let mut vir_functions = lower_top_level_functions(LowerTopLevelFunctionsArgs {
+            program: &program,
+            interner: &mut interner,
+            names: &db.names,
+            entities: &db.entities,
+            type_arena: &db.types,
+            node_map: &output.node_map,
+            module_id: output.module_id,
+            type_table: &mut type_table,
+        });
+        lower_module_functions(LowerModuleFunctionsArgs {
+            module_programs: &mut module_programs,
+            names: &db.names,
+            entities: &db.entities,
+            type_arena: &db.types,
+            node_map: &output.node_map,
+            modules_with_errors: &output.modules_with_errors,
+            vir_functions: &mut vir_functions,
+            type_table: &mut type_table,
+        });
 
         // --- VIR monomorphization ---
         //
@@ -1120,76 +1124,6 @@ impl AnalyzedProgram {
     }
 }
 
-/// Lower top-level non-generic functions to VIR.
-///
-/// Iterates the program's declarations, looks up each non-generic function
-/// in the entity registry, and calls `lower_function()` to produce a
-/// `VirFunction`.  Generic functions and implicit generics are skipped
-/// because they are monomorphized during codegen.
-#[allow(clippy::too_many_arguments)]
-fn lower_top_level_functions(
-    program: &Program,
-    interner: &mut Interner,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    type_arena: &TypeArena,
-    node_map: &NodeMap,
-    module_id: ModuleId,
-    type_table: &mut VirTypeTable,
-) -> Vec<VirFunction> {
-    // Collect (func_decl, func_id, func_def) tuples first while interner is
-    // borrowed immutably by NamerLookup, then lower with &mut interner.
-    let resolved: Vec<_> = {
-        let namer = NamerLookup::new(names, interner);
-        program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                let Decl::Function(func) = decl else {
-                    return None;
-                };
-                if !func.type_params.is_empty() {
-                    return None;
-                }
-                let name_id = namer.function(module_id, func.name)?;
-                let func_id = entities.function_by_name(name_id)?;
-                let func_def = entities.get_function(func_id);
-                if func_def.generic_info.is_some() {
-                    return None;
-                }
-                Some((func, func_id, func_def))
-            })
-            .collect()
-    };
-
-    let mut vir_functions = Vec::new();
-    for (func, func_id, func_def) in resolved {
-        let param_types: Vec<_> = func
-            .params
-            .iter()
-            .zip(func_def.signature.params_id.iter())
-            .map(|(p, &ty)| (p.name, ty))
-            .collect();
-        let display_name = interner.resolve(func.name).to_string();
-        let vir = lower_function(
-            func,
-            func_id,
-            display_name,
-            &param_types,
-            func_def.signature.return_type_id,
-            node_map,
-            interner,
-            type_arena,
-            entities.as_entity_registry(),
-            names,
-            type_table,
-        );
-        vir_functions.push(vir);
-    }
-
-    vir_functions
-}
-
 /// AST-based fallback for monomorphized instances not handled by VIR monomorph.
 ///
 /// For each concrete instance in the monomorph cache, finds the generic
@@ -1903,106 +1837,6 @@ impl<'a, 'namer> GenericFuncCollector<'a, 'namer> {
                 _ => {}
             }
         }
-    }
-}
-
-/// Lower non-generic functions from imported modules to VIR.
-///
-/// Iterates each module's parsed program, resolves function identities through
-/// the module's interner and module ID, and calls `lower_function()` for each
-/// non-generic, non-implicitly-generic function.  Modules with sema errors are
-/// skipped to avoid INVALID type IDs.
-#[allow(clippy::too_many_arguments)]
-fn lower_module_functions(
-    module_programs: &mut FxHashMap<String, (Program, Rc<Interner>)>,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    type_arena: &TypeArena,
-    node_map: &NodeMap,
-    modules_with_errors: &HashSet<String>,
-    vir_functions: &mut Vec<VirFunction>,
-    type_table: &mut VirTypeTable,
-) {
-    for (module_path, (program, module_interner)) in module_programs.iter_mut() {
-        if modules_with_errors.contains(module_path.as_str()) {
-            continue;
-        }
-        let module_id = names
-            .module_id_if_known(module_path)
-            .unwrap_or_else(|| names.main_module());
-        let interner = Rc::make_mut(module_interner);
-        lower_module_program_functions(
-            program,
-            interner,
-            names,
-            entities,
-            type_arena,
-            node_map,
-            module_id,
-            vir_functions,
-            type_table,
-        );
-    }
-}
-
-/// Lower non-generic functions from a single module program to VIR.
-#[allow(clippy::too_many_arguments)]
-fn lower_module_program_functions(
-    program: &Program,
-    interner: &mut Interner,
-    names: &NameTable,
-    entities: &impl LoweringEntityLookup,
-    type_arena: &TypeArena,
-    node_map: &NodeMap,
-    module_id: ModuleId,
-    vir_functions: &mut Vec<VirFunction>,
-    type_table: &mut VirTypeTable,
-) {
-    let resolved: Vec<_> = {
-        let namer = NamerLookup::new(names, interner);
-        program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                let Decl::Function(func) = decl else {
-                    return None;
-                };
-                if !func.type_params.is_empty() {
-                    return None;
-                }
-                let name_id = namer.function(module_id, func.name)?;
-                let func_id = entities.function_by_name(name_id)?;
-                let func_def = entities.get_function(func_id);
-                if func_def.generic_info.is_some() {
-                    return None;
-                }
-                Some((func, func_id, func_def))
-            })
-            .collect()
-    };
-
-    for (func, func_id, func_def) in resolved {
-        let param_types: Vec<_> = func
-            .params
-            .iter()
-            .zip(func_def.signature.params_id.iter())
-            .map(|(p, &ty)| (p.name, ty))
-            .collect();
-        let display_name = interner.resolve(func.name).to_string();
-        let vir = lower_function(
-            func,
-            func_id,
-            display_name,
-            &param_types,
-            func_def.signature.return_type_id,
-            node_map,
-            interner,
-            type_arena,
-            entities.as_entity_registry(),
-            names,
-            type_table,
-        );
-        vir_functions.push(vir);
     }
 }
 
