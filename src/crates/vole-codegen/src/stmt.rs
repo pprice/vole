@@ -85,10 +85,10 @@ impl Cg<'_, '_, '_> {
         if let Some(declared_type_id) = declared_type_id_opt
             && storage == LetStorageHint::Interface
         {
-            let is_final_interface = self.arena().is_interface(final_type_id);
+            let is_final_interface = self.vir_query_is_interface(final_type_id);
             // RuntimeIterator is an internal concrete type that implements Iterator
             // dispatch directly via runtime_iterator_method; skip interface boxing.
-            let is_runtime_iterator = self.arena().is_runtime_iterator(final_type_id);
+            let is_runtime_iterator = self.vir_query_is_runtime_iterator(final_type_id);
 
             if !is_final_interface && !is_runtime_iterator {
                 let cranelift_ty = self.cranelift_type(final_type_id);
@@ -132,21 +132,20 @@ impl Cg<'_, '_, '_> {
         // Sentinel hint match (used when multiple sentinel variants share the same
         // lowered value shape, e.g. Empty/Deleted).
         if let Some(hint_type_id) = sentinel_hint_type_id
-            && self.arena().is_sentinel(resolved_value_type_id)
+            && self.vir_query_is_sentinel(resolved_value_type_id)
             && let Some(pos) = variants.iter().position(|&v| v == hint_type_id)
         {
             return Ok((pos, value.value, hint_type_id));
         }
 
         // Try to find a compatible integer type for widening/narrowing
-        let arena = self.arena();
-        let value_is_integer = arena.is_integer(resolved_value_type_id);
+        let value_is_integer = self.vir_query_is_integer(resolved_value_type_id);
 
         let compatible = if value_is_integer {
             variants
                 .iter()
                 .enumerate()
-                .find(|(_, v)| arena.is_integer(**v))
+                .find(|(_, v)| self.vir_query_is_integer(**v))
                 .map(|(pos, v)| (pos, *v))
         } else {
             None
@@ -164,11 +163,11 @@ impl Cg<'_, '_, '_> {
                 };
                 Ok((pos, actual, variant_type_id))
             }
-            None if self.arena().is_sentinel(resolved_value_type_id) => {
+            None if self.vir_query_is_sentinel(resolved_value_type_id) => {
                 let sentinel_variants: Vec<(usize, TypeId)> = variants
                     .iter()
                     .enumerate()
-                    .filter_map(|(idx, &ty)| self.arena().is_sentinel(ty).then_some((idx, ty)))
+                    .filter_map(|(idx, &ty)| self.vir_query_is_sentinel(ty).then_some((idx, ty)))
                     .collect();
                 if sentinel_variants.len() == 1 {
                     let (pos, ty) = sentinel_variants[0];
@@ -176,10 +175,10 @@ impl Cg<'_, '_, '_> {
                 } else {
                     let expected = variants
                         .iter()
-                        .map(|&variant| self.arena().display_basic(variant))
+                        .map(|&variant| self.vir_query_display_basic(variant))
                         .collect::<Vec<_>>()
                         .join(" | ");
-                    let found = self.arena().display_basic(resolved_value_type_id);
+                    let found = self.vir_query_display_basic(resolved_value_type_id);
                     let subs = self
                         .substitutions
                         .map(|m| {
@@ -189,7 +188,7 @@ impl Cg<'_, '_, '_> {
                                         "{} ({:?}) -> {}",
                                         self.name_table().display(*k),
                                         k,
-                                        self.arena().display_basic(*v)
+                                        self.vir_query_display_basic(*v)
                                     )
                                 })
                                 .collect::<Vec<_>>()
@@ -201,7 +200,7 @@ impl Cg<'_, '_, '_> {
                         format!("compatible sentinel type ({expected})"),
                         format!(
                             "{found} (union={}, substitutions={subs})",
-                            self.arena().display_basic(union_type_id)
+                            self.vir_query_display_basic(union_type_id)
                         ),
                     ))
                 }
@@ -209,13 +208,13 @@ impl Cg<'_, '_, '_> {
             None => {
                 let expected = variants
                     .iter()
-                    .map(|&variant| self.arena().display_basic(variant))
+                    .map(|&variant| self.vir_query_display_basic(variant))
                     .collect::<Vec<_>>()
                     .join(" | ");
-                let found = if let Some(name_id) = self.arena().unwrap_type_param(value.type_id) {
+                let found = if let Some(name_id) = self.vir_query_unwrap_type_param(value.type_id) {
                     format!("{} ({:?})", self.name_table().display(name_id), name_id)
                 } else {
-                    self.arena().display_basic(resolved_value_type_id)
+                    self.vir_query_display_basic(resolved_value_type_id)
                 };
                 let subs = self
                     .substitutions
@@ -226,7 +225,7 @@ impl Cg<'_, '_, '_> {
                                     "{} ({:?}) -> {}",
                                     self.name_table().display(*k),
                                     k,
-                                    self.arena().display_basic(*v)
+                                    self.vir_query_display_basic(*v)
                                 )
                             })
                             .collect::<Vec<_>>()
@@ -238,7 +237,7 @@ impl Cg<'_, '_, '_> {
                     format!("compatible type ({expected})"),
                     format!(
                         "{found} (union={}, substitutions={subs})",
-                        self.arena().display_basic(union_type_id)
+                        self.vir_query_display_basic(union_type_id)
                     ),
                 ))
             }
@@ -301,7 +300,7 @@ impl Cg<'_, '_, '_> {
         if union_size > union_layout::TAG_ONLY_SIZE {
             // Sentinel variants have no payload data; zero the slot to avoid
             // undefined behaviour in generic cleanup paths.
-            let is_sentinel = self.arena().is_sentinel(variant_type_id);
+            let is_sentinel = self.vir_query_is_sentinel(variant_type_id);
             let payload = if is_sentinel {
                 self.iconst_cached(types::I64, 0)
             } else {
@@ -323,11 +322,9 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
         sentinel_hint_type_id: Option<TypeId>,
     ) -> CodegenResult<CompiledValue> {
-        let arena = self.arena();
-        let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
+        let variants = self.vir_query_unwrap_union(union_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union")
         })?;
-        let variants = variants.clone();
 
         // If the value is already the same union type, just return it.
         // Also check the substituted type, since generic code may produce values
@@ -372,7 +369,7 @@ impl Cg<'_, '_, '_> {
             // Initialize payload bytes for payload-carrying unions. Sentinel variants
             // don't carry data, but zeroing avoids undefined behavior when generic
             // cleanup/copy paths read the payload word.
-            let payload = if self.arena().is_sentinel(actual_type_id) {
+            let payload = if self.vir_query_is_sentinel(actual_type_id) {
                 self.iconst_cached(types::I64, 0)
             } else {
                 actual_value
@@ -397,9 +394,8 @@ impl Cg<'_, '_, '_> {
         error_name_sym: Symbol,
     ) -> CodegenResult<vole_identity::TypeDefId> {
         let raise_error_name = self.interner().resolve(error_name_sym);
-        let arena = self.arena();
         let name_table = self.name_table();
-        let result = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
+        let result = if let Some(type_def_id) = self.vir_query_unwrap_error(error_type_id) {
             // Single error type
             let name =
                 name_table.last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
@@ -408,10 +404,10 @@ impl Cg<'_, '_, '_> {
             } else {
                 None
             }
-        } else if let Some(variants) = arena.unwrap_union(error_type_id) {
+        } else if let Some(variants) = self.vir_query_unwrap_union(error_type_id) {
             // Union of error types
             variants.iter().find_map(|&v| {
-                if let Some(type_def_id) = arena.unwrap_error(v) {
+                if let Some(type_def_id) = self.vir_query_unwrap_error(v) {
                     let name = name_table
                         .last_segment_str(self.analyzed().entity_type_name_id(type_def_id));
                     if name.as_deref() == Some(raise_error_name) {
@@ -576,7 +572,7 @@ impl Cg<'_, '_, '_> {
             compiled.type_id = self.try_substitute_type(compiled.type_id);
             if is_union_return
                 && let Some(ret_type_id) = return_type_id
-                && self.arena().is_function(compiled.type_id)
+                && self.vir_query_is_function(compiled.type_id)
                 && let vole_vir::VirExpr::Match {
                     scrutinee, arms, ..
                 } = value_expr
@@ -635,11 +631,11 @@ impl Cg<'_, '_, '_> {
         &self,
         union_type_id: TypeId,
     ) -> Option<TypeId> {
-        let variants = self.arena().unwrap_union(union_type_id)?;
+        let variants = self.vir_query_unwrap_union(union_type_id)?;
         let mut it = variants.iter().copied().filter(|&variant| {
-            self.arena().is_array(variant)
-                || self.arena().unwrap_tuple(variant).is_some()
-                || self.arena().unwrap_fixed_array(variant).is_some()
+            self.vir_query_is_array(variant)
+                || self.vir_query_unwrap_tuple(variant).is_some()
+                || self.vir_query_unwrap_fixed_array(variant).is_some()
         });
         let first = it.next()?;
         if it.next().is_some() {
@@ -683,7 +679,7 @@ impl Cg<'_, '_, '_> {
                     ReturnConvention::Struct
                 } else if self.vir_query_is_union(ret_type_id) {
                     ReturnConvention::Union
-                } else if self.arena().is_void(ret_type_id) {
+                } else if self.vir_query_is_void(ret_type_id) {
                     ReturnConvention::Void
                 } else {
                     ReturnConvention::Scalar
@@ -704,7 +700,7 @@ impl Cg<'_, '_, '_> {
                 let ret_type_id =
                     return_type_id.expect("InterfaceBox convention requires return type");
                 if !self.vir_query_is_interface(compiled.type_id)
-                    && !self.arena().is_runtime_iterator(compiled.type_id)
+                    && !self.vir_query_is_runtime_iterator(compiled.type_id)
                 {
                     let boxed = self.box_interface_value(compiled, ret_type_id)?;
                     self.builder.ins().return_(&[boxed.value]);
@@ -847,11 +843,8 @@ impl Cg<'_, '_, '_> {
             )
         })?;
 
-        // NOTE: arena() retained — error_tag_for/resolve_raise_error_type_def
-        // require sema TypeId.  Remove when error dispatch uses VirTypeId (Phase D).
         let (_success_type_id, error_type_id) = self
-            .arena()
-            .unwrap_fallible(return_type_id)
+            .vir_query_unwrap_fallible(return_type_id)
             .ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "raise statement",
