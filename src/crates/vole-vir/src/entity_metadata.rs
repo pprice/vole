@@ -8,7 +8,9 @@
 // consumed by codegen without reaching back into sema.
 
 use rustc_hash::FxHashMap;
-use vole_identity::{FieldId, GlobalId, MethodId, ModuleId, NameId, Symbol, TypeDefId, VirTypeId};
+use vole_identity::{
+    FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, Symbol, TypeDefId, VirTypeId,
+};
 
 // ---------------------------------------------------------------------------
 // Type definition kind
@@ -195,6 +197,56 @@ pub struct VirGlobalDef {
 }
 
 // ---------------------------------------------------------------------------
+// Function definition metadata
+// ---------------------------------------------------------------------------
+
+/// VIR-native metadata for a free function definition.
+///
+/// Contains the function's name, signature, module, and auxiliary info
+/// (defaults, generics, generator element type) — everything codegen
+/// needs for function dispatch without reaching back into sema.
+#[derive(Debug, Clone)]
+pub struct VirFunctionDef {
+    /// The sema entity ID for this function.
+    pub id: FunctionId,
+    /// The function's short name (e.g. `sin`).
+    pub name_id: NameId,
+    /// Fully qualified function name (e.g. `math::sin`).
+    pub full_name_id: NameId,
+    /// The module this function is declared in.
+    pub module: ModuleId,
+    /// Parameter types in declaration order.
+    ///
+    /// Translated from the sema signature's param TypeIds to VirTypeIds
+    /// during lowering.
+    pub param_types: Vec<VirTypeId>,
+    /// Return type of this function.
+    ///
+    /// Translated from the sema signature's return TypeId to a VirTypeId
+    /// during lowering.
+    pub return_type: VirTypeId,
+    /// Parameter names in declaration order.
+    pub param_names: Vec<String>,
+    /// Number of required parameters (without defaults).
+    /// Parameters 0..required_params are required, rest have defaults.
+    pub required_params: usize,
+    /// Which parameters have default expressions.
+    ///
+    /// Index corresponds to parameter index.  Codegen only needs to know
+    /// whether a default exists (not the expression itself), so we store
+    /// booleans rather than cloning AST nodes.
+    pub has_defaults: Vec<bool>,
+    /// Whether this function is generic (has type parameters).
+    pub is_generic: bool,
+    /// Whether this function is an external (FFI) function.
+    pub is_external: bool,
+    /// If this function is a generator, the element type `T` of its
+    /// `Iterator<T>` return type.  Codegen reads this instead of walking
+    /// the AST.
+    pub generator_element_type: Option<VirTypeId>,
+}
+
+// ---------------------------------------------------------------------------
 // VirEntityMetadata — the top-level container
 // ---------------------------------------------------------------------------
 
@@ -215,6 +267,12 @@ pub struct VirEntityMetadata {
     global_defs: FxHashMap<GlobalId, VirGlobalDef>,
     /// Reverse lookup: `NameId` → `GlobalId`.
     global_by_name: FxHashMap<NameId, GlobalId>,
+    /// Function definitions keyed by `FunctionId`.
+    function_defs: FxHashMap<FunctionId, VirFunctionDef>,
+    /// Reverse lookup: `NameId` → `FunctionId`.
+    ///
+    /// Mirrors `EntityRegistry::function_by_name_map` / `EntityView::function_by_name`.
+    function_by_name: FxHashMap<NameId, FunctionId>,
     /// Reverse lookup: `NameId` → `TypeDefId`.
     ///
     /// Mirrors `EntityRegistry::type_by_name_map` / `EntityView::type_by_name`.
@@ -278,6 +336,27 @@ impl VirEntityMetadata {
             .entry(short_name)
             .or_default()
             .push(type_def_id);
+    }
+
+    /// Register a function definition.
+    ///
+    /// Also updates the `function_by_name` reverse-lookup map using
+    /// the function's `name_id`.  For additional name mappings (e.g.
+    /// `full_name_id`), call [`insert_function_by_name`] separately.
+    pub fn insert_function_def(&mut self, function_def: VirFunctionDef) {
+        self.function_by_name
+            .insert(function_def.name_id, function_def.id);
+        self.function_defs.insert(function_def.id, function_def);
+    }
+
+    /// Register an additional `NameId` → `FunctionId` mapping.
+    ///
+    /// The sema `EntityRegistry` stores both `name_id` and `full_name_id`
+    /// entries in its function-by-name map.  `insert_function_def` only
+    /// inserts by `name_id`, so the lowering pass calls this to mirror
+    /// the full registry map.
+    pub fn insert_function_by_name(&mut self, name_id: NameId, function_id: FunctionId) {
+        self.function_by_name.insert(name_id, function_id);
     }
 
     /// Register a global variable definition.
@@ -542,6 +621,32 @@ impl VirEntityMetadata {
 }
 
 // ---------------------------------------------------------------------------
+// Function queries
+// ---------------------------------------------------------------------------
+
+impl VirEntityMetadata {
+    /// Look up a function definition by ID.
+    pub fn get_function_def(&self, id: FunctionId) -> Option<&VirFunctionDef> {
+        self.function_defs.get(&id)
+    }
+
+    /// Look up a function's `FunctionId` by its `NameId`.
+    pub fn function_by_name(&self, name_id: NameId) -> Option<FunctionId> {
+        self.function_by_name.get(&name_id).copied()
+    }
+
+    /// Return whether a function exists for the given `NameId`.
+    pub fn has_function(&self, name_id: NameId) -> bool {
+        self.function_by_name.contains_key(&name_id)
+    }
+
+    /// Return the number of registered function definitions.
+    pub fn function_def_count(&self) -> usize {
+        self.function_defs.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Composite queries
 // ---------------------------------------------------------------------------
 
@@ -685,6 +790,10 @@ mod tests {
         GlobalId::new(n)
     }
 
+    fn make_function_id(n: u32) -> FunctionId {
+        FunctionId::new(n)
+    }
+
     fn make_module_id(n: u32) -> ModuleId {
         ModuleId::new(n)
     }
@@ -696,6 +805,7 @@ mod tests {
         assert_eq!(meta.field_def_count(), 0);
         assert_eq!(meta.method_def_count(), 0);
         assert_eq!(meta.global_def_count(), 0);
+        assert_eq!(meta.function_def_count(), 0);
     }
 
     #[test]
@@ -813,6 +923,7 @@ mod tests {
         assert!(meta.get_type_def(make_type_def_id(99)).is_none());
         assert!(meta.get_field_def(make_field_id(99)).is_none());
         assert!(meta.get_method_def(make_method_id(99)).is_none());
+        assert!(meta.get_function_def(make_function_id(99)).is_none());
         assert!(meta.type_def_kind(make_type_def_id(99)).is_none());
         assert!(meta.field_vir_type(make_field_id(99)).is_none());
         assert!(meta.method_full_name_id(make_method_id(99)).is_none());
@@ -823,6 +934,8 @@ mod tests {
             meta.implementation_type_args(make_type_def_id(99), make_type_def_id(1))
                 .is_empty()
         );
+        assert!(meta.function_by_name(make_name_id(99)).is_none());
+        assert!(!meta.has_function(make_name_id(99)));
     }
 
     #[test]
@@ -953,6 +1066,82 @@ mod tests {
         assert!(meta.global_by_name(make_name_id(99)).is_none());
         assert!(!meta.has_global(make_name_id(99)));
         assert!(meta.global_vir_type(make_global_id(99)).is_none());
+    }
+
+    #[test]
+    fn insert_and_query_function_def() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_function_id(5);
+        let name = make_name_id(500);
+        let full_name = make_name_id(501);
+
+        meta.insert_function_def(VirFunctionDef {
+            id,
+            name_id: name,
+            full_name_id: full_name,
+            module: make_module_id(1),
+            param_types: vec![VirTypeId::I64, VirTypeId::STRING],
+            return_type: VirTypeId::BOOL,
+            param_names: vec!["x".into(), "y".into()],
+            required_params: 1,
+            has_defaults: vec![false, true],
+            is_generic: false,
+            is_external: false,
+            generator_element_type: None,
+        });
+
+        assert_eq!(meta.function_def_count(), 1);
+
+        let fd = meta.get_function_def(id).expect("should find function def");
+        assert_eq!(fd.name_id, name);
+        assert_eq!(fd.full_name_id, full_name);
+        assert_eq!(fd.module, make_module_id(1));
+        assert_eq!(fd.param_types, vec![VirTypeId::I64, VirTypeId::STRING]);
+        assert_eq!(fd.return_type, VirTypeId::BOOL);
+        assert_eq!(fd.param_names, vec!["x", "y"]);
+        assert_eq!(fd.required_params, 1);
+        assert_eq!(fd.has_defaults, vec![false, true]);
+        assert!(!fd.is_generic);
+        assert!(!fd.is_external);
+        assert!(fd.generator_element_type.is_none());
+
+        // Reverse lookup by name.
+        assert_eq!(meta.function_by_name(name), Some(id));
+        assert!(meta.has_function(name));
+        assert!(!meta.has_function(make_name_id(999)));
+    }
+
+    #[test]
+    fn insert_function_def_generic_generator() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_function_id(10);
+
+        meta.insert_function_def(VirFunctionDef {
+            id,
+            name_id: make_name_id(600),
+            full_name_id: make_name_id(601),
+            module: make_module_id(0),
+            param_types: vec![VirTypeId::I64],
+            return_type: VirTypeId::I64,
+            param_names: vec!["n".into()],
+            required_params: 1,
+            has_defaults: vec![false],
+            is_generic: true,
+            is_external: false,
+            generator_element_type: Some(VirTypeId::I64),
+        });
+
+        let fd = meta.get_function_def(id).unwrap();
+        assert!(fd.is_generic);
+        assert_eq!(fd.generator_element_type, Some(VirTypeId::I64));
+    }
+
+    #[test]
+    fn function_missing_lookups() {
+        let meta = VirEntityMetadata::new();
+        assert!(meta.get_function_def(make_function_id(99)).is_none());
+        assert!(meta.function_by_name(make_name_id(99)).is_none());
+        assert!(!meta.has_function(make_name_id(99)));
     }
 
     #[test]

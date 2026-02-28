@@ -2,7 +2,7 @@
 //
 // Populates `VirEntityMetadata` from sema's `EntityRegistry` during VIR
 // lowering.  This is the bridge that converts sema entity definitions
-// (TypeDef, FieldDef, MethodDef) into VIR-native metadata.
+// (TypeDef, FieldDef, MethodDef, FunctionDef) into VIR-native metadata.
 
 use vole_identity::{Interner, NameTable, VirTypeId};
 
@@ -11,8 +11,8 @@ use crate::TypeArena;
 use crate::entity_defs::{self, TypeDefKind};
 use crate::vir_lower::type_translate::translate_type_id;
 use vole_vir::entity_metadata::{
-    VirEntityMetadata, VirFieldDef, VirGlobalDef, VirImplementation, VirMethodBinding,
-    VirMethodDef, VirTypeDef, VirTypeDefKind,
+    VirEntityMetadata, VirFieldDef, VirFunctionDef, VirGlobalDef, VirImplementation,
+    VirMethodBinding, VirMethodDef, VirTypeDef, VirTypeDefKind,
 };
 use vole_vir::type_table::VirTypeTable;
 
@@ -50,7 +50,17 @@ pub fn build_entity_metadata(
         name_table,
     );
     populate_method_defs(registry.all_method_defs(), type_arena, &mut tt, &mut meta);
+    populate_function_defs(registry.all_function_defs(), type_arena, &mut tt, &mut meta);
     populate_global_defs(registry.all_global_defs(), type_arena, &mut tt, &mut meta);
+
+    // Populate the function_by_name reverse lookup from the registry.
+    // (insert_function_def already inserts by name_id, but the registry's
+    // function_by_name_map uses full_name_id keys, so we mirror it directly.)
+    for (&name_id, &func_id) in registry.function_by_name_map() {
+        // Only insert if not already present from insert_function_def.
+        // The registry map may use full_name_id or name_id — we cover both.
+        meta.insert_function_by_name(name_id, func_id);
+    }
 
     // Populate the array type NameId for array implement dispatch.
     if let Some(array_name) = entities.array_name_id() {
@@ -203,6 +213,47 @@ fn translate_method_signature(
         .collect();
     let return_type = translate_type_id(type_table, ret, type_arena);
     (param_types, return_type)
+}
+
+/// Populate function definitions from sema into VIR entity metadata.
+///
+/// Translates each function's signature parameter types and return type
+/// from sema `TypeId` to `VirTypeId`.  Also extracts the `has_defaults`
+/// boolean vector (codegen only checks `is_some()`, not the expressions
+/// themselves) and the generator element type if present.
+fn populate_function_defs(
+    function_defs: &[entity_defs::FunctionDef],
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+    meta: &mut VirEntityMetadata,
+) {
+    for fd in function_defs {
+        let param_types: Vec<VirTypeId> = fd
+            .signature
+            .params_id
+            .iter()
+            .map(|&p| translate_type_id(type_table, p, type_arena))
+            .collect();
+        let return_type = translate_type_id(type_table, fd.signature.return_type_id, type_arena);
+        let generator_element_type = fd
+            .generator_element_type
+            .map(|ty| translate_type_id(type_table, ty, type_arena));
+
+        meta.insert_function_def(VirFunctionDef {
+            id: fd.id,
+            name_id: fd.name_id,
+            full_name_id: fd.full_name_id,
+            module: fd.module,
+            param_types,
+            return_type,
+            param_names: fd.param_names.clone(),
+            required_params: fd.required_params,
+            has_defaults: fd.param_defaults.iter().map(|d| d.is_some()).collect(),
+            is_generic: fd.generic_info.is_some(),
+            is_external: fd.is_external,
+            generator_element_type,
+        });
+    }
 }
 
 /// Populate global variable definitions from sema into VIR entity metadata.
