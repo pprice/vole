@@ -61,7 +61,7 @@ impl From<vole_sema::implement_registry::ExternalMethodInfo> for ExternalMethodI
 /// Codegen-local method binding payload for per-type method dispatch.
 #[derive(Debug, Clone)]
 pub(crate) struct MethodBindingRef {
-    pub func_type: vole_sema::types::FunctionType,
+    pub func_type: vole_identity::FunctionType,
     pub external_info: Option<ExternalMethodInfoRef>,
 }
 

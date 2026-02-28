@@ -237,7 +237,7 @@ impl MethodResolutions {
 mod tests {
     use super::*;
     use crate::TypeArena;
-    use crate::types::FunctionType;
+    use crate::types::{FunctionType, FunctionTypeArenaExt};
 
     // Create a test NameId for use in tests
     fn test_method_name_id() -> NameId {

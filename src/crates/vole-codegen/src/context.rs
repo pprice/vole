@@ -1623,7 +1623,7 @@ pub(crate) fn resolve_external_names(
 /// - Fallible return types (multi-value: tag + payload, or 3-register for wide i128)
 /// - Struct return types (multi-value for small structs, sret pointer for large structs)
 fn build_monomorph_signature(
-    func_type: &vole_sema::types::FunctionType,
+    func_type: &vole_identity::FunctionType,
     has_self_param: bool,
     arena: &vole_sema::type_arena::TypeArena,
     analyzed: &crate::analyzed::AnalyzedProgram,

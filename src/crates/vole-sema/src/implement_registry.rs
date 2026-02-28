@@ -382,6 +382,7 @@ impl ImplementRegistry {
 mod tests {
     use super::*;
     use crate::TypeArena;
+    use crate::types::FunctionTypeArenaExt;
 
     fn sym(id: u32) -> Symbol {
         Symbol::new_for_test(id)

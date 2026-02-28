@@ -40,7 +40,7 @@ use crate::resolve::resolve_type_to_id;
 use crate::type_arena::{TypeArena, TypeId as ArenaTypeId};
 use crate::types::ConstantValue;
 use crate::{
-    ErrorTypeInfo, FunctionType, PrimitiveType,
+    ErrorTypeInfo, FunctionType, FunctionTypeArenaExt, PrimitiveType,
     resolve::TypeResolutionContext,
     scope::{Scope, Variable},
 };

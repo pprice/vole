@@ -59,4 +59,4 @@ pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use type_arena::{SemaType, TypeArena};
 pub use type_display::TypeDefProvider;
-pub use types::{ClassType, ErrorTypeInfo, FunctionType, PrimitiveType};
+pub use types::{ClassType, ErrorTypeInfo, FunctionType, FunctionTypeArenaExt, PrimitiveType};

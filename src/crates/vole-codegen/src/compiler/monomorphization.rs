@@ -24,7 +24,7 @@ struct ExpandedMethodData {
     concrete_key: vole_sema::generic::ClassMethodMonomorphKey,
     mangled_name_str: String,
     template_mangled_name: NameId,
-    func_type: vole_sema::types::FunctionType,
+    func_type: vole_identity::FunctionType,
     substitutions: FxHashMap<NameId, TypeId>,
     class_name: NameId,
     method_name: NameId,
@@ -987,8 +987,8 @@ impl Compiler<'_> {
     /// declares them in JIT, compiles their bodies, and registers them in
     /// `expanded_class_method_monomorphs` for lookup by `Cg`.
     pub(super) fn expand_abstract_class_method_monomorphs(&mut self) -> CodegenResult<()> {
+        use vole_identity::FunctionType;
         use vole_sema::generic::ClassMethodMonomorphKey;
-        use vole_sema::types::FunctionType;
 
         // Early-exit if monomorph caches haven't grown since last expansion
         let current_cache_size = self

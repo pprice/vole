@@ -24,11 +24,13 @@ pub use symbol::Symbol;
 pub use type_layout::{StorageClass, TypeLayout};
 
 mod entities;
+mod function_type;
 mod namer;
 mod resolver;
 mod type_id;
 mod vir_type_id;
 pub use entities::{FieldId, FunctionId, GlobalId, MethodId, TypeDefId, TypeParamId};
+pub use function_type::FunctionType;
 pub use namer::{Namer, NamerLookup, method_name_id_by_str};
 pub use resolver::Resolver;
 pub use type_id::{TypeId, TypeIdVec};

@@ -671,8 +671,8 @@ impl Default for EntityRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FunctionType;
     use crate::TypeArena;
+    use crate::{FunctionType, FunctionTypeArenaExt};
     use vole_identity::NameTable;
 
     #[test]
