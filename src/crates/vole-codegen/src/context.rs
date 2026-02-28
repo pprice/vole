@@ -203,6 +203,12 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// When false (regular user code), closure params are borrowed — the CALLER retains
     /// ownership and will dec_ref them. Pipeline methods must rc_inc to get their own ref.
     pub in_iterable_default_body: bool,
+    /// Pre-resolved named-argument reordering mapping from VIR.
+    ///
+    /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
+    /// `call_func_id_impl()` and `call_actual_closure()` in preference to the
+    /// NodeMap lookup.  Cleared after `call_dispatch()` returns.
+    pub(crate) vir_resolved_call_args: Option<Vec<Option<usize>>>,
     /// Cached `iconst.i64 0` created in the entry block for void returns.
     /// Reused by every `void_value()` call to avoid emitting thousands of
     /// dead iconst instructions (previously ~18,951 per compilation).
@@ -274,6 +280,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             rc_scopes: RcScopeStack::new(),
             yielder_var: None,
             in_iterable_default_body: false,
+            vir_resolved_call_args: None,
             cached_void_val,
             entry_block,
             iconst_cache,

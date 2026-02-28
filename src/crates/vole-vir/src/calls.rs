@@ -72,10 +72,16 @@ pub enum CallTarget {
         /// The callee identifier symbol.
         callee_sym: Symbol,
         /// NodeId of the call expression (for NodeMap lookups: monomorph key,
-        /// named-arg mapping, lambda defaults, intrinsic key, etc.).
+        /// lambda defaults, intrinsic key, etc.).
         call_node_id: NodeId,
         /// Source line for error messages (assert, panic).
         line: u32,
+        /// Pre-resolved named-argument reordering mapping from sema.
+        ///
+        /// `mapping[i] = Some(j)` means arg_source[j] fills parameter slot i.
+        /// `mapping[i] = None` means slot i uses its default value.
+        /// `None` when all arguments are positional.
+        resolved_call_args: Option<Vec<Option<usize>>>,
     },
 }
 

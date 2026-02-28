@@ -56,7 +56,14 @@ impl Cg<'_, '_, '_> {
                 callee_sym,
                 call_node_id,
                 line,
-            } => self.compile_vir_unresolved_call(*callee_sym, args, *call_node_id, *line),
+                resolved_call_args,
+            } => self.compile_vir_unresolved_call(
+                *callee_sym,
+                args,
+                *call_node_id,
+                *line,
+                resolved_call_args.as_deref(),
+            ),
         }
     }
 
@@ -420,10 +427,15 @@ impl Cg<'_, '_, '_> {
         args: &[VirRef],
         call_node_id: vole_identity::NodeId,
         line: u32,
+        resolved_call_args: Option<&[Option<usize>]>,
     ) -> CodegenResult<CompiledValue> {
         let arg_source = crate::structs::methods::ArgSource(args);
-        let result = self.call_dispatch(callee_sym, &arg_source, line, call_node_id)?;
-        Ok(self.mark_rc_owned(result))
+        // Stash the VIR-resolved named-arg mapping so call_func_id_impl() and
+        // call_actual_closure() can read it instead of hitting NodeMap.
+        self.vir_resolved_call_args = resolved_call_args.map(|m| m.to_vec());
+        let result = self.call_dispatch(callee_sym, &arg_source, line, call_node_id);
+        self.vir_resolved_call_args = None;
+        result.map(|r| self.mark_rc_owned(r))
     }
 
     // =====================================================================

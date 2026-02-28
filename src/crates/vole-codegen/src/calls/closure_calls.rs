@@ -102,8 +102,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call an actual closure (with closure pointer).
     ///
     /// Accepts `ArgSource` so both AST and VIR call sites can share this path.
-    /// Lambda defaults and named-arg reordering are driven by NodeMap annotations
-    /// on `call_expr_id`.
+    /// Lambda defaults are driven by NodeMap annotations on `call_expr_id`.
+    /// Named-arg reordering checks `self.vir_resolved_call_args` first (populated
+    /// by VIR call dispatch), falling back to `NodeMap::get_resolved_call_args`
+    /// for pure AST paths.
     fn call_actual_closure(
         &mut self,
         closure_ptr: Value,
@@ -146,10 +148,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             mapped_count == arg_count
         };
         let named_mapping = self
-            .analyzed()
-            .node_map()
-            .get_resolved_call_args(call_expr_id)
-            .map(|s| s.to_vec())
+            .vir_resolved_call_args
+            .take()
+            .or_else(|| {
+                self.analyzed()
+                    .node_map()
+                    .get_resolved_call_args(call_expr_id)
+                    .map(|s| s.to_vec())
+            })
             .filter(|mapping| mapping_is_valid(mapping));
         if let Some(ref mapping) = named_mapping {
             self.compile_closure_named_args(

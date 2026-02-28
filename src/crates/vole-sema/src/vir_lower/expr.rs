@@ -1261,21 +1261,25 @@ fn lower_call(
         .map(|arg| lower_call_arg(arg.expr(), ctx))
         .collect();
 
+    // Grab the resolved named-arg mapping from sema (if any).
+    let resolved_call_args = ctx
+        .node_map
+        .get_resolved_call_args(expr.id)
+        .map(|m| m.to_vec());
+
     // In generic mode, check if this call has a MonomorphKey — that means
     // it targets another generic function.  Emit GenericCall so the VIR
     // monomorphization pass can resolve it to a concrete callee later.
+    let make_unresolved = |rca| CallTarget::Unresolved {
+        callee_sym,
+        call_node_id: expr.id,
+        line: expr.span.line,
+        resolved_call_args: rca,
+    };
     let target = if ctx.generic {
-        generic_call_target(expr, ctx).unwrap_or(CallTarget::Unresolved {
-            callee_sym,
-            call_node_id: expr.id,
-            line: expr.span.line,
-        })
+        generic_call_target(expr, ctx).unwrap_or_else(|| make_unresolved(resolved_call_args))
     } else {
-        CallTarget::Unresolved {
-            callee_sym,
-            call_node_id: expr.id,
-            line: expr.span.line,
-        }
+        make_unresolved(resolved_call_args)
     };
 
     let compat_ty = ctx.compat_ty(ty);

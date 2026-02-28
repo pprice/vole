@@ -399,6 +399,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Takes an optional NameId for looking up parameter types and default arguments.
     /// `call_expr_id` is the NodeId of the call expression (used to look up named arg mapping).
     ///
+    /// Named-arg reordering: checks `self.vir_resolved_call_args` first (populated
+    /// by VIR call dispatch), falling back to `NodeMap::get_resolved_call_args` for
+    /// pure AST paths.
+    ///
     /// Accepts `ArgSource` so that both AST and VIR call sites can share this
     /// function.  AST callers pass `ArgSource::Ast(&call.args)`, VIR callers
     /// pass `ArgSource::Vir(&vir_args)`.
@@ -483,10 +487,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             mapped_count == arg_count
         };
         let named_arg_mapping = self
-            .analyzed()
-            .node_map()
-            .get_resolved_call_args(call_expr_id)
-            .map(|s| s.to_vec())
+            .vir_resolved_call_args
+            .take()
+            .or_else(|| {
+                self.analyzed()
+                    .node_map()
+                    .get_resolved_call_args(call_expr_id)
+                    .map(|s| s.to_vec())
+            })
             .filter(|mapping| mapping_is_valid(mapping));
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
