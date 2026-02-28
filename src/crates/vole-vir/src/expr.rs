@@ -234,10 +234,24 @@ pub enum VirExpr {
 
     // -- Reference counting -------------------------------------------------
     /// Increment the reference count of a value.
-    RcInc { value: VirRef },
+    ///
+    /// `cleanup` describes the RC strategy for this value's type.  Codegen
+    /// reads this instead of querying the type arena to determine whether
+    /// special handling is needed (interface fat-pointer extraction, unknown
+    /// heap cleanup, etc.).
+    RcInc {
+        value: VirRef,
+        cleanup: VirRcCleanup,
+    },
 
     /// Decrement the reference count of a value.
-    RcDec { value: VirRef },
+    ///
+    /// `cleanup` describes the RC strategy for this value's type.  Codegen
+    /// reads this instead of querying the type arena.
+    RcDec {
+        value: VirRef,
+        cleanup: VirRcCleanup,
+    },
 
     /// Transfer ownership of a reference-counted value (consume without
     /// decrement).
@@ -497,6 +511,49 @@ pub enum FieldStorage {
     /// the object type contains type parameters.  Must be resolved before
     /// codegen via the monomorph rederive pass.
     ByName,
+}
+
+/// RC cleanup strategy for a value, pre-computed during VIR lowering.
+///
+/// Tells codegen how to emit `rc_inc` / `rc_dec` calls for a value
+/// without querying the type arena at compile time.
+///
+/// This covers the per-value RC operations (`VirExpr::RcInc` /
+/// `VirExpr::RcDec` / `VirStmt::RcInc` / `VirStmt::RcDec`).  Scope-level
+/// cleanup (drop flags, union tag checks) is a separate system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VirRcCleanup {
+    /// No RC action needed (primitive, struct, void, etc.).
+    None,
+
+    /// Simple `rc_inc` / `rc_dec` call on the value directly.
+    ///
+    /// Applies to: String, Array, Class instance, Function/closure,
+    /// Handle, RuntimeIterator.
+    SimpleDecRef,
+
+    /// The value is an interface fat pointer `[data_ptr, vtable_ptr]`.
+    ///
+    /// Codegen must load the data word at offset 0 before calling
+    /// `rc_inc` / `rc_dec` on it.
+    InterfaceDecRef,
+
+    /// The value is `unknown`-typed (heap-allocated `TaggedValue`).
+    ///
+    /// Codegen calls `unknown_heap_cleanup` (for dec) or `rc_inc` on
+    /// the boxed value (for inc) instead of the plain `rc_dec` / `rc_inc`.
+    UnknownHeapCleanup,
+
+    /// Unresolved — used in generic templates where the value type
+    /// contains type parameters.  Codegen falls back to arena queries.
+    Unresolved,
+}
+
+impl VirRcCleanup {
+    /// Returns `true` if this cleanup strategy requires any RC action.
+    pub fn needs_action(&self) -> bool {
+        !matches!(self, VirRcCleanup::None)
+    }
 }
 
 /// The kind of type coercion to perform.

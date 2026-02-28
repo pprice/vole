@@ -144,8 +144,16 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable, ret_ty: VirTypeId) {
             rederive_union_storage_from_array_expr(object, union_storage, table);
         }
 
-        // RC
-        VirExpr::RcInc { value } | VirExpr::RcDec { value } | VirExpr::RcMove { value } => {
+        // RC — rederive cleanup strategy from the concrete value type
+        VirExpr::RcInc { value, cleanup } => {
+            rederive_ref(value, table, ret_ty);
+            rederive_rc_cleanup(value, cleanup, table);
+        }
+        VirExpr::RcDec { value, cleanup } => {
+            rederive_ref(value, table, ret_ty);
+            rederive_rc_cleanup(value, cleanup, table);
+        }
+        VirExpr::RcMove { value } => {
             rederive_ref(value, table, ret_ty);
         }
 
@@ -268,7 +276,14 @@ fn rederive_stmt(stmt: &mut VirStmt, table: &VirTypeTable, ret_ty: VirTypeId) {
                 rederive_ref(val, table, ret_ty);
             }
         }
-        VirStmt::RcInc { value } | VirStmt::RcDec { value } => rederive_ref(value, table, ret_ty),
+        VirStmt::RcInc { value, cleanup } => {
+            rederive_ref(value, table, ret_ty);
+            rederive_rc_cleanup(value, cleanup, table);
+        }
+        VirStmt::RcDec { value, cleanup } => {
+            rederive_ref(value, table, ret_ty);
+            rederive_rc_cleanup(value, cleanup, table);
+        }
     }
 }
 
@@ -741,6 +756,86 @@ fn extract_vir_ty(expr: &VirExpr) -> Option<VirTypeId> {
         | VirExpr::RcDec { .. }
         | VirExpr::RcMove { .. }
         | VirExpr::Yield { .. } => None,
+    }
+}
+
+/// Re-derive the `VirRcCleanup` for an RC node after monomorphization.
+///
+/// Extracts the value's VirTypeId from the inner expression and classifies
+/// it into a concrete cleanup strategy using the VirTypeTable.  If the value
+/// type cannot be extracted (should not happen for well-formed VIR), leaves
+/// the cleanup unchanged.
+fn rederive_rc_cleanup(
+    value: &VirRef,
+    cleanup: &mut crate::expr::VirRcCleanup,
+    table: &VirTypeTable,
+) {
+    let Some(vir_ty) = extract_vir_ty(value) else {
+        return;
+    };
+    *cleanup = classify_rc_cleanup(vir_ty, table);
+}
+
+/// Classify a VIR type into an RC cleanup strategy.
+///
+/// Mirrors the logic in codegen's `is_simple_rc_type` / `rc_state.rs` but
+/// operates on `VirType` instead of `SemaType`.
+fn classify_rc_cleanup(vir_ty: VirTypeId, table: &VirTypeTable) -> crate::expr::VirRcCleanup {
+    use crate::expr::VirRcCleanup;
+    use crate::types::VirType;
+
+    // Well-known primitives
+    if vir_ty == VirTypeId::STRING {
+        return VirRcCleanup::SimpleDecRef;
+    }
+    if vir_ty == VirTypeId::UNKNOWN {
+        return VirRcCleanup::UnknownHeapCleanup;
+    }
+
+    // Guard against out-of-range type IDs (e.g., raw sema TypeIds that
+    // haven't been translated yet).
+    if (vir_ty.raw() as usize) >= table.len() {
+        return VirRcCleanup::Unresolved;
+    }
+
+    let ty = table.get(vir_ty);
+
+    match ty {
+        // Simple RC types: single pointer to RC-managed heap object.
+        VirType::Array { .. }
+        | VirType::Function { .. }
+        | VirType::Class { .. }
+        | VirType::RuntimeIterator { .. } => VirRcCleanup::SimpleDecRef,
+
+        // Interface: fat pointer — must extract data word first.
+        VirType::Interface { .. } => VirRcCleanup::InterfaceDecRef,
+
+        // Handle is a well-known primitive but RC-managed.
+        VirType::Primitive(VirPrimitiveKind::Handle) => VirRcCleanup::SimpleDecRef,
+
+        // Non-RC types.
+        VirType::Primitive(_)
+        | VirType::Struct { .. }
+        | VirType::Void
+        | VirType::Nil
+        | VirType::Never
+        | VirType::Range
+        | VirType::Done
+        | VirType::MetaType
+        | VirType::Error { .. } => VirRcCleanup::None,
+
+        // Composite types — RC nodes don't handle these (scope cleanup does).
+        VirType::FixedArray { .. } | VirType::Tuple { .. } => VirRcCleanup::None,
+
+        // Union — RC nodes don't handle union-level cleanup directly.
+        // The scope-based union cleanup system handles tag-based dispatch.
+        VirType::Union { .. } | VirType::Optional { .. } => VirRcCleanup::None,
+
+        // Fallible return types — not RC-managed themselves.
+        VirType::Fallible { .. } => VirRcCleanup::None,
+
+        // Unresolved generic parameter — keep unresolved.
+        VirType::Param { .. } | VirType::Unknown => VirRcCleanup::Unresolved,
     }
 }
 
@@ -1698,6 +1793,7 @@ mod tests {
     fn extract_vir_ty_from_void_expr_is_none() {
         let expr = VirExpr::RcInc {
             value: Box::new(VirExpr::NilLiteral),
+            cleanup: crate::expr::VirRcCleanup::Unresolved,
         };
         assert_eq!(extract_vir_ty(&expr), None);
     }

@@ -72,9 +72,9 @@ impl Cg<'_, '_, '_> {
             VirExpr::Range { .. } => Some(VirTypeId::RANGE),
             VirExpr::TypeLiteral => Some(VirTypeId::METATYPE),
             VirExpr::Unreachable { .. } => Some(VirTypeId::NEVER),
-            VirExpr::RcInc { value } | VirExpr::RcDec { value } | VirExpr::RcMove { value } => {
-                Self::vir_expr_type_id(value)
-            }
+            VirExpr::RcInc { value, .. }
+            | VirExpr::RcDec { value, .. }
+            | VirExpr::RcMove { value } => Self::vir_expr_type_id(value),
             VirExpr::StringConcat { .. }
             | VirExpr::InterpolatedString { .. }
             | VirExpr::FieldStore { .. }
@@ -550,14 +550,14 @@ impl Cg<'_, '_, '_> {
             } => self.compile_vir_index_store(object, index, value, *union_storage),
 
             // -- RC operations ------------------------------------------------
-            VirExpr::RcInc { value } => {
+            VirExpr::RcInc { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_inc(compiled.value)?;
+                self.emit_rc_inc_with_cleanup(compiled.value, compiled.type_id, *cleanup)?;
                 Ok(compiled)
             }
-            VirExpr::RcDec { value } => {
+            VirExpr::RcDec { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_dec(compiled.value)?;
+                self.emit_rc_dec_with_cleanup(compiled.value, compiled.type_id, *cleanup)?;
                 Ok(compiled)
             }
             VirExpr::RcMove { value } => {

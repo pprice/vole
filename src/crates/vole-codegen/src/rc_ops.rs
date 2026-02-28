@@ -375,6 +375,58 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.emit_rc_op_for_type(value, type_id, RuntimeKey::RcDec)
     }
 
+    /// Emit rc_inc using the VIR cleanup strategy, falling back to arena
+    /// queries for `Unresolved`.
+    pub fn emit_rc_inc_with_cleanup(
+        &mut self,
+        value: Value,
+        type_id: TypeId,
+        cleanup: vole_vir::expr::VirRcCleanup,
+    ) -> CodegenResult<()> {
+        use vole_vir::expr::VirRcCleanup;
+        match cleanup {
+            VirRcCleanup::None => Ok(()),
+            VirRcCleanup::SimpleDecRef => self.emit_rc_inc(value),
+            VirRcCleanup::InterfaceDecRef => {
+                let data_word = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value, 0);
+                self.call_runtime_void(RuntimeKey::RcInc, &[data_word])
+            }
+            VirRcCleanup::UnknownHeapCleanup => self.emit_rc_inc(value),
+            VirRcCleanup::Unresolved => self.emit_rc_inc_for_type(value, type_id),
+        }
+    }
+
+    /// Emit rc_dec using the VIR cleanup strategy, falling back to arena
+    /// queries for `Unresolved`.
+    pub fn emit_rc_dec_with_cleanup(
+        &mut self,
+        value: Value,
+        type_id: TypeId,
+        cleanup: vole_vir::expr::VirRcCleanup,
+    ) -> CodegenResult<()> {
+        use vole_vir::expr::VirRcCleanup;
+        match cleanup {
+            VirRcCleanup::None => Ok(()),
+            VirRcCleanup::SimpleDecRef => self.emit_rc_dec(value),
+            VirRcCleanup::InterfaceDecRef => {
+                let data_word = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value, 0);
+                self.call_runtime_void(RuntimeKey::RcDec, &[data_word])
+            }
+            VirRcCleanup::UnknownHeapCleanup => {
+                let cleanup_ref = self.runtime_func_ref(RuntimeKey::UnknownHeapCleanup)?;
+                self.builder.ins().call(cleanup_ref, &[value]);
+                Ok(())
+            }
+            VirRcCleanup::Unresolved => self.emit_rc_dec_for_type(value, type_id),
+        }
+    }
+
     /// Emit rc_dec for an owned RC value and mark it as consumed.
     /// No-op if the value is not Owned (Borrowed, Consumed, or Untracked).
     /// For interface types, extracts the data word before decrementing.

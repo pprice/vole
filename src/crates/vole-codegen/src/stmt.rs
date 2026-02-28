@@ -507,14 +507,14 @@ impl Cg<'_, '_, '_> {
             VirStmt::Continue => self.compile_vir_continue(),
 
             // -- RC operations ---------------------------------------------------
-            VirStmt::RcInc { value } => {
+            VirStmt::RcInc { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_inc(compiled.value)?;
+                self.emit_rc_inc_with_cleanup(compiled.value, compiled.type_id, *cleanup)?;
                 Ok(false)
             }
-            VirStmt::RcDec { value } => {
+            VirStmt::RcDec { value, cleanup } => {
                 let compiled = self.compile_vir_expr(value)?;
-                self.emit_rc_dec(compiled.value)?;
+                self.emit_rc_dec_with_cleanup(compiled.value, compiled.type_id, *cleanup)?;
                 Ok(false)
             }
 

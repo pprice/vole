@@ -72,7 +72,7 @@ fn resolve_in_stmt(stmt: &mut VirStmt, index: &InstanceIndex) {
                 resolve_in_ref(val, index);
             }
         }
-        VirStmt::RcInc { value } | VirStmt::RcDec { value } => {
+        VirStmt::RcInc { value, .. } | VirStmt::RcDec { value, .. } => {
             resolve_in_ref(value, index);
         }
     }
@@ -215,7 +215,7 @@ fn resolve_in_expr_data(expr: &mut VirExpr, index: &InstanceIndex) {
             resolve_in_ref(idx, index);
             resolve_in_ref(value, index);
         }
-        VirExpr::RcInc { value } | VirExpr::RcDec { value } | VirExpr::RcMove { value } => {
+        VirExpr::RcInc { value, .. } | VirExpr::RcDec { value, .. } | VirExpr::RcMove { value } => {
             resolve_in_ref(value, index)
         }
         VirExpr::Coerce { value, .. } => resolve_in_ref(value, index),

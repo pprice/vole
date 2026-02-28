@@ -1128,7 +1128,7 @@ fn collect_vir_direct_in_stmt(stmt: &VirStmt, out: &mut BTreeSet<usize>) {
                 collect_vir_direct_in_ref(val, out);
             }
         }
-        VirStmt::RcInc { value } | VirStmt::RcDec { value } => {
+        VirStmt::RcInc { value, .. } | VirStmt::RcDec { value, .. } => {
             collect_vir_direct_in_ref(value, out)
         }
         VirStmt::Break | VirStmt::Continue | VirStmt::Noop => {}
@@ -1202,7 +1202,7 @@ fn collect_vir_direct_in_expr(expr: &VirExpr, out: &mut BTreeSet<usize>) {
             collect_vir_direct_in_ref(index, out);
             collect_vir_direct_in_ref(value, out);
         }
-        VirExpr::RcInc { value } | VirExpr::RcDec { value } | VirExpr::RcMove { value } => {
+        VirExpr::RcInc { value, .. } | VirExpr::RcDec { value, .. } | VirExpr::RcMove { value } => {
             collect_vir_direct_in_ref(value, out);
         }
         VirExpr::Coerce { value, .. } => collect_vir_direct_in_ref(value, out),

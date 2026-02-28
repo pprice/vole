@@ -216,9 +216,9 @@ fn compute_union_tag_hint(
             .iter()
             .enumerate()
             .find(|(_, v)| ctx.type_arena.is_integer(**v))
-        {
-            return Some(build_tag_hint(pos, variant_ty, ctx));
-        }
+    {
+        return Some(build_tag_hint(pos, variant_ty, ctx));
+    }
 
     // Cannot determine the tag statically.
     None

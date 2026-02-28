@@ -335,11 +335,13 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             value: rewrite_ref(value, ctx),
             union_storage: *union_storage,
         },
-        VirExpr::RcInc { value } => VirExpr::RcInc {
+        VirExpr::RcInc { value, cleanup } => VirExpr::RcInc {
             value: rewrite_ref(value, ctx),
+            cleanup: *cleanup,
         },
-        VirExpr::RcDec { value } => VirExpr::RcDec {
+        VirExpr::RcDec { value, cleanup } => VirExpr::RcDec {
             value: rewrite_ref(value, ctx),
+            cleanup: *cleanup,
         },
         VirExpr::RcMove { value } => VirExpr::RcMove {
             value: rewrite_ref(value, ctx),
@@ -621,11 +623,13 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             error_name: *error_name,
             fields: rewrite_named_refs(fields, ctx),
         },
-        VirStmt::RcInc { value } => VirStmt::RcInc {
+        VirStmt::RcInc { value, cleanup } => VirStmt::RcInc {
             value: rewrite_ref(value, ctx),
+            cleanup: *cleanup,
         },
-        VirStmt::RcDec { value } => VirStmt::RcDec {
+        VirStmt::RcDec { value, cleanup } => VirStmt::RcDec {
             value: rewrite_ref(value, ctx),
+            cleanup: *cleanup,
         },
         VirStmt::Noop => VirStmt::Noop,
     }

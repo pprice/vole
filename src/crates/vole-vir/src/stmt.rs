@@ -89,10 +89,20 @@ pub enum VirStmt {
 
     // -- Reference counting (statement form) --------------------------------
     /// Increment the reference count of a value (fire-and-forget).
-    RcInc { value: VirRef },
+    ///
+    /// `cleanup` describes the RC strategy for this value's type.
+    RcInc {
+        value: VirRef,
+        cleanup: crate::expr::VirRcCleanup,
+    },
 
     /// Decrement the reference count of a value (fire-and-forget).
-    RcDec { value: VirRef },
+    ///
+    /// `cleanup` describes the RC strategy for this value's type.
+    RcDec {
+        value: VirRef,
+        cleanup: crate::expr::VirRcCleanup,
+    },
 
     // -- No-op ---------------------------------------------------------------
     /// A no-op statement (e.g. type aliases that produce no runtime code).

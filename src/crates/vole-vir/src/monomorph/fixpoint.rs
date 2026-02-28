@@ -232,7 +232,7 @@ fn collect_from_stmt(stmt: &VirStmt, out: &mut Vec<MonomorphInstance>) {
                 collect_from_ref(val, out);
             }
         }
-        VirStmt::RcInc { value } | VirStmt::RcDec { value } => {
+        VirStmt::RcInc { value, .. } | VirStmt::RcDec { value, .. } => {
             collect_from_ref(value, out);
         }
     }
@@ -385,7 +385,7 @@ fn collect_from_expr_data(expr: &VirExpr, out: &mut Vec<MonomorphInstance>) {
             collect_from_ref(index, out);
             collect_from_ref(value, out);
         }
-        VirExpr::RcInc { value } | VirExpr::RcDec { value } | VirExpr::RcMove { value } => {
+        VirExpr::RcInc { value, .. } | VirExpr::RcDec { value, .. } | VirExpr::RcMove { value } => {
             collect_from_ref(value, out)
         }
         VirExpr::Coerce { value, .. } => collect_from_ref(value, out),

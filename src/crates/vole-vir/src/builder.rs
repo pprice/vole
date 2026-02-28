@@ -162,13 +162,19 @@ impl VirBuilder {
     /// Increment the reference count of a value (expression form — returns
     /// the value).
     pub fn build_rc_inc(&mut self, value: VirRef) -> VirRef {
-        Box::new(VirExpr::RcInc { value })
+        Box::new(VirExpr::RcInc {
+            value,
+            cleanup: crate::expr::VirRcCleanup::Unresolved,
+        })
     }
 
     /// Decrement the reference count of a value (expression form — returns
     /// the value).
     pub fn build_rc_dec(&mut self, value: VirRef) -> VirRef {
-        Box::new(VirExpr::RcDec { value })
+        Box::new(VirExpr::RcDec {
+            value,
+            cleanup: crate::expr::VirRcCleanup::Unresolved,
+        })
     }
 
     /// Transfer ownership of a reference-counted value (consume without
@@ -264,7 +270,10 @@ impl VirBuilder {
 
     /// Decrement reference count (statement form — fire-and-forget).
     pub fn build_rc_dec_stmt(&mut self, value: VirRef) -> VirStmt {
-        VirStmt::RcDec { value }
+        VirStmt::RcDec {
+            value,
+            cleanup: crate::expr::VirRcCleanup::Unresolved,
+        }
     }
 
     // -- Body / function construction -----------------------------------------
