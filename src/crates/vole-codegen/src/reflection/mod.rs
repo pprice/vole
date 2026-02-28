@@ -32,7 +32,7 @@ use crate::types::CompiledValue;
 
 /// Build a TypeMeta instance for a statically-known type, with singleton caching.
 ///
-/// Takes the result TypeId directly instead of looking it up from the NodeMap.
+/// Takes the result TypeId directly.
 pub(crate) fn compile_static_meta_with_type(
     cg: &mut Cg,
     type_def_id: TypeDefId,

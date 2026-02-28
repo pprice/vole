@@ -969,7 +969,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a VIR let binding: `let x = <init>`.
     ///
-    /// Mirrors [`let_stmt`] but reads from VIR nodes instead of AST+NodeMap.
+    /// Mirrors [`let_stmt`] but reads from VIR nodes instead of AST.
     /// The initializer is compiled through `compile_vir_expr`, then coerced
     /// to the declared type, and the variable is registered with RC tracking.
     fn compile_vir_let(

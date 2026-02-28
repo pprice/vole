@@ -399,9 +399,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Takes an optional NameId for looking up parameter types and default arguments.
     /// `call_expr_id` is the NodeId of the call expression (used to look up named arg mapping).
     ///
-    /// Named-arg reordering: checks `self.vir_resolved_call_args` first (populated
-    /// by VIR call dispatch), falling back to `NodeMap::get_resolved_call_args` for
-    /// pure AST paths.
+    /// Named-arg reordering uses `self.vir_resolved_call_args` (populated
+    /// by VIR call dispatch).
     ///
     /// Accepts `ArgSource` so that both AST and VIR call sites can share this
     /// function.  AST callers pass `ArgSource::Ast(&call.args)`, VIR callers
@@ -415,7 +414,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         name_id: Option<NameId>,
         param_type_ids_override: Option<Vec<TypeId>>,
         return_type_id_override: Option<TypeId>,
-        call_expr_id: NodeId,
+        _call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let func_ref = self
             .codegen_ctx
@@ -489,12 +488,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let named_arg_mapping = self
             .vir_resolved_call_args
             .take()
-            .or_else(|| {
-                self.analyzed()
-                    .node_map()
-                    .get_resolved_call_args(call_expr_id)
-                    .map(|s| s.to_vec())
-            })
             .filter(|mapping| mapping_is_valid(mapping));
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();

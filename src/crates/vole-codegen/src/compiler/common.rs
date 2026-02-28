@@ -475,8 +475,8 @@ fn extract_rc_skip_var_for_sym(cg: &Cg, sym: Symbol) -> Option<Variable> {
 /// compiles the body via [`compile_vir_body_with_cg`].
 ///
 /// Substitutions are still passed through because some VIR variants (e.g.
-/// `MethodCall`) delegate to old codegen helpers that read the NodeMap with
-/// generic TypeIds requiring substitution.
+/// `MethodCall`) delegate to old codegen helpers with generic TypeIds
+/// requiring substitution.
 pub(crate) fn compile_function_inner_with_vir<'ctx>(
     mut builder: FunctionBuilder,
     codegen_ctx: &mut CodegenCtx<'ctx>,

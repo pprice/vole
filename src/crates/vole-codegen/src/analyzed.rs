@@ -11,17 +11,13 @@ use vole_identity::{
     NameTable, Span, StaticMethodMonomorphCache, TypeDefId,
 };
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
-use vole_sema::{AnalysisOutput, NodeMap, SemaType, TypeArena};
+use vole_sema::{AnalysisOutput, SemaType, TypeArena};
 use vole_vir::{VirBody, VirEntityMetadata, VirFunction, VirProgram};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
     program: Program,
-    /// All expression-level metadata (types, method resolutions, generic calls).
-    /// Vec-backed per-node store, keyed by `NodeId`.
-    node_map: NodeMap,
     /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
-    /// Keyed by Span (not NodeId), so stored separately from NodeId-keyed NodeMap.
     tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Parsed module programs for compiling pure Vole functions
     module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
@@ -141,7 +137,6 @@ impl AnalyzedProgram {
         vir_program.name_table = Rc::clone(&db.names);
         Self {
             program,
-            node_map,
             tests_virtual_modules,
             module_programs,
             types: db.types,
@@ -172,11 +167,6 @@ impl AnalyzedProgram {
     /// Clone the interner Rc for APIs that need shared ownership.
     pub(crate) fn interner_rc(&self) -> Rc<Interner> {
         self.vir_program.interner_rc()
-    }
-
-    /// Get read-only access to the node map.
-    pub(crate) fn node_map(&self) -> &NodeMap {
-        &self.node_map
     }
 
     /// Get the main/root module ID for this analyzed program.
@@ -519,27 +509,6 @@ impl AnalyzedProgram {
     /// Return true when all methods on a type are external-only.
     pub(crate) fn is_external_only(&self, type_def_id: TypeDefId) -> bool {
         self.entity_metadata().is_external_only(type_def_id)
-    }
-
-    /// Return monomorph key metadata for a call node.
-    pub(crate) fn monomorph_for(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<&vole_identity::MonomorphKey> {
-        self.node_map.get_generic(node_id)
-    }
-
-    /// Return static-method monomorph key metadata for a call node.
-    ///
-    /// AST-only legacy: VIR dispatch carries `static_method_generic` directly
-    /// on `VirMethodDispatchMeta`. This accessor is only needed for non-VIR
-    /// (AST fallback) paths and will be removed once all static method calls
-    /// go through VIR.
-    pub(crate) fn static_method_generic_at(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<&vole_identity::StaticMethodMonomorphKey> {
-        self.node_map.get_static_method_generic(node_id)
     }
 
     /// Return the single abstract method for functional interfaces.

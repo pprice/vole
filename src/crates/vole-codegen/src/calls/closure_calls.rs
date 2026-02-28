@@ -102,18 +102,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call an actual closure (with closure pointer).
     ///
     /// Accepts `ArgSource` so both AST and VIR call sites can share this path.
-    /// Lambda defaults check `self.vir_lambda_defaults` first (populated by
-    /// VIR call dispatch), falling back to `NodeMap::get_lambda_defaults`
-    /// for pure AST paths.
-    /// Named-arg reordering checks `self.vir_resolved_call_args` first (populated
-    /// by VIR call dispatch), falling back to `NodeMap::get_resolved_call_args`
-    /// for pure AST paths.
+    /// Lambda defaults come from `self.vir_lambda_defaults` (populated by VIR
+    /// call dispatch).
+    /// Named-arg reordering comes from `self.vir_resolved_call_args` (populated
+    /// by VIR call dispatch).
     fn call_actual_closure(
         &mut self,
         closure_ptr: Value,
         func_type_id: TypeId,
         arg_source: &ArgSource<'_>,
-        call_expr_id: NodeId,
+        _call_expr_id: NodeId,
     ) -> CodegenResult<CompiledValue> {
         let func_ptr = self.call_runtime(RuntimeKey::ClosureGetFunc, &[closure_ptr])?;
 
@@ -121,20 +119,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         let mut args: ArgVec = smallvec![closure_ptr];
 
-        // Check if this call has lambda defaults — VIR path first, then NodeMap fallback.
-        let lambda_defaults = self
-            .vir_lambda_defaults
-            .take()
-            .map(|info| vole_sema::LambdaDefaults {
-                required_params: info.required_params,
-                lambda_node_id: info.lambda_node_id,
-            })
-            .or_else(|| {
-                self.analyzed()
-                    .node_map()
-                    .get_lambda_defaults(call_expr_id)
-                    .cloned()
-            });
+        // Check if this call has lambda defaults from VIR dispatch.
+        let lambda_defaults =
+            self.vir_lambda_defaults
+                .take()
+                .map(|info| vole_sema::LambdaDefaults {
+                    required_params: info.required_params,
+                    lambda_node_id: info.lambda_node_id,
+                });
 
         // Compile provided arguments, tracking RC temps for cleanup.
         // When named args were used, sema stored a resolved_call_args mapping that tells
@@ -160,12 +152,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let named_mapping = self
             .vir_resolved_call_args
             .take()
-            .or_else(|| {
-                self.analyzed()
-                    .node_map()
-                    .get_resolved_call_args(call_expr_id)
-                    .map(|s| s.to_vec())
-            })
             .filter(|mapping| mapping_is_valid(mapping));
         if let Some(ref mapping) = named_mapping {
             self.compile_closure_named_args(

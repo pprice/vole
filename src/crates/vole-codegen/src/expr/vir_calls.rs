@@ -441,9 +441,8 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let arg_source = crate::structs::methods::ArgSource(args);
         // Stash the VIR-resolved named-arg mapping, lambda defaults, and
-        // return type so call_dispatch() sub-functions can read them instead
-        // of hitting NodeMap.  The monomorph key is already stashed by the
-        // caller (`compile_vir_call`).
+        // return type so call_dispatch() sub-functions can read them.
+        // The monomorph key is already stashed by the caller (`compile_vir_call`).
         self.vir_resolved_call_args = resolved_call_args.map(|m| m.to_vec());
         self.vir_lambda_defaults = lambda_defaults;
         self.vir_call_return_type = Some(return_ty);

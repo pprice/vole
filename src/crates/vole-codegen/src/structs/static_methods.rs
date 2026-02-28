@@ -251,32 +251,23 @@ impl Cg<'_, '_, '_> {
         &self,
         method_name_id: NameId,
         type_def_id: TypeDefId,
-        expr_id: Option<NodeId>,
+        _expr_id: Option<NodeId>,
         vir_key: Option<&VirStaticMethodMonomorphKey>,
     ) -> Option<StaticMethodMonomorphInstance> {
-        let mono_key = vir_key
-            .map(|key| {
-                StaticMethodMonomorphKey::new(
-                    key.class_name,
-                    key.method_name,
-                    key.class_type_keys
-                        .iter()
-                        .map(|&ty| self.sema_type_from_vir(ty))
-                        .collect(),
-                    key.method_type_keys
-                        .iter()
-                        .map(|&ty| self.sema_type_from_vir(ty))
-                        .collect(),
-                )
-            })
-            .or_else(|| {
-                // AST-only legacy fallback: when no VIR dispatch is available (AST
-                // path), read the static monomorph key from NodeMap. The call site
-                // passes expr_id=None when VIR dispatch is present, so this branch
-                // only fires for non-VIR code paths. Will be removed once all static
-                // method calls go through VIR.
-                expr_id.and_then(|id| self.analyzed().static_method_generic_at(id).cloned())
-            });
+        let mono_key = vir_key.map(|key| {
+            StaticMethodMonomorphKey::new(
+                key.class_name,
+                key.method_name,
+                key.class_type_keys
+                    .iter()
+                    .map(|&ty| self.sema_type_from_vir(ty))
+                    .collect(),
+                key.method_type_keys
+                    .iter()
+                    .map(|&ty| self.sema_type_from_vir(ty))
+                    .collect(),
+            )
+        });
 
         // Try direct monomorph lookup with key rewriting
         if let Some(mono_key) = mono_key.as_ref() {
