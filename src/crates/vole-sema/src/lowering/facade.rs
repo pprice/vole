@@ -27,6 +27,7 @@ use super::method_default_inits::{
     LowerMethodDefaultInitsArgs, LowerModuleMethodDefaultInitsArgs, lower_method_default_inits,
     lower_module_method_default_inits,
 };
+use super::module_bindings::{lower_module_bindings, lower_module_module_bindings};
 use super::monomorph_functions::{
     LowerMonomorphizedInstancesArgs, build_generic_func_map, lower_monomorphized_instances,
 };
@@ -250,6 +251,22 @@ where
         modules_with_errors,
         &mut type_table,
     );
+    let vir_module_bindings = lower_module_bindings(
+        program,
+        node_map,
+        type_arena,
+        names,
+        interner,
+        &mut type_table,
+    );
+    let vir_module_module_bindings = lower_module_module_bindings(
+        &mut module_programs,
+        names,
+        node_map,
+        type_arena,
+        modules_with_errors,
+        &mut type_table,
+    );
     let mut vir_function_default_inits =
         lower_function_default_inits(LowerFunctionDefaultInitsArgs {
             program,
@@ -352,6 +369,8 @@ where
         lambda_default_inits: vir_lambda_default_inits,
         field_default_inits: vir_field_default_inits,
         annotation_inits: vir_annotation_inits,
+        module_bindings: vir_module_bindings,
+        module_module_bindings: vir_module_module_bindings,
         vir_monomorph_base: usize::MAX,
         entity_metadata,
         implement_dispatch,
@@ -607,6 +626,8 @@ fn run_early_vir_monomorphize(
         lambda_default_inits: FxHashMap::default(),
         field_default_inits: FxHashMap::default(),
         annotation_inits: FxHashMap::default(),
+        module_bindings: FxHashMap::default(),
+        module_module_bindings: FxHashMap::default(),
         vir_monomorph_base: usize::MAX,
         entity_metadata: vole_vir::VirEntityMetadata::new(),
         implement_dispatch: vole_vir::VirImplementDispatch::new(),

@@ -11,7 +11,7 @@ use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use vole_frontend::ast::{TestCase, TestsDecl};
-use vole_frontend::{Decl, ExprKind, Program};
+use vole_frontend::{Decl, Program};
 use vole_identity::TypeId;
 
 impl Compiler<'_> {
@@ -241,6 +241,9 @@ impl Compiler<'_> {
         // Compile module functions first (prelude, imports) so module variables are available
         self.compile_module_functions()?;
 
+        // Bulk-register top-level module import bindings from VirProgram.
+        self.register_global_module_bindings_from_vir();
+
         // First pass: declare all functions so they can reference each other
         let mut test_count = 0usize;
         for decl in &program.declarations {
@@ -260,11 +263,8 @@ impl Compiler<'_> {
                         test_count += 1;
                     }
                 }
-                Decl::LetTuple(let_tuple) => {
-                    // Handle top-level destructuring imports
-                    if matches!(&let_tuple.init.kind, ExprKind::Import(_)) {
-                        self.register_global_module_bindings(let_tuple);
-                    }
+                Decl::LetTuple(_) => {
+                    // Module bindings are bulk-registered from VirProgram above.
                 }
                 _ => {}
             }

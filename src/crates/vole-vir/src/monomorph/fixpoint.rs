@@ -604,6 +604,8 @@ mod tests {
             lambda_default_inits: FxHashMap::default(),
             field_default_inits: FxHashMap::default(),
             annotation_inits: FxHashMap::default(),
+            module_bindings: FxHashMap::default(),
+            module_module_bindings: FxHashMap::default(),
             vir_monomorph_base: usize::MAX,
             entity_metadata: crate::entity_metadata::VirEntityMetadata::new(),
             implement_dispatch: crate::implement_dispatch::VirImplementDispatch::new(),

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use rustc_hash::FxHashMap;
 use vole_identity::{
     FieldId, FunctionId, Interner, MethodId, ModuleId, NameId, NameTable, NamerLookup, NodeId,
-    Span, Symbol, TypeDefId,
+    Span, Symbol, TypeDefId, VirTypeId,
 };
 
 use crate::entity_metadata::VirEntityMetadata;
@@ -93,6 +93,21 @@ pub struct VirProgram {
     /// instances for that field, in declaration order. Used by codegen to
     /// build annotation instances without reaching back to AST `Expr` nodes.
     pub annotation_inits: FxHashMap<FieldId, Vec<VirAnnotation>>,
+
+    /// Pre-resolved module export bindings for the main program's top-level
+    /// destructuring imports (`let { foo } = import "mod"`).
+    ///
+    /// Keyed by local binding symbol. Value is `(module_id, export_name, export_vir_type)`.
+    /// Populated during VIR lowering so codegen can register module bindings
+    /// without reaching back into NodeMap.
+    pub module_bindings: FxHashMap<Symbol, (ModuleId, Symbol, VirTypeId)>,
+
+    /// Pre-resolved module export bindings for imported modules' top-level
+    /// destructuring imports.
+    ///
+    /// Keyed by module path string, then by local binding symbol.
+    /// Value is `(module_id, export_name, export_vir_type)`.
+    pub module_module_bindings: FxHashMap<String, FxHashMap<Symbol, (ModuleId, Symbol, VirTypeId)>>,
 
     /// Base index of VIR-monomorphized functions within `functions`.
     ///

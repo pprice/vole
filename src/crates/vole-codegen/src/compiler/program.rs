@@ -8,8 +8,7 @@ use super::{Compiler, DeclareMode};
 use crate::FunctionKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, function_name_id_with_interner, type_id_to_cranelift};
-use vole_frontend::ast::LetTupleStmt;
-use vole_frontend::{Decl, ExprKind, FuncDecl, Interner, PatternKind, Program, Symbol};
+use vole_frontend::{Decl, FuncDecl, Interner, Program, Symbol};
 use vole_identity::{ModuleId, NameId, TypeId};
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{VirExpr, VirMetaKind, VirPattern, VirStringPart};
@@ -58,113 +57,52 @@ impl Compiler<'_> {
         self.func_registry.display(func_key)
     }
 
-    /// Register global module bindings from a top-level destructuring import.
-    /// This extracts module exports from the pattern and stores them in global_module_bindings.
-    pub(super) fn register_global_module_bindings(&mut self, let_tuple: &LetTupleStmt) {
-        // Get the module type from semantic analysis
-        let module_type_id = self.analyzed.node_map().get_type(let_tuple.init.id);
-        let module_type_id = match module_type_id {
-            Some(id) => id,
-            None => return, // No type info available
-        };
-
-        // Get module info from the type arena
-        let module_info = self
-            .analyzed
-            .type_arena()
-            .unwrap_module(module_type_id)
-            .cloned();
-        let module_info = match module_info {
-            Some(info) => info,
-            None => return, // Not a module type
-        };
-
-        // Extract bindings from the destructure pattern
-        if let PatternKind::Record { fields, .. } = &let_tuple.pattern.kind {
-            for field_pattern in fields {
-                let export_name = field_pattern.field_name;
-                let export_name_str = self.analyzed.interner().resolve(export_name);
-
-                // Find the export type in the module
-                let export_type_id = module_info
-                    .exports
-                    .iter()
-                    .find(|(name_id, _)| {
-                        self.analyzed
-                            .name_table()
-                            .last_segment_str(*name_id)
-                            .as_deref()
-                            == Some(export_name_str)
-                    })
-                    .map(|(_, ty)| *ty);
-
-                if let Some(export_type_id) = export_type_id {
-                    // Register the module binding: local_name -> (module_id, export_name, type_id)
-                    self.global_module_bindings.insert(
-                        field_pattern.binding,
-                        (module_info.module_id, export_name, export_type_id),
-                    );
-                }
-            }
+    /// Register global module bindings from VirProgram's pre-resolved module bindings.
+    ///
+    /// Reads `module_bindings` from VirProgram (populated during VIR lowering)
+    /// and registers them in `global_module_bindings` for use during compilation.
+    pub(super) fn register_global_module_bindings_from_vir(&mut self) {
+        let vir = self.analyzed.vir_program();
+        let type_table = &vir.type_table;
+        let type_arena = self.analyzed.type_arena();
+        for (&binding_sym, &(module_id, export_name, vir_export_ty)) in &vir.module_bindings {
+            let export_type_id = crate::types::vir_conversions::vir_to_sema_type_id(
+                vir_export_ty,
+                type_table,
+                type_arena,
+            );
+            self.global_module_bindings
+                .insert(binding_sym, (module_id, export_name, export_type_id));
         }
     }
 
-    /// Extract destructured import bindings from a module's declarations.
+    /// Extract destructured import bindings for a module from VirProgram.
     ///
-    /// When a module uses `let { add } = import "./other"`, this creates bindings
-    /// that map the local name (`add`) to the source module's function. These bindings
-    /// must be available during compilation of the module's function bodies so that
-    /// calls to `add()` can be resolved.
-    ///
-    /// Returns a list of `(local_symbol, binding)` pairs that should be inserted into
-    /// `global_module_bindings` before compiling the module's function bodies.
-    fn extract_module_destructured_bindings(
+    /// Reads pre-resolved bindings from `module_module_bindings` in VirProgram
+    /// (populated during VIR lowering). Returns a list of `(local_symbol, binding)`
+    /// pairs that should be inserted into `global_module_bindings` before compiling
+    /// the module's function bodies.
+    fn extract_module_destructured_bindings_from_vir(
         analyzed: &crate::AnalyzedProgram,
-        program: &Program,
-        module_interner: &Interner,
+        module_path: &str,
     ) -> Vec<(Symbol, super::ModuleExportBinding)> {
-        let mut bindings = Vec::new();
-        // NodeIds are globally unique (they embed ModuleId), so look up directly in the flat map.
-        for decl in &program.declarations {
-            if let Decl::LetTuple(let_tuple) = decl
-                && let ExprKind::Import(_) = &let_tuple.init.kind
-            {
-                // Look up the import expression's type directly (NodeId is globally unique)
-                let module_type_id = analyzed.node_map().get_type(let_tuple.init.id);
-                let Some(module_type_id) = module_type_id else {
-                    continue;
-                };
-                let Some(module_info) =
-                    analyzed.type_arena().unwrap_module(module_type_id).cloned()
-                else {
-                    continue;
-                };
-
-                if let PatternKind::Record { fields, .. } = &let_tuple.pattern.kind {
-                    for field_pattern in fields {
-                        let export_name = field_pattern.field_name;
-                        let export_name_str = module_interner.resolve(export_name);
-
-                        let export_type_id = module_info
-                            .exports
-                            .iter()
-                            .find(|(name_id, _)| {
-                                analyzed.name_table().last_segment_str(*name_id).as_deref()
-                                    == Some(export_name_str)
-                            })
-                            .map(|(_, ty)| *ty);
-
-                        if let Some(export_type_id) = export_type_id {
-                            bindings.push((
-                                field_pattern.binding,
-                                (module_info.module_id, export_name, export_type_id),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        bindings
+        let vir = analyzed.vir_program();
+        let type_table = &vir.type_table;
+        let type_arena = analyzed.type_arena();
+        let Some(module_bindings) = vir.module_module_bindings.get(module_path) else {
+            return Vec::new();
+        };
+        module_bindings
+            .iter()
+            .map(|(&binding_sym, &(module_id, export_name, vir_export_ty))| {
+                let export_type_id = crate::types::vir_conversions::vir_to_sema_type_id(
+                    vir_export_ty,
+                    type_table,
+                    type_arena,
+                );
+                (binding_sym, (module_id, export_name, export_type_id))
+            })
+            .collect()
     }
 
     /// Compile a complete program
@@ -208,6 +146,9 @@ impl Compiler<'_> {
 
     /// First pass: declare all functions and tests, collect globals, finalize type metadata.
     fn declare_program_declarations(&mut self, program: &Program) -> CodegenResult<()> {
+        // Bulk-register top-level module import bindings from VirProgram.
+        self.register_global_module_bindings_from_vir();
+
         let mut test_count = 0usize;
         for decl in &program.declarations {
             match decl {
@@ -247,12 +188,9 @@ impl Compiler<'_> {
                         test_count += 1;
                     }
                 }
-                Decl::LetTuple(let_tuple) => {
-                    // Handle top-level destructuring imports
-                    // Populate global_module_bindings for each destructured name
-                    if matches!(&let_tuple.init.kind, ExprKind::Import(_)) {
-                        self.register_global_module_bindings(let_tuple);
-                    }
+                Decl::LetTuple(_) => {
+                    // Module bindings are bulk-registered from VirProgram at the
+                    // start of declare_program_declarations.
                 }
                 Decl::Let(_) => {
                     // Global initializer presence is resolved via ProgramQuery lookups.
@@ -574,11 +512,11 @@ impl Compiler<'_> {
         tracing::debug!(module_path, "compile_module_functions: compiling bodies");
         let (program, module_interner) = &self.analyzed.module_programs()[module_path];
 
-        // Register destructured import bindings for this module.
+        // Register destructured import bindings for this module from VirProgram.
         // When a module uses `let { add } = import "./other"`, the binding must
         // be available during compilation of the module's function bodies.
         let module_bindings =
-            Self::extract_module_destructured_bindings(self.analyzed, program, module_interner);
+            Self::extract_module_destructured_bindings_from_vir(self.analyzed, module_path);
         let module_binding_keys: Vec<Symbol> = module_bindings.iter().map(|(k, _)| *k).collect();
         for (key, binding) in module_bindings {
             self.global_module_bindings.insert(key, binding);
