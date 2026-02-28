@@ -8,7 +8,8 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use vole_frontend::{Block, Capture, FuncBody, Symbol};
-use vole_sema::type_arena::{TypeArena, TypeId};
+use vole_identity::TypeId;
+use vole_sema::type_arena::TypeArena;
 use vole_vir::VirBody;
 use vole_vir::expr::VirCapture;
 

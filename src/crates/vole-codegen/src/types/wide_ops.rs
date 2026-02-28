@@ -11,7 +11,8 @@
 // instead of duplicating the i128/f128 branching logic.
 
 use cranelift::prelude::*;
-use vole_sema::type_arena::{TypeArena, TypeId};
+use vole_identity::TypeId;
+use vole_sema::type_arena::TypeArena;
 
 use crate::types::CompiledValue;
 

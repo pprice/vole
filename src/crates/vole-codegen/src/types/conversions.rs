@@ -11,9 +11,11 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::helpers::StructEntityLookup;
 use crate::union_layout;
 use vole_frontend::{Interner, PrimitiveType as AstPrimitiveType, Symbol};
-use vole_identity::{FieldId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId, VirTypeId};
+use vole_identity::{
+    FieldId, ModuleId, NameId, NameTable, NamerLookup, TypeDefId, TypeId, VirTypeId,
+};
 use vole_runtime::native_registry::NativeType;
-use vole_sema::type_arena::{TypeArena, TypeId};
+use vole_sema::type_arena::TypeArena;
 
 use super::codegen_state::TypeMetadataMap;
 use crate::ops::{sextend_const, uextend_const};

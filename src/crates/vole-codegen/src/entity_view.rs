@@ -9,12 +9,14 @@
 
 use rustc_hash::FxHashMap;
 
-use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, NameId, NameTable, TypeDefId};
+use vole_identity::{
+    FieldId, FunctionId, GlobalId, MethodId, NameId, NameTable, TypeDefId, TypeId,
+};
 use vole_sema::EntityRegistry;
 use vole_sema::entity_defs::{FieldDef, FunctionDef, GlobalDef, MethodDef, TypeDef};
 use vole_sema::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
 use vole_sema::implement_registry::PrimitiveTypeId;
-use vole_sema::type_arena::{SemaType, TypeArena, TypeId};
+use vole_sema::type_arena::{SemaType, TypeArena};
 use vole_sema::types::PrimitiveType;
 
 use crate::analyzed::ExternalMethodInfoRef;

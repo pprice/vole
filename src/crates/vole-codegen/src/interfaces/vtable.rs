@@ -17,8 +17,8 @@ use crate::types::{
 };
 use crate::union_layout;
 use vole_frontend::Symbol;
-use vole_identity::{MethodId, NameId, TypeDefId};
-use vole_sema::type_arena::{SemaType, TypeId};
+use vole_identity::{MethodId, NameId, TypeDefId, TypeId};
+use vole_sema::type_arena::SemaType;
 
 /// Vtable slot 0 is reserved for the meta getter function pointer.
 /// Method slots start at index 1.

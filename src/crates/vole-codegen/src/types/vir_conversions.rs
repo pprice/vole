@@ -12,8 +12,8 @@
 
 use cranelift::prelude::*;
 
-use vole_identity::{TypeDefId, TypeId, VirTypeId};
-use vole_sema::type_arena::{TypeArena, TypeIdVec};
+use vole_identity::{TypeDefId, TypeId, TypeIdVec, VirTypeId};
+use vole_sema::type_arena::TypeArena;
 use vole_vir::type_table::VirTypeTable;
 use vole_vir::types::{StorageClass, VirPrimitiveKind, VirType};
 

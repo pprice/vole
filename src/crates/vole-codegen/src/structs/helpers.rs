@@ -6,8 +6,8 @@ use rustc_hash::FxHashMap;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::ops::uextend_const;
 use crate::types::CompiledValue;
-use vole_identity::{NameId, TypeDefId};
-use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId, TypeIdVec};
+use vole_identity::{NameId, TypeDefId, TypeId, TypeIdVec};
+use vole_sema::type_arena::{SemaType as ArenaType, TypeArena};
 
 pub(crate) trait StructEntityLookup {
     fn generic_field_types(&self, type_def_id: TypeDefId) -> Option<Vec<TypeId>>;

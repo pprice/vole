@@ -15,7 +15,8 @@
 // - union_variants() -> Option<&[(u8, bool)]>
 
 use rustc_hash::FxHashMap;
-use vole_sema::type_arena::{SemaType, TypeArena, TypeId};
+use vole_identity::TypeId;
+use vole_sema::type_arena::{SemaType, TypeArena};
 
 use crate::structs::helpers::StructEntityLookup;
 

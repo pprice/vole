@@ -7,8 +7,8 @@
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 
-use vole_identity::{ModuleId, NameId};
-use vole_sema::type_arena::{TypeArena, TypeId};
+use vole_identity::{ModuleId, NameId, TypeId};
+use vole_sema::type_arena::TypeArena;
 
 /// Per-function compilation context.
 /// Contains state that varies for each function being compiled.
