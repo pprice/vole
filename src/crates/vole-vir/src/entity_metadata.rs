@@ -12,6 +12,8 @@ use vole_identity::{
     FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, Symbol, TypeDefId, TypeId, VirTypeId,
 };
 
+use crate::expr::VirExternalMethodInfo;
+
 // ---------------------------------------------------------------------------
 // Type definition kind
 // ---------------------------------------------------------------------------
@@ -140,10 +142,35 @@ pub struct VirMethodDef {
     pub full_name_id: NameId,
     /// The type that defines this method.
     pub defining_type: TypeDefId,
+    /// The sema TypeId for the method signature.
+    ///
+    /// Used by `method_signature_id()` and heavily in `impl_dispatch.rs` +
+    /// `signatures.rs` for `unwrap_function()` calls.  This is a raw sema
+    /// TypeId — Phase 3 (TypeArena migration) will convert to VIR-native
+    /// types.
+    pub signature_id: TypeId,
     /// Whether this method has a default implementation.
     pub has_default: bool,
     /// Whether this is a static method.
     pub is_static: bool,
+    /// External binding for this method (if any).
+    ///
+    /// Contains the native module path and function name for FFI dispatch.
+    /// Used by `method_external_binding()`, `is_external_only()`, and
+    /// `type_registry.rs` to check `external_binding.is_some()`.
+    pub external_binding: Option<VirExternalMethodInfo>,
+    /// Whether each parameter has a default expression.
+    ///
+    /// Index corresponds to parameter index.  Codegen only checks
+    /// `is_some()` on the original `param_defaults`, so we store just
+    /// the booleans here (the actual AST default expressions are compiled
+    /// separately via VIR default init).
+    pub has_param_defaults: Vec<bool>,
+    /// Method-level type parameters (e.g., `func convert<U>` has `U`).
+    ///
+    /// Distinct from class type params which are stored on `VirTypeDef`.
+    /// Minimal usage in codegen currently but needed for completeness.
+    pub method_type_params: Vec<NameId>,
     /// Number of required parameters (without defaults).
     pub required_params: usize,
     /// Parameter names in declaration order (excluding `self`).
@@ -587,6 +614,32 @@ impl VirEntityMetadata {
         self.method_defs.get(&id).map(|md| md.defining_type)
     }
 
+    /// Return the sema signature TypeId for a method.
+    pub fn method_signature_id(&self, id: MethodId) -> Option<TypeId> {
+        self.method_defs.get(&id).map(|md| md.signature_id)
+    }
+
+    /// Return the external binding for a method, if any.
+    pub fn method_external_binding(&self, id: MethodId) -> Option<&VirExternalMethodInfo> {
+        self.method_defs
+            .get(&id)
+            .and_then(|md| md.external_binding.as_ref())
+    }
+
+    /// Return whether a method parameter has a default expression.
+    pub fn method_has_param_default(&self, id: MethodId, param_idx: usize) -> Option<bool> {
+        self.method_defs
+            .get(&id)
+            .and_then(|md| md.has_param_defaults.get(param_idx).copied())
+    }
+
+    /// Return the method-level type parameters.
+    pub fn method_type_params(&self, id: MethodId) -> Option<&[NameId]> {
+        self.method_defs
+            .get(&id)
+            .map(|md| md.method_type_params.as_slice())
+    }
+
     /// Return the parameter types of a method.
     pub fn method_param_types(&self, id: MethodId) -> Option<&[VirTypeId]> {
         self.method_defs
@@ -909,8 +962,15 @@ mod tests {
             name_id: make_name_id(70),
             full_name_id: make_name_id(71),
             defining_type: make_type_def_id(2),
+            signature_id: TypeId::I64,
             has_default: true,
             is_static: false,
+            external_binding: Some(VirExternalMethodInfo {
+                module_path: make_name_id(80),
+                native_name: make_name_id(81),
+            }),
+            has_param_defaults: vec![false, true],
+            method_type_params: vec![make_name_id(90)],
             required_params: 2,
             param_names: vec!["x".into(), "y".into()],
             param_types: vec![VirTypeId::I64, VirTypeId::STRING],
@@ -930,6 +990,17 @@ mod tests {
         assert_eq!(meta.method_full_name_id(id), Some(make_name_id(71)));
         assert_eq!(meta.method_has_default(id), Some(true));
         assert_eq!(meta.method_defining_type(id), Some(make_type_def_id(2)));
+        assert_eq!(meta.method_signature_id(id), Some(TypeId::I64));
+        assert_eq!(
+            meta.method_external_binding(id),
+            Some(&VirExternalMethodInfo {
+                module_path: make_name_id(80),
+                native_name: make_name_id(81),
+            })
+        );
+        assert_eq!(meta.method_has_param_default(id, 0), Some(false));
+        assert_eq!(meta.method_has_param_default(id, 1), Some(true));
+        assert_eq!(meta.method_type_params(id), Some(&[make_name_id(90)][..]));
         assert_eq!(
             meta.method_param_types(id),
             Some(&[VirTypeId::I64, VirTypeId::STRING][..])

@@ -10,6 +10,7 @@ use crate::LoweringEntityLookup;
 use crate::TypeArena;
 use crate::entity_defs::{self, TypeDefKind};
 use crate::vir_lower::type_translate::translate_type_id;
+use vole_vir::VirExternalMethodInfo;
 use vole_vir::entity_metadata::{
     VirEntityMetadata, VirFieldDef, VirFunctionDef, VirGlobalDef, VirImplementation,
     VirMethodBinding, VirMethodDef, VirTypeDef, VirTypeDefKind,
@@ -194,8 +195,15 @@ fn populate_method_defs(
             name_id: md.name_id,
             full_name_id: md.full_name_id,
             defining_type: md.defining_type,
+            signature_id: md.signature_id,
             has_default: md.has_default,
             is_static: md.is_static,
+            external_binding: md.external_binding.map(|info| VirExternalMethodInfo {
+                module_path: info.module_path,
+                native_name: info.native_name,
+            }),
+            has_param_defaults: md.param_defaults.iter().map(|opt| opt.is_some()).collect(),
+            method_type_params: md.method_type_params.iter().map(|tp| tp.name_id).collect(),
             required_params: md.required_params,
             param_names: md.param_names.clone(),
             param_types,
