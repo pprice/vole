@@ -130,6 +130,17 @@ pub struct VirMethodDef {
     pub required_params: usize,
     /// Parameter names in declaration order (excluding `self`).
     pub param_names: Vec<String>,
+    /// Parameter types in declaration order (excluding `self`).
+    ///
+    /// Translated from the sema signature's param TypeIds to VirTypeIds
+    /// during lowering.  Replaces the need to call
+    /// `arena.unwrap_function(method_def.signature_id)` in codegen.
+    pub param_types: Vec<VirTypeId>,
+    /// Return type of this method.
+    ///
+    /// Translated from the sema signature's return TypeId to a VirTypeId
+    /// during lowering.
+    pub return_type: VirTypeId,
 }
 
 // ---------------------------------------------------------------------------
@@ -138,11 +149,18 @@ pub struct VirMethodDef {
 
 /// VIR-native metadata for an interface implementation.
 ///
-/// Records which interface a type implements and its method bindings.
+/// Records which interface a type implements, the type arguments for
+/// generic interfaces, and its method bindings.
 #[derive(Debug, Clone)]
 pub struct VirImplementation {
     /// The interface being implemented.
     pub interface: TypeDefId,
+    /// Type arguments for generic interface implementations.
+    ///
+    /// For example, `implement Iterable<i64> for MyType` would have
+    /// `type_args: [VirTypeId::I64]`.  Empty for non-generic interfaces.
+    /// Translated from sema `TypeId`s to `VirTypeId`s during lowering.
+    pub type_args: Vec<VirTypeId>,
     /// Method bindings for this implementation.
     pub method_bindings: Vec<VirMethodBinding>,
 }
@@ -241,6 +259,28 @@ impl VirEntityMetadata {
             .unwrap_or_default()
     }
 
+    /// Return the VIR type arguments for a specific interface implementation.
+    ///
+    /// For example, if `MyType` implements `Iterable<i64>`, calling
+    /// `implementation_type_args(my_type_id, iterable_id)` returns
+    /// `&[VirTypeId::I64]`.  Returns an empty slice if the type does not
+    /// implement the given interface or the implementation is non-generic.
+    pub fn implementation_type_args(
+        &self,
+        type_def_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> &[VirTypeId] {
+        let Some(td) = self.type_defs.get(&type_def_id) else {
+            return &[];
+        };
+        for impl_ in &td.implements {
+            if impl_.interface == interface_id {
+                return &impl_.type_args;
+            }
+        }
+        &[]
+    }
+
     /// Return type parameter names for a type.
     pub fn type_params(&self, id: TypeDefId) -> Option<&[NameId]> {
         self.type_defs.get(&id).map(|td| td.type_params.as_slice())
@@ -315,9 +355,10 @@ impl VirEntityMetadata {
         let td = self.type_defs.get(&type_def_id)?;
         for &field_id in &td.fields {
             if let Some(fd) = self.field_defs.get(&field_id)
-                && fd.symbol == Some(target) {
-                    return Some(fd);
-                }
+                && fd.symbol == Some(target)
+            {
+                return Some(fd);
+            }
         }
         None
     }
@@ -346,6 +387,18 @@ impl VirEntityMetadata {
     /// Return the defining type of a method.
     pub fn method_defining_type(&self, id: MethodId) -> Option<TypeDefId> {
         self.method_defs.get(&id).map(|md| md.defining_type)
+    }
+
+    /// Return the parameter types of a method.
+    pub fn method_param_types(&self, id: MethodId) -> Option<&[VirTypeId]> {
+        self.method_defs
+            .get(&id)
+            .map(|md| md.param_types.as_slice())
+    }
+
+    /// Return the return type of a method.
+    pub fn method_return_type(&self, id: MethodId) -> Option<VirTypeId> {
+        self.method_defs.get(&id).map(|md| md.return_type)
     }
 
     /// Return the number of registered method definitions.
@@ -404,6 +457,7 @@ mod tests {
             type_params: vec![make_name_id(200)],
             implements: vec![VirImplementation {
                 interface: make_type_def_id(2),
+                type_args: vec![VirTypeId::I64],
                 method_bindings: vec![],
             }],
             is_annotation: false,
@@ -422,6 +476,10 @@ mod tests {
         assert_eq!(meta.type_name_id(id), Some(make_name_id(100)));
         assert_eq!(meta.type_params(id), Some(&[make_name_id(200)][..]));
         assert_eq!(meta.implemented_interfaces(id), vec![make_type_def_id(2)]);
+        assert_eq!(
+            meta.implementation_type_args(id, make_type_def_id(2)),
+            &[VirTypeId::I64]
+        );
         assert!(!meta.is_annotation(id));
     }
 
@@ -466,6 +524,8 @@ mod tests {
             is_static: false,
             required_params: 2,
             param_names: vec!["x".into(), "y".into()],
+            param_types: vec![VirTypeId::I64, VirTypeId::STRING],
+            return_type: VirTypeId::BOOL,
         });
 
         assert_eq!(meta.method_def_count(), 1);
@@ -475,10 +535,17 @@ mod tests {
         assert!(!md.is_static);
         assert_eq!(md.required_params, 2);
         assert_eq!(md.param_names, vec!["x", "y"]);
+        assert_eq!(md.param_types, vec![VirTypeId::I64, VirTypeId::STRING]);
+        assert_eq!(md.return_type, VirTypeId::BOOL);
 
         assert_eq!(meta.method_full_name_id(id), Some(make_name_id(71)));
         assert_eq!(meta.method_has_default(id), Some(true));
         assert_eq!(meta.method_defining_type(id), Some(make_type_def_id(2)));
+        assert_eq!(
+            meta.method_param_types(id),
+            Some(&[VirTypeId::I64, VirTypeId::STRING][..])
+        );
+        assert_eq!(meta.method_return_type(id), Some(VirTypeId::BOOL));
     }
 
     #[test]
@@ -490,7 +557,13 @@ mod tests {
         assert!(meta.type_def_kind(make_type_def_id(99)).is_none());
         assert!(meta.field_vir_type(make_field_id(99)).is_none());
         assert!(meta.method_full_name_id(make_method_id(99)).is_none());
+        assert!(meta.method_param_types(make_method_id(99)).is_none());
+        assert!(meta.method_return_type(make_method_id(99)).is_none());
         assert!(meta.implemented_interfaces(make_type_def_id(99)).is_empty());
+        assert!(
+            meta.implementation_type_args(make_type_def_id(99), make_type_def_id(1))
+                .is_empty()
+        );
     }
 
     #[test]

@@ -4,7 +4,7 @@
 // lowering.  This is the bridge that converts sema entity definitions
 // (TypeDef, FieldDef, MethodDef) into VIR-native metadata.
 
-use vole_identity::{Interner, NameTable};
+use vole_identity::{Interner, NameTable, VirTypeId};
 
 use crate::LoweringEntityLookup;
 use crate::TypeArena;
@@ -40,7 +40,7 @@ pub fn build_entity_metadata(
     // translate_type_id may intern new compound types it encounters.
     let mut tt = type_table.clone();
 
-    populate_type_defs(registry.all_type_defs(), &mut meta);
+    populate_type_defs(registry.all_type_defs(), type_arena, &mut tt, &mut meta);
     populate_field_defs(
         registry.all_field_defs(),
         type_arena,
@@ -49,7 +49,7 @@ pub fn build_entity_metadata(
         interner,
         name_table,
     );
-    populate_method_defs(registry.all_method_defs(), &mut meta);
+    populate_method_defs(registry.all_method_defs(), type_arena, &mut tt, &mut meta);
 
     meta
 }
@@ -68,13 +68,26 @@ fn convert_type_def_kind(kind: TypeDefKind) -> VirTypeDefKind {
 }
 
 /// Populate type definitions from sema into VIR entity metadata.
-fn populate_type_defs(type_defs: &[entity_defs::TypeDef], meta: &mut VirEntityMetadata) {
+///
+/// Translates each implementation's sema `TypeId` type arguments to
+/// `VirTypeId`s so codegen can read them without the sema type arena.
+fn populate_type_defs(
+    type_defs: &[entity_defs::TypeDef],
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+    meta: &mut VirEntityMetadata,
+) {
     for td in type_defs {
         let implements = td
             .implements
             .iter()
             .map(|imp| VirImplementation {
                 interface: imp.interface,
+                type_args: imp
+                    .type_args
+                    .iter()
+                    .map(|&ty| translate_type_id(type_table, ty, type_arena))
+                    .collect(),
                 method_bindings: imp
                     .method_bindings
                     .iter()
@@ -133,8 +146,19 @@ fn populate_field_defs(
 }
 
 /// Populate method definitions from sema into VIR entity metadata.
-fn populate_method_defs(method_defs: &[entity_defs::MethodDef], meta: &mut VirEntityMetadata) {
+///
+/// Unwraps each method's sema signature to extract parameter types and
+/// return type, then translates them to `VirTypeId`s so codegen can
+/// read method signatures without `arena.unwrap_function()`.
+fn populate_method_defs(
+    method_defs: &[entity_defs::MethodDef],
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+    meta: &mut VirEntityMetadata,
+) {
     for md in method_defs {
+        let (param_types, return_type) =
+            translate_method_signature(md.signature_id, type_arena, type_table);
         meta.insert_method_def(VirMethodDef {
             id: md.id,
             name_id: md.name_id,
@@ -144,6 +168,30 @@ fn populate_method_defs(method_defs: &[entity_defs::MethodDef], meta: &mut VirEn
             is_static: md.is_static,
             required_params: md.required_params,
             param_names: md.param_names.clone(),
+            param_types,
+            return_type,
         });
     }
+}
+
+/// Translate a sema method signature into VIR param types and return type.
+///
+/// Unwraps the function type from the type arena and translates each
+/// parameter and the return type from sema `TypeId` to `VirTypeId`.
+/// Returns empty params and `VirTypeId::VOID` if the signature cannot
+/// be unwrapped (e.g. for builtins with unresolved signatures).
+fn translate_method_signature(
+    signature_id: vole_identity::TypeId,
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+) -> (Vec<VirTypeId>, VirTypeId) {
+    let Some((params, ret, _is_closure)) = type_arena.unwrap_function(signature_id) else {
+        return (Vec::new(), VirTypeId::VOID);
+    };
+    let param_types = params
+        .iter()
+        .map(|&p| translate_type_id(type_table, p, type_arena))
+        .collect();
+    let return_type = translate_type_id(type_table, ret, type_arena);
+    (param_types, return_type)
 }
