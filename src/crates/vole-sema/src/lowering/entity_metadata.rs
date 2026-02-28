@@ -52,6 +52,14 @@ pub fn build_entity_metadata(
     populate_method_defs(registry.all_method_defs(), type_arena, &mut tt, &mut meta);
     populate_global_defs(registry.all_global_defs(), type_arena, &mut tt, &mut meta);
 
+    // Populate the array type NameId for array implement dispatch.
+    if let Some(array_name) = entities.array_name_id() {
+        meta.set_array_name_id(array_name);
+    }
+
+    // Build the short-name (last segment) lookup map from all type defs.
+    populate_short_name_map(registry.all_type_defs(), name_table, &mut meta);
+
     meta
 }
 
@@ -215,5 +223,23 @@ fn populate_global_defs(
             vir_ty,
             module_id: gd.module_id,
         });
+    }
+}
+
+/// Populate the short-name (last-segment) lookup map from all type
+/// definitions.
+///
+/// Mirrors `build_short_name_map` in `entity_view.rs`.  Uses the
+/// `NameTable` to extract the last segment of each type's `NameId`
+/// and registers it in `VirEntityMetadata::short_name_map`.
+fn populate_short_name_map(
+    type_defs: &[entity_defs::TypeDef],
+    name_table: &NameTable,
+    meta: &mut VirEntityMetadata,
+) {
+    for td in type_defs {
+        if let Some(last_segment) = name_table.last_segment_str(td.name_id) {
+            meta.insert_short_name(last_segment, td.id);
+        }
     }
 }

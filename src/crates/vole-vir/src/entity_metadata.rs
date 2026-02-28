@@ -215,6 +215,25 @@ pub struct VirEntityMetadata {
     global_defs: FxHashMap<GlobalId, VirGlobalDef>,
     /// Reverse lookup: `NameId` → `GlobalId`.
     global_by_name: FxHashMap<NameId, GlobalId>,
+    /// Reverse lookup: `NameId` → `TypeDefId`.
+    ///
+    /// Mirrors `EntityRegistry::type_by_name_map` / `EntityView::type_by_name`.
+    /// Used by `try_type_def_id()` in codegen to resolve a type definition
+    /// from its canonical name.
+    type_by_name: FxHashMap<NameId, TypeDefId>,
+    /// The `NameId` for the built-in `Array` type, used for array implement
+    /// dispatch (e.g. `extend [T] with Iterable<T>`).
+    ///
+    /// Mirrors `EntityRegistry::array_name_id()` / `EntityView::array_name`.
+    array_name_id: Option<NameId>,
+    /// Short-name (last segment) → `TypeDefId`s lookup.
+    ///
+    /// Built eagerly during VIR lowering from all type definitions.
+    /// Maps a type's short name (e.g. `"Point"` from `mymod::Point`) to
+    /// the list of `TypeDefId`s that share that short name.
+    ///
+    /// Mirrors `EntityView::short_name_map`.
+    short_name_map: FxHashMap<String, Vec<TypeDefId>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +247,10 @@ impl VirEntityMetadata {
     }
 
     /// Register a type definition.
+    ///
+    /// Also updates the `type_by_name` reverse-lookup map.
     pub fn insert_type_def(&mut self, type_def: VirTypeDef) {
+        self.type_by_name.insert(type_def.name_id, type_def.id);
         self.type_defs.insert(type_def.id, type_def);
     }
 
@@ -240,6 +262,22 @@ impl VirEntityMetadata {
     /// Register a method definition.
     pub fn insert_method_def(&mut self, method_def: VirMethodDef) {
         self.method_defs.insert(method_def.id, method_def);
+    }
+
+    /// Set the built-in array type `NameId`.
+    pub fn set_array_name_id(&mut self, name_id: NameId) {
+        self.array_name_id = Some(name_id);
+    }
+
+    /// Insert an entry into the short-name lookup map.
+    ///
+    /// Called during VIR lowering for each type definition whose `NameId`
+    /// has a resolvable last segment.
+    pub fn insert_short_name(&mut self, short_name: String, type_def_id: TypeDefId) {
+        self.short_name_map
+            .entry(short_name)
+            .or_default()
+            .push(type_def_id);
     }
 
     /// Register a global variable definition.
@@ -335,6 +373,40 @@ impl VirEntityMetadata {
     /// Return the number of registered type definitions.
     pub fn type_def_count(&self) -> usize {
         self.type_defs.len()
+    }
+
+    /// Resolve a `TypeDefId` by its canonical `NameId`.
+    ///
+    /// Mirrors `EntityView::type_by_name` / `AnalyzedProgram::try_type_def_id`.
+    pub fn type_by_name(&self, name_id: NameId) -> Option<TypeDefId> {
+        self.type_by_name.get(&name_id).copied()
+    }
+
+    /// Return the `NameId` for the built-in array type.
+    ///
+    /// Used by array implement dispatch (e.g. `extend [T] with Iterable<T>`).
+    /// Mirrors `EntityView::array_name_id`.
+    pub fn array_name_id(&self) -> Option<NameId> {
+        self.array_name_id
+    }
+
+    /// Find a type by its short (last-segment) name.
+    ///
+    /// Returns the first `TypeDefId` registered under the given short name.
+    /// Mirrors `EntityView::type_by_short_name`.
+    pub fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
+        self.short_name_map
+            .get(short_name)
+            .and_then(|ids| ids.first().copied())
+    }
+
+    /// Return all `TypeDefId`s registered under a short (last-segment) name.
+    ///
+    /// Returns `None` if no types are registered under the given name.
+    pub fn types_by_short_name(&self, short_name: &str) -> Option<&[TypeDefId]> {
+        self.short_name_map
+            .get(short_name)
+            .map(|ids| ids.as_slice())
     }
 }
 
@@ -881,5 +953,114 @@ mod tests {
         assert!(meta.global_by_name(make_name_id(99)).is_none());
         assert!(!meta.has_global(make_name_id(99)));
         assert!(meta.global_vir_type(make_global_id(99)).is_none());
+    }
+
+    #[test]
+    fn type_by_name_populated_on_insert() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_type_def_id(1);
+        let name = make_name_id(100);
+
+        meta.insert_type_def(VirTypeDef {
+            id,
+            name_id: name,
+            kind: VirTypeDefKind::Class,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+        });
+
+        assert_eq!(meta.type_by_name(name), Some(id));
+        assert!(meta.type_by_name(make_name_id(999)).is_none());
+    }
+
+    #[test]
+    fn type_by_name_overwrite() {
+        let mut meta = VirEntityMetadata::new();
+        let id1 = make_type_def_id(1);
+        let id2 = make_type_def_id(2);
+        let name = make_name_id(100);
+
+        meta.insert_type_def(VirTypeDef {
+            id: id1,
+            name_id: name,
+            kind: VirTypeDefKind::Class,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+        });
+
+        // Second type with the same name overwrites the reverse map.
+        meta.insert_type_def(VirTypeDef {
+            id: id2,
+            name_id: name,
+            kind: VirTypeDefKind::Struct,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+        });
+
+        assert_eq!(meta.type_by_name(name), Some(id2));
+    }
+
+    #[test]
+    fn array_name_id_default_none() {
+        let meta = VirEntityMetadata::new();
+        assert!(meta.array_name_id().is_none());
+    }
+
+    #[test]
+    fn set_and_query_array_name_id() {
+        let mut meta = VirEntityMetadata::new();
+        let name = make_name_id(42);
+
+        meta.set_array_name_id(name);
+        assert_eq!(meta.array_name_id(), Some(name));
+    }
+
+    #[test]
+    fn short_name_map_single_entry() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_type_def_id(1);
+
+        meta.insert_short_name("Point".to_string(), id);
+
+        assert_eq!(meta.type_by_short_name("Point"), Some(id));
+        assert!(meta.type_by_short_name("Line").is_none());
+    }
+
+    #[test]
+    fn short_name_map_multiple_entries() {
+        let mut meta = VirEntityMetadata::new();
+        let id1 = make_type_def_id(1);
+        let id2 = make_type_def_id(2);
+
+        meta.insert_short_name("Point".to_string(), id1);
+        meta.insert_short_name("Point".to_string(), id2);
+
+        // type_by_short_name returns the first entry.
+        assert_eq!(meta.type_by_short_name("Point"), Some(id1));
+
+        // types_by_short_name returns all entries.
+        let all = meta.types_by_short_name("Point").unwrap();
+        assert_eq!(all, &[id1, id2]);
+    }
+
+    #[test]
+    fn types_by_short_name_missing() {
+        let meta = VirEntityMetadata::new();
+        assert!(meta.types_by_short_name("Nonexistent").is_none());
     }
 }
