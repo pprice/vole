@@ -1,14 +1,9 @@
 // type_arena/type_id.rs
 //
-// Re-exports TypeId from vole-identity and defines sema-specific type helpers.
+// Re-exports TypeId and TypeIdVec from vole-identity and defines sema-specific type helpers.
 
-use smallvec::SmallVec;
-
-// Re-export TypeId from its canonical home in vole-identity
-pub use vole_identity::TypeId;
-
-/// SmallVec for type children - inline up to 4 (covers most unions, tuples, params)
-pub type TypeIdVec = SmallVec<[TypeId; 4]>;
+// Re-export TypeId and TypeIdVec from their canonical home in vole-identity
+pub use vole_identity::{TypeId, TypeIdVec};
 
 /// Nominal type kind for Class/Struct/Interface/Error discrimination
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

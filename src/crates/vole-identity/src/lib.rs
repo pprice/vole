@@ -29,7 +29,7 @@ mod vir_type_id;
 pub use entities::{FieldId, FunctionId, GlobalId, MethodId, TypeDefId, TypeParamId};
 pub use namer::{Namer, NamerLookup, method_name_id_by_str};
 pub use resolver::Resolver;
-pub use type_id::TypeId;
+pub use type_id::{TypeId, TypeIdVec};
 pub use vir_type_id::VirTypeId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

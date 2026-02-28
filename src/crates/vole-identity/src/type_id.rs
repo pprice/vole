@@ -2,6 +2,11 @@
 //
 // TypeId: interned type handle with reserved constants for primitives.
 
+use smallvec::SmallVec;
+
+/// SmallVec for type children - inline up to 4 (covers most unions, tuples, params)
+pub type TypeIdVec = SmallVec<[TypeId; 4]>;
+
 /// Concrete type identity in the TypeArena.
 ///
 /// Unlike `TypeDefId` (which identifies a type *definition* like `class Option<T>`),

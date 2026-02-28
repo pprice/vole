@@ -8,6 +8,9 @@ description = "Name identity system for the Vole programming language"
 # Error reporting (for Span -> SourceSpan conversions)
 miette = "7.4"
 
+# Inline small collections
+smallvec = "1.13"
+
 # High-performance hash map
 rustc-hash = "2.1"
 # raw_entry API for zero-allocation name lookups

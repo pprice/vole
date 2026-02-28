@@ -1760,6 +1760,7 @@ dependencies = [
  "hashbrown 0.16.1",
  "miette",
  "rustc-hash",
+ "smallvec",
 ]
 
 [[package]]
