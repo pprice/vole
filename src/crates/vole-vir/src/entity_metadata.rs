@@ -9,7 +9,7 @@
 
 use rustc_hash::FxHashMap;
 use vole_identity::{
-    FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, Symbol, TypeDefId, VirTypeId,
+    FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, Symbol, TypeDefId, TypeId, VirTypeId,
 };
 
 // ---------------------------------------------------------------------------
@@ -77,6 +77,22 @@ pub struct VirTypeDef {
     pub implements: Vec<VirImplementation>,
     /// Whether this type is an annotation type.
     pub is_annotation: bool,
+    /// Pre-computed base type for Class/Struct types.
+    ///
+    /// The base TypeId (with empty type args), pre-computed by sema so
+    /// codegen can look up without mutable arena access.  Uses sema `TypeId`
+    /// (not `VirTypeId`) because codegen callers still operate on `TypeId`.
+    pub base_type_id: Option<TypeId>,
+    /// Which module this type is declared in.
+    pub module: ModuleId,
+    /// Whether this type has generic parameters (i.e. `generic_info.is_some()`).
+    pub is_generic: bool,
+    /// Generic field types translated to `VirTypeId`s.
+    ///
+    /// From sema `TypeDef::generic_info.field_types`.  Used by
+    /// `entity_generic_field_types()` in rc_ops.rs and structs/helpers.rs
+    /// for generic type substitution.  `None` for non-generic types.
+    pub generic_field_types: Option<Vec<VirTypeId>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -830,6 +846,10 @@ mod tests {
                 method_bindings: vec![],
             }],
             is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
         });
 
         assert_eq!(meta.type_def_count(), 1);
@@ -968,6 +988,10 @@ mod tests {
             type_params: vec![],
             implements: vec![],
             is_annotation: true,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
         });
 
         assert!(meta.is_annotation(id));
@@ -990,6 +1014,10 @@ mod tests {
             type_params: vec![],
             implements: vec![],
             is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
         });
 
         assert_eq!(meta.type_extends(child), Some(&[parent][..]));
@@ -1011,6 +1039,10 @@ mod tests {
             type_params: vec![],
             implements: vec![],
             is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
         });
 
         // Overwrite with different data.
@@ -1025,6 +1057,10 @@ mod tests {
             type_params: vec![],
             implements: vec![],
             is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
         });
 
         assert_eq!(meta.type_def_count(), 1);
@@ -1161,6 +1197,10 @@ mod tests {
             type_params: vec![],
             implements: vec![],
             is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
         });
 
         assert_eq!(meta.type_by_name(name), Some(id));
@@ -1185,6 +1225,10 @@ mod tests {
             type_params: vec![],
             implements: vec![],
             is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
         });
 
         // Second type with the same name overwrites the reverse map.
@@ -1199,6 +1243,10 @@ mod tests {
             type_params: vec![],
             implements: vec![],
             is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
         });
 
         assert_eq!(meta.type_by_name(name), Some(id2));

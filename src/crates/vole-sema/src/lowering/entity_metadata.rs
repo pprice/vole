@@ -118,6 +118,13 @@ fn populate_type_defs(
             })
             .collect();
 
+        let generic_field_types = td.generic_info.as_ref().map(|gi| {
+            gi.field_types
+                .iter()
+                .map(|&ty| translate_type_id(type_table, ty, type_arena))
+                .collect()
+        });
+
         meta.insert_type_def(VirTypeDef {
             id: td.id,
             name_id: td.name_id,
@@ -129,6 +136,10 @@ fn populate_type_defs(
             type_params: td.type_params.clone(),
             implements,
             is_annotation: td.is_annotation,
+            base_type_id: td.base_type_id,
+            module: td.module,
+            is_generic: td.generic_info.is_some(),
+            generic_field_types,
         });
     }
 }
