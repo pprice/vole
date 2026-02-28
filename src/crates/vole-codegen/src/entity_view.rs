@@ -108,21 +108,6 @@ impl EntityView {
             .and_then(|ids| ids.first().copied())
     }
 
-    /// Return type arguments for a specific interface implementation.
-    pub(crate) fn implementation_type_args(
-        &self,
-        type_def_id: TypeDefId,
-        interface_id: TypeDefId,
-    ) -> &[TypeId] {
-        let type_def = self.get_type(type_def_id);
-        for impl_ in &type_def.implements {
-            if impl_.interface == interface_id {
-                return &impl_.type_args;
-            }
-        }
-        &[]
-    }
-
     /// Find a method binding for a type's interface implementation.
     pub(crate) fn find_method_binding(
         &self,

@@ -108,6 +108,7 @@ fn populate_type_defs(
                     .iter()
                     .map(|&ty| translate_type_id(type_table, ty, type_arena))
                     .collect(),
+                sema_type_args: imp.type_args.clone(),
                 method_bindings: imp
                     .method_bindings
                     .iter()

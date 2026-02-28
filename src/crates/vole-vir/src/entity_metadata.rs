@@ -206,6 +206,12 @@ pub struct VirImplementation {
     /// `type_args: [VirTypeId::I64]`.  Empty for non-generic interfaces.
     /// Translated from sema `TypeId`s to `VirTypeId`s during lowering.
     pub type_args: Vec<VirTypeId>,
+    /// Original sema `TypeId`s for the type arguments.
+    ///
+    /// Kept temporarily so codegen can build `FxHashMap<NameId, TypeId>`
+    /// substitution maps without reaching into `EntityView`.  Will be
+    /// removed once Phase 3 converts all codegen callers to `VirTypeId`.
+    pub sema_type_args: Vec<TypeId>,
     /// Method bindings for this implementation.
     pub method_bindings: Vec<VirMethodBinding>,
 }
@@ -473,6 +479,27 @@ impl VirEntityMetadata {
         for impl_ in &td.implements {
             if impl_.interface == interface_id {
                 return &impl_.type_args;
+            }
+        }
+        &[]
+    }
+
+    /// Return the original sema `TypeId` type arguments for a specific
+    /// interface implementation.
+    ///
+    /// Temporary accessor — will be removed once Phase 3 converts codegen
+    /// callers to `VirTypeId`.
+    pub fn implementation_sema_type_args(
+        &self,
+        type_def_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> &[TypeId] {
+        let Some(td) = self.type_defs.get(&type_def_id) else {
+            return &[];
+        };
+        for impl_ in &td.implements {
+            if impl_.interface == interface_id {
+                return &impl_.sema_type_args;
             }
         }
         &[]
@@ -924,6 +951,7 @@ mod tests {
             implements: vec![VirImplementation {
                 interface: make_type_def_id(2),
                 type_args: vec![VirTypeId::I64],
+                sema_type_args: vec![TypeId::I64],
                 method_bindings: vec![],
             }],
             is_annotation: false,
@@ -949,6 +977,10 @@ mod tests {
         assert_eq!(
             meta.implementation_type_args(id, make_type_def_id(2)),
             &[VirTypeId::I64]
+        );
+        assert_eq!(
+            meta.implementation_sema_type_args(id, make_type_def_id(2)),
+            &[TypeId::I64]
         );
         assert!(!meta.is_annotation(id));
     }
@@ -1051,6 +1083,10 @@ mod tests {
         assert!(meta.implemented_interfaces(make_type_def_id(99)).is_empty());
         assert!(
             meta.implementation_type_args(make_type_def_id(99), make_type_def_id(1))
+                .is_empty()
+        );
+        assert!(
+            meta.implementation_sema_type_args(make_type_def_id(99), make_type_def_id(1))
                 .is_empty()
         );
         assert!(meta.function_by_name(make_name_id(99)).is_none());

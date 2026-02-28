@@ -436,8 +436,8 @@ impl AnalyzedProgram {
     ) -> FxHashMap<NameId, vole_sema::type_arena::TypeId> {
         let type_params = self.entity_type_params(interface_id);
         let type_args = self
-            .entity_view
-            .implementation_type_args(implementing_type_id, interface_id);
+            .entity_metadata()
+            .implementation_sema_type_args(implementing_type_id, interface_id);
         type_params
             .into_iter()
             .zip(type_args.iter().copied())
