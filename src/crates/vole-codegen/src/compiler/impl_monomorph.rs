@@ -76,7 +76,7 @@ impl Compiler<'_> {
             }
             // Array target type: `extend [T] with Iterable<T>`.
             TypeExprKind::Array(_) => {
-                let type_id = match self.arena().lookup_any_array() {
+                let type_id = match self.vir_query_lookup_any_array() {
                     Some(id) => id,
                     None => return Ok(()), // No array type in arena yet, skip
                 };
@@ -214,42 +214,39 @@ impl Compiler<'_> {
                     .interface_impl_type_param_subs(type_def_id, interface_tdef_id);
                 // Skip abstract/generic default methods (not compiled in the module).
                 if !type_param_subs.is_empty() {
-                    let arena = self.arena();
                     let has_abstract = type_param_subs
                         .values()
-                        .any(|&v| arena.unwrap_type_param(v).is_some());
+                        .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
                     if has_abstract {
                         continue;
                     }
                 }
                 let sig = {
                     let method_def = self.analyzed.get_method(semantic_method_id);
-                    let arena = self.arena();
-                    let (param_type_ids, return_type_id) = match arena
-                        .unwrap_function(method_def.signature_id)
-                    {
-                        Some((params, ret, _)) => {
-                            let subst_params: Vec<TypeId> = params
-                                .iter()
-                                .map(|&p| {
-                                    if arena.is_self_type(p) {
-                                        self_type_id
-                                    } else {
-                                        arena.lookup_substitute(p, &type_param_subs).unwrap_or(p)
-                                    }
-                                })
-                                .collect();
-                            let subst_ret = if arena.is_self_type(ret) {
-                                self_type_id
-                            } else {
-                                arena
-                                    .lookup_substitute(ret, &type_param_subs)
-                                    .unwrap_or(ret)
-                            };
-                            (subst_params, subst_ret)
-                        }
-                        None => (vec![], self.arena().void()),
-                    };
+                    let (param_type_ids, return_type_id) =
+                        match self.vir_query_unwrap_function(method_def.signature_id) {
+                            Some((params, ret, _)) => {
+                                let subst_params: Vec<TypeId> = params
+                                    .iter()
+                                    .map(|&p| {
+                                        if self.vir_query_is_self_type(p) {
+                                            self_type_id
+                                        } else {
+                                            self.vir_query_lookup_substitute(p, &type_param_subs)
+                                                .unwrap_or(p)
+                                        }
+                                    })
+                                    .collect();
+                                let subst_ret = if self.vir_query_is_self_type(ret) {
+                                    self_type_id
+                                } else {
+                                    self.vir_query_lookup_substitute(ret, &type_param_subs)
+                                        .unwrap_or(ret)
+                                };
+                                (subst_params, subst_ret)
+                            }
+                            None => (vec![], self.vir_query_void()),
+                        };
                     self.build_signature_from_type_ids(
                         &param_type_ids,
                         Some(return_type_id),
@@ -368,7 +365,7 @@ impl Compiler<'_> {
             TypeExprKind::Array(_) => {
                 // Find any existing array TypeId (arena is immutable in codegen).
                 // The prelude always interns [i64] arrays, so this should succeed.
-                let type_id = self.arena().lookup_any_array().ok_or_else(|| {
+                let type_id = self.vir_query_lookup_any_array().ok_or_else(|| {
                     CodegenError::internal(
                         "extend [T] with Iterable<T>: no array type found in arena (prelude not loaded?)",
                     )
@@ -558,42 +555,39 @@ impl Compiler<'_> {
                 // Generic interface implementations (e.g., `extend [T] with Iterable<T>`) are
                 // handled via monomorphization at the call site, not registered here.
                 if !type_param_subs.is_empty() {
-                    let arena = self.arena();
                     let has_abstract = type_param_subs
                         .values()
-                        .any(|&v| arena.unwrap_type_param(v).is_some());
+                        .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
                     if has_abstract {
                         continue;
                     }
                 }
                 let sig = {
                     let method_def = self.analyzed.get_method(semantic_method_id);
-                    let arena = self.arena();
-                    let (param_type_ids, return_type_id) = match arena
-                        .unwrap_function(method_def.signature_id)
-                    {
-                        Some((params, ret, _)) => {
-                            let subst_params: Vec<TypeId> = params
-                                .iter()
-                                .map(|&p| {
-                                    if arena.is_self_type(p) {
-                                        self_type_id
-                                    } else {
-                                        arena.lookup_substitute(p, &type_param_subs).unwrap_or(p)
-                                    }
-                                })
-                                .collect();
-                            let subst_ret = if arena.is_self_type(ret) {
-                                self_type_id
-                            } else {
-                                arena
-                                    .lookup_substitute(ret, &type_param_subs)
-                                    .unwrap_or(ret)
-                            };
-                            (subst_params, subst_ret)
-                        }
-                        None => (vec![], self.arena().void()),
-                    };
+                    let (param_type_ids, return_type_id) =
+                        match self.vir_query_unwrap_function(method_def.signature_id) {
+                            Some((params, ret, _)) => {
+                                let subst_params: Vec<TypeId> = params
+                                    .iter()
+                                    .map(|&p| {
+                                        if self.vir_query_is_self_type(p) {
+                                            self_type_id
+                                        } else {
+                                            self.vir_query_lookup_substitute(p, &type_param_subs)
+                                                .unwrap_or(p)
+                                        }
+                                    })
+                                    .collect();
+                                let subst_ret = if self.vir_query_is_self_type(ret) {
+                                    self_type_id
+                                } else {
+                                    self.vir_query_lookup_substitute(ret, &type_param_subs)
+                                        .unwrap_or(ret)
+                                };
+                                (subst_params, subst_ret)
+                            }
+                            None => (vec![], self.vir_query_void()),
+                        };
                     self.build_signature_from_type_ids(
                         &param_type_ids,
                         Some(return_type_id),
@@ -868,10 +862,9 @@ impl Compiler<'_> {
                 // This handles `extend [T] with Iterable<T>` where T is unresolved — those default
                 // methods are instantiated at the call site via monomorphization, not compiled here.
                 if !type_param_subs.is_empty() {
-                    let arena = self.arena();
                     let has_abstract = type_param_subs
                         .values()
-                        .any(|&v| arena.unwrap_type_param(v).is_some());
+                        .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
                     if has_abstract {
                         continue;
                     }
@@ -882,24 +875,23 @@ impl Compiler<'_> {
                 //   2. TypeParam(T) -> concrete element type (via type_param_subs)
                 let (param_type_ids, return_type_id) = {
                     let method_def = self.analyzed.get_method(semantic_method_id);
-                    let arena = self.arena();
-                    match arena.unwrap_function(method_def.signature_id) {
+                    match self.vir_query_unwrap_function(method_def.signature_id) {
                         Some((params, ret, _)) => {
                             let subst_params: Vec<TypeId> = params
                                 .iter()
                                 .map(|&p| {
-                                    if arena.is_self_type(p) {
+                                    if self.vir_query_is_self_type(p) {
                                         self_type_id
                                     } else {
-                                        arena.lookup_substitute(p, &type_param_subs).unwrap_or(p)
+                                        self.vir_query_lookup_substitute(p, &type_param_subs)
+                                            .unwrap_or(p)
                                     }
                                 })
                                 .collect();
-                            let subst_ret = if arena.is_self_type(ret) {
+                            let subst_ret = if self.vir_query_is_self_type(ret) {
                                 self_type_id
                             } else {
-                                arena
-                                    .lookup_substitute(ret, &type_param_subs)
+                                self.vir_query_lookup_substitute(ret, &type_param_subs)
                                     .unwrap_or(ret)
                             };
                             (subst_params, subst_ret)
@@ -1023,7 +1015,7 @@ impl Compiler<'_> {
             // Array target type: `extend [T] with Iterable<T>`.
             // All array TypeIds map to pointer_type in Cranelift, so use any existing
             // array TypeId from the arena as self_type_id.
-            TypeExprKind::Array(_) => self.arena().lookup_any_array().ok_or_else(|| {
+            TypeExprKind::Array(_) => self.vir_query_lookup_any_array().ok_or_else(|| {
                 CodegenError::internal(
                     "compile_module_implement_block: extend [T] with ...: no array type in arena",
                 )
@@ -1196,10 +1188,9 @@ impl Compiler<'_> {
                 // This handles `extend [T] with Iterable<T>` where T is unresolved — those default
                 // methods are instantiated at the call site via monomorphization, not compiled here.
                 if !type_param_subs.is_empty() {
-                    let arena = self.arena();
                     let has_abstract = type_param_subs
                         .values()
-                        .any(|&v| arena.unwrap_type_param(v).is_some());
+                        .any(|&v| self.vir_query_unwrap_type_param(v).is_some());
                     if has_abstract {
                         continue;
                     }
@@ -1210,24 +1201,23 @@ impl Compiler<'_> {
                 //   2. TypeParam(T) -> concrete element type (via type_param_subs)
                 let (param_type_ids, return_type_id) = {
                     let method_def = self.analyzed.get_method(semantic_method_id);
-                    let arena = self.arena();
-                    match arena.unwrap_function(method_def.signature_id) {
+                    match self.vir_query_unwrap_function(method_def.signature_id) {
                         Some((params, ret, _)) => {
                             let subst_params: Vec<TypeId> = params
                                 .iter()
                                 .map(|&p| {
-                                    if arena.is_self_type(p) {
+                                    if self.vir_query_is_self_type(p) {
                                         self_type_id
                                     } else {
-                                        arena.lookup_substitute(p, &type_param_subs).unwrap_or(p)
+                                        self.vir_query_lookup_substitute(p, &type_param_subs)
+                                            .unwrap_or(p)
                                     }
                                 })
                                 .collect();
-                            let subst_ret = if arena.is_self_type(ret) {
+                            let subst_ret = if self.vir_query_is_self_type(ret) {
                                 self_type_id
                             } else {
-                                arena
-                                    .lookup_substitute(ret, &type_param_subs)
+                                self.vir_query_lookup_substitute(ret, &type_param_subs)
                                     .unwrap_or(ret)
                             };
                             (subst_params, subst_ret)
@@ -1393,9 +1383,8 @@ impl Compiler<'_> {
         // Build params: skip explicit `self` params — they are handled via the separate self_binding.
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let method_def = self.analyzed.get_method(semantic_method_id);
-            let arena = self.arena();
-            let (param_type_ids, _, _) = arena
-                .unwrap_function(method_def.signature_id)
+            let (param_type_ids, _, _) = self
+                .vir_query_unwrap_function(method_def.signature_id)
                 .ok_or_else(|| {
                     CodegenError::internal("method compilation: missing function signature")
                 })?;
@@ -1405,7 +1394,8 @@ impl Compiler<'_> {
                 .filter(|p| p.name != self_sym)
                 .zip(param_type_ids.iter())
                 .map(|(param, &type_id)| {
-                    let cranelift_type = type_id_to_cranelift(type_id, arena, self.pointer_type);
+                    let cranelift_type =
+                        type_id_to_cranelift(type_id, self.arena(), self.pointer_type);
                     (param.name, type_id, cranelift_type)
                 })
                 .collect()
@@ -1413,9 +1403,7 @@ impl Compiler<'_> {
 
         let method_return_type_id = {
             let method_def = self.analyzed.get_method(semantic_method_id);
-            let arena = self.arena();
-            arena
-                .unwrap_function(method_def.signature_id)
+            self.vir_query_unwrap_function(method_def.signature_id)
                 .map(|(_, ret, _)| ret)
         };
 
@@ -1501,16 +1489,13 @@ impl Compiler<'_> {
 
             // Use pre-resolved signature from MethodDef
             let method_def = self.analyzed.get_method(method_id);
-            let arena = self.arena();
-            let (params, ret, _) =
-                arena
-                    .unwrap_function(method_def.signature_id)
-                    .ok_or_else(|| {
-                        CodegenError::internal("method compilation: missing function signature")
-                    })?;
+            let (params, ret, _) = self
+                .vir_query_unwrap_function(method_def.signature_id)
+                .ok_or_else(|| {
+                    CodegenError::internal("method compilation: missing function signature")
+                })?;
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
-            let (param_type_ids, return_type_id) =
-                (params.to_vec(), Some(ret).filter(|r| !r.is_void()));
+            let (param_type_ids, return_type_id) = (params, Some(ret).filter(|r| !r.is_void()));
             self.jit.ctx.func.signature = sig;
 
             // Build param info for compilation
@@ -1624,9 +1609,8 @@ impl Compiler<'_> {
         // Skip explicit `self` params — they are handled via the separate self_binding.
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let method_def = self.analyzed.get_method(semantic_method_id);
-            let arena = self.arena();
-            let (param_type_ids, _, _) = arena
-                .unwrap_function(method_def.signature_id)
+            let (param_type_ids, _, _) = self
+                .vir_query_unwrap_function(method_def.signature_id)
                 .ok_or_else(|| {
                     CodegenError::internal("method compilation: missing function signature")
                 })?;
@@ -1636,7 +1620,8 @@ impl Compiler<'_> {
                 .filter(|p| p.name != self_sym)
                 .zip(param_type_ids.iter())
                 .map(|(param, &type_id)| {
-                    let cranelift_type = type_id_to_cranelift(type_id, arena, self.pointer_type);
+                    let cranelift_type =
+                        type_id_to_cranelift(type_id, self.arena(), self.pointer_type);
                     (param.name, type_id, cranelift_type)
                 })
                 .collect()
@@ -1645,9 +1630,7 @@ impl Compiler<'_> {
         // Get the method's return type from the pre-resolved signature
         let method_return_type_id = {
             let method_def = self.analyzed.get_method(semantic_method_id);
-            let arena = self.arena();
-            arena
-                .unwrap_function(method_def.signature_id)
+            self.vir_query_unwrap_function(method_def.signature_id)
                 .map(|(_, ret, _)| ret)
         };
 
@@ -1847,11 +1830,11 @@ impl Compiler<'_> {
         }
 
         // Get all concrete element types for which we need to compile array Iterable methods
-        let elem_types: Vec<TypeId> = self.arena().all_concrete_runtime_iterator_elem_types();
+        let elem_types: Vec<TypeId> = self.vir_query_all_concrete_runtime_iterator_elem_types();
 
         for elem_type in elem_types {
             // Get the concrete array TypeId for this element type
-            let self_type_id = match self.arena().lookup_array(elem_type) {
+            let self_type_id = match self.vir_query_lookup_array(elem_type) {
                 Some(tid) => tid,
                 None => continue, // No array of this elem type in arena, skip
             };
@@ -1884,24 +1867,23 @@ impl Compiler<'_> {
                 // return type. Params fall back to abstract type on failure (safe for ptr-size).
                 let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
                     let method_def = self.analyzed.get_method(*semantic_method_id);
-                    let arena = self.arena();
-                    arena
-                        .unwrap_function(method_def.signature_id)
+                    self.vir_query_unwrap_function(method_def.signature_id)
                         .and_then(|(params, ret, _)| {
                             let subst_params: Vec<TypeId> = params
                                 .iter()
                                 .map(|&p| {
-                                    if arena.is_self_type(p) {
+                                    if self.vir_query_is_self_type(p) {
                                         self_type_id
                                     } else {
-                                        arena.lookup_substitute(p, &concrete_subs).unwrap_or(p)
+                                        self.vir_query_lookup_substitute(p, &concrete_subs)
+                                            .unwrap_or(p)
                                     }
                                 })
                                 .collect();
-                            let subst_ret = if arena.is_self_type(ret) {
+                            let subst_ret = if self.vir_query_is_self_type(ret) {
                                 Some(self_type_id)
                             } else {
-                                arena.lookup_substitute(ret, &concrete_subs)
+                                self.vir_query_lookup_substitute(ret, &concrete_subs)
                             };
                             subst_ret.map(|ret| (subst_params, ret))
                         })
@@ -2062,10 +2044,10 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let elem_types: Vec<TypeId> = self.arena().all_concrete_runtime_iterator_elem_types();
+        let elem_types: Vec<TypeId> = self.vir_query_all_concrete_runtime_iterator_elem_types();
 
         for elem_type in elem_types {
-            let self_type_id = match self.arena().lookup_array(elem_type) {
+            let self_type_id = match self.vir_query_lookup_array(elem_type) {
                 Some(tid) => tid,
                 None => continue,
             };
@@ -2080,24 +2062,23 @@ impl Compiler<'_> {
                 // Build the concrete signature (same as compile path)
                 let maybe_type_ids: Option<(Vec<TypeId>, TypeId)> = {
                     let method_def = self.analyzed.get_method(*semantic_method_id);
-                    let arena = self.arena();
-                    arena
-                        .unwrap_function(method_def.signature_id)
+                    self.vir_query_unwrap_function(method_def.signature_id)
                         .and_then(|(params, ret, _)| {
                             let subst_params: Vec<TypeId> = params
                                 .iter()
                                 .map(|&p| {
-                                    if arena.is_self_type(p) {
+                                    if self.vir_query_is_self_type(p) {
                                         self_type_id
                                     } else {
-                                        arena.lookup_substitute(p, &concrete_subs).unwrap_or(p)
+                                        self.vir_query_lookup_substitute(p, &concrete_subs)
+                                            .unwrap_or(p)
                                     }
                                 })
                                 .collect();
-                            let subst_ret = if arena.is_self_type(ret) {
+                            let subst_ret = if self.vir_query_is_self_type(ret) {
                                 Some(self_type_id)
                             } else {
-                                arena.lookup_substitute(ret, &concrete_subs)
+                                self.vir_query_lookup_substitute(ret, &concrete_subs)
                             };
                             subst_ret.map(|ret| (subst_params, ret))
                         })

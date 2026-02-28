@@ -62,7 +62,8 @@ use crate::AnalyzedProgram;
 use crate::types::PendingMonomorph;
 use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeKey};
 use vole_frontend::Symbol;
-use vole_identity::{ModuleId, NameId};
+use vole_identity::VirTypeId;
+use vole_identity::{ModuleId, NameId, TypeId};
 use vole_runtime::NativeRegistry;
 
 pub use state::TestInfo;
@@ -318,5 +319,107 @@ impl<'a> Compiler<'a> {
         };
 
         self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Declare)
+    }
+
+    // =====================================================================
+    // VIR query wrappers (Phase 3a migration)
+    //
+    // These mirror the `vir_query_*` helpers on `CodegenCtx`, providing a
+    // single call-site abstraction over the VirTypeTable-with-arena-fallback
+    // pattern.  Compiler-level code (registration, signature building) uses
+    // these instead of raw `self.arena().method()` calls.
+    // =====================================================================
+
+    /// Best-effort sema `TypeId` → `VirTypeId` translation.
+    /// Reserved / primitive IDs are aligned between the two ID spaces;
+    /// dynamic sema IDs fall back to `VirTypeId::UNKNOWN`.
+    #[inline]
+    fn vir_lookup(&self, type_id: TypeId) -> VirTypeId {
+        if type_id.raw() < VirTypeId::FIRST_DYNAMIC {
+            VirTypeId::from_raw(type_id.raw())
+        } else {
+            VirTypeId::UNKNOWN
+        }
+    }
+
+    /// Look up any existing array `TypeId` in the arena.
+    #[inline]
+    fn vir_query_lookup_any_array(&self) -> Option<TypeId> {
+        self.arena().lookup_any_array()
+    }
+
+    /// Look up an existing array type by element `TypeId` in the arena.
+    #[inline]
+    fn vir_query_lookup_array(&self, elem: TypeId) -> Option<TypeId> {
+        self.arena().lookup_array(elem)
+    }
+
+    /// Get the void `TypeId` from the arena.
+    #[inline]
+    fn vir_query_void(&self) -> TypeId {
+        self.arena().void()
+    }
+
+    /// Return all concrete element types for which a RuntimeIterator exists.
+    #[inline]
+    fn vir_query_all_concrete_runtime_iterator_elem_types(&self) -> Vec<TypeId> {
+        self.arena().all_concrete_runtime_iterator_elem_types()
+    }
+
+    /// Check if a type is the `Self` type, using VirTypeTable with arena fallback.
+    #[inline]
+    fn vir_query_is_self_type(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            self.arena().is_self_type(type_id)
+        } else {
+            crate::types::vir_conversions::vir_is_self_type(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Unwrap a type parameter to its `NameId`, using VirTypeTable with arena fallback.
+    #[inline]
+    fn vir_query_unwrap_type_param(&self, type_id: TypeId) -> Option<NameId> {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            self.arena().unwrap_type_param(type_id)
+        } else {
+            crate::types::vir_conversions::vir_unwrap_type_param(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Unwrap a function type to `(params, return_type, is_closure)`, using
+    /// VirTypeTable with arena fallback.
+    #[inline]
+    fn vir_query_unwrap_function(&self, type_id: TypeId) -> Option<(Vec<TypeId>, TypeId, bool)> {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            self.arena()
+                .unwrap_function(type_id)
+                .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure))
+        } else {
+            crate::types::vir_conversions::vir_unwrap_function(vir_ty, self.vir_type_table()).map(
+                |(params, ret)| {
+                    (
+                        params
+                            .iter()
+                            .map(|&p| crate::types::vir_conversions::vir_to_sema_type_id_lossy(p))
+                            .collect(),
+                        crate::types::vir_conversions::vir_to_sema_type_id_lossy(ret),
+                        false,
+                    )
+                },
+            )
+        }
+    }
+
+    /// Look up the result of substituting type parameters in a type (read-only).
+    #[inline]
+    fn vir_query_lookup_substitute(
+        &self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<TypeId> {
+        self.arena().lookup_substitute(ty, subs)
     }
 }
