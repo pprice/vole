@@ -163,7 +163,7 @@ impl Cg<'_, '_, '_> {
         // Check if it's an external (native) method
         if let Some(ref external_info) = method_impl.external_info {
             // Call the external function directly
-            let string_type_id = self.arena().primitives.string;
+            let string_type_id = self.vir_query_primitives().string;
             let ext = ExternalMethodRef::from(*external_info);
             let result = self.call_external_id(&ext, &[val.value], string_type_id)?;
             return Ok(result.value);
@@ -201,25 +201,26 @@ impl Cg<'_, '_, '_> {
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
             // Check if left is optional and right is nil
-            if self.arena().is_optional(left.type_id) && right.type_id.is_nil() {
+            if self.vir_query_is_optional(left.type_id) && right.type_id.is_nil() {
                 return self.optional_nil_compare(left, op);
             }
             // Check if right is optional and left is nil
-            if self.arena().is_optional(right.type_id) && left.type_id.is_nil() {
+            if self.vir_query_is_optional(right.type_id) && left.type_id.is_nil() {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type (using TypeId)
-            let arena = self.arena();
-            if let Some(inner_type_id) = arena.unwrap_optional(left.type_id)
+            if let Some(inner_type_id) = self.vir_query_unwrap_optional(left.type_id)
                 && (inner_type_id == right.type_id
-                    || (arena.is_integer(inner_type_id) && arena.is_integer(right.type_id)))
+                    || (self.vir_query_is_integer(inner_type_id)
+                        && self.vir_query_is_integer(right.type_id)))
             {
                 return self.optional_value_compare(left, right, op);
             }
             // Check if right is optional and left is a compatible value type (using TypeId)
-            if let Some(inner_type_id) = arena.unwrap_optional(right.type_id)
+            if let Some(inner_type_id) = self.vir_query_unwrap_optional(right.type_id)
                 && (inner_type_id == left.type_id
-                    || (arena.is_integer(inner_type_id) && arena.is_integer(left.type_id)))
+                    || (self.vir_query_is_integer(inner_type_id)
+                        && self.vir_query_is_integer(left.type_id)))
             {
                 return self.optional_value_compare(right, left, op);
             }
@@ -726,12 +727,9 @@ impl Cg<'_, '_, '_> {
         let is_not_nil = self.tag_ne(optional.value, nil_tag as i64);
 
         // Resolve the inner (non-nil) TypeId for dispatch
-        let inner_type_id = {
-            let arena = self.arena();
-            arena
-                .unwrap_optional(optional.type_id)
-                .unwrap_or_else(|| arena.i64())
-        };
+        let inner_type_id = self
+            .vir_query_unwrap_optional(optional.type_id)
+            .unwrap_or(TypeId::I64);
         let payload_cranelift_type = self.cranelift_type(inner_type_id);
 
         // Struct payloads are pointers to stack data; loading fields from a nil optional's
@@ -839,13 +837,13 @@ impl Cg<'_, '_, '_> {
         if inner_type_id == TypeId::F128 {
             // F128 requires a runtime call; Cranelift has no native fcmp for 128-bit floats.
             self.call_f128_cmp(RuntimeKey::F128Eq, payload, value.value)
-        } else if self.arena().is_float(inner_type_id) {
+        } else if self.vir_query_is_float(inner_type_id) {
             // F32 / F64 use the native Cranelift fcmp instruction.
             Ok(self
                 .builder
                 .ins()
                 .fcmp(FloatCC::Equal, payload, value.value))
-        } else if self.arena().is_string(inner_type_id) {
+        } else if self.vir_query_is_string(inner_type_id) {
             self.string_eq(payload, value.value)
         } else {
             // Integer, bool, pointer, interface, handle, union: compare by value/identity

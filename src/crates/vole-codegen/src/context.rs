@@ -1098,6 +1098,36 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().primitives
     }
 
+    /// Check if a sema `TypeId` is a class type, using VirTypeTable with
+    /// arena fallback for monomorphized types.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_is_class(&self, type_id: TypeId) -> bool {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            self.arena().is_class(type_id)
+        } else {
+            crate::types::vir_conversions::vir_is_class(vir_ty, self.vir_type_table())
+        }
+    }
+
+    /// Unwrap an optional type to its inner sema `TypeId`, using VirTypeTable
+    /// with arena fallback for monomorphized types.
+    ///
+    /// Note: the VIR path returns a VirTypeId that is lossily converted to
+    /// a sema TypeId.  For new code, prefer the VIR-native path.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_unwrap_optional(&self, type_id: TypeId) -> Option<TypeId> {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            self.arena().unwrap_optional(type_id)
+        } else {
+            crate::types::vir_conversions::vir_unwrap_optional(vir_ty, self.vir_type_table())
+                .map(crate::types::vir_conversions::vir_to_sema_type_id_lossy)
+        }
+    }
+
     // =====================================================================
     // VIR-native type queries (no arena fallback)
     //

@@ -28,8 +28,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            let arena = self.arena();
-            let result = arena.expect_substitute(ty, substitutions, "Cg::substitute_type");
+            let result = self.vir_query_expect_substitute(ty, substitutions, "Cg::substitute_type");
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
             result
@@ -47,8 +46,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            let arena = self.arena();
-            if let Some(result) = arena.lookup_substitute(ty, substitutions) {
+            if let Some(result) = self.vir_query_lookup_substitute(ty, substitutions) {
                 self.substitution_cache.borrow_mut().insert(ty, result);
                 result
             } else {
@@ -149,8 +147,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Find the nil variant index in a union (for optional handling)
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
-        let arena = self.arena();
-        if let Some(variants) = arena.unwrap_union(ty) {
+        if let Some(variants) = self.vir_query_unwrap_union(ty) {
             variants.iter().position(|&id| id.is_nil())
         } else {
             None
@@ -159,7 +156,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
     pub fn interface_type_def_id(&self, ty: TypeId) -> Option<TypeDefId> {
-        self.arena().unwrap_interface(ty).map(|(id, _)| id)
+        self.vir_query_unwrap_interface(ty).map(|(id, _)| id)
     }
 
     // ========== Union array storage policy ==========
@@ -171,26 +168,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// inline storage cannot recover the original union variant on read, so we must
     /// fall back to heap-boxed union buffers.
     pub fn union_array_prefers_inline_storage(&self, union_type_id: TypeId) -> bool {
-        use crate::types::unknown_type_tag;
         use rustc_hash::FxHashSet;
         use vole_runtime::value::RuntimeTypeId;
 
         let resolved_union_id = self.try_substitute_type(union_type_id);
-        let Some(variants) = self.arena().unwrap_union(resolved_union_id) else {
+        let Some(variants) = self.vir_query_unwrap_union(resolved_union_id) else {
             return false;
         };
 
-        let arena = self.arena();
         let mut seen_tags: FxHashSet<u64> = FxHashSet::default();
-        for &variant in variants {
+        for &variant in &variants {
             if !self.supports_inline_union_array_variant(variant) {
                 return false;
             }
 
-            let tag = unknown_type_tag(variant, arena);
+            let tag = self.vir_query_unknown_type_tag(variant);
             if tag == RuntimeTypeId::I64 as u64
-                && !arena.is_integer(variant)
-                && !arena.is_sentinel(variant)
+                && !self.vir_query_is_integer(variant)
+                && !self.vir_query_is_sentinel(variant)
             {
                 return false;
             }
@@ -202,18 +197,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     fn supports_inline_union_array_variant(&self, variant: TypeId) -> bool {
-        let arena = self.arena();
         // Codegen/runtime layout policy: inline union array slots store only
         // (runtime_tag, payload_bits), so variants that need richer tagging or
         // heap-backed payload wrappers must use boxed union storage.
-        !(arena.is_union(variant)
-            || arena.is_interface(variant)
-            || arena.is_class(variant)
-            || arena.is_struct(variant)
-            || arena.is_unknown(variant)
-            || arena.unwrap_tuple(variant).is_some()
-            || arena.unwrap_fallible(variant).is_some()
-            || arena.unwrap_type_param(variant).is_some())
+        !(self.vir_query_is_union(variant)
+            || self.vir_query_is_interface(variant)
+            || self.vir_query_is_class(variant)
+            || self.vir_query_is_struct(variant)
+            || self.vir_query_is_unknown(variant)
+            || self.vir_query_unwrap_tuple(variant).is_some()
+            || self.vir_query_unwrap_fallible(variant).is_some()
+            || self.vir_query_unwrap_type_param(variant).is_some())
     }
 
     pub(crate) fn union_variant_index_to_array_tag(
