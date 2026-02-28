@@ -9,7 +9,9 @@
 // - static_method_monomorphs (vol-bklt)
 
 use rustc_hash::FxHashMap;
-use vole_identity::{ClassMethodMonomorphKey, NameId, StaticMethodMonomorphKey, VirTypeId};
+use vole_identity::{
+    ClassMethodMonomorphKey, MonomorphKey, NameId, StaticMethodMonomorphKey, VirTypeId,
+};
 
 use crate::LoweringEntityLookup;
 use crate::TypeArena;
@@ -34,12 +36,13 @@ pub fn populate_monomorph_info(
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
 ) -> PopulatedMonomorphInfo {
-    let free = populate_free_monomorphs(entities, type_arena, type_table);
+    let (free, free_by_key) = populate_free_monomorphs(entities, type_arena, type_table);
     let class = populate_class_method_monomorphs(entities, type_arena, type_table);
     let static_ = populate_static_method_monomorphs(entities, type_arena, type_table);
 
     PopulatedMonomorphInfo {
         free_monomorphs: free,
+        free_monomorphs_by_key: free_by_key,
         class_method_monomorphs: class,
         static_method_monomorphs: static_,
     }
@@ -48,6 +51,7 @@ pub fn populate_monomorph_info(
 /// Output of the monomorph info population pass.
 pub struct PopulatedMonomorphInfo {
     pub free_monomorphs: FxHashMap<NameId, VirMonomorphInfo>,
+    pub free_monomorphs_by_key: FxHashMap<MonomorphKey, NameId>,
     pub class_method_monomorphs: FxHashMap<ClassMethodMonomorphKey, VirClassMethodMonomorphInfo>,
     pub static_method_monomorphs: FxHashMap<StaticMethodMonomorphKey, VirStaticMethodMonomorphInfo>,
 }
@@ -60,14 +64,19 @@ fn populate_free_monomorphs(
     entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
-) -> FxHashMap<NameId, VirMonomorphInfo> {
-    let instances = entities.monomorph_instances();
+) -> (
+    FxHashMap<NameId, VirMonomorphInfo>,
+    FxHashMap<MonomorphKey, NameId>,
+) {
+    let keyed_instances = entities.monomorph_keyed_instances();
     let mut map = FxHashMap::default();
-    for instance in instances {
+    let mut by_key = FxHashMap::default();
+    for (key, instance) in keyed_instances {
         let info = translate_free_monomorph(&instance, type_arena, type_table);
+        by_key.insert(key, instance.mangled_name);
         map.insert(instance.mangled_name, info);
     }
-    map
+    (map, by_key)
 }
 
 fn translate_free_monomorph(

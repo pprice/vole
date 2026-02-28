@@ -610,6 +610,7 @@ mod tests {
             entity_metadata: crate::entity_metadata::VirEntityMetadata::new(),
             implement_dispatch: crate::implement_dispatch::VirImplementDispatch::new(),
             free_monomorphs: FxHashMap::default(),
+            free_monomorphs_by_key: FxHashMap::default(),
             class_method_monomorphs: FxHashMap::default(),
             static_method_monomorphs: FxHashMap::default(),
             interner: std::rc::Rc::new(vole_identity::Interner::new()),

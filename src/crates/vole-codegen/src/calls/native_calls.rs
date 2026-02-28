@@ -427,7 +427,7 @@ impl Cg<'_, '_, '_> {
             return Ok(None);
         };
 
-        let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+        let instance_data = self.free_monomorph(monomorph_key).map(|inst| {
             (
                 inst.original_name,
                 inst.func_type.params_id.to_vec(),
@@ -534,7 +534,7 @@ impl Cg<'_, '_, '_> {
             "checking for generic function call"
         );
 
-        let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+        let instance_data = self.free_monomorph(monomorph_key).map(|inst| {
             (
                 inst.original_name,
                 inst.mangled_name,

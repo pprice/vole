@@ -979,10 +979,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.state.array_iterable_func_keys
     }
 
-    /// Get monomorph cache from entity registry
+    /// Look up a free-function monomorph by `MonomorphKey` via VirProgram.
+    ///
+    /// Uses the `free_monomorphs_by_key` reverse index to find the mangled
+    /// name, then looks up the `VirMonomorphInfo` from `free_monomorphs`.
     #[inline]
-    pub fn monomorph_cache(&self) -> &'ctx vole_identity::MonomorphCache {
-        self.env.analyzed.monomorph_cache()
+    pub fn free_monomorph(
+        &self,
+        key: &vole_identity::MonomorphKey,
+    ) -> Option<&'ctx vole_vir::monomorph::instance::VirMonomorphInfo> {
+        let vir = self.env.analyzed.vir_program();
+        let mangled = vir.free_monomorphs_by_key.get(key)?;
+        vir.free_monomorphs.get(mangled)
     }
 
     /// Get current module as Option<ModuleId> - use current_module_id() for new code

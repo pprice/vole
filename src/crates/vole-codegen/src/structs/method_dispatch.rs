@@ -92,7 +92,7 @@ impl Cg<'_, '_, '_> {
         });
 
         if let Some(monomorph_key) = monomorph_key.as_ref() {
-            let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+            let instance_data = self.free_monomorph(monomorph_key).map(|inst| {
                 (
                     inst.original_name,
                     inst.func_type.params_id.to_vec(),

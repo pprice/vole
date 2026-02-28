@@ -11,7 +11,7 @@ use vole_identity::{
     Span, Symbol, TypeDefId, VirTypeId,
 };
 
-use vole_identity::{ClassMethodMonomorphKey, StaticMethodMonomorphKey};
+use vole_identity::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 
 use crate::entity_metadata::VirEntityMetadata;
 use crate::func::{VirBody, VirFunction, VirTest};
@@ -139,6 +139,12 @@ pub struct VirProgram {
     /// population pass (vol-3on3). Codegen reads these instead of sema's
     /// `MonomorphCache` once the VIR monomorph path is active.
     pub free_monomorphs: FxHashMap<NameId, VirMonomorphInfo>,
+
+    /// Reverse index from `MonomorphKey` to mangled `NameId`.
+    ///
+    /// Allows codegen call sites to look up free-function monomorph info
+    /// by the same `MonomorphKey` that sema's `MonomorphCache` uses.
+    pub free_monomorphs_by_key: FxHashMap<MonomorphKey, NameId>,
 
     /// VIR-native class method monomorph instances.
     ///

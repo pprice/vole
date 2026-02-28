@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use vole_identity::{
-    ClassMethodMonomorphKey, FunctionId, MethodId, NameId, NameTable, StaticMethodMonomorphKey,
-    TypeDefId,
+    ClassMethodMonomorphKey, FunctionId, MethodId, MonomorphKey, NameId, NameTable,
+    StaticMethodMonomorphKey, TypeDefId,
 };
 
 use crate::EntityRegistry;
@@ -31,6 +31,7 @@ pub trait LoweringEntityLookup {
     fn get_implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId>;
     fn methods_on_type(&self, type_def_id: TypeDefId) -> Vec<MethodId>;
     fn monomorph_instances(&self) -> Vec<crate::generic::MonomorphInstance>;
+    fn monomorph_keyed_instances(&self) -> Vec<(MonomorphKey, crate::generic::MonomorphInstance)>;
     fn class_method_monomorph_instances(&self)
     -> Vec<crate::generic::ClassMethodMonomorphInstance>;
     fn static_method_monomorph_instances(
@@ -109,6 +110,10 @@ impl LoweringEntityLookup for EntityRegistry {
 
     fn monomorph_instances(&self) -> Vec<crate::generic::MonomorphInstance> {
         self.monomorph_cache.collect_instances()
+    }
+
+    fn monomorph_keyed_instances(&self) -> Vec<(MonomorphKey, crate::generic::MonomorphInstance)> {
+        self.monomorph_cache.collect_keyed_instances()
     }
 
     fn class_method_monomorph_instances(
@@ -204,6 +209,10 @@ where
 
     fn monomorph_instances(&self) -> Vec<crate::generic::MonomorphInstance> {
         (**self).monomorph_instances()
+    }
+
+    fn monomorph_keyed_instances(&self) -> Vec<(MonomorphKey, crate::generic::MonomorphInstance)> {
+        (**self).monomorph_keyed_instances()
     }
 
     fn class_method_monomorph_instances(
