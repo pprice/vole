@@ -9,7 +9,8 @@
 
 use rustc_hash::FxHashMap;
 use vole_identity::{
-    FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, Symbol, TypeDefId, TypeId, VirTypeId,
+    FieldId, FunctionId, GlobalId, Interner, MethodId, ModuleId, NameId, NameTable, Resolver,
+    Symbol, TypeDefId, TypeId, VirTypeId,
 };
 
 use crate::expr::VirExternalMethodInfo;
@@ -916,6 +917,74 @@ impl VirEntityMetadata {
             None
         }
     }
+
+    /// Resolve a type definition by short name, matching the sema
+    /// `resolve_type_str_or_interface` resolution chain.
+    ///
+    /// Uses the identity-layer `Resolver` for scoped NameId lookup, then
+    /// maps through `type_by_name`.  Falls back to short-name search
+    /// across all registered types (interfaces, classes, structs, sentinels).
+    ///
+    /// Mirrors `EntityView::resolve_type_def_by_str`.
+    pub fn resolve_type_def_by_str(
+        &self,
+        interner: &Interner,
+        names: &NameTable,
+        module_id: ModuleId,
+        name: &str,
+    ) -> Option<TypeDefId> {
+        // Sentinel priority: "nil" and "Done" must resolve to their sentinel
+        // TypeDefId, not a primitive or other type with the same short name.
+        if (name == "nil" || name == "Done")
+            && let Some(id) = self.sentinel_by_short_name(name, names)
+        {
+            return Some(id);
+        }
+        // Scoped NameId resolution (primitives, current module, builtin).
+        let resolver = Resolver::new(interner, names, module_id, &[]);
+        if let Some(name_id) = resolver.resolve_str(name)
+            && let Some(id) = self.type_by_name(name_id)
+        {
+            return Some(id);
+        }
+        // Short-name fallback (covers sentinel, interface, class, struct).
+        self.type_by_short_name(name)
+    }
+
+    /// Check if all methods on a type have external bindings (no vole-native
+    /// methods).
+    ///
+    /// Returns `true` when the type has at least one method and every method
+    /// has an `external_binding` and is not a default method.  Returns `false`
+    /// for types with no methods or any non-external method.
+    ///
+    /// Mirrors `EntityView::is_external_only`.
+    pub fn is_external_only(&self, type_def_id: TypeDefId) -> bool {
+        let Some(td) = self.type_defs.get(&type_def_id) else {
+            return false;
+        };
+        if td.methods.is_empty() {
+            return false;
+        }
+        td.methods.iter().all(|&method_id| {
+            self.method_defs
+                .get(&method_id)
+                .is_some_and(|md| md.external_binding.is_some() && !md.has_default)
+        })
+    }
+
+    /// Find a sentinel type by its short (last-segment) name.
+    fn sentinel_by_short_name(&self, short_name: &str, names: &NameTable) -> Option<TypeDefId> {
+        self.short_name_map.get(short_name).and_then(|ids| {
+            ids.iter().copied().find(|&id| {
+                let Some(td) = self.type_defs.get(&id) else {
+                    return false;
+                };
+                td.kind.is_sentinel()
+                    && names.last_segment_str(td.name_id).as_deref() == Some(short_name)
+            })
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1466,5 +1535,311 @@ mod tests {
     fn types_by_short_name_missing() {
         let meta = VirEntityMetadata::new();
         assert!(meta.types_by_short_name("Nonexistent").is_none());
+    }
+
+    #[test]
+    fn is_external_only_empty_methods() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_type_def_id(1);
+
+        meta.insert_type_def(VirTypeDef {
+            id,
+            name_id: make_name_id(100),
+            kind: VirTypeDefKind::Interface,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
+        });
+
+        // Empty methods → false
+        assert!(!meta.is_external_only(id));
+    }
+
+    #[test]
+    fn is_external_only_all_external() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_type_def_id(1);
+        let m1 = make_method_id(10);
+        let m2 = make_method_id(11);
+
+        meta.insert_type_def(VirTypeDef {
+            id,
+            name_id: make_name_id(100),
+            kind: VirTypeDefKind::Interface,
+            fields: vec![],
+            methods: vec![m1, m2],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
+        });
+
+        // Both methods have external bindings and no default
+        meta.insert_method_def(VirMethodDef {
+            id: m1,
+            name_id: make_name_id(200),
+            full_name_id: make_name_id(201),
+            defining_type: id,
+            signature_id: TypeId::I64,
+            has_default: false,
+            is_static: false,
+            external_binding: Some(VirExternalMethodInfo {
+                module_path: make_name_id(300),
+                native_name: make_name_id(301),
+            }),
+            has_param_defaults: vec![],
+            method_type_params: vec![],
+            required_params: 0,
+            param_names: vec![],
+            param_types: vec![],
+            return_type: VirTypeId::I64,
+        });
+        meta.insert_method_def(VirMethodDef {
+            id: m2,
+            name_id: make_name_id(202),
+            full_name_id: make_name_id(203),
+            defining_type: id,
+            signature_id: TypeId::I64,
+            has_default: false,
+            is_static: false,
+            external_binding: Some(VirExternalMethodInfo {
+                module_path: make_name_id(302),
+                native_name: make_name_id(303),
+            }),
+            has_param_defaults: vec![],
+            method_type_params: vec![],
+            required_params: 0,
+            param_names: vec![],
+            param_types: vec![],
+            return_type: VirTypeId::I64,
+        });
+
+        assert!(meta.is_external_only(id));
+    }
+
+    #[test]
+    fn is_external_only_mixed_methods() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_type_def_id(1);
+        let m1 = make_method_id(10);
+        let m2 = make_method_id(11);
+
+        meta.insert_type_def(VirTypeDef {
+            id,
+            name_id: make_name_id(100),
+            kind: VirTypeDefKind::Interface,
+            fields: vec![],
+            methods: vec![m1, m2],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
+        });
+
+        // m1 has external binding, m2 does not
+        meta.insert_method_def(VirMethodDef {
+            id: m1,
+            name_id: make_name_id(200),
+            full_name_id: make_name_id(201),
+            defining_type: id,
+            signature_id: TypeId::I64,
+            has_default: false,
+            is_static: false,
+            external_binding: Some(VirExternalMethodInfo {
+                module_path: make_name_id(300),
+                native_name: make_name_id(301),
+            }),
+            has_param_defaults: vec![],
+            method_type_params: vec![],
+            required_params: 0,
+            param_names: vec![],
+            param_types: vec![],
+            return_type: VirTypeId::I64,
+        });
+        meta.insert_method_def(VirMethodDef {
+            id: m2,
+            name_id: make_name_id(202),
+            full_name_id: make_name_id(203),
+            defining_type: id,
+            signature_id: TypeId::I64,
+            has_default: false,
+            is_static: false,
+            external_binding: None,
+            has_param_defaults: vec![],
+            method_type_params: vec![],
+            required_params: 0,
+            param_names: vec![],
+            param_types: vec![],
+            return_type: VirTypeId::I64,
+        });
+
+        // One non-external method → false
+        assert!(!meta.is_external_only(id));
+    }
+
+    #[test]
+    fn is_external_only_with_default() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_type_def_id(1);
+        let m1 = make_method_id(10);
+
+        meta.insert_type_def(VirTypeDef {
+            id,
+            name_id: make_name_id(100),
+            kind: VirTypeDefKind::Interface,
+            fields: vec![],
+            methods: vec![m1],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: make_module_id(0),
+            is_generic: false,
+            generic_field_types: None,
+        });
+
+        // Method has external binding but also has_default → false
+        meta.insert_method_def(VirMethodDef {
+            id: m1,
+            name_id: make_name_id(200),
+            full_name_id: make_name_id(201),
+            defining_type: id,
+            signature_id: TypeId::I64,
+            has_default: true,
+            is_static: false,
+            external_binding: Some(VirExternalMethodInfo {
+                module_path: make_name_id(300),
+                native_name: make_name_id(301),
+            }),
+            has_param_defaults: vec![],
+            method_type_params: vec![],
+            required_params: 0,
+            param_names: vec![],
+            param_types: vec![],
+            return_type: VirTypeId::I64,
+        });
+
+        assert!(!meta.is_external_only(id));
+    }
+
+    #[test]
+    fn is_external_only_missing_type() {
+        let meta = VirEntityMetadata::new();
+        // Non-existent type → false
+        assert!(!meta.is_external_only(make_type_def_id(99)));
+    }
+
+    #[test]
+    fn resolve_type_def_by_str_short_name_fallback() {
+        let mut meta = VirEntityMetadata::new();
+        let interner = Interner::new();
+        let names = NameTable::new();
+        let module_id = names.main_module();
+
+        let id = make_type_def_id(1);
+        meta.insert_short_name("Point".to_string(), id);
+        meta.insert_type_def(VirTypeDef {
+            id,
+            name_id: make_name_id(100),
+            kind: VirTypeDefKind::Class,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: module_id,
+            is_generic: false,
+            generic_field_types: None,
+        });
+
+        // Falls back to short-name lookup.
+        assert_eq!(
+            meta.resolve_type_def_by_str(&interner, &names, module_id, "Point"),
+            Some(id)
+        );
+        assert_eq!(
+            meta.resolve_type_def_by_str(&interner, &names, module_id, "NoSuchType"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_type_def_by_str_sentinel_priority() {
+        let mut meta = VirEntityMetadata::new();
+        let interner = Interner::new();
+        let mut names = NameTable::new();
+        let module_id = names.main_module();
+
+        // Create a sentinel and a non-sentinel both named "nil".
+        let sentinel_id = make_type_def_id(1);
+        let other_id = make_type_def_id(2);
+
+        // Register sentinel with a proper NameId that has "nil" as last segment.
+        let nil_name = names.intern_raw(module_id, &["nil"]);
+
+        meta.insert_type_def(VirTypeDef {
+            id: sentinel_id,
+            name_id: nil_name,
+            kind: VirTypeDefKind::Sentinel,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: module_id,
+            is_generic: false,
+            generic_field_types: None,
+        });
+        meta.insert_short_name("nil".to_string(), sentinel_id);
+
+        meta.insert_type_def(VirTypeDef {
+            id: other_id,
+            name_id: make_name_id(999),
+            kind: VirTypeDefKind::Class,
+            fields: vec![],
+            methods: vec![],
+            static_methods: vec![],
+            extends: vec![],
+            type_params: vec![],
+            implements: vec![],
+            is_annotation: false,
+            base_type_id: None,
+            module: module_id,
+            is_generic: false,
+            generic_field_types: None,
+        });
+        meta.insert_short_name("nil".to_string(), other_id);
+
+        // "nil" should resolve to the sentinel, not the class.
+        assert_eq!(
+            meta.resolve_type_def_by_str(&interner, &names, module_id, "nil"),
+            Some(sentinel_id)
+        );
     }
 }

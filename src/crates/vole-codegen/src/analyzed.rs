@@ -360,7 +360,7 @@ impl AnalyzedProgram {
         module_id: ModuleId,
         name: &str,
     ) -> Option<TypeDefId> {
-        self.entity_view.resolve_type_def_by_str(
+        self.entity_metadata().resolve_type_def_by_str(
             self.interner(),
             self.name_table(),
             module_id,
@@ -481,7 +481,7 @@ impl AnalyzedProgram {
 
     /// Return true when all methods on a type are external-only.
     pub(crate) fn is_external_only(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_view.is_external_only(type_def_id)
+        self.entity_metadata().is_external_only(type_def_id)
     }
 
     /// Return monomorph key metadata for a call node.

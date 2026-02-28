@@ -119,18 +119,6 @@ impl EntityView {
         None
     }
 
-    /// Check if all methods on a type have external bindings.
-    pub(crate) fn is_external_only(&self, type_def_id: TypeDefId) -> bool {
-        let type_def = self.get_type(type_def_id);
-        if type_def.methods.is_empty() {
-            return false;
-        }
-        type_def.methods.iter().all(|&method_id| {
-            let method = self.get_method(method_id);
-            method.external_binding.is_some() && !method.has_default
-        })
-    }
-
     // ===== Field lookups =====
 
     /// Return a field definition by ID.
@@ -198,48 +186,6 @@ impl EntityView {
     /// Get the static-method monomorph cache.
     pub(crate) fn static_method_monomorph_cache(&self) -> &StaticMethodMonomorphCache {
         &self.static_method_monomorph_cache
-    }
-
-    /// Resolve a type definition by short name, matching the sema
-    /// `resolve_type_str_or_interface` resolution chain.
-    ///
-    /// Uses the identity-layer `Resolver` for scoped NameId lookup, then
-    /// maps through `type_by_name`.  Falls back to short-name search
-    /// across all registered types (interfaces, classes, structs, sentinels).
-    pub(crate) fn resolve_type_def_by_str(
-        &self,
-        interner: &vole_frontend::Interner,
-        names: &NameTable,
-        module_id: vole_identity::ModuleId,
-        name: &str,
-    ) -> Option<TypeDefId> {
-        // Sentinel priority: "nil" and "Done" must resolve to their sentinel
-        // TypeDefId, not a primitive or other type with the same short name.
-        if (name == "nil" || name == "Done")
-            && let Some(id) = self.sentinel_by_short_name(name, names)
-        {
-            return Some(id);
-        }
-        // Scoped NameId resolution (primitives, current module, builtin).
-        let resolver = vole_identity::Resolver::new(interner, names, module_id, &[]);
-        if let Some(name_id) = resolver.resolve_str(name)
-            && let Some(id) = self.type_by_name(name_id)
-        {
-            return Some(id);
-        }
-        // Short-name fallback (covers sentinel, interface, class, struct).
-        self.type_by_short_name(name)
-    }
-
-    /// Find a sentinel type by its short (last-segment) name.
-    fn sentinel_by_short_name(&self, short_name: &str, names: &NameTable) -> Option<TypeDefId> {
-        self.short_name_map.get(short_name).and_then(|ids| {
-            ids.iter().copied().find(|&id| {
-                let td = self.get_type(id);
-                td.kind.is_sentinel()
-                    && names.last_segment_str(td.name_id).as_deref() == Some(short_name)
-            })
-        })
     }
 }
 
