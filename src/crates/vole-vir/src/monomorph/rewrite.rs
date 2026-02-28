@@ -12,7 +12,7 @@ use vole_identity::VirTypeId;
 
 use crate::calls::CallTarget;
 use crate::expr::{
-    IsCheckResult, VirCapture, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind,
+    CoerceKind, IsCheckResult, VirCapture, VirErrorPatternKind, VirExpr, VirMatchArm, VirMetaKind,
     VirMethodDispatchMeta, VirPattern, VirRecordFieldBinding, VirStringPart, VirTupleBinding,
 };
 use crate::func::{VirBody, VirFunction};
@@ -357,9 +357,31 @@ fn rewrite_expr_operation(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
             to: ctx.remap(*to),
             vir_from: ctx.remap(*vir_from),
             vir_to: ctx.remap(*vir_to),
-            kind: *kind,
+            kind: rewrite_coerce_kind(kind, ctx),
         },
         _ => unreachable!("rewrite_expr_operation called with non-operation"),
+    }
+}
+
+/// Remap VirTypeIds inside enriched `CoerceKind` variants.
+fn rewrite_coerce_kind(kind: &CoerceKind, ctx: &RewriteCtx) -> CoerceKind {
+    match kind {
+        CoerceKind::InterfaceBox {
+            interface_type_def,
+            interface_type_args,
+        } => CoerceKind::InterfaceBox {
+            interface_type_def: *interface_type_def,
+            interface_type_args: interface_type_args.iter().map(|t| ctx.remap(*t)).collect(),
+        },
+        CoerceKind::IteratorWrap {
+            elem_type,
+            interface_type,
+        } => CoerceKind::IteratorWrap {
+            elem_type: ctx.remap(*elem_type),
+            interface_type: ctx.remap(*interface_type),
+        },
+        // Numeric coercions and Unbox carry no VirTypeIds to remap.
+        other => other.clone(),
     }
 }
 

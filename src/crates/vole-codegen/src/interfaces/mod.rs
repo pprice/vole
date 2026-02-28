@@ -8,6 +8,7 @@ pub(crate) mod vtable;
 pub(crate) mod vtable_ctx;
 
 pub(crate) use vtable::{
-    InterfaceVtableRegistry, box_interface_value_id, interface_method_slot_by_type_def_id,
+    InterfaceVtableRegistry, box_interface_value_decomposed, box_interface_value_id,
+    interface_method_slot_by_type_def_id,
 };
 pub(crate) use vtable_ctx::VtableCtx;

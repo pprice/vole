@@ -490,7 +490,7 @@ pub enum FieldStorage {
 }
 
 /// The kind of type coercion to perform.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CoerceKind {
     /// Widen a smaller integer to a larger one (e.g. i32 -> i64).
     IntExtend,
@@ -504,12 +504,25 @@ pub enum CoerceKind {
     FloatExtend,
     /// Truncate a larger float to a smaller one (e.g. f64 -> f32).
     FloatTruncate,
-    /// Box a value behind a pointer (for interface coercion).
-    Box,
-    /// Unbox a pointer back to a concrete value.
+    /// Box a value as an interface type.
+    ///
+    /// Carries the pre-decomposed interface target: the `TypeDefId` of the
+    /// interface and its generic type arguments.  Codegen uses these to
+    /// generate vtables without re-querying the type arena.
+    InterfaceBox {
+        interface_type_def: TypeDefId,
+        interface_type_args: Vec<VirTypeId>,
+    },
+    /// Unbox an interface pointer back to the concrete value.
     Unbox,
     /// Wrap a concrete iterator into a `RuntimeIterator`.
-    IteratorWrap,
+    ///
+    /// Carries the pre-resolved element type and the `Iterator<elem>`
+    /// interface type so codegen can box + wrap without arena queries.
+    IteratorWrap {
+        elem_type: VirTypeId,
+        interface_type: VirTypeId,
+    },
 }
 
 /// Sema-independent dispatch kind annotation for VIR method calls.

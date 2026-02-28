@@ -407,7 +407,7 @@ impl<'a> VirPrinter<'a> {
                 w!(
                     out,
                     "coerce[{}]({} -> {}, ",
-                    format_coerce(*kind),
+                    format_coerce(kind),
                     self.ty(*from),
                     self.ty(*to)
                 );
@@ -1032,7 +1032,7 @@ fn format_unop(op: VirUnOp) -> &'static str {
     }
 }
 
-fn format_coerce(kind: CoerceKind) -> &'static str {
+fn format_coerce(kind: &CoerceKind) -> &'static str {
     match kind {
         CoerceKind::IntExtend => "int_extend",
         CoerceKind::IntTruncate => "int_truncate",
@@ -1040,9 +1040,9 @@ fn format_coerce(kind: CoerceKind) -> &'static str {
         CoerceKind::FloatToInt => "float_to_int",
         CoerceKind::FloatExtend => "float_extend",
         CoerceKind::FloatTruncate => "float_truncate",
-        CoerceKind::Box => "box",
+        CoerceKind::InterfaceBox { .. } => "interface_box",
         CoerceKind::Unbox => "unbox",
-        CoerceKind::IteratorWrap => "iterator_wrap",
+        CoerceKind::IteratorWrap { .. } => "iterator_wrap",
     }
 }
 

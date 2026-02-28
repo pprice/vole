@@ -2037,7 +2037,53 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
             None => return Ok(value), // Not an interface type
         }
     };
+    box_interface_value_core(
+        builder,
+        codegen_ctx,
+        env,
+        value,
+        interface_type_id,
+        type_def_id,
+        &type_args_ids,
+    )
+}
 
+/// Box a value as an interface type using pre-decomposed interface data.
+///
+/// Called from the VIR `CoerceKind::InterfaceBox` path where sema has
+/// already resolved the interface's `TypeDefId` and generic type arguments,
+/// skipping the `unwrap_interface` arena query.
+pub(crate) fn box_interface_value_decomposed<'a, 'ctx>(
+    builder: &mut FunctionBuilder,
+    codegen_ctx: &'a mut CodegenCtx<'ctx>,
+    env: &'a CompileEnv<'ctx>,
+    value: CompiledValue,
+    interface_type_id: TypeId,
+    type_def_id: TypeDefId,
+    type_args_ids: &[TypeId],
+) -> CodegenResult<CompiledValue> {
+    box_interface_value_core(
+        builder,
+        codegen_ctx,
+        env,
+        value,
+        interface_type_id,
+        type_def_id,
+        type_args_ids,
+    )
+}
+
+/// Core interface boxing: shared implementation for both arena-based and
+/// pre-decomposed paths.
+fn box_interface_value_core<'a, 'ctx>(
+    builder: &mut FunctionBuilder,
+    codegen_ctx: &'a mut CodegenCtx<'ctx>,
+    env: &'a CompileEnv<'ctx>,
+    value: CompiledValue,
+    interface_type_id: TypeId,
+    type_def_id: TypeDefId,
+    type_args_ids: &[TypeId],
+) -> CodegenResult<CompiledValue> {
     // Resolve the interface Symbol name via analyzed wrapper metadata.
     let interface_def = env.analyzed.get_type(type_def_id);
     let interface_name_str = env
@@ -2077,7 +2123,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
         &mut ctx_view,
         interface_name,
         type_def_id,
-        &type_args_ids,
+        type_args_ids,
         value.type_id,
     )?;
     // Phase 2+3: Compile wrappers and define vtable data

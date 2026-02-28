@@ -16,7 +16,6 @@ mod vir_calls;
 
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Module};
-use smallvec::smallvec;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
@@ -423,7 +422,7 @@ impl Cg<'_, '_, '_> {
                     self.sema_type_from_vir(*to),
                     *vir_from,
                     *vir_to,
-                    *kind,
+                    kind,
                 )
             }
 
@@ -827,7 +826,7 @@ impl Cg<'_, '_, '_> {
         to: TypeId,
         vir_from: VirTypeId,
         vir_to: VirTypeId,
-        kind: CoerceKind,
+        kind: &CoerceKind,
     ) -> CodegenResult<CompiledValue> {
         use crate::ops::{sextend_const, uextend_const};
         use crate::types::vir_conversions::{vir_is_unsigned, vir_type_to_cranelift};
@@ -872,24 +871,47 @@ impl Cg<'_, '_, '_> {
                 let result = self.builder.ins().fdemote(target_ty, value.value);
                 Ok(CompiledValue::new(result, target_ty, to))
             }
-            // Box/Unbox/IteratorWrap still use TypeId (migrated in later tickets)
-            CoerceKind::Box => self.compile_coerce_box(value, to),
+            CoerceKind::InterfaceBox {
+                interface_type_def,
+                interface_type_args,
+            } => self.compile_coerce_interface_box(
+                value,
+                to,
+                *interface_type_def,
+                interface_type_args,
+            ),
             CoerceKind::Unbox => self.compile_coerce_unbox(value, to),
-            CoerceKind::IteratorWrap => self.compile_coerce_iterator_wrap(value, to),
+            CoerceKind::IteratorWrap { interface_type, .. } => {
+                self.compile_coerce_iterator_wrap_enriched(value, to, *interface_type)
+            }
         }
     }
 
-    /// Box a concrete value as an interface type.
+    /// Box a concrete value as an interface type (enriched path).
     ///
-    /// Allocates `[data_ptr, vtable_ptr]` on the heap and generates the
-    /// vtable for the concrete type implementing the interface.  Delegates
-    /// to the existing `box_interface_value` infrastructure.
-    fn compile_coerce_box(
+    /// Uses pre-decomposed interface info from `CoerceKind::InterfaceBox`
+    /// to skip the `unwrap_interface` arena query.  Vtable generation still
+    /// uses sema TypeIds internally.
+    fn compile_coerce_interface_box(
         &mut self,
         value: CompiledValue,
         interface_type_id: TypeId,
+        interface_type_def: TypeDefId,
+        interface_type_args: &[VirTypeId],
     ) -> CodegenResult<CompiledValue> {
-        self.box_interface_value(value, interface_type_id)
+        let type_args_ids: Vec<TypeId> = interface_type_args
+            .iter()
+            .map(|vir| self.sema_type_from_vir(*vir))
+            .collect();
+        crate::interfaces::box_interface_value_decomposed(
+            self.builder,
+            self.codegen_ctx,
+            self.env,
+            value,
+            interface_type_id,
+            interface_type_def,
+            &type_args_ids,
+        )
     }
 
     /// Unbox an interface pointer back to the concrete value.
@@ -915,39 +937,22 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
-    /// Wrap a concrete iterator as a `RuntimeIterator`.
+    /// Wrap a concrete iterator as a `RuntimeIterator` (enriched path).
     ///
-    /// 1. Extracts the element type from the target `RuntimeIterator(elem)`.
-    /// 2. Looks up the `Iterator<elem>` interface type.
-    /// 3. Boxes the value as that interface.
-    /// 4. Wraps via `InterfaceIter` runtime call.
-    /// 5. Consumes the intermediate boxed interface.
-    fn compile_coerce_iterator_wrap(
+    /// Uses pre-resolved `interface_type` from `CoerceKind::IteratorWrap`
+    /// to skip `unwrap_runtime_iterator` and `lookup_interface` arena queries.
+    ///
+    /// 1. Converts the pre-resolved `Iterator<elem>` VirTypeId to sema TypeId.
+    /// 2. Boxes the value as that interface.
+    /// 3. Wraps via `InterfaceIter` runtime call.
+    /// 4. Consumes the intermediate boxed interface.
+    fn compile_coerce_iterator_wrap_enriched(
         &mut self,
         value: CompiledValue,
         runtime_iter_type_id: TypeId,
+        interface_type: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
-        // NOTE: arena() retained — lookup_interface and box_interface_value
-        // require sema TypeId.  Remove when iterator boxing uses VirTypeId.
-        let elem_type_id = self
-            .arena()
-            .unwrap_runtime_iterator(runtime_iter_type_id)
-            .ok_or_else(|| {
-                CodegenError::internal("IteratorWrap target is not a RuntimeIterator type")
-            })?;
-
-        // Look up Iterator<elem> interface type
-        let iterator_type_def = self
-            .name_table()
-            .well_known
-            .iterator_type_def
-            .ok_or_else(|| CodegenError::internal("Iterator type_def not found"))?;
-        let interface_type_id = self
-            .arena()
-            .lookup_interface(iterator_type_def, smallvec![elem_type_id])
-            .ok_or_else(|| {
-                CodegenError::internal("Iterator<T> interface type not found in arena")
-            })?;
+        let interface_type_id = self.sema_type_from_vir(interface_type);
 
         // Box as Iterator<elem> interface
         let mut boxed = self.box_interface_value(value, interface_type_id)?;
