@@ -11,10 +11,15 @@ use vole_identity::{
     Span, Symbol, TypeDefId, VirTypeId,
 };
 
+use vole_identity::{ClassMethodMonomorphKey, StaticMethodMonomorphKey};
+
 use crate::entity_metadata::VirEntityMetadata;
 use crate::func::{VirBody, VirFunction, VirTest};
 use crate::implement_dispatch::{
     VirExternalFuncInfo, VirGenericExternalInfo, VirImplementDispatch, VirMethodImplInfo,
+};
+use crate::monomorph::instance::{
+    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
 };
 use crate::refs::VirRef;
 use crate::type_table::VirTypeTable;
@@ -127,6 +132,27 @@ pub struct VirProgram {
     /// during VIR lowering from sema's `ImplementRegistry`.  Replaces
     /// codegen's `ImplementView` as the lookup source.
     pub implement_dispatch: VirImplementDispatch,
+
+    /// VIR-native free-function monomorph instances.
+    ///
+    /// Keyed by mangled `NameId`. Populated during the VIR monomorph
+    /// population pass (vol-3on3). Codegen reads these instead of sema's
+    /// `MonomorphCache` once the VIR monomorph path is active.
+    pub free_monomorphs: FxHashMap<NameId, VirMonomorphInfo>,
+
+    /// VIR-native class method monomorph instances.
+    ///
+    /// Keyed by `ClassMethodMonomorphKey`. Populated during the VIR
+    /// monomorph population pass (vol-40jn). Codegen reads these instead
+    /// of sema's `ClassMethodMonomorphCache`.
+    pub class_method_monomorphs: FxHashMap<ClassMethodMonomorphKey, VirClassMethodMonomorphInfo>,
+
+    /// VIR-native static method monomorph instances.
+    ///
+    /// Keyed by `StaticMethodMonomorphKey`. Populated during the VIR
+    /// monomorph population pass (vol-bklt). Codegen reads these instead
+    /// of sema's `StaticMethodMonomorphCache`.
+    pub static_method_monomorphs: FxHashMap<StaticMethodMonomorphKey, VirStaticMethodMonomorphInfo>,
 
     /// String interner for resolving Symbol IDs to strings.
     ///

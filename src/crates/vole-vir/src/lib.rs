@@ -53,7 +53,8 @@ pub use implement_dispatch::{
 };
 pub use intrinsics::IntrinsicKey;
 pub use monomorph::{
-    InstanceIndex, MonomorphInstance, MonomorphResult, RewriteCtx, TypeSubstitution, monomorphize,
+    InstanceIndex, MonomorphInstance, MonomorphResult, RewriteCtx, TypeSubstitution,
+    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo, monomorphize,
     monomorphize_with_seeds, rederive_decisions, resolve_generic_calls, rewrite_function,
     substitute_types,
 };

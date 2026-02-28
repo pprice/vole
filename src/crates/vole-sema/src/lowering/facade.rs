@@ -374,6 +374,9 @@ where
         vir_monomorph_base: usize::MAX,
         entity_metadata,
         implement_dispatch,
+        free_monomorphs: FxHashMap::default(),
+        class_method_monomorphs: FxHashMap::default(),
+        static_method_monomorphs: FxHashMap::default(),
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),
     };
@@ -631,6 +634,9 @@ fn run_early_vir_monomorphize(
         vir_monomorph_base: usize::MAX,
         entity_metadata: vole_vir::VirEntityMetadata::new(),
         implement_dispatch: vole_vir::VirImplementDispatch::new(),
+        free_monomorphs: FxHashMap::default(),
+        class_method_monomorphs: FxHashMap::default(),
+        static_method_monomorphs: FxHashMap::default(),
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),
     };
