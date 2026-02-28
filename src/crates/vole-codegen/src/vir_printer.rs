@@ -95,11 +95,16 @@ impl<'a> VirPrinter<'a> {
                 value,
                 mutable,
                 ty,
+                storage,
                 ..
             } => {
                 let kw = if *mutable { "let mut" } else { "let" };
                 w!(out, "{} {}: {} = ", kw, self.sym(*name), self.ty(*ty));
                 self.fmt_expr(value, out, ind);
+                match storage {
+                    vole_vir::stmt::LetStorageHint::Scalar => {}
+                    hint => w!(out, "  // storage={hint:?}"),
+                }
                 wln!(out);
             }
             VirStmt::LetTuple {

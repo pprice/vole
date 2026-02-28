@@ -236,6 +236,7 @@ impl VirBuilder {
             mutable,
             ty,
             vir_ty: ty,
+            storage: crate::stmt::LetStorageHint::Scalar,
         }
     }
 

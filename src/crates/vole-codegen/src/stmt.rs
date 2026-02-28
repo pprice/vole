@@ -10,6 +10,7 @@ use vole_frontend::{self, Symbol};
 use vole_identity::{NameId, VirTypeId};
 use vole_sema::type_arena::TypeId;
 use vole_vir::VirStmt;
+use vole_vir::stmt::LetStorageHint;
 
 use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, split_i128_for_storage, store_value_to_stack};
@@ -31,58 +32,61 @@ impl Cg<'_, '_, '_> {
     /// Handles: unknown boxing, union wrapping, integer narrowing/widening,
     /// float promotion/demotion, and interface boxing. Returns the coerced
     /// value, its type, and whether a stack-allocated union was constructed.
+    ///
+    /// The `storage` hint (pre-computed during VIR lowering) drives the
+    /// coercion branch instead of querying `TypeArena` at compile time.
     fn coerce_let_init(
         &mut self,
         init: &CompiledValue,
         declared_type_id_opt: Option<TypeId>,
         sentinel_hint_type_id: Option<TypeId>,
+        storage: LetStorageHint,
     ) -> CodegenResult<(Value, TypeId, bool)> {
         let mut is_stack_union = false;
 
         let (mut final_value, mut final_type_id) =
             if let Some(declared_type_id) = declared_type_id_opt {
-                let arena = self.arena();
-                let is_declared_union = arena.is_union(declared_type_id);
-                let is_declared_numeric = arena.is_numeric(declared_type_id);
-                let is_declared_interface = arena.is_interface(declared_type_id);
-                let is_declared_unknown = arena.is_unknown(declared_type_id);
-
-                if is_declared_unknown && !init.type_id.is_unknown() {
-                    // Box value to unknown type (TaggedValue)
-                    let boxed = self.box_to_unknown(*init)?;
-                    (boxed.value, boxed.type_id)
-                } else if is_declared_union && !self.vir_query_is_union(init.type_id) {
-                    let wrapped = self.construct_union_id_with_hint(
-                        *init,
-                        declared_type_id,
-                        sentinel_hint_type_id,
-                    )?;
-                    is_stack_union = true;
-                    (wrapped.value, wrapped.type_id)
-                } else if is_declared_numeric && init.type_id.is_numeric() {
-                    let coerced = self.coerce_to_type(*init, declared_type_id)?;
-                    (coerced.value, coerced.type_id)
-                } else if is_declared_interface {
-                    // For functional interfaces, keep the actual function type from the lambda
-                    // This preserves the is_closure flag for proper calling convention
-                    (init.value, init.type_id)
-                } else {
-                    (init.value, declared_type_id)
+                match storage {
+                    LetStorageHint::Unknown if !init.type_id.is_unknown() => {
+                        // Box value to unknown type (TaggedValue)
+                        let boxed = self.box_to_unknown(*init)?;
+                        (boxed.value, boxed.type_id)
+                    }
+                    LetStorageHint::Union if !self.vir_query_is_union(init.type_id) => {
+                        let wrapped = self.construct_union_id_with_hint(
+                            *init,
+                            declared_type_id,
+                            sentinel_hint_type_id,
+                        )?;
+                        is_stack_union = true;
+                        (wrapped.value, wrapped.type_id)
+                    }
+                    LetStorageHint::Numeric if init.type_id.is_numeric() => {
+                        let coerced = self.coerce_to_type(*init, declared_type_id)?;
+                        (coerced.value, coerced.type_id)
+                    }
+                    LetStorageHint::Interface => {
+                        // For functional interfaces, keep the actual function type
+                        // from the lambda. This preserves the is_closure flag for
+                        // proper calling convention.
+                        (init.value, init.type_id)
+                    }
+                    _ => (init.value, declared_type_id),
                 }
             } else {
                 (init.value, init.type_id)
             };
 
         // Box value if assigning to interface type
-        if let Some(declared_type_id) = declared_type_id_opt {
-            let arena = self.arena();
-            let is_declared_interface = arena.is_interface(declared_type_id);
-            let is_final_interface = arena.is_interface(final_type_id);
+        if let Some(declared_type_id) = declared_type_id_opt
+            && storage == LetStorageHint::Interface
+        {
+            let is_final_interface = self.arena().is_interface(final_type_id);
             // RuntimeIterator is an internal concrete type that implements Iterator
             // dispatch directly via runtime_iterator_method; skip interface boxing.
-            let is_runtime_iterator = arena.is_runtime_iterator(final_type_id);
+            let is_runtime_iterator = self.arena().is_runtime_iterator(final_type_id);
 
-            if is_declared_interface && !is_final_interface && !is_runtime_iterator {
+            if !is_final_interface && !is_runtime_iterator {
                 let cranelift_ty = self.cranelift_type(final_type_id);
                 let boxed = self.box_interface_value(
                     CompiledValue::new(final_value, cranelift_ty, final_type_id),
@@ -451,13 +455,14 @@ impl Cg<'_, '_, '_> {
                 mutable: _,
                 ty,
                 vir_ty,
+                storage,
             } => {
                 let binding_ty = if *vir_ty != VirTypeId::UNKNOWN {
                     self.sema_type_from_vir(*vir_ty)
                 } else {
                     self.sema_type_from_vir(*ty)
                 };
-                self.compile_vir_let(*name, value, binding_ty)
+                self.compile_vir_let(*name, value, binding_ty, *storage)
             }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
@@ -861,6 +866,7 @@ impl Cg<'_, '_, '_> {
         name: Symbol,
         value_expr: &vole_vir::VirExpr,
         binding_ty: TypeId,
+        storage: LetStorageHint,
     ) -> CodegenResult<bool> {
         // Pre-register recursive lambdas so they can capture themselves.
         let preregistered_var = self.preregister_recursive_vir_lambda(name, value_expr);
@@ -887,7 +893,7 @@ impl Cg<'_, '_, '_> {
 
         let sentinel_hint_type_id = self.sentinel_hint_type_id_from_vir_expr(value_expr);
         let (final_value, final_type_id, is_stack_union) =
-            self.coerce_let_init(&init, declared_type_id_opt, sentinel_hint_type_id)?;
+            self.coerce_let_init(&init, declared_type_id_opt, sentinel_hint_type_id, storage)?;
 
         // Use preregistered var for recursive lambdas, otherwise declare new.
         let var = if let Some(var) = preregistered_var {

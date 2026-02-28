@@ -9,8 +9,8 @@ use vole_identity::TypeId;
 
 use vole_vir::expr::VirExpr;
 use vole_vir::stmt::{
-    DestructureTupleKind, VirDestructureElement, VirDestructureField, VirDestructurePattern,
-    VirFor, VirIterKind, VirModuleBinding, VirStmt,
+    DestructureTupleKind, LetStorageHint, VirDestructureElement, VirDestructureField,
+    VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
 
 use super::LoweringCtx;
@@ -121,12 +121,34 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
 
     let vir_ty = ctx.translate(ty);
     let sema_ty = ctx.compat_ty(ty);
+    let storage = classify_let_storage(ty, ctx);
     VirStmt::Let {
         name: let_stmt.name,
         value,
         mutable: let_stmt.mutable,
         ty: sema_ty,
         vir_ty,
+        storage,
+    }
+}
+
+/// Classify the storage kind for a let binding based on its declared type.
+///
+/// Mirrors the decision logic in codegen's `coerce_let_init`, which queries
+/// the arena at compile time to determine: unknown → box to TaggedValue,
+/// union → stack-allocate tag+payload, interface → interface boxing,
+/// numeric → widen/narrow, else → scalar pass-through.
+fn classify_let_storage(ty: TypeId, ctx: &LoweringCtx<'_>) -> LetStorageHint {
+    if ctx.type_arena.is_unknown(ty) {
+        LetStorageHint::Unknown
+    } else if ctx.type_arena.is_union(ty) {
+        LetStorageHint::Union
+    } else if ctx.type_arena.is_interface(ty) {
+        LetStorageHint::Interface
+    } else if ctx.type_arena.is_numeric(ty) {
+        LetStorageHint::Numeric
+    } else {
+        LetStorageHint::Scalar
     }
 }
 

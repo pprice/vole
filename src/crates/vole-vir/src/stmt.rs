@@ -28,6 +28,9 @@ pub enum VirStmt {
         mutable: bool,
         ty: VirTypeId,
         vir_ty: VirTypeId,
+        /// Pre-computed storage classification for the binding type.
+        /// Codegen reads this instead of querying `TypeArena` at compile time.
+        storage: LetStorageHint,
     },
 
     /// Tuple destructuring (`let [a, b] = ...`, `let { x, y } = ...`).
@@ -94,6 +97,33 @@ pub enum VirStmt {
 // ---------------------------------------------------------------------------
 // Supporting types
 // ---------------------------------------------------------------------------
+
+/// Storage classification for a `let` binding, pre-computed during sema
+/// lowering so codegen reads a decision rather than querying `TypeArena`.
+///
+/// Mirrors the classification in codegen's `coerce_let_init`:
+/// - `Unknown` → box init to `TaggedValue`
+/// - `Union` → stack-allocate tag + payload buffer
+/// - `Interface` → interface boxing (post-coerce phase)
+/// - `Numeric` → widen/narrow to target numeric type
+/// - `Scalar` → direct value, no special treatment
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LetStorageHint {
+    /// The binding type is `unknown` — init values of other types are boxed
+    /// to `TaggedValue`.
+    Unknown,
+    /// The binding type is a union — init values are wrapped with a tag and
+    /// stored in a stack-allocated union buffer.
+    Union,
+    /// The binding type is an interface — concrete values are boxed to an
+    /// interface pointer (vtable + data).
+    Interface,
+    /// The binding type is numeric — init values may need widening or
+    /// narrowing (e.g. `i32 → i64`, `f32 → f64`).
+    Numeric,
+    /// Scalar / pass-through — no special storage treatment.
+    Scalar,
+}
 
 /// The target of an assignment statement.
 #[derive(Debug, Clone)]

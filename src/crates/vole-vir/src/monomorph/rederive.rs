@@ -14,7 +14,7 @@ use vole_identity::{StringConversion, UnionStorageKind, VirTypeId};
 use crate::expr::{IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use crate::func::{VirBody, VirFunction};
 use crate::refs::VirRef;
-use crate::stmt::{VirIterKind, VirStmt};
+use crate::stmt::{LetStorageHint, VirIterKind, VirStmt};
 use crate::type_table::VirTypeTable;
 use crate::types::{VirPrimitiveKind, VirType};
 
@@ -231,7 +231,15 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
 
 fn rederive_stmt(stmt: &mut VirStmt, table: &VirTypeTable) {
     match stmt {
-        VirStmt::Let { value, .. } => rederive_ref(value, table),
+        VirStmt::Let {
+            value,
+            vir_ty,
+            storage,
+            ..
+        } => {
+            *storage = rederive_let_storage(*vir_ty, table);
+            rederive_ref(value, table);
+        }
         VirStmt::LetTuple { value, .. } => rederive_ref(value, table),
         VirStmt::Assign { target, value } => {
             rederive_assign_target(target, table);
@@ -726,6 +734,22 @@ fn extract_vir_ty(expr: &VirExpr) -> Option<VirTypeId> {
         | VirExpr::RcDec { .. }
         | VirExpr::RcMove { .. }
         | VirExpr::Yield { .. } => None,
+    }
+}
+
+/// Re-derive the `LetStorageHint` for a `VirStmt::Let` after monomorphization.
+///
+/// After type substitution a generic `T` may resolve to a union, interface,
+/// unknown, numeric, or scalar type.  This mirrors the classification in
+/// `classify_let_storage` (sema side) but works on VirType / VirTypeTable
+/// instead of TypeArena.
+fn rederive_let_storage(vir_ty: VirTypeId, table: &VirTypeTable) -> LetStorageHint {
+    match table.get(vir_ty) {
+        VirType::Unknown => LetStorageHint::Unknown,
+        VirType::Union { .. } | VirType::Optional { .. } => LetStorageHint::Union,
+        VirType::Interface { .. } => LetStorageHint::Interface,
+        VirType::Primitive(p) if p.is_numeric() => LetStorageHint::Numeric,
+        _ => LetStorageHint::Scalar,
     }
 }
 

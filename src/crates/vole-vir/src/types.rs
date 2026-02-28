@@ -108,6 +108,24 @@ impl VirPrimitiveKind {
     pub fn is_unsigned(self) -> bool {
         matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
     }
+
+    /// Whether this primitive is a numeric type (integer or float).
+    pub fn is_numeric(self) -> bool {
+        matches!(
+            self,
+            Self::I8
+                | Self::I16
+                | Self::I32
+                | Self::I64
+                | Self::I128
+                | Self::U8
+                | Self::U16
+                | Self::U32
+                | Self::U64
+                | Self::F32
+                | Self::F64
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
