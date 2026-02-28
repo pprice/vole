@@ -217,6 +217,12 @@ pub struct VirMethodBinding {
     pub method_name: NameId,
     /// Whether this is a builtin method.
     pub is_builtin: bool,
+    /// The return type of the bound method's func_type signature.
+    ///
+    /// Translated from `func_type.return_type_id` (sema `TypeId`) to
+    /// `VirTypeId` during lowering so codegen can read it without the
+    /// sema type arena.
+    pub return_type: VirTypeId,
 }
 
 // ---------------------------------------------------------------------------
@@ -803,6 +809,28 @@ impl VirEntityMetadata {
                 && md.name_id == method_name_id
             {
                 return Some(mid);
+            }
+        }
+        None
+    }
+
+    /// Find a method binding for a type's interface implementation by method
+    /// name.
+    ///
+    /// Searches all implementation blocks on the type, returning the first
+    /// `VirMethodBinding` whose `method_name` matches.  Mirrors
+    /// `EntityView::find_method_binding` but operates on VIR-native data.
+    pub fn find_method_binding(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<&VirMethodBinding> {
+        let td = self.type_defs.get(&type_def_id)?;
+        for impl_ in &td.implements {
+            for binding in &impl_.method_bindings {
+                if binding.method_name == method_name_id {
+                    return Some(binding);
+                }
             }
         }
         None

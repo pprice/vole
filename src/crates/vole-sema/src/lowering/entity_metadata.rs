@@ -114,6 +114,11 @@ fn populate_type_defs(
                     .map(|mb| VirMethodBinding {
                         method_name: mb.method_name,
                         is_builtin: mb.is_builtin,
+                        return_type: translate_type_id(
+                            type_table,
+                            mb.func_type.return_type_id,
+                            type_arena,
+                        ),
                     })
                     .collect(),
             })
