@@ -1035,8 +1035,8 @@ fn collect_concrete_field_info<C: VtableCtx>(
             let name = name_table
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
-            let type_name = arena.display_basic(field.ty);
-            let runtime_tag = crate::types::unknown_type_tag(field.ty, arena) as i64;
+            let type_name = arena.display_basic(field.sema_type_id);
+            let runtime_tag = crate::types::unknown_type_tag(field.sema_type_id, arena) as i64;
             ConcreteFieldInfo {
                 name,
                 type_name,

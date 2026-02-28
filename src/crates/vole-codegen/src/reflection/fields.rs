@@ -89,7 +89,7 @@ fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
                 .name_table()
                 .last_segment_str(field.name_id)
                 .unwrap_or_default();
-            let type_name = arena.display_basic(field.ty);
+            let type_name = arena.display_basic(field.sema_type_id);
             let annotations = vir_program
                 .get_field_annotations(field_id)
                 .map(|anns| anns.to_vec())
@@ -98,7 +98,7 @@ fn collect_field_info(cg: &Cg, type_def_id: TypeDefId) -> Vec<FieldInfo> {
                 name,
                 type_name,
                 slot: field.slot,
-                type_id: field.ty,
+                type_id: field.sema_type_id,
                 annotations,
             }
         })
@@ -357,7 +357,7 @@ fn collect_annotation_field_type_tags(
         .fields_on_type(ann_type_def_id)
         .map(|field_id| {
             let field = cg.analyzed().field_def(field_id);
-            cg.field_type_tag(field.ty)
+            cg.field_type_tag(field.sema_type_id)
         })
         .collect()
 }

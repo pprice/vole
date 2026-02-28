@@ -184,7 +184,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     self.name_table()
                         .last_segment_str(field.name_id)
                         .unwrap_or_default(),
-                    self.try_substitute_type(field.ty),
+                    self.try_substitute_type(field.sema_type_id),
                 )
             })
             .collect()

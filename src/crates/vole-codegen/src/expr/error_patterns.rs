@@ -133,7 +133,7 @@ impl Cg<'_, '_, '_> {
             0 => true, // null payload, rc_dec is no-op
             1 => {
                 let field = self.analyzed().field_def(fields[0]);
-                self.rc_state(field.ty).needs_cleanup()
+                self.rc_state(field.sema_type_id).needs_cleanup()
             }
             _ => false, // 2+ fields = stack pointer, NOT safe for rc_dec
         }
@@ -149,7 +149,7 @@ impl Cg<'_, '_, '_> {
             return false;
         }
         let field = self.analyzed().field_def(fields[0]);
-        self.rc_state(field.ty).needs_cleanup()
+        self.rc_state(field.sema_type_id).needs_cleanup()
     }
 
     // =========================================================================
@@ -207,7 +207,7 @@ impl Cg<'_, '_, '_> {
         // For single wide (i128) field or multi-field errors, payload is a pointer to field data
         let has_any_wide = error_fields
             .iter()
-            .any(|f| crate::types::is_wide_type(f.ty, self.arena()));
+            .any(|f| crate::types::is_wide_type(f.sema_type_id, self.arena()));
         let inline_single_field = error_fields.len() == 1 && !has_any_wide;
 
         // Precompute field byte offsets (i128 fields use 16 bytes, others 8)
@@ -218,7 +218,7 @@ impl Cg<'_, '_, '_> {
                 .iter()
                 .map(|f| {
                     let current = offset;
-                    offset += crate::types::field_byte_size(f.ty, arena) as i32;
+                    offset += crate::types::field_byte_size(f.sema_type_id, arena) as i32;
                     current
                 })
                 .collect()
@@ -234,7 +234,7 @@ impl Cg<'_, '_, '_> {
                 continue;
             };
 
-            let field_ty_id = field_def.ty;
+            let field_ty_id = field_def.sema_type_id;
             let is_wide = crate::types::is_wide_type(field_ty_id, self.arena());
 
             // Load the field value

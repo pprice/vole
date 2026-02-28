@@ -10,11 +10,11 @@
 use rustc_hash::FxHashMap;
 
 use vole_identity::{
-    ClassMethodMonomorphCache, FieldId, FunctionId, GlobalId, MethodId, MonomorphCache, NameId,
-    NameTable, StaticMethodMonomorphCache, TypeDefId,
+    ClassMethodMonomorphCache, FunctionId, GlobalId, MethodId, MonomorphCache, NameId, NameTable,
+    StaticMethodMonomorphCache, TypeDefId,
 };
 use vole_sema::EntityRegistry;
-use vole_sema::entity_defs::{FieldDef, FunctionDef, GlobalDef, MethodDef, TypeDef};
+use vole_sema::entity_defs::{FunctionDef, GlobalDef, MethodDef, TypeDef};
 
 use crate::analyzed::ExternalMethodInfoRef;
 
@@ -31,7 +31,6 @@ pub(crate) struct EntityView {
     // -- Storage (IDs are indices into these vectors) --
     type_defs: Vec<TypeDef>,
     method_defs: Vec<MethodDef>,
-    field_defs: Vec<FieldDef>,
     function_defs: Vec<FunctionDef>,
     global_defs: Vec<GlobalDef>,
 
@@ -61,7 +60,6 @@ impl EntityView {
         Self {
             type_defs,
             method_defs: registry.all_method_defs().to_vec(),
-            field_defs: registry.all_field_defs().to_vec(),
             function_defs: registry.all_function_defs().to_vec(),
             global_defs: registry.all_global_defs().to_vec(),
 
@@ -117,13 +115,6 @@ impl EntityView {
             }
         }
         None
-    }
-
-    // ===== Field lookups =====
-
-    /// Return a field definition by ID.
-    pub(crate) fn get_field(&self, field_id: FieldId) -> &FieldDef {
-        &self.field_defs[field_id.index() as usize]
     }
 
     // ===== Function lookups =====

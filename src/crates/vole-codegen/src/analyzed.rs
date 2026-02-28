@@ -237,13 +237,15 @@ impl AnalyzedProgram {
         self.type_def(type_def_id)
     }
 
-    /// Resolve a sema FieldDef by ID.
-    pub(crate) fn field_def(&self, field_id: FieldId) -> &vole_sema::entity_defs::FieldDef {
-        self.entity_view.get_field(field_id)
+    /// Resolve a VIR field definition by ID.
+    pub(crate) fn field_def(&self, field_id: FieldId) -> &vole_vir::VirFieldDef {
+        self.entity_metadata()
+            .get_field_def(field_id)
+            .unwrap_or_else(|| panic!("field_def: no VirFieldDef for {field_id:?}"))
     }
 
-    /// Query-compatible alias for resolving a sema FieldDef by ID.
-    pub(crate) fn get_field(&self, field_id: FieldId) -> &vole_sema::entity_defs::FieldDef {
+    /// Query-compatible alias for resolving a VIR field definition by ID.
+    pub(crate) fn get_field(&self, field_id: FieldId) -> &vole_vir::VirFieldDef {
         self.field_def(field_id)
     }
 
@@ -610,8 +612,8 @@ impl AnalyzedProgram {
     }
 
     /// Return the semantic field type for a field ID.
-    pub(crate) fn entity_field_type(&self, field_id: FieldId) -> vole_sema::type_arena::TypeId {
-        self.entity_view.get_field(field_id).ty
+    pub(crate) fn entity_field_type(&self, field_id: FieldId) -> vole_identity::TypeId {
+        self.field_def(field_id).sema_type_id
     }
 
     /// Return declared type parameter NameIds for a type definition.

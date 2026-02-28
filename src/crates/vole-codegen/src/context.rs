@@ -791,7 +791,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .fields_on_type(type_def_id)
             .map(|field_id| {
                 let field = self.analyzed().field_def(field_id);
-                self.field_type_tag(field.ty)
+                self.field_type_tag(field.sema_type_id)
             })
             .collect();
         vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);

@@ -128,6 +128,8 @@ pub struct VirFieldDef {
     pub full_name_id: NameId,
     /// The type that owns this field.
     pub defining_type: TypeDefId,
+    /// The sema type ID for this field (used by codegen for type-level queries).
+    pub sema_type_id: TypeId,
     /// The field's VIR type.
     pub vir_ty: VirTypeId,
     /// The field's slot index in the type's storage layout.
@@ -1110,6 +1112,7 @@ mod tests {
             name_id: make_name_id(50),
             full_name_id: make_name_id(51),
             defining_type: make_type_def_id(1),
+            sema_type_id: TypeId::I64,
             vir_ty: VirTypeId::I64,
             slot: 3,
             symbol: None,

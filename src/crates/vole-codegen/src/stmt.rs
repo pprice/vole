@@ -873,7 +873,7 @@ impl Cg<'_, '_, '_> {
                 let field = self.analyzed().field_def(field_id);
                 RaiseFieldLayout {
                     name_id: field.name_id,
-                    ty: field.ty,
+                    ty: field.sema_type_id,
                 }
             })
             .collect();

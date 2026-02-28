@@ -241,13 +241,13 @@ impl Compiler<'_> {
             let slot_key = if is_class { physical_slot } else { ordinal };
             field_slots.insert(field_name, slot_key);
             if is_class {
-                field_type_tags.push(type_id_to_field_tag(field_def.ty, arena));
+                field_type_tags.push(type_id_to_field_tag(field_def.sema_type_id, arena));
                 // i128 uses 2 physical slots; add a Value tag for the high half
-                if crate::types::is_wide_type(field_def.ty, arena) {
+                if crate::types::is_wide_type(field_def.sema_type_id, arena) {
                     field_type_tags.push(FieldTypeTag::Value);
                 }
             }
-            physical_slot += crate::types::field_slot_count(field_def.ty, arena);
+            physical_slot += crate::types::field_slot_count(field_def.sema_type_id, arena);
         }
 
         Ok((field_slots, physical_slot, field_type_tags))

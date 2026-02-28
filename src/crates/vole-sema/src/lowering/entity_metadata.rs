@@ -183,6 +183,7 @@ fn populate_field_defs(
             name_id: fd.name_id,
             full_name_id: fd.full_name_id,
             defining_type: fd.defining_type,
+            sema_type_id: fd.ty,
             vir_ty,
             slot: fd.slot,
             symbol,
