@@ -683,6 +683,142 @@ pub(crate) fn vir_display_basic(vir_ty: VirTypeId, table: &VirTypeTable) -> Stri
     }
 }
 
+/// Check if a `VirTypeId` is a sentinel type (Nil or Done).
+pub(crate) fn vir_is_sentinel(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    table.is_sentinel(vir_ty)
+}
+
+/// Check if a `VirTypeId` is a boolean type.
+pub(crate) fn vir_is_bool(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(
+        table.get(vir_ty),
+        VirType::Primitive(VirPrimitiveKind::Bool)
+    )
+}
+
+/// Check if a `VirTypeId` is an integer type (signed or unsigned).
+pub(crate) fn vir_is_integer(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(
+        table.get(vir_ty),
+        VirType::Primitive(
+            VirPrimitiveKind::I8
+                | VirPrimitiveKind::I16
+                | VirPrimitiveKind::I32
+                | VirPrimitiveKind::I64
+                | VirPrimitiveKind::I128
+                | VirPrimitiveKind::U8
+                | VirPrimitiveKind::U16
+                | VirPrimitiveKind::U32
+                | VirPrimitiveKind::U64
+        )
+    )
+}
+
+/// Check if a `VirTypeId` is a floating point type.
+pub(crate) fn vir_is_float(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(
+        table.get(vir_ty),
+        VirType::Primitive(VirPrimitiveKind::F32 | VirPrimitiveKind::F64)
+    )
+}
+
+/// Check if a `VirTypeId` is the handle type.
+pub(crate) fn vir_is_handle(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    matches!(
+        table.get(vir_ty),
+        VirType::Primitive(VirPrimitiveKind::Handle)
+    )
+}
+
+/// Check if a `VirTypeId` is a SelfType placeholder.
+///
+/// VIR does not have a dedicated SelfType variant; this always returns false.
+/// The wrapper falls back to the arena for monomorphized types.
+pub(crate) fn vir_is_self_type(_vir_ty: VirTypeId, _table: &VirTypeTable) -> bool {
+    // VIR resolves SelfType during lowering; no Placeholder variant exists.
+    false
+}
+
+/// Unwrap a tuple type, returning the element `VirTypeId`s.
+///
+/// Returns `None` if the type is not a tuple.
+pub(crate) fn vir_unwrap_tuple(vir_ty: VirTypeId, table: &VirTypeTable) -> Option<&[VirTypeId]> {
+    table.unwrap_tuple(vir_ty)
+}
+
+/// Unwrap a fixed array type, returning `(elem, len)`.
+///
+/// Returns `None` if the type is not a fixed array.
+pub(crate) fn vir_unwrap_fixed_array(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<(VirTypeId, u32)> {
+    table.unwrap_fixed_array(vir_ty)
+}
+
+/// Unwrap a function type, returning `(params, return_type)`.
+///
+/// Returns `None` if the type is not a function.
+pub(crate) fn vir_unwrap_function(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<(&[VirTypeId], VirTypeId)> {
+    table.unwrap_function(vir_ty)
+}
+
+/// Unwrap a type parameter, returning its `NameId`.
+///
+/// Returns `None` if the type is not a `Param`.
+pub(crate) fn vir_unwrap_type_param(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+) -> Option<vole_identity::NameId> {
+    match table.get(vir_ty) {
+        VirType::Param { name } => Some(*name),
+        _ => None,
+    }
+}
+
+/// Unwrap an error type, returning its `TypeDefId`.
+///
+/// Returns `None` if the type is not an error.
+pub(crate) fn vir_unwrap_error(vir_ty: VirTypeId, table: &VirTypeTable) -> Option<TypeDefId> {
+    match table.get(vir_ty) {
+        VirType::Error { def } => Some(*def),
+        _ => None,
+    }
+}
+
+/// Check if a type contains any type parameter anywhere in its structure.
+///
+/// Recursively walks compound types (arrays, unions, classes, etc.).
+pub(crate) fn vir_contains_type_param(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    match table.get(vir_ty) {
+        VirType::Param { .. } => true,
+        VirType::Class { type_args, .. }
+        | VirType::Struct { type_args, .. }
+        | VirType::Interface { type_args, .. } => type_args
+            .iter()
+            .any(|&arg| vir_contains_type_param(arg, table)),
+        VirType::Union { variants } => variants.iter().any(|&v| vir_contains_type_param(v, table)),
+        VirType::Tuple { elems } => elems.iter().any(|&e| vir_contains_type_param(e, table)),
+        VirType::Array { elem } | VirType::RuntimeIterator { elem } => {
+            vir_contains_type_param(*elem, table)
+        }
+        VirType::FixedArray { elem, .. } => vir_contains_type_param(*elem, table),
+        VirType::Optional { inner } => vir_contains_type_param(*inner, table),
+        VirType::Function { params, ret } => {
+            params.iter().any(|&p| vir_contains_type_param(p, table))
+                || vir_contains_type_param(*ret, table)
+        }
+        VirType::Fallible { success, errors } => {
+            vir_contains_type_param(*success, table)
+                || errors.iter().any(|&e| vir_contains_type_param(e, table))
+        }
+        _ => false,
+    }
+}
+
 // Struct/class field layout helpers and convert_field_value are in
 // types::vir_struct_helpers (split for file size).
 // Callers import directly from that submodule.
