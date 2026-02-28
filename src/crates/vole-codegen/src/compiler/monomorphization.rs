@@ -544,18 +544,21 @@ impl Compiler<'_> {
             .map(|p| self.build_generic_type_asts(p))
             .unwrap_or_default();
 
-        // Collect instances to avoid borrow issues
-        let instances = self
+        // Collect from VirProgram.class_method_monomorphs to avoid borrow issues
+        let instances: Vec<_> = self
             .analyzed
-            .class_method_monomorph_cache()
-            .collect_instances();
+            .vir_program()
+            .class_method_monomorphs
+            .values()
+            .cloned()
+            .collect();
 
         tracing::debug!(
             instance_count = instances.len(),
             "compiling class method monomorphized instances"
         );
 
-        for instance in instances {
+        for instance in &instances {
             // External methods are runtime functions - no compilation needed
             if instance.external_info.is_some() {
                 tracing::debug!(
@@ -566,8 +569,8 @@ impl Compiler<'_> {
                 continue;
             }
 
-            // Skip abstract monomorph templates (e.g., T -> TypeParam(T)).
-            if self.is_abstract_class_method_monomorph(&instance) {
+            // Skip abstract monomorph templates (e.g., T -> Param(T)).
+            if self.is_abstract_vir_class_method_monomorph(instance) {
                 continue;
             }
 
@@ -597,7 +600,7 @@ impl Compiler<'_> {
                     .iter()
                     .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
-                    self.compile_monomorphized_class_method(method, &instance, None)?;
+                    self.compile_monomorphized_class_method(method, instance, None)?;
                     continue;
                 }
             }
@@ -616,11 +619,7 @@ impl Compiler<'_> {
                         .name_table()
                         .module_path(module_id)
                         .to_string();
-                    self.compile_monomorphized_class_method(
-                        &method,
-                        &instance,
-                        Some(&module_path),
-                    )?;
+                    self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
                     continue;
                 }
             }
@@ -634,7 +633,7 @@ impl Compiler<'_> {
                     &method_name_str,
                     program_module,
                 ) {
-                    self.compile_monomorphized_class_method(method, &instance, None)?;
+                    self.compile_monomorphized_class_method(method, instance, None)?;
                     continue;
                 }
             }
@@ -657,11 +656,7 @@ impl Compiler<'_> {
                         )
                         .cloned()
                 {
-                    self.compile_monomorphized_class_method(
-                        &method,
-                        &instance,
-                        Some(&module_path),
-                    )?;
+                    self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
                     continue;
                 }
             }
@@ -686,7 +681,7 @@ impl Compiler<'_> {
     fn compile_monomorphized_class_method(
         &mut self,
         method: &FuncDecl,
-        instance: &ClassMethodMonomorphInstance,
+        instance: &VirClassMethodMonomorphInfo,
         module_path: Option<&str>,
     ) -> CodegenResult<()> {
         let mangled_name = self.analyzed.display_name(instance.mangled_name);
@@ -1799,16 +1794,31 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let method_name_str = self.analyzed.display_name(instance.method_name);
+        // Look up the VIR-native monomorph info by mangled name.
+        // class_method_monomorphs is keyed by ClassMethodMonomorphKey, so we
+        // search values by mangled_name (unique identifier).
+        let vir_info = self
+            .analyzed
+            .vir_program()
+            .class_method_monomorphs
+            .values()
+            .find(|info| info.mangled_name == instance.mangled_name)
+            .unwrap_or_else(|| {
+                let name = self.analyzed.display_name(instance.mangled_name);
+                panic!("pending class method monomorph not in VirProgram.class_method_monomorphs: {name}")
+            })
+            .clone();
+
+        let method_name_str = self.analyzed.display_name(vir_info.method_name);
 
         // Try main program class ASTs (using pre-built map)
-        if let Some(class) = class_asts.get(&instance.class_name) {
+        if let Some(class) = class_asts.get(&vir_info.class_name) {
             let method = class
                 .methods
                 .iter()
                 .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
             if let Some(method) = method {
-                self.compile_monomorphized_class_method(method, instance, None)?;
+                self.compile_monomorphized_class_method(method, &vir_info, None)?;
                 return Ok(());
             }
         }
@@ -1818,32 +1828,32 @@ impl Compiler<'_> {
             let program_module = self.program_module();
             if let Some(method) = self.find_implement_block_method(
                 &program.declarations,
-                instance.class_name,
+                vir_info.class_name,
                 &method_name_str,
                 program_module,
             ) {
-                self.compile_monomorphized_class_method(method, instance, None)?;
+                self.compile_monomorphized_class_method(method, &vir_info, None)?;
                 return Ok(());
             }
         }
 
         // Fallback: search module programs for class methods
         if let Some(method) = self
-            .find_class_method_in_modules(instance.class_name, &method_name_str)
+            .find_class_method_in_modules(vir_info.class_name, &method_name_str)
             .cloned()
         {
-            let module_id = self.analyzed.name_table().module_of(instance.class_name);
+            let module_id = self.analyzed.name_table().module_of(vir_info.class_name);
             let module_path = self
                 .analyzed
                 .name_table()
                 .module_path(module_id)
                 .to_string();
-            self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
+            self.compile_monomorphized_class_method(&method, &vir_info, Some(&module_path))?;
             return Ok(());
         }
 
         // Fallback: search implement blocks in modules
-        let module_id = self.analyzed.name_table().module_of(instance.class_name);
+        let module_id = self.analyzed.name_table().module_of(vir_info.class_name);
         let module_path = self
             .analyzed
             .name_table()
@@ -1853,17 +1863,17 @@ impl Compiler<'_> {
             && let Some(method) = self
                 .find_implement_block_method(
                     &module_program.declarations,
-                    instance.class_name,
+                    vir_info.class_name,
                     &method_name_str,
                     module_id,
                 )
                 .cloned()
         {
-            self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
+            self.compile_monomorphized_class_method(&method, &vir_info, Some(&module_path))?;
             return Ok(());
         }
 
-        let class_name = self.analyzed.display_name(instance.class_name);
+        let class_name = self.analyzed.display_name(vir_info.class_name);
         Err(CodegenError::not_found(
             "pending monomorph: class method",
             format!("{} in class {}", method_name_str, class_name),
