@@ -8,7 +8,7 @@
 // consumed by codegen without reaching back into sema.
 
 use rustc_hash::FxHashMap;
-use vole_identity::{FieldId, MethodId, NameId, Symbol, TypeDefId, VirTypeId};
+use vole_identity::{FieldId, GlobalId, MethodId, ModuleId, NameId, Symbol, TypeDefId, VirTypeId};
 
 // ---------------------------------------------------------------------------
 // Type definition kind
@@ -175,6 +175,26 @@ pub struct VirMethodBinding {
 }
 
 // ---------------------------------------------------------------------------
+// Global variable definition metadata
+// ---------------------------------------------------------------------------
+
+/// VIR-native metadata for a global variable definition.
+///
+/// Contains the global's name, type, and module — everything codegen
+/// needs for global variable access without reaching back into sema.
+#[derive(Debug, Clone)]
+pub struct VirGlobalDef {
+    /// The sema entity ID for this global.
+    pub id: GlobalId,
+    /// The global's name.
+    pub name_id: NameId,
+    /// The global's VIR type (translated from sema `TypeId` during lowering).
+    pub vir_ty: VirTypeId,
+    /// The module this global is declared in.
+    pub module_id: ModuleId,
+}
+
+// ---------------------------------------------------------------------------
 // VirEntityMetadata — the top-level container
 // ---------------------------------------------------------------------------
 
@@ -191,6 +211,10 @@ pub struct VirEntityMetadata {
     field_defs: FxHashMap<FieldId, VirFieldDef>,
     /// Method definitions keyed by `MethodId`.
     method_defs: FxHashMap<MethodId, VirMethodDef>,
+    /// Global variable definitions keyed by `GlobalId`.
+    global_defs: FxHashMap<GlobalId, VirGlobalDef>,
+    /// Reverse lookup: `NameId` → `GlobalId`.
+    global_by_name: FxHashMap<NameId, GlobalId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +240,13 @@ impl VirEntityMetadata {
     /// Register a method definition.
     pub fn insert_method_def(&mut self, method_def: VirMethodDef) {
         self.method_defs.insert(method_def.id, method_def);
+    }
+
+    /// Register a global variable definition.
+    pub fn insert_global_def(&mut self, global_def: VirGlobalDef) {
+        self.global_by_name
+            .insert(global_def.name_id, global_def.id);
+        self.global_defs.insert(global_def.id, global_def);
     }
 }
 
@@ -408,6 +439,37 @@ impl VirEntityMetadata {
 }
 
 // ---------------------------------------------------------------------------
+// Global queries
+// ---------------------------------------------------------------------------
+
+impl VirEntityMetadata {
+    /// Look up a global variable definition by ID.
+    pub fn get_global_def(&self, id: GlobalId) -> Option<&VirGlobalDef> {
+        self.global_defs.get(&id)
+    }
+
+    /// Look up a global's `GlobalId` by its `NameId`.
+    pub fn global_by_name(&self, name_id: NameId) -> Option<GlobalId> {
+        self.global_by_name.get(&name_id).copied()
+    }
+
+    /// Return whether a global exists for the given `NameId`.
+    pub fn has_global(&self, name_id: NameId) -> bool {
+        self.global_by_name.contains_key(&name_id)
+    }
+
+    /// Return the VIR type of a global variable.
+    pub fn global_vir_type(&self, id: GlobalId) -> Option<VirTypeId> {
+        self.global_defs.get(&id).map(|gd| gd.vir_ty)
+    }
+
+    /// Return the number of registered global definitions.
+    pub fn global_def_count(&self) -> usize {
+        self.global_defs.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Composite queries
 // ---------------------------------------------------------------------------
 
@@ -547,12 +609,21 @@ mod tests {
         NameId::new_for_test(n)
     }
 
+    fn make_global_id(n: u32) -> GlobalId {
+        GlobalId::new(n)
+    }
+
+    fn make_module_id(n: u32) -> ModuleId {
+        ModuleId::new(n)
+    }
+
     #[test]
     fn empty_metadata() {
         let meta = VirEntityMetadata::new();
         assert_eq!(meta.type_def_count(), 0);
         assert_eq!(meta.field_def_count(), 0);
         assert_eq!(meta.method_def_count(), 0);
+        assert_eq!(meta.global_def_count(), 0);
     }
 
     #[test]
@@ -776,5 +847,39 @@ mod tests {
         assert_eq!(td.kind, VirTypeDefKind::Struct);
         assert_eq!(td.fields.len(), 2);
         assert_eq!(td.name_id, make_name_id(101));
+    }
+
+    #[test]
+    fn insert_and_query_global_def() {
+        let mut meta = VirEntityMetadata::new();
+        let id = make_global_id(3);
+        let name = make_name_id(300);
+
+        meta.insert_global_def(VirGlobalDef {
+            id,
+            name_id: name,
+            vir_ty: VirTypeId::I64,
+            module_id: make_module_id(0),
+        });
+
+        assert_eq!(meta.global_def_count(), 1);
+
+        let gd = meta.get_global_def(id).expect("should find global def");
+        assert_eq!(gd.vir_ty, VirTypeId::I64);
+        assert_eq!(gd.name_id, name);
+        assert_eq!(gd.module_id, make_module_id(0));
+
+        assert_eq!(meta.global_by_name(name), Some(id));
+        assert!(meta.has_global(name));
+        assert_eq!(meta.global_vir_type(id), Some(VirTypeId::I64));
+    }
+
+    #[test]
+    fn global_missing_lookups() {
+        let meta = VirEntityMetadata::new();
+        assert!(meta.get_global_def(make_global_id(99)).is_none());
+        assert!(meta.global_by_name(make_name_id(99)).is_none());
+        assert!(!meta.has_global(make_name_id(99)));
+        assert!(meta.global_vir_type(make_global_id(99)).is_none());
     }
 }

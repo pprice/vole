@@ -11,17 +11,17 @@ use crate::TypeArena;
 use crate::entity_defs::{self, TypeDefKind};
 use crate::vir_lower::type_translate::translate_type_id;
 use vole_vir::entity_metadata::{
-    VirEntityMetadata, VirFieldDef, VirImplementation, VirMethodBinding, VirMethodDef, VirTypeDef,
-    VirTypeDefKind,
+    VirEntityMetadata, VirFieldDef, VirGlobalDef, VirImplementation, VirMethodBinding,
+    VirMethodDef, VirTypeDef, VirTypeDefKind,
 };
 use vole_vir::type_table::VirTypeTable;
 
 /// Build VIR entity metadata from sema entities.
 ///
-/// Iterates all type definitions, field definitions, and method definitions
-/// in the `EntityRegistry` and translates them into VIR-native metadata.
-/// Field types are translated from sema `TypeId` to `VirTypeId` using the
-/// existing `translate_type_id` machinery.
+/// Iterates all type definitions, field definitions, method definitions,
+/// and global variable definitions in the `EntityRegistry` and translates
+/// them into VIR-native metadata.  Types are translated from sema `TypeId`
+/// to `VirTypeId` using the existing `translate_type_id` machinery.
 ///
 /// `interner` and `name_table` are used to resolve field `NameId`s to
 /// `Symbol`s, enabling the monomorph rederive pass to match field names
@@ -50,6 +50,7 @@ pub fn build_entity_metadata(
         name_table,
     );
     populate_method_defs(registry.all_method_defs(), type_arena, &mut tt, &mut meta);
+    populate_global_defs(registry.all_global_defs(), type_arena, &mut tt, &mut meta);
 
     meta
 }
@@ -194,4 +195,25 @@ fn translate_method_signature(
         .collect();
     let return_type = translate_type_id(type_table, ret, type_arena);
     (param_types, return_type)
+}
+
+/// Populate global variable definitions from sema into VIR entity metadata.
+///
+/// Translates each global's sema `TypeId` to a `VirTypeId` using the
+/// standard type translation machinery.
+fn populate_global_defs(
+    global_defs: &[entity_defs::GlobalDef],
+    type_arena: &TypeArena,
+    type_table: &mut VirTypeTable,
+    meta: &mut VirEntityMetadata,
+) {
+    for gd in global_defs {
+        let vir_ty = translate_type_id(type_table, gd.type_id, type_arena);
+        meta.insert_global_def(VirGlobalDef {
+            id: gd.id,
+            name_id: gd.name_id,
+            vir_ty,
+            module_id: gd.module_id,
+        });
+    }
 }

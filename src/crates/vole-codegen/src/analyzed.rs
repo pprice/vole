@@ -279,7 +279,7 @@ impl AnalyzedProgram {
 
     /// Return true when a global is present for the given NameId.
     pub(crate) fn has_global(&self, name_id: NameId) -> bool {
-        self.entity_view.global_by_name(name_id).is_some()
+        self.entity_metadata().has_global(name_id)
     }
 
     /// Resolve a NameId to display form (e.g. module::Type::method).
