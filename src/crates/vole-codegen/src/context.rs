@@ -215,6 +215,13 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// `call_actual_closure()` in preference to the NodeMap lookup.
     /// Cleared after `call_dispatch()` returns.
     pub(crate) vir_lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
+    /// Pre-resolved monomorph key from VIR.
+    ///
+    /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
+    /// `try_call_generic_external_intrinsic_from_monomorph()` and
+    /// `try_call_monomorphized_function()` in preference to the NodeMap
+    /// lookup.  Cleared after `call_dispatch()` returns.
+    pub(crate) vir_monomorph_key: Option<vole_identity::MonomorphKey>,
     /// Cached `iconst.i64 0` created in the entry block for void returns.
     /// Reused by every `void_value()` call to avoid emitting thousands of
     /// dead iconst instructions (previously ~18,951 per compilation).
@@ -288,6 +295,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             in_iterable_default_body: false,
             vir_resolved_call_args: None,
             vir_lambda_defaults: None,
+            vir_monomorph_key: None,
             cached_void_val,
             entry_block,
             iconst_cache,

@@ -1279,18 +1279,20 @@ fn lower_call(
     // In generic mode, check if this call has a MonomorphKey — that means
     // it targets another generic function.  Emit GenericCall so the VIR
     // monomorphization pass can resolve it to a concrete callee later.
-    let make_unresolved = |rca, ld| CallTarget::Unresolved {
+    let monomorph_key = ctx.node_map.get_generic(expr.id).cloned();
+    let make_unresolved = |rca, ld, mk| CallTarget::Unresolved {
         callee_sym,
         call_node_id: expr.id,
         line: expr.span.line,
         resolved_call_args: rca,
         lambda_defaults: ld,
+        monomorph_key: mk,
     };
     let target = if ctx.generic {
         generic_call_target(expr, ctx)
-            .unwrap_or_else(|| make_unresolved(resolved_call_args, lambda_defaults))
+            .unwrap_or_else(|| make_unresolved(resolved_call_args, lambda_defaults, monomorph_key))
     } else {
-        make_unresolved(resolved_call_args, lambda_defaults)
+        make_unresolved(resolved_call_args, lambda_defaults, monomorph_key)
     };
 
     let compat_ty = ctx.compat_ty(ty);

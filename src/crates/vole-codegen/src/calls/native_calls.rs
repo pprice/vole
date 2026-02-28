@@ -423,7 +423,16 @@ impl Cg<'_, '_, '_> {
         call_expr_id: NodeId,
         arg_source: &ArgSource<'_>,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let Some(monomorph_key) = self.analyzed().monomorph_for(call_expr_id) else {
+        // Prefer the VIR-carried monomorph key; fall back to NodeMap for AST paths.
+        let monomorph_key_from_vir = self.vir_monomorph_key.clone();
+        let monomorph_key_from_map;
+        let Some(monomorph_key) = (match monomorph_key_from_vir.as_ref() {
+            Some(k) => Some(k),
+            None => {
+                monomorph_key_from_map = self.analyzed().monomorph_for(call_expr_id).cloned();
+                monomorph_key_from_map.as_ref()
+            }
+        }) else {
             return Ok(None);
         };
 
@@ -523,7 +532,16 @@ impl Cg<'_, '_, '_> {
         _callee_sym: Symbol,
         callee_name: &str,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let Some(monomorph_key) = self.analyzed().monomorph_for(call_expr_id) else {
+        // Prefer the VIR-carried monomorph key; fall back to NodeMap for AST paths.
+        let monomorph_key_from_vir = self.vir_monomorph_key.clone();
+        let monomorph_key_from_map;
+        let Some(monomorph_key) = (match monomorph_key_from_vir.as_ref() {
+            Some(k) => Some(k),
+            None => {
+                monomorph_key_from_map = self.analyzed().monomorph_for(call_expr_id).cloned();
+                monomorph_key_from_map.as_ref()
+            }
+        }) else {
             return Ok(None);
         };
 

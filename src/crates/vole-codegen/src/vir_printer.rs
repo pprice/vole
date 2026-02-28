@@ -593,9 +593,16 @@ impl<'a> VirPrinter<'a> {
                 w!(out, "vir_direct(idx={}, ", function_index);
             }
             CallTarget::Unresolved {
-                callee_sym, line, ..
+                callee_sym,
+                line,
+                monomorph_key,
+                ..
             } => {
-                w!(out, "unresolved({}@{})(", self.sym(*callee_sym), line);
+                if monomorph_key.is_some() {
+                    w!(out, "unresolved({}@{},mono)(", self.sym(*callee_sym), line);
+                } else {
+                    w!(out, "unresolved({}@{})(", self.sym(*callee_sym), line);
+                }
             }
         }
         self.fmt_comma_list(args, out, ind);

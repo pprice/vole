@@ -2,7 +2,7 @@
 //
 // Call target descriptors for VIR function calls.
 
-use vole_identity::{FunctionId, NodeId, Symbol, VirTypeId};
+use vole_identity::{FunctionId, MonomorphKey, NodeId, Symbol, VirTypeId};
 
 use crate::intrinsics::IntrinsicKey;
 
@@ -88,6 +88,12 @@ pub enum CallTarget {
         /// default parameter values.  Codegen uses this to compile fallback
         /// values for omitted arguments.
         lambda_defaults: Option<LambdaDefaultsInfo>,
+        /// MonomorphKey for generic function calls.
+        ///
+        /// Copied from `NodeMap::get_generic` during VIR lowering so codegen
+        /// can resolve monomorphized callees without touching the NodeMap.
+        /// `None` for non-generic calls.
+        monomorph_key: Option<MonomorphKey>,
     },
 }
 
