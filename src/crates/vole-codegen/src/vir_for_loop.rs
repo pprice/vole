@@ -591,7 +591,7 @@ impl Cg<'_, '_, '_> {
         let elem_cr_type = self.cranelift_type(elem_type_id);
         let elem_wide = crate::types::wide_ops::WideType::from_type_id(elem_type_id, self.arena());
         if let Some(storage) = union_storage {
-            use vole_sema::UnionStorageKind;
+            use vole_identity::UnionStorageKind;
             match storage {
                 UnionStorageKind::Inline => {
                     let tag_offset =

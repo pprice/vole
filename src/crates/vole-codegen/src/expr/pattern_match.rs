@@ -11,8 +11,7 @@ use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, l
 
 use vole_frontend::Symbol;
 use vole_frontend::ast::RecordFieldPattern;
-use vole_identity::{TypeId, VirTypeId};
-use vole_sema::IsCheckResult;
+use vole_identity::{IsCheckResult, TypeId, VirTypeId};
 
 use super::super::context::Cg;
 use super::super::control_flow::match_switch;
