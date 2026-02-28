@@ -179,8 +179,7 @@ impl Compiler<'_> {
                         .implemented_interfaces(type_def_id)
                         .into_iter()
                         .filter_map(|interface_id| {
-                            let interface_def = query.get_type(interface_id);
-                            query.last_segment(interface_def.name_id)
+                            query.last_segment(query.entity_type_name_id(interface_id))
                         })
                         .collect()
                 })
@@ -785,7 +784,7 @@ impl Compiler<'_> {
                     arena.unwrap_struct(meta.vole_type).map(|(id, _)| id)
                 };
                 type_def_id.is_some_and(|id| {
-                    let name_id = self.analyzed.get_type(id).name_id;
+                    let name_id = self.analyzed.entity_type_name_id(id);
                     self.analyzed
                         .name_table()
                         .last_segment_str(name_id)

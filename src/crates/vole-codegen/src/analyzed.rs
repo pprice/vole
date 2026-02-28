@@ -12,7 +12,7 @@ use vole_identity::{
 };
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 use vole_sema::{AnalysisOutput, ImplementRegistry, NodeMap, TypeArena};
-use vole_vir::{VirBody, VirFunction, VirProgram};
+use vole_vir::{VirBody, VirEntityMetadata, VirFunction, VirProgram};
 
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
@@ -316,6 +316,15 @@ impl AnalyzedProgram {
         &self.vir_program
     }
 
+    /// Get read-only access to the VIR entity metadata.
+    ///
+    /// This is the VIR-native replacement for `EntityView` type/field/method
+    /// queries.  Proxy methods on `AnalyzedProgram` are progressively
+    /// migrated from `entity_view` to this accessor.
+    fn entity_metadata(&self) -> &VirEntityMetadata {
+        self.vir_program.entity_metadata()
+    }
+
     /// Get a reference to the name table Rc (borrowed, no clone)
     pub(crate) fn name_table_ref(&self) -> &Rc<NameTable> {
         &self.names
@@ -333,7 +342,14 @@ impl AnalyzedProgram {
 
     /// Resolve a type's canonical entity NameId from its TypeDefId.
     pub(crate) fn entity_type_name_id(&self, type_def_id: TypeDefId) -> NameId {
-        self.entity_view.type_name_id(type_def_id)
+        self.entity_metadata()
+            .type_name_id(type_def_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "entity_type_name_id: type def {:?} not in VirEntityMetadata",
+                    type_def_id
+                )
+            })
     }
 
     /// Resolve a sema TypeDef by ID.
@@ -392,7 +408,11 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
     ) -> impl Iterator<Item = FieldId> + '_ {
-        self.entity_view.fields_on_type(type_def_id).iter().copied()
+        self.entity_metadata()
+            .fields_on_type(type_def_id)
+            .unwrap_or(&[])
+            .iter()
+            .copied()
     }
 
     /// Return true when a global is present for the given NameId.
@@ -508,8 +528,9 @@ impl AnalyzedProgram {
 
     /// Return whether a type definition is an interface.
     pub(crate) fn is_interface_type(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_view.get_type(type_def_id).kind
-            == vole_sema::entity_defs::TypeDefKind::Interface
+        self.entity_metadata()
+            .type_def_kind(type_def_id)
+            .is_some_and(|k| k.is_interface())
     }
 
     /// Return interface method binding return type, when a binding exists.
@@ -540,13 +561,16 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name_id: NameId,
     ) -> Option<MethodId> {
-        self.entity_view
+        self.entity_metadata()
             .find_method_on_type(type_def_id, method_name_id)
     }
 
     /// Return direct method IDs declared on a type definition.
     pub(crate) fn type_methods(&self, type_def_id: TypeDefId) -> Vec<MethodId> {
-        self.entity_view.methods_on_type(type_def_id).to_vec()
+        self.entity_metadata()
+            .methods_on_type(type_def_id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default()
     }
 
     /// Build interface type-parameter substitutions for a concrete implementation.
@@ -555,7 +579,7 @@ impl AnalyzedProgram {
         implementing_type_id: TypeDefId,
         interface_id: TypeDefId,
     ) -> FxHashMap<NameId, vole_sema::type_arena::TypeId> {
-        let type_params = self.entity_view.type_params(interface_id);
+        let type_params = self.entity_type_params(interface_id);
         let type_args = self
             .entity_view
             .implementation_type_args(implementing_type_id, interface_id);
@@ -571,18 +595,25 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name_id: NameId,
     ) -> Option<MethodId> {
-        self.entity_view
+        self.entity_metadata()
             .find_static_method_on_type(type_def_id, method_name_id)
     }
 
     /// Get the full NameId for a semantic method.
     pub(crate) fn method_full_name(&self, method_id: MethodId) -> NameId {
-        self.entity_view.method_full_name(method_id)
+        self.entity_metadata()
+            .method_full_name_id(method_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "method_full_name: method {:?} not in VirEntityMetadata",
+                    method_id
+                )
+            })
     }
 
     /// Return all interfaces implemented by a type definition.
     pub(crate) fn implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId> {
-        self.entity_view.implemented_interfaces(type_def_id)
+        self.entity_metadata().implemented_interfaces(type_def_id)
     }
 
     /// Return external binding metadata for a method, when available.
@@ -624,7 +655,7 @@ impl AnalyzedProgram {
 
     /// Return the single abstract method for functional interfaces.
     pub(crate) fn is_functional_interface(&self, type_def_id: TypeDefId) -> Option<MethodId> {
-        self.entity_view.is_functional(type_def_id)
+        self.entity_metadata().is_functional(type_def_id)
     }
 
     /// Resolve virtual module ID for a tests block span.
@@ -706,7 +737,7 @@ impl AnalyzedProgram {
 
     /// Return whether a type definition is marked as an annotation type.
     pub(crate) fn type_is_annotation(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_view.get_type(type_def_id).is_annotation
+        self.entity_metadata().is_annotation(type_def_id)
     }
 
     /// Return interface method IDs in deterministic slot order.
@@ -714,13 +745,16 @@ impl AnalyzedProgram {
         &self,
         interface_type_def_id: TypeDefId,
     ) -> Vec<MethodId> {
-        self.entity_view
+        self.entity_metadata()
             .interface_methods_ordered(interface_type_def_id)
     }
 
     /// Return all field IDs declared on a type definition.
     pub(crate) fn entity_field_ids_on_type(&self, type_def_id: TypeDefId) -> Vec<FieldId> {
-        self.entity_view.fields_on_type(type_def_id).to_vec()
+        self.entity_metadata()
+            .fields_on_type(type_def_id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default()
     }
 
     /// Return the semantic field type for a field ID.
@@ -730,7 +764,10 @@ impl AnalyzedProgram {
 
     /// Return declared type parameter NameIds for a type definition.
     pub(crate) fn entity_type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
-        self.entity_view.type_params(type_def_id)
+        self.entity_metadata()
+            .type_params(type_def_id)
+            .map(|s| s.to_vec())
+            .unwrap_or_default()
     }
 
     /// Return generic field types metadata for a type definition, if present.
@@ -747,7 +784,9 @@ impl AnalyzedProgram {
 
     /// Return whether a type definition is a sentinel type.
     pub(crate) fn entity_type_is_sentinel(&self, type_def_id: TypeDefId) -> bool {
-        self.entity_view.get_type(type_def_id).kind.is_sentinel()
+        self.entity_metadata()
+            .type_def_kind(type_def_id)
+            .is_some_and(|k| k.is_sentinel())
     }
 
     /// Find a type by its short (last-segment) name in the entity view.

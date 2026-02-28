@@ -122,12 +122,10 @@ fn get_or_alloc_meta_cache_key(cg: &Cg, type_def_id: TypeDefId) -> CodegenResult
 fn build_type_meta_instance(cg: &mut Cg, type_def_id: TypeDefId) -> CodegenResult<Value> {
     let info = resolve_reflection_types(cg)?;
 
-    let type_name = {
-        let type_def = cg.analyzed().type_def(type_def_id);
-        cg.analyzed()
-            .last_segment(type_def.name_id)
-            .unwrap_or_else(|| "?".to_string())
-    };
+    let type_name = cg
+        .analyzed()
+        .last_segment(cg.analyzed().entity_type_name_id(type_def_id))
+        .unwrap_or_else(|| "?".to_string());
 
     let name_cv = cg.string_literal(&type_name)?;
     let fields_cv = fields::build_field_meta_array(cg, type_def_id, &info)?;

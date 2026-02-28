@@ -408,6 +408,122 @@ impl VirEntityMetadata {
 }
 
 // ---------------------------------------------------------------------------
+// Composite queries
+// ---------------------------------------------------------------------------
+
+impl VirEntityMetadata {
+    /// Return interface method IDs in deterministic vtable slot order.
+    ///
+    /// Recursively collects methods from parent interfaces first, then own
+    /// methods.  Skips duplicate method names from parent interfaces.
+    pub fn interface_methods_ordered(&self, interface_id: TypeDefId) -> Vec<MethodId> {
+        let mut methods = Vec::new();
+        let mut seen_interfaces = std::collections::HashSet::new();
+        let mut seen_methods = std::collections::HashSet::new();
+        self.collect_interface_methods_inner(
+            interface_id,
+            &mut methods,
+            &mut seen_interfaces,
+            &mut seen_methods,
+        );
+        methods
+    }
+
+    /// Recursive helper: collect interface methods in vtable order.
+    fn collect_interface_methods_inner(
+        &self,
+        interface_id: TypeDefId,
+        methods: &mut Vec<MethodId>,
+        seen_interfaces: &mut std::collections::HashSet<TypeDefId>,
+        seen_methods: &mut std::collections::HashSet<NameId>,
+    ) {
+        if !seen_interfaces.insert(interface_id) {
+            return;
+        }
+        let Some(td) = self.type_defs.get(&interface_id) else {
+            return;
+        };
+        // Parent interfaces first
+        for &parent in &td.extends {
+            self.collect_interface_methods_inner(parent, methods, seen_interfaces, seen_methods);
+        }
+        // Then own methods (skip already-seen from parents)
+        for &method_id in &td.methods {
+            if let Some(md) = self.method_defs.get(&method_id)
+                && seen_methods.insert(md.name_id)
+            {
+                methods.push(method_id);
+            }
+        }
+    }
+
+    /// Find an instance method on a type by method `NameId`.
+    ///
+    /// Searches the type's instance method list in reverse order so that
+    /// later-registered methods (e.g. interface defaults copied onto the
+    /// implementing type) shadow earlier entries with the same `name_id`,
+    /// matching the `HashMap` last-write-wins semantics of the sema
+    /// `methods_by_type` map.
+    pub fn find_method_on_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        let td = self.type_defs.get(&type_def_id)?;
+        for &mid in td.methods.iter().rev() {
+            if let Some(md) = self.method_defs.get(&mid)
+                && md.name_id == method_name_id
+            {
+                return Some(mid);
+            }
+        }
+        None
+    }
+
+    /// Find a static method on a type by method `NameId`.
+    ///
+    /// Searches in reverse order for the same reason as
+    /// [`find_method_on_type`](Self::find_method_on_type).
+    pub fn find_static_method_on_type(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<MethodId> {
+        let td = self.type_defs.get(&type_def_id)?;
+        for &mid in td.static_methods.iter().rev() {
+            if let Some(md) = self.method_defs.get(&mid)
+                && md.name_id == method_name_id
+            {
+                return Some(mid);
+            }
+        }
+        None
+    }
+
+    /// Check if a type is a functional interface (single abstract method, no fields).
+    ///
+    /// Returns `Some(method_id)` when the type has no fields and exactly one
+    /// non-default method, `None` otherwise.
+    pub fn is_functional(&self, type_def_id: TypeDefId) -> Option<MethodId> {
+        let td = self.type_defs.get(&type_def_id)?;
+        if !td.fields.is_empty() {
+            return None;
+        }
+        let abstract_methods: Vec<MethodId> = td
+            .methods
+            .iter()
+            .copied()
+            .filter(|&mid| self.method_defs.get(&mid).is_some_and(|md| !md.has_default))
+            .collect();
+        if abstract_methods.len() == 1 {
+            Some(abstract_methods[0])
+        } else {
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
 

@@ -382,7 +382,7 @@ impl Compiler<'_> {
         let arena = self.analyzed.type_arena();
 
         let nominal_is_program_owned = |type_def_id| {
-            let name_id = self.analyzed.get_type(type_def_id).name_id;
+            let name_id = self.analyzed.entity_type_name_id(type_def_id);
             let module_id = self.analyzed.name_table().module_of(name_id);
             let module_path = self
                 .analyzed

@@ -300,7 +300,7 @@ impl Cg<'_, '_, '_> {
             return resolved;
         }
 
-        let type_params = self.analyzed().type_def(type_def_id).type_params.clone();
+        let type_params = self.analyzed().entity_type_params(type_def_id);
         if type_params.len() != type_args.len() {
             return resolved;
         }

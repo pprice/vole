@@ -166,7 +166,7 @@ impl Compiler<'_> {
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
             {
-                let type_name_id = self.analyzed.get_type(tdef_id).name_id;
+                let type_name_id = self.analyzed.entity_type_name_id(tdef_id);
                 self.state
                     .method_func_keys
                     .insert((type_name_id, name_id), func_key);
@@ -207,7 +207,7 @@ impl Compiler<'_> {
                 results
             };
 
-            let type_name_id = self.analyzed.get_type(type_def_id).name_id;
+            let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
             for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
                 // Build TypeParam substitution map for this interface implementation.
                 let type_param_subs = self
@@ -315,12 +315,11 @@ impl Compiler<'_> {
             };
             let func_key = self.register_method_func(semantic_method_id, &sig, DeclareMode::Import);
 
-            let type_name_id =
-                self.analyzed
-                    .get_type(type_def_id.ok_or_else(|| {
-                        CodegenError::internal("import statics: missing type_def_id")
-                    })?)
-                    .name_id;
+            let type_name_id = self
+                .analyzed
+                .entity_type_name_id(type_def_id.ok_or_else(|| {
+                    CodegenError::internal("import statics: missing type_def_id")
+                })?);
             self.state.method_func_keys.insert(
                 (
                     type_name_id,
@@ -488,7 +487,7 @@ impl Compiler<'_> {
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
             {
-                let type_name_id = self.analyzed.get_type(tdef_id).name_id;
+                let type_name_id = self.analyzed.entity_type_name_id(tdef_id);
                 self.state
                     .method_func_keys
                     .insert((type_name_id, name_id), func_key);
@@ -550,7 +549,7 @@ impl Compiler<'_> {
             // TypeParam(T) substituted with the concrete interface type arg (e.g., i64 for
             // Iterable<i64>), so that the JIT function declaration signature matches what
             // the compiler will emit.
-            let type_name_id = self.analyzed.get_type(type_def_id).name_id;
+            let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
             for (semantic_method_id, method_name_id, interface_tdef_id) in iface_default_methods {
                 // Build TypeParam substitution map for this interface's implementation.
                 let type_param_subs = self
@@ -667,7 +666,7 @@ impl Compiler<'_> {
                 let tdef_id = type_def_id.ok_or_else(|| {
                     CodegenError::internal("register_implement_block statics: missing type_def_id")
                 })?;
-                let type_name_id = self.analyzed.get_type(tdef_id).name_id;
+                let type_name_id = self.analyzed.entity_type_name_id(tdef_id);
                 self.state.method_func_keys.insert(
                     (
                         type_name_id,
@@ -757,7 +756,7 @@ impl Compiler<'_> {
         for method in &impl_block.methods {
             let method_key = if let Some(type_def_id) = type_def_id {
                 // Use type's NameId for stable lookup across analyzer instances
-                let type_name_id = self.analyzed.get_type(type_def_id).name_id;
+                let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
                 let method_id = self.method_name_id(method.name)?;
                 self.state
                     .method_func_keys
@@ -784,12 +783,9 @@ impl Compiler<'_> {
                 let query = self.analyzed;
                 let mut results = Vec::new();
                 for interface_tdef_id in query.implemented_interfaces(type_def_id) {
-                    let iface_name_str = {
-                        let interface_def = query.get_type(interface_tdef_id);
-                        query
-                            .last_segment(interface_def.name_id)
-                            .unwrap_or_default()
-                    };
+                    let iface_name_str = query
+                        .last_segment(query.entity_type_name_id(interface_tdef_id))
+                        .unwrap_or_default();
                     for iface_method_id in query.type_methods(interface_tdef_id) {
                         let method_def = query.get_method(iface_method_id);
                         if !method_def.has_default {
@@ -825,7 +821,7 @@ impl Compiler<'_> {
                 iface_default_method_ids
             {
                 // Look up function key (registered in pass 1)
-                let type_name_id = self.analyzed.get_type(type_def_id).name_id;
+                let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
                 let func_key = match self
                     .state
                     .method_func_keys
@@ -1081,7 +1077,7 @@ impl Compiler<'_> {
         // Compile instance methods using module interner for name resolution
         for method in &impl_block.methods {
             let method_key = type_def_id.and_then(|type_def_id| {
-                let type_name_id = self.analyzed.get_type(type_def_id).name_id;
+                let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
                 // Use module interner for method name lookup (cross-interner safe)
                 let method_name_id =
                     method_name_id_with_interner(self.analyzed, interner, method.name);
@@ -1116,12 +1112,9 @@ impl Compiler<'_> {
                 let query = self.analyzed;
                 let mut results = Vec::new();
                 for interface_tdef_id in query.implemented_interfaces(type_def_id) {
-                    let iface_name_str = {
-                        let interface_def = query.get_type(interface_tdef_id);
-                        query
-                            .last_segment(interface_def.name_id)
-                            .unwrap_or_default()
-                    };
+                    let iface_name_str = query
+                        .last_segment(query.entity_type_name_id(interface_tdef_id))
+                        .unwrap_or_default();
                     for iface_method_id in query.type_methods(interface_tdef_id) {
                         let method_def = query.get_method(iface_method_id);
                         if !method_def.has_default {
@@ -1156,7 +1149,7 @@ impl Compiler<'_> {
                 iface_default_method_ids
             {
                 // Look up function key (registered in pass 1)
-                let type_name_id = self.analyzed.get_type(type_def_id).name_id;
+                let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
                 let func_key = match self
                     .state
                     .method_func_keys
@@ -1817,7 +1810,7 @@ impl Compiler<'_> {
 
         // Get the interface name string for collect_interface_method_body
         let iface_name_str: String = {
-            let iface_name_id = self.analyzed.get_type(iterable_tdef_id).name_id;
+            let iface_name_id = self.analyzed.entity_type_name_id(iterable_tdef_id);
             self.analyzed
                 .name_table()
                 .last_segment_str(iface_name_id)

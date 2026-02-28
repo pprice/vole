@@ -50,7 +50,7 @@ impl Compiler<'_> {
         method_name_id: NameId,
         func_key: FunctionKey,
     ) {
-        let type_name_id = self.analyzed.get_type(type_def_id).name_id;
+        let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
         self.state
             .method_func_keys
             .insert((type_name_id, method_name_id), func_key);
@@ -185,7 +185,7 @@ impl Compiler<'_> {
                 )
             })?
             .vole_type;
-        let name_id = self.analyzed.get_type(type_def_id).name_id;
+        let name_id = self.analyzed.entity_type_name_id(type_def_id);
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,
@@ -275,7 +275,7 @@ impl Compiler<'_> {
                     )
                 })?;
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
-            let full_name_id = self.analyzed.get_method(method_id).full_name_id;
+            let full_name_id = self.analyzed.method_full_name(method_id);
             let func_key = self.func_registry.intern_name_id(full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -480,7 +480,7 @@ impl Compiler<'_> {
             })?;
 
         // Sentinels are zero-field structs, use type_id 0 as a placeholder.
-        let name_id = self.analyzed.get_type(type_def_id).name_id;
+        let name_id = self.analyzed.entity_type_name_id(type_def_id);
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,
@@ -636,7 +636,7 @@ impl Compiler<'_> {
                     type_kind.to_string(),
                 )
             })?;
-        let name_id = self.analyzed.get_type(type_def_id).name_id;
+        let name_id = self.analyzed.entity_type_name_id(type_def_id);
         self.state.type_metadata.insert_with_name_id(
             type_def_id,
             name_id,

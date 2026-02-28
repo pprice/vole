@@ -40,11 +40,10 @@ impl Cg<'_, '_, '_> {
             .iterator_type_def
             .ok_or_else(|| CodegenError::not_found("interface", "Iterator"))?;
 
-        let iter_def = self.analyzed().type_def(iter_type_id);
+        let iter_methods = self.analyzed().type_methods(iter_type_id);
 
         // Find the method by name
-        let method_id = iter_def
-            .methods
+        let method_id = iter_methods
             .iter()
             .find(|&&mid| {
                 let m = self.analyzed().method_def(mid);

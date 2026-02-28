@@ -161,12 +161,11 @@ impl InterfaceVtableRegistry {
 
         // Get interface metadata from the passed TypeDefId (don't re-resolve by name
         // since interface_by_short_name could return a different interface with the same name)
-        let interface_def = ctx.analyzed().get_type(interface_type_def_id);
-        let interface_name_id = interface_def.name_id;
+        let interface_name_id = ctx.analyzed().entity_type_name_id(interface_type_def_id);
 
         // Build substitution map from type param names to concrete type args (already TypeIds)
-        let mut substitutions: FxHashMap<NameId, TypeId> = interface_def
-            .type_params
+        let interface_type_params = ctx.analyzed().entity_type_params(interface_type_def_id);
+        let mut substitutions: FxHashMap<NameId, TypeId> = interface_type_params
             .iter()
             .zip(interface_type_arg_ids.iter())
             .map(|(param_name_id, &arg_id)| (*param_name_id, arg_id))
@@ -183,8 +182,8 @@ impl InterfaceVtableRegistry {
             .unwrap_nominal(concrete_type_id)
             .map(|(id, args, _)| (id, args.to_vec()));
         if let Some((class_def_id, class_type_args)) = class_info {
-            let class_def = ctx.analyzed().get_type(class_def_id);
-            for (param_name, arg_id) in class_def.type_params.iter().zip(class_type_args.iter()) {
+            let class_type_params = ctx.analyzed().entity_type_params(class_def_id);
+            for (param_name, arg_id) in class_type_params.iter().zip(class_type_args.iter()) {
                 substitutions.insert(*param_name, *arg_id);
             }
         }
@@ -973,10 +972,9 @@ fn resolve_concrete_type_name<C: VtableCtx>(
                 format!("{:?}", concrete_type_id),
             )
         })?;
-    let type_def = ctx.analyzed().get_type(type_def_id);
     let type_name = ctx
         .analyzed()
-        .last_segment(type_def.name_id)
+        .last_segment(ctx.analyzed().entity_type_name_id(type_def_id))
         .unwrap_or_else(|| "?".to_string());
     Ok((type_def_id, type_name))
 }
@@ -2006,11 +2004,10 @@ pub(crate) fn collect_interface_methods_ordered(
 ) -> CodegenResult<Vec<MethodId>> {
     // Verify this is an interface
     if !analyzed.is_interface_type(interface_id) {
-        let interface = analyzed.get_type(interface_id);
         return Err(CodegenError::type_mismatch(
             "interface vtable",
             "interface",
-            format!("{:?}", interface.kind),
+            format!("{:?}", interface_id),
         ));
     }
 
@@ -2085,11 +2082,11 @@ fn box_interface_value_core<'a, 'ctx>(
     type_args_ids: &[TypeId],
 ) -> CodegenResult<CompiledValue> {
     // Resolve the interface Symbol name via analyzed wrapper metadata.
-    let interface_def = env.analyzed.get_type(type_def_id);
+    let interface_name_id = env.analyzed.entity_type_name_id(type_def_id);
     let interface_name_str = env
         .analyzed
         .name_table()
-        .last_segment_str(interface_def.name_id)
+        .last_segment_str(interface_name_id)
         .ok_or_else(|| {
             CodegenError::not_found("interface name string", format!("{:?}", type_def_id))
         })?;
@@ -2292,7 +2289,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         let arena = ctx.analyzed().type_arena();
         let type_def_id = arena.unwrap_class(concrete_type_id).map(|(id, _)| id)?;
 
-        let type_name_id = ctx.analyzed().get_type(type_def_id).name_id;
+        let type_name_id = ctx.analyzed().entity_type_name_id(type_def_id);
         let meta = type_metadata_by_name_id(ctx.type_metadata(), type_name_id)?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 

@@ -41,10 +41,6 @@ pub(crate) struct EntityView {
     function_by_name: FxHashMap<NameId, FunctionId>,
     global_by_name: FxHashMap<NameId, GlobalId>,
 
-    // -- Scoped lookups --
-    methods_by_type: FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>>,
-    static_methods_by_type: FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>>,
-
     // -- Miscellaneous --
     array_name: Option<NameId>,
     /// Primitive type NameIds (i64, string, bool, ...).
@@ -76,9 +72,6 @@ impl EntityView {
             function_by_name: registry.function_by_name_map().clone(),
             global_by_name: registry.global_by_name_map().clone(),
 
-            methods_by_type: registry.methods_by_type_map().clone(),
-            static_methods_by_type: registry.static_methods_by_type_map().clone(),
-
             array_name: registry.array_name_id(),
             primitive_names: registry.primitive_name_entries().collect(),
             short_name_map,
@@ -96,11 +89,6 @@ impl EntityView {
         self.array_name
     }
 
-    /// Resolve a type's canonical entity NameId from its TypeDefId.
-    pub(crate) fn type_name_id(&self, type_def_id: TypeDefId) -> NameId {
-        self.get_type(type_def_id).name_id
-    }
-
     /// Return a type definition by ID.
     pub(crate) fn get_type(&self, type_def_id: TypeDefId) -> &TypeDef {
         &self.type_defs[type_def_id.index() as usize]
@@ -116,20 +104,6 @@ impl EntityView {
         self.short_name_map
             .get(short_name)
             .and_then(|ids| ids.first().copied())
-    }
-
-    /// Return type parameters for a type definition.
-    pub(crate) fn type_params(&self, type_def_id: TypeDefId) -> Vec<NameId> {
-        self.get_type(type_def_id).type_params.clone()
-    }
-
-    /// Return all interfaces implemented by a type definition.
-    pub(crate) fn implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId> {
-        self.get_type(type_def_id)
-            .implements
-            .iter()
-            .map(|impl_| impl_.interface)
-            .collect()
     }
 
     /// Return type arguments for a specific interface implementation.
@@ -164,25 +138,6 @@ impl EntityView {
         None
     }
 
-    /// Check if a type is a functional interface (single abstract method, no fields).
-    pub(crate) fn is_functional(&self, type_def_id: TypeDefId) -> Option<MethodId> {
-        let type_def = self.get_type(type_def_id);
-        if !type_def.fields.is_empty() {
-            return None;
-        }
-        let abstract_methods: Vec<MethodId> = type_def
-            .methods
-            .iter()
-            .copied()
-            .filter(|&method_id| !self.get_method(method_id).has_default)
-            .collect();
-        if abstract_methods.len() == 1 {
-            Some(abstract_methods[0])
-        } else {
-            None
-        }
-    }
-
     /// Check if all methods on a type have external bindings.
     pub(crate) fn is_external_only(&self, type_def_id: TypeDefId) -> bool {
         let type_def = self.get_type(type_def_id);
@@ -195,55 +150,11 @@ impl EntityView {
         })
     }
 
-    /// Return interface method IDs in deterministic vtable slot order.
-    pub(crate) fn interface_methods_ordered(&self, interface_id: TypeDefId) -> Vec<MethodId> {
-        let mut methods = Vec::new();
-        let mut seen_interfaces = std::collections::HashSet::new();
-        let mut seen_methods = std::collections::HashSet::new();
-        self.collect_interface_methods_inner(
-            interface_id,
-            &mut methods,
-            &mut seen_interfaces,
-            &mut seen_methods,
-        );
-        methods
-    }
-
-    /// Recursive helper: collect interface methods in vtable order.
-    fn collect_interface_methods_inner(
-        &self,
-        interface_id: TypeDefId,
-        methods: &mut Vec<MethodId>,
-        seen_interfaces: &mut std::collections::HashSet<TypeDefId>,
-        seen_methods: &mut std::collections::HashSet<NameId>,
-    ) {
-        if !seen_interfaces.insert(interface_id) {
-            return;
-        }
-        let type_def = self.get_type(interface_id);
-        // Parent interfaces first
-        for &parent in &type_def.extends {
-            self.collect_interface_methods_inner(parent, methods, seen_interfaces, seen_methods);
-        }
-        // Then own methods (skip already-seen from parents)
-        for &method_id in &type_def.methods {
-            let name = self.get_method(method_id).name_id;
-            if seen_methods.insert(name) {
-                methods.push(method_id);
-            }
-        }
-    }
-
     // ===== Field lookups =====
 
     /// Return a field definition by ID.
     pub(crate) fn get_field(&self, field_id: FieldId) -> &FieldDef {
         &self.field_defs[field_id.index() as usize]
-    }
-
-    /// Return field IDs declared on a type definition.
-    pub(crate) fn fields_on_type(&self, type_def_id: TypeDefId) -> &[FieldId] {
-        &self.get_type(type_def_id).fields
     }
 
     // ===== Function lookups =====
@@ -263,38 +174,6 @@ impl EntityView {
     /// Return a method definition by ID.
     pub(crate) fn get_method(&self, method_id: MethodId) -> &MethodDef {
         &self.method_defs[method_id.index() as usize]
-    }
-
-    /// Find a method on a type by method NameId.
-    pub(crate) fn find_method_on_type(
-        &self,
-        type_def_id: TypeDefId,
-        method_name_id: NameId,
-    ) -> Option<MethodId> {
-        self.methods_by_type
-            .get(&type_def_id)
-            .and_then(|m| m.get(&method_name_id).copied())
-    }
-
-    /// Find a static method on a type by method NameId.
-    pub(crate) fn find_static_method_on_type(
-        &self,
-        type_def_id: TypeDefId,
-        method_name_id: NameId,
-    ) -> Option<MethodId> {
-        self.static_methods_by_type
-            .get(&type_def_id)
-            .and_then(|m| m.get(&method_name_id).copied())
-    }
-
-    /// Return direct method IDs declared on a type definition.
-    pub(crate) fn methods_on_type(&self, type_def_id: TypeDefId) -> &[MethodId] {
-        &self.get_type(type_def_id).methods
-    }
-
-    /// Return the full NameId for a method.
-    pub(crate) fn method_full_name(&self, method_id: MethodId) -> NameId {
-        self.get_method(method_id).full_name_id
     }
 
     /// Return external binding metadata for a method, when available.
