@@ -7,10 +7,8 @@ use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
 use vole_frontend::Symbol;
-use vole_identity::{
-    MethodId, NameId, NodeId, StaticMethodMonomorphInstance, StaticMethodMonomorphKey, TypeDefId,
-    TypeId,
-};
+use vole_identity::{MethodId, NameId, NodeId, StaticMethodMonomorphKey, TypeDefId, TypeId};
+use vole_vir::VirStaticMethodMonomorphInfo;
 use vole_vir::expr::{VirMethodDispatchMeta, VirStaticMethodMonomorphKey};
 
 use super::methods::ArgSource;
@@ -115,8 +113,9 @@ impl Cg<'_, '_, '_> {
                     })
                     .collect();
                 let static_candidates: Vec<_> = self.analyzed()
-                    .static_method_monomorph_cache()
-                    .instances()
+                    .vir_program()
+                    .static_method_monomorphs
+                    .iter()
                     .filter(|(k, _)| k.class_name == type_name_id && k.method_name == method_name_id)
                     .map(|(k, inst)| {
                         let mangled = self.analyzed().display_name(inst.mangled_name);
@@ -253,7 +252,7 @@ impl Cg<'_, '_, '_> {
         type_def_id: TypeDefId,
         _expr_id: Option<NodeId>,
         vir_key: Option<&VirStaticMethodMonomorphKey>,
-    ) -> Option<StaticMethodMonomorphInstance> {
+    ) -> Option<VirStaticMethodMonomorphInfo> {
         let mono_key = vir_key.map(|key| {
             StaticMethodMonomorphKey::new(
                 key.class_name,
@@ -306,10 +305,11 @@ impl Cg<'_, '_, '_> {
                 mono_key.clone()
             };
 
-            // Look up the monomorphized instance
+            // Look up the monomorphized instance from VirProgram
             if let Some(instance) = self
                 .analyzed()
-                .static_method_monomorph_cache()
+                .vir_program()
+                .static_method_monomorphs
                 .get(&effective_key)
             {
                 return Some(instance.clone());
@@ -324,8 +324,9 @@ impl Cg<'_, '_, '_> {
         let subs = self.substitutions;
         let arena = self.arena();
         self.analyzed()
-            .static_method_monomorph_cache()
-            .instances()
+            .vir_program()
+            .static_method_monomorphs
+            .iter()
             .filter_map(|(key, instance)| {
                 if key.class_name != type_name_id || key.method_name != method_name_id {
                     return None;
@@ -377,7 +378,7 @@ impl Cg<'_, '_, '_> {
 
     fn call_static_monomorph_instance(
         &mut self,
-        instance: &StaticMethodMonomorphInstance,
+        instance: &VirStaticMethodMonomorphInfo,
         arg_source: &ArgSource<'_>,
     ) -> CodegenResult<CompiledValue> {
         // Compile arguments with substituted param types (TypeId-based)
