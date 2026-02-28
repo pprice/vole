@@ -331,7 +331,7 @@ impl Cg<'_, '_, '_> {
         // Global interface initializers are recompiled per use. They can surface as
         // untracked/borrowed values in method-call paths, but still represent fresh
         // temporary interface boxes that must be released after dispatch.
-        if receiver_is_global_init_rc_iface && self.arena().is_interface(receiver.type_id) {
+        if receiver_is_global_init_rc_iface && self.vir_query_is_interface(receiver.type_id) {
             self.emit_rc_dec_for_type(receiver.value, receiver.type_id)?;
             receiver.mark_consumed();
             return Ok(());
@@ -514,7 +514,7 @@ impl Cg<'_, '_, '_> {
         // resolution as None so the monomorphized-fallback path (which derives dispatch from
         // obj.type_id) handles it correctly.
         let resolution = match resolution {
-            Some(r) if r.is_interface_method() && !self.arena().is_interface(obj.type_id) => None,
+            Some(r) if r.is_interface_method() && !self.vir_query_is_interface(obj.type_id) => None,
             other => other,
         };
 
@@ -1166,7 +1166,7 @@ impl Cg<'_, '_, '_> {
         // If the return type is a union, copy the data from the callee's stack to our own
         // IMMEDIATELY after the call, before any rc_dec calls (consume_rc_value/consume_rc_args)
         // can clobber the callee's stack frame.
-        if self.arena().is_union(return_type_id) && !is_sret {
+        if self.vir_query_is_union(return_type_id) && !is_sret {
             let results = self.builder.inst_results(call);
             if !results.is_empty() {
                 let src_ptr = results[0];
@@ -1253,7 +1253,7 @@ impl Cg<'_, '_, '_> {
 
             // For union returns, copy out of the callee stack into a local stack
             // slot and mark RC unions as owned so discard paths can clean them.
-            if self.arena().is_union(return_type_id) {
+            if self.vir_query_is_union(return_type_id) {
                 return Ok(self.copy_union_ptr_to_local(result_value, return_type_id));
             }
 

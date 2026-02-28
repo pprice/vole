@@ -518,7 +518,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // For union returns, copy the value out of the callee's stack frame
         // before RC temp cleanup. rc_dec may clobber the callee return slot.
-        let union_copy = if sret_slot.is_none() && self.arena().is_union(callee_return_type_id) {
+        let union_copy = if sret_slot.is_none() && self.vir_query_is_union(callee_return_type_id) {
             let results = self.builder.inst_results(call_inst);
             let src_ptr = results[0];
             Some(self.copy_union_ptr_to_local(src_ptr, callee_return_type_id))

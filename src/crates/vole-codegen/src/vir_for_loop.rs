@@ -229,7 +229,7 @@ impl Cg<'_, '_, '_> {
         // element typing/storage from the compiled iterable value.
         if let Some(arr_elem_type_id) = self.arena().unwrap_array(arr.type_id) {
             elem_type_id = arr_elem_type_id;
-            if union_storage.is_none() && self.arena().is_union(arr_elem_type_id) {
+            if union_storage.is_none() && self.vir_query_is_union(arr_elem_type_id) {
                 union_storage = Some(
                     if self.union_array_prefers_inline_storage(arr_elem_type_id) {
                         vole_sema::UnionStorageKind::Inline
@@ -568,7 +568,7 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
         union_storage: Option<vole_sema::UnionStorageKind>,
     ) -> CodegenResult<Value> {
-        if self.arena().is_unknown(elem_type_id) {
+        if elem_type_id.is_unknown() {
             let tag_offset = std::mem::offset_of!(vole_runtime::value::TaggedValue, tag) as i32;
             let elem_tag =
                 self.builder

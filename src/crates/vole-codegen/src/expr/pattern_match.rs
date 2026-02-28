@@ -7,10 +7,7 @@ use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{
-    CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag,
-    type_id_to_cranelift,
-};
+use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag};
 
 use vole_frontend::Symbol;
 use vole_frontend::ast::RecordFieldPattern;
@@ -196,20 +193,20 @@ impl Cg<'_, '_, '_> {
         }
         if arm_types.len() > 1
             && let Some(inferred_union) = self.arena().lookup_union(arm_types.clone().into())
-            && (!self.arena().is_union(effective_result_type)
-                || self.arena().is_unknown(effective_result_type)
+            && (!self.vir_query_is_union(effective_result_type)
+                || effective_result_type.is_unknown()
                 || self.arena().is_function(effective_result_type))
         {
             effective_result_type = inferred_union;
         } else if let [single] = arm_types.as_slice()
-            && (self.arena().is_unknown(effective_result_type)
+            && (effective_result_type.is_unknown()
                 || self.arena().is_function(effective_result_type))
         {
             effective_result_type = *single;
         }
 
         // Replicate the nil-arm union return type adjustment from match_expr.
-        if !self.arena().is_union(effective_result_type) {
+        if !self.vir_query_is_union(effective_result_type) {
             let has_nil_arm = arms.iter().any(|arm| {
                 arm.ty != VirTypeId::UNKNOWN
                     && self
@@ -218,14 +215,14 @@ impl Cg<'_, '_, '_> {
             });
             if has_nil_arm && let Some(ret_type_id) = self.return_type {
                 let ret_type_id = self.try_substitute_type(ret_type_id);
-                if self.arena().is_union(ret_type_id) {
+                if self.vir_query_is_union(ret_type_id) {
                     effective_result_type = ret_type_id;
                 }
             }
         }
 
         let result_cranelift_type = self.cranelift_type(effective_result_type);
-        let is_void = self.arena().is_void(effective_result_type);
+        let is_void = effective_result_type.is_void();
 
         // Try switch optimization for dense integer literal arms.
         if let Some(analysis) = match_switch::analyze_vir_switch(arms, scrutinee_type_id) {
@@ -517,11 +514,7 @@ impl Cg<'_, '_, '_> {
 
         if let Some(inner_pat) = inner {
             let success_type_id = self.try_substitute_type(success_type);
-            let ptr_type = self.ptr_type();
-            let payload_ty = {
-                let arena = self.arena();
-                type_id_to_cranelift(success_type_id, arena, ptr_type)
-            };
+            let payload_ty = self.cranelift_type(success_type_id);
             let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
 
             // The inner pattern is a VIR pattern (e.g. Binding for `success x`).
@@ -557,11 +550,7 @@ impl Cg<'_, '_, '_> {
                         .ins()
                         .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
                 let error_type_id = self.try_substitute_type(self.sema_type_from_vir(*error_ty));
-                let ptr_type = self.ptr_type();
-                let payload_ty = {
-                    let arena = self.arena();
-                    type_id_to_cranelift(error_type_id, arena, ptr_type)
-                };
+                let payload_ty = self.cranelift_type(error_type_id);
                 let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
                 let var = self.builder.declare_var(payload_ty);
                 self.builder.def_var(var, payload);
@@ -735,7 +724,7 @@ impl Cg<'_, '_, '_> {
         field_source_type_id: TypeId,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> CodegenResult<()> {
-        let is_struct = self.arena().is_struct(field_source_type_id);
+        let is_struct = self.vir_query_is_struct(field_source_type_id);
         for field in fields {
             let field_name = self.interner().resolve(field.field_name);
             let (slot, field_type_id) =
@@ -792,7 +781,7 @@ impl Cg<'_, '_, '_> {
             }
             if terminated {
                 self.void_value()
-            } else if self.arena().is_union(result_type_id)
+            } else if self.vir_query_is_union(result_type_id)
                 && matches!(trailing.as_ref(), vole_vir::VirExpr::ArrayLiteral { .. })
                 && let Some(expected_variant) =
                     self.preferred_array_like_union_variant(result_type_id)

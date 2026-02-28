@@ -12,6 +12,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use vole_frontend::ast::{TestCase, TestsDecl};
 use vole_frontend::{Decl, ExprKind, Program};
+use vole_sema::type_arena::TypeId;
 
 impl Compiler<'_> {
     /// Compile all tests in a tests block
@@ -158,13 +159,12 @@ impl Compiler<'_> {
                     self.declare_tests_scoped_decls(nested_tests, test_count)?;
 
                     // Declare each nested test with a generated name and signature () -> i64
-                    let i64_type_id = self.arena().primitives.i64;
                     for _ in &nested_tests.tests {
                         let func_key = self.test_function_key(*test_count);
                         let func_name = self.test_display_name(func_key);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
-                        self.func_registry.set_return_type(func_key, i64_type_id);
+                        self.func_registry.set_return_type(func_key, TypeId::I64);
                         self.func_registry.set_func_id(func_key, func_id);
                         *test_count += 1;
                     }
@@ -250,13 +250,12 @@ impl Compiler<'_> {
                     self.declare_main_function(func.name);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
-                    let i64_type_id = self.arena().primitives.i64;
                     for _ in &tests_decl.tests {
                         let func_key = self.test_function_key(test_count);
                         let func_name = self.test_display_name(func_key);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
-                        self.func_registry.set_return_type(func_key, i64_type_id);
+                        self.func_registry.set_return_type(func_key, TypeId::I64);
                         self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
                     }

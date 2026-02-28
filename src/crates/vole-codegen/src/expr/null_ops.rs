@@ -7,10 +7,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{
-    CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag,
-    type_id_to_cranelift,
-};
+use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag};
 use crate::union_layout;
 
 use vole_identity::NodeId;
@@ -73,7 +70,7 @@ impl Cg<'_, '_, '_> {
         // Structs are captured by value — the heap slot contains the full struct
         // data (not a pointer to a pointer). Return heap_ptr directly as the
         // struct pointer.
-        if self.arena().is_struct(binding.vole_type) {
+        if self.vir_query_is_struct(binding.vole_type) {
             let ptr_type = self.ptr_type();
             let cv = CompiledValue::new(heap_ptr, ptr_type, binding.vole_type);
             return Ok(cv);
@@ -161,7 +158,7 @@ impl Cg<'_, '_, '_> {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
         })?;
 
-        let is_multi_variant_inner = self.arena().is_union(inner_type_id);
+        let is_multi_variant_inner = self.vir_query_is_union(inner_type_id);
         if is_multi_variant_inner {
             self.vir_null_coalesce_union(default_expr, value, inner_type_id, nil_tag)
         } else {
@@ -177,7 +174,7 @@ impl Cg<'_, '_, '_> {
         inner_type_id: TypeId,
         nil_tag: usize,
     ) -> CodegenResult<CompiledValue> {
-        let cranelift_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
+        let cranelift_type = self.cranelift_type(inner_type_id);
 
         let is_nil = self.tag_eq(value.value, nil_tag as i64);
         let nil_block = self.builder.create_block();
@@ -248,7 +245,7 @@ impl Cg<'_, '_, '_> {
         // Nil branch: evaluate default, box into union if needed
         self.switch_and_seal(nil_block);
         let default_val = self.compile_vir_expr(default_expr)?;
-        let default_ptr = if self.arena().is_union(default_val.type_id) {
+        let default_ptr = if self.vir_query_is_union(default_val.type_id) {
             default_val.value
         } else {
             let boxed = self.construct_union_id(default_val, inner_type_id)?;

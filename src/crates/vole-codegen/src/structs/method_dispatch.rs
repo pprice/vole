@@ -258,7 +258,7 @@ impl Cg<'_, '_, '_> {
                     self.ptr_type(),
                 )));
             }
-            let is_void_return = self.arena().is_void(return_type_id);
+            let is_void_return = return_type_id.is_void();
             if !is_void_return {
                 sig.returns.push(AbiParam::new(type_id_to_cranelift(
                     return_type_id,
@@ -290,7 +290,7 @@ impl Cg<'_, '_, '_> {
                     self.ptr_type(),
                 )));
             }
-            let is_void_return = self.arena().is_void(return_type_id);
+            let is_void_return = return_type_id.is_void();
             if !is_void_return {
                 sig.returns.push(AbiParam::new(type_id_to_cranelift(
                     return_type_id,

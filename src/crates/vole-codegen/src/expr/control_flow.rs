@@ -5,7 +5,7 @@
 use cranelift::prelude::*;
 
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
+use crate::types::{CompiledValue, RcLifecycle};
 
 use vole_sema::type_arena::TypeId;
 
@@ -127,9 +127,8 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let condition = self.compile_vir_expr(cond)?;
-        let is_void = self.arena().is_void(result_type_id);
-        let result_cranelift_type =
-            type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
+        let is_void = self.vir_query_is_void(result_type_id);
+        let result_cranelift_type = self.cranelift_type(result_type_id);
 
         // Create basic blocks
         let then_block = self.builder.create_block();

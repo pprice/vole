@@ -13,7 +13,7 @@ use vole_vir::VirStmt;
 
 use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, split_i128_for_storage, store_value_to_stack};
-use super::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, type_id_to_cranelift};
+use super::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type};
 use crate::ops::sextend_const;
 
 #[derive(Clone, Copy)]
@@ -47,11 +47,11 @@ impl Cg<'_, '_, '_> {
                 let is_declared_interface = arena.is_interface(declared_type_id);
                 let is_declared_unknown = arena.is_unknown(declared_type_id);
 
-                if is_declared_unknown && !self.arena().is_unknown(init.type_id) {
+                if is_declared_unknown && !init.type_id.is_unknown() {
                     // Box value to unknown type (TaggedValue)
                     let boxed = self.box_to_unknown(*init)?;
                     (boxed.value, boxed.type_id)
-                } else if is_declared_union && !self.arena().is_union(init.type_id) {
+                } else if is_declared_union && !self.vir_query_is_union(init.type_id) {
                     let wrapped = self.construct_union_id_with_hint(
                         *init,
                         declared_type_id,
@@ -83,8 +83,7 @@ impl Cg<'_, '_, '_> {
             let is_runtime_iterator = arena.is_runtime_iterator(final_type_id);
 
             if is_declared_interface && !is_final_interface && !is_runtime_iterator {
-                let arena = self.arena();
-                let cranelift_ty = type_id_to_cranelift(final_type_id, arena, self.ptr_type());
+                let cranelift_ty = self.cranelift_type(final_type_id);
                 let boxed = self.box_interface_value(
                     CompiledValue::new(final_value, cranelift_ty, final_type_id),
                     declared_type_id,
@@ -269,7 +268,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // If the value is a struct, box it first (auto-boxing for union storage)
-        let value = if self.arena().is_struct(value.type_id) {
+        let value = if self.vir_query_is_struct(value.type_id) {
             self.copy_struct_to_heap(value)?
         } else {
             value
@@ -489,7 +488,7 @@ impl Cg<'_, '_, '_> {
             };
             compiled.type_id = self.try_substitute_type(compiled.type_id);
             if let Some(ret_type_id) = return_type_id
-                && self.arena().is_union(ret_type_id)
+                && self.vir_query_is_union(ret_type_id)
                 && self.arena().is_function(compiled.type_id)
                 && let vole_vir::VirExpr::Match {
                     scrutinee, arms, ..
@@ -639,11 +638,9 @@ impl Cg<'_, '_, '_> {
         // NOTE: convert_to_type requires arena for detailed type inspection.
         // This is a boundary case retained until CompiledValue carries VirTypeId.
         let return_value = if let Some(ret_type_id) = return_type_id {
-            let arena = self.env.analyzed.type_arena();
-            let ptr_type = self.ptr_type();
-            let target_ty = type_id_to_cranelift(ret_type_id, arena, ptr_type);
+            let target_ty = self.cranelift_type(ret_type_id);
 
-            convert_to_type(self.builder, compiled, target_ty, arena)
+            convert_to_type(self.builder, compiled, target_ty, self.arena())
         } else {
             compiled.value
         };

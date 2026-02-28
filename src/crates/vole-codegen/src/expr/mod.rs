@@ -30,7 +30,7 @@ use vole_vir::{
 };
 
 use super::context::Cg;
-use super::types::{CompiledValue, RcLifecycle, type_id_to_cranelift};
+use super::types::{CompiledValue, RcLifecycle};
 
 impl Cg<'_, '_, '_> {
     /// Best-effort VIR type extraction for an expression node.
@@ -167,7 +167,7 @@ impl Cg<'_, '_, '_> {
         // Build wrapper signature: (closure_ptr, params...) -> return_type
         let param_types = self.cranelift_types(param_ids);
         let return_cr_type = self.cranelift_type(return_type_id);
-        let is_void_return = self.arena().is_void(return_type_id);
+        let is_void_return = return_type_id.is_void();
 
         let mut wrapper_sig = self.jit_module().make_signature();
         wrapper_sig.params.push(AbiParam::new(self.ptr_type())); // closure ptr (ignored)
@@ -1019,8 +1019,7 @@ impl Cg<'_, '_, '_> {
             && let Some(narrowed_variant) =
                 self.find_union_variant(resolved_union_type_id, narrowed_type_id)
         {
-            // NOTE: arena() retained for type_id_to_cranelift — needs sema TypeId.
-            let payload_ty = type_id_to_cranelift(narrowed_variant, self.arena(), self.ptr_type());
+            let payload_ty = self.cranelift_type(narrowed_variant);
             let payload = self.load_union_payload(val, resolved_union_type_id, payload_ty);
             let mut cv = CompiledValue::new(payload, payload_ty, narrowed_variant);
             self.mark_borrowed_if_rc(&mut cv);

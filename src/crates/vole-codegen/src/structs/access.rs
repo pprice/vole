@@ -44,8 +44,8 @@ impl Cg<'_, '_, '_> {
         // Struct types are stack-allocated: load field directly from pointer + offset.
         // Exception: annotation structs used in FieldMeta.annotations are heap-allocated
         // class instances (via InstanceNew), so they must use InstanceGetField.
-        let is_struct =
-            self.arena().is_struct(obj.type_id) && !self.is_heap_allocated_annotation(obj.type_id);
+        let is_struct = self.vir_query_is_struct(obj.type_id)
+            && !self.is_heap_allocated_annotation(obj.type_id);
         if is_struct {
             return self.struct_field_load(obj.value, slot, field_type_id, obj.type_id);
         }
@@ -94,7 +94,7 @@ impl Cg<'_, '_, '_> {
         let offset = self.struct_field_byte_offset(parent_type_id, slot);
 
         // If the field is itself a struct, return a pointer into the parent data
-        let is_nested_struct = self.arena().is_struct(field_type_id);
+        let is_nested_struct = self.vir_query_is_struct(field_type_id);
         if is_nested_struct {
             let ptr_type = self.ptr_type();
             // iadd_imm to compute pointer into the parent struct's inline data
@@ -171,7 +171,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Coerce to union if needed
-        let union_val = if !self.arena().is_union(value.type_id) {
+        let union_val = if !self.vir_query_is_union(value.type_id) {
             self.construct_union_id(value, field_type_id)?
         } else {
             value

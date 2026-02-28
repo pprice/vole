@@ -10,7 +10,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, field_byte_size, type_id_to_cranelift};
+use crate::types::{CompiledValue, field_byte_size};
 
 use vole_sema::UnionStorageKind;
 use vole_sema::type_arena::TypeId;
@@ -148,7 +148,7 @@ impl Cg<'_, '_, '_> {
             let (_, offsets) = self.tuple_layout(elem_type_ids);
             let offset = offsets[i];
             let elem_type_id = elem_type_ids[i];
-            let elem_cr_type = type_id_to_cranelift(elem_type_id, self.arena(), self.ptr_type());
+            let elem_cr_type = self.cranelift_type(elem_type_id);
 
             let value = self
                 .builder
@@ -172,7 +172,7 @@ impl Cg<'_, '_, '_> {
         size: usize,
     ) -> CodegenResult<CompiledValue> {
         let elem_size = field_byte_size(element_id, self.arena()) as i32;
-        let elem_cr_type = type_id_to_cranelift(element_id, self.arena(), self.ptr_type());
+        let elem_cr_type = self.cranelift_type(element_id);
 
         let offset = if let VirExpr::IntLiteral { value, .. } = index {
             let i = *value as usize;

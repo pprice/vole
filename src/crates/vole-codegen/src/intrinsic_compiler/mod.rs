@@ -24,9 +24,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::convert_to_i64_for_storage;
 
 use super::context::{Cg, ExternalMethodRef, resolve_external_names};
-use super::types::{
-    CompiledValue, array_element_tag_id, native_type_to_cranelift, type_id_to_cranelift,
-};
+use super::types::{CompiledValue, array_element_tag_id, native_type_to_cranelift};
 use crate::ops::uextend_const;
 
 /// Get signed integer min/max bounds for a given bit width.
@@ -127,8 +125,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            let arena = self.arena();
-            let cranelift_ty = type_id_to_cranelift(return_type_id, arena, ptr_type);
+            let cranelift_ty = self.cranelift_type(return_type_id);
             let actual_ty = self.builder.func.dfg.value_type(results[0]);
             let result_val = if actual_ty == cranelift_ty {
                 results[0]
@@ -198,7 +195,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     Ok(self.void_value())
                 } else {
                     let value = self.call_runtime(runtime, &args)?;
-                    let ty = type_id_to_cranelift(return_type_id, self.arena(), self.ptr_type());
+                    let ty = self.cranelift_type(return_type_id);
                     Ok(CompiledValue::new(value, ty, return_type_id))
                 }
             }
@@ -481,7 +478,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // tag/payload representation.
         let can_classify_rc = payload.type_id != TypeId::VOID
             && self.arena().unwrap_type_param(payload.type_id).is_none();
-        let payload_is_union = self.arena().is_union(payload.type_id);
+        let payload_is_union = self.vir_query_is_union(payload.type_id);
 
         let (tag_val, payload_bits) = if payload_is_union {
             // Reuse array tagged-value lowering for union payloads so channel
@@ -528,7 +525,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let (tag, raw_value) =
             self.call_std_task_tagged_native("channel_recv", typed_args[0].value)?;
-        if self.arena().is_union(return_type_id) {
+        if self.vir_query_is_union(return_type_id) {
             Ok(self.decode_dynamic_array_union_element(tag, raw_value, return_type_id))
         } else {
             Ok(self.convert_field_value(raw_value, return_type_id))
@@ -580,7 +577,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.seal_block(done_block);
 
         self.switch_to_block(value_block);
-        let typed_value = if self.arena().is_union(elem_type_id) {
+        let typed_value = if self.vir_query_is_union(elem_type_id) {
             self.decode_dynamic_array_union_element(tag, raw_value, elem_type_id)
         } else {
             self.convert_field_value(raw_value, elem_type_id)
@@ -611,7 +608,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
         let (tag, raw_value) =
             self.call_std_task_tagged_native("task_join", typed_args[0].value)?;
-        if self.arena().is_union(return_type_id) {
+        if self.vir_query_is_union(return_type_id) {
             Ok(self.decode_dynamic_array_union_element(tag, raw_value, return_type_id))
         } else {
             Ok(self.convert_field_value(raw_value, return_type_id))

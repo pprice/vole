@@ -11,7 +11,7 @@ use vole_sema::type_arena::TypeId;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::function_registry::FunctionRegistry;
-use crate::types::{CompiledValue, type_id_to_cranelift};
+use crate::types::CompiledValue;
 use crate::union_layout;
 
 use super::super::RuntimeKey;
@@ -191,7 +191,7 @@ impl Cg<'_, '_, '_> {
             .find(|v| !v.is_nil())
             .copied()
             .expect("INTERNAL: optional must have non-nil variant");
-        let inner_cr_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
+        let inner_cr_type = self.cranelift_type(inner_type_id);
 
         let inner_size = self.type_size(inner_type_id);
         let inner_val = if inner_size > 0 {
@@ -249,8 +249,7 @@ impl Cg<'_, '_, '_> {
         for (i, &block) in variant_blocks.iter().enumerate() {
             self.switch_to_block(block);
             let (variant_type_id, ref conv) = variants[i];
-            let inner_cr_type =
-                type_id_to_cranelift(variant_type_id, self.arena(), self.ptr_type());
+            let inner_cr_type = self.cranelift_type(variant_type_id);
             let inner_size = self.type_size(variant_type_id);
 
             let inner_val = if inner_size > 0 {

@@ -6,7 +6,7 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 
 use crate::errors::CodegenResult;
-use crate::types::{CompiledValue, type_id_to_cranelift};
+use crate::types::CompiledValue;
 
 use vole_sema::type_arena::TypeId;
 
@@ -61,8 +61,7 @@ impl Cg<'_, '_, '_> {
         line: u32,
         extract: impl FnOnce(&mut Self) -> CodegenResult<CompiledValue>,
     ) -> CodegenResult<CompiledValue> {
-        let result_cranelift_type =
-            type_id_to_cranelift(tested_type_id, self.arena(), self.ptr_type());
+        let result_cranelift_type = self.cranelift_type(tested_type_id);
 
         let match_block = self.builder.create_block();
         let panic_block = self.builder.create_block();
@@ -100,7 +99,7 @@ impl Cg<'_, '_, '_> {
         union_value: CompiledValue,
         target_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let payload_ty = type_id_to_cranelift(target_type_id, self.arena(), self.ptr_type());
+        let payload_ty = self.cranelift_type(target_type_id);
         let payload = self.load_union_payload(union_value.value, union_value.type_id, payload_ty);
         Ok(CompiledValue::new(payload, payload_ty, target_type_id))
     }

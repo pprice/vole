@@ -202,7 +202,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // If the return type is a union, the returned value is a pointer to callee's stack.
             // We need to copy the union data to our own stack to prevent it from being
             // overwritten on subsequent calls to the same closure.
-            if self.arena().is_union(ret) {
+            if self.vir_query_is_union(ret) {
                 let src_ptr = results[0];
                 Ok(self.copy_union_ptr_to_local(src_ptr, ret))
             } else {

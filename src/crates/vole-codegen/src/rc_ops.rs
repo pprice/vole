@@ -351,7 +351,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_id: TypeId,
         rc_fn: RuntimeKey,
     ) -> CodegenResult<()> {
-        if self.arena().is_interface(type_id) {
+        if self.vir_query_is_interface(type_id) {
             let data_word = self
                 .builder
                 .ins()
@@ -408,8 +408,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Returns the drop flag Variable so the caller can set it to 1 after assignment.
     pub fn register_rc_local(&mut self, variable: Variable, type_id: TypeId) -> Variable {
         let drop_flag = super::rc_cleanup::alloc_drop_flag(self);
-        let is_interface = self.arena().is_interface(type_id);
-        let is_unknown = self.arena().is_unknown(type_id);
+        let is_interface = self.vir_query_is_interface(type_id);
+        let is_unknown = type_id.is_unknown();
         self.rc_scopes
             .register_rc_local(variable, drop_flag, type_id, is_interface, is_unknown);
         drop_flag
@@ -471,9 +471,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// `FieldTypeTag::UnionHeap`, everything else is `Value`.
     pub fn field_type_tag(&self, type_id: TypeId) -> vole_runtime::type_registry::FieldTypeTag {
         use vole_runtime::type_registry::FieldTypeTag;
-        if self.arena().is_unknown(type_id) {
+        if type_id.is_unknown() {
             FieldTypeTag::UnknownHeap
-        } else if self.arena().is_interface(type_id) {
+        } else if self.vir_query_is_interface(type_id) {
             FieldTypeTag::Interface
         } else if self.rc_state(type_id).needs_cleanup() {
             FieldTypeTag::Rc

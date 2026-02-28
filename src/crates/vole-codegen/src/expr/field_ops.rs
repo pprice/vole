@@ -67,7 +67,7 @@ impl Cg<'_, '_, '_> {
         let field_name = self.interner().resolve(field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
 
-        let is_struct = self.arena().is_struct(obj.type_id);
+        let is_struct = self.vir_query_is_struct(obj.type_id);
         if is_struct {
             self.vir_struct_field_store(obj, slot, field_type_id, value)
         } else {
@@ -293,11 +293,11 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         field_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        if self.arena().is_unknown(field_type_id) && !self.arena().is_unknown(value.type_id) {
+        if field_type_id.is_unknown() && !value.type_id.is_unknown() {
             self.box_to_unknown(value)
-        } else if self.arena().is_unknown(field_type_id) && self.arena().is_unknown(value.type_id) {
+        } else if field_type_id.is_unknown() && value.type_id.is_unknown() {
             self.copy_tagged_value_to_heap(value)
-        } else if self.arena().is_interface(field_type_id) {
+        } else if self.vir_query_is_interface(field_type_id) {
             self.box_interface_value(value, field_type_id)
         } else {
             Ok(value)
@@ -313,7 +313,7 @@ impl Cg<'_, '_, '_> {
         slot: usize,
         field_type_id: TypeId,
     ) -> CodegenResult<(Option<Value>, bool, bool)> {
-        let field_is_unknown = self.arena().is_unknown(field_type_id);
+        let field_is_unknown = field_type_id.is_unknown();
         let needs_rc =
             self.rc_scopes.has_active_scope() && self.rc_state(field_type_id).needs_cleanup();
         let needs_unknown = self.rc_scopes.has_active_scope() && field_is_unknown;

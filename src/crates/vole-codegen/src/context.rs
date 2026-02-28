@@ -1090,11 +1090,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // by a scope-cleanup binding. We must clone it so the array gets
             // an independent copy (avoiding use-after-free when the binding's
             // scope cleanup frees the original).
-            let was_already_unknown = self.arena().is_unknown(value.type_id);
+            let was_already_unknown = value.type_id.is_unknown();
 
             value = self.coerce_to_type(value, resolved_elem_type)?;
 
-            if was_already_unknown && self.arena().is_unknown(value.type_id) {
+            if was_already_unknown && value.type_id.is_unknown() {
                 let cloned = self.call_runtime(RuntimeKey::TaggedValueClone, &[value.value])?;
                 value = CompiledValue::new(cloned, self.ptr_type(), value.type_id);
             }

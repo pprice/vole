@@ -224,7 +224,7 @@ impl Cg<'_, '_, '_> {
                 return self.optional_value_compare(right, left, op);
             }
             // Check if both operands are structs
-            if self.arena().is_struct(left.type_id) && self.arena().is_struct(right.type_id) {
+            if self.vir_query_is_struct(left.type_id) && self.vir_query_is_struct(right.type_id) {
                 return self.struct_equality(left, right, op);
             }
         }
@@ -736,7 +736,7 @@ impl Cg<'_, '_, '_> {
 
         // Struct payloads are pointers to stack data; loading fields from a nil optional's
         // payload pointer causes a segfault. Use conditional branching to guard the load.
-        if self.arena().is_struct(inner_type_id) {
+        if self.vir_query_is_struct(inner_type_id) {
             return self.optional_struct_compare(optional, value, op, is_not_nil, inner_type_id);
         }
 
