@@ -10,13 +10,11 @@
 use rustc_hash::FxHashMap;
 
 use vole_identity::{
-    ClassMethodMonomorphCache, FunctionId, GlobalId, MethodId, MonomorphCache, NameId, NameTable,
+    ClassMethodMonomorphCache, FunctionId, GlobalId, MonomorphCache, NameId, NameTable,
     StaticMethodMonomorphCache, TypeDefId,
 };
 use vole_sema::EntityRegistry;
-use vole_sema::entity_defs::{GlobalDef, MethodDef, TypeDef};
-
-use crate::analyzed::ExternalMethodInfoRef;
+use vole_sema::entity_defs::{GlobalDef, TypeDef};
 
 // ---------------------------------------------------------------------------
 // EntityView
@@ -30,7 +28,6 @@ use crate::analyzed::ExternalMethodInfoRef;
 pub(crate) struct EntityView {
     // -- Storage (IDs are indices into these vectors) --
     type_defs: Vec<TypeDef>,
-    method_defs: Vec<MethodDef>,
     global_defs: Vec<GlobalDef>,
 
     // -- Primary lookups by NameId --
@@ -58,7 +55,6 @@ impl EntityView {
 
         Self {
             type_defs,
-            method_defs: registry.all_method_defs().to_vec(),
             global_defs: registry.all_global_defs().to_vec(),
 
             type_by_name: registry.type_by_name_map().clone(),
@@ -120,27 +116,6 @@ impl EntityView {
     /// Resolve FunctionId by NameId.
     pub(crate) fn function_by_name(&self, name_id: NameId) -> Option<FunctionId> {
         self.function_by_name.get(&name_id).copied()
-    }
-
-    // ===== Method lookups =====
-
-    /// Return a method definition by ID.
-    pub(crate) fn get_method(&self, method_id: MethodId) -> &MethodDef {
-        &self.method_defs[method_id.index() as usize]
-    }
-
-    /// Return external binding metadata for a method, when available.
-    pub(crate) fn method_external_binding(
-        &self,
-        method_id: MethodId,
-    ) -> Option<ExternalMethodInfoRef> {
-        self.get_method(method_id)
-            .external_binding
-            .as_ref()
-            .map(|info| ExternalMethodInfoRef {
-                module_path: info.module_path,
-                native_name: info.native_name,
-            })
     }
 
     // ===== Global lookups =====

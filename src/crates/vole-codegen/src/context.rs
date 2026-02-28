@@ -51,6 +51,15 @@ impl From<vole_vir::expr::VirExternalMethodInfo> for ExternalMethodRef {
     }
 }
 
+impl From<&vole_vir::expr::VirExternalMethodInfo> for ExternalMethodRef {
+    fn from(value: &vole_vir::expr::VirExternalMethodInfo) -> Self {
+        Self {
+            module_path: value.module_path,
+            native_name: value.native_name,
+        }
+    }
+}
+
 impl From<vole_vir::VirExternalFuncInfo> for ExternalMethodRef {
     fn from(value: vole_vir::VirExternalFuncInfo) -> Self {
         Self {

@@ -259,19 +259,27 @@ impl AnalyzedProgram {
             .unwrap_or_else(|| panic!("function_def: no VirFunctionDef for {function_id:?}"))
     }
 
-    /// Resolve a sema MethodDef by ID.
-    pub(crate) fn method_def(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
-        self.entity_view.get_method(method_id)
+    /// Resolve a VIR method definition by ID.
+    pub(crate) fn method_def(
+        &self,
+        method_id: MethodId,
+    ) -> &vole_vir::entity_metadata::VirMethodDef {
+        self.entity_metadata()
+            .get_method_def(method_id)
+            .unwrap_or_else(|| panic!("method_def: no VirMethodDef for {method_id:?}"))
     }
 
-    /// Query-compatible alias for resolving a sema MethodDef by ID.
-    pub(crate) fn get_method(&self, method_id: MethodId) -> &vole_sema::entity_defs::MethodDef {
+    /// Query-compatible alias for resolving a VIR method definition by ID.
+    pub(crate) fn get_method(
+        &self,
+        method_id: MethodId,
+    ) -> &vole_vir::entity_metadata::VirMethodDef {
         self.method_def(method_id)
     }
 
     /// Return the sema signature TypeId for a method.
     pub(crate) fn method_signature_id(&self, method_id: MethodId) -> vole_sema::type_arena::TypeId {
-        self.entity_view.get_method(method_id).signature_id
+        self.method_def(method_id).signature_id
     }
 
     /// Return all field IDs declared on a type definition.
@@ -484,8 +492,8 @@ impl AnalyzedProgram {
     pub(crate) fn method_external_binding(
         &self,
         method_id: MethodId,
-    ) -> Option<ExternalMethodInfoRef> {
-        self.entity_view.method_external_binding(method_id)
+    ) -> Option<&vole_vir::VirExternalMethodInfo> {
+        self.method_def(method_id).external_binding.as_ref()
     }
 
     /// Return true when all methods on a type are external-only.
@@ -564,11 +572,11 @@ impl AnalyzedProgram {
 
     /// Return whether a method parameter has a default expression.
     pub(crate) fn has_method_default_expr(&self, method_id: MethodId, param_idx: usize) -> bool {
-        self.entity_view
-            .get_method(method_id)
-            .param_defaults
+        self.method_def(method_id)
+            .has_param_defaults
             .get(param_idx)
-            .is_some_and(|opt| opt.is_some())
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Return imported-module interner for a module ID, when available.
