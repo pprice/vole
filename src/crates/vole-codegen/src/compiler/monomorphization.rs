@@ -1033,16 +1033,8 @@ impl Compiler<'_> {
         use vole_identity::{ClassMethodMonomorphKey, FunctionType};
 
         // Early-exit if monomorph caches haven't grown since last expansion
-        let current_cache_size = self
-            .analyzed
-            .class_method_monomorph_cache()
-            .instances()
-            .count()
-            + self
-                .analyzed
-                .static_method_monomorph_cache()
-                .instances()
-                .count();
+        let current_cache_size = self.analyzed.vir_program().class_method_monomorphs.len()
+            + self.analyzed.vir_program().static_method_monomorphs.len();
         if current_cache_size == self.last_expansion_cache_size {
             tracing::debug!("expand_abstract_class_method_monomorphs: caches unchanged, skipping");
             return Ok(());
@@ -1057,14 +1049,16 @@ impl Compiler<'_> {
             "expand_abstract_class_method_monomorphs: checking cache"
         );
 
-        let abstract_templates: Vec<(ClassMethodMonomorphKey, ClassMethodMonomorphInstance)> = self
+        let type_table = &self.analyzed.vir_program().type_table;
+        let abstract_templates: Vec<(ClassMethodMonomorphKey, VirClassMethodMonomorphInfo)> = self
             .analyzed
-            .class_method_monomorph_cache()
-            .instances()
+            .vir_program()
+            .class_method_monomorphs
+            .iter()
             .filter(|(_, inst)| {
-                inst.substitutions
-                    .values()
-                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+                inst.vir_substitutions.values().any(|&vir_type_id| {
+                    matches!(type_table.get(vir_type_id), VirType::Param { .. })
+                })
             })
             .map(|(key, inst)| (key.clone(), inst.clone()))
             .collect();
@@ -1094,12 +1088,12 @@ impl Compiler<'_> {
             FxHashMap::default();
 
         // Collect from concrete static method monomorphs
-        for (key, inst) in self.analyzed.static_method_monomorph_cache().instances() {
+        for (key, inst) in &self.analyzed.vir_program().static_method_monomorphs {
             // Skip abstract entries (TypeParam in substitutions)
             if inst
-                .substitutions
+                .vir_substitutions
                 .values()
-                .any(|&ty| arena.unwrap_type_param(ty).is_some())
+                .any(|&vir_type_id| matches!(type_table.get(vir_type_id), VirType::Param { .. }))
             {
                 continue;
             }
@@ -1144,12 +1138,12 @@ impl Compiler<'_> {
         }
 
         // Collect from concrete class method monomorphs
-        for (key, inst) in self.analyzed.class_method_monomorph_cache().instances() {
+        for (key, inst) in &self.analyzed.vir_program().class_method_monomorphs {
             // Skip abstract entries
             if inst
-                .substitutions
+                .vir_substitutions
                 .values()
-                .any(|&ty| arena.unwrap_type_param(ty).is_some())
+                .any(|&vir_type_id| matches!(type_table.get(vir_type_id), VirType::Param { .. }))
             {
                 continue;
             }
@@ -1252,12 +1246,12 @@ impl Compiler<'_> {
                     concrete_type_keys,
                 );
 
-                // Skip if already in sema cache or already expanded
+                // Skip if already in VirProgram or already expanded
                 if self
                     .analyzed
-                    .class_method_monomorph_cache()
-                    .get(&concrete_key)
-                    .is_some()
+                    .vir_program()
+                    .class_method_monomorphs
+                    .contains_key(&concrete_key)
                 {
                     continue;
                 }
