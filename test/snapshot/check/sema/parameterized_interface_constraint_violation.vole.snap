@@ -9,12 +9,3 @@
     ·          ╰── found 'main::StringProducer'
  22 │ }
     ╰────
-  × [E2096]: return type mismatch in function expecting i64
-    ╭─[<path>/parameterized_interface_constraint_violation.vole:16:12]
- 15 │ func get_int<P: Producer<i64>>(p: P) -> i64 {
- 16 │     return p.produce()
-    ·            ─────┬─────
-    ·                 ╰── this returns string
- 17 │ }
-    ╰────
-  help: function expects i64

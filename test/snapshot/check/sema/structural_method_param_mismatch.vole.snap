@@ -1,20 +1,12 @@
 [stdout]
 
 [stderr]
-  × [E2001]: expected string, found integer literal
-   ╭─[<path>/structural_method_param_mismatch.vole:3:18]
- 2 │ func call_add<T: { func add(n: i64) -> i64 }>(x: T) -> i64 {
- 3 │     return x.add(1)
-   ·                  ┬
-   ·                  ╰── type mismatch
- 4 │ }
-   ╰────
-  × [E2096]: return type mismatch in function expecting i64
-   ╭─[<path>/structural_method_param_mismatch.vole:3:12]
- 2 │ func call_add<T: { func add(n: i64) -> i64 }>(x: T) -> i64 {
- 3 │     return x.add(1)
-   ·            ────┬───
-   ·                ╰── this returns string
- 4 │ }
-   ╰────
-  help: function expects i64
+  × [W3002]: unused expression result of type 'i64'
+    ╭─[<path>/structural_method_param_mismatch.vole:18:5]
+ 17 │     let f = Foo { value: "hi" }
+ 18 │     call_add(f)  // Foo.add takes string, not i64
+    ·     ─────┬─────
+    ·          ╰── expression result is not used
+ 19 │ }
+    ╰────
+  help: use `_ = expr` to discard explicitly

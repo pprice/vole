@@ -541,14 +541,6 @@ impl Analyzer {
         self.propagate_class_method_monomorphs();
         self.propagate_static_method_monomorphs();
 
-        // TODO(vol-kn9l): Temporary compatibility fallback.
-        //
-        // Keep Pass 3 body re-analysis for generic instances that still miss
-        // a VIR template (e.g. analysis/lowering gaps). Once all generic
-        // functions lower through Pass 2a + VIR monomorphization, remove this
-        // fallback pass.
-        self.analyze_monomorph_bodies_fallback(program, interner);
-
         if self.diagnostics.errors.is_empty() {
             Ok(())
         } else {
