@@ -289,15 +289,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> u32 {
         if let Some(subs) = self.substitutions {
             let type_def = self.analyzed().type_def(type_def_id);
-            if let Some(generic_info) = &type_def.generic_info
-                && !generic_info.type_params.is_empty()
-            {
-                let concrete_args: Vec<_> = generic_info
+            if type_def.is_generic && !type_def.type_params.is_empty() {
+                let concrete_args: Vec<_> = type_def
                     .type_params
                     .iter()
-                    .filter_map(|tp| subs.get(&tp.name_id).copied())
+                    .filter_map(|&tp| subs.get(&tp).copied())
                     .collect();
-                if concrete_args.len() == generic_info.type_params.len() {
+                if concrete_args.len() == type_def.type_params.len() {
                     self.mono_instance_type_id_with_args(base_type_id, type_def_id, concrete_args)
                 } else {
                     let result_type_id = self.substitute_type(result_type_id);

@@ -80,10 +80,14 @@ pub(crate) fn get_field_slot_and_type_id_cg(
             })?;
 
     let type_def = cg.analyzed().type_def(type_def_id);
-    let generic_info = type_def
-        .generic_info
+    let sema_field_types = type_def
+        .sema_generic_field_types
         .as_ref()
-        .ok_or_else(|| CodegenError::not_found("generic_info", "type"))?;
+        .ok_or_else(|| CodegenError::not_found("sema_generic_field_types", "type"))?;
+    let field_names = type_def
+        .generic_field_names
+        .as_ref()
+        .ok_or_else(|| CodegenError::not_found("generic_field_names", "type"))?;
 
     // Build combined substitution map: type params -> type args, plus monomorphization context
     // This allows a single pass through the type tree instead of two.
@@ -112,10 +116,10 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     // Physical slot is the sum of slot widths for all fields before this one.
     let is_class = arena.unwrap_class(resolved_type_id).is_some();
     let mut physical_slot = 0usize;
-    for (idx, field_name_id) in generic_info.field_names.iter().enumerate() {
+    for (idx, field_name_id) in field_names.iter().enumerate() {
         let name = cg.analyzed().last_segment(*field_name_id);
         if name.as_deref() == Some(field_name) {
-            let base_type_id = generic_info.field_types[idx];
+            let base_type_id = sema_field_types[idx];
             let field_type_id = if !combined_subs.is_empty() {
                 arena.expect_substitute(base_type_id, &combined_subs, "field access substitution")
             } else {
@@ -126,7 +130,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
             return Ok((slot, field_type_id));
         }
         // Advance physical slot counter
-        let ft = generic_info.field_types[idx];
+        let ft = sema_field_types[idx];
         let resolved_ft = if !combined_subs.is_empty() {
             arena.expect_substitute(ft, &combined_subs, "field slot width substitution")
         } else {

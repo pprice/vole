@@ -64,24 +64,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Check if any field type is a TypeParam that maps to an RC type
         let type_def = self.analyzed().type_def(type_def_id);
-        let Some(generic_info) = &type_def.generic_info else {
-            return base_type_id;
-        };
-        if generic_info.type_params.is_empty() {
+        if type_def.type_params.is_empty() {
             return base_type_id;
         }
+        let Some(sema_field_types) = &type_def.sema_generic_field_types else {
+            return base_type_id;
+        };
 
         // Build substitution map: type_param NameId -> concrete TypeId
-        let subs: FxHashMap<NameId, TypeId> = generic_info
+        let subs: FxHashMap<NameId, TypeId> = type_def
             .type_params
             .iter()
             .zip(concrete_type_args.iter())
-            .map(|(param, &arg)| (param.name_id, arg))
+            .map(|(&param, &arg)| (param, arg))
             .collect();
 
         // Substitute field types to get concrete types
-        let concrete_field_types: Vec<TypeId> = generic_info
-            .field_types
+        let concrete_field_types: Vec<TypeId> = sema_field_types
             .iter()
             .map(|&ft| arena.expect_substitute(ft, &subs, "mono_instance_type_id"))
             .collect();
@@ -89,8 +88,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Check if any field type changes its cleanup tag after substitution.
         // If all concrete field types have the same tag as the base registration,
         // we can reuse the base type_id.
-        let base_tags: Vec<_> = generic_info
-            .field_types
+        let base_tags: Vec<_> = sema_field_types
             .iter()
             .map(|&ft| self.field_type_tag(ft))
             .collect();

@@ -96,6 +96,18 @@ pub struct VirTypeDef {
     /// `entity_generic_field_types()` in rc_ops.rs and structs/helpers.rs
     /// for generic type substitution.  `None` for non-generic types.
     pub generic_field_types: Option<Vec<VirTypeId>>,
+    /// Generic field types as sema `TypeId`s (temporary).
+    ///
+    /// Kept so codegen callers that call `arena.expect_substitute()` can
+    /// continue to work with sema `TypeId`s.  Will be removed once Phase 3
+    /// converts all codegen callers to `VirTypeId`.
+    pub sema_generic_field_types: Option<Vec<TypeId>>,
+    /// Field names as stable `NameId`s for generic field lookup.
+    ///
+    /// From sema `GenericTypeInfo::field_names`.  Used by
+    /// `get_field_slot_and_type_id_cg()` in structs/helpers.rs.
+    /// `None` for non-generic types.
+    pub generic_field_names: Option<Vec<NameId>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1060,6 +1072,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         assert_eq!(meta.type_def_count(), 1);
@@ -1228,6 +1242,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         assert!(meta.is_annotation(id));
@@ -1254,6 +1270,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         assert_eq!(meta.type_extends(child), Some(&[parent][..]));
@@ -1279,6 +1297,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         // Overwrite with different data.
@@ -1297,6 +1317,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         assert_eq!(meta.type_def_count(), 1);
@@ -1437,6 +1459,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         assert_eq!(meta.type_by_name(name), Some(id));
@@ -1465,6 +1489,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         // Second type with the same name overwrites the reverse map.
@@ -1483,6 +1509,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         assert_eq!(meta.type_by_name(name), Some(id2));
@@ -1557,6 +1585,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         // Empty methods → false
@@ -1585,6 +1615,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         // Both methods have external bindings and no default
@@ -1652,6 +1684,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         // m1 has external binding, m2 does not
@@ -1716,6 +1750,8 @@ mod tests {
             module: make_module_id(0),
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         // Method has external binding but also has_default → false
@@ -1773,6 +1809,8 @@ mod tests {
             module: module_id,
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
 
         // Falls back to short-name lookup.
@@ -1815,6 +1853,8 @@ mod tests {
             module: module_id,
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
         meta.insert_short_name("nil".to_string(), sentinel_id);
 
@@ -1833,6 +1873,8 @@ mod tests {
             module: module_id,
             is_generic: false,
             generic_field_types: None,
+            sema_generic_field_types: None,
+            generic_field_names: None,
         });
         meta.insert_short_name("nil".to_string(), other_id);
 

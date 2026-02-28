@@ -214,13 +214,26 @@ impl AnalyzedProgram {
             })
     }
 
-    /// Resolve a sema TypeDef by ID.
-    pub(crate) fn type_def(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
-        self.entity_view.get_type(type_def_id)
+    /// Resolve a VIR type definition by ID.
+    pub(crate) fn type_def(
+        &self,
+        type_def_id: TypeDefId,
+    ) -> &vole_vir::entity_metadata::VirTypeDef {
+        self.entity_metadata()
+            .get_type_def(type_def_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "type_def: type def {:?} not in VirEntityMetadata",
+                    type_def_id
+                )
+            })
     }
 
-    /// Query-compatible alias for resolving a sema TypeDef by ID.
-    pub(crate) fn get_type(&self, type_def_id: TypeDefId) -> &vole_sema::entity_defs::TypeDef {
+    /// Query-compatible alias for resolving a VIR type definition by ID.
+    pub(crate) fn get_type(
+        &self,
+        type_def_id: TypeDefId,
+    ) -> &vole_vir::entity_metadata::VirTypeDef {
         self.type_def(type_def_id)
     }
 
@@ -373,7 +386,7 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
     ) -> Option<vole_sema::type_arena::TypeId> {
-        self.entity_view.get_type(type_def_id).base_type_id
+        self.type_def(type_def_id).base_type_id
     }
 
     /// Return whether a type definition is a sentinel.
@@ -614,11 +627,7 @@ impl AnalyzedProgram {
         &self,
         type_def_id: TypeDefId,
     ) -> Option<Vec<vole_sema::type_arena::TypeId>> {
-        self.entity_view
-            .get_type(type_def_id)
-            .generic_info
-            .as_ref()
-            .map(|g| g.field_types.clone())
+        self.type_def(type_def_id).sema_generic_field_types.clone()
     }
 
     /// Return whether a type definition is a sentinel type.

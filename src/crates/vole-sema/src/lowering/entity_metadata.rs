@@ -135,6 +135,8 @@ fn populate_type_defs(
                 .map(|&ty| translate_type_id(type_table, ty, type_arena))
                 .collect()
         });
+        let sema_generic_field_types = td.generic_info.as_ref().map(|gi| gi.field_types.clone());
+        let generic_field_names = td.generic_info.as_ref().map(|gi| gi.field_names.clone());
 
         meta.insert_type_def(VirTypeDef {
             id: td.id,
@@ -151,6 +153,8 @@ fn populate_type_defs(
             module: td.module,
             is_generic: td.generic_info.is_some(),
             generic_field_types,
+            sema_generic_field_types,
+            generic_field_names,
         });
     }
 }
