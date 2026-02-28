@@ -9,7 +9,7 @@ use vole_frontend::Expr;
 use vole_frontend::ast::{BinaryOp, ExprKind, StringPart, UnaryOp};
 use vole_identity::{TypeId, VirTypeId};
 
-use vole_vir::calls::CallTarget;
+use vole_vir::calls::{CallTarget, LambdaDefaultsInfo};
 use vole_vir::expr::{
     AsCastKind, IsCheckResult, VirBinOp, VirCapture, VirClassMethodMonomorphKey,
     VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirExternalMethodInfo,
@@ -1267,19 +1267,30 @@ fn lower_call(
         .get_resolved_call_args(expr.id)
         .map(|m| m.to_vec());
 
+    // Grab lambda parameter defaults from sema (if any).
+    let lambda_defaults = ctx
+        .node_map
+        .get_lambda_defaults(expr.id)
+        .map(|d| LambdaDefaultsInfo {
+            required_params: d.required_params,
+            lambda_node_id: d.lambda_node_id,
+        });
+
     // In generic mode, check if this call has a MonomorphKey — that means
     // it targets another generic function.  Emit GenericCall so the VIR
     // monomorphization pass can resolve it to a concrete callee later.
-    let make_unresolved = |rca| CallTarget::Unresolved {
+    let make_unresolved = |rca, ld| CallTarget::Unresolved {
         callee_sym,
         call_node_id: expr.id,
         line: expr.span.line,
         resolved_call_args: rca,
+        lambda_defaults: ld,
     };
     let target = if ctx.generic {
-        generic_call_target(expr, ctx).unwrap_or_else(|| make_unresolved(resolved_call_args))
+        generic_call_target(expr, ctx)
+            .unwrap_or_else(|| make_unresolved(resolved_call_args, lambda_defaults))
     } else {
-        make_unresolved(resolved_call_args)
+        make_unresolved(resolved_call_args, lambda_defaults)
     };
 
     let compat_ty = ctx.compat_ty(ty);

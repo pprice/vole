@@ -102,7 +102,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call an actual closure (with closure pointer).
     ///
     /// Accepts `ArgSource` so both AST and VIR call sites can share this path.
-    /// Lambda defaults are driven by NodeMap annotations on `call_expr_id`.
+    /// Lambda defaults check `self.vir_lambda_defaults` first (populated by
+    /// VIR call dispatch), falling back to `NodeMap::get_lambda_defaults`
+    /// for pure AST paths.
     /// Named-arg reordering checks `self.vir_resolved_call_args` first (populated
     /// by VIR call dispatch), falling back to `NodeMap::get_resolved_call_args`
     /// for pure AST paths.
@@ -119,12 +121,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         let mut args: ArgVec = smallvec![closure_ptr];
 
-        // Check if this call has lambda defaults
+        // Check if this call has lambda defaults — VIR path first, then NodeMap fallback.
         let lambda_defaults = self
-            .analyzed()
-            .node_map()
-            .get_lambda_defaults(call_expr_id)
-            .cloned();
+            .vir_lambda_defaults
+            .take()
+            .map(|info| vole_sema::LambdaDefaults {
+                required_params: info.required_params,
+                lambda_node_id: info.lambda_node_id,
+            })
+            .or_else(|| {
+                self.analyzed()
+                    .node_map()
+                    .get_lambda_defaults(call_expr_id)
+                    .cloned()
+            });
 
         // Compile provided arguments, tracking RC temps for cleanup.
         // When named args were used, sema stored a resolved_call_args mapping that tells

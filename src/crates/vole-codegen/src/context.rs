@@ -209,6 +209,12 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// `call_func_id_impl()` and `call_actual_closure()` in preference to the
     /// NodeMap lookup.  Cleared after `call_dispatch()` returns.
     pub(crate) vir_resolved_call_args: Option<Vec<Option<usize>>>,
+    /// Pre-resolved lambda parameter defaults from VIR.
+    ///
+    /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
+    /// `call_actual_closure()` in preference to the NodeMap lookup.
+    /// Cleared after `call_dispatch()` returns.
+    pub(crate) vir_lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
     /// Cached `iconst.i64 0` created in the entry block for void returns.
     /// Reused by every `void_value()` call to avoid emitting thousands of
     /// dead iconst instructions (previously ~18,951 per compilation).
@@ -281,6 +287,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             yielder_var: None,
             in_iterable_default_body: false,
             vir_resolved_call_args: None,
+            vir_lambda_defaults: None,
             cached_void_val,
             entry_block,
             iconst_cache,

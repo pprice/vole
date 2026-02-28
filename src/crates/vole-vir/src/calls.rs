@@ -82,7 +82,27 @@ pub enum CallTarget {
         /// `mapping[i] = None` means slot i uses its default value.
         /// `None` when all arguments are positional.
         resolved_call_args: Option<Vec<Option<usize>>>,
+        /// Lambda parameter defaults from sema.
+        ///
+        /// Present when the callee is a closure whose lambda definition has
+        /// default parameter values.  Codegen uses this to compile fallback
+        /// values for omitted arguments.
+        lambda_defaults: Option<LambdaDefaultsInfo>,
     },
+}
+
+/// Lambda parameter default info carried on VIR call nodes.
+///
+/// When a closure is called with fewer arguments than parameters, defaults
+/// are compiled from the lambda body.  VIR lowering copies this from
+/// `NodeMap::get_lambda_defaults` so codegen can read it without touching
+/// the NodeMap.
+#[derive(Debug, Clone, Copy)]
+pub struct LambdaDefaultsInfo {
+    /// Number of required parameters (those without defaults).
+    pub required_params: usize,
+    /// NodeId of the lambda expression (for locating default expressions).
+    pub lambda_node_id: NodeId,
 }
 
 /// ABI convention for native (FFI) calls.

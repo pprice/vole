@@ -33,7 +33,7 @@ pub use paste;
 pub use vole_identity::{NodeId, Span};
 
 pub use builder::VirBuilder;
-pub use calls::{BuiltinMethod, CallTarget, NativeAbi};
+pub use calls::{BuiltinMethod, CallTarget, LambdaDefaultsInfo, NativeAbi};
 pub use entity_metadata::{
     VirEntityMetadata, VirFieldDef, VirFunctionDef, VirGlobalDef, VirImplementation,
     VirMethodBinding, VirMethodDef, VirTypeDef, VirTypeDefKind,
