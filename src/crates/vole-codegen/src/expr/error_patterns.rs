@@ -36,7 +36,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         scrutinee_type_id: TypeId,
     ) -> CodegenResult<()> {
-        let fallible_types = self.arena().unwrap_fallible(scrutinee_type_id);
+        let fallible_types = self.vir_query_unwrap_fallible(scrutinee_type_id);
         let Some((success_type_id, error_type_id)) = fallible_types else {
             return Ok(());
         };
@@ -104,8 +104,7 @@ impl Cg<'_, '_, '_> {
         if self.error_type_single_field_is_rc(error_type_id) {
             return true;
         }
-        let arena = self.arena();
-        if let Some(variants) = arena.unwrap_union(error_type_id) {
+        if let Some(variants) = self.vir_query_unwrap_union(error_type_id) {
             // All variants must be safe for unconditional rc_dec:
             // - 0 fields: payload is null (rc_dec is no-op)
             // - 1 RC field: payload is an RC pointer (rc_dec works)
@@ -125,7 +124,7 @@ impl Cg<'_, '_, '_> {
     /// Check if an error variant is safe for unconditional rc_dec.
     /// True for: 0 fields (null payload) or 1 RC field.
     fn error_variant_safe_for_rc_dec(&self, type_id: TypeId) -> bool {
-        let Some(type_def_id) = self.arena().unwrap_error_or_struct_def(type_id) else {
+        let Some(type_def_id) = self.vir_query_unwrap_error_or_struct_def(type_id) else {
             return false;
         };
         let fields: Vec<_> = self.analyzed().fields_on_type(type_def_id).collect();
@@ -141,7 +140,7 @@ impl Cg<'_, '_, '_> {
 
     /// Check if an error/struct type has exactly one field and that field is RC.
     fn error_type_single_field_is_rc(&self, type_id: TypeId) -> bool {
-        let Some(type_def_id) = self.arena().unwrap_error_or_struct_def(type_id) else {
+        let Some(type_def_id) = self.vir_query_unwrap_error_or_struct_def(type_id) else {
             return false;
         };
         let fields: Vec<_> = self.analyzed().fields_on_type(type_def_id).collect();

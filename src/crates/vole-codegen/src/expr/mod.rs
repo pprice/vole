@@ -98,42 +98,32 @@ impl Cg<'_, '_, '_> {
         let name_id = crate::types::module_name_id(self.analyzed(), module_id, export_name_str);
 
         // Look up constant value in module metadata
-        let const_val = {
-            let arena = self.arena();
-            name_id.and_then(|nid| {
-                arena
-                    .module_metadata(module_id)
-                    .and_then(|meta| meta.constants.get(&nid).cloned())
-            })
-        };
+        let const_val = name_id.and_then(|nid| self.vir_query_module_constant(module_id, nid));
 
         if let Some(const_val) = const_val {
-            let arena = self.arena();
-            let f64_id = arena.f64();
-            let i64_id = arena.i64();
-            let bool_id = arena.bool();
+            let prims = self.vir_query_primitives();
             match const_val {
                 ConstantValue::F64(v) => {
                     let val = self.builder.ins().f64const(v);
-                    Ok(CompiledValue::new(val, types::F64, f64_id))
+                    Ok(CompiledValue::new(val, types::F64, prims.f64))
                 }
                 ConstantValue::I64(v) => {
                     let val = self.iconst_cached(types::I64, v);
-                    Ok(CompiledValue::new(val, types::I64, i64_id))
+                    Ok(CompiledValue::new(val, types::I64, prims.i64))
                 }
                 ConstantValue::Bool(v) => {
                     let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
-                    Ok(CompiledValue::new(val, types::I8, bool_id))
+                    Ok(CompiledValue::new(val, types::I8, prims.bool))
                 }
                 ConstantValue::String(s) => self.string_literal(&s),
             }
-        } else if self.arena().is_function(export_type_id) {
+        } else if self.vir_query_is_function(export_type_id) {
             // Functions cannot be used as values directly - must be called
             Err(CodegenError::unsupported_with_context(
                 "function as value",
                 format!("use {}() to call the function", export_name_str),
             ))
-        } else if self.arena().is_sentinel(export_type_id) {
+        } else if self.vir_query_is_sentinel(export_type_id) {
             // Sentinel exports are zero-field structs - emit i8(0)
             let value = self.iconst_cached(types::I8, 0);
             Ok(CompiledValue::new(value, types::I8, export_type_id))
@@ -255,12 +245,12 @@ impl Cg<'_, '_, '_> {
 
         // Unwrap function type to get params and return type
         let (param_ids, return_type_id) = {
-            let arena = self.arena();
-            let (params, ret, _is_closure) =
-                arena.unwrap_function(func_type_id).ok_or_else(|| {
+            let (params, ret, _is_closure) = self
+                .vir_query_unwrap_function(func_type_id)
+                .ok_or_else(|| {
                     CodegenError::type_mismatch("closure wrapper", "function type", "non-function")
                 })?;
-            (params.clone(), ret)
+            (params, ret)
         };
 
         let wrapper_func_id =
@@ -327,15 +317,19 @@ impl Cg<'_, '_, '_> {
         expr: &VirExpr,
         expected_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        if (self.arena().is_array(expected_type_id)
-            || self.arena().unwrap_tuple(expected_type_id).is_some()
-            || self.arena().unwrap_fixed_array(expected_type_id).is_some())
+        if (self.vir_query_is_array(expected_type_id)
+            || self.vir_query_unwrap_tuple(expected_type_id).is_some()
+            || self
+                .vir_query_unwrap_fixed_array(expected_type_id)
+                .is_some())
             && let VirExpr::ArrayLiteral { elements, .. } = expr
         {
             let result = self.compile_vir_array_literal(elements, expected_type_id)?;
             return Ok(self.mark_rc_owned(result));
         }
-        if self.arena().unwrap_fixed_array(expected_type_id).is_some()
+        if self
+            .vir_query_unwrap_fixed_array(expected_type_id)
+            .is_some()
             && let VirExpr::RepeatLiteral { element, count, .. } = expr
         {
             let result = self.compile_vir_repeat_literal(element, *count, expected_type_id)?;
@@ -985,8 +979,7 @@ impl Cg<'_, '_, '_> {
     ///    (these will migrate to dedicated VIR nodes later).
     fn compile_local_load(&mut self, sym: Symbol, ty: TypeId) -> CodegenResult<CompiledValue> {
         // 1. Sentinel types — always i8(0).
-        // NOTE: arena() retained — no vir_is_sentinel helper yet.
-        if self.arena().is_sentinel(ty) {
+        if self.vir_query_is_sentinel(ty) {
             let value = self.iconst_cached(types::I8, 0);
             return Ok(CompiledValue::new(value, types::I8, ty));
         }
@@ -1060,26 +1053,23 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Find a union variant matching the narrowed type, with integer fallback.
-    /// NOTE: arena() retained — unwrap_union returns sema TypeId variants which
-    /// are used by load_union_payload and extract_union_payload_typed.
     fn find_union_variant(
         &self,
         union_type_id: TypeId,
         narrowed_type_id: TypeId,
     ) -> Option<TypeId> {
-        self.arena()
-            .unwrap_union(union_type_id)
+        self.vir_query_unwrap_union(union_type_id)
             .and_then(|variants| {
                 variants
                     .iter()
                     .copied()
                     .find(|&v| v == narrowed_type_id)
                     .or_else(|| {
-                        if self.arena().is_integer(narrowed_type_id) {
+                        if self.vir_query_is_integer(narrowed_type_id) {
                             variants
                                 .iter()
                                 .copied()
-                                .find(|&v| self.arena().is_integer(v))
+                                .find(|&v| self.vir_query_is_integer(v))
                         } else {
                             None
                         }
@@ -1109,8 +1099,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Function reference
-        // NOTE: arena() retained — no vir_is_function helper yet.
-        if self.arena().is_function(ty) {
+        if self.vir_query_is_function(ty) {
             return self.function_reference(sym, ty);
         }
 
@@ -1377,7 +1366,7 @@ impl Cg<'_, '_, '_> {
                 if tested_type_id != TypeId::UNKNOWN {
                     let concrete_value_ty = self.try_substitute_type(compiled.type_id);
                     let concrete_tested_ty = self.try_substitute_type(tested_type_id);
-                    if let Some(variants) = self.arena().unwrap_union(concrete_value_ty)
+                    if let Some(variants) = self.vir_query_unwrap_union(concrete_value_ty)
                         && let Some(tag_index) =
                             variants.iter().position(|&ty| ty == concrete_tested_ty)
                     {

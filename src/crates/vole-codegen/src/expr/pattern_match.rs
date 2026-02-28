@@ -30,10 +30,9 @@ impl Cg<'_, '_, '_> {
         value_type_id: TypeId,
         tested_type_id: TypeId,
     ) -> IsCheckResult {
-        let arena = self.arena();
         if value_type_id.is_unknown() {
             IsCheckResult::CheckUnknown(tested_type_id)
-        } else if let Some(variants) = arena.unwrap_union(value_type_id) {
+        } else if let Some(variants) = self.vir_query_unwrap_union(value_type_id) {
             if let Some(index) = variants.iter().position(|&v| v == tested_type_id) {
                 IsCheckResult::CheckTag(index as u32)
             } else {
@@ -142,10 +141,9 @@ impl Cg<'_, '_, '_> {
         use crate::RuntimeKey;
         use cranelift::prelude::FloatCC;
 
-        let arena = self.arena();
-        if arena.is_string(type_id) {
+        if self.vir_query_is_string(type_id) {
             Ok(self.call_runtime(RuntimeKey::StringEq, &[left, right])?)
-        } else if arena.is_float(type_id) {
+        } else if self.vir_query_is_float(type_id) {
             Ok(self.builder.ins().fcmp(FloatCC::Equal, left, right))
         } else if type_id.is_integer() || type_id.is_bool() {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
@@ -190,15 +188,15 @@ impl Cg<'_, '_, '_> {
             }
         }
         if arm_types.len() > 1
-            && let Some(inferred_union) = self.arena().lookup_union(arm_types.clone().into())
+            && let Some(inferred_union) = self.vir_query_lookup_union(arm_types.clone().into())
             && (!self.vir_query_is_union(effective_result_type)
                 || effective_result_type.is_unknown()
-                || self.arena().is_function(effective_result_type))
+                || self.vir_query_is_function(effective_result_type))
         {
             effective_result_type = inferred_union;
         } else if let [single] = arm_types.as_slice()
             && (effective_result_type.is_unknown()
-                || self.arena().is_function(effective_result_type))
+                || self.vir_query_is_function(effective_result_type))
         {
             effective_result_type = *single;
         }
@@ -208,8 +206,7 @@ impl Cg<'_, '_, '_> {
             let has_nil_arm = arms.iter().any(|arm| {
                 arm.ty != VirTypeId::UNKNOWN
                     && self
-                        .arena()
-                        .is_nil(self.try_substitute_type(self.sema_type_from_vir(arm.ty)))
+                        .vir_query_is_nil(self.try_substitute_type(self.sema_type_from_vir(arm.ty)))
             });
             if has_nil_arm && let Some(ret_type_id) = self.return_type {
                 let ret_type_id = self.try_substitute_type(ret_type_id);
@@ -601,7 +598,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> CodegenResult<Option<Value>> {
-        let elem_type_ids = self.arena().unwrap_tuple(scrutinee.type_id).cloned();
+        let elem_type_ids = self.vir_query_unwrap_tuple(scrutinee.type_id);
         if let Some(elem_type_ids) = elem_type_ids {
             let (_, offsets) = self.tuple_layout(&elem_type_ids);
             let elem_cr_types = self.cranelift_types(&elem_type_ids);

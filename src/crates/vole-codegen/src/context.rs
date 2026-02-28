@@ -1128,6 +1128,66 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Check if a sema `TypeId` is the nil type.
+    ///
+    /// This is a constant check — no VirTypeTable query needed.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_is_nil(&self, type_id: TypeId) -> bool {
+        self.arena().is_nil(type_id)
+    }
+
+    /// Unwrap an error or struct type to its `TypeDefId`, using arena.
+    ///
+    /// Arena-only operation (combines unwrap_error + unwrap_struct).
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_unwrap_error_or_struct_def(
+        &self,
+        type_id: TypeId,
+    ) -> Option<vole_identity::TypeDefId> {
+        self.arena().unwrap_error_or_struct_def(type_id)
+    }
+
+    /// Look up an existing fixed-array type by element `TypeId` and size.
+    ///
+    /// Arena-only operation (type construction lookup, not a type predicate).
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_lookup_fixed_array(&self, element: TypeId, size: usize) -> Option<TypeId> {
+        self.arena().lookup_fixed_array(element, size)
+    }
+
+    /// Unwrap a module type, returning the module ID and exported (name, type) pairs.
+    ///
+    /// Arena-only operation (module types are not represented in VirTypeTable).
+    /// Returns cloned export data to avoid borrow conflicts.
+    #[allow(dead_code, clippy::type_complexity)]
+    #[inline]
+    pub fn vir_query_unwrap_module(
+        &self,
+        type_id: TypeId,
+    ) -> Option<(ModuleId, smallvec::SmallVec<[(NameId, TypeId); 8]>)> {
+        self.arena()
+            .unwrap_module(type_id)
+            .map(|m| (m.module_id, m.exports.clone()))
+    }
+
+    /// Look up a compile-time constant in a module's metadata.
+    ///
+    /// Arena-only operation (module metadata is not represented in VirTypeTable).
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_module_constant(
+        &self,
+        module_id: ModuleId,
+        name_id: NameId,
+    ) -> Option<vole_identity::ConstantValue> {
+        self.arena()
+            .module_metadata(module_id)
+            .and_then(|meta| meta.constants.get(&name_id).cloned())
+    }
+
     // =====================================================================
     // VIR-native type queries (no arena fallback)
     //

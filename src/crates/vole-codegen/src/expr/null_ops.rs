@@ -47,7 +47,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let nil_type_id = self.arena().nil();
+        let nil_type_id = self.vir_query_nil();
         let nil_val = CompiledValue::new(self.iconst_cached(types::I8, 0), types::I8, nil_type_id);
         self.coerce_to_type(nil_val, result_type_id)
     }

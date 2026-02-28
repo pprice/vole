@@ -59,15 +59,14 @@ impl Cg<'_, '_, '_> {
         union_storage: Option<UnionStorageKind>,
     ) -> CodegenResult<CompiledValue> {
         let obj = self.compile_vir_expr(object)?;
-        let arena = self.arena();
 
-        if let Some(elem_type_ids) = arena.unwrap_tuple(obj.type_id).cloned() {
+        if let Some(elem_type_ids) = self.vir_query_unwrap_tuple(obj.type_id) {
             return self.vir_index_tuple(obj, index, &elem_type_ids);
         }
-        if let Some((element_id, size)) = arena.unwrap_fixed_array(obj.type_id) {
+        if let Some((element_id, size)) = self.vir_query_unwrap_fixed_array(obj.type_id) {
             return self.vir_index_fixed_array(obj, index, element_id, size);
         }
-        if let Some(element_id) = arena.unwrap_array(obj.type_id) {
+        if let Some(element_id) = self.vir_query_unwrap_array(obj.type_id) {
             return self.vir_index_dynamic_array(obj, index, element_id, ty, union_storage);
         }
         if let Some((tuple_elems, fixed_array, dyn_array)) = self.vir_index_dispatch(object) {
@@ -83,7 +82,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Codegen should not reach this — sema validates indexable types.
-        let type_name = self.arena().display_basic(obj.type_id);
+        let type_name = self.vir_query_display_basic(obj.type_id);
         Err(CodegenError::type_mismatch(
             "index expression",
             "array or tuple",
@@ -102,9 +101,8 @@ impl Cg<'_, '_, '_> {
         let arr = self.compile_vir_expr(object)?;
         let val = self.compile_vir_expr(value_expr)?;
 
-        let arena = self.arena();
-        let fixed_array_info = arena.unwrap_fixed_array(arr.type_id);
-        let is_dynamic_array = arena.is_array(arr.type_id);
+        let fixed_array_info = self.vir_query_unwrap_fixed_array(arr.type_id);
+        let is_dynamic_array = self.vir_query_is_array(arr.type_id);
 
         if let Some((elem_type_id, size)) = fixed_array_info {
             self.vir_index_assign_fixed_array(arr.value, index, val, elem_type_id, size)
@@ -118,7 +116,7 @@ impl Cg<'_, '_, '_> {
                 let idx = self.compile_vir_expr(index)?;
                 self.index_assign_dynamic_array_inner(arr, idx, val)
             } else {
-                let type_name = self.arena().display_basic(arr.type_id);
+                let type_name = self.vir_query_display_basic(arr.type_id);
                 Err(CodegenError::type_mismatch(
                     "index assignment",
                     "array",
@@ -126,7 +124,7 @@ impl Cg<'_, '_, '_> {
                 ))
             }
         } else {
-            let type_name = self.arena().display_basic(arr.type_id);
+            let type_name = self.vir_query_display_basic(arr.type_id);
             Err(CodegenError::type_mismatch(
                 "index assignment",
                 "array",
@@ -235,8 +233,8 @@ impl Cg<'_, '_, '_> {
         let expected_element_id = self.try_substitute_type(expected_element_id);
         let mut resolved_element_id = self.try_substitute_type(element_id);
         let resolved_is_abstract = resolved_element_id == TypeId::UNKNOWN
-            || self.arena().contains_type_param(resolved_element_id)
-            || self.arena().is_self_type(resolved_element_id);
+            || self.vir_query_contains_type_param(resolved_element_id)
+            || self.vir_query_is_self_type(resolved_element_id);
         if resolved_is_abstract && expected_element_id != TypeId::UNKNOWN {
             resolved_element_id = expected_element_id;
         }
@@ -343,7 +341,7 @@ impl Cg<'_, '_, '_> {
         idx: CompiledValue,
         val: CompiledValue,
     ) -> CodegenResult<CompiledValue> {
-        let elem_type = self.arena().unwrap_array(arr.type_id);
+        let elem_type = self.vir_query_unwrap_array(arr.type_id);
         let (tag_val, value_bits, val) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(val, elem_id)?
         } else {

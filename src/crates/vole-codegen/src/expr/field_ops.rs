@@ -106,14 +106,7 @@ impl Cg<'_, '_, '_> {
         obj: CompiledValue,
         field: Symbol,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let module_info = {
-            let arena = self.arena();
-            arena.unwrap_module(obj.type_id).map(|m| {
-                let exports = m.exports.clone();
-                (m.module_id, exports)
-            })
-        };
-        let Some((module_id, exports)) = module_info else {
+        let Some((module_id, exports)) = self.vir_query_unwrap_module(obj.type_id) else {
             return Ok(None);
         };
 
@@ -122,14 +115,7 @@ impl Cg<'_, '_, '_> {
         let name_id = module_name_id(self.analyzed(), module_id, field_name);
 
         // Constant value lookup
-        let const_val = {
-            let arena = self.arena();
-            name_id.and_then(|nid| {
-                arena
-                    .module_metadata(module_id)
-                    .and_then(|meta| meta.constants.get(&nid).cloned())
-            })
-        };
+        let const_val = name_id.and_then(|nid| self.vir_query_module_constant(module_id, nid));
         if let Some(const_val) = const_val {
             let cv = self.compile_constant_value(const_val)?;
             return Ok(Some(cv));
@@ -139,13 +125,13 @@ impl Cg<'_, '_, '_> {
         let export_type_id =
             name_id.and_then(|nid| exports.iter().find(|(n, _)| *n == nid).map(|(_, tid)| *tid));
         if let Some(export_type_id) = export_type_id {
-            if self.arena().is_function(export_type_id) {
+            if self.vir_query_is_function(export_type_id) {
                 return Err(CodegenError::unsupported_with_context(
                     "function as field value",
                     format!("use {}() to call the function", field_name),
                 ));
             }
-            if self.arena().is_sentinel(export_type_id) {
+            if self.vir_query_is_sentinel(export_type_id) {
                 let value = self.iconst_cached(types::I8, 0);
                 return Ok(Some(CompiledValue::new(value, types::I8, export_type_id)));
             }
@@ -163,22 +149,19 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a `ConstantValue` to a `CompiledValue`.
     fn compile_constant_value(&mut self, const_val: ConstantValue) -> CodegenResult<CompiledValue> {
-        let arena = self.arena();
-        let f64_id = arena.f64();
-        let i64_id = arena.i64();
-        let bool_id = arena.bool();
+        let prims = self.vir_query_primitives();
         match const_val {
             ConstantValue::F64(v) => {
                 let val = self.builder.ins().f64const(v);
-                Ok(CompiledValue::new(val, types::F64, f64_id))
+                Ok(CompiledValue::new(val, types::F64, prims.f64))
             }
             ConstantValue::I64(v) => {
                 let val = self.iconst_cached(types::I64, v);
-                Ok(CompiledValue::new(val, types::I64, i64_id))
+                Ok(CompiledValue::new(val, types::I64, prims.i64))
             }
             ConstantValue::Bool(v) => {
                 let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
-                Ok(CompiledValue::new(val, types::I8, bool_id))
+                Ok(CompiledValue::new(val, types::I8, prims.bool))
             }
             ConstantValue::String(s) => self.string_literal(&s),
         }
