@@ -14,7 +14,7 @@ use vole_identity::{
     StaticMethodMonomorphCache, TypeDefId,
 };
 use vole_sema::EntityRegistry;
-use vole_sema::entity_defs::{FunctionDef, GlobalDef, MethodDef, TypeDef};
+use vole_sema::entity_defs::{GlobalDef, MethodDef, TypeDef};
 
 use crate::analyzed::ExternalMethodInfoRef;
 
@@ -31,7 +31,6 @@ pub(crate) struct EntityView {
     // -- Storage (IDs are indices into these vectors) --
     type_defs: Vec<TypeDef>,
     method_defs: Vec<MethodDef>,
-    function_defs: Vec<FunctionDef>,
     global_defs: Vec<GlobalDef>,
 
     // -- Primary lookups by NameId --
@@ -60,7 +59,6 @@ impl EntityView {
         Self {
             type_defs,
             method_defs: registry.all_method_defs().to_vec(),
-            function_defs: registry.all_function_defs().to_vec(),
             global_defs: registry.all_global_defs().to_vec(),
 
             type_by_name: registry.type_by_name_map().clone(),
@@ -118,11 +116,6 @@ impl EntityView {
     }
 
     // ===== Function lookups =====
-
-    /// Return a function definition by ID.
-    pub(crate) fn get_function(&self, function_id: FunctionId) -> &FunctionDef {
-        &self.function_defs[function_id.index() as usize]
-    }
 
     /// Resolve FunctionId by NameId.
     pub(crate) fn function_by_name(&self, name_id: NameId) -> Option<FunctionId> {

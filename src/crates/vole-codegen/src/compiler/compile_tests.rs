@@ -204,7 +204,7 @@ impl Compiler<'_> {
                     let has_implicit_generic_info = self
                         .analyzed
                         .function_id_by_name_id(name_id)
-                        .map(|func_id| self.analyzed.function_def(func_id).generic_info.is_some())
+                        .map(|func_id| self.analyzed.function_def(func_id).is_generic)
                         .unwrap_or(false);
                     if has_implicit_generic_info {
                         continue;
@@ -313,10 +313,8 @@ impl Compiler<'_> {
                 CodegenError::not_found("function", self.analyzed.interner().resolve(func.name))
             })?;
         let func_def = self.analyzed.function_def(semantic_func_id);
-        let (param_type_ids, return_type_id) = (
-            func_def.signature.params_id.clone(),
-            func_def.signature.return_type_id,
-        );
+        let (param_type_ids, return_type_id) =
+            (func_def.sema_param_types.clone(), func_def.sema_return_type);
 
         // Create function signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);

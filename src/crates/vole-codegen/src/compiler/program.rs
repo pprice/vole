@@ -294,7 +294,11 @@ impl Compiler<'_> {
                 Some(id) => id,
                 None => return,
             };
-            match self.analyzed.function_def(func_id).generator_element_type {
+            match self
+                .analyzed
+                .function_def(func_id)
+                .sema_generator_element_type
+            {
                 Some(e) => e,
                 None => return,
             }
@@ -328,7 +332,7 @@ impl Compiler<'_> {
                     let has_implicit_generic_info = self
                         .analyzed
                         .function_id_by_name_id(name_id)
-                        .map(|func_id| self.analyzed.function_def(func_id).generic_info.is_some())
+                        .map(|func_id| self.analyzed.function_def(func_id).is_generic)
                         .unwrap_or(false);
                     if has_implicit_generic_info {
                         continue;
@@ -600,7 +604,7 @@ impl Compiler<'_> {
                 let has_implicit_generic_info = self
                     .analyzed
                     .function_id_by_name_id(name_id)
-                    .map(|func_id| self.analyzed.function_def(func_id).generic_info.is_some())
+                    .map(|func_id| self.analyzed.function_def(func_id).is_generic)
                     .unwrap_or(false);
                 if has_implicit_generic_info {
                     continue;
@@ -765,16 +769,14 @@ impl Compiler<'_> {
             .function_id_by_name_id(name_id)
             .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
         let func_def = self.analyzed.function_def(semantic_func_id);
-        let (param_type_ids, return_type_id) = (
-            func_def.signature.params_id.clone(),
-            func_def.signature.return_type_id,
-        );
+        let (param_type_ids, return_type_id) =
+            (func_def.sema_param_types.clone(), func_def.sema_return_type);
 
         // Check if a VIR function was lowered for this function
         let vir_func = self.analyzed.get_vir_function(semantic_func_id);
 
         // Check if this is a generator function (sema annotated it with element type)
-        if let Some(elem_type_id) = func_def.generator_element_type {
+        if let Some(elem_type_id) = func_def.sema_generator_element_type {
             let vir = vir_func.unwrap_or_else(|| {
                 panic!(
                     "VIR must be available for generator function '{}'",
@@ -871,16 +873,14 @@ impl Compiler<'_> {
             .and_then(|name_id| self.analyzed.function_id_by_name_id(name_id))
             .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
         let func_def = self.analyzed.function_def(semantic_func_id);
-        let (param_type_ids, return_type_id) = (
-            func_def.signature.params_id.clone(),
-            func_def.signature.return_type_id,
-        );
+        let (param_type_ids, return_type_id) =
+            (func_def.sema_param_types.clone(), func_def.sema_return_type);
 
         // Check if a VIR function was lowered for this function
         let vir_func = self.analyzed.get_vir_function(semantic_func_id);
 
         // Check if this is a generator function (sema annotated it with element type)
-        if let Some(elem_type_id) = func_def.generator_element_type {
+        if let Some(elem_type_id) = func_def.sema_generator_element_type {
             let vir = vir_func.unwrap_or_else(|| {
                 panic!(
                     "VIR must be available for generator function '{}'",

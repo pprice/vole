@@ -267,7 +267,7 @@ impl Compiler<'_> {
                     let has_implicit_generic_info = self
                         .analyzed
                         .function_id_by_name_id(name_id)
-                        .map(|func_id| self.analyzed.function_def(func_id).generic_info.is_some())
+                        .map(|func_id| self.analyzed.function_def(func_id).is_generic)
                         .unwrap_or(false);
 
                     if has_explicit_type_params || has_implicit_generic_info {

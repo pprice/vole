@@ -249,20 +249,14 @@ impl AnalyzedProgram {
         self.field_def(field_id)
     }
 
-    /// Resolve a sema FunctionDef by ID.
+    /// Resolve a VIR function definition by ID.
     pub(crate) fn function_def(
         &self,
         function_id: FunctionId,
-    ) -> &vole_sema::entity_defs::FunctionDef {
-        self.entity_view.get_function(function_id)
-    }
-
-    /// Query-compatible alias for resolving a sema FunctionDef by ID.
-    pub(crate) fn get_function(
-        &self,
-        function_id: FunctionId,
-    ) -> &vole_sema::entity_defs::FunctionDef {
-        self.function_def(function_id)
+    ) -> &vole_vir::entity_metadata::VirFunctionDef {
+        self.entity_metadata()
+            .get_function_def(function_id)
+            .unwrap_or_else(|| panic!("function_def: no VirFunctionDef for {function_id:?}"))
     }
 
     /// Resolve a sema MethodDef by ID.
@@ -535,11 +529,7 @@ impl AnalyzedProgram {
         &self,
         func_id: FunctionId,
     ) -> Vec<vole_sema::type_arena::TypeId> {
-        self.entity_view
-            .get_function(func_id)
-            .signature
-            .params_id
-            .to_vec()
+        self.function_def(func_id).sema_param_types.clone()
     }
 
     /// Return global declared TypeId by NameId.
@@ -565,11 +555,11 @@ impl AnalyzedProgram {
 
     /// Return whether a function parameter has a default expression.
     pub(crate) fn has_function_default_expr(&self, func_id: FunctionId, param_idx: usize) -> bool {
-        self.entity_view
-            .get_function(func_id)
-            .param_defaults
+        self.function_def(func_id)
+            .has_defaults
             .get(param_idx)
-            .is_some_and(|opt| opt.is_some())
+            .copied()
+            .unwrap_or(false)
     }
 
     /// Return whether a method parameter has a default expression.
@@ -766,7 +756,7 @@ impl AnalyzedProgram {
             let method_def = self.get_method(method_id);
             self.get_type(method_def.defining_type).module == module_id
         } else {
-            self.get_function(func.id).module == module_id
+            self.function_def(func.id).module == module_id
         }
     }
 

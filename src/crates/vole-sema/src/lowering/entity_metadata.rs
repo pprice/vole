@@ -286,6 +286,9 @@ fn populate_function_defs(
             is_generic: fd.generic_info.is_some(),
             is_external: fd.is_external,
             generator_element_type,
+            sema_param_types: fd.signature.params_id.to_vec(),
+            sema_return_type: fd.signature.return_type_id,
+            sema_generator_element_type: fd.generator_element_type,
         });
     }
 }

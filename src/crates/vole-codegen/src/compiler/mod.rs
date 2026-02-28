@@ -178,7 +178,7 @@ impl<'a> Compiler<'a> {
     fn has_implicit_generic_info(&self, name_id: NameId) -> bool {
         self.analyzed
             .function_id_by_name_id(name_id)
-            .map(|func_id| self.analyzed.function_def(func_id).generic_info.is_some())
+            .map(|func_id| self.analyzed.function_def(func_id).is_generic)
             .unwrap_or(false)
     }
 
@@ -295,8 +295,7 @@ impl<'a> Compiler<'a> {
         let return_type_id = self
             .analyzed
             .function_def(semantic_func_id)
-            .signature
-            .return_type_id;
+            .sema_return_type;
         self.func_registry.set_return_type(func_key, return_type_id);
 
         Some(func_key)

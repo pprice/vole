@@ -314,6 +314,17 @@ pub struct VirFunctionDef {
     /// `Iterator<T>` return type.  Codegen reads this instead of walking
     /// the AST.
     pub generator_element_type: Option<VirTypeId>,
+
+    // ----- Temporary sema TypeId copies (until Phase 3 VIR migration) -----
+    /// Original sema parameter TypeIds, for callers that still build
+    /// Cranelift signatures via `build_signature_from_type_ids`.
+    pub sema_param_types: Vec<TypeId>,
+    /// Original sema return TypeId, for callers that still register
+    /// return types in FunctionRegistry.
+    pub sema_return_type: TypeId,
+    /// Original sema generator element TypeId, for callers that still
+    /// call `lookup_runtime_iterator` on the sema TypeArena.
+    pub sema_generator_element_type: Option<TypeId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1385,6 +1396,9 @@ mod tests {
             is_generic: false,
             is_external: false,
             generator_element_type: None,
+            sema_param_types: vec![TypeId::I64, TypeId::STRING],
+            sema_return_type: TypeId::BOOL,
+            sema_generator_element_type: None,
         });
 
         assert_eq!(meta.function_def_count(), 1);
@@ -1426,6 +1440,9 @@ mod tests {
             is_generic: true,
             is_external: false,
             generator_element_type: Some(VirTypeId::I64),
+            sema_param_types: vec![TypeId::I64],
+            sema_return_type: TypeId::I64,
+            sema_generator_element_type: Some(TypeId::I64),
         });
 
         let fd = meta.get_function_def(id).unwrap();

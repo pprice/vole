@@ -138,8 +138,8 @@ impl Compiler<'_> {
     pub fn build_signature_for_function(&self, func_id: FunctionId) -> Signature {
         let func_def = self.analyzed.function_def(func_id);
         self.build_signature_from_type_ids(
-            &func_def.signature.params_id,
-            Some(func_def.signature.return_type_id),
+            &func_def.sema_param_types,
+            Some(func_def.sema_return_type),
             SelfParam::None,
         )
     }
