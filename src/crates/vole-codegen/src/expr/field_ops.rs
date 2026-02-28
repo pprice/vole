@@ -17,7 +17,7 @@ use crate::structs::helpers::{
 use crate::types::{CompiledValue, module_name_id};
 
 use vole_frontend::Symbol;
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 use vole_sema::types::ConstantValue;
 use vole_vir::VirExpr;
 use vole_vir::expr::FieldStorage;

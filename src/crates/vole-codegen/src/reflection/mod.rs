@@ -21,8 +21,7 @@ mod trampolines;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 use rustc_hash::FxHashMap;
-use vole_identity::TypeDefId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{TypeDefId, TypeId};
 
 use crate::RuntimeKey;
 use crate::context::Cg;

@@ -15,8 +15,7 @@ use crate::types::{CodegenCtx, TypeMetadata, method_name_id_with_interner, type_
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::{ClassDecl, InterfaceMethod, StaticsBlock, StructDecl};
 use vole_frontend::{FuncDecl, Interner, Symbol, TypeExpr, TypeExprKind};
-use vole_identity::{MethodId, ModuleId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{MethodId, ModuleId, TypeId};
 
 use super::impls::primitive_type_name;
 

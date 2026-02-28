@@ -10,12 +10,11 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_frontend::ast::InterfaceMethod;
 use vole_frontend::{Decl, FuncDecl, Interner, Program};
-use vole_identity::{ModuleId, NameId};
+use vole_identity::{ModuleId, NameId, TypeId};
 use vole_sema::generic::{
     ClassMethodMonomorphInstance, MonomorphInstance, MonomorphInstanceTrait,
     StaticMethodMonomorphInstance,
 };
-use vole_sema::type_arena::TypeId;
 
 use crate::types::MonomorphIndexEntry;
 use crate::types::function_name_id_with_interner;

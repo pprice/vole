@@ -15,8 +15,8 @@ mod saturating;
 use cranelift::prelude::{AbiParam, InstBuilder, IntCC, MemFlags, Value, types};
 use cranelift_module::Module;
 
+use vole_identity::TypeId;
 use vole_runtime::native_registry::NativeType;
-use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
 use crate::callable_registry::{CallableKey, ResolvedCallable, resolve_callable_with_preference};

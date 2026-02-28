@@ -8,7 +8,7 @@ use crate::types::CompiledValue;
 use crate::union_layout;
 use cranelift::prelude::*;
 use cranelift_codegen::ir::StackSlot;
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 impl Cg<'_, '_, '_> {
     /// Coerce a value to match a field's declared type.

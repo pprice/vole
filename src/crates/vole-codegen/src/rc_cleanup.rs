@@ -8,7 +8,7 @@
 // conditional (e.g., variable set in one branch of an if but not the other).
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags, Variable, types};
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 use crate::context::Cg;
 use crate::ops::try_constant_value;

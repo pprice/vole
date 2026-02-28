@@ -9,8 +9,7 @@ use cranelift::prelude::{InstBuilder, IntCC, MemFlags, Value, Variable, types};
 
 use rustc_hash::FxHashMap;
 
-use vole_identity::NameId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{NameId, TypeId};
 
 use crate::RuntimeKey;
 use crate::errors::CodegenResult;

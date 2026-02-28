@@ -4,8 +4,7 @@ use smallvec::{SmallVec, smallvec};
 use super::Compiler;
 use crate::types::vir_conversions::{vir_is_wide, vir_type_to_cranelift};
 use crate::types::{is_wide_fallible, type_id_to_cranelift};
-use vole_identity::{FunctionId, MethodId, VirTypeId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{FunctionId, MethodId, TypeId, VirTypeId};
 use vole_vir::types::VirType;
 
 /// SmallVec for function parameters - most functions have <= 8 params

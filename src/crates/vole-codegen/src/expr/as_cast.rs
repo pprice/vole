@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use crate::errors::CodegenResult;
 use crate::types::CompiledValue;
 
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 use super::super::context::Cg;
 

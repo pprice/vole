@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
 use vole_frontend::{FuncBody, Symbol};
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
 use crate::context::{Captures, Cg};

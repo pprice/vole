@@ -24,8 +24,7 @@ use crate::types::{
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::{ImplementBlock, StaticsBlock};
 use vole_frontend::{FuncDecl, Interner, Symbol, TypeExprKind};
-use vole_identity::{MethodId, ModuleId, NameId, TypeDefId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{MethodId, ModuleId, NameId, TypeDefId, TypeId};
 
 impl Compiler<'_> {
     /// Register implement block methods (first pass)

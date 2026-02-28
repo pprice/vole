@@ -7,7 +7,7 @@
 use cranelift::prelude::{InstBuilder, Type, Value, types};
 use paste::paste;
 
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 use crate::context::Cg;
 use crate::ops::uextend_const;

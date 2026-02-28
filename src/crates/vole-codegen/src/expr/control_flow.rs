@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
 
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 use crate::ops::sextend_const;
 

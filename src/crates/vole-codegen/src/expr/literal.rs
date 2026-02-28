@@ -8,7 +8,7 @@ use crate::RuntimeKey;
 use crate::errors::CodegenResult;
 use crate::types::{CompiledValue, field_byte_size};
 
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 use super::super::context::Cg;
 use super::super::structs::split_i128_for_storage;

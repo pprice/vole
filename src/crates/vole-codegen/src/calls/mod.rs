@@ -19,8 +19,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::methods::ArgSource;
 
 use vole_frontend::Symbol;
-use vole_identity::{NameId, NodeId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{NameId, NodeId, TypeId};
 
 use super::context::Cg;
 use super::types::CompiledValue;

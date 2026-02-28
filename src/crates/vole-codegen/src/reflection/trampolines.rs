@@ -6,9 +6,8 @@
 
 use cranelift::prelude::*;
 use cranelift_module::{FuncId, Module};
-use vole_identity::TypeDefId;
+use vole_identity::{TypeDefId, TypeId};
 use vole_runtime::value::RuntimeTypeId;
-use vole_sema::type_arena::TypeId;
 
 use crate::RuntimeKey;
 use crate::context::Cg;

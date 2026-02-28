@@ -8,7 +8,7 @@ use cranelift_codegen::ir::{BlockArg, Function, InstructionData};
 use crate::RuntimeKey;
 use crate::context::ExternalMethodRef;
 use vole_frontend::BinaryOp;
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 use vole_vir::numeric_model::numeric_result_type;
 
 use super::context::Cg;

@@ -14,11 +14,8 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::CompiledValue;
 use vole_frontend::Symbol;
-use vole_identity::NamerLookup;
-use vole_identity::NodeId;
-use vole_identity::{MethodId, NameId};
+use vole_identity::{MethodId, NameId, NamerLookup, NodeId, TypeId};
 use vole_sema::generic::ClassMethodMonomorphKey;
-use vole_sema::type_arena::TypeId;
 use vole_vir::VirRef;
 use vole_vir::expr::{
     VirMethodDispatchKind, VirMethodDispatchMeta, VirMethodReceiverCoercion, VirResolvedMethod,

@@ -22,8 +22,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
 use vole_frontend::{BinaryOp, Symbol};
-use vole_identity::{ModuleId, TypeDefId, VirTypeId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{ModuleId, TypeDefId, TypeId, VirTypeId};
 use vole_vir::{
     AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
 };

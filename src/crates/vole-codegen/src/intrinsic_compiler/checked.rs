@@ -5,7 +5,7 @@
 
 use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
 
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 use super::signed_min_max;
 use crate::context::Cg;

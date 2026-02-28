@@ -6,8 +6,8 @@ use cranelift::prelude::*;
 use cranelift_jit::JITModule;
 use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
+use vole_identity::TypeId;
 use vole_sema::StringConversion;
-use vole_sema::type_arena::TypeId;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::function_registry::FunctionRegistry;

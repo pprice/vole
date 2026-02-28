@@ -4,8 +4,7 @@
 // The main logic now uses ResolvedMethod directly from sema + method_func_keys lookup.
 
 use crate::AnalyzedProgram;
-use vole_identity::TypeDefId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{TypeDefId, TypeId};
 
 /// Get TypeDefId for a type during codegen using TypeId.
 ///

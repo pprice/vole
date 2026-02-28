@@ -7,7 +7,7 @@ use crate::errors::CodegenResult;
 use crate::types::{CompiledValue, RcLifecycle};
 use crate::union_layout;
 use cranelift::prelude::*;
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 impl Cg<'_, '_, '_> {
     /// Convenience wrapper: compute struct field byte offset, panicking on invalid types.

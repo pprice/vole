@@ -12,7 +12,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use vole_frontend::ast::{TestCase, TestsDecl};
 use vole_frontend::{Decl, ExprKind, Program};
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 impl Compiler<'_> {
     /// Compile all tests in a tests block

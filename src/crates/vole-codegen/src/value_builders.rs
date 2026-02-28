@@ -12,8 +12,7 @@ use cranelift::prelude::{
 };
 use cranelift_codegen::ir::StackSlot;
 
-use vole_identity::VirTypeId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};

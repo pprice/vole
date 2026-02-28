@@ -9,8 +9,7 @@
 use cranelift::prelude::{InstBuilder, IntCC, Type, Value, types};
 use cranelift_codegen::ir::FuncRef;
 
-use vole_identity::{TypeDefId, VirTypeId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{TypeDefId, TypeId, VirTypeId};
 
 use super::context::Cg;
 use super::types::{CompiledValue, type_id_size, type_id_to_cranelift, value_to_word};

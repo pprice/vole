@@ -11,8 +11,8 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, native_type_to_cranelift};
 use crate::union_layout;
 
+use vole_identity::TypeId;
 use vole_runtime::native_registry::NativeType;
-use vole_sema::type_arena::TypeId;
 use vole_vir::{CallTarget, VirRef};
 
 use super::super::context::Cg;

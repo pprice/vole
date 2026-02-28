@@ -5,13 +5,12 @@
 use rustc_hash::FxHashMap;
 use std::cell::{Cell, RefCell};
 
-use vole_identity::{NameId, TypeDefId};
+use vole_identity::{NameId, TypeDefId, TypeId};
 use vole_runtime::NativeRegistry;
 use vole_sema::generic::{
     ClassMethodMonomorphInstance, ClassMethodMonomorphKey, MonomorphInstance,
     StaticMethodMonomorphInstance,
 };
-use vole_sema::type_arena::TypeId;
 
 use cranelift_module::FuncId;
 

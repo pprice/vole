@@ -5,8 +5,7 @@
 use rustc_hash::FxHashMap;
 
 use vole_frontend::{Interner, Symbol};
-use vole_identity::ModuleId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{ModuleId, TypeId};
 
 use crate::AnalyzedProgram;
 

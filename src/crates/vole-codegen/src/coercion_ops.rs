@@ -10,9 +10,7 @@
 use cranelift::prelude::{InstBuilder, MemFlags, Type, Value, types};
 
 use smallvec::SmallVec;
-use vole_identity::NodeId;
-use vole_identity::{FunctionId, MethodId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{FunctionId, MethodId, NodeId, TypeId};
 use vole_vir::numeric_model::{NumericCoercion, numeric_coercion};
 
 use crate::RuntimeKey;

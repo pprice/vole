@@ -15,7 +15,7 @@ use cranelift_module::Module;
 use rustc_hash::FxHashMap;
 
 use vole_frontend::{FuncDecl, Symbol};
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 use vole_vir::VirBody;
 
 use crate::compiler::common::{DefaultReturn, compile_vir_body_with_cg};

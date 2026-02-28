@@ -10,8 +10,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, load_fallible_tag};
 use crate::union_layout;
 
-use vole_identity::NodeId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{NodeId, TypeId};
 use vole_vir::VirExpr;
 use vole_vir::expr::VirMethodDispatchMeta;
 

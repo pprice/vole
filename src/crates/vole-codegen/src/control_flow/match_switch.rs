@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 /// Minimum number of non-default arms required to use the Switch optimization.
 pub(crate) const MIN_SWITCH_ARMS: usize = 4;

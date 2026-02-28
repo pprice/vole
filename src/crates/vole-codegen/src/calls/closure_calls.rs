@@ -8,8 +8,7 @@ use cranelift_codegen::ir::SigRef;
 use cranelift_module::Module;
 use smallvec::{SmallVec, smallvec};
 
-use vole_identity::NodeId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{NodeId, TypeId};
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::methods::ArgSource;

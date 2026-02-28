@@ -9,7 +9,7 @@ use crate::RuntimeKey;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 impl Cg<'_, '_, '_> {
     /// VIR path for range.iter() - compiles start/end from VIR expressions.

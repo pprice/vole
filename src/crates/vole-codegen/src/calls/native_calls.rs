@@ -7,9 +7,8 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use vole_frontend::Symbol;
-use vole_identity::{ModuleId, NodeId};
+use vole_identity::{ModuleId, NodeId, TypeId};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
-use vole_sema::type_arena::TypeId;
 
 use crate::errors::{CodegenError, CodegenResult};
 use crate::structs::methods::ArgSource;

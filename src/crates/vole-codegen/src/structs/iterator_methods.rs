@@ -14,9 +14,7 @@ use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
-use vole_identity::NodeId;
-use vole_identity::TypeDefId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{NodeId, TypeDefId, TypeId};
 
 use super::methods::ArgSource;
 

@@ -13,7 +13,7 @@ use crate::types::{
 
 use vole_frontend::Symbol;
 use vole_frontend::ast::RecordFieldPattern;
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 
 use super::super::context::Cg;
 

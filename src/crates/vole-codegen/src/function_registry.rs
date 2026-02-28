@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 use cranelift_module::FuncId;
 
 use crate::runtime_registry::RuntimeKey;
-use vole_identity::{ModuleId, NameId, NameTable};
+use vole_identity::{ModuleId, NameId, NameTable, TypeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionKey(u32);
@@ -23,8 +23,6 @@ enum FunctionName {
     /// Raw string name (e.g. for array Iterable monomorphs like "array_i64_count")
     Raw(String),
 }
-
-use vole_sema::type_arena::TypeId;
 
 #[derive(Debug, Clone)]
 struct FunctionEntry {

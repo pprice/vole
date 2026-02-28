@@ -16,8 +16,8 @@ use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 use vole_frontend::Symbol;
+use vole_identity::TypeId;
 use vole_runtime::value::RuntimeTypeId;
-use vole_sema::type_arena::TypeId;
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Compile a VIR struct literal (stack-allocated value type).

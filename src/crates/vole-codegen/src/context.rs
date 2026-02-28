@@ -18,8 +18,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 use crate::{FunctionKey, RuntimeKey};
 use vole_frontend::Symbol;
-use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, VirTypeId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeId, VirTypeId};
 
 use super::lambda::CaptureBinding;
 use super::rc_cleanup::RcScopeStack;

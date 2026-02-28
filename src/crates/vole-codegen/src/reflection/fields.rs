@@ -12,8 +12,7 @@
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
-use vole_identity::{Symbol, TypeDefId};
-use vole_sema::type_arena::TypeId;
+use vole_identity::{Symbol, TypeDefId, TypeId};
 use vole_vir::types::{VirAnnotation, VirAnnotationValue, VirConstant};
 
 use crate::RuntimeKey;

@@ -7,10 +7,8 @@ use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle};
 use vole_frontend::Symbol;
-use vole_identity::NodeId;
-use vole_identity::{MethodId, NameId, TypeDefId};
+use vole_identity::{MethodId, NameId, NodeId, TypeDefId, TypeId};
 use vole_sema::generic::{StaticMethodMonomorphInstance, StaticMethodMonomorphKey};
-use vole_sema::type_arena::TypeId;
 use vole_vir::expr::{VirMethodDispatchMeta, VirStaticMethodMonomorphKey};
 
 use super::methods::ArgSource;

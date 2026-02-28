@@ -6,8 +6,7 @@
 
 use vole_frontend::ast::{ClassDecl, PrimitiveType as AstPrimitive, StaticsBlock, StructDecl};
 use vole_frontend::{FuncDecl, Interner, Symbol};
-use vole_identity::ModuleId;
-use vole_sema::type_arena::TypeId;
+use vole_identity::{ModuleId, TypeId};
 
 /// Map a primitive type name string to its TypeId constant.
 /// Used for `extend range with Iterable<i64>` and similar Named-primitive target blocks.

@@ -7,9 +7,8 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{MethodInfo, TypeMetadata, method_name_id_with_interner};
 use vole_frontend::ast::{ClassDecl, SentinelDecl, StaticsBlock, StructDecl};
 use vole_frontend::{Interner, Program, Symbol};
-use vole_identity::{ModuleId, NameId, TypeDefId};
+use vole_identity::{ModuleId, NameId, TypeDefId, TypeId};
 use vole_runtime::type_registry::{FieldTypeTag, alloc_type_id, register_instance_type};
-use vole_sema::type_arena::TypeId;
 
 /// Convert a TypeId to a FieldTypeTag for runtime cleanup.
 ///

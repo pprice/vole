@@ -12,8 +12,8 @@ use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, field_byte_size};
 
+use vole_identity::TypeId;
 use vole_sema::UnionStorageKind;
-use vole_sema::type_arena::TypeId;
 use vole_vir::VirExpr;
 use vole_vir::types::VirType;
 

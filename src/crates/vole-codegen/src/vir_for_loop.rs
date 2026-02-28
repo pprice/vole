@@ -9,7 +9,7 @@ use smallvec::smallvec;
 use crate::IntrinsicKey;
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
-use vole_sema::type_arena::TypeId;
+use vole_identity::TypeId;
 use vole_vir::stmt::{VirFor, VirIterKind};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
