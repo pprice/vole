@@ -270,6 +270,11 @@ impl Cg<'_, '_, '_> {
                 )
             })
             .or_else(|| {
+                // AST-only legacy fallback: when no VIR dispatch is available (AST
+                // path), read the static monomorph key from NodeMap. The call site
+                // passes expr_id=None when VIR dispatch is present, so this branch
+                // only fires for non-VIR code paths. Will be removed once all static
+                // method calls go through VIR.
                 expr_id.and_then(|id| self.analyzed().static_method_generic_at(id).cloned())
             });
 

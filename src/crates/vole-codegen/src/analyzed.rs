@@ -530,6 +530,11 @@ impl AnalyzedProgram {
     }
 
     /// Return static-method monomorph key metadata for a call node.
+    ///
+    /// AST-only legacy: VIR dispatch carries `static_method_generic` directly
+    /// on `VirMethodDispatchMeta`. This accessor is only needed for non-VIR
+    /// (AST fallback) paths and will be removed once all static method calls
+    /// go through VIR.
     pub(crate) fn static_method_generic_at(
         &self,
         node_id: vole_identity::NodeId,
