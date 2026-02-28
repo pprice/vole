@@ -9,7 +9,7 @@ use crate::entity_view::EntityView;
 use vole_frontend::{Interner, Program, Symbol};
 use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId};
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
-use vole_sema::{AnalysisOutput, NodeMap, TypeArena};
+use vole_sema::{AnalysisOutput, NodeMap, SemaType, TypeArena};
 use vole_vir::{VirBody, VirEntityMetadata, VirFunction, VirProgram};
 
 /// Result of parsing and analyzing a source file.
@@ -687,12 +687,27 @@ impl AnalyzedProgram {
     }
 
     /// Resolve the implement-registry type key NameId for a concrete sema TypeId.
+    ///
+    /// Fast path: looks up the pre-computed `impl_type_names` map in
+    /// `VirEntityMetadata` (covers primitives, Range, Handle).
+    /// Fallback: inspects the `TypeArena` for Array, Class, and Struct types.
     pub(crate) fn impl_type_name_id_from_type_id(
         &self,
         type_id: vole_sema::type_arena::TypeId,
     ) -> Option<NameId> {
-        self.entity_view
-            .impl_type_name_id_from_type_id(type_id, self.type_arena())
+        let entity_metadata = self.vir_program.entity_metadata();
+        // Fast path: pre-computed for primitives, Range, Handle.
+        if let Some(name_id) = entity_metadata.impl_type_name(type_id) {
+            return Some(name_id);
+        }
+        // Dynamic path: inspect the arena for Array, Class, Struct.
+        match self.type_arena().get(type_id) {
+            SemaType::Array(_) => entity_metadata.array_name_id(),
+            SemaType::Class { type_def_id, .. } | SemaType::Struct { type_def_id, .. } => {
+                entity_metadata.type_name_id(*type_def_id)
+            }
+            _ => None,
+        }
     }
 
     /// Look up an implement-registry method by concrete type-name key.

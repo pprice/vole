@@ -347,6 +347,19 @@ pub struct VirEntityMetadata {
     ///
     /// Mirrors `EntityView::short_name_map`.
     short_name_map: FxHashMap<String, Vec<TypeDefId>>,
+    /// Pre-computed implement-registry type names for primitive, Range, and
+    /// Handle types.
+    ///
+    /// Maps the sema `TypeId` (interned in the type arena during sema) to
+    /// the canonical `NameId` used by the implement registry.  Only covers
+    /// the finite set of simple types (14 primitives + Range + Handle = 16
+    /// entries); Class, Struct, and Array types are resolved dynamically via
+    /// `type_name_id()` and `array_name_id()`.
+    ///
+    /// Populated during VIR lowering in `build_entity_metadata`.  Queried
+    /// by `AnalyzedProgram::impl_type_name_id_from_type_id` as a fast-path
+    /// before falling back to TypeArena inspection.
+    impl_type_names: FxHashMap<TypeId, NameId>,
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +432,15 @@ impl VirEntityMetadata {
         self.global_by_name
             .insert(global_def.name_id, global_def.id);
         self.global_defs.insert(global_def.id, global_def);
+    }
+
+    /// Register an implement-registry type name for a sema `TypeId`.
+    ///
+    /// Called during VIR lowering for each primitive type, Range, and Handle
+    /// to pre-compute the `TypeId → NameId` mapping that
+    /// `impl_type_name_id_from_type_id` uses as a fast-path.
+    pub fn insert_impl_type_name(&mut self, type_id: TypeId, name_id: NameId) {
+        self.impl_type_names.insert(type_id, name_id);
     }
 }
 
@@ -543,6 +565,16 @@ impl VirEntityMetadata {
     /// Mirrors `EntityView::array_name_id`.
     pub fn array_name_id(&self) -> Option<NameId> {
         self.array_name_id
+    }
+
+    /// Look up a pre-computed implement-registry type name for a sema `TypeId`.
+    ///
+    /// Returns the canonical `NameId` for primitive types, Range, and Handle
+    /// that was pre-computed during VIR lowering.  Returns `None` for
+    /// Class, Struct, Array, and other types that need dynamic resolution
+    /// via `type_name_id()` or `array_name_id()`.
+    pub fn impl_type_name(&self, type_id: TypeId) -> Option<NameId> {
+        self.impl_type_names.get(&type_id).copied()
     }
 
     /// Find a type by its short (last-segment) name.

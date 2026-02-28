@@ -9,6 +9,7 @@ use vole_identity::{Interner, NameTable, VirTypeId};
 use crate::LoweringEntityLookup;
 use crate::TypeArena;
 use crate::entity_defs::{self, TypeDefKind};
+use crate::implement_registry::PrimitiveTypeId;
 use crate::vir_lower::type_translate::translate_type_id;
 use vole_vir::VirExternalMethodInfo;
 use vole_vir::entity_metadata::{
@@ -70,6 +71,9 @@ pub fn build_entity_metadata(
 
     // Build the short-name (last segment) lookup map from all type defs.
     populate_short_name_map(registry.all_type_defs(), name_table, &mut meta);
+
+    // Pre-compute implement-registry type names for primitives, Range, Handle.
+    populate_impl_type_names(registry, type_arena, &mut meta);
 
     meta
 }
@@ -317,5 +321,41 @@ fn populate_short_name_map(
         if let Some(last_segment) = name_table.last_segment_str(td.name_id) {
             meta.insert_short_name(last_segment, td.id);
         }
+    }
+}
+
+/// Pre-compute implement-registry type names for primitive, Range, and
+/// Handle types.
+///
+/// Maps each `PrimitiveTypeId` from the entity registry to the corresponding
+/// sema `TypeId` (via the type arena's pre-interned primitives) and stores
+/// the `TypeId → NameId` mapping in `VirEntityMetadata`.  This allows codegen
+/// to resolve primitive/Range/Handle implement-registry names without needing
+/// the `EntityView` or `PrimitiveTypeId` enum at query time.
+fn populate_impl_type_names(
+    registry: &crate::EntityRegistry,
+    type_arena: &TypeArena,
+    meta: &mut VirEntityMetadata,
+) {
+    for (prim_id, name_id) in registry.primitive_name_entries() {
+        let type_id = match prim_id {
+            PrimitiveTypeId::I8 => type_arena.primitives.i8,
+            PrimitiveTypeId::I16 => type_arena.primitives.i16,
+            PrimitiveTypeId::I32 => type_arena.primitives.i32,
+            PrimitiveTypeId::I64 => type_arena.primitives.i64,
+            PrimitiveTypeId::I128 => type_arena.primitives.i128,
+            PrimitiveTypeId::U8 => type_arena.primitives.u8,
+            PrimitiveTypeId::U16 => type_arena.primitives.u16,
+            PrimitiveTypeId::U32 => type_arena.primitives.u32,
+            PrimitiveTypeId::U64 => type_arena.primitives.u64,
+            PrimitiveTypeId::F32 => type_arena.primitives.f32,
+            PrimitiveTypeId::F64 => type_arena.primitives.f64,
+            PrimitiveTypeId::F128 => type_arena.primitives.f128,
+            PrimitiveTypeId::Bool => type_arena.primitives.bool,
+            PrimitiveTypeId::String => type_arena.primitives.string,
+            PrimitiveTypeId::Range => type_arena.primitives.range,
+            PrimitiveTypeId::Handle => type_arena.primitives.handle,
+        };
+        meta.insert_impl_type_name(type_id, name_id);
     }
 }

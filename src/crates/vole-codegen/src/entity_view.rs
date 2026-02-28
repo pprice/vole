@@ -11,13 +11,10 @@ use rustc_hash::FxHashMap;
 
 use vole_identity::{
     ClassMethodMonomorphCache, FieldId, FunctionId, GlobalId, MethodId, MonomorphCache, NameId,
-    NameTable, StaticMethodMonomorphCache, TypeDefId, TypeId,
+    NameTable, StaticMethodMonomorphCache, TypeDefId,
 };
 use vole_sema::EntityRegistry;
 use vole_sema::entity_defs::{FieldDef, FunctionDef, GlobalDef, MethodDef, TypeDef};
-use vole_sema::implement_registry::PrimitiveTypeId;
-use vole_sema::type_arena::{SemaType, TypeArena};
-use vole_sema::types::PrimitiveType;
 
 use crate::analyzed::ExternalMethodInfoRef;
 
@@ -45,8 +42,6 @@ pub(crate) struct EntityView {
 
     // -- Miscellaneous --
     array_name: Option<NameId>,
-    /// Primitive type NameIds (i64, string, bool, ...).
-    primitive_names: FxHashMap<PrimitiveTypeId, NameId>,
 
     /// Eagerly-built short-name cache (last segment -> TypeDefIds).
     short_name_map: FxHashMap<String, Vec<TypeDefId>>,
@@ -75,7 +70,6 @@ impl EntityView {
             global_by_name: registry.global_by_name_map().clone(),
 
             array_name: registry.array_name_id(),
-            primitive_names: registry.primitive_name_entries().collect(),
             short_name_map,
 
             monomorph_cache: registry.monomorph_cache.clone(),
@@ -204,46 +198,6 @@ impl EntityView {
     /// Get the static-method monomorph cache.
     pub(crate) fn static_method_monomorph_cache(&self) -> &StaticMethodMonomorphCache {
         &self.static_method_monomorph_cache
-    }
-
-    /// Resolve the implement-registry type-key NameId from a concrete sema TypeId.
-    ///
-    /// Replicates `ImplTypeId::from_type_id` logic using the EntityView's
-    /// own type defs and primitive name table, without reaching back into
-    /// the EntityRegistry.
-    pub(crate) fn impl_type_name_id_from_type_id(
-        &self,
-        type_id: TypeId,
-        arena: &TypeArena,
-    ) -> Option<NameId> {
-        match arena.get(type_id) {
-            SemaType::Primitive(prim) => {
-                let prim_id = match prim {
-                    PrimitiveType::I8 => PrimitiveTypeId::I8,
-                    PrimitiveType::I16 => PrimitiveTypeId::I16,
-                    PrimitiveType::I32 => PrimitiveTypeId::I32,
-                    PrimitiveType::I64 => PrimitiveTypeId::I64,
-                    PrimitiveType::I128 => PrimitiveTypeId::I128,
-                    PrimitiveType::U8 => PrimitiveTypeId::U8,
-                    PrimitiveType::U16 => PrimitiveTypeId::U16,
-                    PrimitiveType::U32 => PrimitiveTypeId::U32,
-                    PrimitiveType::U64 => PrimitiveTypeId::U64,
-                    PrimitiveType::F32 => PrimitiveTypeId::F32,
-                    PrimitiveType::F64 => PrimitiveTypeId::F64,
-                    PrimitiveType::F128 => PrimitiveTypeId::F128,
-                    PrimitiveType::Bool => PrimitiveTypeId::Bool,
-                    PrimitiveType::String => PrimitiveTypeId::String,
-                };
-                self.primitive_names.get(&prim_id).copied()
-            }
-            SemaType::Range => self.primitive_names.get(&PrimitiveTypeId::Range).copied(),
-            SemaType::Handle => self.primitive_names.get(&PrimitiveTypeId::Handle).copied(),
-            SemaType::Array(_) => self.array_name,
-            SemaType::Class { type_def_id, .. } | SemaType::Struct { type_def_id, .. } => {
-                Some(self.get_type(*type_def_id).name_id)
-            }
-            _ => None,
-        }
     }
 
     /// Resolve a type definition by short name, matching the sema
