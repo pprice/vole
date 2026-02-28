@@ -105,3 +105,53 @@ pub enum StringConversion {
     /// monomorphization substitutes `T` with a concrete type.
     Generic { type_id: TypeId },
 }
+
+/// A constant value that can be stored in a module.
+///
+/// This is the public-facing constant type used by the module system and codegen.
+/// It stores the raw value without numeric suffix metadata.
+///
+/// The optimizer internally uses a richer `ConstValue` type (in `optimizer::constant_folding`)
+/// that carries an optional `NumericSuffix` for type-preserving folds. `From` conversions
+/// exist between the two types.
+///
+/// ```ignore
+/// // In math.vole:
+/// let PI = 3.14159
+/// let MAX_SIZE = 1024
+/// ```
+#[derive(Debug, Clone)]
+pub enum ConstantValue {
+    I64(i64),
+    F64(f64),
+    Bool(bool),
+    String(String),
+}
+
+// Manual PartialEq: compare f64 by bits so NaN == NaN, matching Hash and satisfying Eq.
+impl PartialEq for ConstantValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ConstantValue::I64(a), ConstantValue::I64(b)) => a == b,
+            (ConstantValue::F64(a), ConstantValue::F64(b)) => a.to_bits() == b.to_bits(),
+            (ConstantValue::Bool(a), ConstantValue::Bool(b)) => a == b,
+            (ConstantValue::String(a), ConstantValue::String(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ConstantValue {}
+
+// Manual Hash implementation because f64 doesn't implement Hash
+impl std::hash::Hash for ConstantValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            ConstantValue::I64(v) => v.hash(state),
+            ConstantValue::F64(v) => v.to_bits().hash(state),
+            ConstantValue::Bool(v) => v.hash(state),
+            ConstantValue::String(v) => v.hash(state),
+        }
+    }
+}

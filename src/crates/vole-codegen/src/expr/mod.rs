@@ -22,7 +22,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::union_layout;
 
 use vole_frontend::{BinaryOp, Symbol};
-use vole_identity::{ModuleId, TypeDefId, TypeId, VirTypeId};
+use vole_identity::{ConstantValue, ModuleId, TypeDefId, TypeId, VirTypeId};
 use vole_vir::{
     AsCastKind, CoerceKind, IsCheckResult, VirBinOp, VirExpr, VirMetaKind, VirStringPart, VirUnOp,
 };
@@ -113,19 +113,19 @@ impl Cg<'_, '_, '_> {
             let i64_id = arena.i64();
             let bool_id = arena.bool();
             match const_val {
-                vole_sema::types::ConstantValue::F64(v) => {
+                ConstantValue::F64(v) => {
                     let val = self.builder.ins().f64const(v);
                     Ok(CompiledValue::new(val, types::F64, f64_id))
                 }
-                vole_sema::types::ConstantValue::I64(v) => {
+                ConstantValue::I64(v) => {
                     let val = self.iconst_cached(types::I64, v);
                     Ok(CompiledValue::new(val, types::I64, i64_id))
                 }
-                vole_sema::types::ConstantValue::Bool(v) => {
+                ConstantValue::Bool(v) => {
                     let val = self.iconst_cached(types::I8, if v { 1 } else { 0 });
                     Ok(CompiledValue::new(val, types::I8, bool_id))
                 }
-                vole_sema::types::ConstantValue::String(s) => self.string_literal(&s),
+                ConstantValue::String(s) => self.string_literal(&s),
             }
         } else if self.arena().is_function(export_type_id) {
             // Functions cannot be used as values directly - must be called

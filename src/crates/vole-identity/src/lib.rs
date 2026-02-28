@@ -14,7 +14,9 @@ mod span;
 mod symbol;
 mod type_layout;
 
-pub use annotations::{IsCheckResult, StringConversion, UnionStorageKind, VirIsCheckResult};
+pub use annotations::{
+    ConstantValue, IsCheckResult, StringConversion, UnionStorageKind, VirIsCheckResult,
+};
 pub use intern::Interner;
 pub use primitive_type::PrimitiveType;
 pub use span::Span;
