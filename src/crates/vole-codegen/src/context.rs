@@ -1275,7 +1275,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// FieldMeta.annotations they are heap-allocated via InstanceNew. Field access
     /// on these values must use InstanceGetField rather than struct offset loads.
     pub fn is_heap_allocated_annotation(&self, type_id: TypeId) -> bool {
-        if let Some((type_def_id, _)) = self.arena().unwrap_struct(type_id) {
+        if let Some((type_def_id, _)) = self.vir_query_unwrap_struct(type_id) {
             self.env
                 .state
                 .annotation_type_ids
@@ -1297,7 +1297,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// flag directly, so it works even when the annotation type hasn't been through
     /// the FieldMeta.annotations codepath yet (cross-function case).
     pub fn get_annotation_runtime_type_id(&self, type_id: TypeId) -> Option<u32> {
-        let (type_def_id, _) = self.arena().unwrap_struct(type_id)?;
+        let (type_def_id, _) = self.vir_query_unwrap_struct(type_id)?;
 
         // Check sema's is_annotation flag (authoritative source)
         if !self.analyzed().type_is_annotation(type_def_id) {
@@ -1590,7 +1590,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         value: CompiledValue,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
-        let value = if self.arena().is_struct(value.type_id) {
+        let value = if self.vir_query_is_struct(value.type_id) {
             self.copy_struct_to_heap(value)?
         } else {
             value
@@ -1617,7 +1617,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         elem_type_id: TypeId,
         union_storage_hint: Option<vole_sema::UnionStorageKind>,
     ) -> CodegenResult<(Value, Value, CompiledValue)> {
-        let mut value = if self.arena().is_struct(value.type_id) {
+        let mut value = if self.vir_query_is_struct(value.type_id) {
             self.copy_struct_to_heap(value)?
         } else {
             value
@@ -1627,7 +1627,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Fast path: sema told us whether this is a union element or not.
         // If no hint, fall back to arena check.
         let is_union_elem =
-            union_storage_hint.is_some() || self.arena().is_union(resolved_elem_type);
+            union_storage_hint.is_some() || self.vir_query_is_union(resolved_elem_type);
         if !is_union_elem {
             // Track whether the value was already unknown before coercion.
             // If so, the value is a heap TaggedValue pointer potentially owned
@@ -1670,18 +1670,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
         if prefers_inline {
             value = self.coerce_to_type(value, resolved_elem_type)?;
-            if !self.arena().is_union(value.type_id) {
+            if !self.vir_query_is_union(value.type_id) {
                 return Err(CodegenError::type_mismatch(
                     "array union inline coercion",
-                    self.arena().display_basic(resolved_elem_type),
-                    self.arena().display_basic(value.type_id),
+                    self.vir_query_display_basic(resolved_elem_type),
+                    self.vir_query_display_basic(value.type_id),
                 ));
             }
             let variants = self
-                .arena()
-                .unwrap_union(resolved_elem_type)
-                .expect("INTERNAL: expected union element type")
-                .clone();
+                .vir_query_unwrap_union(resolved_elem_type)
+                .expect("INTERNAL: expected union element type");
 
             let variant_idx = self
                 .builder
@@ -1702,13 +1700,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Boxed union storage for ambiguous runtime tags.
-        if self.arena().is_union(value.type_id) {
+        if self.vir_query_is_union(value.type_id) {
             value = self.coerce_to_type(value, resolved_elem_type)?;
-            if !self.arena().is_union(value.type_id) {
+            if !self.vir_query_is_union(value.type_id) {
                 return Err(CodegenError::type_mismatch(
                     "array union boxed coercion",
-                    self.arena().display_basic(resolved_elem_type),
-                    self.arena().display_basic(value.type_id),
+                    self.vir_query_display_basic(resolved_elem_type),
+                    self.vir_query_display_basic(value.type_id),
                 ));
             }
             value = self.copy_union_to_heap(value)?;
@@ -1739,10 +1737,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         let variants = self
-            .arena()
-            .unwrap_union(resolved_union_id)
-            .expect("INTERNAL: expected union type for array decode")
-            .clone();
+            .vir_query_unwrap_union(resolved_union_id)
+            .expect("INTERNAL: expected union type for array decode");
 
         let union_size = self.type_size(resolved_union_id);
         let slot = self.alloc_stack(union_size);
