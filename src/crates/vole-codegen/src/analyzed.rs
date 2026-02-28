@@ -691,7 +691,7 @@ impl AnalyzedProgram {
             type_id,
             self.type_arena(),
             self.name_table(),
-            &self.entity_view,
+            self.vir_program.entity_metadata(),
         )
     }
 

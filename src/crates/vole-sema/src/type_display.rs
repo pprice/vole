@@ -2,22 +2,29 @@
 //!
 //! This module provides functions to display types directly from TypeId.
 
-use crate::entity_defs::TypeDef;
 use crate::entity_registry::EntityRegistry;
 use crate::type_arena::{InternedStructural, SemaType, TypeArena, TypeId};
-use vole_identity::{NameTable, TypeDefId};
+use vole_identity::{NameId, NameTable, TypeDefId};
 
-/// Minimal trait for type display: look up a `TypeDef` by ID.
+/// Minimal trait for type display: look up a type's name by its ID.
 ///
-/// Both `EntityRegistry` (sema) and `EntityView` (codegen) implement this,
-/// allowing `display_type_id_short` to work without a concrete registry.
+/// Both `EntityRegistry` (sema) and `VirEntityMetadata` (codegen) implement
+/// this, allowing `display_type_id_short` to work without a concrete registry.
 pub trait TypeDefProvider {
-    fn get_type(&self, id: TypeDefId) -> &TypeDef;
+    fn type_name_id(&self, id: TypeDefId) -> NameId;
 }
 
 impl TypeDefProvider for EntityRegistry {
-    fn get_type(&self, id: TypeDefId) -> &TypeDef {
-        EntityRegistry::get_type(self, id)
+    fn type_name_id(&self, id: TypeDefId) -> NameId {
+        EntityRegistry::get_type(self, id).name_id
+    }
+}
+
+impl TypeDefProvider for vole_vir::VirEntityMetadata {
+    fn type_name_id(&self, id: TypeDefId) -> NameId {
+        self.get_type_def(id)
+            .expect("VirEntityMetadata: missing TypeDefId in type_name_id()")
+            .name_id
     }
 }
 
@@ -85,8 +92,8 @@ fn display_sema_type(
     if arena.is_sentinel(type_id)
         && let SemaType::Struct { type_def_id, .. } = arena.get(type_id)
     {
-        let type_def = provider.get_type(*type_def_id);
-        if let Some(name) = names.last_segment_str(type_def.name_id) {
+        let name_id = provider.type_name_id(*type_def_id);
+        if let Some(name) = names.last_segment_str(name_id) {
             return name;
         }
     }
@@ -162,7 +169,7 @@ fn display_sema_type(
             type_def_id,
             type_args,
         } => {
-            let name_id = provider.get_type(*type_def_id).name_id;
+            let name_id = provider.type_name_id(*type_def_id);
             let base = if short {
                 names
                     .last_segment_str(name_id)
@@ -183,7 +190,7 @@ fn display_sema_type(
         }
 
         SemaType::Error { type_def_id } => {
-            let name_id = provider.get_type(*type_def_id).name_id;
+            let name_id = provider.type_name_id(*type_def_id);
             if short {
                 names
                     .last_segment_str(name_id)
