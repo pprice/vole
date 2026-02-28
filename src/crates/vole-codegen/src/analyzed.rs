@@ -488,7 +488,7 @@ impl AnalyzedProgram {
     pub(crate) fn monomorph_for(
         &self,
         node_id: vole_identity::NodeId,
-    ) -> Option<&vole_sema::generic::MonomorphKey> {
+    ) -> Option<&vole_identity::MonomorphKey> {
         self.node_map.get_generic(node_id)
     }
 
@@ -496,7 +496,7 @@ impl AnalyzedProgram {
     pub(crate) fn static_method_generic_at(
         &self,
         node_id: vole_identity::NodeId,
-    ) -> Option<&vole_sema::generic::StaticMethodMonomorphKey> {
+    ) -> Option<&vole_identity::StaticMethodMonomorphKey> {
         self.node_map.get_static_method_generic(node_id)
     }
 
@@ -660,21 +660,19 @@ impl AnalyzedProgram {
     }
 
     /// Get the free-function monomorph cache.
-    pub(crate) fn monomorph_cache(&self) -> &vole_sema::generic::MonomorphCache {
+    pub(crate) fn monomorph_cache(&self) -> &vole_identity::MonomorphCache {
         self.entity_view.monomorph_cache()
     }
 
     /// Get the class-method monomorph cache.
-    pub(crate) fn class_method_monomorph_cache(
-        &self,
-    ) -> &vole_sema::generic::ClassMethodMonomorphCache {
+    pub(crate) fn class_method_monomorph_cache(&self) -> &vole_identity::ClassMethodMonomorphCache {
         self.entity_view.class_method_monomorph_cache()
     }
 
     /// Get the static-method monomorph cache.
     pub(crate) fn static_method_monomorph_cache(
         &self,
-    ) -> &vole_sema::generic::StaticMethodMonomorphCache {
+    ) -> &vole_identity::StaticMethodMonomorphCache {
         self.entity_view.static_method_monomorph_cache()
     }
 

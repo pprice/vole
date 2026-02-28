@@ -10,10 +10,9 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_frontend::ast::InterfaceMethod;
 use vole_frontend::{Decl, FuncDecl, Interner, Program};
-use vole_identity::{ModuleId, NameId, TypeId};
-use vole_sema::generic::{
-    ClassMethodMonomorphInstance, MonomorphInstance, MonomorphInstanceTrait,
-    StaticMethodMonomorphInstance,
+use vole_identity::{
+    ClassMethodMonomorphInstance, ModuleId, MonomorphInstance, MonomorphInstanceTrait, NameId,
+    StaticMethodMonomorphInstance, TypeId,
 };
 
 use crate::types::MonomorphIndexEntry;
@@ -21,7 +20,7 @@ use crate::types::function_name_id_with_interner;
 
 /// Data for an expanded class method monomorph (used during template expansion).
 struct ExpandedMethodData {
-    concrete_key: vole_sema::generic::ClassMethodMonomorphKey,
+    concrete_key: vole_identity::ClassMethodMonomorphKey,
     mangled_name_str: String,
     template_mangled_name: NameId,
     func_type: vole_identity::FunctionType,
@@ -987,8 +986,7 @@ impl Compiler<'_> {
     /// declares them in JIT, compiles their bodies, and registers them in
     /// `expanded_class_method_monomorphs` for lookup by `Cg`.
     pub(super) fn expand_abstract_class_method_monomorphs(&mut self) -> CodegenResult<()> {
-        use vole_identity::FunctionType;
-        use vole_sema::generic::ClassMethodMonomorphKey;
+        use vole_identity::{ClassMethodMonomorphKey, FunctionType};
 
         // Early-exit if monomorph caches haven't grown since last expansion
         let current_cache_size = self

@@ -14,11 +14,11 @@ use crate::FunctionRegistry;
 #[derive(Debug, Clone)]
 pub enum PendingMonomorph {
     /// A free-function monomorph (from monomorph_cache).
-    Function(vole_sema::generic::MonomorphInstance),
+    Function(vole_identity::MonomorphInstance),
     /// A class instance method monomorph (from class_method_monomorph_cache).
-    ClassMethod(vole_sema::generic::ClassMethodMonomorphInstance),
+    ClassMethod(vole_identity::ClassMethodMonomorphInstance),
     /// A static method monomorph (from static_method_monomorph_cache).
-    StaticMethod(vole_sema::generic::StaticMethodMonomorphInstance),
+    StaticMethod(vole_identity::StaticMethodMonomorphInstance),
 }
 
 /// Codegen context - mutable infrastructure for code generation.

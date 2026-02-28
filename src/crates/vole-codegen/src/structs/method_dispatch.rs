@@ -14,8 +14,7 @@ use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, module_name_id, type_id_to_cranelift};
-use vole_identity::{ModuleId, NameId, TypeDefId, TypeId};
-use vole_sema::generic::MonomorphKey;
+use vole_identity::{ModuleId, MonomorphKey, NameId, TypeDefId, TypeId};
 use vole_vir::expr::{VirFunctionMonomorphKey, VirResolvedMethod};
 
 use super::methods::ArgSource;

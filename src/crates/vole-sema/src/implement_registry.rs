@@ -122,14 +122,8 @@ pub struct MethodKey {
     pub method_name: NameId,
 }
 
-/// Info for external (native) methods.
-/// Both fields are interned as single-segment NameIds for cheap Copy.
-/// Use name_table.last_segment_str(field) to get the string value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ExternalMethodInfo {
-    pub module_path: NameId,
-    pub native_name: NameId,
-}
+// Re-export from vole-identity for backward compatibility.
+pub use vole_identity::ExternalMethodInfo;
 
 /// Type-to-intrinsic mapping for generic external functions.
 /// Used during codegen to dispatch to the correct intrinsic based on concrete type.
