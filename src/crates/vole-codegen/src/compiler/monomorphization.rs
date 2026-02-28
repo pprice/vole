@@ -69,17 +69,23 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized function instances
     pub(super) fn declare_monomorphized_instances(&mut self) -> CodegenResult<()> {
-        // Collect instances to avoid borrow issues
-        let instances = self.analyzed.monomorph_cache().collect_instances();
+        // Collect from VirProgram.free_monomorphs to avoid borrow issues
+        let instances: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .free_monomorphs
+            .values()
+            .cloned()
+            .collect();
 
-        for instance in instances {
+        for instance in &instances {
             // Skip external functions - they don't need JIT compilation
             // They're called directly via native_registry
             if self.is_external_func(instance.original_name) {
                 continue;
             }
 
-            self.declare_monomorph_instance(&instance, false);
+            self.declare_monomorph_instance(instance, false);
         }
 
         Ok(())

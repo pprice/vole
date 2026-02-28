@@ -10,7 +10,7 @@
 // tickets (vol-3on3, vol-40jn, vol-bklt).
 
 use rustc_hash::FxHashMap;
-use vole_identity::{FunctionType, NameId, TypeId, VirTypeId};
+use vole_identity::{FunctionType, MonomorphInstanceTrait, NameId, TypeId, VirTypeId};
 
 use crate::expr::VirExternalMethodInfo;
 
@@ -49,6 +49,21 @@ pub struct VirMonomorphInfo {
     ///
     /// Keyed by type param NameId. Used by VIR-path codegen.
     pub vir_substitutions: FxHashMap<NameId, VirTypeId>,
+}
+
+impl MonomorphInstanceTrait for VirMonomorphInfo {
+    fn mangled_name(&self) -> NameId {
+        self.mangled_name
+    }
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+    fn func_type(&self) -> &FunctionType {
+        &self.func_type
+    }
+    fn substitutions(&self) -> &FxHashMap<NameId, TypeId> {
+        &self.substitutions
+    }
 }
 
 // ============================================================================
