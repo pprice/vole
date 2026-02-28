@@ -163,16 +163,6 @@ impl Cg<'_, '_, '_> {
         };
         let named_mapping = vir_dispatch
             .and_then(|dispatch| dispatch.resolved_call_args.clone())
-            .or_else(|| {
-                if vir_dispatch.is_some() {
-                    None
-                } else {
-                    self.analyzed()
-                        .node_map()
-                        .get_resolved_call_args(expr_id)
-                        .map(|s| s.to_vec())
-                }
-            })
             .filter(|mapping| mapping_is_valid(mapping));
         if let Some(ref mapping) = named_mapping {
             // Named arg reordering: compile each slot in parameter order using the mapping.
