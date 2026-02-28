@@ -963,10 +963,11 @@ impl Cg<'_, '_, '_> {
                     monomorph_key.clone()
                 };
 
-                // Look up the monomorphized instance
+                // Look up the monomorphized instance from VirProgram
                 if let Some(instance) = self
                     .analyzed()
-                    .class_method_monomorph_cache()
+                    .vir_program()
+                    .class_method_monomorphs
                     .get(&effective_key)
                 {
                     return_type_id = instance.func_type.return_type_id;
