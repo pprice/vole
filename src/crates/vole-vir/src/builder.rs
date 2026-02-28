@@ -418,14 +418,14 @@ mod tests {
         }
 
         let obj = b.build_local_load(dummy_symbol(), ty);
-        let field = b.build_field_load(obj, dummy_symbol(), FieldStorage::Direct { offset: 8 }, ty);
+        let field = b.build_field_load(obj, dummy_symbol(), FieldStorage::Direct { slot: 1 }, ty);
 
         match field.as_ref() {
             VirExpr::FieldLoad {
-                storage: FieldStorage::Direct { offset: 8 },
+                storage: FieldStorage::Direct { slot: 1 },
                 ..
             } => {}
-            other => panic!("expected FieldLoad Direct@8, got {other:?}"),
+            other => panic!("expected FieldLoad Direct@s1, got {other:?}"),
         }
     }
 

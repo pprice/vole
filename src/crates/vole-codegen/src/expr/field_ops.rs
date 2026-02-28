@@ -20,58 +20,80 @@ use vole_frontend::Symbol;
 use vole_sema::type_arena::TypeId;
 use vole_sema::types::ConstantValue;
 use vole_vir::VirExpr;
+use vole_vir::expr::FieldStorage;
 
 use super::super::context::Cg;
 
 impl Cg<'_, '_, '_> {
     /// Compile a VIR `FieldLoad` expression.
     ///
-    /// Handles three paths:
-    /// 1. **Module field** -- constant/export lookup (no runtime load).
-    /// 2. **Struct field** -- stack-based load at byte offset.
-    /// 3. **Class field** -- runtime `InstanceGetField` call.
+    /// When `storage` is resolved (`Direct` or `Heap`), uses the
+    /// pre-resolved slot and dispatch kind from sema lowering.
+    /// Falls back to the full arena lookup when `storage` is `ByName`
+    /// (module fields).
     pub(crate) fn compile_vir_field_load(
         &mut self,
         object: &VirExpr,
         field: Symbol,
+        storage: FieldStorage,
     ) -> CodegenResult<CompiledValue> {
         let obj = self.compile_vir_expr(object)?;
 
-        // Module field access: constant/export lookup.
+        // Resolved storage: use pre-resolved slot, only look up field type.
+        if let FieldStorage::Direct { slot } | FieldStorage::Heap { slot } = storage {
+            let field_name = self.interner().resolve(field);
+            let (_, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+            return self.extract_field(obj, slot as usize, field_type_id);
+        }
+
+        // ByName fallback: module field access or full arena lookup.
         if let Some(cv) = self.try_module_field_load(obj, field)? {
             return Ok(cv);
         }
-
-        // Resolve field slot and type using TypeArena.
         let field_name = self.interner().resolve(field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
-
-        // Delegate to extract_field which handles struct vs class,
-        // wide types, RC bookkeeping, and nested struct pointers.
         self.extract_field(obj, slot, field_type_id)
     }
 
     /// Compile a VIR `FieldStore` expression.
     ///
-    /// Dispatches between struct (stack store) and class (runtime call),
-    /// handling RC bookkeeping, wide types, union coercion, and boxing.
+    /// When `storage` is resolved (`Direct` or `Heap`), uses the
+    /// pre-resolved slot and dispatch kind from sema lowering.
+    /// Falls back to the full arena lookup when `storage` is `ByName`.
     pub(crate) fn compile_vir_field_store(
         &mut self,
         object: &VirExpr,
         field: Symbol,
+        storage: FieldStorage,
         value_expr: &VirExpr,
     ) -> CodegenResult<CompiledValue> {
         let obj = self.compile_vir_expr(object)?;
         let value = self.compile_vir_expr(value_expr)?;
 
-        let field_name = self.interner().resolve(field);
-        let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
-
-        let is_struct = self.vir_query_is_struct(obj.type_id);
-        if is_struct {
-            self.vir_struct_field_store(obj, slot, field_type_id, value)
-        } else {
-            self.vir_class_field_store(obj, slot, field_type_id, value)
+        match storage {
+            FieldStorage::Direct { slot } => {
+                let field_name = self.interner().resolve(field);
+                let (_, field_type_id) =
+                    get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+                self.vir_struct_field_store(obj, slot as usize, field_type_id, value)
+            }
+            FieldStorage::Heap { slot } => {
+                let field_name = self.interner().resolve(field);
+                let (_, field_type_id) =
+                    get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+                self.vir_class_field_store(obj, slot as usize, field_type_id, value)
+            }
+            FieldStorage::ByName => {
+                let field_name = self.interner().resolve(field);
+                let (slot, field_type_id) =
+                    get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+                let is_struct = self.vir_query_is_struct(obj.type_id);
+                if is_struct {
+                    self.vir_struct_field_store(obj, slot, field_type_id, value)
+                } else {
+                    self.vir_class_field_store(obj, slot, field_type_id, value)
+                }
+            }
         }
     }
 

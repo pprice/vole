@@ -519,13 +519,18 @@ impl Cg<'_, '_, '_> {
             }
 
             // -- Field access -------------------------------------------------
-            VirExpr::FieldLoad { object, field, .. } => self.compile_vir_field_load(object, *field),
+            VirExpr::FieldLoad {
+                object,
+                field,
+                storage,
+                ..
+            } => self.compile_vir_field_load(object, *field, *storage),
             VirExpr::FieldStore {
                 object,
                 field,
-                storage: _,
+                storage,
                 value,
-            } => self.compile_vir_field_store(object, *field, value),
+            } => self.compile_vir_field_store(object, *field, *storage, value),
 
             // -- Indexing ------------------------------------------------------
             VirExpr::Index {

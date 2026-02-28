@@ -11,7 +11,7 @@ use vole_identity::{TypeId, VirTypeId};
 
 use vole_vir::calls::CallTarget;
 use vole_vir::expr::{
-    AsCastKind, FieldStorage, IsCheckResult, VirBinOp, VirCapture, VirClassMethodMonomorphKey,
+    AsCastKind, IsCheckResult, VirBinOp, VirCapture, VirClassMethodMonomorphKey,
     VirErrorFieldBinding, VirErrorPatternKind, VirExpr, VirExternalMethodInfo,
     VirFunctionMonomorphKey, VirMatchArm, VirMetaKind, VirMethodDispatchKind,
     VirMethodDispatchMeta, VirMethodReceiverCoercion, VirPattern, VirRecordFieldBinding,
@@ -417,12 +417,14 @@ fn lower_assign(
             Box::new(VirExpr::LocalStore { name: *sym, value })
         }
         vole_frontend::AssignTarget::Field { object, field, .. } => {
+            let object_type = ctx.node_map.get_type(object.id).unwrap_or(TypeId::UNKNOWN);
+            let storage = ctx.resolve_field_storage(object_type, *field);
             let obj = lower_expr(object, ctx);
             let value = lower_expr(&assign_expr.value, ctx);
             Box::new(VirExpr::FieldStore {
                 object: obj,
                 field: *field,
-                storage: FieldStorage::ByName,
+                storage,
                 value,
             })
         }
@@ -494,12 +496,14 @@ fn lower_compound_assign(
             })
         }
         vole_frontend::AssignTarget::Field { object, field, .. } => {
+            let object_type = ctx.node_map.get_type(object.id).unwrap_or(TypeId::UNKNOWN);
+            let storage = ctx.resolve_field_storage(object_type, *field);
             let obj_for_load = lower_expr(object, ctx);
             let obj_for_store = lower_expr(object, ctx);
             let load = Box::new(VirExpr::FieldLoad {
                 object: obj_for_load,
                 field: *field,
-                storage: FieldStorage::ByName,
+                storage,
                 ty: compat_ty,
                 vir_ty,
             });
@@ -514,7 +518,7 @@ fn lower_compound_assign(
             Box::new(VirExpr::FieldStore {
                 object: obj_for_store,
                 field: *field,
-                storage: FieldStorage::ByName,
+                storage,
                 value: binop_result,
             })
         }
@@ -555,21 +559,26 @@ fn lower_compound_assign(
 
 /// Lower a field access expression to `VirExpr::FieldLoad`.
 ///
-/// The object sub-expression is recursively lowered.  Storage resolution
-/// (`Direct` vs `Heap`) is deferred to codegen via `FieldStorage::ByName`
-/// because field layout is not yet resolved during lowering.
+/// The object sub-expression is recursively lowered.  Storage is resolved
+/// to `Direct` (struct) or `Heap` (class) using the object's sema type.
+/// Falls back to `ByName` for modules, unknown types, or generic templates.
 fn lower_field_access(
     fa: &vole_frontend::ast::FieldAccessExpr,
     ty: TypeId,
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
+    let object_type = ctx
+        .node_map
+        .get_type(fa.object.id)
+        .unwrap_or(TypeId::UNKNOWN);
+    let storage = ctx.resolve_field_storage(object_type, fa.field);
     let object = lower_expr(&fa.object, ctx);
     let compat_ty = ctx.compat_ty(ty);
     let vir_ty = ctx.translate(ty);
     Box::new(VirExpr::FieldLoad {
         object,
         field: fa.field,
-        storage: FieldStorage::ByName,
+        storage,
         ty: compat_ty,
         vir_ty,
     })

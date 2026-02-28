@@ -476,16 +476,26 @@ pub enum VirUnOp {
 }
 
 /// Describes the physical storage location of a struct/class field.
+///
+/// `Direct` and `Heap` are resolved during VIR lowering for concrete
+/// (non-generic) types.  Generic templates emit `ByName`; the monomorph
+/// rederive pass resolves them to concrete storage after type substitution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FieldStorage {
-    /// Field stored inline at the given byte offset (value-type struct).
-    Direct { offset: u32 },
-    /// Field stored on the heap, accessed through a runtime call at the
-    /// given slot index (reference-counted class instance).
-    Heap { offset: u32 },
-    /// Unresolved storage — the lowering pass emits this when `TypeArena`
-    /// is not available.  Codegen resolves it to `Direct` or `Heap` using
-    /// the object's type at instruction-selection time.
+    /// Field stored inline on the stack (value-type struct).
+    ///
+    /// `slot` is the logical field index in the struct's field list.
+    /// Codegen converts to byte offset via `struct_field_byte_offset`.
+    Direct { slot: u32 },
+    /// Field stored on the heap, accessed through a runtime call
+    /// (reference-counted class instance).
+    ///
+    /// `slot` is the physical slot index accounting for wide types
+    /// (i128/f128 fields occupy 2 consecutive slots).
+    Heap { slot: u32 },
+    /// Unresolved storage — emitted for generic function templates where
+    /// the object type contains type parameters.  Must be resolved before
+    /// codegen via the monomorph rederive pass.
     ByName,
 }
 

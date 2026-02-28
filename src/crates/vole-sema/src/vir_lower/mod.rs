@@ -147,6 +147,101 @@ impl LoweringCtx<'_> {
         }
     }
 
+    /// Resolve the field storage dispatch for a field access.
+    ///
+    /// Given the object's sema type and the field name (as a `Symbol`),
+    /// returns:
+    /// - `FieldStorage::Direct { slot }` for struct fields (logical slot index)
+    /// - `FieldStorage::Heap { slot }` for class fields (physical slot,
+    ///   accounting for wide types)
+    /// - `FieldStorage::ByName` for modules, unknown types, or generic templates
+    pub fn resolve_field_storage(
+        &self,
+        object_type: TypeId,
+        field: Symbol,
+    ) -> vole_vir::expr::FieldStorage {
+        use vole_vir::expr::FieldStorage;
+
+        // Generic templates can't resolve storage — type params are abstract.
+        if self.generic {
+            return FieldStorage::ByName;
+        }
+
+        let field_name = self.interner.resolve(field);
+
+        // Try struct first (value-type, stack-allocated).
+        if let Some((type_def_id, type_args)) = self.type_arena.unwrap_struct(object_type) {
+            return self
+                .resolve_struct_field_slot(type_def_id, type_args, field_name)
+                .map_or(FieldStorage::ByName, |slot| FieldStorage::Direct {
+                    slot: slot as u32,
+                });
+        }
+
+        // Try class (reference-counted, heap-allocated).
+        if let Some((type_def_id, type_args)) = self.type_arena.unwrap_class(object_type) {
+            return self
+                .resolve_class_field_slot(type_def_id, type_args, field_name)
+                .map_or(FieldStorage::ByName, |slot| FieldStorage::Heap {
+                    slot: slot as u32,
+                });
+        }
+
+        // Module, interface, or other type — codegen handles separately.
+        FieldStorage::ByName
+    }
+
+    /// Resolve the logical field slot for a struct field.
+    ///
+    /// Returns the field's index in the struct's field list (0-based).
+    fn resolve_struct_field_slot(
+        &self,
+        type_def_id: TypeDefId,
+        _type_args: &crate::type_arena::TypeIdVec,
+        field_name: &str,
+    ) -> Option<usize> {
+        let type_def = self.entities.get_type(type_def_id);
+        let generic_info = type_def.generic_info.as_ref()?;
+        generic_info.field_index_by_name(field_name, self.name_table)
+    }
+
+    /// Resolve the physical slot for a class field, accounting for wide
+    /// types (i128/f128) that occupy 2 consecutive slots.
+    fn resolve_class_field_slot(
+        &self,
+        type_def_id: TypeDefId,
+        type_args: &crate::type_arena::TypeIdVec,
+        field_name: &str,
+    ) -> Option<usize> {
+        let type_def = self.entities.get_type(type_def_id);
+        let generic_info = type_def.generic_info.as_ref()?;
+
+        // Build substitution map for generic classes.
+        let subs: rustc_hash::FxHashMap<NameId, TypeId> = type_def
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(&param, &arg)| (param, arg))
+            .collect();
+
+        let mut physical_slot = 0usize;
+        for (idx, field_name_id) in generic_info.field_names.iter().enumerate() {
+            let name = self.name_table.last_segment_str(*field_name_id);
+            if name.as_deref() == Some(field_name) {
+                return Some(physical_slot);
+            }
+            // Advance physical slot: wide types use 2 slots.
+            let ft = generic_info.field_types[idx];
+            let resolved_ft = if !subs.is_empty() {
+                self.type_arena.lookup_substitute(ft, &subs).unwrap_or(ft)
+            } else {
+                ft
+            };
+            physical_slot += if is_wide_sema_type(resolved_ft) { 2 } else { 1 };
+        }
+        None
+    }
+
     /// Get the `StructLiteralInfo` for a node, with a tolerant fallback
     /// in generic mode.
     ///
@@ -511,4 +606,10 @@ pub fn lower_stmts(stmts: &[vole_frontend::ast::Stmt], ctx: &mut LoweringCtx<'_>
         stmts: vir_stmts,
         trailing: None,
     }
+}
+
+/// Check whether a sema `TypeId` is a wide type (i128 or f128) that
+/// occupies 2 consecutive slots in class instance storage.
+fn is_wide_sema_type(type_id: TypeId) -> bool {
+    matches!(type_id, TypeId::I128 | TypeId::F128)
 }
