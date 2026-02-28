@@ -331,7 +331,7 @@ where
     vir_field_default_inits.extend(module_vir_field_default_inits);
 
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
-    let entity_metadata = build_entity_metadata(entities, type_arena, &type_table);
+    let entity_metadata = build_entity_metadata(entities, type_arena, &type_table, interner, names);
     let mut vir_program = VirProgram {
         type_table,
         functions: vir_functions,

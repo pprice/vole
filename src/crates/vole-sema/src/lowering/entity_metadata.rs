@@ -4,6 +4,8 @@
 // lowering.  This is the bridge that converts sema entity definitions
 // (TypeDef, FieldDef, MethodDef) into VIR-native metadata.
 
+use vole_identity::{Interner, NameTable};
+
 use crate::LoweringEntityLookup;
 use crate::TypeArena;
 use crate::entity_defs::{self, TypeDefKind};
@@ -20,10 +22,16 @@ use vole_vir::type_table::VirTypeTable;
 /// in the `EntityRegistry` and translates them into VIR-native metadata.
 /// Field types are translated from sema `TypeId` to `VirTypeId` using the
 /// existing `translate_type_id` machinery.
+///
+/// `interner` and `name_table` are used to resolve field `NameId`s to
+/// `Symbol`s, enabling the monomorph rederive pass to match field names
+/// without needing the interner at rederive time.
 pub fn build_entity_metadata(
     entities: &impl LoweringEntityLookup,
     type_arena: &TypeArena,
     type_table: &VirTypeTable,
+    interner: &mut Interner,
+    name_table: &NameTable,
 ) -> VirEntityMetadata {
     let registry = entities.as_entity_registry();
     let mut meta = VirEntityMetadata::new();
@@ -33,7 +41,14 @@ pub fn build_entity_metadata(
     let mut tt = type_table.clone();
 
     populate_type_defs(registry.all_type_defs(), &mut meta);
-    populate_field_defs(registry.all_field_defs(), type_arena, &mut tt, &mut meta);
+    populate_field_defs(
+        registry.all_field_defs(),
+        type_arena,
+        &mut tt,
+        &mut meta,
+        interner,
+        name_table,
+    );
     populate_method_defs(registry.all_method_defs(), &mut meta);
 
     meta
@@ -89,15 +104,22 @@ fn populate_type_defs(type_defs: &[entity_defs::TypeDef], meta: &mut VirEntityMe
 /// Populate field definitions from sema into VIR entity metadata.
 ///
 /// Translates each field's sema `TypeId` to a `VirTypeId` using the
-/// standard type translation machinery.
+/// standard type translation machinery.  Also resolves each field's
+/// `NameId` to a `Symbol` via the name table + interner so that the
+/// monomorph rederive pass can match field names without the interner.
 fn populate_field_defs(
     field_defs: &[entity_defs::FieldDef],
     type_arena: &TypeArena,
     type_table: &mut VirTypeTable,
     meta: &mut VirEntityMetadata,
+    interner: &mut Interner,
+    name_table: &NameTable,
 ) {
     for fd in field_defs {
         let vir_ty = translate_type_id(type_table, fd.ty, type_arena);
+        let symbol = name_table
+            .last_segment_str(fd.name_id)
+            .map(|name| interner.intern(&name));
         meta.insert_field_def(VirFieldDef {
             id: fd.id,
             name_id: fd.name_id,
@@ -105,6 +127,7 @@ fn populate_field_defs(
             defining_type: fd.defining_type,
             vir_ty,
             slot: fd.slot,
+            symbol,
         });
     }
 }

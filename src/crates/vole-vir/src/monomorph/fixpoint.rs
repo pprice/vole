@@ -140,7 +140,7 @@ fn monomorphize_one(instance: &MonomorphInstance, program: &mut VirProgram) -> O
     let ctx = RewriteCtx::new(type_map);
     let mut concrete = rewrite_function(&template, &ctx);
 
-    rederive_decisions(&mut concrete, &target_table);
+    rederive_decisions(&mut concrete, &target_table, &program.entity_metadata);
 
     // Clear type_params on the concrete function (it's no longer generic).
     concrete.type_params = Vec::new();

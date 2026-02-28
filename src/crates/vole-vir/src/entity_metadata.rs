@@ -8,7 +8,7 @@
 // consumed by codegen without reaching back into sema.
 
 use rustc_hash::FxHashMap;
-use vole_identity::{FieldId, MethodId, NameId, TypeDefId, VirTypeId};
+use vole_identity::{FieldId, MethodId, NameId, Symbol, TypeDefId, VirTypeId};
 
 // ---------------------------------------------------------------------------
 // Type definition kind
@@ -99,6 +99,9 @@ pub struct VirFieldDef {
     pub vir_ty: VirTypeId,
     /// The field's slot index in the type's storage layout.
     pub slot: usize,
+    /// Interned symbol for the field name (for name matching during
+    /// monomorph rederive without requiring the interner).
+    pub symbol: Option<Symbol>,
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +301,26 @@ impl VirEntityMetadata {
     pub fn field_def_count(&self) -> usize {
         self.field_defs.len()
     }
+
+    /// Find a field on a type by its interned `Symbol`.
+    ///
+    /// Iterates the type's field list and returns the first `VirFieldDef`
+    /// whose `symbol` matches.  Returns `None` if the type has no fields,
+    /// is not registered, or no field matches the symbol.
+    pub fn find_field_by_symbol(
+        &self,
+        type_def_id: TypeDefId,
+        target: Symbol,
+    ) -> Option<&VirFieldDef> {
+        let td = self.type_defs.get(&type_def_id)?;
+        for &field_id in &td.fields {
+            if let Some(fd) = self.field_defs.get(&field_id)
+                && fd.symbol == Some(target) {
+                    return Some(fd);
+                }
+        }
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -414,6 +437,7 @@ mod tests {
             defining_type: make_type_def_id(1),
             vir_ty: VirTypeId::I64,
             slot: 3,
+            symbol: None,
         });
 
         assert_eq!(meta.field_def_count(), 1);
