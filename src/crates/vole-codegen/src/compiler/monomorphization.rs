@@ -14,7 +14,10 @@ use vole_identity::{
     ClassMethodMonomorphInstance, ModuleId, MonomorphInstanceTrait, NameId,
     StaticMethodMonomorphInstance, TypeId,
 };
-use vole_vir::monomorph::instance::VirMonomorphInfo;
+use vole_vir::monomorph::instance::{
+    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
+};
+use vole_vir::types::VirType;
 
 use crate::types::MonomorphIndexEntry;
 use crate::types::function_name_id_with_interner;
@@ -374,6 +377,30 @@ impl Compiler<'_> {
             .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
     }
 
+    /// VIR-native: check if a class method monomorph is abstract (contains Param substitutions).
+    fn is_abstract_vir_class_method_monomorph(
+        &self,
+        instance: &VirClassMethodMonomorphInfo,
+    ) -> bool {
+        let type_table = &self.analyzed.vir_program().type_table;
+        instance
+            .vir_substitutions
+            .values()
+            .any(|&vir_type_id| matches!(type_table.get(vir_type_id), VirType::Param { .. }))
+    }
+
+    /// VIR-native: check if a static method monomorph is abstract (contains Param substitutions).
+    fn is_abstract_vir_static_method_monomorph(
+        &self,
+        instance: &VirStaticMethodMonomorphInfo,
+    ) -> bool {
+        let type_table = &self.analyzed.vir_program().type_table;
+        instance
+            .vir_substitutions
+            .values()
+            .any(|&vir_type_id| matches!(type_table.get(vir_type_id), VirType::Param { .. }))
+    }
+
     /// Returns true when the type references a nominal definition from the main
     /// program (or a tests virtual module), not from imported module programs.
     fn type_depends_on_program_definitions(&self, type_id: TypeId) -> bool {
@@ -472,30 +499,33 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized class method instances
     pub(super) fn declare_class_method_monomorphized_instances(&mut self) -> CodegenResult<()> {
-        // Collect instances to avoid borrow issues
-        let instances = self
+        // Collect from VirProgram.class_method_monomorphs to avoid borrow issues
+        let instances: Vec<_> = self
             .analyzed
-            .class_method_monomorph_cache()
-            .collect_instances();
+            .vir_program()
+            .class_method_monomorphs
+            .values()
+            .cloned()
+            .collect();
 
         tracing::debug!(
             instance_count = instances.len(),
             "declaring class method monomorphized instances"
         );
 
-        for instance in instances {
+        for instance in &instances {
             // External methods are runtime functions - no declaration needed
             if instance.external_info.is_some() {
                 continue;
             }
 
-            // Skip abstract monomorph templates (e.g., T -> TypeParam(T)).
-            if self.is_abstract_class_method_monomorph(&instance) {
+            // Skip abstract monomorph templates (e.g., T -> Param(T)).
+            if self.is_abstract_vir_class_method_monomorph(instance) {
                 continue;
             }
 
             // Class methods have self parameter
-            self.declare_monomorph_instance(&instance, true);
+            self.declare_monomorph_instance(instance, true);
         }
 
         Ok(())
@@ -761,23 +791,26 @@ impl Compiler<'_> {
 
     /// Declare all monomorphized static method instances
     pub(super) fn declare_static_method_monomorphized_instances(&mut self) -> CodegenResult<()> {
-        // Collect instances to avoid borrow issues
-        let instances = self
+        // Collect from VirProgram.static_method_monomorphs to avoid borrow issues
+        let instances: Vec<_> = self
             .analyzed
-            .static_method_monomorph_cache()
-            .collect_instances();
+            .vir_program()
+            .static_method_monomorphs
+            .values()
+            .cloned()
+            .collect();
 
         tracing::debug!(
             instance_count = instances.len(),
             "declaring static method monomorphized instances"
         );
 
-        for instance in instances {
-            if self.is_abstract_static_method_monomorph(&instance) {
+        for instance in &instances {
+            if self.is_abstract_vir_static_method_monomorph(instance) {
                 continue;
             }
             // Static methods don't have self parameter
-            self.declare_monomorph_instance(&instance, false);
+            self.declare_monomorph_instance(instance, false);
         }
 
         Ok(())

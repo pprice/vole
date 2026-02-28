@@ -109,6 +109,21 @@ pub struct VirClassMethodMonomorphInfo {
     pub vir_self_type: VirTypeId,
 }
 
+impl MonomorphInstanceTrait for VirClassMethodMonomorphInfo {
+    fn mangled_name(&self) -> NameId {
+        self.mangled_name
+    }
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+    fn func_type(&self) -> &FunctionType {
+        &self.func_type
+    }
+    fn substitutions(&self) -> &FxHashMap<NameId, TypeId> {
+        &self.substitutions
+    }
+}
+
 // ============================================================================
 // VirStaticMethodMonomorphInfo — class static method monomorphs
 // ============================================================================
@@ -138,6 +153,21 @@ pub struct VirStaticMethodMonomorphInfo {
     pub substitutions: FxHashMap<NameId, TypeId>,
     /// VIR-level type parameter substitutions.
     pub vir_substitutions: FxHashMap<NameId, VirTypeId>,
+}
+
+impl MonomorphInstanceTrait for VirStaticMethodMonomorphInfo {
+    fn mangled_name(&self) -> NameId {
+        self.mangled_name
+    }
+    fn instance_id(&self) -> u32 {
+        self.instance_id
+    }
+    fn func_type(&self) -> &FunctionType {
+        &self.func_type
+    }
+    fn substitutions(&self) -> &FxHashMap<NameId, TypeId> {
+        &self.substitutions
+    }
 }
 
 // ============================================================================
