@@ -1111,6 +1111,33 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Unwrap a class type to `(TypeDefId, type_args)`, using VirTypeTable
+    /// with arena fallback for monomorphized types.
+    #[allow(dead_code)]
+    #[inline]
+    pub fn vir_query_unwrap_class(
+        &self,
+        type_id: TypeId,
+    ) -> Option<(vole_identity::TypeDefId, Vec<TypeId>)> {
+        let vir_ty = self.vir_lookup(type_id);
+        if vir_ty == VirTypeId::UNKNOWN {
+            self.arena()
+                .unwrap_class(type_id)
+                .map(|(def, args)| (def, args.to_vec()))
+        } else {
+            crate::types::vir_conversions::vir_unwrap_class(vir_ty, self.vir_type_table()).map(
+                |(def, args)| {
+                    (
+                        def,
+                        args.iter()
+                            .map(|&a| crate::types::vir_conversions::vir_to_sema_type_id_lossy(a))
+                            .collect(),
+                    )
+                },
+            )
+        }
+    }
+
     /// Unwrap an optional type to its inner sema `TypeId`, using VirTypeTable
     /// with arena fallback for monomorphized types.
     ///

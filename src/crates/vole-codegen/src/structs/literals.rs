@@ -21,12 +21,11 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         field_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let arena = self.arena();
-        let field_is_union = arena.is_union(field_type_id);
-        let field_is_interface = arena.is_interface(field_type_id);
-        let field_is_unknown = arena.is_unknown(field_type_id);
-        let value_is_union = arena.is_union(value.type_id);
-        let value_is_unknown = arena.is_unknown(value.type_id);
+        let field_is_union = self.vir_query_is_union(field_type_id);
+        let field_is_interface = self.vir_query_is_interface(field_type_id);
+        let field_is_unknown = self.vir_query_is_unknown(field_type_id);
+        let value_is_union = self.vir_query_is_union(value.type_id);
+        let value_is_unknown = self.vir_query_is_unknown(value.type_id);
 
         if field_is_unknown && !value_is_unknown {
             // Box the value into a heap-allocated TaggedValue.
@@ -45,7 +44,7 @@ impl Cg<'_, '_, '_> {
             // The value may be stack-allocated (from construct_union_id),
             // so copy the 16-byte buffer to the heap.
             self.copy_union_to_heap(value)
-        } else if field_is_interface && arena.is_interface(value.type_id) {
+        } else if field_is_interface && self.vir_query_is_interface(value.type_id) {
             // Value is already an interface fat pointer. Copy it into a new
             // heap allocation so instance_drop can free it independently.
             self.copy_interface_fat_ptr(value)
@@ -64,11 +63,9 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let arena = self.arena();
-        let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
+        let variants = self.vir_query_unwrap_union(union_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union")
         })?;
-        let variants = variants.clone();
 
         // If the value is already the same union type, just return it
         if value.type_id == union_type_id {
@@ -106,7 +103,7 @@ impl Cg<'_, '_, '_> {
         );
 
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
-        if !self.arena().is_sentinel(actual_type_id) {
+        if !self.vir_query_is_sentinel(actual_type_id) {
             self.builder.ins().store(
                 MemFlags::new(),
                 actual_value,
@@ -297,7 +294,7 @@ impl Cg<'_, '_, '_> {
                         .load(types::I64, MemFlags::new(), value.value, src_off);
                 self.builder.ins().stack_store(val, slot, dst_off);
             }
-        } else if super::helpers::is_payload_union(value.type_id, self.arena()) {
+        } else if self.vir_query_is_payload_union(value.type_id) {
             // Union values are pointers to 16-byte buffers (tag + payload).
             // Copy both words inline into the struct's slot.
             let word0 = self

@@ -13,7 +13,7 @@ type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, module_name_id, type_id_to_cranelift};
+use crate::types::{CompiledValue, module_name_id};
 use vole_identity::{ModuleId, MonomorphKey, NameId, TypeDefId, TypeId};
 use vole_vir::expr::{VirFunctionMonomorphKey, VirResolvedMethod};
 
@@ -53,11 +53,10 @@ impl Cg<'_, '_, '_> {
             }
         };
 
-        // Get return type from arena
+        // Get return type from function type
         let return_type_id = {
-            let arena = self.arena();
-            let (_, ret, _) = arena
-                .unwrap_function(func_type_id)
+            let (_, ret, _) = self
+                .vir_query_unwrap_function(func_type_id)
                 .expect("INTERNAL: module method: missing function type");
             ret
         };
@@ -80,7 +79,7 @@ impl Cg<'_, '_, '_> {
                 .map(|&type_id| {
                     let sema_type_id = self.sema_type_from_vir(type_id);
                     if let Some(subs) = self.substitutions
-                        && let Some(name_id) = self.arena().unwrap_type_param(sema_type_id)
+                        && let Some(name_id) = self.vir_query_unwrap_type_param(sema_type_id)
                     {
                         subs.get(&name_id).copied().unwrap_or(sema_type_id)
                     } else {
@@ -121,7 +120,7 @@ impl Cg<'_, '_, '_> {
                 let concrete_param_type_ids: Vec<TypeId> = mono_param_type_ids
                     .iter()
                     .map(|&ty| {
-                        self.arena().expect_substitute(
+                        self.vir_query_expect_substitute(
                             ty,
                             &substitutions,
                             "module generic intrinsic args",
@@ -196,13 +195,18 @@ impl Cg<'_, '_, '_> {
         is_closure: bool,
         arg_source: &ArgSource<'_>,
     ) -> CodegenResult<CompiledValue> {
-        // Extract function type components from the arena
+        // Extract function type components
         let (param_ids, return_type_id) = {
-            let arena = self.arena();
-            let (params, ret, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
-                CodegenError::type_mismatch("functional interface call", "function type", "other")
-            })?;
-            (params.clone(), ret)
+            let (params, ret, _) =
+                self.vir_query_unwrap_function(func_type_id)
+                    .ok_or_else(|| {
+                        CodegenError::type_mismatch(
+                            "functional interface call",
+                            "function type",
+                            "other",
+                        )
+                    })?;
+            (params, ret)
         };
 
         // Check if this is actually a closure or a pure function
@@ -217,19 +221,14 @@ impl Cg<'_, '_, '_> {
             let mut sig = self.jit_module().make_signature();
             sig.params.push(AbiParam::new(self.ptr_type())); // Closure pointer
             for &param_id in &param_ids {
-                sig.params.push(AbiParam::new(type_id_to_cranelift(
-                    param_id,
-                    self.arena(),
-                    self.ptr_type(),
-                )));
+                sig.params
+                    .push(AbiParam::new(self.vir_query_type_to_cranelift(param_id)));
             }
             let is_void_return = return_type_id.is_void();
             if !is_void_return {
-                sig.returns.push(AbiParam::new(type_id_to_cranelift(
-                    return_type_id,
-                    self.arena(),
-                    self.ptr_type(),
-                )));
+                sig.returns.push(AbiParam::new(
+                    self.vir_query_type_to_cranelift(return_type_id),
+                ));
             }
 
             // Compile arguments - closure pointer first, then user args
@@ -249,19 +248,14 @@ impl Cg<'_, '_, '_> {
             // It's a pure function - call directly
             let mut sig = self.jit_module().make_signature();
             for &param_id in &param_ids {
-                sig.params.push(AbiParam::new(type_id_to_cranelift(
-                    param_id,
-                    self.arena(),
-                    self.ptr_type(),
-                )));
+                sig.params
+                    .push(AbiParam::new(self.vir_query_type_to_cranelift(param_id)));
             }
             let is_void_return = return_type_id.is_void();
             if !is_void_return {
-                sig.returns.push(AbiParam::new(type_id_to_cranelift(
-                    return_type_id,
-                    self.arena(),
-                    self.ptr_type(),
-                )));
+                sig.returns.push(AbiParam::new(
+                    self.vir_query_type_to_cranelift(return_type_id),
+                ));
             }
 
             let (values, _) = self.compile_args_tracking_rc(arg_source)?;
@@ -320,8 +314,7 @@ impl Cg<'_, '_, '_> {
         let word_type = self.ptr_type();
         let word_bytes = word_type.bytes() as i32;
         let dispatch_func_type_id = self
-            .arena()
-            .unwrap_interface(obj.type_id)
+            .vir_query_unwrap_interface(obj.type_id)
             .and_then(|(interface_type_def_id, _)| {
                 self.analyzed()
                     .interface_method_ids_ordered(interface_type_def_id)
@@ -333,9 +326,8 @@ impl Cg<'_, '_, '_> {
 
         // Unwrap function type to get params and return type
         let (param_count, param_type_ids, return_type_id, is_void_return) = {
-            let arena = self.arena();
-            let (params, ret_id, _is_closure) = arena
-                .unwrap_function(dispatch_func_type_id)
+            let (params, ret_id, _is_closure) = self
+                .vir_query_unwrap_function(dispatch_func_type_id)
                 .ok_or_else(|| {
                     CodegenError::type_mismatch(
                         "interface dispatch",
@@ -343,7 +335,8 @@ impl Cg<'_, '_, '_> {
                         "non-function",
                     )
                 })?;
-            (params.len(), params.to_vec(), ret_id, arena.is_void(ret_id))
+            let is_void = self.vir_query_is_void(ret_id);
+            (params.len(), params, ret_id, is_void)
         };
 
         // Load data pointer from boxed interface (first word)

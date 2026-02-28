@@ -199,9 +199,8 @@ impl Cg<'_, '_, '_> {
     }
 
     fn signature_has_self_placeholder_param(&self, signature_id: TypeId) -> bool {
-        self.arena()
-            .unwrap_function(signature_id)
-            .is_some_and(|(params, _, _)| params.iter().any(|&p| self.arena().is_self_type(p)))
+        self.vir_query_unwrap_function(signature_id)
+            .is_some_and(|(params, _, _)| params.iter().any(|&p| self.vir_query_is_self_type(p)))
     }
 
     /// Resolve method parameter types for argument coercion.
@@ -214,21 +213,21 @@ impl Cg<'_, '_, '_> {
     ) -> Option<Vec<TypeId>> {
         if let Some(method_id) = resolved.method_id() {
             let signature_id = self.analyzed().method_signature_id(method_id);
-            if let Some((params, _, _)) = self.arena().unwrap_function(signature_id) {
-                return Some(params.to_vec());
+            if let Some((params, _, _)) = self.vir_query_unwrap_function(signature_id) {
+                return Some(params);
             }
         }
 
         let resolved_signature_id = self.resolved_func_type_id(resolved);
         if self.signature_has_self_placeholder_param(resolved_signature_id)
             && let Some(signature_id) = self.resolved_interface_signature_id(resolved)
-            && let Some((params, _, _)) = self.arena().unwrap_function(signature_id)
+            && let Some((params, _, _)) = self.vir_query_unwrap_function(signature_id)
         {
-            return Some(params.to_vec());
+            return Some(params);
         }
 
-        if let Some((params, _, _)) = self.arena().unwrap_function(resolved_signature_id) {
-            return Some(params.to_vec());
+        if let Some((params, _, _)) = self.vir_query_unwrap_function(resolved_signature_id) {
+            return Some(params);
         }
         if let VirType::Function { params, .. } =
             self.vir_type_table().get(resolved.0.func_type_id())
@@ -254,7 +253,7 @@ impl Cg<'_, '_, '_> {
     ) -> Vec<TypeId> {
         let has_self_placeholder = param_type_ids
             .first()
-            .is_some_and(|&first| self.arena().is_self_type(first));
+            .is_some_and(|&first| self.vir_query_is_self_type(first));
         if has_self_placeholder && param_type_ids.len() >= provided_arg_count.saturating_add(1) {
             param_type_ids[1..].to_vec()
         } else {
@@ -280,14 +279,8 @@ impl Cg<'_, '_, '_> {
 
         let resolved_receiver = self.try_substitute_type(receiver_type_id);
         let receiver_generic = self
-            .arena()
-            .unwrap_class(resolved_receiver)
-            .map(|(type_def_id, type_args)| (type_def_id, type_args.to_vec()))
-            .or_else(|| {
-                self.arena()
-                    .unwrap_interface(resolved_receiver)
-                    .map(|(type_def_id, type_args)| (type_def_id, type_args.to_vec()))
-            });
+            .vir_query_unwrap_class(resolved_receiver)
+            .or_else(|| self.vir_query_unwrap_interface(resolved_receiver));
 
         let Some((type_def_id, type_args)) = receiver_generic else {
             return resolved;
@@ -314,7 +307,7 @@ impl Cg<'_, '_, '_> {
 
         resolved = resolved
             .into_iter()
-            .map(|ty| self.arena().lookup_substitute(ty, &subs).unwrap_or(ty))
+            .map(|ty| self.vir_query_lookup_substitute(ty, &subs).unwrap_or(ty))
             .collect();
         resolved
     }
@@ -457,7 +450,7 @@ impl Cg<'_, '_, '_> {
         // RuntimeIterator dispatch: detected from the codegen-side compiled type
         // (not sema annotation) because the Iterator<T> → RuntimeIterator<T>
         // conversion happens in codegen only.
-        if let Some(elem_type_id) = self.arena().unwrap_runtime_iterator(obj.type_id) {
+        if let Some(elem_type_id) = self.vir_query_unwrap_runtime_iterator(obj.type_id) {
             let return_type_hint = dispatch
                 .substituted_return_type
                 .map(|ty| self.sema_type_from_vir(ty))
@@ -538,14 +531,9 @@ impl Cg<'_, '_, '_> {
             // Interface dispatch - check if object is an interface type and dispatch via vtable
             // This is a fallback path when we don't have InterfaceMethod (e.g., in monomorphized context)
             // Extract interface info before mutable borrow
-            let interface_info = {
-                let arena = self.arena();
-                if arena.is_interface(obj.type_id) {
-                    arena.unwrap_interface(obj.type_id).map(|(id, _)| id)
-                } else {
-                    None
-                }
-            };
+            let interface_info = self
+                .vir_query_unwrap_interface(obj.type_id)
+                .map(|(id, _)| id);
             if let Some(interface_type_id) = interface_info {
                 let result = self.interface_dispatch_call_args_by_type_def_id(
                     &obj,
@@ -569,10 +557,9 @@ impl Cg<'_, '_, '_> {
                 };
             if let Some(func_type_id) = functional_func_type_id {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
-                let interface_type_def_id = {
-                    let arena = self.arena();
-                    arena.unwrap_interface(obj.type_id).map(|(id, _)| id)
-                };
+                let interface_type_def_id = self
+                    .vir_query_unwrap_interface(obj.type_id)
+                    .map(|(id, _)| id);
                 if let Some(interface_type_def_id) = interface_type_def_id {
                     let result = self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
@@ -586,18 +573,14 @@ impl Cg<'_, '_, '_> {
                     return Ok(result);
                 }
                 // For functional interfaces, the object holds the function ptr or closure
-                let is_closure = {
-                    let arena = self.arena();
-                    arena
-                        .unwrap_function(obj.type_id)
-                        .map(|(_, _, is_closure)| is_closure)
-                        .or_else(|| {
-                            arena
-                                .unwrap_function(func_type_id)
-                                .map(|(_, _, is_closure)| is_closure)
-                        })
-                        .unwrap_or(true)
-                };
+                let is_closure = self
+                    .vir_query_unwrap_function(obj.type_id)
+                    .map(|(_, _, is_closure)| is_closure)
+                    .or_else(|| {
+                        self.vir_query_unwrap_function(func_type_id)
+                            .map(|(_, _, is_closure)| is_closure)
+                    })
+                    .unwrap_or(true);
                 let result = self.functional_interface_call(
                     obj.value,
                     func_type_id,
@@ -766,16 +749,9 @@ impl Cg<'_, '_, '_> {
             // In monomorphized context, resolution is None so the interface dispatch
             // paths above (lines 264-310) are skipped. Check here if the object is an
             // interface type and dispatch via vtable.
-            let interface_type_def_id = {
-                let arena = self.arena();
-                if arena.is_interface(resolved_obj_type_id) {
-                    arena
-                        .unwrap_interface(resolved_obj_type_id)
-                        .map(|(id, _)| id)
-                } else {
-                    None
-                }
-            };
+            let interface_type_def_id = self
+                .vir_query_unwrap_interface(resolved_obj_type_id)
+                .map(|(id, _)| id);
             if let Some(interface_type_def_id) = interface_type_def_id {
                 let func_type_id = self
                     .analyzed()
@@ -934,17 +910,16 @@ impl Cg<'_, '_, '_> {
                 // (TypeParam type_keys). In concrete monomorphized contexts, rewrite
                 // those keys using the current substitution map before cache lookup.
                 let effective_key = if let Some(subs) = self.substitutions {
-                    let arena = self.arena();
                     let needs_substitution = monomorph_key
                         .type_keys
                         .iter()
-                        .any(|&type_id| arena.unwrap_type_param(type_id).is_some());
+                        .any(|&type_id| self.vir_query_unwrap_type_param(type_id).is_some());
                     if needs_substitution {
                         let concrete_keys: Vec<TypeId> = monomorph_key
                             .type_keys
                             .iter()
                             .map(|&type_id| {
-                                if let Some(name_id) = arena.unwrap_type_param(type_id) {
+                                if let Some(name_id) = self.vir_query_unwrap_type_param(type_id) {
                                     subs.get(&name_id).copied().unwrap_or(type_id)
                                 } else {
                                     type_id
@@ -1285,13 +1260,12 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         method_name: &str,
     ) -> vole_sema::MethodDispatchKind {
-        let arena = self.arena();
-        if let Some(m) = arena.unwrap_module(obj.type_id) {
-            return vole_sema::MethodDispatchKind::Module(m.module_id);
+        if let Some((module_id, _)) = self.vir_query_unwrap_module(obj.type_id) {
+            return vole_sema::MethodDispatchKind::Module(module_id);
         }
         // Check array-specific methods: push needs its own path, other array
         // builtins (length, iter) go through builtin_method.
-        if arena.unwrap_array(obj.type_id).is_some() {
+        if self.vir_query_unwrap_array(obj.type_id).is_some() {
             if method_name == "push" {
                 return vole_sema::MethodDispatchKind::ArrayPush;
             }

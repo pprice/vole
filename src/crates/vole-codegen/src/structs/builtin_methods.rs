@@ -33,8 +33,7 @@ impl Cg<'_, '_, '_> {
         let result = self.call_runtime(RuntimeKey::RangeIter, &[start_val.value, end_value])?;
 
         let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-            self.arena()
-                .lookup_runtime_iterator(TypeId::I64)
+            self.vir_query_lookup_runtime_iterator(TypeId::I64)
                 .expect("INTERNAL: range iterator: RuntimeIterator<i64> type not pre-created")
         });
         Ok(CompiledValue::owned(result, self.ptr_type(), iter_type_id))
@@ -48,10 +47,8 @@ impl Cg<'_, '_, '_> {
         method_name: &str,
         iter_type_hint: Option<TypeId>,
     ) -> CodegenResult<Option<CompiledValue>> {
-        let arena = self.arena();
-
         // Array methods
-        if let Some(elem_type_id) = arena.unwrap_array(obj.type_id) {
+        if let Some(elem_type_id) = self.vir_query_unwrap_array(obj.type_id) {
             return match method_name {
                 "length" => {
                     let result = self.call_compiler_intrinsic_key_with_line(
@@ -68,13 +65,13 @@ impl Cg<'_, '_, '_> {
                     // the element type (needed for monomorphized generic functions where
                     // sema resolution is skipped).
                     let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                        self.arena().lookup_runtime_iterator(elem_type_id).expect(
+                        self.vir_query_lookup_runtime_iterator(elem_type_id).expect(
                             "INTERNAL: array iterator: RuntimeIterator type not pre-created",
                         )
                     });
                     // Set elem_tag on the array iterator so pipeline operations
                     // can properly manage RC values
-                    let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
+                    let tag = self.vir_query_unknown_type_tag(elem_type_id);
                     if tag != 0 {
                         let tag_val = self.iconst_cached(types::I64, tag as i64);
                         self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
@@ -90,7 +87,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // String methods
-        if arena.is_string(obj.type_id) {
+        if self.vir_query_is_string(obj.type_id) {
             return match method_name {
                 "length" => {
                     let result = self.call_compiler_intrinsic_key_with_line(
@@ -107,15 +104,14 @@ impl Cg<'_, '_, '_> {
                     // (needed for monomorphized generic functions where sema
                     // resolution is skipped).
                     let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                        self.arena()
-                            .lookup_runtime_iterator(TypeId::STRING)
+                        self.vir_query_lookup_runtime_iterator(TypeId::STRING)
                             .expect(
                                 "INTERNAL: string iterator: RuntimeIterator<string> type not pre-created",
                             )
                     });
                     // Set elem_tag to RuntimeTypeId::String so terminal methods can properly
                     // free owned char strings produced by the string chars iterator.
-                    let string_tag = crate::types::unknown_type_tag(TypeId::STRING, self.arena());
+                    let string_tag = self.vir_query_unknown_type_tag(TypeId::STRING);
                     if string_tag != 0 {
                         let tag_val = self.iconst_cached(types::I64, string_tag as i64);
                         self.call_runtime_void(RuntimeKey::IterSetElemTag, &[result, tag_val])?;
@@ -131,10 +127,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Range methods
-        if matches!(
-            arena.get(obj.type_id),
-            vole_sema::type_arena::SemaType::Range
-        ) {
+        if obj.type_id == TypeId::RANGE {
             if method_name == "iter" {
                 // Load start and end from the range struct (pointer to [start, end])
                 let start = self
@@ -150,8 +143,7 @@ impl Cg<'_, '_, '_> {
                 // the element type (needed for monomorphized generic functions where
                 // sema resolution is skipped).
                 let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                    self.arena()
-                        .lookup_runtime_iterator(TypeId::I64)
+                    self.vir_query_lookup_runtime_iterator(TypeId::I64)
                         .expect("INTERNAL: range.iter(): RuntimeIterator<i64> type not pre-created")
                 });
                 return Ok(Some(CompiledValue::owned(
@@ -181,7 +173,7 @@ impl Cg<'_, '_, '_> {
         // Compile the argument
         let value = self.compile_arg_from_source(arg_source, 0)?;
 
-        let elem_type = self.arena().unwrap_array(arr_obj.type_id);
+        let elem_type = self.vir_query_unwrap_array(arr_obj.type_id);
         let (tag_val, value_bits, _value) = if let Some(elem_id) = elem_type {
             self.prepare_dynamic_array_store(value, elem_id)?
         } else {
@@ -195,7 +187,7 @@ impl Cg<'_, '_, '_> {
         self.emit_call(push_ref, &[arr_obj.value, tag_val, value_bits]);
 
         // Return void
-        let void_type_id = self.arena().void();
+        let void_type_id = self.vir_query_void();
         Ok(CompiledValue::new(
             self.iconst_cached(types::I64, 0),
             types::I64,
