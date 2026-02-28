@@ -6,10 +6,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use vole_frontend::{Interner, Program, Symbol};
-use vole_identity::{
-    ClassMethodMonomorphCache, FieldId, FunctionId, MethodId, ModuleId, MonomorphCache, NameId,
-    NameTable, Span, StaticMethodMonomorphCache, TypeDefId,
-};
+use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId};
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 use vole_sema::{AnalysisOutput, SemaType, TypeArena};
 use vole_vir::{VirBody, VirEntityMetadata, VirFunction, VirProgram};
@@ -33,15 +30,6 @@ pub struct AnalyzedProgram {
     /// This is the single entry point for all VIR data produced during lowering.
     /// Codegen accesses VIR through this struct rather than individual fields.
     vir_program: VirProgram,
-    /// Free-function monomorph cache.
-    ///
-    /// Cloned from the entity registry during `from_analysis`.  Phase 4
-    /// (monomorphization refactor) will move this to VIR-native storage.
-    monomorph_cache: MonomorphCache,
-    /// Class-method monomorph cache.
-    class_method_monomorph_cache: ClassMethodMonomorphCache,
-    /// Static-method monomorph cache.
-    static_method_monomorph_cache: StaticMethodMonomorphCache,
 }
 
 /// Codegen-local external binding payload from implement-registry lookups.
@@ -126,11 +114,6 @@ impl AnalyzedProgram {
         });
         let module_programs = lowering_output.module_programs;
         let mut vir_program = lowering_output.vir_program;
-        // Clone monomorph caches from the entity registry before moving data
-        // into VirProgram.  Phase 4 will migrate these to VIR-native storage.
-        let monomorph_cache = db.entities.monomorph_cache.clone();
-        let class_method_monomorph_cache = db.entities.class_method_monomorph_cache.clone();
-        let static_method_monomorph_cache = db.entities.static_method_monomorph_cache.clone();
         // Move name resolution data into VirProgram (zero-clone for NameTable
         // via Rc::clone, single Rc::new wrap for interner).
         vir_program.interner = Rc::new(interner);
@@ -143,9 +126,6 @@ impl AnalyzedProgram {
             module_id,
             modules_with_errors,
             vir_program,
-            monomorph_cache,
-            class_method_monomorph_cache,
-            static_method_monomorph_cache,
         }
     }
 
@@ -665,21 +645,6 @@ impl AnalyzedProgram {
     ) -> Option<&vole_vir::VirGenericExternalInfo> {
         self.vir_program
             .generic_external_method(type_def_id, method_name)
-    }
-
-    /// Get the free-function monomorph cache.
-    pub(crate) fn monomorph_cache(&self) -> &MonomorphCache {
-        &self.monomorph_cache
-    }
-
-    /// Get the class-method monomorph cache.
-    pub(crate) fn class_method_monomorph_cache(&self) -> &ClassMethodMonomorphCache {
-        &self.class_method_monomorph_cache
-    }
-
-    /// Get the static-method monomorph cache.
-    pub(crate) fn static_method_monomorph_cache(&self) -> &StaticMethodMonomorphCache {
-        &self.static_method_monomorph_cache
     }
 
     /// Render a short human-readable type name for diagnostics/debug output.

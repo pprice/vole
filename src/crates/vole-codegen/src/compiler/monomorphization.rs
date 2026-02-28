@@ -10,10 +10,7 @@ use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CodegenCtx;
 use vole_frontend::ast::InterfaceMethod;
 use vole_frontend::{Decl, FuncDecl, Interner, Program};
-use vole_identity::{
-    ClassMethodMonomorphInstance, ModuleId, MonomorphInstanceTrait, NameId,
-    StaticMethodMonomorphInstance, TypeId,
-};
+use vole_identity::{ModuleId, MonomorphInstanceTrait, NameId, TypeId};
 use vole_vir::monomorph::instance::{
     VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
 };
@@ -353,28 +350,6 @@ impl Compiler<'_> {
         self.finalize_function(func_id)?;
 
         Ok(())
-    }
-
-    /// Check if a class method monomorph is abstract (contains TypeParam substitutions).
-    /// Abstract entries are templates from generic class body analysis and are not compilable.
-    fn is_abstract_class_method_monomorph(&self, instance: &ClassMethodMonomorphInstance) -> bool {
-        let arena = self.analyzed.type_arena();
-        instance
-            .substitutions
-            .values()
-            .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
-    }
-
-    /// Check if a static method monomorph is abstract (contains TypeParam substitutions).
-    fn is_abstract_static_method_monomorph(
-        &self,
-        instance: &StaticMethodMonomorphInstance,
-    ) -> bool {
-        let arena = self.analyzed.type_arena();
-        instance
-            .substitutions
-            .values()
-            .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
     }
 
     /// VIR-native: check if a class method monomorph is abstract (contains Param substitutions).
@@ -1638,17 +1613,7 @@ impl Compiler<'_> {
             for pending in &batch {
                 match pending {
                     PendingMonomorph::Function(instance) => {
-                        // Look up the VIR-native monomorph info by mangled name
-                        let vir_info = self
-                            .analyzed
-                            .vir_program()
-                            .free_monomorphs
-                            .get(&instance.mangled_name)
-                            .unwrap_or_else(|| {
-                                let name = self.analyzed.display_name(instance.mangled_name);
-                                panic!("pending free monomorph not in VirProgram.free_monomorphs: {name}")
-                            });
-                        self.compile_pending_function(vir_info, &generic_func_asts)?;
+                        self.compile_pending_function(instance, &generic_func_asts)?;
                     }
                     PendingMonomorph::ClassMethod(instance) => {
                         self.compile_pending_class_method(instance, program, &class_asts)?;
@@ -1779,7 +1744,7 @@ impl Compiler<'_> {
     /// Compile a single pending class method monomorph.
     fn compile_pending_class_method(
         &mut self,
-        instance: &ClassMethodMonomorphInstance,
+        instance: &VirClassMethodMonomorphInfo,
         program: Option<&Program>,
         class_asts: &FxHashMap<NameId, GenericTypeMethodsAst<'_>>,
     ) -> CodegenResult<()> {
@@ -1787,35 +1752,20 @@ impl Compiler<'_> {
         if instance.external_info.is_some() {
             return Ok(());
         }
-        if self.is_abstract_class_method_monomorph(instance) {
+        if self.is_abstract_vir_class_method_monomorph(instance) {
             return Ok(());
         }
 
-        // Look up the VIR-native monomorph info by mangled name.
-        // class_method_monomorphs is keyed by ClassMethodMonomorphKey, so we
-        // search values by mangled_name (unique identifier).
-        let vir_info = self
-            .analyzed
-            .vir_program()
-            .class_method_monomorphs
-            .values()
-            .find(|info| info.mangled_name == instance.mangled_name)
-            .unwrap_or_else(|| {
-                let name = self.analyzed.display_name(instance.mangled_name);
-                panic!("pending class method monomorph not in VirProgram.class_method_monomorphs: {name}")
-            })
-            .clone();
-
-        let method_name_str = self.analyzed.display_name(vir_info.method_name);
+        let method_name_str = self.analyzed.display_name(instance.method_name);
 
         // Try main program class ASTs (using pre-built map)
-        if let Some(class) = class_asts.get(&vir_info.class_name) {
+        if let Some(class) = class_asts.get(&instance.class_name) {
             let method = class
                 .methods
                 .iter()
                 .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
             if let Some(method) = method {
-                self.compile_monomorphized_class_method(method, &vir_info, None)?;
+                self.compile_monomorphized_class_method(method, instance, None)?;
                 return Ok(());
             }
         }
@@ -1825,32 +1775,32 @@ impl Compiler<'_> {
             let program_module = self.program_module();
             if let Some(method) = self.find_implement_block_method(
                 &program.declarations,
-                vir_info.class_name,
+                instance.class_name,
                 &method_name_str,
                 program_module,
             ) {
-                self.compile_monomorphized_class_method(method, &vir_info, None)?;
+                self.compile_monomorphized_class_method(method, instance, None)?;
                 return Ok(());
             }
         }
 
         // Fallback: search module programs for class methods
         if let Some(method) = self
-            .find_class_method_in_modules(vir_info.class_name, &method_name_str)
+            .find_class_method_in_modules(instance.class_name, &method_name_str)
             .cloned()
         {
-            let module_id = self.analyzed.name_table().module_of(vir_info.class_name);
+            let module_id = self.analyzed.name_table().module_of(instance.class_name);
             let module_path = self
                 .analyzed
                 .name_table()
                 .module_path(module_id)
                 .to_string();
-            self.compile_monomorphized_class_method(&method, &vir_info, Some(&module_path))?;
+            self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
             return Ok(());
         }
 
         // Fallback: search implement blocks in modules
-        let module_id = self.analyzed.name_table().module_of(vir_info.class_name);
+        let module_id = self.analyzed.name_table().module_of(instance.class_name);
         let module_path = self
             .analyzed
             .name_table()
@@ -1860,17 +1810,17 @@ impl Compiler<'_> {
             && let Some(method) = self
                 .find_implement_block_method(
                     &module_program.declarations,
-                    vir_info.class_name,
+                    instance.class_name,
                     &method_name_str,
                     module_id,
                 )
                 .cloned()
         {
-            self.compile_monomorphized_class_method(&method, &vir_info, Some(&module_path))?;
+            self.compile_monomorphized_class_method(&method, instance, Some(&module_path))?;
             return Ok(());
         }
 
-        let class_name = self.analyzed.display_name(vir_info.class_name);
+        let class_name = self.analyzed.display_name(instance.class_name);
         Err(CodegenError::not_found(
             "pending monomorph: class method",
             format!("{} in class {}", method_name_str, class_name),
@@ -1880,32 +1830,17 @@ impl Compiler<'_> {
     /// Compile a single pending static method monomorph.
     fn compile_pending_static_method(
         &mut self,
-        instance: &StaticMethodMonomorphInstance,
+        instance: &VirStaticMethodMonomorphInfo,
         class_asts: &FxHashMap<NameId, GenericTypeMethodsAst<'_>>,
     ) -> CodegenResult<()> {
-        if self.is_abstract_static_method_monomorph(instance) {
+        if self.is_abstract_vir_static_method_monomorph(instance) {
             return Ok(());
         }
 
-        // Look up the VIR-native monomorph info by mangled name.
-        // static_method_monomorphs is keyed by StaticMethodMonomorphKey, so we
-        // search values by mangled_name (unique identifier).
-        let vir_info = self
-            .analyzed
-            .vir_program()
-            .static_method_monomorphs
-            .values()
-            .find(|info| info.mangled_name == instance.mangled_name)
-            .unwrap_or_else(|| {
-                let name = self.analyzed.display_name(instance.mangled_name);
-                panic!("pending static method monomorph not in VirProgram.static_method_monomorphs: {name}")
-            })
-            .clone();
-
-        let method_name_str = self.analyzed.display_name(vir_info.method_name);
+        let method_name_str = self.analyzed.display_name(instance.method_name);
 
         // Try main program class ASTs (using pre-built map)
-        if let Some(class) = class_asts.get(&vir_info.class_name)
+        if let Some(class) = class_asts.get(&instance.class_name)
             && let Some(statics) = class.statics
         {
             let method = statics
@@ -1913,34 +1848,34 @@ impl Compiler<'_> {
                 .iter()
                 .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
             if let Some(method) = method {
-                self.compile_monomorphized_static_method(method, &vir_info, None)?;
+                self.compile_monomorphized_static_method(method, instance, None)?;
                 return Ok(());
             }
         }
 
         // Fallback: search module programs
         if let Some(method) = self
-            .find_static_method_in_modules(vir_info.class_name, &method_name_str)
+            .find_static_method_in_modules(instance.class_name, &method_name_str)
             .cloned()
         {
-            let module_id = self.analyzed.name_table().module_of(vir_info.class_name);
+            let module_id = self.analyzed.name_table().module_of(instance.class_name);
             let module_path = self
                 .analyzed
                 .name_table()
                 .module_path(module_id)
                 .to_string();
-            self.compile_monomorphized_static_method(&method, &vir_info, Some(&module_path))?;
+            self.compile_monomorphized_static_method(&method, instance, Some(&module_path))?;
             return Ok(());
         }
 
-        let class_name = self.analyzed.display_name(vir_info.class_name);
+        let class_name = self.analyzed.display_name(instance.class_name);
         Err(CodegenError::not_found(
             "pending monomorph: static method",
             format!("{} in class {}", method_name_str, class_name),
         ))
     }
 
-    /// Build the monomorph name index from the entity_registry's 3 caches.
+    /// Build the monomorph name index from VirProgram's monomorph maps.
     ///
     /// Creates a `FxHashMap<NameId, MonomorphIndexEntry>` keyed by `mangled_name`
     /// for O(1) lookup in `try_demand_declare_monomorph`. Entries that would be
@@ -1950,11 +1885,12 @@ impl Compiler<'_> {
     /// Called before body compilation in both `compile_module_functions` and
     /// `compile_program_body`.
     pub(super) fn build_monomorph_index(&mut self) {
-        let arena = self.arena();
+        let vir_program = self.analyzed.vir_program();
+        let type_table = &vir_program.type_table;
         let mut index = FxHashMap::default();
 
         // Index free-function monomorphs (no filtering needed)
-        for (_, instance) in self.analyzed.monomorph_cache().instances() {
+        for instance in vir_program.free_monomorphs.values() {
             index.insert(
                 instance.mangled_name,
                 MonomorphIndexEntry::Function(instance.clone()),
@@ -1962,14 +1898,14 @@ impl Compiler<'_> {
         }
 
         // Index class method monomorphs (skip external + abstract templates)
-        for (_, instance) in self.analyzed.class_method_monomorph_cache().instances() {
+        for instance in vir_program.class_method_monomorphs.values() {
             if instance.external_info.is_some() {
                 continue;
             }
             if instance
-                .substitutions
+                .vir_substitutions
                 .values()
-                .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+                .any(|&vir_type_id| matches!(type_table.get(vir_type_id), VirType::Param { .. }))
             {
                 continue;
             }
@@ -1980,11 +1916,11 @@ impl Compiler<'_> {
         }
 
         // Index static method monomorphs (skip abstract templates)
-        for (_, instance) in self.analyzed.static_method_monomorph_cache().instances() {
+        for instance in vir_program.static_method_monomorphs.values() {
             if instance
-                .substitutions
+                .vir_substitutions
                 .values()
-                .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+                .any(|&vir_type_id| matches!(type_table.get(vir_type_id), VirType::Param { .. }))
             {
                 continue;
             }

@@ -5,11 +5,11 @@
 use rustc_hash::FxHashMap;
 use std::cell::{Cell, RefCell};
 
-use vole_identity::{
-    ClassMethodMonomorphInstance, ClassMethodMonomorphKey, MonomorphInstance, NameId,
-    StaticMethodMonomorphInstance, TypeDefId, TypeId,
-};
+use vole_identity::{ClassMethodMonomorphKey, NameId, TypeDefId, TypeId};
 use vole_runtime::NativeRegistry;
+use vole_vir::monomorph::instance::{
+    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
+};
 
 use cranelift_module::FuncId;
 
@@ -84,16 +84,16 @@ pub(crate) struct ExpandedClassMethodInfo {
 
 /// An entry in the monomorph name index, distinguishing the 3 cache variants.
 ///
-/// Built once per compilation phase from the entity_registry's monomorph caches,
+/// Built once per compilation phase from VirProgram's monomorph maps,
 /// keyed by `mangled_name` (NameId) for O(1) lookup in `try_demand_declare_monomorph`.
 #[derive(Debug, Clone)]
 pub(crate) enum MonomorphIndexEntry {
-    /// A free-function monomorph (from monomorph_cache).
-    Function(MonomorphInstance),
-    /// A class instance method monomorph (from class_method_monomorph_cache).
-    ClassMethod(ClassMethodMonomorphInstance),
-    /// A static method monomorph (from static_method_monomorph_cache).
-    StaticMethod(StaticMethodMonomorphInstance),
+    /// A free-function monomorph (from VirProgram.free_monomorphs).
+    Function(VirMonomorphInfo),
+    /// A class instance method monomorph (from VirProgram.class_method_monomorphs).
+    ClassMethod(VirClassMethodMonomorphInfo),
+    /// A static method monomorph (from VirProgram.static_method_monomorphs).
+    StaticMethod(VirStaticMethodMonomorphInfo),
 }
 
 /// Key for monomorphized generic class type_id cache.

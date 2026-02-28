@@ -6,6 +6,10 @@ use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
 use cranelift_module::Module;
 
+use vole_vir::monomorph::instance::{
+    VirClassMethodMonomorphInfo, VirMonomorphInfo, VirStaticMethodMonomorphInfo,
+};
+
 use crate::FunctionRegistry;
 
 /// A monomorphized instance that was lazily declared on FuncId miss and needs
@@ -13,12 +17,12 @@ use crate::FunctionRegistry;
 /// each compilation phase.
 #[derive(Debug, Clone)]
 pub enum PendingMonomorph {
-    /// A free-function monomorph (from monomorph_cache).
-    Function(vole_identity::MonomorphInstance),
-    /// A class instance method monomorph (from class_method_monomorph_cache).
-    ClassMethod(vole_identity::ClassMethodMonomorphInstance),
-    /// A static method monomorph (from static_method_monomorph_cache).
-    StaticMethod(vole_identity::StaticMethodMonomorphInstance),
+    /// A free-function monomorph (from VirProgram.free_monomorphs).
+    Function(VirMonomorphInfo),
+    /// A class instance method monomorph (from VirProgram.class_method_monomorphs).
+    ClassMethod(VirClassMethodMonomorphInfo),
+    /// A static method monomorph (from VirProgram.static_method_monomorphs).
+    StaticMethod(VirStaticMethodMonomorphInfo),
 }
 
 /// Codegen context - mutable infrastructure for code generation.
