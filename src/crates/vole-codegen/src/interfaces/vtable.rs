@@ -2223,12 +2223,8 @@ fn resolve_vtable_target<C: VtableCtx>(
         // Use substituted types when available (required for generic implement blocks
         // where the registry stores abstract types like `T | Done` but we need concrete
         // types like `i64 | Done` for correct union tag ordering in vtable wrappers).
-        let (param_type_ids, return_type_id) = substituted_types.unwrap_or_else(|| {
-            (
-                impl_.func_type.params_id.to_vec(),
-                impl_.func_type.return_type_id,
-            )
-        });
+        let (param_type_ids, return_type_id) = substituted_types
+            .unwrap_or_else(|| (impl_.func_sig.params.clone(), impl_.func_sig.return_type));
         let returns_void = matches!(
             ctx.analyzed().type_arena().get(return_type_id),
             SemaType::Void
@@ -2237,7 +2233,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         // differs from the concrete return type (e.g. `i64 | Done`). The callee was compiled
         // with the abstract union's tag ordering, but the wrapper must produce the concrete
         // union's tag ordering.
-        let callee_ret = impl_.func_type.return_type_id;
+        let callee_ret = impl_.func_sig.return_type;
         let union_tag_remap = build_union_tag_remap(
             ctx.analyzed().type_arena(),
             callee_ret,
@@ -2256,7 +2252,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         );
         if let Some(external_info) = impl_.external_info {
             return Ok(VtableMethod {
-                param_count: impl_.func_type.params_id.len(),
+                param_count: impl_.func_sig.params.len(),
                 returns_void,
                 param_type_ids,
                 return_type_id,
@@ -2272,7 +2268,7 @@ fn resolve_vtable_target<C: VtableCtx>(
             .ok_or_else(|| CodegenError::not_found("method info", "method_func_keys lookup"))?;
         let method_info = MethodInfo { func_key };
         return Ok(VtableMethod {
-            param_count: impl_.func_type.params_id.len(),
+            param_count: impl_.func_sig.params.len(),
             returns_void,
             param_type_ids,
             return_type_id,

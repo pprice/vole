@@ -4,10 +4,13 @@
 // This is the clean boundary between VIR lowering and code generation.
 
 use rustc_hash::FxHashMap;
-use vole_identity::{FieldId, FunctionId, MethodId, NameId, NodeId, Span, Symbol};
+use vole_identity::{FieldId, FunctionId, MethodId, NameId, NodeId, Span, Symbol, TypeDefId};
 
 use crate::entity_metadata::VirEntityMetadata;
 use crate::func::{VirBody, VirFunction, VirTest};
+use crate::implement_dispatch::{
+    VirExternalFuncInfo, VirGenericExternalInfo, VirImplementDispatch, VirMethodImplInfo,
+};
 use crate::refs::VirRef;
 use crate::type_table::VirTypeTable;
 use crate::types::VirAnnotation;
@@ -98,6 +101,12 @@ pub struct VirProgram {
     /// `EntityRegistry`.  Replaces `EntityView` as the VIR-native source
     /// of entity-level data for codegen.
     pub entity_metadata: VirEntityMetadata,
+
+    /// Implement-dispatch metadata: external function bindings, generic
+    /// external dispatch, and implement-block method bindings.  Populated
+    /// during VIR lowering from sema's `ImplementRegistry`.  Replaces
+    /// codegen's `ImplementView` as the lookup source.
+    pub implement_dispatch: VirImplementDispatch,
 }
 
 impl VirProgram {
@@ -167,5 +176,40 @@ impl VirProgram {
     /// Get a mutable reference to the entity metadata (for population).
     pub fn entity_metadata_mut(&mut self) -> &mut VirEntityMetadata {
         &mut self.entity_metadata
+    }
+
+    /// Get a read-only reference to the implement-dispatch metadata.
+    pub fn implement_dispatch(&self) -> &VirImplementDispatch {
+        &self.implement_dispatch
+    }
+
+    /// Look up external function binding by short name.
+    pub fn external_func_by_name(&self, name: &str) -> Option<VirExternalFuncInfo> {
+        self.implement_dispatch.external_func_by_name(name)
+    }
+
+    /// Look up generic external function metadata by short name.
+    pub fn generic_external_by_name(&self, name: &str) -> Option<&VirGenericExternalInfo> {
+        self.implement_dispatch.generic_external_by_name(name)
+    }
+
+    /// Look up generic external method metadata by defining type and method name.
+    pub fn generic_external_method(
+        &self,
+        type_def_id: TypeDefId,
+        method_name: NameId,
+    ) -> Option<&VirGenericExternalInfo> {
+        self.implement_dispatch
+            .generic_external_method(type_def_id, method_name)
+    }
+
+    /// Look up an implement-block method binding by type name key and method name.
+    pub fn implement_method_by_name(
+        &self,
+        type_name_id: NameId,
+        method_name_id: NameId,
+    ) -> Option<&VirMethodImplInfo> {
+        self.implement_dispatch
+            .method_by_name(type_name_id, method_name_id)
     }
 }

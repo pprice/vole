@@ -37,6 +37,7 @@ use super::type_method_monomorph::{
 };
 use super::type_methods::{lower_module_type_methods, lower_top_level_type_methods};
 use crate::LoweringEntityLookup;
+use crate::implement_registry::ImplementRegistry;
 use crate::vir_lower::{lower_stmts, lower_test_body};
 use crate::{NodeMap, TypeArena};
 use vole_frontend::{Decl, Interner, Program};
@@ -60,6 +61,7 @@ where
     pub modules_with_errors: &'a HashSet<String>,
     pub generic_vir_functions: Vec<(NameId, VirFunction)>,
     pub generic_vir_type_table: VirTypeTable,
+    pub implements: &'a ImplementRegistry,
 }
 
 pub struct LowerVirProgramOutput {
@@ -85,6 +87,7 @@ where
         modules_with_errors,
         generic_vir_functions,
         generic_vir_type_table,
+        implements,
     } = args;
 
     let mut type_table = VirTypeTable::new();
@@ -332,6 +335,7 @@ where
 
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
     let entity_metadata = build_entity_metadata(entities, type_arena, &type_table, interner, names);
+    let implement_dispatch = build_implement_dispatch(implements);
     let mut vir_program = VirProgram {
         type_table,
         functions: vir_functions,
@@ -350,6 +354,7 @@ where
         annotation_inits: vir_annotation_inits,
         vir_monomorph_base: usize::MAX,
         entity_metadata,
+        implement_dispatch,
     };
     run_vir_monomorphize(&mut vir_program);
 
@@ -602,6 +607,7 @@ fn run_early_vir_monomorphize(
         annotation_inits: FxHashMap::default(),
         vir_monomorph_base: usize::MAX,
         entity_metadata: vole_vir::VirEntityMetadata::new(),
+        implement_dispatch: vole_vir::VirImplementDispatch::new(),
     };
 
     let mut result = vole_vir::monomorphize_with_seeds(&mut temp_program, seeds);
@@ -678,4 +684,87 @@ fn run_vir_monomorphize(program: &mut VirProgram) {
 
     // Resolve GenericCall -> VirDirect in all concrete functions.
     vole_vir::resolve_generic_calls(&mut program.functions, &abs_index);
+}
+
+/// Build VIR implement-dispatch metadata from sema's `ImplementRegistry`.
+///
+/// Converts all registry entries into VIR-native types, populating the
+/// four lookup maps (external_funcs, generic_externals,
+/// generic_external_methods, methods).
+fn build_implement_dispatch(registry: &ImplementRegistry) -> vole_vir::VirImplementDispatch {
+    use crate::implement_registry::ImplTypeId;
+    use vole_vir::{
+        VirExternalFuncInfo, VirFuncSignature, VirImplementDispatch, VirMethodImplInfo,
+    };
+
+    let mut dispatch = VirImplementDispatch::new();
+
+    for (name, info) in registry.external_func_entries() {
+        dispatch.insert_external_func(
+            name.to_string(),
+            VirExternalFuncInfo {
+                module_path: info.module_path,
+                native_name: info.native_name,
+            },
+        );
+    }
+
+    for (name, info) in registry.generic_external_entries() {
+        dispatch.insert_generic_external(name.to_string(), convert_generic_info(info));
+    }
+
+    for (key, info) in registry.generic_external_method_entries() {
+        dispatch.insert_generic_external_method(
+            key.type_def_id,
+            key.method_name,
+            convert_generic_info(info),
+        );
+    }
+
+    for (key, method_impl) in registry.method_entries() {
+        let type_name_id = ImplTypeId::name_id(key.type_id);
+        dispatch.insert_method(
+            type_name_id,
+            key.method_name,
+            VirMethodImplInfo {
+                func_sig: VirFuncSignature {
+                    is_closure: method_impl.func_type.is_closure,
+                    params: method_impl.func_type.params_id.to_vec(),
+                    return_type: method_impl.func_type.return_type_id,
+                },
+                external_info: method_impl.external_info.map(|ei| VirExternalFuncInfo {
+                    module_path: ei.module_path,
+                    native_name: ei.native_name,
+                }),
+            },
+        );
+    }
+
+    dispatch
+}
+
+/// Convert a sema `GenericExternalInfo` to VIR.
+fn convert_generic_info(
+    info: &crate::implement_registry::GenericExternalInfo,
+) -> vole_vir::VirGenericExternalInfo {
+    use vole_vir::{VirGenericExternalInfo, VirTypeMappingEntry, VirTypeMappingKind};
+
+    VirGenericExternalInfo {
+        module_path: info.module_path,
+        type_mappings: info
+            .type_mappings
+            .iter()
+            .map(|entry| VirTypeMappingEntry {
+                kind: match &entry.kind {
+                    crate::implement_registry::TypeMappingKind::Exact(type_id) => {
+                        VirTypeMappingKind::Exact(*type_id)
+                    }
+                    crate::implement_registry::TypeMappingKind::Default => {
+                        VirTypeMappingKind::Default
+                    }
+                },
+                intrinsic_key: entry.intrinsic_key.clone(),
+            })
+            .collect(),
+    }
 }

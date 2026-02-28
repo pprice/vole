@@ -17,6 +17,7 @@ pub mod calls;
 pub mod entity_metadata;
 pub mod expr;
 pub mod func;
+pub mod implement_dispatch;
 pub mod intrinsics;
 pub mod monomorph;
 pub mod numeric_model;
@@ -46,6 +47,10 @@ pub use expr::{
     VirTupleBinding, VirUnOp,
 };
 pub use func::{VirBody, VirFunction, VirTest};
+pub use implement_dispatch::{
+    VirExternalFuncInfo, VirFuncSignature, VirGenericExternalInfo, VirImplementDispatch,
+    VirMethodImplInfo, VirTypeMappingEntry, VirTypeMappingKind,
+};
 pub use intrinsics::IntrinsicKey;
 pub use monomorph::{
     InstanceIndex, MonomorphInstance, MonomorphResult, RewriteCtx, TypeSubstitution, monomorphize,

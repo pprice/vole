@@ -52,6 +52,15 @@ impl From<vole_vir::expr::VirExternalMethodInfo> for ExternalMethodRef {
     }
 }
 
+impl From<vole_vir::VirExternalFuncInfo> for ExternalMethodRef {
+    fn from(value: vole_vir::VirExternalFuncInfo) -> Self {
+        Self {
+            module_path: value.module_path,
+            native_name: value.native_name,
+        }
+    }
+}
+
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
     /// Stack of loop exit blocks for break statements
