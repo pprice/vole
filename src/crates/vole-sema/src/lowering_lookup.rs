@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
-use vole_identity::{FunctionId, MethodId, NameId, NameTable, TypeDefId};
+use vole_identity::{
+    ClassMethodMonomorphKey, FunctionId, MethodId, NameId, NameTable, StaticMethodMonomorphKey,
+    TypeDefId,
+};
 
 use crate::EntityRegistry;
 
@@ -33,6 +36,18 @@ pub trait LoweringEntityLookup {
     fn static_method_monomorph_instances(
         &self,
     ) -> Vec<crate::generic::StaticMethodMonomorphInstance>;
+    fn class_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        ClassMethodMonomorphKey,
+        crate::generic::ClassMethodMonomorphInstance,
+    )>;
+    fn static_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        StaticMethodMonomorphKey,
+        crate::generic::StaticMethodMonomorphInstance,
+    )>;
 }
 
 impl LoweringEntityLookup for EntityRegistry {
@@ -106,6 +121,24 @@ impl LoweringEntityLookup for EntityRegistry {
         &self,
     ) -> Vec<crate::generic::StaticMethodMonomorphInstance> {
         self.static_method_monomorph_cache.collect_instances()
+    }
+
+    fn class_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        ClassMethodMonomorphKey,
+        crate::generic::ClassMethodMonomorphInstance,
+    )> {
+        self.class_method_monomorph_cache.collect_keyed_instances()
+    }
+
+    fn static_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        StaticMethodMonomorphKey,
+        crate::generic::StaticMethodMonomorphInstance,
+    )> {
+        self.static_method_monomorph_cache.collect_keyed_instances()
     }
 }
 
@@ -183,5 +216,23 @@ where
         &self,
     ) -> Vec<crate::generic::StaticMethodMonomorphInstance> {
         (**self).static_method_monomorph_instances()
+    }
+
+    fn class_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        ClassMethodMonomorphKey,
+        crate::generic::ClassMethodMonomorphInstance,
+    )> {
+        (**self).class_method_monomorph_keyed_instances()
+    }
+
+    fn static_method_monomorph_keyed_instances(
+        &self,
+    ) -> Vec<(
+        StaticMethodMonomorphKey,
+        crate::generic::StaticMethodMonomorphInstance,
+    )> {
+        (**self).static_method_monomorph_keyed_instances()
     }
 }

@@ -31,6 +31,7 @@ use super::module_bindings::{lower_module_bindings, lower_module_module_bindings
 use super::monomorph_functions::{
     LowerMonomorphizedInstancesArgs, build_generic_func_map, lower_monomorphized_instances,
 };
+use super::monomorph_info::populate_monomorph_info;
 use super::test_scoped_type_methods::lower_test_scoped_type_methods;
 use super::type_method_monomorph::{
     MethodMonomorphLoweringCtx, MethodMonomorphLoweringWork,
@@ -350,6 +351,7 @@ where
         });
     vir_field_default_inits.extend(module_vir_field_default_inits);
 
+    let monomorph_info = populate_monomorph_info(entities, type_arena, &mut type_table);
     let vir_annotation_inits = lower_annotation_inits(entities, interner, names);
     let entity_metadata = build_entity_metadata(entities, type_arena, &type_table, interner, names);
     let implement_dispatch = build_implement_dispatch(implements);
@@ -374,9 +376,9 @@ where
         vir_monomorph_base: usize::MAX,
         entity_metadata,
         implement_dispatch,
-        free_monomorphs: FxHashMap::default(),
-        class_method_monomorphs: FxHashMap::default(),
-        static_method_monomorphs: FxHashMap::default(),
+        free_monomorphs: monomorph_info.free_monomorphs,
+        class_method_monomorphs: monomorph_info.class_method_monomorphs,
+        static_method_monomorphs: monomorph_info.static_method_monomorphs,
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),
     };

@@ -122,6 +122,21 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
         self.instances.values().cloned().collect()
     }
 
+    /// Collect all instances as owned (key, value) pairs.
+    ///
+    /// Used by VIR lowering to populate monomorph info maps that are
+    /// keyed by the same key type as the sema cache.
+    pub fn collect_keyed_instances(&self) -> Vec<(K, V)>
+    where
+        K: Clone,
+        V: Clone,
+    {
+        self.instances
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
     // ========================================================================
     // Cache Metrics
     // ========================================================================
