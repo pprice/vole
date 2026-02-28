@@ -1,7 +1,7 @@
 // method_resolution.rs
 //
 // Utility functions for method resolution during codegen.
-// The main logic now uses ResolvedMethod directly from sema + method_func_keys lookup.
+// Method resolution uses VirResolvedMethod from VIR lowering.
 
 use crate::AnalyzedProgram;
 use vole_identity::{TypeDefId, TypeId};

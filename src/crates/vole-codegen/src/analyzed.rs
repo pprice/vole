@@ -484,14 +484,6 @@ impl AnalyzedProgram {
         self.entity_view.is_external_only(type_def_id)
     }
 
-    /// Return resolved method metadata for a call node.
-    pub(crate) fn method_at(
-        &self,
-        node_id: vole_identity::NodeId,
-    ) -> Option<&vole_sema::ResolvedMethod> {
-        self.node_map.get_method(node_id)
-    }
-
     /// Return monomorph key metadata for a call node.
     pub(crate) fn monomorph_for(
         &self,

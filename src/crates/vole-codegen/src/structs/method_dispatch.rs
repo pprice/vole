@@ -14,9 +14,8 @@ use crate::context::Cg;
 use crate::context::ExternalMethodRef;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, module_name_id, type_id_to_cranelift};
-use vole_identity::{ModuleId, NameId, NodeId, TypeDefId, TypeId};
+use vole_identity::{ModuleId, NameId, TypeDefId, TypeId};
 use vole_sema::generic::MonomorphKey;
-use vole_sema::resolution::ResolvedMethod;
 use vole_vir::expr::{VirFunctionMonomorphKey, VirResolvedMethod};
 
 use super::methods::ArgSource;
@@ -29,8 +28,7 @@ impl Cg<'_, '_, '_> {
         module_id: ModuleId,
         arg_source: &ArgSource<'_>,
         method_name_str: &str,
-        expr_id: Option<NodeId>,
-        vir_resolution: Option<&VirResolvedMethod>,
+        vir_resolution: &VirResolvedMethod,
         vir_generic_key: Option<&VirFunctionMonomorphKey>,
     ) -> CodegenResult<CompiledValue> {
         let module_path = self
@@ -39,48 +37,21 @@ impl Cg<'_, '_, '_> {
             .module_path(module_id)
             .to_string();
         let name_id = module_name_id(self.analyzed(), module_id, method_name_str);
-        let (external_info, func_type_id) = if let Some(resolved) = vir_resolution {
-            match resolved {
-                VirResolvedMethod::Implemented {
-                    external_info,
-                    func_type_id,
-                    ..
-                } => (
-                    external_info.map(ExternalMethodRef::from),
-                    self.sema_type_from_vir(*func_type_id),
-                ),
-                _ => {
-                    return Err(CodegenError::not_found(
-                        "module method",
-                        format!("{}::{}", module_path, method_name_str),
-                    ));
-                }
-            }
-        } else {
-            let expr_id = expr_id.ok_or_else(|| {
-                CodegenError::missing_resource(
-                    "module method call is missing expr_id and VIR resolution metadata",
-                )
-            })?;
-            let resolution = self.analyzed().method_at(expr_id);
-            let Some(ResolvedMethod::Implemented {
+        let (external_info, func_type_id) = match vir_resolution {
+            VirResolvedMethod::Implemented {
                 external_info,
                 func_type_id,
                 ..
-            }) = resolution
-            else {
+            } => (
+                external_info.map(ExternalMethodRef::from),
+                self.sema_type_from_vir(*func_type_id),
+            ),
+            _ => {
                 return Err(CodegenError::not_found(
                     "module method",
                     format!("{}::{}", module_path, method_name_str),
                 ));
-            };
-            (
-                external_info.map(|info| ExternalMethodRef {
-                    module_path: info.module_path,
-                    native_name: info.native_name,
-                }),
-                *func_type_id,
-            )
+            }
         };
 
         // Get return type from arena
@@ -103,25 +74,23 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
-        let monomorph_key = vir_generic_key
-            .map(|key| {
-                let effective_type_keys: Vec<TypeId> = key
-                    .type_keys
-                    .iter()
-                    .map(|&type_id| {
-                        let sema_type_id = self.sema_type_from_vir(type_id);
-                        if let Some(subs) = self.substitutions
-                            && let Some(name_id) = self.arena().unwrap_type_param(sema_type_id)
-                        {
-                            subs.get(&name_id).copied().unwrap_or(sema_type_id)
-                        } else {
-                            sema_type_id
-                        }
-                    })
-                    .collect();
-                MonomorphKey::new(key.func_name, effective_type_keys)
-            })
-            .or_else(|| expr_id.and_then(|id| self.analyzed().monomorph_for(id).cloned()));
+        let monomorph_key = vir_generic_key.map(|key| {
+            let effective_type_keys: Vec<TypeId> = key
+                .type_keys
+                .iter()
+                .map(|&type_id| {
+                    let sema_type_id = self.sema_type_from_vir(type_id);
+                    if let Some(subs) = self.substitutions
+                        && let Some(name_id) = self.arena().unwrap_type_param(sema_type_id)
+                    {
+                        subs.get(&name_id).copied().unwrap_or(sema_type_id)
+                    } else {
+                        sema_type_id
+                    }
+                })
+                .collect();
+            MonomorphKey::new(key.func_name, effective_type_keys)
+        });
 
         if let Some(monomorph_key) = monomorph_key.as_ref() {
             let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {

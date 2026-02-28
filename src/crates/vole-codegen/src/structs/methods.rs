@@ -424,12 +424,14 @@ impl Cg<'_, '_, '_> {
             .unwrap_or_else(|| self.infer_method_dispatch_kind(&obj, method_name_str));
         match dispatch_kind {
             vole_sema::MethodDispatchKind::Module(module_id) => {
+                let resolved = dispatch.resolved_method.as_ref().ok_or_else(|| {
+                    CodegenError::missing_resource("module method call missing VIR resolved method")
+                })?;
                 return self.module_method_call(
                     module_id,
                     &mc.arg_source(),
                     method_name_str,
-                    None,
-                    dispatch.resolved_method.as_ref(),
+                    resolved,
                     dispatch.generic_monomorph.as_ref(),
                 );
             }
