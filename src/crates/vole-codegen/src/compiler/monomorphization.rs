@@ -11,9 +11,10 @@ use crate::types::CodegenCtx;
 use vole_frontend::ast::InterfaceMethod;
 use vole_frontend::{Decl, FuncDecl, Interner, Program};
 use vole_identity::{
-    ClassMethodMonomorphInstance, ModuleId, MonomorphInstance, MonomorphInstanceTrait, NameId,
+    ClassMethodMonomorphInstance, ModuleId, MonomorphInstanceTrait, NameId,
     StaticMethodMonomorphInstance, TypeId,
 };
+use vole_vir::monomorph::instance::VirMonomorphInfo;
 
 use crate::types::MonomorphIndexEntry;
 use crate::types::function_name_id_with_interner;
@@ -115,10 +116,16 @@ impl Compiler<'_> {
             );
         }
 
-        // Collect instances to avoid borrow issues
-        let instances = self.analyzed.monomorph_cache().collect_instances();
+        // Collect instances from VirProgram.free_monomorphs to avoid borrow issues
+        let instances: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .free_monomorphs
+            .values()
+            .cloned()
+            .collect();
 
-        for instance in instances {
+        for instance in &instances {
             // Skip external functions - they don't have AST bodies
             // Generic externals are called directly with type erasure at call sites
             if self.is_external_func(instance.original_name) {
@@ -127,12 +134,12 @@ impl Compiler<'_> {
 
             // First try the main program's generic functions
             if let Some(func) = generic_func_asts.get(&instance.original_name) {
-                self.compile_monomorphized_function(func, &instance)?;
+                self.compile_monomorphized_function(func, instance)?;
                 continue;
             }
 
             // Then try module programs (for prelude generic functions like print/println)
-            let found = self.compile_monomorphized_module_function(&instance)?;
+            let found = self.compile_monomorphized_module_function(instance)?;
             if !found && program.is_some() {
                 // Only error when the main program is available — during the module-only
                 // phase, missing ASTs are expected for program-originating monomorphs.
@@ -151,7 +158,7 @@ impl Compiler<'_> {
     /// Searches module programs for the generic function AST.
     fn compile_monomorphized_module_function(
         &mut self,
-        instance: &MonomorphInstance,
+        instance: &VirMonomorphInfo,
     ) -> CodegenResult<bool> {
         // Find which module contains this function
         let module_id = self.analyzed.name_table().module_of(instance.original_name);
@@ -194,7 +201,7 @@ impl Compiler<'_> {
     fn compile_monomorphized_function_with_module(
         &mut self,
         func: &FuncDecl,
-        instance: &MonomorphInstance,
+        instance: &VirMonomorphInfo,
         module_interner: &Interner,
         module_id: ModuleId,
     ) -> CodegenResult<bool> {
@@ -276,7 +283,7 @@ impl Compiler<'_> {
     fn compile_monomorphized_function(
         &mut self,
         func: &FuncDecl,
-        instance: &MonomorphInstance,
+        instance: &VirMonomorphInfo,
     ) -> CodegenResult<()> {
         let mangled_name = self.analyzed.display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
@@ -1606,7 +1613,17 @@ impl Compiler<'_> {
             for pending in &batch {
                 match pending {
                     PendingMonomorph::Function(instance) => {
-                        self.compile_pending_function(instance, &generic_func_asts)?;
+                        // Look up the VIR-native monomorph info by mangled name
+                        let vir_info = self
+                            .analyzed
+                            .vir_program()
+                            .free_monomorphs
+                            .get(&instance.mangled_name)
+                            .unwrap_or_else(|| {
+                                let name = self.analyzed.display_name(instance.mangled_name);
+                                panic!("pending free monomorph not in VirProgram.free_monomorphs: {name}")
+                            });
+                        self.compile_pending_function(vir_info, &generic_func_asts)?;
                     }
                     PendingMonomorph::ClassMethod(instance) => {
                         self.compile_pending_class_method(instance, program, &class_asts)?;
@@ -1708,7 +1725,7 @@ impl Compiler<'_> {
     /// Compile a single pending free-function monomorph.
     fn compile_pending_function(
         &mut self,
-        instance: &MonomorphInstance,
+        instance: &VirMonomorphInfo,
         generic_func_asts: &FxHashMap<NameId, &FuncDecl>,
     ) -> CodegenResult<()> {
         // Skip external functions
