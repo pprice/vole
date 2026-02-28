@@ -7,9 +7,7 @@ use std::rc::Rc;
 
 use crate::entity_view::EntityView;
 use vole_frontend::{Interner, Program, Symbol};
-use vole_identity::{
-    FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, NamerLookup, Span, TypeDefId,
-};
+use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId};
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 use vole_sema::{AnalysisOutput, NodeMap, TypeArena};
 use vole_vir::{VirBody, VirEntityMetadata, VirFunction, VirProgram};
@@ -17,7 +15,6 @@ use vole_vir::{VirBody, VirEntityMetadata, VirFunction, VirProgram};
 /// Result of parsing and analyzing a source file.
 pub struct AnalyzedProgram {
     program: Program,
-    interner: Rc<Interner>,
     /// All expression-level metadata (types, method resolutions, generic calls).
     /// Vec-backed per-node store, keyed by `NodeId`.
     node_map: NodeMap,
@@ -28,8 +25,6 @@ pub struct AnalyzedProgram {
     module_programs: FxHashMap<String, (Program, Rc<Interner>)>,
     /// Type arena (Rc-shared, immutable during codegen).
     types: Rc<TypeArena>,
-    /// Name table (Rc-shared, immutable during codegen).
-    names: Rc<NameTable>,
     /// The module ID for the main program (may differ from main_module when using shared cache)
     module_id: ModuleId,
     /// Module paths that had sema errors. Codegen should skip compiling
@@ -119,16 +114,18 @@ impl AnalyzedProgram {
             implements: &db.implements,
         });
         let module_programs = lowering_output.module_programs;
-        let vir_program = lowering_output.vir_program;
+        let mut vir_program = lowering_output.vir_program;
         let entity_view = EntityView::from_registry(&db.entities, &db.names);
+        // Move name resolution data into VirProgram (zero-clone for NameTable
+        // via Rc::clone, single Rc::new wrap for interner).
+        vir_program.interner = Rc::new(interner);
+        vir_program.name_table = Rc::clone(&db.names);
         Self {
             program,
-            interner: Rc::new(interner),
             node_map,
             tests_virtual_modules,
             module_programs,
             types: db.types,
-            names: db.names,
             module_id,
             modules_with_errors,
             vir_program,
@@ -136,9 +133,9 @@ impl AnalyzedProgram {
         }
     }
 
-    /// Get read-only access to the name table
+    /// Get read-only access to the name table.
     pub(crate) fn name_table(&self) -> &NameTable {
-        &self.names
+        self.vir_program.name_table()
     }
 
     /// Get read-only access to the analyzed root program AST.
@@ -148,12 +145,12 @@ impl AnalyzedProgram {
 
     /// Get read-only access to the interner.
     pub(crate) fn interner(&self) -> &Interner {
-        &self.interner
+        self.vir_program.interner()
     }
 
     /// Clone the interner Rc for APIs that need shared ownership.
     pub(crate) fn interner_rc(&self) -> Rc<Interner> {
-        Rc::clone(&self.interner)
+        self.vir_program.interner_rc()
     }
 
     /// Get read-only access to the node map.
@@ -190,9 +187,9 @@ impl AnalyzedProgram {
         self.vir_program.entity_metadata()
     }
 
-    /// Get a reference to the name table Rc (borrowed, no clone)
-    pub(crate) fn name_table_ref(&self) -> &Rc<NameTable> {
-        &self.names
+    /// Clone the name table Rc for APIs that need shared ownership.
+    pub(crate) fn name_table_rc(&self) -> Rc<NameTable> {
+        self.vir_program.name_table_rc()
     }
 
     /// Get read-only access to the type arena
@@ -287,17 +284,17 @@ impl AnalyzedProgram {
 
     /// Resolve a NameId to display form (e.g. module::Type::method).
     pub(crate) fn display_name(&self, name_id: NameId) -> String {
-        self.names.display(name_id)
+        self.vir_program.display_name(name_id)
     }
 
     /// Resolve a symbol in the main-program interner.
     pub(crate) fn resolve_symbol(&self, sym: Symbol) -> &str {
-        self.interner.resolve(sym)
+        self.vir_program.resolve_symbol(sym)
     }
 
     /// Resolve a NameId to its last segment.
     pub(crate) fn last_segment(&self, name_id: NameId) -> Option<String> {
-        self.names.last_segment_str(name_id)
+        self.vir_program.last_segment(name_id)
     }
 
     /// Resolve type definition by NameId.
@@ -307,28 +304,22 @@ impl AnalyzedProgram {
 
     /// Resolve method NameId by Symbol.
     pub(crate) fn try_method_name_id(&self, name: Symbol) -> Option<NameId> {
-        let namer = NamerLookup::new(self.name_table(), self.interner());
-        namer.method(name)
+        self.vir_program.try_method_name_id(name)
     }
 
     /// Resolve method NameId by short string.
     pub(crate) fn try_method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
-        vole_identity::method_name_id_by_str(self.name_table(), self.interner(), name_str)
+        self.vir_program.try_method_name_id_by_str(name_str)
     }
 
     /// Resolve NameId by module and symbol segments using the main interner.
     pub(crate) fn try_name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> Option<NameId> {
-        self.names.name_id(module_id, segments, self.interner())
+        self.vir_program.try_name_id(module_id, segments)
     }
 
     /// Query-compatible alias for resolving NameId by module and symbol segments.
     pub(crate) fn name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> NameId {
-        self.try_name_id(module_id, segments).unwrap_or_else(|| {
-            panic!(
-                "name_id not found for segments {:?} in {:?}",
-                segments, module_id
-            )
-        })
+        self.vir_program.name_id(module_id, segments)
     }
 
     /// Resolve NameId by module and symbol segments with an explicit interner.
@@ -338,19 +329,18 @@ impl AnalyzedProgram {
         segments: &[Symbol],
         interner: &Interner,
     ) -> Option<NameId> {
-        self.names.name_id(module_id, segments, interner)
+        self.vir_program
+            .try_name_id_with_interner(module_id, segments, interner)
     }
 
     /// Resolve method NameId by short string, panicking when missing.
     pub(crate) fn method_name_id_by_str(&self, name_str: &str) -> NameId {
-        self.try_method_name_id_by_str(name_str)
-            .unwrap_or_else(|| panic!("method name_id not found for '{}'", name_str))
+        self.vir_program.method_name_id_by_str(name_str)
     }
 
     /// Resolve function NameId by module and Symbol.
     pub(crate) fn try_function_name_id(&self, module_id: ModuleId, name: Symbol) -> Option<NameId> {
-        let namer = NamerLookup::new(self.name_table(), self.interner());
-        namer.function(module_id, name)
+        self.vir_program.try_function_name_id(module_id, name)
     }
 
     /// Resolve semantic FunctionId by NameId.
@@ -530,13 +520,7 @@ impl AnalyzedProgram {
 
     /// Resolve function NameId by module and Symbol, panicking when missing.
     pub(crate) fn function_name_id(&self, module_id: ModuleId, name: Symbol) -> NameId {
-        self.try_function_name_id(module_id, name)
-            .unwrap_or_else(|| {
-                panic!(
-                    "function name_id not found for '{}'",
-                    self.resolve_symbol(name)
-                )
-            })
+        self.vir_program.function_name_id(module_id, name)
     }
 
     /// Return function parameter TypeIds by FunctionId.
@@ -559,14 +543,12 @@ impl AnalyzedProgram {
 
     /// Return module ID for a path, falling back to main module.
     pub(crate) fn module_id_or_main(&self, path: &str) -> ModuleId {
-        self.names
-            .module_id_if_known(path)
-            .unwrap_or_else(|| self.names.main_module())
+        self.vir_program.module_id_or_main(path)
     }
 
     /// Return module ID when known for a path.
     pub(crate) fn module_id_if_known(&self, path: &str) -> Option<ModuleId> {
-        self.names.module_id_if_known(path)
+        self.vir_program.module_id_if_known(path)
     }
 
     /// Return known imported module paths.
@@ -594,7 +576,7 @@ impl AnalyzedProgram {
 
     /// Return imported-module interner for a module ID, when available.
     pub(crate) fn module_interner(&self, module_id: ModuleId) -> Option<&Interner> {
-        let module_path = self.names.module_path(module_id);
+        let module_path = self.vir_program.module_path(module_id);
         self.module_programs
             .get(module_path)
             .map(|(_, interner)| &**interner)

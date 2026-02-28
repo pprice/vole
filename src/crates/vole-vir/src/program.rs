@@ -3,8 +3,13 @@
 // VirProgram: the complete VIR output from sema/lowering, consumed by codegen.
 // This is the clean boundary between VIR lowering and code generation.
 
+use std::rc::Rc;
+
 use rustc_hash::FxHashMap;
-use vole_identity::{FieldId, FunctionId, MethodId, NameId, NodeId, Span, Symbol, TypeDefId};
+use vole_identity::{
+    FieldId, FunctionId, Interner, MethodId, ModuleId, NameId, NameTable, NamerLookup, NodeId,
+    Span, Symbol, TypeDefId,
+};
 
 use crate::entity_metadata::VirEntityMetadata;
 use crate::func::{VirBody, VirFunction, VirTest};
@@ -107,6 +112,20 @@ pub struct VirProgram {
     /// during VIR lowering from sema's `ImplementRegistry`.  Replaces
     /// codegen's `ImplementView` as the lookup source.
     pub implement_dispatch: VirImplementDispatch,
+
+    /// String interner for resolving Symbol IDs to strings.
+    ///
+    /// Rc-shared with AnalyzedProgram during the transition period.
+    /// Codegen uses this to resolve field names, method names, and other
+    /// symbol-based identifiers.
+    pub interner: Rc<Interner>,
+
+    /// Name table for resolving NameIds to qualified names and module paths.
+    ///
+    /// Rc-shared with AnalyzedProgram during the transition period.
+    /// Codegen uses this for module path resolution, function/type name
+    /// lookup, and NameId-based dispatch.
+    pub name_table: Rc<NameTable>,
 }
 
 impl VirProgram {
@@ -211,5 +230,123 @@ impl VirProgram {
     ) -> Option<&VirMethodImplInfo> {
         self.implement_dispatch
             .method_by_name(type_name_id, method_name_id)
+    }
+
+    // ---- Name resolution accessors ----
+
+    /// Get read-only access to the string interner.
+    pub fn interner(&self) -> &Interner {
+        &self.interner
+    }
+
+    /// Clone the interner Rc for APIs that need shared ownership.
+    pub fn interner_rc(&self) -> Rc<Interner> {
+        Rc::clone(&self.interner)
+    }
+
+    /// Get read-only access to the name table.
+    pub fn name_table(&self) -> &NameTable {
+        &self.name_table
+    }
+
+    /// Clone the name table Rc for APIs that need shared ownership.
+    pub fn name_table_rc(&self) -> Rc<NameTable> {
+        Rc::clone(&self.name_table)
+    }
+
+    /// Resolve a symbol to its string representation.
+    pub fn resolve_symbol(&self, sym: Symbol) -> &str {
+        self.interner.resolve(sym)
+    }
+
+    /// Resolve a NameId to display form (e.g. module::Type::method).
+    pub fn display_name(&self, name_id: NameId) -> String {
+        self.name_table.display(name_id)
+    }
+
+    /// Resolve a NameId to its last segment string.
+    pub fn last_segment(&self, name_id: NameId) -> Option<String> {
+        self.name_table.last_segment_str(name_id)
+    }
+
+    /// Resolve NameId by module and symbol segments using the interner.
+    pub fn try_name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> Option<NameId> {
+        self.name_table.name_id(module_id, segments, &self.interner)
+    }
+
+    /// Resolve NameId by module and symbol segments, panicking when missing.
+    pub fn name_id(&self, module_id: ModuleId, segments: &[Symbol]) -> NameId {
+        self.try_name_id(module_id, segments).unwrap_or_else(|| {
+            panic!(
+                "name_id not found for segments {:?} in {:?}",
+                segments, module_id
+            )
+        })
+    }
+
+    /// Resolve NameId by module and symbol segments with an explicit interner.
+    pub fn try_name_id_with_interner(
+        &self,
+        module_id: ModuleId,
+        segments: &[Symbol],
+        interner: &Interner,
+    ) -> Option<NameId> {
+        self.name_table.name_id(module_id, segments, interner)
+    }
+
+    /// Resolve method NameId by Symbol.
+    pub fn try_method_name_id(&self, name: Symbol) -> Option<NameId> {
+        let namer = NamerLookup::new(&self.name_table, &self.interner);
+        namer.method(name)
+    }
+
+    /// Resolve method NameId by short string.
+    pub fn try_method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
+        vole_identity::method_name_id_by_str(&self.name_table, &self.interner, name_str)
+    }
+
+    /// Resolve method NameId by short string, panicking when missing.
+    pub fn method_name_id_by_str(&self, name_str: &str) -> NameId {
+        self.try_method_name_id_by_str(name_str)
+            .unwrap_or_else(|| panic!("method name_id not found for '{}'", name_str))
+    }
+
+    /// Resolve function NameId by module and Symbol.
+    pub fn try_function_name_id(&self, module_id: ModuleId, name: Symbol) -> Option<NameId> {
+        let namer = NamerLookup::new(&self.name_table, &self.interner);
+        namer.function(module_id, name)
+    }
+
+    /// Resolve function NameId by module and Symbol, panicking when missing.
+    pub fn function_name_id(&self, module_id: ModuleId, name: Symbol) -> NameId {
+        self.try_function_name_id(module_id, name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "function name_id not found for '{}'",
+                    self.resolve_symbol(name)
+                )
+            })
+    }
+
+    /// Return the main module ID from the name table.
+    pub fn main_module(&self) -> ModuleId {
+        self.name_table.main_module()
+    }
+
+    /// Return module ID for a path, falling back to main module.
+    pub fn module_id_or_main(&self, path: &str) -> ModuleId {
+        self.name_table
+            .module_id_if_known(path)
+            .unwrap_or_else(|| self.name_table.main_module())
+    }
+
+    /// Return module ID when known for a path.
+    pub fn module_id_if_known(&self, path: &str) -> Option<ModuleId> {
+        self.name_table.module_id_if_known(path)
+    }
+
+    /// Return the module path string for a module ID.
+    pub fn module_path(&self, module_id: ModuleId) -> &str {
+        self.name_table.module_path(module_id)
     }
 }

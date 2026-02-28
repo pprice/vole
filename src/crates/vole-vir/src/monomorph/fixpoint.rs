@@ -607,6 +607,8 @@ mod tests {
             vir_monomorph_base: usize::MAX,
             entity_metadata: crate::entity_metadata::VirEntityMetadata::new(),
             implement_dispatch: crate::implement_dispatch::VirImplementDispatch::new(),
+            interner: std::rc::Rc::new(vole_identity::Interner::new()),
+            name_table: std::rc::Rc::new(vole_identity::NameTable::new()),
         }
     }
 

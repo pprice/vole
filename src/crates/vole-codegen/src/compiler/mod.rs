@@ -1,7 +1,5 @@
 // src/codegen/compiler/mod.rs
 
-use std::rc::Rc;
-
 /// Macro to construct CompileEnv from Compiler fields.
 /// This is a macro (not a method) to allow field-level borrowing,
 /// which lets the borrow checker see that CompileEnv uses different
@@ -110,7 +108,7 @@ impl<'a> Compiler<'a> {
         let mut native_registry = NativeRegistry::new();
         vole_runtime::stdlib::register_stdlib(&mut native_registry);
 
-        let mut func_registry = FunctionRegistry::new(Rc::clone(analyzed.name_table_ref()));
+        let mut func_registry = FunctionRegistry::new(analyzed.name_table_rc());
         for runtime in RuntimeKey::ALL {
             // Runtime functions are in imported_func_ids (Import linkage)
             if let Some(func_id) = jit.imported_func_ids.get(runtime.name()) {

@@ -355,6 +355,8 @@ where
         vir_monomorph_base: usize::MAX,
         entity_metadata,
         implement_dispatch,
+        interner: Rc::new(Interner::new()),
+        name_table: Rc::new(NameTable::new()),
     };
     run_vir_monomorphize(&mut vir_program);
 
@@ -608,6 +610,8 @@ fn run_early_vir_monomorphize(
         vir_monomorph_base: usize::MAX,
         entity_metadata: vole_vir::VirEntityMetadata::new(),
         implement_dispatch: vole_vir::VirImplementDispatch::new(),
+        interner: Rc::new(Interner::new()),
+        name_table: Rc::new(NameTable::new()),
     };
 
     let mut result = vole_vir::monomorphize_with_seeds(&mut temp_program, seeds);
