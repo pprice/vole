@@ -9,8 +9,8 @@
 
 use rustc_hash::FxHashMap;
 use vole_identity::{
-    FieldId, FunctionId, GlobalId, Interner, MethodId, ModuleId, NameId, NameTable, Resolver,
-    Symbol, TypeDefId, TypeId, VirTypeId,
+    FieldId, FunctionId, FunctionType, GlobalId, Interner, MethodId, ModuleId, NameId, NameTable,
+    Resolver, Symbol, TypeDefId, TypeId, VirTypeId,
 };
 
 use crate::expr::VirExternalMethodInfo;
@@ -244,6 +244,18 @@ pub struct VirMethodBinding {
     /// `VirTypeId` during lowering so codegen can read it without the
     /// sema type arena.
     pub return_type: VirTypeId,
+    /// The original sema function type (params + return as sema TypeIds).
+    ///
+    /// Temporary — kept so codegen callers that inspect `func_type.params_id`
+    /// and `func_type.return_type_id` can continue to work without reaching
+    /// back into `EntityView`.  Will be removed once Phase 3 converts all
+    /// codegen callers to VIR-native types.
+    pub sema_func_type: FunctionType,
+    /// External (native) method binding info, when present.
+    ///
+    /// Contains the module path and native function name for FFI dispatch.
+    /// Migrated from `EntityView::find_method_binding` → `MethodBinding::external_info`.
+    pub external_info: Option<VirExternalMethodInfo>,
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +276,12 @@ pub struct VirGlobalDef {
     pub vir_ty: VirTypeId,
     /// The module this global is declared in.
     pub module_id: ModuleId,
+    /// The original sema `TypeId` for this global.
+    ///
+    /// Temporary — kept so codegen callers that call `coerce_to_type`
+    /// and `interface_type_def_id` can continue to work with sema TypeIds.
+    /// Will be removed once Phase 3 converts all codegen callers to VirTypeId.
+    pub sema_type_id: TypeId,
 }
 
 // ---------------------------------------------------------------------------
@@ -1353,6 +1371,7 @@ mod tests {
             name_id: name,
             vir_ty: VirTypeId::I64,
             module_id: make_module_id(0),
+            sema_type_id: TypeId::VOID,
         });
 
         assert_eq!(meta.global_def_count(), 1);

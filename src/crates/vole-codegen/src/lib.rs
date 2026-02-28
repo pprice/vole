@@ -6,7 +6,6 @@ mod calls;
 mod coercion_ops;
 pub mod compiler;
 mod context;
-mod entity_view;
 pub mod errors;
 mod expr;
 mod function_registry;

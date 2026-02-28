@@ -124,6 +124,11 @@ fn populate_type_defs(
                             mb.func_type.return_type_id,
                             type_arena,
                         ),
+                        sema_func_type: mb.func_type.clone(),
+                        external_info: mb.external_info.map(|info| VirExternalMethodInfo {
+                            module_path: info.module_path,
+                            native_name: info.native_name,
+                        }),
                     })
                     .collect(),
             })
@@ -310,6 +315,7 @@ fn populate_global_defs(
             name_id: gd.name_id,
             vir_ty,
             module_id: gd.module_id,
+            sema_type_id: gd.type_id,
         });
     }
 }

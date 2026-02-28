@@ -5,9 +5,11 @@ use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use crate::entity_view::EntityView;
 use vole_frontend::{Interner, Program, Symbol};
-use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, NameTable, Span, TypeDefId};
+use vole_identity::{
+    ClassMethodMonomorphCache, FieldId, FunctionId, MethodId, ModuleId, MonomorphCache, NameId,
+    NameTable, Span, StaticMethodMonomorphCache, TypeDefId,
+};
 use vole_sema::lowering::{LowerVirProgramArgs, lower_vir_program};
 use vole_sema::{AnalysisOutput, NodeMap, SemaType, TypeArena};
 use vole_vir::{VirBody, VirEntityMetadata, VirFunction, VirProgram};
@@ -35,11 +37,15 @@ pub struct AnalyzedProgram {
     /// This is the single entry point for all VIR data produced during lowering.
     /// Codegen accesses VIR through this struct rather than individual fields.
     vir_program: VirProgram,
-    /// Codegen-local metadata view for entity-registry lookups.
+    /// Free-function monomorph cache.
     ///
-    /// Populated once during `from_analysis`; all entity helpers read
-    /// from this view instead of `Rc<EntityRegistry>`.
-    entity_view: EntityView,
+    /// Cloned from the entity registry during `from_analysis`.  Phase 4
+    /// (monomorphization refactor) will move this to VIR-native storage.
+    monomorph_cache: MonomorphCache,
+    /// Class-method monomorph cache.
+    class_method_monomorph_cache: ClassMethodMonomorphCache,
+    /// Static-method monomorph cache.
+    static_method_monomorph_cache: StaticMethodMonomorphCache,
 }
 
 /// Codegen-local external binding payload from implement-registry lookups.
@@ -49,8 +55,17 @@ pub(crate) struct ExternalMethodInfoRef {
     pub native_name: NameId,
 }
 
-impl From<vole_sema::implement_registry::ExternalMethodInfo> for ExternalMethodInfoRef {
-    fn from(value: vole_sema::implement_registry::ExternalMethodInfo) -> Self {
+impl From<vole_vir::VirExternalMethodInfo> for ExternalMethodInfoRef {
+    fn from(value: vole_vir::VirExternalMethodInfo) -> Self {
+        Self {
+            module_path: value.module_path,
+            native_name: value.native_name,
+        }
+    }
+}
+
+impl From<vole_identity::ExternalMethodInfo> for ExternalMethodInfoRef {
+    fn from(value: vole_identity::ExternalMethodInfo) -> Self {
         Self {
             module_path: value.module_path,
             native_name: value.native_name,
@@ -65,10 +80,10 @@ pub(crate) struct MethodBindingRef {
     pub external_info: Option<ExternalMethodInfoRef>,
 }
 
-impl From<&vole_sema::entity_defs::MethodBinding> for MethodBindingRef {
-    fn from(value: &vole_sema::entity_defs::MethodBinding) -> Self {
+impl From<&vole_vir::VirMethodBinding> for MethodBindingRef {
+    fn from(value: &vole_vir::VirMethodBinding) -> Self {
         Self {
-            func_type: value.func_type.clone(),
+            func_type: value.sema_func_type.clone(),
             external_info: value.external_info.map(ExternalMethodInfoRef::from),
         }
     }
@@ -115,7 +130,11 @@ impl AnalyzedProgram {
         });
         let module_programs = lowering_output.module_programs;
         let mut vir_program = lowering_output.vir_program;
-        let entity_view = EntityView::from_registry(&db.entities, &db.names);
+        // Clone monomorph caches from the entity registry before moving data
+        // into VirProgram.  Phase 4 will migrate these to VIR-native storage.
+        let monomorph_cache = db.entities.monomorph_cache.clone();
+        let class_method_monomorph_cache = db.entities.class_method_monomorph_cache.clone();
+        let static_method_monomorph_cache = db.entities.static_method_monomorph_cache.clone();
         // Move name resolution data into VirProgram (zero-clone for NameTable
         // via Rc::clone, single Rc::new wrap for interner).
         vir_program.interner = Rc::new(interner);
@@ -129,7 +148,9 @@ impl AnalyzedProgram {
             module_id,
             modules_with_errors,
             vir_program,
-            entity_view,
+            monomorph_cache,
+            class_method_monomorph_cache,
+            static_method_monomorph_cache,
         }
     }
 
@@ -180,9 +201,8 @@ impl AnalyzedProgram {
 
     /// Get read-only access to the VIR entity metadata.
     ///
-    /// This is the VIR-native replacement for `EntityView` type/field/method
-    /// queries.  Proxy methods on `AnalyzedProgram` are progressively
-    /// migrated from `entity_view` to this accessor.
+    /// VIR-native entity data for type, field, method, function, and global
+    /// queries.  Populated during VIR lowering from sema's `EntityRegistry`.
     fn entity_metadata(&self) -> &VirEntityMetadata {
         self.vir_program.entity_metadata()
     }
@@ -199,7 +219,7 @@ impl AnalyzedProgram {
 
     /// Resolve the EntityRegistry NameId used for all array implement dispatch.
     pub(crate) fn array_type_name_id(&self) -> Option<NameId> {
-        self.entity_view.array_name_id()
+        self.entity_metadata().array_name_id()
     }
 
     /// Resolve a type's canonical entity NameId from its TypeDefId.
@@ -316,7 +336,7 @@ impl AnalyzedProgram {
 
     /// Resolve type definition by NameId.
     pub(crate) fn try_type_def_id(&self, name_id: NameId) -> Option<TypeDefId> {
-        self.entity_view.type_by_name(name_id)
+        self.entity_metadata().type_by_name(name_id)
     }
 
     /// Resolve method NameId by Symbol.
@@ -362,7 +382,7 @@ impl AnalyzedProgram {
 
     /// Resolve semantic FunctionId by NameId.
     pub(crate) fn function_id_by_name_id(&self, name_id: NameId) -> Option<FunctionId> {
-        self.entity_view.function_by_name(name_id)
+        self.entity_metadata().function_by_name(name_id)
     }
 
     /// Resolve semantic FunctionId by module and Symbol.
@@ -411,9 +431,9 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name_id: NameId,
     ) -> Option<vole_sema::type_arena::TypeId> {
-        self.entity_view
+        self.entity_metadata()
             .find_method_binding(type_def_id, method_name_id)
-            .map(|binding| binding.func_type.return_type_id)
+            .map(|binding| binding.sema_func_type.return_type_id)
     }
 
     /// Return interface method binding metadata, when a binding exists.
@@ -422,7 +442,7 @@ impl AnalyzedProgram {
         type_def_id: TypeDefId,
         method_name_id: NameId,
     ) -> Option<MethodBindingRef> {
-        self.entity_view
+        self.entity_metadata()
             .find_method_binding(type_def_id, method_name_id)
             .map(MethodBindingRef::from)
     }
@@ -542,8 +562,13 @@ impl AnalyzedProgram {
 
     /// Return global declared TypeId by NameId.
     pub(crate) fn global_type_id(&self, name_id: NameId) -> Option<vole_sema::type_arena::TypeId> {
-        let global_id = self.entity_view.global_by_name(name_id)?;
-        Some(self.entity_view.get_global(global_id).type_id)
+        let global_id = self.entity_metadata().global_by_name(name_id)?;
+        Some(
+            self.entity_metadata()
+                .get_global_def(global_id)
+                .expect("global_type_id: global ID not in VirEntityMetadata")
+                .sema_type_id,
+        )
     }
 
     /// Return module ID for a path, falling back to main module.
@@ -637,9 +662,9 @@ impl AnalyzedProgram {
             .is_some_and(|k| k.is_sentinel())
     }
 
-    /// Find a type by its short (last-segment) name in the entity view.
+    /// Find a type by its short (last-segment) name.
     pub(crate) fn type_by_short_name(&self, short_name: &str) -> Option<TypeDefId> {
-        self.entity_view.type_by_short_name(short_name)
+        self.entity_metadata().type_by_short_name(short_name)
     }
 
     /// Look up external function binding metadata by short function name.
@@ -669,20 +694,18 @@ impl AnalyzedProgram {
     }
 
     /// Get the free-function monomorph cache.
-    pub(crate) fn monomorph_cache(&self) -> &vole_identity::MonomorphCache {
-        self.entity_view.monomorph_cache()
+    pub(crate) fn monomorph_cache(&self) -> &MonomorphCache {
+        &self.monomorph_cache
     }
 
     /// Get the class-method monomorph cache.
-    pub(crate) fn class_method_monomorph_cache(&self) -> &vole_identity::ClassMethodMonomorphCache {
-        self.entity_view.class_method_monomorph_cache()
+    pub(crate) fn class_method_monomorph_cache(&self) -> &ClassMethodMonomorphCache {
+        &self.class_method_monomorph_cache
     }
 
     /// Get the static-method monomorph cache.
-    pub(crate) fn static_method_monomorph_cache(
-        &self,
-    ) -> &vole_identity::StaticMethodMonomorphCache {
-        self.entity_view.static_method_monomorph_cache()
+    pub(crate) fn static_method_monomorph_cache(&self) -> &StaticMethodMonomorphCache {
+        &self.static_method_monomorph_cache
     }
 
     /// Render a short human-readable type name for diagnostics/debug output.
