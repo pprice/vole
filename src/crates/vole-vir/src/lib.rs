@@ -58,7 +58,7 @@ pub use numeric_model::{
 pub use program::VirProgram;
 pub use refs::VirRef;
 pub use stmt::{
-    AssignTarget, DestructureTupleKind, LetStorageHint, VirDestructureElement,
+    AssignTarget, DestructureTupleKind, LetStorageHint, ReturnConvention, VirDestructureElement,
     VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
 pub use type_table::VirTypeTable;

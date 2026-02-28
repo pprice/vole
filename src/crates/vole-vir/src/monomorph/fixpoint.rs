@@ -221,7 +221,7 @@ fn collect_from_stmt(stmt: &VirStmt, out: &mut Vec<MonomorphInstance>) {
             collect_from_ref(&vir_for.iterable, out);
             collect_from_body(&vir_for.body, out);
         }
-        VirStmt::Return { value } => {
+        VirStmt::Return { value, .. } => {
             if let Some(v) = value {
                 collect_from_ref(v, out);
             }

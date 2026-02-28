@@ -432,7 +432,9 @@ impl Cg<'_, '_, '_> {
             VirStmt::While { cond, body } => self.compile_vir_while(cond, body),
 
             // -- Control flow (simple delegation) --------------------------------
-            VirStmt::Return { value } => self.compile_vir_return(value.as_deref()),
+            VirStmt::Return { value, convention } => {
+                self.compile_vir_return(value.as_deref(), *convention)
+            }
             VirStmt::Break => self.compile_vir_break(),
             VirStmt::Continue => self.compile_vir_continue(),
 
@@ -479,11 +481,22 @@ impl Cg<'_, '_, '_> {
     /// Handles all return conventions: simple value return, interface boxing,
     /// unknown boxing, fallible returns, struct returns, union wrapping, and
     /// RC bookkeeping (skip-var for owned locals, inc for borrows).
-    fn compile_vir_return(&mut self, value: Option<&vole_vir::VirExpr>) -> CodegenResult<bool> {
+    ///
+    /// The `convention` parameter (pre-computed during VIR lowering) drives
+    /// the return instruction emission instead of querying the type arena.
+    fn compile_vir_return(
+        &mut self,
+        value: Option<&vole_vir::VirExpr>,
+        convention: vole_vir::stmt::ReturnConvention,
+    ) -> CodegenResult<bool> {
         let return_type_id = self.return_type;
         if let Some(value_expr) = value {
-            let mut compiled = if let Some(ret_type_id) = return_type_id
-                && self.vir_query_is_union(ret_type_id)
+            // For Unresolved conventions, determine union-ness at codegen time.
+            let is_union_return = matches!(convention, vole_vir::stmt::ReturnConvention::Union)
+                || (matches!(convention, vole_vir::stmt::ReturnConvention::Unresolved)
+                    && return_type_id.is_some_and(|ret_id| self.vir_query_is_union(ret_id)));
+            let mut compiled = if is_union_return
+                && let Some(ret_type_id) = return_type_id
                 && matches!(value_expr, vole_vir::VirExpr::ArrayLiteral { .. })
                 && let Some(expected_variant) = self.preferred_array_like_union_variant(ret_type_id)
             {
@@ -492,8 +505,8 @@ impl Cg<'_, '_, '_> {
                 self.compile_vir_expr(value_expr)?
             };
             compiled.type_id = self.try_substitute_type(compiled.type_id);
-            if let Some(ret_type_id) = return_type_id
-                && self.vir_query_is_union(ret_type_id)
+            if is_union_return
+                && let Some(ret_type_id) = return_type_id
                 && self.arena().is_function(compiled.type_id)
                 && let vole_vir::VirExpr::Match {
                     scrutinee, arms, ..
@@ -520,7 +533,7 @@ impl Cg<'_, '_, '_> {
             compiled.mark_consumed();
             compiled.debug_assert_rc_handled("VirStmt::Return");
 
-            self.emit_return_value(compiled, return_type_id)?;
+            self.emit_return_value(compiled, return_type_id, convention)?;
         } else {
             self.emit_rc_cleanup_all_scopes(None)?;
             self.builder.ins().return_(&[]);
@@ -569,87 +582,116 @@ impl Cg<'_, '_, '_> {
 
     /// Emit the actual return instruction, handling all return conventions.
     ///
-    /// Dispatches based on the function's return type: interface boxing,
-    /// unknown boxing, fallible (tag+payload), struct, union, or plain value.
+    /// Dispatches on the pre-computed `ReturnConvention` from VIR lowering
+    /// instead of querying the type arena at compile time.  The `return_type_id`
+    /// is still needed for type-specific operations (vtable generation, union
+    /// wrapping, struct layout) but the dispatch decision itself is read from
+    /// the convention.
     fn emit_return_value(
         &mut self,
         compiled: CompiledValue,
         return_type_id: Option<TypeId>,
+        convention: vole_vir::stmt::ReturnConvention,
     ) -> CodegenResult<()> {
-        // Interface boxing
-        // NOTE: box_interface_value requires sema TypeId (ret_type_id) for vtable
-        // generation.  The predicate is migrated; the call retains arena dependency.
-        if let Some(ret_type_id) = return_type_id
-            && self.vir_query_is_interface(ret_type_id)
-            && !self.vir_query_is_interface(compiled.type_id)
-            && !self.arena().is_runtime_iterator(compiled.type_id)
-        {
-            let boxed = self.box_interface_value(compiled, ret_type_id)?;
-            self.builder.ins().return_(&[boxed.value]);
-            return Ok(());
-        }
+        use vole_vir::stmt::ReturnConvention;
 
-        // Unknown boxing
-        if let Some(ret_type_id) = return_type_id
-            && self.vir_query_is_unknown(ret_type_id)
-            && !self.vir_query_is_unknown(compiled.type_id)
-        {
-            let boxed = self.box_to_unknown_no_inc(compiled)?;
-            self.builder.ins().return_(&[boxed.value]);
-            return Ok(());
-        }
-
-        // Fallible return
-        if let Some(ret_type_id) = return_type_id
-            && self.vir_query_is_fallible(ret_type_id)
-        {
-            let tag_val = self.iconst_cached(types::I64, FALLIBLE_SUCCESS_TAG);
-            if self.vir_query_is_wide_fallible(ret_type_id) {
-                let (low, high) = split_i128_for_storage(self.builder, compiled.value);
-                self.builder.ins().return_(&[tag_val, low, high]);
+        // Resolve Unresolved conventions at codegen time.  This handles
+        // sema-monomorphized methods whose return type contains type parameters
+        // that sema couldn't fully substitute during VIR lowering.
+        let convention = if convention == ReturnConvention::Unresolved {
+            if let Some(ret_type_id) = return_type_id {
+                if self.vir_query_is_interface(ret_type_id) {
+                    ReturnConvention::InterfaceBox
+                } else if self.vir_query_is_unknown(ret_type_id) {
+                    ReturnConvention::UnknownBox
+                } else if self.vir_query_is_fallible(ret_type_id) {
+                    if self.vir_query_is_wide_fallible(ret_type_id) {
+                        ReturnConvention::WideFallible
+                    } else {
+                        ReturnConvention::Fallible
+                    }
+                } else if self.vir_query_is_struct(ret_type_id) {
+                    ReturnConvention::Struct
+                } else if self.vir_query_is_union(ret_type_id) {
+                    ReturnConvention::Union
+                } else if self.arena().is_void(ret_type_id) {
+                    ReturnConvention::Void
+                } else {
+                    ReturnConvention::Scalar
+                }
             } else {
+                ReturnConvention::Void
+            }
+        } else {
+            convention
+        };
+
+        match convention {
+            ReturnConvention::Void => {
+                self.builder.ins().return_(&[]);
+            }
+            ReturnConvention::InterfaceBox => {
+                // NOTE: box_interface_value requires sema TypeId for vtable generation.
+                let ret_type_id =
+                    return_type_id.expect("InterfaceBox convention requires return type");
+                if !self.vir_query_is_interface(compiled.type_id)
+                    && !self.arena().is_runtime_iterator(compiled.type_id)
+                {
+                    let boxed = self.box_interface_value(compiled, ret_type_id)?;
+                    self.builder.ins().return_(&[boxed.value]);
+                } else {
+                    // Already an interface value — return directly.
+                    self.builder.ins().return_(&[compiled.value]);
+                }
+            }
+            ReturnConvention::UnknownBox => {
+                if !self.vir_query_is_unknown(compiled.type_id) {
+                    let boxed = self.box_to_unknown_no_inc(compiled)?;
+                    self.builder.ins().return_(&[boxed.value]);
+                } else {
+                    // Already unknown — return directly.
+                    self.builder.ins().return_(&[compiled.value]);
+                }
+            }
+            ReturnConvention::Fallible => {
+                let tag_val = self.iconst_cached(types::I64, FALLIBLE_SUCCESS_TAG);
                 let payload_val = convert_to_i64_for_storage(self.builder, &compiled);
                 self.builder.ins().return_(&[tag_val, payload_val]);
             }
-            return Ok(());
+            ReturnConvention::WideFallible => {
+                let tag_val = self.iconst_cached(types::I64, FALLIBLE_SUCCESS_TAG);
+                let (low, high) = split_i128_for_storage(self.builder, compiled.value);
+                self.builder.ins().return_(&[tag_val, low, high]);
+            }
+            ReturnConvention::Struct => {
+                let ret_type_id = return_type_id.expect("Struct convention requires return type");
+                if self.is_small_struct_return(ret_type_id) {
+                    self.emit_small_struct_return(compiled.value, ret_type_id)?;
+                } else {
+                    self.emit_sret_struct_return(compiled.value, ret_type_id)?;
+                }
+            }
+            ReturnConvention::Union => {
+                let ret_type_id = return_type_id.expect("Union convention requires return type");
+                let wrapped = self.construct_union_id(compiled, ret_type_id)?;
+                self.builder.ins().return_(&[wrapped.value]);
+            }
+            ReturnConvention::Scalar => {
+                // Plain value return (with type conversion if needed).
+                // NOTE: convert_to_type requires arena for detailed type inspection.
+                // This is a boundary case retained until CompiledValue carries VirTypeId.
+                let return_value = if let Some(ret_type_id) = return_type_id {
+                    let target_ty = self.cranelift_type(ret_type_id);
+                    convert_to_type(self.builder, compiled, target_ty, self.arena())
+                } else {
+                    compiled.value
+                };
+                self.builder.ins().return_(&[return_value]);
+            }
+            ReturnConvention::Unresolved => {
+                unreachable!("Unresolved convention should have been resolved above");
+            }
         }
-
-        // Small struct return
-        if let Some(ret_type_id) = return_type_id
-            && self.is_small_struct_return(ret_type_id)
-        {
-            self.emit_small_struct_return(compiled.value, ret_type_id)?;
-            return Ok(());
-        }
-
-        // Sret struct return
-        if let Some(ret_type_id) = return_type_id
-            && self.is_sret_struct_return(ret_type_id)
-        {
-            self.emit_sret_struct_return(compiled.value, ret_type_id)?;
-            return Ok(());
-        }
-
-        // Union return
-        if let Some(ret_type_id) = return_type_id
-            && self.vir_query_is_union(ret_type_id)
-        {
-            let wrapped = self.construct_union_id(compiled, ret_type_id)?;
-            self.builder.ins().return_(&[wrapped.value]);
-            return Ok(());
-        }
-
-        // Plain value return (with type conversion if needed)
-        // NOTE: convert_to_type requires arena for detailed type inspection.
-        // This is a boundary case retained until CompiledValue carries VirTypeId.
-        let return_value = if let Some(ret_type_id) = return_type_id {
-            let target_ty = self.cranelift_type(ret_type_id);
-
-            convert_to_type(self.builder, compiled, target_ty, self.arena())
-        } else {
-            compiled.value
-        };
-        self.builder.ins().return_(&[return_value]);
         Ok(())
     }
 

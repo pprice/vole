@@ -140,7 +140,7 @@ impl<'a> VirPrinter<'a> {
             VirStmt::For(vir_for) => {
                 self.fmt_for(vir_for, out, ind);
             }
-            VirStmt::Return { value } => {
+            VirStmt::Return { value, .. } => {
                 if let Some(val) = value {
                     w!(out, "return ");
                     self.fmt_expr(val, out, ind);

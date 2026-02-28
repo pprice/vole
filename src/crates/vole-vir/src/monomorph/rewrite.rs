@@ -571,8 +571,9 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             body: rewrite_body(body, ctx),
         },
         VirStmt::For(vir_for) => VirStmt::For(rewrite_for(vir_for, ctx)),
-        VirStmt::Return { value } => VirStmt::Return {
+        VirStmt::Return { value, convention } => VirStmt::Return {
             value: value.as_ref().map(|v| rewrite_ref(v, ctx)),
+            convention: *convention,
         },
         VirStmt::Break => VirStmt::Break,
         VirStmt::Continue => VirStmt::Continue,

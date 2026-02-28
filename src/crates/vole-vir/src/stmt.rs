@@ -62,7 +62,12 @@ pub enum VirStmt {
 
     // -- Control flow -------------------------------------------------------
     /// Return from the enclosing function.
-    Return { value: Option<VirRef> },
+    Return {
+        value: Option<VirRef>,
+        /// Pre-computed calling convention for the return value.
+        /// Codegen reads this instead of querying `TypeArena` at compile time.
+        convention: ReturnConvention,
+    },
 
     /// Break out of the enclosing loop.
     Break,
@@ -123,6 +128,43 @@ pub enum LetStorageHint {
     Numeric,
     /// Scalar / pass-through — no special storage treatment.
     Scalar,
+}
+
+/// Pre-computed return convention for `VirStmt::Return`, determined during
+/// VIR lowering based on the enclosing function's return type.
+///
+/// Mirrors the 7-way dispatch in codegen's `emit_return_value`:
+/// - `InterfaceBox` → box the value to an interface pointer
+/// - `UnknownBox` → box the value to `TaggedValue`
+/// - `Fallible` → multi-register return `(tag, payload)`
+/// - `WideFallible` → 3-register return `(tag, low, high)` for i128 success
+/// - `Struct` → struct return (codegen determines small vs sret from type)
+/// - `Union` → wrap value with union tag
+/// - `Scalar` → plain value return
+/// - `Void` → no return value
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReturnConvention {
+    /// No return value (void function or bare `return`).
+    Void,
+    /// Return type is an interface — value must be boxed to interface pointer.
+    InterfaceBox,
+    /// Return type is `unknown` — value must be boxed to `TaggedValue`.
+    UnknownBox,
+    /// Return type is fallible — multi-register `(tag, payload)`.
+    Fallible,
+    /// Return type is fallible with wide (i128) success — `(tag, low, high)`.
+    WideFallible,
+    /// Return type is a struct — codegen determines small (register) vs sret
+    /// (stack pointer) based on the flat slot count.
+    Struct,
+    /// Return type is a union — value wrapped with tag.
+    Union,
+    /// Scalar / plain value return.
+    Scalar,
+    /// Return type is not yet resolved (e.g., contains type parameters that
+    /// sema monomorphization hasn't fully substituted).  Codegen falls back to
+    /// the old type-query dispatch when it encounters this variant.
+    Unresolved,
 }
 
 /// The target of an assignment statement.

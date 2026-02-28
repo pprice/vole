@@ -135,6 +135,7 @@ fn lower_single_lambda_default_init(args: LowerSingleLambdaDefaultInitArgs<'_>) 
         name_table: names,
         type_table,
         generic: false,
+        func_return_type: vole_identity::TypeId::VOID,
     };
 
     for (slot, param) in lambda.params.iter().enumerate() {

@@ -492,7 +492,7 @@ fn lower_return_with_value() {
     let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
-        VirStmt::Return { value: Some(v) } => match v.as_ref() {
+        VirStmt::Return { value: Some(v), .. } => match v.as_ref() {
             VirExpr::IntLiteral { value: 42, .. } => {}
             other => panic!("expected IntLiteral(42) as return value, got {other:?}"),
         },
@@ -524,7 +524,7 @@ fn lower_return_void() {
     let vir = lower_stmt(&stmt, &mut ctx);
 
     match &vir {
-        VirStmt::Return { value: None } => {}
+        VirStmt::Return { value: None, .. } => {}
         other => panic!("expected VirStmt::Return with no value, got {other:?}"),
     }
 }

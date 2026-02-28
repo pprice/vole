@@ -783,7 +783,16 @@ fn lower_lambda(
     ctx: &mut LoweringCtx<'_>,
 ) -> VirRef {
     let params: Vec<_> = lambda.params.iter().map(|p| p.name).collect();
+
+    // Save and restore func_return_type around lambda body lowering.
+    // Without this, any `return` inside the lambda would be classified
+    // using the outer function's return type rather than the lambda's.
+    let saved_return_type = ctx.func_return_type;
+    if let Some((_, ret, _)) = ctx.type_arena.unwrap_function(ty) {
+        ctx.func_return_type = ret;
+    }
     let body = lower_func_body(&lambda.body, ctx);
+    ctx.func_return_type = saved_return_type;
 
     // Extract captures from sema's lambda analysis.
     // Capture types are not tracked in sema's Capture struct, so we use

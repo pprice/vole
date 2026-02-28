@@ -342,7 +342,9 @@ fn generic_template_nested_call_targets_wrap_function_id() {
     assert_ne!(double_wrap.id, wrap_func_id);
 
     let outer_call = match double_wrap.body.stmts.first() {
-        Some(vole_vir::stmt::VirStmt::Return { value: Some(ret) }) => match ret.as_ref() {
+        Some(vole_vir::stmt::VirStmt::Return {
+            value: Some(ret), ..
+        }) => match ret.as_ref() {
             vole_vir::expr::VirExpr::Call { target, args, .. } => (target, args),
             _ => panic!("expected return call in double_wrap template"),
         },

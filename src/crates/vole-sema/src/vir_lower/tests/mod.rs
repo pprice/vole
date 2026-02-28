@@ -138,6 +138,7 @@ fn make_ctx<'a>(
         name_table,
         type_table,
         generic: false,
+        func_return_type: TypeId::VOID,
     }
 }
 
@@ -160,5 +161,6 @@ fn make_generic_ctx<'a>(
         name_table,
         type_table,
         generic: true,
+        func_return_type: TypeId::VOID,
     }
 }

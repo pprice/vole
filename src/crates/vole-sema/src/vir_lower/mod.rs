@@ -53,6 +53,11 @@ pub struct LoweringCtx<'a> {
     ///
     /// Default: `false` (concrete mode — existing strict behaviour).
     pub generic: bool,
+    /// The return type of the enclosing function.
+    ///
+    /// Used to pre-compute the `ReturnConvention` on `VirStmt::Return`
+    /// nodes.  `VOID` for test bodies and void-returning functions.
+    pub func_return_type: TypeId,
 }
 
 impl LoweringCtx<'_> {
@@ -199,6 +204,7 @@ pub fn lower_function(
         name_table,
         type_table,
         generic: false,
+        func_return_type: return_type,
     };
     let params = param_types
         .iter()
@@ -293,6 +299,7 @@ pub fn lower_method(
         name_table,
         type_table,
         generic: false,
+        func_return_type: return_type,
     };
     let params = param_types
         .iter()
@@ -343,6 +350,7 @@ pub fn lower_interface_method(
         name_table,
         type_table,
         generic: false,
+        func_return_type: return_type,
     };
     let params = param_types
         .iter()
@@ -399,6 +407,7 @@ pub fn lower_generic_function(
         name_table,
         type_table,
         generic: true,
+        func_return_type: return_type,
     };
     let params = param_types
         .iter()
@@ -469,6 +478,7 @@ pub fn lower_test_body(
         name_table,
         type_table,
         generic: false,
+        func_return_type: TypeId::VOID,
     };
     lower_func_body(body, &mut ctx)
 }

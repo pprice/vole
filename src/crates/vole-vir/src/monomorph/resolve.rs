@@ -61,7 +61,7 @@ fn resolve_in_stmt(stmt: &mut VirStmt, index: &InstanceIndex) {
             resolve_in_ref(&mut vir_for.iterable, index);
             resolve_in_body(&mut vir_for.body, index);
         }
-        VirStmt::Return { value } => {
+        VirStmt::Return { value, .. } => {
             if let Some(v) = value {
                 resolve_in_ref(v, index);
             }

@@ -14,7 +14,7 @@ use vole_identity::{StringConversion, UnionStorageKind, VirTypeId};
 use crate::expr::{IsCheckResult, VirExpr, VirMetaKind, VirPattern, VirStringPart};
 use crate::func::{VirBody, VirFunction};
 use crate::refs::VirRef;
-use crate::stmt::{LetStorageHint, VirIterKind, VirStmt};
+use crate::stmt::{LetStorageHint, ReturnConvention, VirIterKind, VirStmt};
 use crate::type_table::VirTypeTable;
 use crate::types::{VirPrimitiveKind, VirType};
 
@@ -37,27 +37,28 @@ use crate::types::{VirPrimitiveKind, VirType};
 /// 4. **VirMetaKind**: `TypeParam` -> left as-is (requires EntityRegistry;
 ///    see vol-b4d0).
 pub fn rederive_decisions(func: &mut VirFunction, table: &VirTypeTable) {
-    rederive_body(&mut func.body, table);
+    let ret_ty = func.vir_return_type;
+    rederive_body(&mut func.body, table, ret_ty);
 }
 
 // ---------------------------------------------------------------------------
 // Body / statement / expression walkers
 // ---------------------------------------------------------------------------
 
-fn rederive_body(body: &mut VirBody, table: &VirTypeTable) {
+fn rederive_body(body: &mut VirBody, table: &VirTypeTable, ret_ty: VirTypeId) {
     for stmt in &mut body.stmts {
-        rederive_stmt(stmt, table);
+        rederive_stmt(stmt, table, ret_ty);
     }
     if let Some(ref mut trailing) = body.trailing {
-        rederive_ref(trailing, table);
+        rederive_ref(trailing, table, ret_ty);
     }
 }
 
-fn rederive_ref(r: &mut VirRef, table: &VirTypeTable) {
-    rederive_expr(r.as_mut(), table);
+fn rederive_ref(r: &mut VirRef, table: &VirTypeTable, ret_ty: VirTypeId) {
+    rederive_expr(r.as_mut(), table, ret_ty);
 }
 
-fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
+fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable, ret_ty: VirTypeId) {
     match expr {
         // Literals & construction — recurse into sub-expressions only
         VirExpr::IntLiteral { .. }
@@ -71,54 +72,54 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
         | VirExpr::TypeLiteral => {}
 
         VirExpr::Range { start, end, .. } => {
-            rederive_ref(start, table);
-            rederive_ref(end, table);
+            rederive_ref(start, table, ret_ty);
+            rederive_ref(end, table, ret_ty);
         }
         VirExpr::ArrayLiteral { elements, .. } => {
             for elem in elements {
-                rederive_ref(elem, table);
+                rederive_ref(elem, table, ret_ty);
             }
         }
-        VirExpr::RepeatLiteral { element, .. } => rederive_ref(element, table),
+        VirExpr::RepeatLiteral { element, .. } => rederive_ref(element, table, ret_ty),
         VirExpr::StructLiteral { fields, .. } | VirExpr::ClassInstance { fields, .. } => {
             for (_, val) in fields {
-                rederive_ref(val, table);
+                rederive_ref(val, table, ret_ty);
             }
         }
 
         // Operators
         VirExpr::BinaryOp { lhs, rhs, .. } => {
-            rederive_ref(lhs, table);
-            rederive_ref(rhs, table);
+            rederive_ref(lhs, table, ret_ty);
+            rederive_ref(rhs, table, ret_ty);
         }
-        VirExpr::UnaryOp { operand, .. } => rederive_ref(operand, table),
+        VirExpr::UnaryOp { operand, .. } => rederive_ref(operand, table, ret_ty),
 
         // Strings — re-derive StringConversion::Generic
         VirExpr::StringConcat { parts } => {
             for part in parts {
-                rederive_ref(part, table);
+                rederive_ref(part, table, ret_ty);
             }
         }
-        VirExpr::InterpolatedString { parts } => rederive_string_parts(parts, table),
+        VirExpr::InterpolatedString { parts } => rederive_string_parts(parts, table, ret_ty),
 
         // Calls
         VirExpr::Call { args, .. } => {
             for arg in args {
-                rederive_ref(arg, table);
+                rederive_ref(arg, table, ret_ty);
             }
         }
         VirExpr::MethodCall { receiver, args, .. } => {
-            rederive_ref(receiver, table);
+            rederive_ref(receiver, table, ret_ty);
             for arg in args {
-                rederive_ref(arg, table);
+                rederive_ref(arg, table, ret_ty);
             }
         }
 
         // Fields, indexing
-        VirExpr::FieldLoad { object, .. } => rederive_ref(object, table),
+        VirExpr::FieldLoad { object, .. } => rederive_ref(object, table, ret_ty),
         VirExpr::FieldStore { object, value, .. } => {
-            rederive_ref(object, table);
-            rederive_ref(value, table);
+            rederive_ref(object, table, ret_ty);
+            rederive_ref(value, table, ret_ty);
         }
         VirExpr::Index {
             object,
@@ -126,8 +127,8 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
             union_storage,
             ..
         } => {
-            rederive_ref(object, table);
-            rederive_ref(index, table);
+            rederive_ref(object, table, ret_ty);
+            rederive_ref(index, table, ret_ty);
             rederive_union_storage_from_array_expr(object, union_storage, table);
         }
         VirExpr::IndexStore {
@@ -137,19 +138,19 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
             union_storage,
             ..
         } => {
-            rederive_ref(object, table);
-            rederive_ref(index, table);
-            rederive_ref(value, table);
+            rederive_ref(object, table, ret_ty);
+            rederive_ref(index, table, ret_ty);
+            rederive_ref(value, table, ret_ty);
             rederive_union_storage_from_array_expr(object, union_storage, table);
         }
 
         // RC
         VirExpr::RcInc { value } | VirExpr::RcDec { value } | VirExpr::RcMove { value } => {
-            rederive_ref(value, table);
+            rederive_ref(value, table, ret_ty);
         }
 
         // Coercion
-        VirExpr::Coerce { value, .. } => rederive_ref(value, table),
+        VirExpr::Coerce { value, .. } => rederive_ref(value, table, ret_ty),
 
         // Control flow
         VirExpr::If {
@@ -158,78 +159,78 @@ fn rederive_expr(expr: &mut VirExpr, table: &VirTypeTable) {
             else_body,
             ..
         } => {
-            rederive_ref(cond, table);
-            rederive_body(then_body, table);
+            rederive_ref(cond, table, ret_ty);
+            rederive_body(then_body, table, ret_ty);
             if let Some(eb) = else_body {
-                rederive_body(eb, table);
+                rederive_body(eb, table, ret_ty);
             }
         }
         VirExpr::Match {
             scrutinee, arms, ..
         } => {
-            rederive_ref(scrutinee, table);
+            rederive_ref(scrutinee, table, ret_ty);
             let scrutinee_vir_ty = extract_vir_ty(scrutinee);
             for arm in arms {
-                rederive_pattern(&mut arm.pattern, scrutinee_vir_ty, table);
+                rederive_pattern(&mut arm.pattern, scrutinee_vir_ty, table, ret_ty);
                 if let Some(guard) = &mut arm.guard {
-                    rederive_ref(guard, table);
+                    rederive_ref(guard, table, ret_ty);
                 }
-                rederive_body(&mut arm.body, table);
+                rederive_body(&mut arm.body, table, ret_ty);
             }
         }
         VirExpr::Block {
             stmts, trailing, ..
         } => {
             for stmt in stmts {
-                rederive_stmt(stmt, table);
+                rederive_stmt(stmt, table, ret_ty);
             }
             if let Some(t) = trailing {
-                rederive_ref(t, table);
+                rederive_ref(t, table, ret_ty);
             }
         }
 
         // Type operations — re-derive IsCheckResult
         VirExpr::IsCheck { value, result, .. } => {
-            rederive_ref(value, table);
+            rederive_ref(value, table, ret_ty);
             rederive_is_check_from_expr(value, result, table);
         }
         VirExpr::AsCast { value, result, .. } => {
-            rederive_ref(value, table);
+            rederive_ref(value, table, ret_ty);
             rederive_is_check_from_expr(value, result, table);
         }
 
         // Reflection — re-derive TypeParam meta-kind from concrete VIR types.
-        VirExpr::MetaAccess { kind, .. } => rederive_meta_kind(kind, table),
+        VirExpr::MetaAccess { kind, .. } => rederive_meta_kind(kind, table, ret_ty),
 
         // Variables
         VirExpr::LocalLoad { .. } => {}
-        VirExpr::LocalStore { value, .. } => rederive_ref(value, table),
+        VirExpr::LocalStore { value, .. } => rederive_ref(value, table, ret_ty),
 
         // Lambda
-        VirExpr::Lambda { body, .. } => rederive_body(body, table),
+        VirExpr::Lambda { body, .. } => rederive_body(body, table, ret_ty),
 
         // Optional / null
         VirExpr::NullCoalesce { value, default, .. } => {
-            rederive_ref(value, table);
-            rederive_ref(default, table);
+            rederive_ref(value, table, ret_ty);
+            rederive_ref(default, table, ret_ty);
         }
-        VirExpr::OptionalChain { object, .. } => rederive_ref(object, table),
+        VirExpr::OptionalChain { object, .. } => rederive_ref(object, table, ret_ty),
         VirExpr::OptionalMethodCall {
             object,
             method_args,
             ..
         } => {
-            rederive_ref(object, table);
+            rederive_ref(object, table, ret_ty);
             for arg in method_args {
-                rederive_ref(arg, table);
+                rederive_ref(arg, table, ret_ty);
             }
         }
-        VirExpr::Try { value, .. } => rederive_ref(value, table),
-        VirExpr::Yield { value } => rederive_ref(value, table),
+        VirExpr::Try { value, .. } => rederive_ref(value, table, ret_ty),
+        VirExpr::Yield { value } => rederive_ref(value, table, ret_ty),
     }
 }
 
-fn rederive_stmt(stmt: &mut VirStmt, table: &VirTypeTable) {
+fn rederive_stmt(stmt: &mut VirStmt, table: &VirTypeTable, ret_ty: VirTypeId) {
     match stmt {
         VirStmt::Let {
             value,
@@ -238,46 +239,51 @@ fn rederive_stmt(stmt: &mut VirStmt, table: &VirTypeTable) {
             ..
         } => {
             *storage = rederive_let_storage(*vir_ty, table);
-            rederive_ref(value, table);
+            rederive_ref(value, table, ret_ty);
         }
-        VirStmt::LetTuple { value, .. } => rederive_ref(value, table),
+        VirStmt::LetTuple { value, .. } => rederive_ref(value, table, ret_ty),
         VirStmt::Assign { target, value } => {
-            rederive_assign_target(target, table);
-            rederive_ref(value, table);
+            rederive_assign_target(target, table, ret_ty);
+            rederive_ref(value, table, ret_ty);
         }
-        VirStmt::Expr { value } => rederive_ref(value, table),
+        VirStmt::Expr { value } => rederive_ref(value, table, ret_ty),
         VirStmt::While { cond, body } => {
-            rederive_ref(cond, table);
-            rederive_body(body, table);
+            rederive_ref(cond, table, ret_ty);
+            rederive_body(body, table, ret_ty);
         }
         VirStmt::For(vir_for) => {
-            rederive_ref(&mut vir_for.iterable, table);
-            rederive_body(&mut vir_for.body, table);
+            rederive_ref(&mut vir_for.iterable, table, ret_ty);
+            rederive_body(&mut vir_for.body, table, ret_ty);
             rederive_iter_kind(&mut vir_for.kind, table);
         }
-        VirStmt::Return { value } => {
+        VirStmt::Return { value, convention } => {
             if let Some(v) = value {
-                rederive_ref(v, table);
+                rederive_ref(v, table, ret_ty);
             }
+            *convention = rederive_return_convention(ret_ty, table);
         }
         VirStmt::Break | VirStmt::Continue | VirStmt::Noop => {}
         VirStmt::Raise { fields, .. } => {
             for (_, val) in fields {
-                rederive_ref(val, table);
+                rederive_ref(val, table, ret_ty);
             }
         }
-        VirStmt::RcInc { value } | VirStmt::RcDec { value } => rederive_ref(value, table),
+        VirStmt::RcInc { value } | VirStmt::RcDec { value } => rederive_ref(value, table, ret_ty),
     }
 }
 
-fn rederive_assign_target(target: &mut crate::stmt::AssignTarget, table: &VirTypeTable) {
+fn rederive_assign_target(
+    target: &mut crate::stmt::AssignTarget,
+    table: &VirTypeTable,
+    ret_ty: VirTypeId,
+) {
     use crate::stmt::AssignTarget;
     match target {
         AssignTarget::Local(_) => {}
-        AssignTarget::Field { object, .. } => rederive_ref(object, table),
+        AssignTarget::Field { object, .. } => rederive_ref(object, table, ret_ty),
         AssignTarget::Index { array, index } => {
-            rederive_ref(array, table);
-            rederive_ref(index, table);
+            rederive_ref(array, table, ret_ty);
+            rederive_ref(index, table, ret_ty);
         }
     }
 }
@@ -286,6 +292,7 @@ fn rederive_pattern(
     pat: &mut VirPattern,
     scrutinee_vir_ty: Option<VirTypeId>,
     table: &VirTypeTable,
+    ret_ty: VirTypeId,
 ) {
     match pat {
         VirPattern::Wildcard | VirPattern::Binding { .. } | VirPattern::Val { .. } => {}
@@ -300,20 +307,20 @@ fn rederive_pattern(
                     derive_is_check_result(scrutinee_vir_ty, *tested_type, *vir_tested_type, table);
             }
         }
-        VirPattern::Literal { value, .. } => rederive_ref(value, table),
+        VirPattern::Literal { value, .. } => rederive_ref(value, table, ret_ty),
         VirPattern::Success {
             inner,
             vir_success_type,
             ..
         } => {
             if let Some(p) = inner {
-                rederive_pattern(p, Some(*vir_success_type), table);
+                rederive_pattern(p, Some(*vir_success_type), table, ret_ty);
             }
         }
         VirPattern::Error { .. } => {}
         VirPattern::Tuple { bindings } => {
             for b in bindings {
-                rederive_pattern(&mut b.pattern, Some(b.vir_ty), table);
+                rederive_pattern(&mut b.pattern, Some(b.vir_ty), table, ret_ty);
             }
         }
         VirPattern::Record {
@@ -614,10 +621,10 @@ enum RuntimeTagCategory {
     Instance,
 }
 
-fn rederive_string_parts(parts: &mut [VirStringPart], table: &VirTypeTable) {
+fn rederive_string_parts(parts: &mut [VirStringPart], table: &VirTypeTable, ret_ty: VirTypeId) {
     for part in parts {
         if let VirStringPart::Expr { value, conversion } = part {
-            rederive_ref(value, table);
+            rederive_ref(value, table, ret_ty);
             // Extract the expression's VirTypeId to re-derive the conversion.
             let vir_ty = extract_vir_ty(value);
             if let Some(vir_ty) = vir_ty {
@@ -627,11 +634,11 @@ fn rederive_string_parts(parts: &mut [VirStringPart], table: &VirTypeTable) {
     }
 }
 
-fn rederive_meta_kind(kind: &mut VirMetaKind, table: &VirTypeTable) {
+fn rederive_meta_kind(kind: &mut VirMetaKind, table: &VirTypeTable, ret_ty: VirTypeId) {
     match kind {
         VirMetaKind::Static { object, type_def } => {
             if let Some(obj) = object {
-                rederive_ref(obj, table);
+                rederive_ref(obj, table, ret_ty);
                 if let Some(obj_vir_ty) = extract_vir_ty(obj)
                     && let Some(concrete_type_def) =
                         nominal_type_def_from_vir_type(obj_vir_ty, table)
@@ -640,9 +647,9 @@ fn rederive_meta_kind(kind: &mut VirMetaKind, table: &VirTypeTable) {
                 }
             }
         }
-        VirMetaKind::Dynamic { value } => rederive_ref(value, table),
+        VirMetaKind::Dynamic { value } => rederive_ref(value, table, ret_ty),
         VirMetaKind::TypeParam { value, .. } => {
-            rederive_ref(value, table);
+            rederive_ref(value, table, ret_ty);
             let Some(value_vir_ty) = extract_vir_ty(value) else {
                 return;
             };
@@ -743,6 +750,31 @@ fn extract_vir_ty(expr: &VirExpr) -> Option<VirTypeId> {
 /// unknown, numeric, or scalar type.  This mirrors the classification in
 /// `classify_let_storage` (sema side) but works on VirType / VirTypeTable
 /// instead of TypeArena.
+/// Re-derive the `ReturnConvention` for `VirStmt::Return` after
+/// monomorphization.
+///
+/// After type substitution a generic return type may resolve to interface,
+/// unknown, fallible, struct, union, or scalar.  This mirrors the
+/// classification in `classify_return_convention` (sema side) but works on
+/// VirType / VirTypeTable instead of TypeArena.
+fn rederive_return_convention(vir_return_ty: VirTypeId, table: &VirTypeTable) -> ReturnConvention {
+    match table.get(vir_return_ty) {
+        VirType::Void => ReturnConvention::Void,
+        VirType::Interface { .. } => ReturnConvention::InterfaceBox,
+        VirType::Unknown => ReturnConvention::UnknownBox,
+        VirType::Fallible { success, .. } => {
+            if table.is_wide(*success) {
+                ReturnConvention::WideFallible
+            } else {
+                ReturnConvention::Fallible
+            }
+        }
+        VirType::Struct { .. } => ReturnConvention::Struct,
+        VirType::Union { .. } | VirType::Optional { .. } => ReturnConvention::Union,
+        _ => ReturnConvention::Scalar,
+    }
+}
+
 fn rederive_let_storage(vir_ty: VirTypeId, table: &VirTypeTable) -> LetStorageHint {
     match table.get(vir_ty) {
         VirType::Unknown => LetStorageHint::Unknown,

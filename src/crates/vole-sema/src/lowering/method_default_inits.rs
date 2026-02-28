@@ -59,6 +59,7 @@ pub fn lower_method_default_inits(
         name_table: names,
         type_table,
         generic: false,
+        func_return_type: vole_identity::TypeId::VOID,
     };
     let mut map = FxHashMap::default();
     lower_method_default_inits_in_decls(
@@ -104,6 +105,7 @@ pub fn lower_module_method_default_inits(
             name_table: names,
             type_table,
             generic: false,
+            func_return_type: vole_identity::TypeId::VOID,
         };
         lower_method_default_inits_in_decls(
             &program.declarations,

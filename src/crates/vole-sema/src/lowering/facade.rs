@@ -459,6 +459,7 @@ fn lower_tests_decl_bodies(
             name_table: names,
             type_table,
             generic: false,
+            func_return_type: vole_identity::TypeId::VOID,
         };
         lower_stmts(&scoped_let_stmts, &mut ctx).stmts
     };

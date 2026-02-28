@@ -254,8 +254,12 @@ impl VirBuilder {
     }
 
     /// Return from the enclosing function.
-    pub fn build_return(&mut self, value: Option<VirRef>) -> VirStmt {
-        VirStmt::Return { value }
+    pub fn build_return(
+        &mut self,
+        value: Option<VirRef>,
+        convention: crate::stmt::ReturnConvention,
+    ) -> VirStmt {
+        VirStmt::Return { value, convention }
     }
 
     /// Decrement reference count (statement form — fire-and-forget).
@@ -332,7 +336,7 @@ mod tests {
 
         // return x
         let load = b.build_local_load(dummy_symbol(), ty);
-        let ret = b.build_return(Some(load));
+        let ret = b.build_return(Some(load), crate::stmt::ReturnConvention::Scalar);
 
         let body = b.build_body(vec![let_stmt, ret], None);
         let func =
@@ -350,7 +354,7 @@ mod tests {
 
         // Verify the return
         match &func.body.stmts[1] {
-            VirStmt::Return { value } => assert!(value.is_some()),
+            VirStmt::Return { value, .. } => assert!(value.is_some()),
             other => panic!("expected Return, got {other:?}"),
         }
     }

@@ -9,8 +9,8 @@ use vole_identity::TypeId;
 
 use vole_vir::expr::VirExpr;
 use vole_vir::stmt::{
-    DestructureTupleKind, LetStorageHint, VirDestructureElement, VirDestructureField,
-    VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
+    DestructureTupleKind, LetStorageHint, ReturnConvention, VirDestructureElement,
+    VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
 
 use super::LoweringCtx;
@@ -38,7 +38,8 @@ pub fn lower_stmt(stmt: &Stmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
         Stmt::For(for_stmt) => lower_for(for_stmt, ctx),
         Stmt::Return(ret) => {
             let value = ret.value.as_ref().map(|v| lower_expr(v, ctx));
-            VirStmt::Return { value }
+            let convention = classify_return_convention(ctx.func_return_type, ctx);
+            VirStmt::Return { value, convention }
         }
         Stmt::LetTuple(let_tuple) => {
             let value = lower_expr(&let_tuple.init, ctx);
@@ -150,6 +151,54 @@ fn classify_let_storage(ty: TypeId, ctx: &LoweringCtx<'_>) -> LetStorageHint {
     } else {
         LetStorageHint::Scalar
     }
+}
+
+/// Classify the return convention for a function based on its return type.
+///
+/// Mirrors the 7-way dispatch in codegen's `emit_return_value`, using
+/// `TypeArena` queries available during VIR lowering.  The result is stored
+/// on `VirStmt::Return` so codegen reads the decision rather than querying
+/// the arena at compile time.
+///
+/// For struct returns, codegen further splits into small (register) vs sret
+/// (stack pointer) based on the flat slot count — that detail is left to
+/// codegen since it depends on `MAX_SMALL_STRUCT_FIELDS`, a codegen constant.
+fn classify_return_convention(return_type: TypeId, ctx: &LoweringCtx<'_>) -> ReturnConvention {
+    // If the return type contains unresolved type parameters (e.g., sema-side
+    // monomorphized method where the return type references a class type param),
+    // we cannot determine the convention now.  Mark as Unresolved so codegen
+    // falls back to the old type-query dispatch.
+    //
+    // Also guard against function types: some lowering paths (e.g.,
+    // `lower_single_method`) pass the method's *signature* TypeId (a function
+    // type like `(K) -> V?`) as the return type.  A function type is never a
+    // valid return convention, so mark it Unresolved and let codegen resolve
+    // from the real return type it sees at compile time.
+    if ctx.type_arena.contains_type_param(return_type) || ctx.type_arena.is_function(return_type) {
+        return ReturnConvention::Unresolved;
+    }
+    if ctx.type_arena.is_void(return_type) {
+        return ReturnConvention::Void;
+    }
+    if ctx.type_arena.is_interface(return_type) {
+        return ReturnConvention::InterfaceBox;
+    }
+    if ctx.type_arena.is_unknown(return_type) {
+        return ReturnConvention::UnknownBox;
+    }
+    if let Some((success_ty, _)) = ctx.type_arena.unwrap_fallible(return_type) {
+        if matches!(success_ty, TypeId::I128 | TypeId::F128) {
+            return ReturnConvention::WideFallible;
+        }
+        return ReturnConvention::Fallible;
+    }
+    if ctx.type_arena.is_struct(return_type) {
+        return ReturnConvention::Struct;
+    }
+    if ctx.type_arena.is_union(return_type) {
+        return ReturnConvention::Union;
+    }
+    ReturnConvention::Scalar
 }
 
 /// Lower a for statement to `VirStmt::For`.

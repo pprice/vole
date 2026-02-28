@@ -1118,7 +1118,7 @@ fn collect_vir_direct_in_stmt(stmt: &VirStmt, out: &mut BTreeSet<usize>) {
             collect_vir_direct_in_ref(&vir_for.iterable, out);
             collect_vir_direct_in_body(&vir_for.body, out);
         }
-        VirStmt::Return { value } => {
+        VirStmt::Return { value, .. } => {
             if let Some(v) = value {
                 collect_vir_direct_in_ref(v, out);
             }
