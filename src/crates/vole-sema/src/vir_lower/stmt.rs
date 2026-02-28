@@ -123,6 +123,7 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
     let vir_ty = ctx.translate(ty);
     let sema_ty = ctx.compat_ty(ty);
     let storage = classify_let_storage(ty, expr_ty, ctx);
+    let declared_type = declared_ty.map(|dt| ctx.compat_ty(dt));
     VirStmt::Let {
         name: let_stmt.name,
         value,
@@ -130,6 +131,7 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
         ty: sema_ty,
         vir_ty,
         storage,
+        declared_type,
     }
 }
 

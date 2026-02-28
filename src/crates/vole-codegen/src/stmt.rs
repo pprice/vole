@@ -525,13 +525,15 @@ impl Cg<'_, '_, '_> {
                 ty,
                 vir_ty,
                 storage,
+                declared_type,
             } => {
                 let binding_ty = if *vir_ty != VirTypeId::UNKNOWN {
                     self.sema_type_from_vir(*vir_ty)
                 } else {
                     self.sema_type_from_vir(*ty)
                 };
-                self.compile_vir_let(*name, value, binding_ty, *storage)
+                let declared = declared_type.map(|dt| self.sema_type_from_vir(dt));
+                self.compile_vir_let(*name, value, binding_ty, *storage, declared)
             }
             VirStmt::LetTuple { pattern, value, .. } => self.compile_vir_let_tuple(pattern, value),
             VirStmt::Assign { target, value } => self.compile_vir_assign(target, value),
@@ -976,6 +978,7 @@ impl Cg<'_, '_, '_> {
         value_expr: &vole_vir::VirExpr,
         binding_ty: TypeId,
         storage: LetStorageHint,
+        declared_type: Option<TypeId>,
     ) -> CodegenResult<bool> {
         // Pre-register recursive lambdas so they can capture themselves.
         let preregistered_var = self.preregister_recursive_vir_lambda(name, value_expr);
@@ -983,7 +986,8 @@ impl Cg<'_, '_, '_> {
             self.self_capture = Some(name);
         }
 
-        let declared_type_id_opt = self.vir_let_declared_type(value_expr, binding_ty);
+        let declared_type_id_opt =
+            self.vir_let_declared_type(value_expr, binding_ty, declared_type);
 
         let init = if let Some(declared_type_id) = declared_type_id_opt {
             self.compile_vir_let_init_with_declared_type(value_expr, declared_type_id)?
@@ -1294,15 +1298,16 @@ impl Cg<'_, '_, '_> {
         &self,
         value_expr: &vole_vir::VirExpr,
         binding_ty: TypeId,
+        declared_type: Option<TypeId>,
     ) -> Option<TypeId> {
-        // For MethodCall inits, check the NodeMap via the carried NodeId.
+        // For MethodCall inits, use the VIR-carried declared type annotation.
         // Method calls may have codegen-computed return types that differ from
         // the sema expression type (e.g. sum() on Iterator<[i64]> returns i64
-        // at runtime but sema records [i64]). Using the NodeMap lookup returns
-        // the *declared* annotation type (None for untyped lets), which lets
-        // coerce_let_init use init.type_id (the codegen-computed type) instead.
-        if let vole_vir::VirExpr::MethodCall { node_id, .. } = value_expr {
-            return self.get_declared_var_type(node_id);
+        // at runtime but sema records [i64]). Using the declared type returns
+        // Some(annotated_type) for typed lets, None for untyped lets, which
+        // lets coerce_let_init use init.type_id (the codegen-computed type).
+        if matches!(value_expr, vole_vir::VirExpr::MethodCall { .. }) {
+            return declared_type;
         }
         // For pure VIR inits: always pass binding_ty as declared type.
         Some(binding_ty)

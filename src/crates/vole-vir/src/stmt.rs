@@ -31,6 +31,13 @@ pub enum VirStmt {
         /// Pre-computed storage classification for the binding type.
         /// Codegen reads this instead of querying `TypeArena` at compile time.
         storage: LetStorageHint,
+        /// The explicit type annotation on the binding, if present.
+        ///
+        /// `Some(type)` when the let has an annotation (e.g. `let x: i64 = ...`);
+        /// `None` for untyped lets.  Codegen uses this for MethodCall inits
+        /// where the codegen-computed return type may differ from sema's
+        /// expression type.
+        declared_type: Option<VirTypeId>,
     },
 
     /// Tuple destructuring (`let [a, b] = ...`, `let { x, y } = ...`).

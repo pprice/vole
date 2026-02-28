@@ -222,6 +222,13 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// `try_call_monomorphized_function()` in preference to the NodeMap
     /// lookup.  Cleared after `call_dispatch()` returns.
     pub(crate) vir_monomorph_key: Option<vole_identity::MonomorphKey>,
+    /// Pre-resolved return type from VIR `Call` node.
+    ///
+    /// Set by VIR call dispatch before entering `call_dispatch()`, consumed by
+    /// `get_expr_type()` / `get_expr_type_substituted()` /
+    /// `get_substituted_return_type()` in preference to the NodeMap lookup.
+    /// Cleared after `call_dispatch()` returns.
+    pub(crate) vir_call_return_type: Option<TypeId>,
     /// Cached `iconst.i64 0` created in the entry block for void returns.
     /// Reused by every `void_value()` call to avoid emitting thousands of
     /// dead iconst instructions (previously ~18,951 per compilation).
@@ -296,6 +303,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             vir_resolved_call_args: None,
             vir_lambda_defaults: None,
             vir_monomorph_key: None,
+            vir_call_return_type: None,
             cached_void_val,
             entry_block,
             iconst_cache,
@@ -739,21 +747,33 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get expression type by NodeId.
     ///
+    /// Checks the VIR-stashed `vir_call_return_type` first (set during
+    /// `compile_vir_unresolved_call`), falling back to NodeMap.
     /// NodeIds are globally unique (they embed a ModuleId), so a single flat
     /// lookup covers both main-program and module nodes.
     #[inline]
     pub fn get_expr_type(&self, node_id: &vole_identity::NodeId) -> Option<TypeId> {
+        if let Some(ty) = self.vir_call_return_type {
+            return Some(ty);
+        }
         self.env.analyzed.node_map().get_type(*node_id)
     }
 
     /// Get expression type by NodeId, applying type param substitution for module code.
+    ///
+    /// Checks the VIR-stashed `vir_call_return_type` first (already concrete,
+    /// no substitution needed), falling back to NodeMap with substitution.
     ///
     /// This is used when the expression type needs to be concrete (e.g., for return types,
     /// call results). Module code stores generic types (e.g., `V`) which must be substituted
     /// to concrete types (e.g., `i64`) in monomorphized contexts.
     #[inline]
     pub fn get_expr_type_substituted(&self, node_id: &vole_identity::NodeId) -> Option<TypeId> {
-        let ty = self.get_expr_type(node_id)?;
+        // VIR return type is already concrete — no substitution needed.
+        if let Some(ty) = self.vir_call_return_type {
+            return Some(ty);
+        }
+        let ty = self.env.analyzed.node_map().get_type(*node_id)?;
         if self.current_module.is_some() && self.substitutions.is_some() {
             Some(self.try_substitute_type(ty))
         } else {
@@ -837,23 +857,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get substituted return type for generic method calls.
+    ///
+    /// Checks the VIR-stashed `vir_call_return_type` first (already concrete),
+    /// falling back to NodeMap with substitution.
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_identity::NodeId) -> Option<TypeId> {
+        if let Some(ty) = self.vir_call_return_type {
+            return Some(ty);
+        }
         self.env
             .analyzed
             .node_map()
             .get_substituted_return_type(*node_id)
             .map(|ty| self.try_substitute_type(ty))
-    }
-
-    /// Get declared variable type for let statements with explicit type annotations.
-    /// Used for union wrapping, numeric widening, and interface boxing.
-    #[inline]
-    pub fn get_declared_var_type(&self, init_node_id: &vole_identity::NodeId) -> Option<TypeId> {
-        self.env
-            .analyzed
-            .node_map()
-            .get_declared_var_type(*init_node_id)
     }
 
     /// Get type metadata map

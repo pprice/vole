@@ -68,6 +68,7 @@ impl Cg<'_, '_, '_> {
                     *line,
                     resolved_call_args.as_deref(),
                     *lambda_defaults,
+                    ty,
                 )
             }
         }
@@ -427,6 +428,7 @@ impl Cg<'_, '_, '_> {
     /// table, and module context.  This method passes the VIR-lowered `args`
     /// through `ArgSource::Vir` so all dispatch paths compile from VIR
     /// instead of the original AST.
+    #[allow(clippy::too_many_arguments)]
     fn compile_vir_unresolved_call(
         &mut self,
         callee_sym: vole_identity::Symbol,
@@ -435,18 +437,21 @@ impl Cg<'_, '_, '_> {
         line: u32,
         resolved_call_args: Option<&[Option<usize>]>,
         lambda_defaults: Option<vole_vir::LambdaDefaultsInfo>,
+        return_ty: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let arg_source = crate::structs::methods::ArgSource(args);
-        // Stash the VIR-resolved named-arg mapping and lambda defaults so
-        // call_dispatch() sub-functions can read them instead of hitting
-        // NodeMap.  The monomorph key is already stashed by the caller
-        // (`compile_vir_call`).
+        // Stash the VIR-resolved named-arg mapping, lambda defaults, and
+        // return type so call_dispatch() sub-functions can read them instead
+        // of hitting NodeMap.  The monomorph key is already stashed by the
+        // caller (`compile_vir_call`).
         self.vir_resolved_call_args = resolved_call_args.map(|m| m.to_vec());
         self.vir_lambda_defaults = lambda_defaults;
+        self.vir_call_return_type = Some(return_ty);
         let result = self.call_dispatch(callee_sym, &arg_source, line, call_node_id);
         self.vir_resolved_call_args = None;
         self.vir_lambda_defaults = None;
         self.vir_monomorph_key = None;
+        self.vir_call_return_type = None;
         result.map(|r| self.mark_rc_owned(r))
     }
 

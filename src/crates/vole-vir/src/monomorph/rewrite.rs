@@ -582,6 +582,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             ty,
             vir_ty,
             storage,
+            declared_type,
         } => VirStmt::Let {
             name: *name,
             value: rewrite_ref(value, ctx),
@@ -589,6 +590,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
             storage: rewrite_let_storage(storage, ctx),
+            declared_type: declared_type.map(|dt| ctx.remap(dt)),
         },
         VirStmt::LetTuple {
             pattern,
@@ -1341,6 +1343,7 @@ mod tests {
                     ty: type_id(10),
                     vir_ty: param_id,
                     storage: crate::stmt::LetStorageHint::Scalar,
+                    declared_type: None,
                 }],
                 trailing: Some(Box::new(VirExpr::LocalLoad {
                     name: sym(3),
