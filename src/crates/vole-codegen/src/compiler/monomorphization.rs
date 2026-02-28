@@ -824,19 +824,22 @@ impl Compiler<'_> {
             .map(|p| self.build_generic_type_asts(p))
             .unwrap_or_default();
 
-        // Collect instances to avoid borrow issues
-        let instances = self
+        // Collect from VirProgram.static_method_monomorphs to avoid borrow issues
+        let instances: Vec<_> = self
             .analyzed
-            .static_method_monomorph_cache()
-            .collect_instances();
+            .vir_program()
+            .static_method_monomorphs
+            .values()
+            .cloned()
+            .collect();
 
         tracing::debug!(
             instance_count = instances.len(),
             "compiling static method monomorphized instances"
         );
 
-        for instance in instances {
-            if self.is_abstract_static_method_monomorph(&instance) {
+        for instance in &instances {
+            if self.is_abstract_vir_static_method_monomorph(instance) {
                 continue;
             }
 
@@ -868,7 +871,7 @@ impl Compiler<'_> {
                     .iter()
                     .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
-                    self.compile_monomorphized_static_method(method, &instance, None)?;
+                    self.compile_monomorphized_static_method(method, instance, None)?;
                     continue;
                 }
             }
@@ -887,7 +890,7 @@ impl Compiler<'_> {
                         .to_string();
                     self.compile_monomorphized_static_method(
                         &method,
-                        &instance,
+                        instance,
                         Some(&module_path),
                     )?;
                     continue;
@@ -915,7 +918,7 @@ impl Compiler<'_> {
     fn compile_monomorphized_static_method(
         &mut self,
         method: &InterfaceMethod,
-        instance: &StaticMethodMonomorphInstance,
+        instance: &VirStaticMethodMonomorphInfo,
         module_path: Option<&str>,
     ) -> CodegenResult<()> {
         let mangled_name = self.analyzed.display_name(instance.mangled_name);
@@ -1890,10 +1893,25 @@ impl Compiler<'_> {
             return Ok(());
         }
 
-        let method_name_str = self.analyzed.display_name(instance.method_name);
+        // Look up the VIR-native monomorph info by mangled name.
+        // static_method_monomorphs is keyed by StaticMethodMonomorphKey, so we
+        // search values by mangled_name (unique identifier).
+        let vir_info = self
+            .analyzed
+            .vir_program()
+            .static_method_monomorphs
+            .values()
+            .find(|info| info.mangled_name == instance.mangled_name)
+            .unwrap_or_else(|| {
+                let name = self.analyzed.display_name(instance.mangled_name);
+                panic!("pending static method monomorph not in VirProgram.static_method_monomorphs: {name}")
+            })
+            .clone();
+
+        let method_name_str = self.analyzed.display_name(vir_info.method_name);
 
         // Try main program class ASTs (using pre-built map)
-        if let Some(class) = class_asts.get(&instance.class_name)
+        if let Some(class) = class_asts.get(&vir_info.class_name)
             && let Some(statics) = class.statics
         {
             let method = statics
@@ -1901,27 +1919,27 @@ impl Compiler<'_> {
                 .iter()
                 .find(|m| self.analyzed.resolve_symbol(m.name) == method_name_str);
             if let Some(method) = method {
-                self.compile_monomorphized_static_method(method, instance, None)?;
+                self.compile_monomorphized_static_method(method, &vir_info, None)?;
                 return Ok(());
             }
         }
 
         // Fallback: search module programs
         if let Some(method) = self
-            .find_static_method_in_modules(instance.class_name, &method_name_str)
+            .find_static_method_in_modules(vir_info.class_name, &method_name_str)
             .cloned()
         {
-            let module_id = self.analyzed.name_table().module_of(instance.class_name);
+            let module_id = self.analyzed.name_table().module_of(vir_info.class_name);
             let module_path = self
                 .analyzed
                 .name_table()
                 .module_path(module_id)
                 .to_string();
-            self.compile_monomorphized_static_method(&method, instance, Some(&module_path))?;
+            self.compile_monomorphized_static_method(&method, &vir_info, Some(&module_path))?;
             return Ok(());
         }
 
-        let class_name = self.analyzed.display_name(instance.class_name);
+        let class_name = self.analyzed.display_name(vir_info.class_name);
         Err(CodegenError::not_found(
             "pending monomorph: static method",
             format!("{} in class {}", method_name_str, class_name),
