@@ -119,7 +119,15 @@ pub enum LetStorageHint {
     Unknown,
     /// The binding type is a union — init values are wrapped with a tag and
     /// stored in a stack-allocated union buffer.
-    Union,
+    ///
+    /// When `tag_hint` is `Some`, the variant tag, RC state, and coercion
+    /// target were pre-computed during sema lowering; codegen reads these
+    /// instead of re-deriving them from the type arena at compile time.
+    ///
+    /// `None` means the tag could not be determined statically (e.g. the
+    /// init expression is already a union, is a type parameter, or the
+    /// lowering ran in generic mode).
+    Union { tag_hint: Option<UnionTagHint> },
     /// The binding type is an interface — concrete values are boxed to an
     /// interface pointer (vtable + data).
     Interface,
@@ -128,6 +136,30 @@ pub enum LetStorageHint {
     Numeric,
     /// Scalar / pass-through — no special storage treatment.
     Scalar,
+}
+
+/// Pre-computed union variant tag metadata, determined during sema lowering.
+///
+/// Codegen stores the `tag` byte at offset 0 of the union buffer and the
+/// `is_rc` flag at offset 1 (IS_RC_OFFSET), without querying the type arena
+/// to match the value type against the union's variant list.
+///
+/// `variant_type` is the resolved variant type from the union; codegen uses
+/// it to derive the Cranelift target type for integer widening/narrowing of
+/// the payload value (same logic as `find_union_variant_tag`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UnionTagHint {
+    /// Variant index in the union's variant list (the tag byte stored at
+    /// offset 0).
+    pub tag: u8,
+    /// Whether the matched variant type is RC-managed (needs cleanup).
+    /// Stored at IS_RC_OFFSET in the union buffer.
+    pub is_rc: bool,
+    /// The resolved variant type from the union's variant list.
+    ///
+    /// Codegen uses this to determine whether integer coercion (sextend /
+    /// ireduce) is needed between the init value and the union payload slot.
+    pub variant_type: VirTypeId,
 }
 
 /// Pre-computed return convention for `VirStmt::Return`, determined during

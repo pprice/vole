@@ -18,8 +18,8 @@ use crate::expr::{
 use crate::func::{VirBody, VirFunction};
 use crate::refs::VirRef;
 use crate::stmt::{
-    DestructureTupleKind, VirDestructureElement, VirDestructureField, VirDestructurePattern,
-    VirFor, VirIterKind, VirModuleBinding, VirStmt,
+    DestructureTupleKind, LetStorageHint, UnionTagHint, VirDestructureElement, VirDestructureField,
+    VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
 
 /// Remap context carrying old->new VirTypeId mapping.
@@ -385,6 +385,24 @@ fn rewrite_coerce_kind(kind: &CoerceKind, ctx: &RewriteCtx) -> CoerceKind {
     }
 }
 
+/// Remap VirTypeIds inside `LetStorageHint::Union { tag_hint }`.
+///
+/// Non-Union variants carry no VirTypeIds and are returned as-is.
+fn rewrite_let_storage(storage: &LetStorageHint, ctx: &RewriteCtx) -> LetStorageHint {
+    match storage {
+        LetStorageHint::Union {
+            tag_hint: Some(hint),
+        } => LetStorageHint::Union {
+            tag_hint: Some(UnionTagHint {
+                tag: hint.tag,
+                is_rc: hint.is_rc,
+                variant_type: ctx.remap(hint.variant_type),
+            }),
+        },
+        other => *other,
+    }
+}
+
 /// Rewrite control flow, type operations, reflection, variables, and lambda.
 fn rewrite_expr_control(expr: &VirExpr, ctx: &RewriteCtx) -> VirExpr {
     match expr {
@@ -568,7 +586,7 @@ fn rewrite_stmt(stmt: &VirStmt, ctx: &RewriteCtx) -> VirStmt {
             mutable: *mutable,
             ty: ctx.remap(*ty),
             vir_ty: ctx.remap(*vir_ty),
-            storage: *storage,
+            storage: rewrite_let_storage(storage, ctx),
         },
         VirStmt::LetTuple {
             pattern,

@@ -44,38 +44,43 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Value, TypeId, bool)> {
         let mut is_stack_union = false;
 
-        let (mut final_value, mut final_type_id) =
-            if let Some(declared_type_id) = declared_type_id_opt {
-                match storage {
-                    LetStorageHint::Unknown if !init.type_id.is_unknown() => {
-                        // Box value to unknown type (TaggedValue)
-                        let boxed = self.box_to_unknown(*init)?;
-                        (boxed.value, boxed.type_id)
-                    }
-                    LetStorageHint::Union if !self.vir_query_is_union(init.type_id) => {
-                        let wrapped = self.construct_union_id_with_hint(
+        let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
+            declared_type_id_opt
+        {
+            match storage {
+                LetStorageHint::Unknown if !init.type_id.is_unknown() => {
+                    // Box value to unknown type (TaggedValue)
+                    let boxed = self.box_to_unknown(*init)?;
+                    (boxed.value, boxed.type_id)
+                }
+                LetStorageHint::Union { tag_hint } if !self.vir_query_is_union(init.type_id) => {
+                    let wrapped = if let Some(hint) = tag_hint {
+                        self.construct_union_from_hint(*init, declared_type_id, &hint)?
+                    } else {
+                        self.construct_union_id_with_hint(
                             *init,
                             declared_type_id,
                             sentinel_hint_type_id,
-                        )?;
-                        is_stack_union = true;
-                        (wrapped.value, wrapped.type_id)
-                    }
-                    LetStorageHint::Numeric if init.type_id.is_numeric() => {
-                        let coerced = self.coerce_to_type(*init, declared_type_id)?;
-                        (coerced.value, coerced.type_id)
-                    }
-                    LetStorageHint::Interface => {
-                        // For functional interfaces, keep the actual function type
-                        // from the lambda. This preserves the is_closure flag for
-                        // proper calling convention.
-                        (init.value, init.type_id)
-                    }
-                    _ => (init.value, declared_type_id),
+                        )?
+                    };
+                    is_stack_union = true;
+                    (wrapped.value, wrapped.type_id)
                 }
-            } else {
-                (init.value, init.type_id)
-            };
+                LetStorageHint::Numeric if init.type_id.is_numeric() => {
+                    let coerced = self.coerce_to_type(*init, declared_type_id)?;
+                    (coerced.value, coerced.type_id)
+                }
+                LetStorageHint::Interface => {
+                    // For functional interfaces, keep the actual function type
+                    // from the lambda. This preserves the is_closure flag for
+                    // proper calling convention.
+                    (init.value, init.type_id)
+                }
+                _ => (init.value, declared_type_id),
+            }
+        } else {
+            (init.value, init.type_id)
+        };
 
         // Box value if assigning to interface type
         if let Some(declared_type_id) = declared_type_id_opt
@@ -248,6 +253,69 @@ impl Cg<'_, '_, '_> {
         union_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         self.construct_union_id_with_hint(value, union_type_id, None)
+    }
+
+    /// Construct a stack-allocated union buffer using a pre-computed tag hint.
+    ///
+    /// This is the fast path for let-binding union coercion when VIR lowering
+    /// has pre-computed the variant tag, RC state, and coercion target.  Skips
+    /// the `unwrap_union` + `find_union_variant_tag` arena queries.
+    fn construct_union_from_hint(
+        &mut self,
+        value: CompiledValue,
+        union_type_id: TypeId,
+        hint: &vole_vir::stmt::UnionTagHint,
+    ) -> CodegenResult<CompiledValue> {
+        // If the value is a struct, box it first (auto-boxing for union storage)
+        let value = if self.vir_query_is_struct(value.type_id) {
+            self.copy_struct_to_heap(value)?
+        } else {
+            value
+        };
+
+        // Coerce the payload value to the variant's Cranelift type if needed.
+        let variant_type_id = self.sema_type_from_vir(hint.variant_type);
+        let target_ty = self.cranelift_type(variant_type_id);
+        let actual_value = if target_ty != value.ty && target_ty.is_int() && value.ty.is_int() {
+            if target_ty.bytes() < value.ty.bytes() {
+                self.builder.ins().ireduce(target_ty, value.value)
+            } else {
+                sextend_const(self.builder, target_ty, value.value)
+            }
+        } else {
+            value.value
+        };
+
+        let union_size = self.type_size(union_type_id);
+        let slot = self.alloc_stack(union_size);
+
+        // Store tag byte at offset 0
+        let tag_val = self.iconst_cached(types::I8, hint.tag as i64);
+        self.builder.ins().stack_store(tag_val, slot, 0);
+
+        // Store is_rc flag at offset 1
+        let is_rc_val = self.iconst_cached(types::I8, hint.is_rc as i64);
+        self.builder
+            .ins()
+            .stack_store(is_rc_val, slot, union_layout::IS_RC_OFFSET);
+
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            // Sentinel variants have no payload data; zero the slot to avoid
+            // undefined behaviour in generic cleanup paths.
+            let is_sentinel = self.arena().is_sentinel(variant_type_id);
+            let payload = if is_sentinel {
+                self.iconst_cached(types::I64, 0)
+            } else {
+                actual_value
+            };
+            self.builder
+                .ins()
+                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+        }
+
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        Ok(CompiledValue::new(ptr, ptr_type, union_type_id))
     }
 
     pub fn construct_union_id_with_hint(

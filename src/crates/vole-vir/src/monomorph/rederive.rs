@@ -238,7 +238,7 @@ fn rederive_stmt(stmt: &mut VirStmt, table: &VirTypeTable, ret_ty: VirTypeId) {
             storage,
             ..
         } => {
-            *storage = rederive_let_storage(*vir_ty, table);
+            *storage = rederive_let_storage(*vir_ty, storage, table);
             rederive_ref(value, table, ret_ty);
         }
         VirStmt::LetTuple { value, .. } => rederive_ref(value, table, ret_ty),
@@ -775,10 +775,26 @@ fn rederive_return_convention(vir_return_ty: VirTypeId, table: &VirTypeTable) ->
     }
 }
 
-fn rederive_let_storage(vir_ty: VirTypeId, table: &VirTypeTable) -> LetStorageHint {
+fn rederive_let_storage(
+    vir_ty: VirTypeId,
+    existing: &LetStorageHint,
+    table: &VirTypeTable,
+) -> LetStorageHint {
     match table.get(vir_ty) {
         VirType::Unknown => LetStorageHint::Unknown,
-        VirType::Union { .. } | VirType::Optional { .. } => LetStorageHint::Union,
+        VirType::Union { .. } | VirType::Optional { .. } => {
+            // If the existing storage is already Union with a pre-computed
+            // tag hint, preserve it — the rewrite pass has already remapped
+            // the VirTypeIds inside the hint.  Otherwise (e.g. the storage
+            // was Scalar before monomorphization resolved the type to a
+            // union), leave the hint as None.
+            match existing {
+                LetStorageHint::Union { tag_hint } => LetStorageHint::Union {
+                    tag_hint: *tag_hint,
+                },
+                _ => LetStorageHint::Union { tag_hint: None },
+            }
+        }
         VirType::Interface { .. } => LetStorageHint::Interface,
         VirType::Primitive(p) if p.is_numeric() => LetStorageHint::Numeric,
         _ => LetStorageHint::Scalar,

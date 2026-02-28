@@ -9,7 +9,7 @@ use vole_identity::TypeId;
 
 use vole_vir::expr::VirExpr;
 use vole_vir::stmt::{
-    DestructureTupleKind, LetStorageHint, ReturnConvention, VirDestructureElement,
+    DestructureTupleKind, LetStorageHint, ReturnConvention, UnionTagHint, VirDestructureElement,
     VirDestructureField, VirDestructurePattern, VirFor, VirIterKind, VirModuleBinding, VirStmt,
 };
 
@@ -122,7 +122,7 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
 
     let vir_ty = ctx.translate(ty);
     let sema_ty = ctx.compat_ty(ty);
-    let storage = classify_let_storage(ty, ctx);
+    let storage = classify_let_storage(ty, expr_ty, ctx);
     VirStmt::Let {
         name: let_stmt.name,
         value,
@@ -139,11 +139,15 @@ fn lower_let(let_stmt: &LetStmt, ctx: &mut LoweringCtx<'_>) -> VirStmt {
 /// the arena at compile time to determine: unknown → box to TaggedValue,
 /// union → stack-allocate tag+payload, interface → interface boxing,
 /// numeric → widen/narrow, else → scalar pass-through.
-fn classify_let_storage(ty: TypeId, ctx: &LoweringCtx<'_>) -> LetStorageHint {
+///
+/// When the binding type is a union, `init_ty` (the init expression's type)
+/// is used to pre-compute the variant tag, RC state, and coercion target.
+fn classify_let_storage(ty: TypeId, init_ty: TypeId, ctx: &mut LoweringCtx<'_>) -> LetStorageHint {
     if ctx.type_arena.is_unknown(ty) {
         LetStorageHint::Unknown
     } else if ctx.type_arena.is_union(ty) {
-        LetStorageHint::Union
+        let tag_hint = compute_union_tag_hint(ty, init_ty, ctx);
+        LetStorageHint::Union { tag_hint }
     } else if ctx.type_arena.is_interface(ty) {
         LetStorageHint::Interface
     } else if ctx.type_arena.is_numeric(ty) {
@@ -151,6 +155,98 @@ fn classify_let_storage(ty: TypeId, ctx: &LoweringCtx<'_>) -> LetStorageHint {
     } else {
         LetStorageHint::Scalar
     }
+}
+
+/// Pre-compute the union variant tag for a value-to-union coercion.
+///
+/// Returns `None` when the tag cannot be determined statically:
+/// - The init type is already a union (codegen passes through)
+/// - The init type contains type parameters (generic context)
+/// - The init type is unknown
+/// - No matching variant is found in the union
+///
+/// Mirrors the variant-matching logic in codegen's `find_union_variant_tag`:
+/// 1. Exact type match against variants
+/// 2. Sentinel type fallback (unique sentinel variant)
+/// 3. Integer compatibility fallback (i32 init → i64 variant)
+fn compute_union_tag_hint(
+    union_ty: TypeId,
+    init_ty: TypeId,
+    ctx: &mut LoweringCtx<'_>,
+) -> Option<UnionTagHint> {
+    // Cannot pre-compute if the init type is already a union, unknown, or
+    // contains unresolved type parameters.
+    if ctx.type_arena.is_union(init_ty)
+        || init_ty == TypeId::UNKNOWN
+        || ctx.type_arena.contains_type_param(init_ty)
+    {
+        return None;
+    }
+    // In generic lowering mode, the init type may not be fully resolved.
+    if ctx.generic {
+        return None;
+    }
+
+    let variants = ctx.type_arena.unwrap_union(union_ty)?;
+    let variants = variants.to_vec();
+
+    // 1. Exact type match
+    if let Some(pos) = variants.iter().position(|&v| v == init_ty) {
+        return Some(build_tag_hint(pos, variants[pos], ctx));
+    }
+
+    // 2. Sentinel fallback: if init is a sentinel and there's exactly one
+    //    sentinel variant, use it.
+    if ctx.type_arena.is_sentinel(init_ty) {
+        let sentinel_variants: Vec<(usize, TypeId)> = variants
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &v)| ctx.type_arena.is_sentinel(v).then_some((i, v)))
+            .collect();
+        if sentinel_variants.len() == 1 {
+            let (pos, variant_ty) = sentinel_variants[0];
+            return Some(build_tag_hint(pos, variant_ty, ctx));
+        }
+    }
+
+    // 3. Integer compatibility: find a compatible integer variant for
+    //    widening/narrowing (e.g. i32 init → i64 union variant).
+    if ctx.type_arena.is_integer(init_ty)
+        && let Some((pos, &variant_ty)) = variants
+            .iter()
+            .enumerate()
+            .find(|(_, v)| ctx.type_arena.is_integer(**v))
+        {
+            return Some(build_tag_hint(pos, variant_ty, ctx));
+        }
+
+    // Cannot determine the tag statically.
+    None
+}
+
+/// Build a `UnionTagHint` from a resolved variant position and type.
+fn build_tag_hint(pos: usize, variant_ty: TypeId, ctx: &mut LoweringCtx<'_>) -> UnionTagHint {
+    let is_rc = is_simple_rc_type(ctx.type_arena, variant_ty);
+    let variant_type = ctx.translate(variant_ty);
+    UnionTagHint {
+        tag: pos as u8,
+        is_rc,
+        variant_type,
+    }
+}
+
+/// Check if a sema type is a simple RC type (needs cleanup via rc_dec).
+///
+/// Mirrors the logic in codegen's `is_simple_rc_type` (rc_state.rs) but
+/// operates on `TypeArena` queries available during VIR lowering.
+fn is_simple_rc_type(arena: &crate::type_arena::TypeArena, ty: TypeId) -> bool {
+    arena.is_string(ty)
+        || arena.is_array(ty)
+        || arena.is_function(ty)
+        || arena.is_class(ty)
+        || arena.is_handle(ty)
+        || arena.is_runtime_iterator(ty)
+        || arena.is_interface(ty)
 }
 
 /// Classify the return convention for a function based on its return type.
