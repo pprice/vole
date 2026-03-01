@@ -594,12 +594,27 @@ impl AnalyzedProgram {
     }
 
     /// Render a short human-readable type name for diagnostics/debug output.
+    #[allow(dead_code)]
     pub(crate) fn display_type_id_short(&self, type_id: vole_sema::type_arena::TypeId) -> String {
         vole_sema::type_display::display_type_id_short(
             type_id,
             self.type_arena(),
             self.name_table(),
             self.vir_program.entity_metadata(),
+        )
+    }
+
+    /// Render a VIR type as a human-readable string using entity metadata for names.
+    ///
+    /// VIR-native equivalent of [`display_type_id_short`](Self::display_type_id_short).
+    /// Resolves nominal types (Class, Struct, Interface) to their entity names
+    /// via VirEntityMetadata instead of the sema type arena.
+    pub(crate) fn display_vir_type(&self, vir_ty: VirTypeId) -> String {
+        crate::types::vir_conversions::vir_display_named(
+            vir_ty,
+            &self.vir_program.type_table,
+            self.vir_program.entity_metadata(),
+            self.name_table(),
         )
     }
 
@@ -685,6 +700,18 @@ impl AnalyzedProgram {
         let type_name_id = self.impl_type_name_id_from_vir_type_id(vir_ty)?;
         let method_impl = self.implement_method_by_name(type_name_id, method_name_id)?;
         Some((type_name_id, method_impl))
+    }
+
+    /// Convert a `VirTypeId` to sema `TypeId` using VIR structure and arena lookups.
+    ///
+    /// Delegates to [`vir_to_sema_type_id`](crate::types::vir_conversions::vir_to_sema_type_id).
+    /// Use this for legacy APIs that still require sema TypeId (e.g., vtable compilation).
+    pub(crate) fn resolve_sema_type_id(&self, vir_ty: VirTypeId) -> vole_sema::type_arena::TypeId {
+        crate::types::vir_conversions::vir_to_sema_type_id(
+            vir_ty,
+            &self.vir_program.type_table,
+            &self.types,
+        )
     }
 
     /// Look up a VIR function by its monomorphized mangled NameId.

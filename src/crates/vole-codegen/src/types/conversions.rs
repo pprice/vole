@@ -118,14 +118,6 @@ impl CompiledValue {
         }
     }
 
-    /// Recover the sema TypeId from this value's VirTypeId via lossy conversion.
-    ///
-    /// Use this ONLY for legacy sema-typed APIs (arena substitution, display).
-    /// Prefer querying `self.type_id` via VirTypeTable for type predicates.
-    pub fn sema_type_id(&self) -> TypeId {
-        crate::types::vir_conversions::vir_to_sema_type_id_lossy(self.type_id)
-    }
-
     /// Whether this value has Owned lifecycle.
     pub fn is_owned(&self) -> bool {
         self.rc_lifecycle == RcLifecycle::Owned
@@ -585,7 +577,7 @@ pub(crate) fn convert_to_type(
     builder: &mut FunctionBuilder,
     val: CompiledValue,
     target: Type,
-    arena: &TypeArena,
+    _arena: &TypeArena,
 ) -> Value {
     fn pack_f64_to_f128(builder: &mut FunctionBuilder, f64_val: Value) -> Value {
         // Runtime f128 currently uses a compact software representation:
@@ -656,7 +648,7 @@ pub(crate) fn convert_to_type(
 
     // Integer widening - use uextend for unsigned types, sextend for signed
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-        if arena.is_unsigned(val.sema_type_id()) {
+        if val.type_id.is_unsigned_int() {
             return uextend_const(builder, target, val.value);
         } else {
             return sextend_const(builder, target, val.value);
@@ -686,12 +678,14 @@ pub(crate) fn value_to_word(
     value: &CompiledValue,
     pointer_type: Type,
     heap_alloc_ref: Option<FuncRef>,
-    arena: &TypeArena,
-    entities: &impl TypeEntityLookup,
+    _arena: &TypeArena,
+    _entities: &impl TypeEntityLookup,
 ) -> CodegenResult<Value> {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let value_size = type_id_size(value.sema_type_id(), pointer_type, entities, arena);
+    // Use Cranelift type size: the compiled value's .ty accurately represents
+    // the storage size (pointers for heap types, full width for scalars).
+    let value_size = value.ty.bytes();
     let needs_box = value_size > word_bytes;
 
     if needs_box {
@@ -715,23 +709,24 @@ pub(crate) fn value_to_word(
         return Ok(alloc_ptr);
     }
 
-    let word = match value.sema_type_id() {
-        TypeId::F64 => builder
+    let vir_ty = value.type_id;
+    let word = match vir_ty {
+        VirTypeId::F64 => builder
             .ins()
             .bitcast(types::I64, MemFlags::new(), value.value),
-        TypeId::F32 => {
+        VirTypeId::F32 => {
             let i32_val = builder
                 .ins()
                 .bitcast(types::I32, MemFlags::new(), value.value);
             uextend_const(builder, word_type, i32_val)
         }
-        TypeId::BOOL
-        | TypeId::I8
-        | TypeId::U8
-        | TypeId::I16
-        | TypeId::U16
-        | TypeId::I32
-        | TypeId::U32 => {
+        VirTypeId::BOOL
+        | VirTypeId::I8
+        | VirTypeId::U8
+        | VirTypeId::I16
+        | VirTypeId::U16
+        | VirTypeId::I32
+        | VirTypeId::U32 => {
             // Only extend if the Cranelift value isn't already word-sized
             if value.ty == word_type {
                 value.value
@@ -739,8 +734,8 @@ pub(crate) fn value_to_word(
                 uextend_const(builder, word_type, value.value)
             }
         }
-        TypeId::I64 | TypeId::U64 => value.value,
-        TypeId::I128 => {
+        VirTypeId::I64 | VirTypeId::U64 => value.value,
+        VirTypeId::I128 => {
             let low = builder.ins().ireduce(types::I64, value.value);
             if word_type == types::I64 {
                 low

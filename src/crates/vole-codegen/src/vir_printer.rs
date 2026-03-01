@@ -1005,8 +1005,7 @@ impl<'a> VirPrinter<'a> {
     }
 
     fn ty(&self, id: VirTypeId) -> String {
-        let sema_ty = crate::types::vir_conversions::vir_to_sema_type_id_lossy(id);
-        self.analyzed.display_type_id_short(sema_ty)
+        self.analyzed.display_vir_type(id)
     }
 }
 

@@ -2100,16 +2100,17 @@ fn box_interface_value_core<'a, 'ctx>(
         CodegenError::not_found("interface name in interner", &interface_name_str)
     })?;
 
-    // Check if value is already an interface
-    let value_sema_type_id = super::super::types::vir_conversions::vir_to_sema_type_id(
+    // Check if value is already an interface (VIR-native check)
+    if super::super::types::vir_conversions::vir_is_interface(
         value.type_id,
         &env.analyzed.vir_program().type_table,
-        env.analyzed.type_arena(),
-    );
-    if env.analyzed.type_arena().is_interface(value_sema_type_id) {
+    ) {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
+
+    // Resolve sema TypeId for legacy vtable operations that still need it.
+    let value_sema_type_id = env.analyzed.resolve_sema_type_id(value.type_id);
 
     // Check if this is an external-only interface
     if env.analyzed.is_external_only(type_def_id) {

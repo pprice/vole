@@ -712,6 +712,144 @@ pub(crate) fn vir_display_basic(vir_ty: VirTypeId, table: &VirTypeTable) -> Stri
     }
 }
 
+/// Format a VIR type for display, resolving nominal types to their entity names.
+///
+/// Like [`vir_display_basic`] but resolves Class/Struct/Interface TypeDefId to
+/// human-readable names via entity metadata and the name table.
+pub(crate) fn vir_display_named(
+    vir_ty: VirTypeId,
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+    names: &NameTable,
+) -> String {
+    // Check well-known sentinels first.
+    if vir_ty == VirTypeId::NIL {
+        return "nil".into();
+    }
+    if vir_ty == VirTypeId::DONE {
+        return "Done".into();
+    }
+
+    match table.get(vir_ty) {
+        VirType::Primitive(kind) => match kind {
+            VirPrimitiveKind::I8 => "i8".into(),
+            VirPrimitiveKind::I16 => "i16".into(),
+            VirPrimitiveKind::I32 => "i32".into(),
+            VirPrimitiveKind::I64 => "i64".into(),
+            VirPrimitiveKind::I128 => "i128".into(),
+            VirPrimitiveKind::U8 => "u8".into(),
+            VirPrimitiveKind::U16 => "u16".into(),
+            VirPrimitiveKind::U32 => "u32".into(),
+            VirPrimitiveKind::U64 => "u64".into(),
+            VirPrimitiveKind::F32 => "f32".into(),
+            VirPrimitiveKind::F64 => "f64".into(),
+            VirPrimitiveKind::Bool => "bool".into(),
+            VirPrimitiveKind::String => "string".into(),
+            VirPrimitiveKind::Handle => "handle".into(),
+        },
+        VirType::Void => "void".into(),
+        VirType::Never => "never".into(),
+        VirType::Unknown => "unknown".into(),
+        VirType::Range => "range".into(),
+        VirType::MetaType => "type".into(),
+        VirType::Class { def, type_args } => {
+            format_nominal("Class", *def, type_args, table, entities, names)
+        }
+        VirType::Struct { def, type_args } => {
+            format_nominal("Struct", *def, type_args, table, entities, names)
+        }
+        VirType::Interface { def, type_args } => {
+            format_nominal("Interface", *def, type_args, table, entities, names)
+        }
+        VirType::Array { elem } => {
+            format!("[{}]", vir_display_named(*elem, table, entities, names))
+        }
+        VirType::FixedArray { elem, len } => {
+            format!(
+                "[{}; {}]",
+                vir_display_named(*elem, table, entities, names),
+                len
+            )
+        }
+        VirType::Tuple { elems } => {
+            let parts: Vec<_> = elems
+                .iter()
+                .map(|e| vir_display_named(*e, table, entities, names))
+                .collect();
+            format!("({})", parts.join(", "))
+        }
+        VirType::Optional { inner } => {
+            format!("{}?", vir_display_named(*inner, table, entities, names))
+        }
+        VirType::Union { variants } => {
+            let parts: Vec<_> = variants
+                .iter()
+                .map(|v| vir_display_named(*v, table, entities, names))
+                .collect();
+            parts.join(" | ")
+        }
+        VirType::Fallible { success, errors } => {
+            let err_parts: Vec<_> = errors
+                .iter()
+                .map(|e| vir_display_named(*e, table, entities, names))
+                .collect();
+            format!(
+                "{} ! {}",
+                vir_display_named(*success, table, entities, names),
+                err_parts.join(" | ")
+            )
+        }
+        VirType::Function { params, ret } => {
+            let param_parts: Vec<_> = params
+                .iter()
+                .map(|p| vir_display_named(*p, table, entities, names))
+                .collect();
+            format!(
+                "({}) -> {}",
+                param_parts.join(", "),
+                vir_display_named(*ret, table, entities, names)
+            )
+        }
+        VirType::RuntimeIterator { elem } => {
+            format!(
+                "RuntimeIterator<{}>",
+                vir_display_named(*elem, table, entities, names)
+            )
+        }
+        VirType::Error { def } => entities
+            .type_name_id(*def)
+            .and_then(|name_id| names.last_segment_str(name_id))
+            .unwrap_or_else(|| format!("Error({def:?})")),
+        VirType::Param { name } => names
+            .last_segment_str(*name)
+            .unwrap_or_else(|| format!("T({name:?})")),
+    }
+}
+
+/// Format a nominal type (Class/Struct/Interface) with resolved entity name.
+fn format_nominal(
+    kind: &str,
+    def: TypeDefId,
+    type_args: &[VirTypeId],
+    table: &VirTypeTable,
+    entities: &VirEntityMetadata,
+    names: &NameTable,
+) -> String {
+    let name = entities
+        .type_name_id(def)
+        .and_then(|name_id| names.last_segment_str(name_id))
+        .unwrap_or_else(|| format!("{kind}({def:?})"));
+    if type_args.is_empty() {
+        name
+    } else {
+        let args: Vec<_> = type_args
+            .iter()
+            .map(|a| vir_display_named(*a, table, entities, names))
+            .collect();
+        format!("{}<{}>", name, args.join(", "))
+    }
+}
+
 /// Check if a `VirTypeId` is a sentinel type (Nil or Done).
 pub(crate) fn vir_is_sentinel(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
     table.is_sentinel(vir_ty)
@@ -1163,17 +1301,8 @@ pub(crate) fn vir_convert_to_type(
 
     // Integer widening — use uextend for unsigned types, sextend for signed.
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-        // Check VirTypeTable for unsigned status instead of arena.
-        let vir_ty = val.type_id;
-        let is_unsigned = if vir_ty != VirTypeId::UNKNOWN {
-            vir_is_unsigned(vir_ty, table)
-        } else {
-            // Fallback: check well-known unsigned type IDs.
-            matches!(
-                val.sema_type_id(),
-                TypeId::U8 | TypeId::U16 | TypeId::U32 | TypeId::U64
-            )
-        };
+        // Check VirTypeTable for unsigned status; for UNKNOWN types default to signed.
+        let is_unsigned = val.type_id != VirTypeId::UNKNOWN && vir_is_unsigned(val.type_id, table);
         if is_unsigned {
             return uextend_const(builder, target, val.value);
         } else {
