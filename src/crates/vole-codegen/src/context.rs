@@ -433,7 +433,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is a union type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[inline]
     pub fn vir_query_is_union(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
@@ -444,20 +444,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Check if a sema `TypeId` is the unknown type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// Check if a sema `TypeId` is the unknown type.
+    ///
+    /// Arena-only: `VirTypeId::UNKNOWN` is ambiguous — it means both "not found
+    /// in mapping" and "genuinely unknown type".
     #[inline]
     pub fn vir_query_is_unknown(&self, type_id: TypeId) -> bool {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_unknown(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_unknown(vir_ty, self.vir_type_table())
-        }
+        self.arena().is_unknown(type_id)
     }
 
     /// Check if a sema `TypeId` is a payload-carrying union, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// with arena fallback for unmapped monomorphized types.
     #[inline]
     pub fn vir_query_is_payload_union(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
@@ -469,7 +466,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is void, using VirTypeTable with arena
-    /// fallback for monomorphized types.
+    /// fallback for unmapped monomorphized types.
     #[inline]
     pub fn vir_query_is_void(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
@@ -481,7 +478,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is a fallible type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[inline]
     pub fn vir_query_is_fallible(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
@@ -493,7 +490,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is a wide fallible (i128 success type), using
-    /// VirTypeTable with arena fallback for monomorphized types.
+    /// VirTypeTable with arena fallback for unmapped monomorphized types.
     #[inline]
     pub fn vir_query_is_wide_fallible(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
@@ -505,7 +502,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is a wide type (i128/f128), using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// with arena fallback for unmapped monomorphized types.
     #[inline]
     pub fn vir_query_is_wide(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
@@ -517,7 +514,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is an interface type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[inline]
     pub fn vir_query_is_interface(&self, type_id: TypeId) -> bool {
         let vir_ty = self.vir_lookup(type_id);
@@ -589,21 +586,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Check if a sema `TypeId` is a sentinel type (Nil, Done, etc.), using
-    /// VirTypeTable with arena fallback for monomorphized types.
+    /// Check if a sema `TypeId` is a sentinel type.
+    ///
+    /// Arena-only: VIR translates sentinels as `VirType::Struct` — there is no
+    /// dedicated sentinel variant yet, so `VirTypeTable::is_sentinel` misses them.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_sentinel(&self, type_id: TypeId) -> bool {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_sentinel(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_sentinel(vir_ty, self.vir_type_table())
-        }
+        self.arena().is_sentinel(type_id)
     }
 
     /// Check if a sema `TypeId` is a function type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_function(&self, type_id: TypeId) -> bool {
@@ -616,7 +610,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is an unsigned integer type, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// with arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_unsigned(&self, type_id: TypeId) -> bool {
@@ -628,21 +622,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Check if a sema `TypeId` is a SelfType placeholder, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// Check if a sema `TypeId` is a SelfType placeholder.
+    ///
+    /// Arena-only: VIR translates `Placeholder(SelfType)` as `VirType::Unknown`,
+    /// making it indistinguishable from genuinely unknown types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_self_type(&self, type_id: TypeId) -> bool {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_self_type(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_self_type(vir_ty, self.vir_type_table())
-        }
+        self.arena().is_self_type(type_id)
     }
 
     /// Check if a sema `TypeId` is an integer type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_integer(&self, type_id: TypeId) -> bool {
@@ -655,7 +646,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is a floating point type, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// with arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_float(&self, type_id: TypeId) -> bool {
@@ -668,7 +659,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is the string type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_string(&self, type_id: TypeId) -> bool {
@@ -681,7 +672,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is an optional type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_optional(&self, type_id: TypeId) -> bool {
@@ -694,7 +685,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is an array type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_array(&self, type_id: TypeId) -> bool {
@@ -707,7 +698,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is a runtime iterator type, using VirTypeTable
-    /// with arena fallback for monomorphized types.
+    /// with arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_runtime_iterator(&self, type_id: TypeId) -> bool {
@@ -720,7 +711,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is the handle type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_handle(&self, type_id: TypeId) -> bool {
@@ -965,7 +956,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a type contains any type parameter anywhere in its structure,
-    /// using VirTypeTable with arena fallback for monomorphized types.
+    /// using VirTypeTable with arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_contains_type_param(&self, type_id: TypeId) -> bool {
@@ -1018,7 +1009,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Check if a sema `TypeId` is a class type, using VirTypeTable with
-    /// arena fallback for monomorphized types.
+    /// arena fallback for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_class(&self, type_id: TypeId) -> bool {

@@ -364,15 +364,13 @@ impl<'a> Compiler<'a> {
         self.arena().all_concrete_runtime_iterator_elem_types()
     }
 
-    /// Check if a type is the `Self` type, using VirTypeTable with arena fallback.
+    /// Check if a type is the `Self` type.
+    ///
+    /// Arena-only: VIR translates `Placeholder(SelfType)` as `VirType::Unknown`,
+    /// making it indistinguishable from genuinely unknown types.
     #[inline]
     fn vir_query_is_self_type(&self, type_id: TypeId) -> bool {
-        let vir_ty = self.vir_lookup(type_id);
-        if vir_ty == VirTypeId::UNKNOWN {
-            self.arena().is_self_type(type_id)
-        } else {
-            crate::types::vir_conversions::vir_is_self_type(vir_ty, self.vir_type_table())
-        }
+        self.arena().is_self_type(type_id)
     }
 
     /// Unwrap a type parameter to its `NameId`, using VirTypeTable with arena fallback.
@@ -433,7 +431,8 @@ impl<'a> Compiler<'a> {
         self.arena().unwrap_fallible(type_id)
     }
 
-    /// Check if a type is a union, using VirTypeTable with arena fallback.
+    /// Check if a type is a union, using VirTypeTable with arena fallback
+    /// for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     fn vir_query_is_union(&self, type_id: TypeId) -> bool {
@@ -445,7 +444,8 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Check if a type is void, using VirTypeTable with arena fallback.
+    /// Check if a type is void, using VirTypeTable with arena fallback
+    /// for unmapped monomorphized types.
     #[allow(dead_code)]
     #[inline]
     fn vir_query_is_void(&self, type_id: TypeId) -> bool {
