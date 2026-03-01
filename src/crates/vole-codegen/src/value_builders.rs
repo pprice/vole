@@ -755,4 +755,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.iconst_cached(payload_type, 0)
         }
     }
+
+    /// Load the payload from a union pointer using `VirTypeId` for size lookup.
+    ///
+    /// VirTypeId-native variant of [`load_union_payload`].
+    pub fn load_union_payload_v(
+        &mut self,
+        union_ptr: Value,
+        union_vir_ty: VirTypeId,
+        payload_type: cranelift::prelude::Type,
+    ) -> Value {
+        let union_size = self.type_size_v(union_vir_ty);
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            self.builder.ins().load(
+                payload_type,
+                MemFlags::new(),
+                union_ptr,
+                union_layout::PAYLOAD_OFFSET,
+            )
+        } else {
+            self.iconst_cached(payload_type, 0)
+        }
+    }
 }

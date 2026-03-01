@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
 use vole_frontend::Symbol;
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 use vole_vir::{VirBody, VirExpr, VirStmt};
 
 use crate::context::{Captures, Cg};
@@ -227,7 +227,7 @@ fn emit_implicit_return(
 
             if is_wide {
                 // Wide fallible (i128 success): load low/high from offset 8/16
-                let union_size = cg.type_size(cg.cv_type_id(&value));
+                let union_size = cg.type_size_v(value.type_id);
                 let (low, high) = if union_size > union_layout::TAG_ONLY_SIZE {
                     let low = cg.builder.ins().load(
                         types::I64,
@@ -246,7 +246,7 @@ fn emit_implicit_return(
                 };
                 cg.builder.ins().return_(&[tag, low, high]);
             } else {
-                let payload = cg.load_union_payload(value.value, cg.cv_type_id(&value), types::I64);
+                let payload = cg.load_union_payload_v(value.value, value.type_id, types::I64);
                 cg.builder.ins().return_(&[tag, payload]);
             }
         } else if let Some(ret_type_id) = cg.return_type
@@ -368,9 +368,9 @@ fn compile_trailing_vir_expr(
     let skip_var = extract_vir_rc_skip_var(cg, vir_expr);
 
     if skip_var.is_none() && value.is_borrowed() {
-        if cg.rc_state(cg.cv_type_id(&value)).needs_cleanup() {
-            cg.emit_rc_inc_for_type(value.value, cg.cv_type_id(&value))?;
-        } else if let Some(rc_tags) = cg.rc_state(cg.cv_type_id(&value)).union_variants() {
+        if cg.rc_state_v(value.type_id).needs_cleanup() {
+            cg.emit_rc_inc_for_type_v(value.value, value.type_id)?;
+        } else if let Some(rc_tags) = cg.rc_state_v(value.type_id).union_variants() {
             cg.emit_union_rc_inc(value.value, rc_tags)?;
         }
     }
@@ -418,9 +418,9 @@ fn compile_vir_block_body(
         };
         let mut value = value;
         if skip_var.is_none() && value.is_borrowed() {
-            if cg.rc_state(cg.cv_type_id(&value)).needs_cleanup() {
-                cg.emit_rc_inc_for_type(value.value, cg.cv_type_id(&value))?;
-            } else if let Some(rc_tags) = cg.rc_state(cg.cv_type_id(&value)).union_variants() {
+            if cg.rc_state_v(value.type_id).needs_cleanup() {
+                cg.emit_rc_inc_for_type_v(value.value, value.type_id)?;
+            } else if let Some(rc_tags) = cg.rc_state_v(value.type_id).union_variants() {
                 cg.emit_union_rc_inc(value.value, rc_tags)?;
             }
         }
@@ -537,15 +537,10 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
     env: &CompileEnv<'ctx>,
     vir_func: &vole_vir::func::VirFunction,
 ) -> CodegenResult<()> {
-    let return_type_id = Some(crate::types::vir_conversions::vir_to_sema_type_id(
-        vir_func.return_type,
-        &env.analyzed.vir_program().type_table,
-        env.analyzed.type_arena(),
-    ))
-    .filter(|id| !id.is_void());
+    let has_return = vir_func.return_type != VirTypeId::VOID;
 
     // Auto-detect sret convention.
-    let skip_block_params = if return_type_id.is_some() {
+    let skip_block_params = if has_return {
         if let Some(flat_count) = crate::types::vir_struct_helpers::vir_struct_flat_slot_count(
             vir_func.return_type,
             &env.analyzed.vir_program().type_table,
@@ -569,31 +564,37 @@ pub(crate) fn compile_vir_monomorph_function<'ctx>(
     builder.switch_to_block(entry_block);
 
     let block_params = builder.block_params(entry_block).to_vec();
-    let mut variables: FxHashMap<Symbol, (Variable, TypeId)> = FxHashMap::default();
     let ptr = codegen_ctx.ptr_type();
     let vir_table = &env.analyzed.vir_program().type_table;
 
-    for (i, (name, type_id, _vir_ty)) in vir_func.params.iter().enumerate() {
-        let cl_ty = crate::types::vir_conversions::vir_type_to_cranelift(*type_id, vir_table, ptr);
-        let var = builder.declare_var(cl_ty);
-        builder.def_var(var, block_params[skip_block_params + i]);
-        variables.insert(
-            *name,
-            (
-                var,
-                crate::types::vir_conversions::vir_to_sema_type_id(
-                    *type_id,
-                    vir_table,
-                    env.analyzed.type_arena(),
-                ),
-            ),
-        );
+    // Declare Cranelift variables for each param (type conversion deferred to Cg bridge).
+    let param_info: Vec<(Symbol, Variable, VirTypeId)> = vir_func
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, (name, vir_ty, _))| {
+            let cl_ty =
+                crate::types::vir_conversions::vir_type_to_cranelift(*vir_ty, vir_table, ptr);
+            let var = builder.declare_var(cl_ty);
+            builder.def_var(var, block_params[skip_block_params + i]);
+            (*name, var, *vir_ty)
+        })
+        .collect();
+
+    // Create Cg first, then use its bridge method for TypeId conversions.
+    let mut cg = Cg::new(&mut builder, codegen_ctx, env)
+        .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline);
+
+    // Populate vars using Cg's cv_type_id_from_vir bridge.
+    for (name, var, vir_ty) in &param_info {
+        cg.vars
+            .insert(*name, (*var, cg.cv_type_id_from_vir(*vir_ty)));
     }
 
-    let mut cg = Cg::new(&mut builder, codegen_ctx, env)
-        .with_callable_backend_preference(crate::CallableBackendPreference::PreferInline)
-        .with_vars(variables)
-        .with_return_type(return_type_id);
+    // Set return type using Cg's bridge.
+    if has_return {
+        cg.return_type = Some(cg.cv_type_id_from_vir(vir_func.return_type));
+    }
 
     compile_vir_body_with_cg(&mut cg, &vir_func.body, DefaultReturn::Empty)?;
 

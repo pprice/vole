@@ -43,14 +43,8 @@ impl Compiler<'_> {
     /// and registers them in `global_module_bindings` for use during compilation.
     pub(super) fn register_global_module_bindings(&mut self) {
         let vir = self.analyzed.vir_program();
-        let type_table = &vir.type_table;
-        let type_arena = self.analyzed.type_arena();
         for (&binding_sym, &(module_id, export_name, vir_export_ty)) in &vir.module_bindings {
-            let export_type_id = crate::types::vir_conversions::vir_to_sema_type_id(
-                vir_export_ty,
-                type_table,
-                type_arena,
-            );
+            let export_type_id = self.cv_type_id_from_vir(vir_export_ty);
             self.global_module_bindings
                 .insert(binding_sym, (module_id, export_name, export_type_id));
         }
@@ -63,23 +57,17 @@ impl Compiler<'_> {
     /// pairs that should be inserted into `global_module_bindings` before compiling
     /// the module's function bodies.
     fn extract_module_destructured_bindings(
-        analyzed: &crate::AnalyzedProgram,
+        &self,
         module_path: &str,
     ) -> Vec<(Symbol, super::ModuleExportBinding)> {
-        let vir = analyzed.vir_program();
-        let type_table = &vir.type_table;
-        let type_arena = analyzed.type_arena();
+        let vir = self.analyzed.vir_program();
         let Some(module_bindings) = vir.module_module_bindings.get(module_path) else {
             return Vec::new();
         };
         module_bindings
             .iter()
             .map(|(&binding_sym, &(module_id, export_name, vir_export_ty))| {
-                let export_type_id = crate::types::vir_conversions::vir_to_sema_type_id(
-                    vir_export_ty,
-                    type_table,
-                    type_arena,
-                );
+                let export_type_id = self.cv_type_id_from_vir(vir_export_ty);
                 (binding_sym, (module_id, export_name, export_type_id))
             })
             .collect()
@@ -596,8 +584,7 @@ impl Compiler<'_> {
         // Register destructured import bindings for this module from VirProgram.
         // When a module uses `let { add } = import "./other"`, the binding must
         // be available during compilation of the module's function bodies.
-        let module_bindings =
-            Self::extract_module_destructured_bindings(self.analyzed, module_path);
+        let module_bindings = self.extract_module_destructured_bindings(module_path);
         let module_binding_keys: Vec<Symbol> = module_bindings.iter().map(|(k, _)| *k).collect();
         for (key, binding) in module_bindings {
             self.global_module_bindings.insert(key, binding);
