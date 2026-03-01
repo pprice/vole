@@ -430,14 +430,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         lookup.unwrap_or(VirTypeId::UNKNOWN)
     }
 
-    /// Check if a sema `TypeId` is a struct type.
+    /// Check if a sema `TypeId` is a struct type via VirTypeTable.
     ///
-    /// Always uses the arena path because the arena's `is_struct()` excludes
-    /// sentinel types (zero-field structs like Nil, Done, user-defined empties),
-    /// while VIR represents sentinels as `VirType::Struct` internally.
+    /// Excludes sentinel types (Nil, Done, user-defined empties) — matching the
+    /// arena's `is_struct()` semantics.
     #[inline]
     pub fn vir_query_is_struct(&self, type_id: TypeId) -> bool {
-        self.arena().is_struct(type_id)
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_is_struct(vir_ty, self.vir_type_table())
     }
 
     /// Check if a sema `TypeId` is a union type via VirTypeTable.
@@ -449,11 +449,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a sema `TypeId` is the unknown type.
     ///
-    /// Arena-only: `VirTypeId::UNKNOWN` is ambiguous — it means both "not found
-    /// in mapping" and "genuinely unknown type".
+    /// Constant check — `TypeId::UNKNOWN` is a well-known constant (no arena or
+    /// VirTypeTable state needed).  Cannot use `vir_lookup` because unmapped
+    /// types also resolve to `VirTypeId::UNKNOWN`, producing false positives.
     #[inline]
     pub fn vir_query_is_unknown(&self, type_id: TypeId) -> bool {
-        self.arena().is_unknown(type_id)
+        type_id.is_unknown()
     }
 
     /// Check if a sema `TypeId` is a payload-carrying union via VirTypeTable.
@@ -539,25 +540,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Map a sema `TypeId` to its Cranelift type via VirTypeTable.
     #[inline]
     pub fn vir_query_type_to_cranelift(&self, type_id: TypeId) -> Type {
-        // Sentinel types are always i8 (zero-field struct tag). VIR lacks a
-        // dedicated sentinel variant and maps them as Struct, which would
-        // incorrectly resolve to ptr_type. Guard with arena check first.
-        if self.arena().is_sentinel(type_id) {
+        let vir_ty = self.vir_lookup(type_id);
+        // Sentinel types are always i8 (zero-field struct tag). VIR maps them
+        // as Struct, which would incorrectly resolve to ptr_type.
+        if crate::types::vir_conversions::vir_is_sentinel(vir_ty, self.vir_type_table()) {
             return types::I8;
         }
-        let vir_ty = self.vir_lookup(type_id);
         let ptr = self.ptr_type();
         crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
     }
 
-    /// Check if a sema `TypeId` is a sentinel type.
-    ///
-    /// Arena-only: VIR translates sentinels as `VirType::Struct` — there is no
-    /// dedicated sentinel variant yet, so `VirTypeTable::is_sentinel` misses them.
+    /// Check if a sema `TypeId` is a sentinel type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_sentinel(&self, type_id: TypeId) -> bool {
-        self.arena().is_sentinel(type_id)
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_is_sentinel(vir_ty, self.vir_type_table())
     }
 
     /// Check if a sema `TypeId` is a function type via VirTypeTable.
@@ -873,13 +871,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::types::vir_conversions::vir_contains_type_param(vir_ty, self.vir_type_table())
     }
 
-    /// Check if a sema `TypeId` is a numeric type (integer or float).
-    ///
-    /// Constant check — delegates to `TypeId::is_numeric()`, no arena state needed.
+    /// Check if a sema `TypeId` is a numeric type (integer or float) via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_numeric(&self, type_id: TypeId) -> bool {
-        self.arena().is_numeric(type_id)
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_is_numeric(vir_ty, self.vir_type_table())
     }
 
     /// Get the `TypeId` for the `unknown` type.
@@ -946,13 +943,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().unwrap_optional(type_id)
     }
 
-    /// Check if a sema `TypeId` is the nil type.
-    ///
-    /// This is a constant check — no VirTypeTable query needed.
+    /// Check if a sema `TypeId` is the nil type via VirTypeTable.
     #[allow(dead_code)]
     #[inline]
     pub fn vir_query_is_nil(&self, type_id: TypeId) -> bool {
-        self.arena().is_nil(type_id)
+        let vir_ty = self.vir_lookup(type_id);
+        crate::types::vir_conversions::vir_is_nil(vir_ty, self.vir_type_table())
     }
 
     /// Unwrap an error or struct type to its `TypeDefId`, using arena.

@@ -447,7 +447,10 @@ pub(crate) fn vir_unwrap_class(
 
 /// Check if a `VirTypeId` is a value-type struct.
 pub(crate) fn vir_is_struct(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
-    matches!(table.get(vir_ty), VirType::Struct { .. })
+    // Sentinel types (Nil, Done, user-defined empties) are VirType::Struct
+    // internally but not treated as structs for codegen purposes — matching
+    // the arena's `is_struct()` which excludes them.
+    !table.is_sentinel(vir_ty) && matches!(table.get(vir_ty), VirType::Struct { .. })
 }
 
 /// Unwrap a struct type, returning its `TypeDefId` and type arguments.
@@ -736,6 +739,11 @@ pub(crate) fn vir_is_float(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
         table.get(vir_ty),
         VirType::Primitive(VirPrimitiveKind::F32 | VirPrimitiveKind::F64)
     )
+}
+
+/// Check if a `VirTypeId` is a numeric type (integer or float).
+pub(crate) fn vir_is_numeric(vir_ty: VirTypeId, table: &VirTypeTable) -> bool {
+    vir_is_integer(vir_ty, table) || vir_is_float(vir_ty, table)
 }
 
 /// Check if a `VirTypeId` is the handle type.

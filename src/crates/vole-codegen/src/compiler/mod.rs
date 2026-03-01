@@ -478,13 +478,12 @@ impl<'a> Compiler<'a> {
     /// Map a sema `TypeId` to its Cranelift type via VirTypeTable.
     #[inline]
     fn vir_query_type_to_cranelift(&self, type_id: TypeId) -> clif_types::Type {
-        // Sentinel types are always i8 (zero-field struct tag). VIR lacks a
-        // dedicated sentinel variant and maps them as Struct, which would
-        // incorrectly resolve to ptr_type. Guard with arena check first.
-        if self.arena().is_sentinel(type_id) {
+        let vir_ty = self.vir_lookup(type_id);
+        // Sentinel types are always i8 (zero-field struct tag). VIR maps them
+        // as Struct, which would incorrectly resolve to ptr_type.
+        if crate::types::vir_conversions::vir_is_sentinel(vir_ty, self.vir_type_table()) {
             return clif_types::I8;
         }
-        let vir_ty = self.vir_lookup(type_id);
         let ptr = self.pointer_type;
         crate::types::vir_conversions::vir_type_to_cranelift(vir_ty, self.vir_type_table(), ptr)
     }
