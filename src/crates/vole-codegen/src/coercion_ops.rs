@@ -11,7 +11,7 @@ use cranelift::prelude::{InstBuilder, MemFlags, Type, Value, types};
 
 use smallvec::SmallVec;
 use vole_identity::{FunctionId, MethodId, NodeId, TypeId, VirTypeId};
-use vole_vir::numeric_model::{NumericCoercion, numeric_coercion};
+use vole_vir::numeric_model::{NumericCoercion, numeric_coercion_v};
 
 use crate::RuntimeKey;
 use crate::errors::{CodegenError, CodegenResult};
@@ -149,24 +149,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // This keeps union/interface coercions from comparing concrete targets against
         // unresolved TypeParam values.
         let resolved_target_type_id = self.try_substitute_type(target_type_id);
-        let resolved_value_type_id = self.try_substitute_type(self.cv_type_id(&value));
+        let resolved_target_vir = self.vir_lookup(resolved_target_type_id);
+        let resolved_value_vir = self.try_substitute_type_v(value.type_id);
         let mut resolved_value = value;
-        resolved_value.type_id = self.vir_lookup(resolved_value_type_id);
+        resolved_value.type_id = resolved_value_vir;
 
-        let is_target_interface = self.vir_query_is_interface(resolved_target_type_id);
-        let is_value_interface = self.vir_query_is_interface(resolved_value_type_id);
-        let is_target_union = self.vir_query_is_union(resolved_target_type_id);
-        let is_value_union = self.vir_query_is_union(resolved_value_type_id);
+        let is_target_interface = self.vir_query_is_interface_v(resolved_target_vir);
+        let is_value_interface = self.vir_query_is_interface_v(resolved_value_vir);
+        let is_target_union = self.vir_query_is_union_v(resolved_target_vir);
+        let is_value_union = self.vir_query_is_union_v(resolved_value_vir);
+        // Note: vir_lookup maps unmapped TypeIds to VirTypeId::UNKNOWN as a
+        // fallback, so vir_query_is_unknown_v on target would produce false
+        // positives. Use TypeId-based constant check instead.
         let is_target_unknown = self.vir_query_is_unknown(resolved_target_type_id);
-        let is_value_unknown = self.vir_query_is_unknown(resolved_value_type_id);
-        let is_value_runtime_iterator = self.vir_query_is_runtime_iterator(resolved_value_type_id);
-        let is_target_numeric = self.vir_query_is_numeric(resolved_target_type_id);
-        let is_value_numeric = self.vir_query_is_numeric(resolved_value_type_id);
+        let is_value_unknown = self.vir_query_is_unknown_v(resolved_value_vir);
+        let is_value_runtime_iterator = self.vir_query_is_runtime_iterator_v(resolved_value_vir);
+        let is_target_numeric = self.vir_query_is_numeric_v(resolved_target_vir);
+        let is_value_numeric = self.vir_query_is_numeric_v(resolved_value_vir);
 
-        if is_target_numeric
-            && is_value_numeric
-            && resolved_target_type_id != resolved_value_type_id
-        {
+        if is_target_numeric && is_value_numeric && resolved_target_vir != resolved_value_vir {
             return self.coerce_numeric_to_type(resolved_value, resolved_target_type_id);
         }
         // RuntimeIterator is a concrete type that implements Iterator dispatch
@@ -197,7 +198,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 self.vir_lookup(target_type_id),
             ));
         }
-        let coercion = numeric_coercion(self.cv_type_id(&value), target_type_id);
+        let coercion = numeric_coercion_v(value.type_id, self.vir_lookup(target_type_id));
 
         let converted = match coercion {
             NumericCoercion::Identity => {
@@ -368,9 +369,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // is freed, so we need the extra reference to avoid use-after-free.
         if value.is_borrowed()
             && self.rc_scopes.has_active_scope()
-            && self.rc_state(self.cv_type_id(&value)).needs_cleanup()
+            && self
+                .rc_state(self.cv_type_id_from_vir(value.type_id))
+                .needs_cleanup()
         {
-            self.emit_rc_inc_for_type(value.value, self.cv_type_id(&value))?;
+            self.emit_rc_inc_for_type(value.value, self.cv_type_id_from_vir(value.type_id))?;
         }
         self.box_to_unknown_raw(value)
     }
@@ -394,7 +397,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
 
         // Get the runtime tag for this type
-        let tag = self.vir_query_unknown_type_tag(self.cv_type_id(&value));
+        let tag = self.vir_query_unknown_type_tag_v(value.type_id);
         let tag_val = self.iconst_cached(types::I64, tag as i64);
 
         // Convert value to i64 for storage
@@ -411,7 +414,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .bitcast(types::I32, MemFlags::new(), value.value);
             uextend_const(self.builder, types::I64, i32_val)
         } else if value.ty.is_int() && value.ty.bytes() < 8 {
-            if self.vir_query_is_unsigned(self.cv_type_id(&value)) {
+            if self.vir_query_is_unsigned_v(value.type_id) {
                 uextend_const(self.builder, types::I64, value.value)
             } else {
                 sextend_const(self.builder, types::I64, value.value)
