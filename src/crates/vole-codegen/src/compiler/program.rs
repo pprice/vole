@@ -778,8 +778,9 @@ impl Compiler<'_> {
             });
             let source_file_ptr = self.source_file_ptr();
             let env = compile_env!(self, module_interner, source_file_ptr);
+            let param_names: Vec<_> = vir.params.iter().map(|(name, _, _)| *name).collect();
             let gen_params = crate::generator::GeneratorParams {
-                func,
+                param_names: &param_names,
                 jit_func_id,
                 wrapper_func_key: func_key,
                 param_type_ids: &param_type_ids,
@@ -882,8 +883,9 @@ impl Compiler<'_> {
             });
             let source_file_ptr = self.source_file_ptr();
             let env = compile_env!(self, source_file_ptr);
+            let param_names: Vec<_> = vir.params.iter().map(|(name, _, _)| *name).collect();
             let gen_params = crate::generator::GeneratorParams {
-                func,
+                param_names: &param_names,
                 jit_func_id,
                 wrapper_func_key: func_key,
                 param_type_ids: &param_type_ids,

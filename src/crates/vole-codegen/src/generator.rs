@@ -14,7 +14,7 @@ use cranelift_codegen::ir::{FuncRef, Function};
 use cranelift_module::Module;
 use rustc_hash::FxHashMap;
 
-use vole_frontend::{FuncDecl, Symbol};
+use vole_frontend::Symbol;
 use vole_identity::TypeId;
 use vole_vir::VirBody;
 
@@ -27,7 +27,7 @@ use crate::{FunctionKey, RuntimeKey};
 
 /// Parameters for compiling a generator function.
 pub(crate) struct GeneratorParams<'a> {
-    pub func: &'a FuncDecl,
+    pub param_names: &'a [Symbol],
     pub jit_func_id: cranelift_module::FuncId,
     pub wrapper_func_key: FunctionKey,
     pub param_type_ids: &'a [TypeId],
@@ -64,12 +64,12 @@ pub(crate) fn compile_generator_function<'ctx>(
     codegen_ctx: &mut CodegenCtx<'ctx>,
     env: &CompileEnv<'ctx>,
 ) -> CodegenResult<()> {
-    let func = params.func;
+    let param_names = params.param_names;
     let param_type_ids = params.param_type_ids;
     let module_id = params.module_id;
     // Step 1: Compile the inner body function
     let (body_func_id, has_captures) = compile_generator_body(
-        func,
+        param_names,
         param_type_ids,
         module_id,
         params.vir_body,
@@ -102,7 +102,7 @@ pub(crate) fn compile_generator_function<'ctx>(
 ///
 /// Returns the declared FuncId and whether the function has captures.
 fn compile_generator_body<'ctx>(
-    func: &FuncDecl,
+    param_names: &[Symbol],
     param_type_ids: &[TypeId],
     module_id: Option<vole_identity::ModuleId>,
     vir_body: &VirBody,
@@ -134,9 +134,9 @@ fn compile_generator_body<'ctx>(
     // Build capture bindings: each parameter becomes a closure capture
     let mut capture_bindings: FxHashMap<Symbol, crate::lambda::CaptureBinding> =
         FxHashMap::default();
-    for (i, param) in func.params.iter().enumerate() {
+    for (i, &name) in param_names.iter().enumerate() {
         capture_bindings.insert(
-            param.name,
+            name,
             crate::lambda::CaptureBinding::new(i, param_type_ids[i]),
         );
     }
@@ -202,7 +202,6 @@ fn compile_generator_wrapper<'ctx>(
     codegen_ctx: &mut CodegenCtx<'ctx>,
     env: &CompileEnv<'ctx>,
 ) -> CodegenResult<()> {
-    let func = params.func;
     let param_type_ids = params.param_type_ids;
     let elem_type_id = params.elem_type_id;
     let ptr_type = codegen_ctx.ptr_type();
@@ -238,7 +237,7 @@ fn compile_generator_wrapper<'ctx>(
                 &block_params,
                 param_type_ids,
                 body_func_addr,
-                func.params.len(),
+                params.param_names.len(),
                 codegen_ctx,
                 env,
                 &mut builder,
