@@ -201,8 +201,6 @@ pub(crate) struct TypeMetadata {
     pub physical_slot_count: usize,
     /// The Vole type (Class) - interned TypeId handle
     pub vole_type: TypeId,
-    /// TypeDefId for sema lookups (method return types, etc.)
-    pub type_def_id: TypeDefId,
     /// Method info: method name -> method info
     pub method_infos: FxHashMap<NameId, MethodInfo>,
 }
@@ -238,17 +236,6 @@ pub(crate) fn module_name_id(
     analyzed
         .name_table()
         .name_id(module_id, &[sym], module_interner)
-}
-
-/// Look up a method NameId by Symbol with explicit interner (for cross-interner usage)
-pub(crate) fn method_name_id_with_interner(
-    analyzed: &AnalyzedProgram,
-    interner: &Interner,
-    name: Symbol,
-) -> Option<NameId> {
-    let name_table = analyzed.name_table();
-    let namer = NamerLookup::new(name_table, interner);
-    namer.method(name)
 }
 
 /// Look up a method NameId by string name (cross-interner safe)

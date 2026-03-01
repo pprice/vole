@@ -83,7 +83,6 @@ impl Compiler<'_> {
                 field_slots: FxHashMap::default(),
                 physical_slot_count: 0,
                 vole_type: vole_type_id,
-                type_def_id,
                 method_infos: FxHashMap::default(),
             },
         );
@@ -185,7 +184,6 @@ impl Compiler<'_> {
                 field_slots,
                 physical_slot_count,
                 vole_type: vole_type_id,
-                type_def_id,
                 method_infos,
             },
         );
@@ -392,7 +390,6 @@ impl Compiler<'_> {
                 field_slots: FxHashMap::default(),
                 physical_slot_count: 0,
                 vole_type: vole_type_id,
-                type_def_id,
                 method_infos: FxHashMap::default(),
             },
         );
@@ -428,7 +425,6 @@ impl Compiler<'_> {
                 field_slots: FxHashMap::default(),
                 physical_slot_count: 0,
                 vole_type: vole_type_id,
-                type_def_id,
                 method_infos: FxHashMap::default(),
             },
         );
@@ -479,7 +475,6 @@ impl Compiler<'_> {
                 field_slots: FxHashMap::default(),
                 physical_slot_count: 0,
                 vole_type: vole_type_id,
-                type_def_id,
                 method_infos: FxHashMap::default(),
             },
         );
@@ -630,7 +625,6 @@ impl Compiler<'_> {
                 field_slots,
                 physical_slot_count,
                 vole_type: vole_type_id,
-                type_def_id,
                 method_infos,
             },
         );

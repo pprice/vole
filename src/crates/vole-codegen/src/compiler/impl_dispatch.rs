@@ -2,7 +2,7 @@
 //!
 //! This module handles the "what-to-compile" logic for type methods:
 //! - Type method orchestration (`compile_type_methods`)
-//! - Individual method compilation (`compile_method`, `compile_default_method`)
+//! - Individual method compilation (`compile_method_by_id`)
 //! - Static method compilation (`compile_static_methods`)
 //! - Module type method compilation (`compile_module_type_methods` and helpers)
 //! - Shared helpers (`register_method_func`)
@@ -14,7 +14,7 @@ use super::{Compiler, DeclareMode, SelfParam};
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, TypeMetadata, type_id_to_cranelift};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
-use vole_frontend::ast::InterfaceMethod;
+use rustc_hash::FxHashSet;
 use vole_frontend::{Interner, Symbol};
 use vole_identity::{MethodId, ModuleId, TypeId};
 
@@ -44,13 +44,9 @@ impl Compiler<'_> {
     }
 
     /// Compile methods for a class by name.
-    pub(super) fn compile_class_methods(
-        &mut self,
-        name: Symbol,
-        program: &vole_frontend::Program,
-    ) -> CodegenResult<()> {
+    pub(super) fn compile_class_methods(&mut self, name: Symbol) -> CodegenResult<()> {
         let module_id = self.program_module();
-        self.compile_class_methods_in_module(name, program, module_id)
+        self.compile_class_methods_in_module(name, module_id)
     }
 
     /// Compile instance methods for a struct type by name.
@@ -58,7 +54,6 @@ impl Compiler<'_> {
         &mut self,
         name: Symbol,
         has_type_params: bool,
-        program: &vole_frontend::Program,
     ) -> CodegenResult<()> {
         // Skip generic structs - they're compiled via monomorphized instances
         if has_type_params {
@@ -74,14 +69,13 @@ impl Compiler<'_> {
             })?;
         let type_def = self.analyzed.get_type(type_def_id);
         let data = TypeMethodsData::from_vir(type_def, name);
-        self.compile_type_methods(data, program, module_id)
+        self.compile_type_methods(data, module_id)
     }
 
     /// Compile methods for a class using a specific module for type lookups.
     pub(super) fn compile_class_methods_in_module(
         &mut self,
         name: Symbol,
-        program: &vole_frontend::Program,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
         // Look up VirTypeDef to check if generic
@@ -98,14 +92,17 @@ impl Compiler<'_> {
             return Ok(());
         }
         let data = TypeMethodsData::from_vir(type_def, name);
-        self.compile_type_methods(data, program, module_id)
+        self.compile_type_methods(data, module_id)
     }
 
-    /// Core implementation for compiling methods of a class or struct
+    /// Core implementation for compiling methods of a class or struct.
+    ///
+    /// Iterates method IDs from VirTypeDef.methods and compiles class-body
+    /// and inherited default methods using VIR. Implement-block methods are
+    /// excluded -- they are compiled separately by the implement block path.
     fn compile_type_methods(
         &mut self,
         data: TypeMethodsData<'_>,
-        _program: &vole_frontend::Program,
         module_id: ModuleId,
     ) -> CodegenResult<()> {
         // Look up TypeDefId from name (needed as key for type_metadata)
@@ -140,156 +137,53 @@ impl Compiler<'_> {
                 )
             })?;
 
-        // Compile instance methods from VIR method IDs.
-        // VirTypeDef.methods includes ALL methods on the type (direct class-body,
-        // inherited defaults, implement-block), but only direct class-body methods
-        // should be compiled here.  Other methods are compiled by their own paths:
-        // - Inherited defaults (has_default=true) → default method compilation below
-        // - Implement-block methods (no VIR keyed by this MethodId) → implement block path
+        // Build sets of method IDs owned by implement blocks for this type.
+        // When a type has implement blocks, default methods from ALL interfaces
+        // are compiled by compile_iface_default_methods (which iterates
+        // implemented_interfaces, not just the implement block's interface).
+        let mut impl_instance_ids: FxHashSet<MethodId> = FxHashSet::default();
+        let mut impl_static_ids: FxHashSet<MethodId> = FxHashSet::default();
+        for entry in self.analyzed.implement_blocks_for_type(type_def_id) {
+            impl_instance_ids.extend(entry.instance_methods.iter().copied());
+            impl_static_ids.extend(entry.static_methods.iter().copied());
+        }
+        let has_impl_blocks = !impl_instance_ids.is_empty() || !impl_static_ids.is_empty();
+
+        // Compile instance methods from VIR method IDs, skipping:
+        // - implement-block direct methods (compiled by compile_implement_block)
+        // - inherited default methods when implement blocks exist
+        //   (compiled by compile_iface_default_methods for ALL interfaces)
+        // - methods without VIR bodies
         for &method_id in data.method_ids {
-            let method_def = self.analyzed.get_method(method_id);
-            // Skip inherited default methods
-            if method_def.has_default {
+            if impl_instance_ids.contains(&method_id) {
                 continue;
             }
-            // Skip methods without VIR (implement-block methods with duplicate MethodIds)
+            if has_impl_blocks {
+                let method_def = self.analyzed.get_method(method_id);
+                if method_def.has_default {
+                    // When implement blocks exist, compile_iface_default_methods
+                    // handles ALL default methods (from all interfaces, not just
+                    // the implement block's interface).
+                    continue;
+                }
+            }
             if self.analyzed.get_vir_method(method_id).is_none() {
                 continue;
             }
             self.compile_method_by_id(method_id, data.name, &metadata)?;
         }
 
-        // Compile default methods from implemented interfaces.
-        // Direct method names (for skipping explicitly implemented methods, cross-interner safe).
-        // Only include methods that we compiled above (non-default with VIR) plus
-        // methods from implement blocks (non-default without VIR but explicitly defined).
-        // This prevents the default path from re-compiling methods the class explicitly provides.
-        let direct_method_name_strs: std::collections::HashSet<String> = data
-            .method_ids
-            .iter()
-            .filter_map(|&mid| {
-                let md = self.analyzed.get_method(mid);
-                // Inherited defaults should NOT count as "explicitly implemented"
-                if md.has_default {
-                    return None;
-                }
-                self.analyzed.last_segment(md.name_id)
-            })
-            .collect();
-
-        // Collect interface name strings using query (avoids borrow conflicts with compile calls).
-        let interface_name_strs: Vec<String> = {
-            let query = self.analyzed;
-            query
-                .try_name_id(module_id, &[data.name])
-                .and_then(|type_name_id| query.try_type_def_id(type_name_id))
-                .map(|type_def_id| {
-                    query
-                        .implemented_interfaces(type_def_id)
-                        .into_iter()
-                        .filter_map(|interface_id| {
-                            query.last_segment(query.entity_type_name_id(interface_id))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-
-        // Collect (InterfaceMethod, is_from_module) pairs before any mutable operations.
-        // We clone the method data so we can release the borrow on self.analyzed.
-        struct DefaultMethodInfo {
-            method: InterfaceMethod,
-            /// True if from a module program (needs module interner for compilation).
-            from_module: bool,
-            /// The interner key (module path) if from_module is true.
-            module_path: Option<String>,
-        }
-        let mut default_methods_to_compile: Vec<DefaultMethodInfo> = Vec::new();
-        for interface_name_str in &interface_name_strs {
-            // Search main program first
-            let found_in_main = self
-                .analyzed
-                .program()
-                .declarations
-                .iter()
-                .find_map(|decl| {
-                    if let vole_frontend::Decl::Interface(iface) = decl {
-                        let name_str = self.analyzed.interner().resolve(iface.name);
-                        if name_str == interface_name_str {
-                            return Some(iface.methods.clone());
-                        }
-                    }
-                    None
-                });
-            if let Some(methods) = found_in_main {
-                for method in methods {
-                    let method_name_str = self.analyzed.interner().resolve(method.name).to_string();
-                    if method.body.is_some() && !direct_method_name_strs.contains(&method_name_str)
-                    {
-                        default_methods_to_compile.push(DefaultMethodInfo {
-                            method,
-                            from_module: false,
-                            module_path: None,
-                        });
-                    }
-                }
-                continue; // Found in main, no need to search modules
-            }
-
-            // Search module programs
-            let module_paths: Vec<String> =
-                self.analyzed.module_programs().keys().cloned().collect();
-            for module_path in module_paths {
-                let found = {
-                    let (prog, interner) = &self.analyzed.module_programs()[&module_path];
-                    prog.declarations.iter().find_map(|decl| {
-                        if let vole_frontend::Decl::Interface(iface) = decl {
-                            let name_str = interner.resolve(iface.name);
-                            if name_str == interface_name_str {
-                                return Some((iface.methods.clone(), interner.clone()));
-                            }
-                        }
-                        None
-                    })
-                };
-                if let Some((methods, mod_interner)) = found {
-                    for method in methods {
-                        let method_name_str = mod_interner.resolve(method.name).to_string();
-                        if method.body.is_some()
-                            && !direct_method_name_strs.contains(&method_name_str)
-                        {
-                            default_methods_to_compile.push(DefaultMethodInfo {
-                                method,
-                                from_module: true,
-                                module_path: Some(module_path.clone()),
-                            });
-                        }
-                    }
-                    break; // Found in this module, no need to search further
-                }
-            }
-        }
-
-        for info in default_methods_to_compile {
-            if info.from_module {
-                let module_path = info.module_path.as_deref().unwrap_or("");
-                let module_id = self.analyzed.module_id_or_main(module_path);
-                let module_interner = self.analyzed.module_programs()[module_path].1.clone();
-                self.compile_default_method_with_interner(
-                    &info.method,
-                    data.name,
-                    &metadata,
-                    &module_interner,
-                    Some(module_id),
-                )?;
-            } else {
-                self.compile_default_method(&info.method, data.name, &metadata)?;
-            }
-        }
-
-        // Compile static methods from VIR metadata
+        // Compile static methods from VIR metadata, excluding implement-block statics.
         if !data.static_method_ids.is_empty() {
-            self.compile_static_methods_by_id(data.static_method_ids, data.name, module_id)?;
+            let non_impl_statics: Vec<MethodId> = data
+                .static_method_ids
+                .iter()
+                .copied()
+                .filter(|id| !impl_static_ids.contains(id))
+                .collect();
+            if !non_impl_statics.is_empty() {
+                self.compile_static_methods_by_id(&non_impl_statics, data.name, module_id)?;
+            }
         }
 
         Ok(())
@@ -297,8 +191,9 @@ impl Compiler<'_> {
 
     /// Compile a single method by MethodId (VIR-based).
     ///
-    /// Uses VirMethodDef param_names to build parameter bindings instead of
-    /// reading AST FuncDecl params.
+    /// Uses VIR function params for Symbol bindings, ensuring correctness for
+    /// both direct methods and inherited default methods (including those from
+    /// module interfaces where param Symbols may differ from the main interner).
     fn compile_method_by_id(
         &mut self,
         method_id: MethodId,
@@ -334,7 +229,6 @@ impl Compiler<'_> {
 
         // Get param and return types from sema (pre-resolved signature)
         let method_def = self.analyzed.get_method(method_id);
-        let param_names = method_def.param_names.clone();
         let (param_type_ids, method_return_type_id) = {
             let (params, ret, _) = self
                 .vir_query_unwrap_function(method_def.signature_id)
@@ -344,24 +238,30 @@ impl Compiler<'_> {
             (params, Some(ret))
         };
 
-        // Get source file pointer and self symbol before borrowing ctx.func
-        let source_file_ptr = self.source_file_ptr();
-        let self_sym = self.self_symbol();
+        // Get VIR function (must be available at this point)
+        let vir_func = self
+            .analyzed
+            .get_vir_method(method_id)
+            .expect("VIR must be available for type method");
 
-        // Build params from VirMethodDef param_names (already excludes `self`)
+        // Build params using VIR function param Symbols (not interner lookup).
+        // This ensures correctness for inherited default methods from module
+        // interfaces, where param Symbols may come from a different interner.
+        //
+        // VIR function params may include an explicit `self` parameter (from
+        // `func foo(self: T, ...)`) which is NOT included in the method
+        // signature's param types (since codegen adds `self` separately via
+        // SelfParam::Pointer). If VIR has more params than the signature,
+        // skip the leading `self` entry to keep the zip aligned.
+        let vir_params_offset = vir_func.params.len().saturating_sub(param_type_ids.len());
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.arena();
-            let interner = self.analyzed.interner();
-            param_names
+            vir_func
+                .params
                 .iter()
+                .skip(vir_params_offset)
                 .zip(param_type_ids.iter())
-                .map(|(param_name, &type_id)| {
-                    let sym = interner.lookup(param_name).unwrap_or_else(|| {
-                        panic!(
-                            "compile_method_by_id: param '{}' not interned for {}::{}",
-                            param_name, type_name_str, method_name_str
-                        )
-                    });
+                .map(|(&(sym, _, _), &type_id)| {
                     let cranelift_type =
                         type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
                     (sym, type_id, cranelift_type)
@@ -369,8 +269,12 @@ impl Compiler<'_> {
                 .collect()
         };
 
-        // Check if a VIR function was lowered for this method
-        let vir_func = self.analyzed.get_vir_method(method_id);
+        // Get self Symbol from the VIR function's identity context.
+        // For module interface default methods, "self" may be a different Symbol
+        // than the main interner's. We look it up in the VIR body's interner context
+        // by using the method's defining type module.
+        let source_file_ptr = self.source_file_ptr();
+        let self_sym = self.self_symbol();
 
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -386,233 +290,13 @@ impl Compiler<'_> {
             );
             let self_binding = (self_sym, self_type_id, self.pointer_type);
             let config = FunctionCompileConfig::method(params, self_binding, method_return_type_id);
-            let vir = vir_func.expect("VIR must be available for type method");
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
                 &env,
                 config,
-                &vir.body,
+                &vir_func.body,
                 None,
-                None,
-            )?;
-        }
-
-        // Define the function
-        self.finalize_function(func_id)?;
-
-        Ok(())
-    }
-
-    /// Compile a default method from an interface, monomorphized for a concrete type
-    fn compile_default_method(
-        &mut self,
-        method: &InterfaceMethod,
-        type_name: Symbol,
-        metadata: &TypeMetadata,
-    ) -> CodegenResult<()> {
-        let type_name_str = self.analyzed.resolve_symbol(type_name).to_string();
-        let method_name_str = self.analyzed.resolve_symbol(method.name).to_string();
-
-        let method_name_id = self.method_name_id(method.name)?;
-        let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
-            CodegenError::not_found(
-                "default method info",
-                format!("{}::{}", type_name_str, method_name_str),
-            )
-        })?;
-        let func_key = method_info.func_key;
-
-        // Look up MethodId - interface default methods are now registered on implementing types
-        let semantic_method_id = self
-            .analyzed
-            .find_method(metadata.type_def_id, method_name_id)
-            .ok_or_else(|| {
-                CodegenError::internal_with_context(
-                    "interface default method not registered on implementing type",
-                    format!(
-                        "{}::{} (type_def_id={:?}, method_name_id={:?})",
-                        type_name_str, method_name_str, metadata.type_def_id, method_name_id
-                    ),
-                )
-            })?;
-
-        let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            CodegenError::not_found("default method", self.func_registry.display(func_key))
-        })?;
-
-        // Create method signature using pre-resolved MethodId
-        let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-        self.jit.ctx.func.signature = sig;
-
-        // Get param and return types from sema (pre-resolved signature)
-        let method_def = self.analyzed.get_method(semantic_method_id);
-        let (param_type_ids, return_type_id) = {
-            let (params, ret, _) = self
-                .vir_query_unwrap_function(method_def.signature_id)
-                .ok_or_else(|| {
-                    CodegenError::internal("method signature: expected function type")
-                })?;
-            (params, ret)
-        };
-
-        let param_types = self.type_ids_to_cranelift(&param_type_ids);
-        let params: Vec<_> = method
-            .params
-            .iter()
-            .zip(param_type_ids.iter())
-            .zip(param_types.iter())
-            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
-            .collect();
-
-        // Validate method body exists for default methods
-        let _body = method.body.as_ref().ok_or_else(|| {
-            CodegenError::internal_with_context("default method has no body", &*method_name_str)
-        })?;
-
-        // Get source file pointer and self binding (use metadata.vole_type for self type)
-        let source_file_ptr = self.source_file_ptr();
-        let self_sym = self.self_symbol();
-        let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
-
-        // Check if a VIR function was lowered for this method
-        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
-
-        // Create function builder and compile
-        let mut builder_ctx = FunctionBuilderContext::new();
-        {
-            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-            let env = compile_env!(self, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(
-                &mut self.jit.module,
-                &mut self.func_registry,
-                &mut self.pending_monomorphs,
-            );
-
-            let config = FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
-            let vir = vir_func.expect("VIR must be available for default method");
-            compile_function_inner_with_vir(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                &vir.body,
-                None,
-                None,
-            )?;
-        }
-
-        // Define the function
-        self.finalize_function(func_id)?;
-
-        Ok(())
-    }
-
-    /// Compile a default method from a module interface, using the module interner.
-    ///
-    /// This is needed when the default method body uses symbols from a module interner
-    /// (e.g., stdlib `Comparable.lt` uses stdlib symbols for `self` and `compare`).
-    fn compile_default_method_with_interner(
-        &mut self,
-        method: &InterfaceMethod,
-        type_name: Symbol,
-        metadata: &TypeMetadata,
-        interner: &Interner,
-        module_id: Option<ModuleId>,
-    ) -> CodegenResult<()> {
-        let type_name_str = self.analyzed.resolve_symbol(type_name).to_string();
-        let method_name_str = interner.resolve(method.name).to_string();
-
-        // Look up method NameId using the module interner (cross-interner safe)
-        let method_name_id =
-            crate::types::method_name_id_with_interner(self.analyzed, interner, method.name)
-                .ok_or_else(|| CodegenError::not_found("method name_id", &method_name_str))?;
-
-        let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
-            CodegenError::not_found(
-                "default method info",
-                format!("{}::{}", type_name_str, method_name_str),
-            )
-        })?;
-        let func_key = method_info.func_key;
-
-        let semantic_method_id = self
-            .analyzed
-            .find_method(metadata.type_def_id, method_name_id)
-            .ok_or_else(|| {
-                CodegenError::internal_with_context(
-                    "interface default method not registered on implementing type",
-                    format!(
-                        "{}::{} (type_def_id={:?}, method_name_id={:?})",
-                        type_name_str, method_name_str, metadata.type_def_id, method_name_id
-                    ),
-                )
-            })?;
-
-        let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            CodegenError::not_found("default method", self.func_registry.display(func_key))
-        })?;
-
-        // Create method signature using pre-resolved MethodId
-        let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-        self.jit.ctx.func.signature = sig;
-
-        // Get param and return types from sema (pre-resolved signature)
-        let method_def = self.analyzed.get_method(semantic_method_id);
-        let (param_type_ids, return_type_id) = {
-            let (params, ret, _) = self
-                .vir_query_unwrap_function(method_def.signature_id)
-                .ok_or_else(|| {
-                    CodegenError::internal("method signature: expected function type")
-                })?;
-            (params, ret)
-        };
-
-        let param_types = self.type_ids_to_cranelift(&param_type_ids);
-        let params: Vec<_> = method
-            .params
-            .iter()
-            .zip(param_type_ids.iter())
-            .zip(param_types.iter())
-            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
-            .collect();
-
-        // Validate method body exists for default methods
-        let _body = method.body.as_ref().ok_or_else(|| {
-            CodegenError::internal_with_context("default method has no body", &*method_name_str)
-        })?;
-
-        // Use the module interner's "self" symbol so the body's identifier references
-        // for `self` (which use the module interner) bind correctly.
-        let source_file_ptr = self.source_file_ptr();
-        let self_sym = interner
-            .lookup("self")
-            .ok_or_else(|| CodegenError::internal("'self' not interned in module interner"))?;
-        let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
-
-        // Check if a VIR function was lowered for this method
-        let vir_func = self.analyzed.get_vir_method(semantic_method_id);
-
-        // Create function builder and compile using the module interner
-        let mut builder_ctx = FunctionBuilderContext::new();
-        {
-            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-            let env = compile_env!(self, interner, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(
-                &mut self.jit.module,
-                &mut self.func_registry,
-                &mut self.pending_monomorphs,
-            );
-
-            let config = FunctionCompileConfig::method(params, self_binding, Some(return_type_id));
-            let vir = vir_func.expect("VIR must be available for module default method");
-            compile_function_inner_with_vir(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                &vir.body,
-                module_id,
                 None,
             )?;
         }
@@ -638,10 +322,9 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let method_name_id = method_def.name_id;
             let method_name_str = self
                 .analyzed
-                .last_segment(method_name_id)
+                .last_segment(method_def.name_id)
                 .unwrap_or_default();
 
             // Function key from EntityRegistry full_name_id
@@ -663,7 +346,6 @@ impl Compiler<'_> {
 
             // Get param and return types from sema (pre-resolved signature)
             let method_def = self.analyzed.get_method(method_id);
-            let param_names = method_def.param_names.clone();
             let (param_type_ids, return_type_id) = {
                 let (params, ret, _) = self
                     .vir_query_unwrap_function(method_def.signature_id)
@@ -673,24 +355,26 @@ impl Compiler<'_> {
                 (params, ret)
             };
 
-            let param_types = self.type_ids_to_cranelift(&param_type_ids);
-            let params: Vec<_> = param_names
-                .iter()
-                .zip(param_type_ids.iter())
-                .zip(param_types.iter())
-                .map(|((name, &type_id), &cranelift_type)| {
-                    let sym = self.analyzed.interner().lookup(name).unwrap_or_else(|| {
-                        panic!(
-                            "compile_static_methods_by_id: param '{}' not interned for ::{}",
-                            name, method_name_str
-                        )
-                    });
-                    (sym, type_id, cranelift_type)
-                })
-                .collect();
+            // Get VIR function (must be available)
+            let vir_func = self
+                .analyzed
+                .get_vir_method(method_id)
+                .expect("VIR must be available for static method");
 
-            // Check if a VIR function was lowered for this method
-            let vir_func = self.analyzed.get_vir_method(method_id);
+            // Build params using VIR function param Symbols
+            let params: Vec<_> = {
+                let arena_ref = self.arena();
+                vir_func
+                    .params
+                    .iter()
+                    .zip(param_type_ids.iter())
+                    .map(|(&(sym, _, _), &type_id)| {
+                        let cranelift_type =
+                            type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
+                        (sym, type_id, cranelift_type)
+                    })
+                    .collect()
+            };
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
@@ -705,13 +389,12 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(params, Some(return_type_id));
-                let vir = vir_func.expect("VIR must be available for static method");
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
                     &env,
                     config,
-                    &vir.body,
+                    &vir_func.body,
                     None,
                     None,
                 )?;
@@ -830,15 +513,13 @@ impl Compiler<'_> {
             if method_def.has_default {
                 continue;
             }
-            let method_name_id = method_def.name_id;
-            let method_name_str = self
-                .analyzed
-                .last_segment(method_name_id)
-                .unwrap_or_default();
-            let param_names = method_def.param_names.clone();
 
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                let method_name_str = self
+                    .analyzed
+                    .last_segment(method_def.name_id)
+                    .unwrap_or_default();
                 CodegenError::not_found("method", format!("{}::{}", type_name_str, method_name_str))
             })?;
 
@@ -864,30 +545,35 @@ impl Compiler<'_> {
                 (params, Some(ret))
             };
 
+            // Get VIR function (must be available)
+            let vir_func = self
+                .analyzed
+                .get_vir_method(method_id)
+                .expect("VIR must be available for module method");
+
             let self_sym = module_info
                 .interner
                 .lookup("self")
                 .ok_or_else(|| CodegenError::internal("method compilation: 'self' not interned"))?;
-            // Build params from VirMethodDef param_names (already excludes self)
-            let param_types = self.type_ids_to_cranelift(&param_type_ids);
-            let params: Vec<_> = param_names
-                .iter()
-                .zip(param_type_ids.iter())
-                .zip(param_types.iter())
-                .map(|((name, &type_id), &cranelift_type)| {
-                    let sym = module_info.interner.lookup(name).unwrap_or_else(|| {
-                        panic!(
-                            "compile_module_type_instance_methods: param '{}' not interned for {}::{}",
-                            name, type_name_str, method_name_str
-                        )
-                    });
-                    (sym, type_id, cranelift_type)
-                })
-                .collect();
+            // Build params using VIR function param Symbols.
+            // Skip leading `self` param if VIR has more params than the signature
+            // (explicit `self: T` in source is excluded from the method signature).
+            let vir_params_offset = vir_func.params.len().saturating_sub(param_type_ids.len());
+            let params: Vec<_> = {
+                let arena_ref = self.arena();
+                vir_func
+                    .params
+                    .iter()
+                    .skip(vir_params_offset)
+                    .zip(param_type_ids.iter())
+                    .map(|(&(sym, _, _), &type_id)| {
+                        let cranelift_type =
+                            type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
+                        (sym, type_id, cranelift_type)
+                    })
+                    .collect()
+            };
             let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
-
-            // Check if a VIR function was lowered for this method
-            let vir_func = self.analyzed.get_vir_method(method_id);
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
@@ -902,13 +588,12 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::method(params, self_binding, return_type_id);
-                let vir = vir_func.expect("VIR must be available for module method");
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
                     &env,
                     config,
-                    &vir.body,
+                    &vir_func.body,
                     Some(module_info.module_id),
                     None,
                 )?;
@@ -941,7 +626,6 @@ impl Compiler<'_> {
                 .analyzed
                 .last_segment(method_def.name_id)
                 .unwrap_or_default();
-            let param_names = method_def.param_names.clone();
 
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
@@ -966,24 +650,26 @@ impl Compiler<'_> {
                 (params, Some(ret))
             };
 
-            let param_types = self.type_ids_to_cranelift(&param_type_ids);
-            let params: Vec<_> = param_names
-                .iter()
-                .zip(param_type_ids.iter())
-                .zip(param_types.iter())
-                .map(|((name, &type_id), &cranelift_type)| {
-                    let sym = module_info.interner.lookup(name).unwrap_or_else(|| {
-                        panic!(
-                            "compile_module_type_static_methods: param '{}' not interned for {}::{}",
-                            name, type_name_str, method_name_str
-                        )
-                    });
-                    (sym, type_id, cranelift_type)
-                })
-                .collect();
+            // Get VIR function (must be available)
+            let vir_func = self
+                .analyzed
+                .get_vir_method(method_id)
+                .expect("VIR must be available for module static method");
 
-            // Check if a VIR function was lowered for this method
-            let vir_func = self.analyzed.get_vir_method(method_id);
+            // Build params using VIR function param Symbols
+            let params: Vec<_> = {
+                let arena_ref = self.arena();
+                vir_func
+                    .params
+                    .iter()
+                    .zip(param_type_ids.iter())
+                    .map(|(&(sym, _, _), &type_id)| {
+                        let cranelift_type =
+                            type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
+                        (sym, type_id, cranelift_type)
+                    })
+                    .collect()
+            };
 
             // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
@@ -998,13 +684,12 @@ impl Compiler<'_> {
                 );
 
                 let config = FunctionCompileConfig::top_level(params, return_type_id);
-                let vir = vir_func.expect("VIR must be available for module static method");
                 compile_function_inner_with_vir(
                     builder,
                     &mut codegen_ctx,
                     &env,
                     config,
-                    &vir.body,
+                    &vir_func.body,
                     Some(module_info.module_id),
                     None,
                 )?;

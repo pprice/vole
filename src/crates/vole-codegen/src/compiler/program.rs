@@ -295,14 +295,14 @@ impl Compiler<'_> {
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
                     // Compile scoped function/class/implement bodies (recursive into nested tests)
-                    self.compile_tests_scoped_bodies(tests_decl, program)?;
+                    self.compile_tests_scoped_bodies(tests_decl)?;
                 }
                 Decl::Let(_) | Decl::LetTuple(_) => {
                     // Globals are handled during identifier lookup
                     // LetTuple (destructuring imports) don't generate code
                 }
                 Decl::Class(class) => {
-                    self.compile_class_methods(class.name, program)?;
+                    self.compile_class_methods(class.name)?;
                 }
                 Decl::Interface(_) => {
                     // Interface methods are compiled when used via implement blocks
@@ -315,7 +315,6 @@ impl Compiler<'_> {
                         self.compile_struct_methods(
                             struct_decl.name,
                             !struct_decl.type_params.is_empty(),
-                            program,
                         )?;
                     }
                 }
@@ -1095,11 +1094,7 @@ impl Compiler<'_> {
 
     /// Compile scoped function and method bodies within a tests block (pass 2).
     /// Does NOT compile test bodies (those are compiled via compile_all_tests).
-    fn compile_tests_scoped_bodies(
-        &mut self,
-        tests_decl: &TestsDecl,
-        program: &Program,
-    ) -> CodegenResult<()> {
+    fn compile_tests_scoped_bodies(&mut self, tests_decl: &TestsDecl) -> CodegenResult<()> {
         let program_module = self.program_module();
         // Scoped types are registered under the virtual module in sema
         let virtual_module_id = self
@@ -1128,14 +1123,14 @@ impl Compiler<'_> {
                     self.compile_function(func)?;
                 }
                 Decl::Class(class) => {
-                    self.compile_class_methods_in_module(class.name, program, virtual_module_id)?;
+                    self.compile_class_methods_in_module(class.name, virtual_module_id)?;
                 }
                 Decl::Implement(_) => {
                     // Compiled via VirImplementBlockEntry in the main compile pass.
                 }
                 Decl::Tests(nested_tests) => {
                     // Recursively compile nested tests block scoped bodies
-                    self.compile_tests_scoped_bodies(nested_tests, program)?;
+                    self.compile_tests_scoped_bodies(nested_tests)?;
                 }
                 _ => {
                     // Let declarations are handled during test body compilation

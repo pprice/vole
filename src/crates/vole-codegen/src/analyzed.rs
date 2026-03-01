@@ -309,11 +309,6 @@ impl AnalyzedProgram {
         self.entity_metadata().type_by_name(name_id)
     }
 
-    /// Resolve method NameId by Symbol.
-    pub(crate) fn try_method_name_id(&self, name: Symbol) -> Option<NameId> {
-        self.vir_program.try_method_name_id(name)
-    }
-
     /// Resolve method NameId by short string.
     pub(crate) fn try_method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
         self.vir_program.try_method_name_id_by_str(name_str)
@@ -449,6 +444,24 @@ impl AnalyzedProgram {
     /// Return all interfaces implemented by a type definition.
     pub(crate) fn implemented_interfaces(&self, type_def_id: TypeDefId) -> Vec<TypeDefId> {
         self.entity_metadata().implemented_interfaces(type_def_id)
+    }
+
+    /// Return all implement block entries (main program + all modules) that
+    /// target the given type.  Used to build the set of implement-block method
+    /// IDs so `compile_type_methods` can skip them (they are compiled by the
+    /// implement block path instead).
+    pub(crate) fn implement_blocks_for_type(
+        &self,
+        type_def_id: TypeDefId,
+    ) -> impl Iterator<Item = &vole_vir::VirImplementBlockEntry> {
+        let em = &self.vir_program().entity_metadata;
+        em.implement_blocks()
+            .iter()
+            .chain(
+                em.all_module_implement_blocks()
+                    .flat_map(|(_, entries)| entries.iter()),
+            )
+            .filter(move |entry| entry.type_def_id == type_def_id)
     }
 
     /// Return external binding metadata for a method, when available.
