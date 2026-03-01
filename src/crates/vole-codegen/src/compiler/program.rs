@@ -277,7 +277,7 @@ impl Compiler<'_> {
     /// Iterates VirEntityMetadata instead of walking AST `program.declarations`.
     /// Decl::Let globals are handled by inlining their initializers when
     /// referenced (see compile_expr for ExprKind::Identifier).
-    fn compile_program_declarations(&mut self, _program: &Program) -> CodegenResult<()> {
+    fn compile_program_declarations(&mut self) -> CodegenResult<()> {
         use vole_vir::entity_metadata::VirTypeDefKind;
 
         let program_module = self.program_module();
@@ -419,7 +419,7 @@ impl Compiler<'_> {
         self.build_monomorph_index();
 
         // Second pass: compile function bodies and tests
-        self.compile_program_declarations(program)?;
+        self.compile_program_declarations()?;
 
         // Compile monomorphized instances
         self.compile_all_monomorphized_instances(Some(program))?;
