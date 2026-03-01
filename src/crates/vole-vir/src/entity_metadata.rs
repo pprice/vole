@@ -910,6 +910,39 @@ impl VirEntityMetadata {
     pub fn function_def_count(&self) -> usize {
         self.function_defs.len()
     }
+
+    /// Return function definitions declared in a specific module.
+    ///
+    /// Iterates all registered function definitions and returns those whose
+    /// `module` matches the given `module_id`.  Results are collected into a
+    /// `Vec` for borrow-safe iteration.
+    pub fn module_function_defs(&self, module_id: ModuleId) -> Vec<&VirFunctionDef> {
+        self.function_defs
+            .values()
+            .filter(|fd| fd.module == module_id)
+            .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Module-level type iteration
+// ---------------------------------------------------------------------------
+
+impl VirEntityMetadata {
+    /// Return type definitions declared in a specific module with the given kind.
+    ///
+    /// Iterates all registered type definitions and returns those whose
+    /// `module` matches the given `module_id` and whose `kind` matches.
+    pub fn module_type_defs_by_kind(
+        &self,
+        module_id: ModuleId,
+        kind: VirTypeDefKind,
+    ) -> Vec<&VirTypeDef> {
+        self.type_defs
+            .values()
+            .filter(|td| td.module == module_id && td.kind == kind)
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -369,6 +369,11 @@ where
         meta: &mut entity_metadata,
     });
     let implement_dispatch = build_implement_dispatch(implements);
+    // Collect module interners from module_programs for VirProgram.
+    let module_interners: FxHashMap<String, Rc<Interner>> = module_programs
+        .iter()
+        .map(|(path, (_program, interner))| (path.clone(), Rc::clone(interner)))
+        .collect();
     let mut vir_program = VirProgram {
         type_table,
         functions: vir_functions,
@@ -394,6 +399,7 @@ where
         free_monomorphs_by_key: monomorph_info.free_monomorphs_by_key,
         class_method_monomorphs: monomorph_info.class_method_monomorphs,
         static_method_monomorphs: monomorph_info.static_method_monomorphs,
+        module_interners,
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),
     };
@@ -655,6 +661,7 @@ fn run_early_vir_monomorphize(
         free_monomorphs_by_key: FxHashMap::default(),
         class_method_monomorphs: FxHashMap::default(),
         static_method_monomorphs: FxHashMap::default(),
+        module_interners: FxHashMap::default(),
         interner: Rc::new(Interner::new()),
         name_table: Rc::new(NameTable::new()),
     };

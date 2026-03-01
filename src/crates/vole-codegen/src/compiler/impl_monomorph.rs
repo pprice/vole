@@ -33,18 +33,6 @@ impl Compiler<'_> {
         self.register_implement_block_inner(entry, None)
     }
 
-    /// Register implement block methods using a specific module interner.
-    ///
-    /// The `interner_override` is used for module implement blocks where
-    /// symbols come from the module's interner rather than the main program.
-    pub(super) fn register_implement_block_with_module_interner(
-        &mut self,
-        entry: &VirImplementBlockEntry,
-        interner: &Rc<Interner>,
-    ) -> CodegenResult<()> {
-        self.register_implement_block_inner(entry, Some(interner))
-    }
-
     /// Import all methods (instance + static) from a module implement block.
     /// Uses Linkage::Import for pre-compiled modules in shared cache.
     ///

@@ -164,17 +164,6 @@ impl<'a> Compiler<'a> {
             .expect("INTERNAL: 'self' keyword not interned")
     }
 
-    /// Check if a function has implicit generic info (structural type params).
-    ///
-    /// Functions with implicit generics are templates and should be skipped during
-    /// normal compilation - they're compiled via monomorphized instances instead.
-    fn has_implicit_generic_info(&self, name_id: NameId) -> bool {
-        self.analyzed
-            .function_id_by_name_id(name_id)
-            .map(|func_id| self.analyzed.function_def(func_id).is_generic)
-            .unwrap_or(false)
-    }
-
     /// Check if a function (by NameId) is an external function.
     ///
     /// External functions are registered by their short name in the implement registry.

@@ -160,6 +160,14 @@ pub struct VirProgram {
     /// of sema's `StaticMethodMonomorphCache`.
     pub static_method_monomorphs: FxHashMap<StaticMethodMonomorphKey, VirStaticMethodMonomorphInfo>,
 
+    /// Per-module string interners for resolving module-local Symbol IDs.
+    ///
+    /// Keyed by module path. Each module has its own interner because modules
+    /// are parsed independently and their Symbol IDs are disjoint from the
+    /// main program's interner. Used by codegen when compiling module function
+    /// bodies via `compile_env!`.
+    pub module_interners: FxHashMap<String, Rc<Interner>>,
+
     /// String interner for resolving Symbol IDs to strings.
     ///
     /// Rc-shared with AnalyzedProgram during the transition period.
@@ -289,6 +297,19 @@ impl VirProgram {
     /// Clone the interner Rc for APIs that need shared ownership.
     pub fn interner_rc(&self) -> Rc<Interner> {
         Rc::clone(&self.interner)
+    }
+
+    /// Get a module's interner by module path.
+    ///
+    /// Returns the module-specific interner for symbol resolution during
+    /// compilation of module function bodies.
+    pub fn module_interner(&self, module_path: &str) -> Option<&Interner> {
+        self.module_interners.get(module_path).map(|rc| rc.as_ref())
+    }
+
+    /// Clone a module's interner Rc for APIs that need shared ownership.
+    pub fn module_interner_rc(&self, module_path: &str) -> Option<Rc<Interner>> {
+        self.module_interners.get(module_path).cloned()
     }
 
     /// Get read-only access to the name table.

@@ -432,24 +432,112 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Register a module sentinel type in codegen.
-    /// Sentinels from imported modules (like prelude's Done and nil) need metadata
-    /// registered so that struct literal codegen can find them.
-    pub(super) fn finalize_module_sentinel(
+    /// Finalize a module type (class or struct) by TypeDefId.
+    ///
+    /// Used when iterating VirEntityMetadata type definitions by module,
+    /// where we already have the TypeDefId without needing name resolution.
+    pub(super) fn finalize_module_type_by_id(
         &mut self,
-        name: Symbol,
-        module_interner: &Interner,
-        module_id: ModuleId,
+        type_def_id: TypeDefId,
     ) -> CodegenResult<()> {
-        let type_name_str = module_interner.resolve(name);
-        tracing::debug!(type_name = %type_name_str, "finalize_module_sentinel called");
+        let type_name_str = self
+            .analyzed
+            .display_name(self.analyzed.entity_type_name_id(type_def_id));
+        tracing::debug!(type_name = %type_name_str, "finalize_module_type_by_id called");
 
-        // Look up the TypeDefId using the sentinel name via full resolution chain
-        let query = self.analyzed;
-        let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
-            tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module sentinel");
+        // Skip if already registered
+        if self.state.type_metadata.contains_key(&type_def_id) {
+            tracing::debug!(type_name = %type_name_str, "Skipping - already registered in type_metadata");
             return Ok(());
+        }
+
+        let type_def = self.analyzed.get_type(type_def_id);
+        let type_kind = type_def.type_kind();
+        let is_class = type_def.is_class();
+        let is_generic_type = type_def.has_type_params();
+
+        tracing::debug!(type_name = %type_name_str, type_kind, "finalizing module type by id");
+
+        // Allocate type_id for classes; structs use 0
+        let type_id = if is_class { alloc_type_id() } else { 0 };
+
+        // Build field slots and optionally collect field_type_tags (classes only)
+        let (field_slots, physical_slot_count, field_type_tags) =
+            self.build_field_slots_and_tags(type_def_id, is_class)?;
+
+        // Register field types in runtime type registry (classes only)
+        if is_class {
+            register_instance_type(type_id, field_type_tags);
+        }
+
+        // Register instance methods using VIR metadata.
+        // Generic types are compiled via monomorphized instances, so skip direct
+        // method declaration here to avoid declaring functions that never compile.
+        let type_name_short = self
+            .analyzed
+            .name_table()
+            .last_segment_str(self.analyzed.entity_type_name_id(type_def_id))
+            .unwrap_or_else(|| type_name_str.clone());
+        let method_infos = if is_generic_type {
+            FxHashMap::default()
+        } else {
+            let method_ids: Vec<MethodId> = self.analyzed.get_type(type_def_id).methods.clone();
+            self.register_module_type_instance_methods(&method_ids, type_def_id, &type_name_short)?
         };
+
+        // Register type metadata
+        let vole_type_id = self
+            .analyzed
+            .get_type(type_def_id)
+            .base_type_id
+            .ok_or_else(|| {
+                CodegenError::internal_with_context(
+                    "finalize_module_type_by_id: missing base_type_id from sema",
+                    type_kind.to_string(),
+                )
+            })?;
+        let name_id = self.analyzed.entity_type_name_id(type_def_id);
+        self.state.type_metadata.insert_with_name_id(
+            type_def_id,
+            name_id,
+            TypeMetadata {
+                type_id,
+                field_slots,
+                physical_slot_count,
+                vole_type: vole_type_id,
+                method_infos,
+            },
+        );
+
+        // Register static methods for non-generic types.
+        // Generic type statics are emitted from static-method monomorph instances.
+        if !is_generic_type {
+            let static_method_ids: Vec<MethodId> =
+                self.analyzed.get_type(type_def_id).static_methods.clone();
+            if !static_method_ids.is_empty() {
+                self.register_module_type_static_methods(
+                    &static_method_ids,
+                    type_def_id,
+                    &type_name_short,
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Finalize a module sentinel type by TypeDefId.
+    ///
+    /// Used when iterating VirEntityMetadata type definitions by module,
+    /// where we already have the TypeDefId without needing name resolution.
+    pub(super) fn finalize_module_sentinel_by_id(
+        &mut self,
+        type_def_id: TypeDefId,
+    ) -> CodegenResult<()> {
+        let type_name_str = self
+            .analyzed
+            .display_name(self.analyzed.entity_type_name_id(type_def_id));
+        tracing::debug!(type_name = %type_name_str, "finalize_module_sentinel_by_id called");
 
         // Skip if already registered
         if self.state.type_metadata.contains_key(&type_def_id) {
@@ -462,7 +550,9 @@ impl Compiler<'_> {
             .get_type(type_def_id)
             .base_type_id
             .ok_or_else(|| {
-                CodegenError::internal("finalize_module_sentinel: missing base_type_id from sema")
+                CodegenError::internal(
+                    "finalize_module_sentinel_by_id: missing base_type_id from sema",
+                )
             })?;
 
         // Sentinels are zero-field structs, use type_id 0 as a placeholder.

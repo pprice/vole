@@ -16,7 +16,7 @@ use crate::types::{CodegenCtx, TypeMetadata, type_id_to_cranelift};
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use rustc_hash::FxHashSet;
 use vole_frontend::{Interner, Symbol};
-use vole_identity::{MethodId, ModuleId, TypeId};
+use vole_identity::{MethodId, ModuleId, TypeDefId, TypeId};
 
 impl Compiler<'_> {
     /// Register a method in the JIT function registry if not already registered.
@@ -702,29 +702,22 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile methods for a module class (uses module interner)
-    pub(super) fn compile_module_class_methods(
+    /// Compile methods for a module type by TypeDefId using the VirProgram interner.
+    ///
+    /// Used when iterating VirEntityMetadata type definitions by module,
+    /// where we already have the TypeDefId without needing AST name resolution.
+    pub(super) fn compile_module_type_methods_by_id(
         &mut self,
-        name: Symbol,
+        type_def_id: TypeDefId,
         module_interner: &Interner,
         module_path: &str,
     ) -> CodegenResult<()> {
-        let type_name_str = module_interner.resolve(name);
-        self.compile_module_type_methods(type_name_str, module_interner, module_path)
-    }
-
-    /// Compile methods for a module struct (uses module interner)
-    pub(super) fn compile_module_struct_methods(
-        &mut self,
-        name: Symbol,
-        has_methods: bool,
-        module_interner: &Interner,
-        module_path: &str,
-    ) -> CodegenResult<()> {
-        if !has_methods {
-            return Ok(());
-        }
-        let type_name_str = module_interner.resolve(name);
-        self.compile_module_type_methods(type_name_str, module_interner, module_path)
+        let type_name_id = self.analyzed.entity_type_name_id(type_def_id);
+        let type_name_str = self
+            .analyzed
+            .name_table()
+            .last_segment_str(type_name_id)
+            .unwrap_or_else(|| self.analyzed.display_name(type_name_id));
+        self.compile_module_type_methods(&type_name_str, module_interner, module_path)
     }
 }

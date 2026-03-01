@@ -422,66 +422,75 @@ impl Compiler<'_> {
     /// These are functions defined in module files (not external FFI functions).
     /// Declare all module functions, finalize types, and register implement blocks.
     /// Must run before compiling function bodies so cross-module calls can be resolved.
+    ///
+    /// Iterates VirEntityMetadata (function_defs, type_defs) instead of walking
+    /// AST module programs.
     fn declare_module_types_and_functions(&mut self, module_paths: &[String]) -> CodegenResult<()> {
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
         for module_path in module_paths {
             tracing::debug!(module_path, "compile_module_functions: declaring functions");
-            let (program, module_interner) = &self.analyzed.module_programs()[module_path];
-
-            // Declare pure Vole functions
-            for decl in &program.declarations {
-                if let Decl::Function(func) = decl {
-                    // Skip generic functions - they're declared via monomorphized instances
-                    if !func.type_params.is_empty() {
-                        continue;
-                    }
-                    let module_id = self.analyzed.module_id_or_main(module_path);
-                    let name_id = function_name_id_with_interner(
-                        self.analyzed,
-                        module_interner,
-                        module_id,
-                        func.name,
-                    )
-                    .ok_or_else(|| {
-                        CodegenError::internal("module function: name_id not registered")
-                    })?;
-
-                    // Check for implicit generics (structural type params)
-                    if self.has_implicit_generic_info(name_id) {
-                        continue;
-                    }
-
-                    let display_name = self.analyzed.display_name(name_id);
-                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Declare);
-                }
-            }
-
             let module_id = self.analyzed.module_id_or_main(module_path);
+
+            // Declare pure Vole functions from VirEntityMetadata.
+            // Skip generic functions (declared via monomorphized instances) and
+            // external functions (declared via implement block / FFI path).
+            let func_defs: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_function_defs(module_id)
+                .into_iter()
+                .filter(|fd| !fd.is_generic && !fd.is_external)
+                .map(|fd| fd.name_id)
+                .collect();
+            for name_id in func_defs {
+                let display_name = self.analyzed.display_name(name_id);
+                self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Declare);
+            }
 
             // Finalize module classes (register type metadata, declare methods)
             // MUST happen before implement block registration, which needs type_metadata
-            for decl in &program.declarations {
-                if let Decl::Class(class) = decl {
-                    self.finalize_module_class(class.name, module_interner, module_id)?;
-                }
+            let class_ids: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Class)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in class_ids {
+                self.finalize_module_type_by_id(type_def_id)?;
             }
 
             // Finalize module structs (register type metadata, declare methods)
-            for decl in &program.declarations {
-                if let Decl::Struct(struct_decl) = decl {
-                    self.finalize_module_struct(struct_decl.name, module_interner, module_id)?;
-                }
+            let struct_ids: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Struct)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in struct_ids {
+                self.finalize_module_type_by_id(type_def_id)?;
             }
 
             // Register module sentinels (zero-field struct types like Done, nil)
-            for decl in &program.declarations {
-                if let Decl::Sentinel(sentinel_decl) = decl {
-                    self.finalize_module_sentinel(sentinel_decl.name, module_interner, module_id)?;
-                }
+            let sentinel_ids: Vec<_> = self
+                .analyzed
+                .vir_program()
+                .entity_metadata
+                .module_type_defs_by_kind(module_id, VirTypeDefKind::Sentinel)
+                .into_iter()
+                .map(|td| td.id)
+                .collect();
+            for type_def_id in sentinel_ids {
+                self.finalize_module_sentinel_by_id(type_def_id)?;
             }
 
             // Register implement block methods from VIR metadata
             // MUST happen after class finalization so type_metadata is populated
-            let interner_rc = module_interner.clone();
             let entries = self
                 .analyzed
                 .vir_program()
@@ -489,7 +498,9 @@ impl Compiler<'_> {
                 .module_implement_blocks(module_path)
                 .to_vec();
             for entry in &entries {
-                self.register_implement_block_with_module_interner(entry, &interner_rc)?;
+                // The interner_override parameter is unused in the inner implementation,
+                // so we can use register_implement_block directly.
+                self.register_implement_block(entry)?;
             }
         }
 
@@ -549,9 +560,21 @@ impl Compiler<'_> {
     }
 
     /// Compile all function bodies for a single module.
+    ///
+    /// Iterates VirEntityMetadata (function_defs, type_defs) instead of walking
+    /// AST module programs.  The module interner is obtained from VirProgram's
+    /// `module_interners` map (populated during VIR lowering).
     fn compile_module_function_bodies(&mut self, module_path: &str) -> CodegenResult<()> {
+        use vole_vir::entity_metadata::VirTypeDefKind;
+
         tracing::debug!(module_path, "compile_module_functions: compiling bodies");
-        let (program, module_interner) = &self.analyzed.module_programs()[module_path];
+
+        // Get module interner from VirProgram (populated during VIR lowering)
+        let module_interner = self
+            .analyzed
+            .vir_program()
+            .module_interner_rc(module_path)
+            .unwrap_or_else(|| self.analyzed.interner_rc());
 
         // Register destructured import bindings for this module from VirProgram.
         // When a module uses `let { add } = import "./other"`, the binding must
@@ -563,38 +586,25 @@ impl Compiler<'_> {
             self.global_module_bindings.insert(key, binding);
         }
 
-        // Compile pure Vole function bodies
-        for decl in &program.declarations {
-            if let Decl::Function(func) = decl {
-                // Skip generic functions - they're compiled via monomorphized instances
-                if !func.type_params.is_empty() {
-                    continue;
-                }
-                let module_id = self.analyzed.module_id_or_main(module_path);
-                let name_id = function_name_id_with_interner(
-                    self.analyzed,
-                    module_interner,
-                    module_id,
-                    func.name,
-                )
-                .ok_or_else(|| CodegenError::internal("module function: name_id not registered"))?;
+        let module_id = self.analyzed.module_id_or_main(module_path);
 
-                // Check for implicit generics (structural type params)
-                let has_implicit_generic_info = self
-                    .analyzed
-                    .function_id_by_name_id(name_id)
-                    .map(|func_id| self.analyzed.function_def(func_id).is_generic)
-                    .unwrap_or(false);
-                if has_implicit_generic_info {
-                    continue;
-                }
-
-                self.compile_module_function(module_path, name_id, func, module_interner)?;
-            }
+        // Compile pure Vole function bodies from VirEntityMetadata.
+        // Skip generic functions (compiled via monomorphized instances) and
+        // external functions (no Vole body to compile).
+        let func_name_ids: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_function_defs(module_id)
+            .into_iter()
+            .filter(|fd| !fd.is_generic && !fd.is_external)
+            .map(|fd| fd.name_id)
+            .collect();
+        for name_id in func_name_ids {
+            self.compile_module_function_by_name_id(module_path, name_id, &module_interner)?;
         }
 
         // Compile implement block methods from VIR metadata (both instance and static)
-        let module_id = self.analyzed.module_id_or_main(module_path);
         let impl_entries = self
             .analyzed
             .vir_program()
@@ -602,31 +612,35 @@ impl Compiler<'_> {
             .module_implement_blocks(module_path)
             .to_vec();
         for entry in &impl_entries {
-            self.compile_module_implement_block(entry, module_interner, module_id)?;
+            self.compile_module_implement_block(entry, &module_interner, module_id)?;
         }
 
-        // Compile module class methods (both instance and static)
-        for decl in &program.declarations {
-            if let Decl::Class(class) = decl {
-                tracing::debug!(class_name = %module_interner.resolve(class.name), "Compiling module class methods");
-                self.compile_module_class_methods(class.name, module_interner, module_path)?;
-            }
+        // Compile module class methods (both instance and static) from VirEntityMetadata
+        let class_ids: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_type_defs_by_kind(module_id, VirTypeDefKind::Class)
+            .into_iter()
+            .filter(|td| !td.methods.is_empty() || !td.static_methods.is_empty())
+            .map(|td| td.id)
+            .collect();
+        for type_def_id in class_ids {
+            self.compile_module_type_methods_by_id(type_def_id, &module_interner, module_path)?;
         }
 
-        // Compile module struct methods (both instance and static)
-        for decl in &program.declarations {
-            if let Decl::Struct(struct_decl) = decl
-                && (!struct_decl.methods.is_empty() || struct_decl.statics.is_some())
-            {
-                tracing::debug!(struct_name = %module_interner.resolve(struct_decl.name), "Compiling module struct methods");
-                let has_methods = !struct_decl.methods.is_empty() || struct_decl.statics.is_some();
-                self.compile_module_struct_methods(
-                    struct_decl.name,
-                    has_methods,
-                    module_interner,
-                    module_path,
-                )?;
-            }
+        // Compile module struct methods (both instance and static) from VirEntityMetadata
+        let struct_ids: Vec<_> = self
+            .analyzed
+            .vir_program()
+            .entity_metadata
+            .module_type_defs_by_kind(module_id, VirTypeDefKind::Struct)
+            .into_iter()
+            .filter(|td| !td.methods.is_empty() || !td.static_methods.is_empty())
+            .map(|td| td.id)
+            .collect();
+        for type_def_id in struct_ids {
+            self.compile_module_type_methods_by_id(type_def_id, &module_interner, module_path)?;
         }
 
         // Remove module-specific destructured import bindings to avoid
@@ -740,12 +754,14 @@ impl Compiler<'_> {
         self.finalize_module_struct(struct_decl.name, module_interner, module_id)
     }
 
-    /// Compile a single module function with its own interner
-    fn compile_module_function(
+    /// Compile a single module function using VIR metadata (no AST FuncDecl needed).
+    ///
+    /// Takes the function's `NameId` (from `VirFunctionDef`) and the module interner
+    /// for symbol resolution during compilation.
+    fn compile_module_function_by_name_id(
         &mut self,
         module_path: &str,
         name_id: NameId,
-        func: &FuncDecl,
         module_interner: &Interner,
     ) -> CodegenResult<()> {
         let func_key = self.func_registry.intern_name_id(name_id);
@@ -801,17 +817,17 @@ impl Compiler<'_> {
         let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
 
-        // Build params: Vec<(Symbol, TypeId, Type)>
-        // Combine AST param names with pre-resolved TypeIds from FunctionDef
+        // Build params from VIR function param Symbols + pre-resolved TypeIds
+        let vir = vir_func.expect("VIR must be available for module function");
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.arena();
-            func.params
+            vir.params
                 .iter()
                 .zip(param_type_ids.iter())
-                .map(|(p, &type_id)| {
+                .map(|(&(sym, _, _), &type_id)| {
                     let cranelift_type =
                         type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
-                    (p.name, type_id, cranelift_type)
+                    (sym, type_id, cranelift_type)
                 })
                 .collect()
         };
@@ -834,7 +850,6 @@ impl Compiler<'_> {
             );
 
             let config = FunctionCompileConfig::top_level(params, return_type_id);
-            let vir = vir_func.expect("VIR must be available for module function");
             compile_function_inner_with_vir(
                 builder,
                 &mut codegen_ctx,
