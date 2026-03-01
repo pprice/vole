@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use vole_identity::TypeId;
+use vole_identity::VirTypeId;
 
 /// Minimum number of non-default arms required to use the Switch optimization.
 pub(crate) const MIN_SWITCH_ARMS: usize = 4;
@@ -49,7 +49,7 @@ fn extract_vir_int_literal(expr: &vole_vir::VirExpr) -> Option<i64> {
 /// All patterns are concrete `VirPattern` variants (Wildcard, Literal, etc.).
 pub(crate) fn analyze_vir_switch(
     arms: &[vole_vir::VirMatchArm],
-    scrutinee_type_id: TypeId,
+    scrutinee_type_id: VirTypeId,
 ) -> Option<SwitchAnalysis> {
     if !scrutinee_type_id.is_integer() {
         return None;

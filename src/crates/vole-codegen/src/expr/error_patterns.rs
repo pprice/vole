@@ -13,7 +13,7 @@ use crate::types::{
 
 use vole_frontend::Symbol;
 use vole_frontend::ast::RecordFieldPattern;
-use vole_identity::TypeId;
+use vole_identity::{TypeId, VirTypeId};
 
 use super::super::context::Cg;
 
@@ -34,8 +34,11 @@ impl Cg<'_, '_, '_> {
     pub(super) fn cleanup_fallible_scrutinee(
         &mut self,
         scrutinee: &CompiledValue,
-        scrutinee_type_id: TypeId,
+        scrutinee_vir_type_id: VirTypeId,
     ) -> CodegenResult<()> {
+        // Bridge to sema TypeId for downstream RC analysis (will be eliminated
+        // when error_patterns.rs migrates to VirTypeId).
+        let scrutinee_type_id = self.cv_type_id_from_vir(scrutinee_vir_type_id);
         let fallible_types = self.vir_query_unwrap_fallible_sema(scrutinee_type_id);
         let Some((success_type_id, error_type_id)) = fallible_types else {
             return Ok(());

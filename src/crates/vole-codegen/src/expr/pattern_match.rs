@@ -11,7 +11,7 @@ use crate::types::{CompiledValue, FALLIBLE_SUCCESS_TAG, load_fallible_payload, l
 
 use vole_frontend::Symbol;
 use vole_frontend::ast::RecordFieldPattern;
-use vole_identity::{IsCheckResult, TypeId, VirTypeId};
+use vole_identity::{IsCheckResult, TypeId, VirIsCheckResult, VirTypeId};
 
 use super::super::context::Cg;
 use super::super::control_flow::match_switch;
@@ -174,7 +174,7 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
         let scrutinee = self.compile_vir_expr(scrutinee_expr)?;
-        let scrutinee_type_id = self.cv_type_id(&scrutinee);
+        let scrutinee_type_id = scrutinee.type_id;
 
         let mut effective_result_type = self.try_substitute_type(result_type_id);
 
@@ -249,7 +249,7 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
         result_cranelift_type: Type,
         is_void: bool,
-        scrutinee_type_id: TypeId,
+        scrutinee_type_id: VirTypeId,
     ) -> CodegenResult<CompiledValue> {
         let merge_block = self.builder.create_block();
         if !is_void {
@@ -380,7 +380,7 @@ impl Cg<'_, '_, '_> {
             vole_vir::VirPattern::Binding { name, ty: _, .. } => {
                 let var = self.builder.declare_var(scrutinee.ty);
                 self.builder.def_var(var, scrutinee.value);
-                arm_variables.insert(*name, (var, self.cv_type_id(scrutinee)));
+                arm_variables.insert(*name, (var, self.sema_type_from_vir(scrutinee.type_id)));
                 Ok(None)
             }
 
@@ -392,16 +392,15 @@ impl Cg<'_, '_, '_> {
             } => {
                 // For monomorphized generics, recompute the IsCheckResult
                 // using substituted types.
-                let effective_result = if self.substitutions.is_some() {
+                let cond = if self.substitutions.is_some() {
                     let sub_tested =
                         self.try_substitute_type(self.sema_type_from_vir(*tested_type));
-                    let sub_scrutinee = self.try_substitute_type(self.cv_type_id(scrutinee));
-                    self.compute_is_check_result(sub_scrutinee, sub_tested)
+                    let sub_scrutinee = self.sema_type_from_vir(scrutinee.type_id);
+                    let effective_result = self.compute_is_check_result(sub_scrutinee, sub_tested);
+                    self.compile_is_check_result(&effective_result, scrutinee)?
                 } else {
-                    convert_vir_is_check(result)
+                    self.compile_vir_is_check_result(result, scrutinee)?
                 };
-
-                let cond = self.compile_is_check_result(&effective_result, scrutinee)?;
 
                 // If there's a binding, introduce the variable after the check.
                 if let Some((name, bind_ty, _)) = binding {
@@ -439,7 +438,7 @@ impl Cg<'_, '_, '_> {
                         (self.builder.use_var(var), var_type_id)
                     } else if let Some(binding) = self.get_capture(name).copied() {
                         let captured = self.load_capture(&binding)?;
-                        (captured.value, self.cv_type_id(&captured))
+                        (captured.value, self.sema_type_from_vir(captured.type_id))
                     } else {
                         return Err(CodegenError::internal("undefined variable in val pattern"));
                     };
@@ -598,15 +597,14 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> CodegenResult<Option<Value>> {
-        let elem_type_ids = self.vir_query_unwrap_tuple_sema(self.cv_type_id(scrutinee));
-        if let Some(elem_type_ids) = elem_type_ids {
-            let (_, offsets) = self.tuple_layout(&elem_type_ids);
-            let elem_cr_types = self.cranelift_types(&elem_type_ids);
+        let elem_vir_type_ids = self.vir_query_unwrap_tuple_v(scrutinee.type_id);
+        if let Some(elem_vir_type_ids) = elem_vir_type_ids {
+            let (_, offsets) = self.tuple_layout_v(&elem_vir_type_ids);
             for binding in bindings {
                 let i = binding.element_index;
                 let offset = offsets[i];
-                let elem_type_id = elem_type_ids[i];
-                let elem_cr_type = elem_cr_types[i];
+                let elem_vir_type_id = elem_vir_type_ids[i];
+                let elem_cr_type = self.cranelift_type_v(elem_vir_type_id);
 
                 if let vole_vir::VirPattern::Binding { name, .. } = &binding.pattern {
                     let value = self.builder.ins().load(
@@ -617,7 +615,7 @@ impl Cg<'_, '_, '_> {
                     );
                     let var = self.builder.declare_var(elem_cr_type);
                     self.builder.def_var(var, value);
-                    arm_variables.insert(*name, (var, elem_type_id));
+                    arm_variables.insert(*name, (var, self.sema_type_from_vir(elem_vir_type_id)));
                 }
                 // Wildcard and other patterns: nothing to bind.
             }
@@ -651,18 +649,18 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<Option<Value>> {
         // Compute pattern check condition (if type check present)
         let pattern_check = if let Some(vir_result) = type_check {
-            let effective_result = if self.substitutions.is_some() {
+            if self.substitutions.is_some() {
                 if let Some(tested) = tested_type {
                     let sub_tested = self.try_substitute_type(self.sema_type_from_vir(*tested));
-                    let sub_scrutinee = self.try_substitute_type(self.cv_type_id(scrutinee));
-                    self.compute_is_check_result(sub_scrutinee, sub_tested)
+                    let sub_scrutinee = self.sema_type_from_vir(scrutinee.type_id);
+                    let effective_result = self.compute_is_check_result(sub_scrutinee, sub_tested);
+                    self.compile_is_check_result(&effective_result, scrutinee)?
                 } else {
-                    convert_vir_is_check(vir_result)
+                    self.compile_vir_is_check_result(vir_result, scrutinee)?
                 }
             } else {
-                convert_vir_is_check(vir_result)
-            };
-            self.compile_is_check_result(&effective_result, scrutinee)?
+                self.compile_vir_is_check_result(vir_result, scrutinee)?
+            }
         } else {
             None
         };
@@ -760,6 +758,32 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Compile a VIR `IsCheckResult` into a condition value (if runtime check needed).
+    ///
+    /// Like [`compile_is_check_result`] but operates directly on VIR's `IsCheckResult`,
+    /// avoiding the `vir_to_sema_type_id_lossy` bridge in `CheckUnknown`.
+    fn compile_vir_is_check_result(
+        &mut self,
+        result: &VirIsCheckResult,
+        scrutinee: &CompiledValue,
+    ) -> CodegenResult<Option<Value>> {
+        match result {
+            VirIsCheckResult::AlwaysTrue => Ok(None),
+            VirIsCheckResult::AlwaysFalse => {
+                let never_match = self.iconst_cached(types::I8, 0);
+                Ok(Some(never_match))
+            }
+            VirIsCheckResult::CheckTag(tag_index) => {
+                let cmp = self.tag_eq(scrutinee.value, *tag_index as i64);
+                Ok(Some(cmp))
+            }
+            VirIsCheckResult::CheckUnknown(_, vir_tested_type_id) => {
+                let cmp = self.compile_unknown_is_check_vir(scrutinee.value, *vir_tested_type_id);
+                Ok(Some(cmp))
+            }
+        }
+    }
+
     /// Compile a VIR match arm body, coercing the result to the match result type.
     fn compile_vir_arm_body(
         &mut self,
@@ -789,7 +813,7 @@ impl Cg<'_, '_, '_> {
             let (_, body_val) = self.compile_vir_body(body)?;
             body_val.unwrap_or_else(|| self.void_value())
         };
-        if self.cv_type_id(&body_result) == TypeId::NEVER {
+        if body_result.type_id == VirTypeId::NEVER {
             return Ok(body_result);
         }
         self.coerce_to_type(body_result, result_type_id)
@@ -804,7 +828,7 @@ impl Cg<'_, '_, '_> {
         is_void: bool,
         merge_block: Block,
     ) -> CodegenResult<()> {
-        if self.cv_type_id(&body_result) == TypeId::NEVER {
+        if body_result.type_id == VirTypeId::NEVER {
             self.builder.ins().trap(crate::trap_codes::UNREACHABLE);
         } else if !is_void {
             let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
@@ -876,20 +900,5 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
 
         self.merge_block_result(merge_block, result_cranelift_type, result_type_id, is_void)
-    }
-}
-
-/// Convert VIR's `IsCheckResult` to sema's `IsCheckResult`.
-///
-/// VIR defines its own copy to avoid circular crate dependencies.
-/// The variants are isomorphic so this is a mechanical mapping.
-fn convert_vir_is_check(vir: &vole_vir::expr::IsCheckResult) -> IsCheckResult {
-    match vir {
-        vole_vir::expr::IsCheckResult::AlwaysTrue => IsCheckResult::AlwaysTrue,
-        vole_vir::expr::IsCheckResult::AlwaysFalse => IsCheckResult::AlwaysFalse,
-        vole_vir::expr::IsCheckResult::CheckTag(tag) => IsCheckResult::CheckTag(*tag),
-        vole_vir::expr::IsCheckResult::CheckUnknown(ty, _) => IsCheckResult::CheckUnknown(
-            crate::types::vir_conversions::vir_to_sema_type_id_lossy(*ty),
-        ),
     }
 }
